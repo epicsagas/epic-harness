@@ -9,6 +9,7 @@ import {
   extractFunctionName,
   parseFrontmatter,
   validateEvolvedSkill,
+  validateGuardPattern,
 } from "../hooks/scripts/common.js";
 
 test("classifyFailure: null on empty/clean output", () => {
@@ -114,4 +115,42 @@ test("validateEvolvedSkill: rejects too-short description", () => {
   const content = '---\nname: x\ndescription: "short"\n---\n# T\nfoo';
   const result = validateEvolvedSkill(content);
   assert.equal(result.valid, false);
+});
+
+// ── validateGuardPattern ──────────────────────────────
+test("validateGuardPattern: rejects nested quantifier (a+)+", () => {
+  assert.equal(validateGuardPattern("(a+)+"), false);
+});
+
+test("validateGuardPattern: rejects nested quantifier (a+)+$", () => {
+  assert.equal(validateGuardPattern("(a+)+$"), false);
+});
+
+test("validateGuardPattern: rejects nested quantifier (a*)*", () => {
+  assert.equal(validateGuardPattern("(a*)*"), false);
+});
+
+test("validateGuardPattern: accepts alternation without inner quantifiers (docker|podman)", () => {
+  // (x|y)+ is safe when alternatives contain no inner quantifiers
+  assert.equal(validateGuardPattern("(docker|podman)\\s+run"), true);
+});
+
+test("validateGuardPattern: rejects deeply nested (x+y+)+", () => {
+  assert.equal(validateGuardPattern("(x+y+)+"), false);
+});
+
+test("validateGuardPattern: accepts safe pattern kubectl\\s+delete", () => {
+  assert.equal(validateGuardPattern("kubectl\\s+delete"), true);
+});
+
+test("validateGuardPattern: accepts safe pattern docker.*prune", () => {
+  assert.equal(validateGuardPattern("docker.*prune"), true);
+});
+
+test("validateGuardPattern: accepts safe pattern git push --force", () => {
+  assert.equal(validateGuardPattern("git push --force"), true);
+});
+
+test("validateGuardPattern: rejects invalid regex", () => {
+  assert.equal(validateGuardPattern("(unclosed"), false);
 });

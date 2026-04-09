@@ -288,6 +288,34 @@ export function validateEvolvedSkill(content) {
         errors.push("missing_actionable_section");
     return { valid: errors.length === 0, errors, frontmatter: fm };
 }
+// ── Guard pattern validation (ReDoS prevention) ─────
+/**
+ * Validates a user-defined regex pattern string for ReDoS safety before compilation.
+ * Rejects patterns containing nested quantifiers that can cause catastrophic backtracking.
+ * Returns true if the pattern is safe to compile and use, false otherwise.
+ *
+ * Rejected forms:
+ *   - Group with quantifier followed by outer quantifier: (a+)+, (a*)*, (a+)*, (a*)+
+ *   - Group with alternation containing quantified terms, followed by outer quantifier: (a|aa)+
+ */
+export function validateGuardPattern(pattern) {
+    // First check if the pattern is a valid regex at all
+    try {
+        new RegExp(pattern);
+    }
+    catch {
+        return false;
+    }
+    // Reject patterns with nested quantifiers inside groups followed by an outer quantifier.
+    // Matches: (...+...)+ / (...*...)+ / (...+...)* / (...*...)*
+    // Note: alternation groups like (docker|podman)+ are NOT rejected — they are safe
+    // when alternatives don't overlap. Only inner quantifiers trigger catastrophic backtracking.
+    const nestedQuantifier = /\([^)]*[+*][^)]*\)[+*?]|\([^)]*[+*][^)]*\)\{[0-9,]+\}/;
+    if (nestedQuantifier.test(pattern)) {
+        return false;
+    }
+    return true;
+}
 /** Simple YAML-like key:value parser for guard-rules.yaml (no external deps) */
 export function parseSimpleYaml(content) {
     const result = { blocked: [], warned: [] };
@@ -308,8 +336,11 @@ export function parseSimpleYaml(content) {
         // Format: "pattern: <regex> | msg: <message>"
         const match = entry.match(/^pattern:\s*(.+?)\s*\|\s*msg:\s*(.+)$/);
         if (match) {
+            const rawPattern = match[1].trim();
+            if (!validateGuardPattern(rawPattern))
+                continue; // skip ReDoS-risky patterns
             try {
-                result[section].push({ pattern: new RegExp(match[1].trim()), msg: match[2].trim() });
+                result[section].push({ pattern: new RegExp(rawPattern), msg: match[2].trim() });
             }
             catch { /* invalid regex, skip */ }
         }

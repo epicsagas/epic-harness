@@ -5,9 +5,9 @@
  * Auto-format + typecheck after file edits.
  * Feeds failures back to observe pipeline (#9).
  */
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { extname, basename, join } from "node:path";
+import { extname, basename, join, isAbsolute } from "node:path";
 import {
   runHook, hint, harnessExists, ensureDir, appendJsonl,
   CWD, OBS_DIR, now, getSessionId, SCORE_WEIGHTS,
@@ -24,6 +24,22 @@ function tryExec(cmd: string, opts?: { silent?: boolean }): string | null {
     }
     return null;
   }
+}
+
+function tryExecFile(bin: string, args: string[], opts?: { silent?: boolean }): string | null {
+  try {
+    return execFileSync(bin, args, { cwd: CWD, timeout: 15_000, stdio: "pipe" }).toString();
+  } catch (e: unknown) {
+    if (!opts?.silent) {
+      const err = e as { stdout?: Buffer };
+      return err.stdout?.toString() ?? null;
+    }
+    return null;
+  }
+}
+
+function isValidFilePath(p: string): boolean {
+  return typeof p === "string" && p.length > 0 && !p.includes("\0") && isAbsolute(p);
 }
 
 /** Record polish result as observation for the eval loop */
@@ -60,17 +76,18 @@ function feedbackToObserve(filePath: string, formatter: string, success: boolean
 }
 
 function formatJS(filePath: string): void {
+  if (!isValidFilePath(filePath)) return;
   const hasBiome = existsSync(join(CWD, "biome.json")) || existsSync(join(CWD, "biome.jsonc"));
   const hasPrettier = existsSync(join(CWD, ".prettierrc")) || existsSync(join(CWD, ".prettierrc.json"));
 
   if (hasBiome) {
-    const result = tryExec(`npx biome format --write "${filePath}"`, { silent: true });
+    const result = tryExecFile("npx", ["biome", "format", "--write", filePath], { silent: true });
     if (result) {
       hint("polish", `Biome: ${basename(filePath)}`);
       feedbackToObserve(filePath, "biome", true);
     }
   } else if (hasPrettier) {
-    const result = tryExec(`npx prettier --write "${filePath}"`, { silent: true });
+    const result = tryExecFile("npx", ["prettier", "--write", filePath], { silent: true });
     if (result) {
       hint("polish", `Prettier: ${basename(filePath)}`);
       feedbackToObserve(filePath, "prettier", true);
@@ -90,15 +107,17 @@ function checkTS(filePath: string): void {
 }
 
 function formatPython(filePath: string): void {
-  if (tryExec(`ruff format "${filePath}" 2>/dev/null`, { silent: true })
-    || tryExec(`black "${filePath}" 2>/dev/null`, { silent: true })) {
+  if (!isValidFilePath(filePath)) return;
+  if (tryExecFile("ruff", ["format", filePath], { silent: true })
+    || tryExecFile("black", [filePath], { silent: true })) {
     hint("polish", `Formatted: ${basename(filePath)}`);
     feedbackToObserve(filePath, "ruff/black", true);
   }
 }
 
 function formatGo(filePath: string): void {
-  if (tryExec(`gofmt -w "${filePath}"`, { silent: true })) {
+  if (!isValidFilePath(filePath)) return;
+  if (tryExecFile("gofmt", ["-w", filePath], { silent: true })) {
     hint("polish", `gofmt: ${basename(filePath)}`);
     feedbackToObserve(filePath, "gofmt", true);
   }

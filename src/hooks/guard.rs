@@ -10,7 +10,7 @@ struct BuiltinRule {
 
 const BLOCKED_RULES: &[BuiltinRule] = &[
     BuiltinRule { pattern: r"git\s+push\s+.*--force\s+(origin\s+)?(main|master)\b", msg: "Force push to main/master blocked" },
-    BuiltinRule { pattern: r"rm\s+-rf\s+/\s*$|rm\s+-rf\s+/\s", msg: "rm -rf / blocked" },
+    BuiltinRule { pattern: r"rm\s+-rf\s+/([^a-zA-Z0-9_]|$)", msg: "rm -rf / blocked" },
     BuiltinRule { pattern: r"(?i)DROP\s+(DATABASE|TABLE)\s+.*prod", msg: "DROP on production DB blocked" },
 ];
 
@@ -72,14 +72,19 @@ pub fn run(input: &HookInput) -> i32 {
                 return 2;
             }
         }
+        // Evaluate builtin + custom warned together (same order as TS implementation)
+        for msg in check_warned(cmd) {
+            hint("guard", &format!("WARNING: {msg}"));
+        }
         for rule in &custom_warned {
             if rule.pattern.is_match(cmd) {
                 hint("guard", &format!("WARNING: {}", rule.msg));
             }
         }
+        return 0;
     }
 
-    // Check built-in warned rules
+    // No custom rules file — just check builtin warned rules
     for msg in check_warned(cmd) {
         hint("guard", &format!("WARNING: {msg}"));
     }
@@ -136,6 +141,21 @@ mod tests {
     #[test]
     fn allows_rm_rf_dir() {
         assert!(check_blocked("rm -rf /tmp/build").is_none());
+    }
+
+    #[test]
+    fn blocks_rm_rf_double_slash() {
+        assert!(check_blocked("rm -rf //").is_some());
+    }
+
+    #[test]
+    fn allows_rm_rf_tmp() {
+        assert!(check_blocked("rm -rf /tmp").is_none());
+    }
+
+    #[test]
+    fn allows_rm_rf_var() {
+        assert!(check_blocked("rm -rf /var/log").is_none());
     }
 
     #[test]

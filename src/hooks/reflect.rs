@@ -403,7 +403,9 @@ fn compute_trend(history: &[SessionScoreEntry]) -> &'static str {
         let x = i as f64;
         sx += x; sy += e.avg_score; sxy += x * e.avg_score; sxx += x * x;
     }
-    let slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    let denom = n * sxx - sx * sx;
+    if denom.abs() < f64::EPSILON { return "stable"; }
+    let slope = (n * sxy - sx * sy) / denom;
     if slope > 0.01 { "improving" } else if slope < -0.01 { "declining" } else { "stable" }
 }
 
@@ -425,11 +427,14 @@ fn update_skill_attribution(metrics: &mut Metrics, analysis: &SessionAnalysis, e
     }
 
     let total_sessions = metrics.total_sessions + 1;
+    // Sum of all composite avg_scores across all sessions (history + current).
+    // Use score_history (avg_score field, not avg_success_rate) for historical sessions.
+    let all_scores_sum = metrics.score_history.iter().map(|e| e.avg_score).sum::<f64>() + analysis.avg_score;
     for attr in metrics.skill_attribution.values_mut() {
         let without = total_sessions.saturating_sub(attr.sessions_active);
-        if without > 0 && !metrics.score_history.is_empty() {
+        if without > 0 {
             attr.avg_score_without = round3(
-                ((metrics.avg_success_rate * total_sessions as f64) - (attr.avg_score_with * attr.sessions_active as f64)) / without as f64,
+                (all_scores_sum - (attr.avg_score_with * attr.sessions_active as f64)) / without as f64,
             );
         }
     }
@@ -483,7 +488,7 @@ fn gate_skills() {
             continue;
         }
         let content = fs::read_to_string(&skill_file).unwrap_or_default();
-        let body = content.split("---").nth(2).unwrap_or("").trim();
+        let body = content.splitn(3, "---").nth(2).unwrap_or("").trim();
         if !content.starts_with("---") || body.len() < 20 {
             rm_dir(&evolved.join(&name));
         }
@@ -946,6 +951,81 @@ mod tests {
         assert_eq!(round3(0.12345), 0.123);
         assert_eq!(round3(0.9999), 1.0);
         assert_eq!(round3(0.0), 0.0);
+    }
+
+    // ── gate_skills: frontmatter with --- in skill body ──
+    #[test]
+    fn gate_skills_body_extraction_with_embedded_dashes() {
+        // A SKILL.md whose body contains a "---" horizontal rule.
+        // With unlimited split("---").nth(2), the body is truncated at the embedded "---".
+        // With splitn(3, "---").nth(2), the remainder (everything after the closing "---")
+        // is returned in full, preserving the body's embedded "---".
+        let content = "---\nname: test\n---\n\n# Body content here, long enough\n\n---\n\nmore content below\n";
+        let body_splitn = content.splitn(3, "---").nth(2).unwrap_or("").trim();
+        let body_unlimited = content.split("---").nth(2).unwrap_or("").trim();
+
+        // splitn(3) body starts at the closing "---" delimiter and contains everything after it
+        assert!(body_splitn.starts_with("# Body"), "splitn body: {:?}", body_splitn);
+        // splitn(3) body preserves the embedded "---" inside the body
+        assert!(body_splitn.contains("more content"), "splitn must preserve full body: {:?}", body_splitn);
+        // unlimited split's nth(2) stops at the *body's* "---", truncating it
+        assert!(!body_unlimited.contains("more content"), "unlimited split truncates body: {:?}", body_unlimited);
+        // splitn body must be >= 20 chars (passes gate validation)
+        assert!(body_splitn.len() >= 20);
+    }
+
+    // ── update_skill_attribution: uses avg_score not avg_success_rate ──
+    #[test]
+    fn skill_attribution_uses_avg_score_not_success_rate() {
+        let mut metrics = default_metrics();
+        // Set up divergent values so we can detect which one is used
+        metrics.avg_success_rate = 0.99; // should NOT be used
+        // score_history has avg_score = 0.60
+        metrics.score_history.push(SessionScoreEntry {
+            timestamp: "2026-04-09T00:00:00Z".into(),
+            success_rate: 0.99,
+            avg_score: 0.60,
+            observations: 10,
+            dimension_averages: ScoreDimensions::default(),
+        });
+        metrics.total_sessions = 1;
+
+        let analysis = SessionAnalysis {
+            avg_score: 0.70,
+            ..Default::default()
+        };
+        // skill is active this session → avg_score_with = 0.70
+        // skill was absent in the 1 prior session (total=2, active=1, without=1)
+        // avg_score_without should be derived from score_history avg_score (0.60), NOT avg_success_rate (0.99)
+        let evolved = vec!["evo-test".to_string()];
+        update_skill_attribution(&mut metrics, &analysis, &evolved);
+
+        let attr = metrics.skill_attribution.get("evo-test").expect("attribution entry missing");
+        assert!((attr.avg_score_with - 0.70).abs() < 0.01, "avg_score_with should be 0.70, got {}", attr.avg_score_with);
+        // avg_score_without should be close to 0.60 (from score_history), not 0.99
+        assert!(
+            (attr.avg_score_without - 0.60).abs() < 0.05,
+            "avg_score_without should be ~0.60 (from score_history avg_score), got {}",
+            attr.avg_score_without
+        );
+    }
+
+    // ── compute_trend: no NaN when all scores are identical ──
+    #[test]
+    fn trend_no_nan_with_zero_denominator() {
+        // All scores the same → n*sxx - sx*sx == 0 → division by zero → NaN slope
+        let history: Vec<SessionScoreEntry> = (0..5).map(|i| SessionScoreEntry {
+            timestamp: format!("2026-04-0{}", i + 1),
+            success_rate: 0.80,
+            avg_score: 0.80,
+            observations: 10,
+            dimension_averages: ScoreDimensions::default(),
+        }).collect();
+        let trend = compute_trend(&history);
+        // Must not be "NaN" / must be a valid string
+        assert!(trend == "stable" || trend == "improving" || trend == "declining",
+            "trend must be a valid value, got: {:?}", trend);
+        assert_eq!(trend, "stable");
     }
 
     // ── skill builders ──────────────────────────────
