@@ -1,6 +1,6 @@
 [package]
 name = "epic-harness"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "6 commands · auto skills · self-evolving Claude Code harness"
 license = "Apache-2.0"
