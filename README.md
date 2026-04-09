@@ -1,3 +1,5 @@
+[English](README.md) | [日本語](docs/ja/README.md) | [한국어](docs/ko/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [Português](docs/pt-BR/README.md) | [Español](docs/es/README.md) | [हिन्दी](docs/hi/README.md)
+
 # epic harness
 
 **6 commands. Auto-trigger skills. Self-evolving.**
