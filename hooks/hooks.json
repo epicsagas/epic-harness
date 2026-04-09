@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/resume.js\""
+          }
+        ],
+        "description": "Restore previous session context + load project memory and evolved skills"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/guard.js\""
+          }
+        ],
+        "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/polish.js\""
+          }
+        ],
+        "description": "Auto-format + typecheck + lint warning after edits"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/observe.js\"",
+            "async": true,
+            "timeout": 5
+          }
+        ],
+        "description": "Record tool result for evolution loop"
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/snapshot.js\""
+          }
+        ],
+        "description": "Save working state before context compaction"
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/reflect.js\""
+          }
+        ],
+        "description": "Analyze session observations → evolve skills → gate mutations"
+      }
+    ]
+  }
+}

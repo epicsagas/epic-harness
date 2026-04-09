@@ -1,0 +1,21 @@
+{
+  "name": "epic",
+  "version": "0.1.0",
+  "description": "6 commands, auto-trigger skills, self-evolving agent harness. Less to remember, more automation.",
+  "author": {
+    "name": "epicsagas",
+    "url": "https://github.com/epicsagas"
+  },
+  "homepage": "https://github.com/epicsagas/epic-harness",
+  "repository": "https://github.com/epicsagas/epic-harness",
+  "license": "Apache-2.0",
+  "keywords": [
+    "harness",
+    "self-evolving",
+    "skills",
+    "hooks",
+    "tdd",
+    "code-review",
+    "automation"
+  ]
+}

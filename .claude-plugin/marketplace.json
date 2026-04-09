@@ -1,0 +1,17 @@
+{
+  "name": "epicsagas",
+  "owner": {
+    "name": "epicsagas",
+    "url": "https://github.com/epicsagas"
+  },
+  "metadata": {
+    "description": "6 commands, auto-trigger skills, self-evolving agent harness for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "epic",
+      "source": "./",
+      "description": "6 commands, auto-trigger skills, self-evolving agent harness."
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+[package]
+name = "epic-harness"
+version = "0.1.0"
+edition = "2024"
+description = "6 commands · auto skills · self-evolving Claude Code harness"
+license = "Apache-2.0"
+repository = "https://github.com/epicsagas/epic-harness"
+homepage = "https://github.com/epicsagas/epic-harness"
+readme = "README.md"
+keywords = ["claude-code", "plugin", "agent", "harness", "ai"]
+categories = ["command-line-utilities", "development-tools"]
+exclude = ["ref/", "tests/", ".harness/", "hooks/scripts/", "hooks/bin/"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
