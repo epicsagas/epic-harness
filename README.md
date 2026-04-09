@@ -7,7 +7,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/epicsagas/epic-harness/actions/workflows/ci.yml"><img src="https://github.com/epicsagas/epic-harness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
