@@ -16,6 +16,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.gz"
+pkg-fmt = "tgz"
+bin-dir = "epic-harness"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.zip"
+pkg-fmt = "zip"
+bin-dir = "epic-harness.exe"
+
 [profile.release]
 opt-level = "s"
 lto = true
