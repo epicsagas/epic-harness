@@ -53,7 +53,7 @@ git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
 
 ```bash
 # Homebrew (macOS)
-brew install epicsagas/epic-harness/epic-harness
+brew install epicsagas/tap/epic-harness
 
 # From crates.io
 cargo install epic-harness

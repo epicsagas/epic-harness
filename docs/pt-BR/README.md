@@ -1,8 +1,10 @@
-[English](../../README.md) | [日本語](../ja/README.md) | [한국어](../ko/README.md) | [Deutsch](../de/README.md) | [Français](../fr/README.md) | [简体中文](../zh-CN/README.md) | [繁體中文](../zh-TW/README.md) | [Português](../pt-BR/README.md) | [Español](../es/README.md) | [हिन्दी](../hi/README.md)
-
 # epic harness
 
 **6 comandos. Skills de acionamento automático. Auto-evolutivo.**
+
+<p align="center">
+<a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
+</p>
 
 <p align="center">
   <a href="https://github.com/epicsagas/epic-harness/actions/workflows/ci.yml"><img src="https://github.com/epicsagas/epic-harness/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -11,7 +13,6 @@
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
-  <a href="https://github.com/epicsagas/epic-harness/stargazers"><img src="https://img.shields.io/github/stars/epicsagas/epic-harness?style=social" alt="GitHub Stars"></a>
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
@@ -51,6 +52,10 @@ git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
 ### Binário Rust (opcional, ~4x mais rápido nos hooks)
 
 ```bash
+# Homebrew (macOS)
+brew install epicsagas/tap/epic-harness
+
+
 # Via crates.io
 cargo install epic-harness
 # ou com cargo-binstall (pré-compilado, mais rápido)
