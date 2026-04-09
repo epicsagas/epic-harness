@@ -40,9 +40,9 @@ Ring 3 — 진화 (자기 개선)
 ## 설치
 
 ```bash
-# Claude Code 플러그인 마켓플레이스
-/plugin marketplace add epicsagas/epic-harness
-/plugin install harness@epic
+# Claude Code 플러그인 CLI
+claude plugins marketplace add epicsagas/epic-harness
+claude plugins install epic@epicsagas
 
 # 또는 수동 설치
 git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
