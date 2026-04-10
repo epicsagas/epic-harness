@@ -9,26 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Extract scoring weights to `SCORE_WEIGHTS` constant in `common.ts`
-- Extract 11 pattern detection and skill seeding thresholds to named constants
-- Evolved skills now defer to static skills on conflict (`_dispatch` policy)
-- Add Acknowledgments section to README with reference project attributions
+- Harness data directory moved from `cwd()/.harness/` to `~/.harness/projects/{slug}/`
+  — prevents git pollution and survives project deletion
+- `guard-rules.yaml` stays at `cwd()/.harness/guard-rules.yaml` for team git-sharing
+- `cross_project_file` opt-in marker moved to `~/.harness/global/` (was per-project)
+- `global_harness_dir` renamed from `~/.harness-global/` to `~/.harness/global/`
 
 ### Added
 
-- Initial project setup
-- Test suite with Node built-in `node:test` runner (zero deps): 25 tests covering
-  failure classification, Ring 3 analysis (`analyzeSession`, `detectPatterns`,
-  `computeTrend`, `checkStagnation`), guard rules, snapshot summary, and E2E
-  hook invocation via subprocess
-- GitHub Actions CI workflow (`.github/workflows/ci.yml`) — runs `npm test` on
-  push and PR
-- `npm test` script (builds then runs all tests)
+- `project_slug()`: stable `{dirname}-{4-char hex}` identifier to namespace per-project data
+- Auto-migration: on first session, existing `cwd()/.harness/` is copied to the new global path
 
-### Changed
+## [0.1.3] — 2026-04-09
 
-- Exported pure functions from `src/ts/reflect.ts`, `src/ts/guard.ts`,
-  `src/ts/snapshot.ts` for testability
-- Wrapped top-level `runHook`/`runGuardHook` calls with `isMain` guard so hook
-  modules can be imported by tests without stdin hangs
-- `getObsSummary` now accepts an optional `obsDir` parameter for test fixtures
+### Fixed
+
+- Shell injection vulnerability in hook command dispatch
+- Guard rule matching consistency across blocked/warned rule evaluation
+- Reflect analysis correctness (session scoring, trend calculation edge cases)
+
+## [0.1.2] — 2026-04-09
+
+### Fixed
+
+- Plugin install commands corrected from `/plugin` to `claude plugins` CLI syntax in all docs
+
+## [0.1.1] — 2026-04-09
+
+### Added
+
+- Multi-language README for top 10 Claude Code countries (10 locales)
+- npm publish step in release CI workflow
+- Linux arm64 binary target in release builds
+- `cargo install` and `cargo binstall` install methods documented
+- Homebrew tap (`epicsagas/tap`) integration in CI and install docs
+
+### Fixed
+
+- Hook dispatch now checks `PATH` before falling back to Node.js scripts
+- Homebrew tap path shortened to `epicsagas/tap` across all i18n READMEs
+- Broken CI badge removed from all READMEs

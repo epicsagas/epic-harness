@@ -5,7 +5,25 @@ import { readFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, statS
 import { join, extname } from "node:path";
 // ── Paths ────────────────────────────────────────────
 export const CWD = process.cwd();
-export const HARNESS_DIR = join(CWD, ".harness");
+/** Stable per-project slug: `{sanitized-dirname}-{6 hex chars}`. Mirrors Rust project_slug(). */
+function projectSlug() {
+    const name = (CWD.split("/").filter(Boolean).pop() ?? "project")
+        .replace(/[^a-zA-Z0-9_-]/g, "_");
+    let h = 0;
+    for (let i = 0; i < CWD.length; i++) {
+        // Mirrors Rust: wrapping u32 arithmetic on UTF-8 bytes (ASCII-compatible)
+        h = (((h << 5) >>> 0) - h + (CWD.charCodeAt(i) & 0xff)) >>> 0;
+    }
+    return `${name}-${(h & 0x00ffffff).toString(16).padStart(6, "0")}`;
+}
+const HOME = process.env.HOME?.trim() || "/tmp";
+if (!process.env.HOME?.trim()) {
+    process.stderr.write("[harness] WARNING: $HOME is not set — storing harness data in /tmp/.harness\n");
+}
+/** Per-project data directory: ~/.harness/projects/{slug}/ */
+export const HARNESS_DIR = join(HOME, ".harness", "projects", projectSlug());
+/** Legacy project-local path — used for migration detection only. */
+export const LOCAL_HARNESS_DIR = join(CWD, ".harness");
 export const OBS_DIR = join(HARNESS_DIR, "obs");
 export const SESSIONS_DIR = join(HARNESS_DIR, "sessions");
 export const MEMORY_DIR = join(HARNESS_DIR, "memory");
@@ -18,9 +36,10 @@ export const STAGNATION_LIMIT = 3; // sessions before rollback
 export const IMPROVEMENT_THRESHOLD = 0.05; // 5% improvement required
 export const EVOLVED_BACKUP_DIR = join(HARNESS_DIR, "evolved_backup");
 export const DISPATCH_DIR = join(HARNESS_DIR, "dispatch");
-export const GUARD_RULES_FILE = join(HARNESS_DIR, "guard-rules.yaml");
+/** guard-rules.yaml stays in the project tree so teams can git-track it. */
+export const GUARD_RULES_FILE = join(LOCAL_HARNESS_DIR, "guard-rules.yaml");
 export const PRESETS_DIR = join(HARNESS_DIR, "presets");
-export const GLOBAL_HARNESS_DIR = join(process.env.HOME ?? "~", ".harness-global");
+export const GLOBAL_HARNESS_DIR = join(HOME, ".harness", "global");
 export const GLOBAL_PATTERNS_FILE = join(GLOBAL_HARNESS_DIR, "patterns.jsonl");
 // ── Score Weights ───────────────────────────────────
 export const SCORE_WEIGHTS = { success: 0.5, quality: 0.3, cost: 0.2 };
@@ -46,7 +65,8 @@ export function getSessionId() {
     return _sessionId;
 }
 // ── Cross-project learning ─────────────────────────
-export const CROSS_PROJECT_OPT_IN_FILE = join(HARNESS_DIR, ".cross-project-enabled");
+/** Opt-in marker lives in the global dir, not per-project. */
+export const CROSS_PROJECT_OPT_IN_FILE = join(GLOBAL_HARNESS_DIR, ".cross-project-enabled");
 // ── Failure Classification ──────────────────────────
 const FAILURE_RULES = [
     { pattern: /TypeError|type error/i, category: "type_error" },

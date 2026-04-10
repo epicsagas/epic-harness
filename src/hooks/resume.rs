@@ -94,7 +94,32 @@ fn get_cross_project_hints() -> Vec<String> {
 pub fn run(_input: &HookInput) -> i32 {
     let wd = cwd();
 
-    // Auto-init .harness/
+    // Migrate legacy .harness/ from project dir to ~/.harness/projects/{slug}/
+    let local = local_harness_dir();
+    let is_real_dir = local
+        .symlink_metadata()
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false);
+    if is_real_dir && !harness_exists() {
+        ensure_dir(&harness_dir());
+        let copied = copy_dir_counted(&local, &harness_dir());
+        if copied.errors > 0 {
+            hint("resume", &format!(
+                "Migration partial: {}/{} files copied — check {}",
+                copied.ok, copied.ok + copied.errors,
+                harness_dir().display()
+            ));
+        } else {
+            hint("resume", &format!(
+                "Migrated .harness/ → {} ({} files). \
+                 You can now delete .harness/ from the project \
+                 (keep .harness/guard-rules.yaml if present).",
+                harness_dir().display(), copied.ok
+            ));
+        }
+    }
+
+    // Auto-init ~/.harness/projects/{slug}/
     if !harness_exists() {
         for line in BANNER { raw(line); }
         ensure_dir(&harness_dir());
@@ -102,7 +127,7 @@ pub fn run(_input: &HookInput) -> i32 {
         ensure_dir(&sessions_dir());
         ensure_dir(&memory_dir());
         ensure_dir(&evolved_dir());
-        hint("resume", "Initialized .harness/ — Ring 3 evolution loop active");
+        hint("resume", &format!("Initialized {} — Ring 3 evolution loop active", harness_dir().display()));
     }
 
     // 1. Latest session snapshot

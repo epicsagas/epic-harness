@@ -182,7 +182,42 @@ pub fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-pub fn harness_dir() -> PathBuf { cwd().join(".harness") }
+/// Returns a stable slug for the current project: `{sanitized-dirname}-{hash6}`.
+/// - Name is sanitized to `[a-zA-Z0-9_-]` to be safe as a directory component.
+/// - 6-char hex hash (24 bits) prevents collisions between same-named projects.
+pub fn project_slug() -> String {
+    let path = cwd();
+    // Walk components to find the last meaningful segment (handles "/" edge case).
+    let name = path
+        .components()
+        .filter_map(|c| {
+            if let std::path::Component::Normal(s) = c { s.to_str() } else { None }
+        })
+        .last()
+        .unwrap_or("project")
+        .to_string();
+    // Sanitize: replace any char that isn't alphanumeric, hyphen, or underscore.
+    let safe_name: String = name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let full = path.to_string_lossy();
+    let mut h: u32 = 0;
+    for b in full.bytes() {
+        h = h.wrapping_shl(5).wrapping_sub(h).wrapping_add(b as u32);
+    }
+    format!("{}-{:06x}", safe_name, h & 0x00ff_ffff)
+}
+
+/// Per-project data lives in `~/.harness/projects/{slug}/` — outside the
+/// project tree so it never pollutes git and survives project deletion.
+pub fn harness_dir() -> PathBuf {
+    dirs_home().join(".harness").join("projects").join(project_slug())
+}
+
+/// Legacy project-local path used for migration detection only.
+pub(crate) fn local_harness_dir() -> PathBuf { cwd().join(".harness") }
+
 pub fn obs_dir() -> PathBuf { harness_dir().join("obs") }
 pub fn sessions_dir() -> PathBuf { harness_dir().join("sessions") }
 pub fn memory_dir() -> PathBuf { harness_dir().join("memory") }
@@ -192,17 +227,26 @@ pub fn team_dir() -> PathBuf { harness_dir().join("team") }
 
 pub fn metrics_file() -> PathBuf { harness_dir().join("metrics.json") }
 pub fn evolution_file() -> PathBuf { harness_dir().join("evolution.jsonl") }
-pub fn guard_rules_file() -> PathBuf { harness_dir().join("guard-rules.yaml") }
-pub fn cross_project_file() -> PathBuf { harness_dir().join(".cross-project-enabled") }
-pub fn global_harness_dir() -> PathBuf {
-    dirs_home().join(".harness-global")
-}
-pub fn global_patterns_file() -> PathBuf {
-    global_harness_dir().join("patterns.jsonl")
-}
+
+/// guard-rules.yaml stays in the project tree so teams can git-track it.
+pub fn guard_rules_file() -> PathBuf { local_harness_dir().join("guard-rules.yaml") }
+
+pub fn global_harness_dir() -> PathBuf { dirs_home().join(".harness").join("global") }
+pub fn global_patterns_file() -> PathBuf { global_harness_dir().join("patterns.jsonl") }
+
+/// Opt-in marker lives in the global dir (not per-project).
+pub fn cross_project_file() -> PathBuf { global_harness_dir().join(".cross-project-enabled") }
 
 fn dirs_home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "~".into()))
+    match std::env::var("HOME") {
+        Ok(h) if !h.is_empty() => PathBuf::from(h),
+        _ => {
+            // HOME is unset or empty (common in some CI environments).
+            // Fall back to /tmp so harness data stays off the project tree.
+            eprintln!("[harness] WARNING: $HOME is not set — storing harness data in /tmp/.harness");
+            PathBuf::from("/tmp")
+        }
+    }
 }
 
 // ── Failure Classification ──────────────────────────
@@ -432,6 +476,32 @@ pub fn copy_dir(src: &Path, dest: &Path) {
             }
         }
     }
+}
+
+pub struct CopyResult { pub ok: u64, pub errors: u64 }
+
+/// Like `copy_dir` but counts successes and errors instead of silently ignoring failures.
+pub fn copy_dir_counted(src: &Path, dest: &Path) -> CopyResult {
+    let mut result = CopyResult { ok: 0, errors: 0 };
+    if !src.is_dir() { return result; }
+    ensure_dir(dest);
+    if let Ok(entries) = fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let src_path = entry.path();
+            let dest_path = dest.join(entry.file_name());
+            if src_path.is_dir() {
+                let sub = copy_dir_counted(&src_path, &dest_path);
+                result.ok += sub.ok;
+                result.errors += sub.errors;
+            } else {
+                match fs::copy(&src_path, &dest_path) {
+                    Ok(_) => result.ok += 1,
+                    Err(_) => result.errors += 1,
+                }
+            }
+        }
+    }
+    result
 }
 
 pub fn rm_dir(dir: &Path) {
@@ -725,6 +795,35 @@ warned:
     #[test]
     fn extract_file_none() {
         assert_eq!(extract_file("ls -la"), None);
+    }
+
+    // ── project_slug ────────────────────────────────
+    #[test]
+    fn project_slug_deterministic() {
+        assert_eq!(project_slug(), project_slug());
+    }
+
+    #[test]
+    fn project_slug_format() {
+        let slug = project_slug();
+        // "{name}-{6 hex chars}"
+        let parts: Vec<&str> = slug.rsplitn(2, '-').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0].len(), 6);
+        assert!(parts[0].chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn project_slug_safe_chars_only() {
+        // slug before the hash must not contain filesystem-unsafe characters
+        let slug = project_slug();
+        let name_part = slug.rsplitn(2, '-').nth(1).unwrap_or("");
+        assert!(name_part.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+    }
+
+    #[test]
+    fn project_slug_non_empty() {
+        assert!(!project_slug().is_empty());
     }
 
     // ── today / now_iso ─────────────────────────────
