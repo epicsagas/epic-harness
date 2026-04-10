@@ -12,9 +12,10 @@ This project uses epic-harness workflows (/spec, /go, /check, /ship, /evolve, /t
 ## Session Startup
 
 At the beginning of each session:
-1. Run: `epic-harness resume` in terminal to load session context
-2. Read .harness/memory/ for project-specific rules
-3. Check .harness/evolved/ for evolved skills and apply them
+1. **You (the agent) run via Bash tool**: `epic-harness resume`
+   This prints session context, previous metrics, and evolved skills to stderr.
+2. Read `.harness/memory/` for project-specific rules
+3. Check `.harness/evolved/` for evolved skills and apply them
 
 ## Auto-behaviors (Ring 2 — Skills)
 
@@ -67,10 +68,14 @@ This records observations and evolves skills for the next session.
 ## Forbidden Commands (Guard Rules)
 
 Never execute the following without explicit user confirmation:
-- `git push --force` — destructive, can overwrite history
-- `DROP TABLE` or `DELETE FROM` without a WHERE clause
-- `rm -rf /` or any recursive deletion of system paths
-- Any command that modifies production systems directly
+- `git push --force` or `git push --force-with-lease` — can overwrite shared history
+- `DROP TABLE`, `DROP DATABASE`, `TRUNCATE`, or `DELETE FROM` without a WHERE clause
+- `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf .` — recursive deletion of broad paths
+- `kubectl delete` — destroys running workloads
+- Any command targeting a production environment, prod database, or live infrastructure
+
+Note: These are soft guidelines enforced by the LLM. For hard enforcement, use the
+`guard` subcommand (`epic-harness guard`) which blocks patterns at the binary level.
 
 ## Quality Standards
 

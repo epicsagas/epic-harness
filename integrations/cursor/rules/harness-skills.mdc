@@ -1,6 +1,6 @@
 ---
-description: epic-harness quality skills
-alwaysApply: true
+description: "epic-harness quality skills — TDD, security, verify, simplify, perf. Apply when implementing features, touching auth/DB/API code, or before marking tasks done."
+alwaysApply: false
 ---
 # epic-harness Quality Skills
 

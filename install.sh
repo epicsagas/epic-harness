@@ -52,8 +52,14 @@ copy()  {
     echo "[dry-run] cp -r $src → $dest"
     return
   fi
-  mkdir -p "$(dirname "$dest")"
-  cp -r "$src" "$dest"
+  if [[ -d "$src" ]]; then
+    # Avoid cp -r src/ dest/ nesting: copy contents into dest/
+    mkdir -p "$dest"
+    cp -rP "$src/." "$dest/"
+  else
+    mkdir -p "$(dirname "$dest")"
+    cp -P "$src" "$dest"
+  fi
   ok "$(basename "$src") → $dest"
 }
 copy_if_missing() {
@@ -150,7 +156,12 @@ install_cursor() {
 
 install_antigravity() {
   local src="$INTEGRATIONS_DIR/antigravity"
-  local target_dir="${PWD}/.agents"
+  local target_dir
+  if $GLOBAL; then
+    target_dir="$HOME/.agents"
+  else
+    target_dir="${PWD}/.agents"
+  fi
 
   info "Installing Antigravity integration → $target_dir"
   info "Note: Ring 0 hooks not available — using AGENTS.md + skills/workflows instead."

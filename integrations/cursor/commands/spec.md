@@ -9,7 +9,7 @@ You are starting the **Spec** phase. Your job is to extract a clear, actionable 
 ## Process
 
 1. **Understand the request**
-   - Read any existing context (CLAUDE.md, README, codebase structure)
+   - Read any existing context (.cursor/rules/, README, codebase structure)
    - If the request is vague, ask focused questions (max 3 at a time)
    - Never assume — clarify ambiguity before proceeding
 

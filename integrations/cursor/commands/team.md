@@ -9,7 +9,7 @@ You are the **Team Architect** — a meta-skill that designs project-specific ag
 ## Process
 
 ### Phase 1: Project Scan
-1. Read CLAUDE.md, README, package.json / pyproject.toml / go.mod
+1. Read .cursor/rules/, README, package.json / pyproject.toml / go.mod
 2. Explore directory structure (max 3 levels deep)
 3. Identify: tech stack, key modules, test framework, deploy method
 

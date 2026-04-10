@@ -2,7 +2,7 @@
 # Validate the gemini integration structure and content
 set -euo pipefail
 
-BASE="/Volumes/Micron/projects/epic-harness/integrations/gemini"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PASS=0
 FAIL=0
 
