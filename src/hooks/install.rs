@@ -491,14 +491,13 @@ impl Progress {
             } else {
                 20
             };
-            let bar: String = std::iter::repeat('=')
-                .take(filled.saturating_sub(1))
+            let bar: String = std::iter::repeat_n('=', filled.saturating_sub(1))
                 .chain(if filled > 0 && filled < 20 {
                     std::iter::once('>')
                 } else {
                     std::iter::once('=')
                 })
-                .chain(std::iter::repeat(' ').take(20 - filled))
+                .chain(std::iter::repeat_n(' ', 20 - filled))
                 .collect();
 
             let name = if filename.len() > 26 {
@@ -568,7 +567,7 @@ fn write_if_missing(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
 /// Hooks, commands, agents, rules, skills, etc.: write if missing or content differs from embedded.
 fn write_or_sync(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
     let existed = dest.exists();
-    let is_settings_json = dest.file_name().map_or(false, |n| n == "settings.json");
+    let is_settings_json = dest.file_name().is_some_and(|n| n == "settings.json");
 
     if is_settings_json && existed {
         // For settings.json, merge instead of overwriting to preserve theme, auth, etc.
@@ -664,6 +663,21 @@ const TOOLS: &[(&str, &str)] = &[
 ];
 
 fn interactive_menu() -> Vec<String> {
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        match super::install_wizard::interactive_select_tools(TOOLS) {
+            Ok(selected) => selected,
+            Err(e) => {
+                eprintln!("[harness] Interactive UI failed ({e}); falling back to text prompt.");
+                interactive_menu_fallback()
+            }
+        }
+    } else {
+        interactive_menu_fallback()
+    }
+}
+
+/// Non-TTY (CI, pipes): comma-separated indices or `a` / `all` for everything.
+fn interactive_menu_fallback() -> Vec<String> {
     eprintln!();
     eprintln!("epic-harness — Select integrations to install");
     eprintln!("──────────────────────────────────────────────");
@@ -688,10 +702,10 @@ fn interactive_menu() -> Vec<String> {
     let mut selected = Vec::new();
     for token in line.split(',') {
         let token = token.trim();
-        if let Ok(n) = token.parse::<usize>() {
-            if n >= 1 && n <= TOOLS.len() {
-                selected.push(TOOLS[n - 1].0.to_string());
-            }
+        if let Ok(n) = token.parse::<usize>()
+            && n >= 1 && n <= TOOLS.len()
+        {
+            selected.push(TOOLS[n - 1].0.to_string());
         }
     }
     selected
@@ -737,11 +751,14 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let mut progress = Progress::new(tool, cfg.files.len(), dry_run);
 
     for (rel, content) in cfg.files {
-        let dest = if !cfg.alt_prefix.is_empty()
-            && rel.starts_with(cfg.alt_prefix)
-            && alt_target.is_some()
-        {
-            alt_target.as_ref().unwrap().join(rel)
+        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
+            if let Some(alt) = &alt_target {
+                alt.join(rel)
+            } else if cfg.root_files.contains(rel) {
+                cwd.join(rel)
+            } else {
+                target_dir.join(rel)
+            }
         } else if cfg.root_files.contains(rel) {
             cwd.join(rel)
         } else {

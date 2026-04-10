@@ -9,7 +9,7 @@ fn main() {
 
     // install reads stdin itself (interactive menu) — skip pre-reading for it.
     if subcmd == "install" {
-        let code = hooks::install::run(&args[2..].to_vec());
+        let code = hooks::install::run(&args[2..]);
         std::process::exit(code);
     }
 

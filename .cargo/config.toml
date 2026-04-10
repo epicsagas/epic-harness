@@ -1,0 +1,5 @@
+[build]
+jobs = 8
+
+[net]
+retry = 2

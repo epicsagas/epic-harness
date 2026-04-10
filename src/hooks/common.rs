@@ -200,7 +200,7 @@ pub fn project_slug() -> String {
                     None
                 }
             })
-            .last()
+            .next_back()
             .unwrap_or("project")
             .to_string();
         // Sanitize: replace any char that isn't alphanumeric, hyphen, or underscore.
@@ -985,7 +985,7 @@ warned:
     fn project_slug_safe_chars_only() {
         // slug before the hash must not contain filesystem-unsafe characters
         let slug = project_slug();
-        let name_part = slug.rsplitn(2, '-').nth(1).unwrap_or("");
+        let name_part = slug.rsplit_once('-').map(|x| x.0).unwrap_or("");
         assert!(
             name_part
                 .chars()
