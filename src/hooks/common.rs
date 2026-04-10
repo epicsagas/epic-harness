@@ -261,9 +261,16 @@ pub fn evolution_file() -> PathBuf {
     harness_dir().join("evolution.jsonl")
 }
 
-/// guard-rules.yaml stays in the project tree so teams can git-track it.
+/// guard-rules.yaml stays in the project tree only if the user/team explicitly
+/// created it there. Otherwise, we default to the per-project global directory
+/// to keep the project tree clean.
 pub fn guard_rules_file() -> PathBuf {
-    local_harness_dir().join("guard-rules.yaml")
+    let local = local_harness_dir().join("guard-rules.yaml");
+    if local.is_file() {
+        local
+    } else {
+        harness_dir().join("guard-rules.yaml")
+    }
 }
 
 pub fn global_harness_dir() -> PathBuf {
@@ -279,17 +286,17 @@ pub fn cross_project_file() -> PathBuf {
 }
 
 fn dirs_home() -> PathBuf {
-    match std::env::var("HOME") {
-        Ok(h) if !h.is_empty() => PathBuf::from(h),
-        _ => {
-            // HOME is unset or empty (common in some CI environments).
+    // Check HOME (Linux/macOS) then USERPROFILE (Windows)
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
             // Fall back to /tmp so harness data stays off the project tree.
             eprintln!(
-                "[harness] WARNING: $HOME is not set — storing harness data in /tmp/.harness"
+                "[harness] WARNING: Neither $HOME nor $USERPROFILE is set — storing harness data in /tmp/.harness"
             );
             PathBuf::from("/tmp")
-        }
-    }
+        })
 }
 
 // ── Failure Classification ──────────────────────────

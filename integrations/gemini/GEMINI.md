@@ -10,7 +10,7 @@ This project uses epic-harness for AI quality automation.
 - /evolve — skill evolution status
 
 ### Auto-behaviors
-- Before coding: read `.harness/memory/` for project context
+- Before coding: read `~/.harness/projects/{slug}/memory/` for project context
 - After each task: verify build+tests pass
 - On security-related code: run secure skill checklist
 - On large files (>200 lines): run simplify skill
@@ -24,4 +24,4 @@ This project uses epic-harness for AI quality automation.
 ### Notes
 - Gemini CLI does not support parallel agent spawning — all tasks run sequentially
 - Guard runs at BeforeModel level (no PreToolUse equivalent in Gemini CLI)
-- Evolved skills stored in `.harness/evolved/`, backed up in `.harness/evolved_backup/`
+- Evolved skills stored in `~/.harness/projects/{slug}/evolved/`, backed up in `~/.harness/projects/{slug}/evolved_backup/`

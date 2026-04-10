@@ -149,8 +149,8 @@ epic-harness resume | guard | polish | observe | snapshot | reflect
 | **resume** | Session start | Restore context, load memory, detect stack |
 | **guard** | Before Bash | Block force-push-to-main, rm -rf /, DROP prod |
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
-| **observe** | Every tool use | Log to `.harness/obs/` for evolution |
-| **snapshot** | Before compact | Save state to `.harness/sessions/` |
+| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
+| **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
 | **reflect** | Session end | Analyze failures, seed evolved skills, gate |
 
 ## Eval System (Ring 3 Core)
@@ -206,14 +206,14 @@ All thresholds are configurable constants in `src/ts/common.ts` (or `src/hooks/c
 
 ```
 Observe (PostToolUse — 3-axis scoring)
-    ↓ .harness/obs/session_{id}.jsonl
+    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
 Analyze (SessionEnd)
     ↓ SessionAnalysis: per-tool, per-ext, score distribution
     ↓ Patterns: repeated_same_error, fix_then_break, long_debug_loop, thrashing
 Seed (4 paths: pattern / weak tool / weak file type / high-freq error)
-    ↓ .harness/evolved/{skill}/SKILL.md
+    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
 Gate (format check, dedup, cap of 10, stagnation check)
-    ↓ .harness/evolved_backup/ (best checkpoint)
+    ↓ ~/.harness/projects/{slug}/evolved_backup/ (best checkpoint)
 Reload (next session — resume.ts reports metrics + loads evolved skills)
 ```
 
@@ -245,7 +245,7 @@ Each session writes to its own observation file (`session_{date}_{pid}_{random}.
 
 ## Custom Guard Rules
 
-Add project-specific safety rules via `.harness/guard-rules.yaml`:
+Add project-specific safety rules via `.harness/guard-rules.yaml` in your project root:
 
 ```yaml
 blocked:
@@ -255,18 +255,18 @@ warned:
   - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
 
-Rules merge with built-in guards (force-push-to-main, rm -rf /, DROP prod).
+Rules merge with built-in guards (force-push-to-main, rm -rf /, DROP prod). Keeping this file in git allows sharing safety rules with your team.
 
 ## Cross-Project Learning
 
 Opt-in to share failure patterns across projects:
 
 ```bash
-touch .harness/.cross-project-enabled  # opt-in
+touch ~/.harness/projects/{slug}/.cross-project-enabled  # opt-in
 ```
 
 When enabled:
-- Session end exports anonymized patterns to `~/.harness-global/patterns.jsonl`
+- Session end exports anonymized patterns to `~/.harness/global_patterns.jsonl`
 - Session start shows hints from other projects' weak areas
 - Use `/evolve cross-project` to see aggregate patterns
 
@@ -295,12 +295,12 @@ The polish hook (auto-format + typecheck) feeds results back into the observatio
 
 This means "edit → type error → edit → type error" thrashing patterns get detected even when the errors come from the polish hook, not manual commands.
 
-## Project Data (`.harness/`)
+## Project Data (`~/.harness/projects/{slug}/`)
 
-epic harness creates a `.harness/` directory in your project:
+Project-specific data lives in your home directory. This survives project deletion and doesn't pollute your git history.
 
 ```
-.harness/
+~/.harness/projects/{slug}/
 ├── memory/           # Project patterns and rules (persistent)
 ├── sessions/         # Session snapshots (for resume)
 ├── obs/              # Tool usage observation logs (JSONL, per-session)
@@ -309,11 +309,10 @@ epic harness creates a `.harness/` directory in your project:
 ├── dispatch/         # Skill dispatch logs (JSONL)
 ├── team/             # /team generated agents and skills
 ├── evolution.jsonl   # Full evolution history
-├── metrics.json      # Aggregate stats + skill attribution
-└── guard-rules.yaml  # Custom guard rules (optional)
+└── metrics.json      # Aggregate stats + skill attribution
 ```
 
-Add `.harness/` to `.gitignore` or commit it — your choice.
+You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
 
 ## Development
 

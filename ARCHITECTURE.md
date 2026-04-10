@@ -58,7 +58,7 @@ sequenceDiagram
     participant H as Hooks
     participant C as Commands
     participant S as Skills
-    participant D as .harness/
+    participant D as ~/.harness/projects/{slug}/
 
     H->>D: resume: load state
     U->>C: /go "add login"
@@ -74,7 +74,7 @@ sequenceDiagram
 
 | A-Evolve Concept | epic-harness Equivalent | Adaptation |
 |-----------------|------------------------|------------|
-| Workspace Contract | `.harness/` directory | Filesystem as interface |
+| Workspace Contract | `~/.harness/projects/{slug}/` directory | Filesystem as interface |
 | BatchAnalysis | `analyzeSession()` | JSONL observations → statistical aggregation |
 | FailurePatternDetector | `detectPatterns()` | O(n) single-pass, 4 pattern types |
 | AdaptiveEvolveEngine | `checkStagnation()` | Stagnation detection → checkpoint rollback |

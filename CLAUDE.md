@@ -92,7 +92,7 @@ On first session with no evolved skills, stack-appropriate preset skills auto-ap
 
 ## Guard Rule Extension
 
-Add custom block/warn rules via `.harness/guard-rules.yaml`:
+Add custom block/warn rules via `.harness/guard-rules.yaml` in your project root:
 ```yaml
 blocked:
   - pattern: kubectl\s+delete  | msg: kubectl delete blocked
@@ -102,8 +102,8 @@ warned:
 
 ## Cross-Project Learning
 
-Opt-in by creating `.harness/.cross-project-enabled`.
-On session end, patterns export to `~/.harness-global/patterns.jsonl`.
+Opt-in by creating `~/.harness/projects/{slug}/.cross-project-enabled`.
+On session end, patterns export to `~/.harness/global_patterns.jsonl`.
 On next session start, weak patterns from other projects shown as hints.
 
 ## Skill Attribution
@@ -120,12 +120,12 @@ Format failure = lint_fail, typecheck failure = build_fail — feeds into patter
 
 ## Dispatch Logging
 
-Skill dispatches logged to `.harness/dispatch/dispatch_YYYYMMDD.jsonl`.
+Skill dispatches logged to `~/.harness/projects/{slug}/dispatch/dispatch_YYYYMMDD.jsonl`.
 Analyze via `/evolve history`.
 
 ## Project Side Data
 
-`.harness/` directory accumulates per-project memory, observations, evolved skills:
+`~/.harness/projects/{slug}/` directory accumulates per-project memory, observations, evolved skills:
 - `memory/` — Project patterns and rules
 - `sessions/` — Session snapshots
 - `obs/` — Tool usage observation logs (JSONL, 3-axis scores)
@@ -135,7 +135,6 @@ Analyze via `/evolve history`.
 - `dispatch/` — Skill dispatch logs (JSONL)
 - `metrics.json` — Aggregate stats (score_history, trend, stagnation_count, skill_attribution)
 - `evolution.jsonl` — Evolution history (SessionAnalysis + patterns)
-- `guard-rules.yaml` — Custom guard rules (optional)
 - `.cross-project-enabled` — Cross-project learning opt-in marker (optional)
 
-`.harness/` auto-created on session start.
+`~/.harness/projects/{slug}/` auto-created on session start. Keep `.harness/guard-rules.yaml` in your project root to share safety rules with your team.

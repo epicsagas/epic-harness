@@ -31,8 +31,9 @@ epic-harness is a Claude Code plugin that executes hooks and skills locally. Sec
 
 - **Hooks** (`hooks/`) — execute on tool events; review for command injection
 - **Skills** (`skills/`) — auto-triggered prompts; review for prompt injection vectors
-- **Evolved skills** (`.harness/evolved/`) — auto-generated; gated but worth scrutiny
-- **Observation logs** (`.harness/obs/`) — may capture sensitive tool output; not transmitted externally
+- **Evolved skills** (`~/.harness/projects/{slug}/evolved/`) — auto-generated; gated but worth scrutiny
+- **Observation logs** (`~/.harness/projects/{slug}/obs/`) — may capture sensitive tool output; not transmitted externally
+- **Custom Guard Rules** (`.harness/guard-rules.yaml`) — optional project-local rules that override or supplement global ones. Review before committing to shared repos.
 
 ## Out of Scope
 

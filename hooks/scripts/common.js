@@ -16,10 +16,11 @@ function projectSlug() {
     }
     return `${name}-${(h & 0x00ffffff).toString(16).padStart(6, "0")}`;
 }
-const HOME = process.env.HOME?.trim() || "/tmp";
-if (!process.env.HOME?.trim()) {
-    process.stderr.write("[harness] WARNING: $HOME is not set — storing harness data in /tmp/.harness\n");
+const HOME = process.env.HOME || process.env.USERPROFILE || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : "/tmp");
+if (!HOME || HOME === "/tmp") {
+    process.stderr.write("[harness] WARNING: Home directory not detected — storing harness data in /tmp/.harness\n");
 }
+
 /** Per-project data directory: ~/.harness/projects/{slug}/ */
 export const HARNESS_DIR = join(HOME, ".harness", "projects", projectSlug());
 /** Legacy project-local path — used for migration detection only. */
@@ -36,8 +37,11 @@ export const STAGNATION_LIMIT = 3; // sessions before rollback
 export const IMPROVEMENT_THRESHOLD = 0.05; // 5% improvement required
 export const EVOLVED_BACKUP_DIR = join(HARNESS_DIR, "evolved_backup");
 export const DISPATCH_DIR = join(HARNESS_DIR, "dispatch");
-/** guard-rules.yaml stays in the project tree so teams can git-track it. */
-export const GUARD_RULES_FILE = join(LOCAL_HARNESS_DIR, "guard-rules.yaml");
+/** guard-rules.yaml stays in the project tree only if explicitly created. */
+export const GUARD_RULES_FILE = (function () {
+    const local = join(LOCAL_HARNESS_DIR, "guard-rules.yaml");
+    return existsSync(local) ? local : join(HARNESS_DIR, "guard-rules.yaml");
+})();
 export const PRESETS_DIR = join(HARNESS_DIR, "presets");
 export const GLOBAL_HARNESS_DIR = join(HOME, ".harness", "global");
 export const GLOBAL_PATTERNS_FILE = join(GLOBAL_HARNESS_DIR, "patterns.jsonl");
