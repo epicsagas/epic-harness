@@ -1,7 +1,7 @@
 ---
 name: planner
 description: "Breaks down a goal into ordered, sequential tasks with dependencies."
-tools: [Read, Grep, Glob]
+tools: [read_file, grep_search, glob]
 ---
 
 # Planner Agent

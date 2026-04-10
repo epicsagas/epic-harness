@@ -1,7 +1,7 @@
 ---
 name: builder
 description: "Implements a single task using TDD. Writes test first, then code, then verifies."
-tools: [Read, Edit, Write, Bash, Grep, Glob]
+tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]
 ---
 
 # Builder Agent

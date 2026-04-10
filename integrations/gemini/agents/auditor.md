@@ -1,7 +1,7 @@
 ---
 name: auditor
 description: "Audits code for security vulnerabilities and performance issues."
-tools: [Read, Grep, Glob, Bash]
+tools: [read_file, grep_search, glob, run_shell_command]
 ---
 
 # Auditor Agent
