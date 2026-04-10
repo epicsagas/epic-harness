@@ -66,6 +66,24 @@ cargo install --path .
 
 바이너리가 감지되면 훅에서 자동으로 사용합니다. 없으면 Node.js로 폴백합니다.
 
+### 다른 도구에 설치
+
+먼저 Rust 바이너리를 설치하고(필수), 이후 사용하는 도구에 인테그레이션을 설치합니다:
+
+```bash
+# 인테그레이션 설치 (글로벌, 기본값)
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+
+# 프로젝트 로컬 설치
+epic-harness install cursor --local
+
+# 변경 없이 미리보기
+epic-harness install gemini --dry-run
+```
+
 ## 명령어
 
 | 명령어 | 기능 |

@@ -88,20 +88,18 @@ epic-harness works with Claude Code and 4 additional AI coding tools. All tools 
 # Install the Rust binary first (required for all tools)
 brew install epicsagas/tap/epic-harness
 
-# Then install the integration
-./install.sh --tool=codex        # Codex CLI  (~/.codex/ or .codex/)
-./install.sh --tool=gemini       # Gemini CLI (~/.gemini/ or .gemini/)
-./install.sh --tool=cursor       # Cursor     (~/.cursor/ or .cursor/)
-./install.sh --tool=antigravity  # Antigravity (.agents/ + AGENTS.md)
+# Then install the integration (global by default)
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
 
-# Use --global for user-wide install, default is project-local
-./install.sh --tool=cursor --global
+# Project-local install instead
+epic-harness install cursor --local
 
 # Preview without making changes
-./install.sh --tool=gemini --dry-run
+epic-harness install gemini --dry-run
 ```
-
-See `integrations/{tool}/install.md` for per-tool details.
 
 ## Commands
 

@@ -66,6 +66,24 @@ cargo install --path .
 
 バイナリはフックによって自動検出されます。存在しない場合、フックはNode.jsにフォールバックします。
 
+### 他のツールにインストール
+
+まずRustバイナリをインストールし（必須）、次にツール用のインテグレーションをインストールします：
+
+```bash
+# インテグレーションをインストール（グローバル、デフォルト）
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+
+# プロジェクトローカルにインストール
+epic-harness install cursor --local
+
+# 変更なしでプレビュー
+epic-harness install gemini --dry-run
+```
+
 ## コマンド
 
 | コマンド | 機能 |

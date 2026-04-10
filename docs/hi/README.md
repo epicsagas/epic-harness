@@ -66,6 +66,24 @@ cargo install --path .
 
 बाइनरी हुक्स द्वारा स्वचालित रूप से पहचानी जाती है। अनुपस्थित होने पर, हुक्स Node.js पर फ़ॉलबैक करते हैं।
 
+### अन्य टूल्स के लिए इंस्टॉल करें
+
+पहले Rust बाइनरी इंस्टॉल करें (आवश्यक), फिर अपने टूल के लिए इंटीग्रेशन:
+
+```bash
+# इंटीग्रेशन इंस्टॉल करें (ग्लोबल, डिफ़ॉल्ट)
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+
+# प्रोजेक्ट-लोकल इंस्टॉल करें
+epic-harness install cursor --local
+
+# बिना बदलाव किए पूर्वावलोकन
+epic-harness install gemini --dry-run
+```
+
 ## कमांड
 
 | कमांड | यह क्या करता है |

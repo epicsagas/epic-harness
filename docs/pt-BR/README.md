@@ -66,6 +66,24 @@ cargo install --path .
 
 O binário é detectado automaticamente pelos hooks. Se ausente, os hooks utilizam Node.js como fallback.
 
+### Instalar para outras ferramentas
+
+Instale primeiro o binário Rust (obrigatório) e depois a integração para a sua ferramenta:
+
+```bash
+# Instalar integração (global, padrão)
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+
+# Instalar localmente no projeto
+epic-harness install cursor --local
+
+# Visualizar sem realizar alterações
+epic-harness install gemini --dry-run
+```
+
 ## Comandos
 
 | Comando | O que faz |

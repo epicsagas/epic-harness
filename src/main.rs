@@ -1,15 +1,17 @@
 mod hooks;
 
 use std::env;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
-    // Read stdin once, pass to subcommand
+    // Read stdin once, pass to subcommand (skip if TTY — no EOF would arrive)
     let mut stdin_buf = String::new();
-    let _ = io::stdin().read_to_string(&mut stdin_buf);
+    if !io::stdin().is_terminal() {
+        let _ = io::stdin().read_to_string(&mut stdin_buf);
+    }
 
     let input: hooks::common::HookInput = if stdin_buf.is_empty() {
         hooks::common::HookInput::default()
@@ -24,12 +26,14 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
+        "install" => hooks::install::run(&args[2..].to_vec()),
         "version" => {
             eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
             0
         }
         _ => {
-            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect>");
+            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install>");
+            eprintln!("       epic-harness install <codex|gemini|cursor|antigravity> [--local] [--dry-run]");
             1
         }
     };

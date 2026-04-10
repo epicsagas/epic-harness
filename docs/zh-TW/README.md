@@ -66,6 +66,24 @@ cargo install --path .
 
 hooks 會自動偵測二進位檔。若不存在，則回退至 Node.js。
 
+### 為其他工具安裝
+
+先安裝 Rust 二進位檔（必要），再為您的工具安裝整合：
+
+```bash
+# 安裝整合（全域，預設）
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+
+# 安裝至專案本地
+epic-harness install cursor --local
+
+# 預覽而不進行任何變更
+epic-harness install gemini --dry-run
+```
+
 ## 指令
 
 | 指令 | 功能說明 |

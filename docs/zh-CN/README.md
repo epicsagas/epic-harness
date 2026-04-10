@@ -66,6 +66,24 @@ cargo install --path .
 
 钩子会自动检测该二进制文件。如果不存在，则回退到 Node.js。
 
+### 为其他工具安装
+
+首先安装 Rust 二进制文件（必须），然后为您的工具安装集成：
+
+```bash
+# 安装集成（全局，默认）
+epic-harness install codex        # Codex CLI  → ~/.codex/
+epic-harness install gemini       # Gemini CLI → ~/.gemini/
+epic-harness install cursor       # Cursor     → ~/.cursor/
+epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+
+# 安装到项目本地
+epic-harness install cursor --local
+
+# 预览而不进行任何更改
+epic-harness install gemini --dry-run
+```
+
 ## 命令
 
 | 命令 | 功能 |
