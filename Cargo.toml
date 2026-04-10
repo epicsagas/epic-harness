@@ -30,3 +30,15 @@ bin-dir = "epic-harness.exe"
 opt-level = "s"
 lto = true
 strip = true
+
+# ---------------------------------------------------------------------------
+# Build optimizations
+# ---------------------------------------------------------------------------
+
+[profile.dev]
+opt-level = 0
+debug = 1
+
+[profile.release.package."*"]
+opt-level = 3
+codegen-units = 4
