@@ -50,7 +50,7 @@ Copy the command definitions so Gemini CLI can load them:
 
 ```bash
 mkdir -p .gemini/commands
-cp integrations/gemini/commands/*.md .gemini/commands/
+cp integrations/gemini/commands/*.toml .gemini/commands/
 ```
 
 ## Step 4: Verify
@@ -68,7 +68,7 @@ If you see `[harness] epic-harness not found`, ensure the binary is in your PATH
 |------|---------|
 | `settings.json` | Hook event bindings (BeforeAgent, AfterAgent, BeforeModel, AfterModel) |
 | `GEMINI.md` | Snippet to append to project GEMINI.md |
-| `commands/*.md` | /spec, /go, /check, /ship, /evolve, /team command definitions |
+| `commands/*.toml` | /spec, /go, /check, /ship, /evolve, /team command definitions |
 | `skills/*/SKILL.md` | Auto-triggered skill definitions |
 | `agents/*.md` | Builder, reviewer, auditor, planner agent definitions |
 

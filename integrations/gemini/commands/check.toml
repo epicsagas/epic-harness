@@ -1,0 +1,25 @@
+description = "Verify everything - sequential code review, security audit, and test run"
+prompt = """
+Identify what changed using `git diff --stat HEAD~1` (or against base branch).
+
+Run 3 sequential checks:
+1. **Reviewer** (use `agents/reviewer.md`): Code quality, logic correctness, style consistency, bugs, race conditions, edge cases, and test coverage for changed code.
+2. **Auditor** (use `agents/auditor.md`): Security (injection, auth bypass, secret exposure, OWASP Top 10) and performance (N+1 queries, memory leaks, unnecessary computation). Refer to `references/security.md` and `references/performance.md`.
+3. **Test runner**: Run the full test suite, report coverage delta, and flag any flaky tests.
+
+Combine findings into a single report:
+```
+## Check Report
+### Code Quality: [PASS/WARN/FAIL]
+### Security: [PASS/WARN/FAIL]
+### Performance: [PASS/WARN/FAIL]
+### Tests: [X/Y passing, Z% coverage]
+### Action Items: [numbered list]
+```
+
+- **PASS on all**: Ready for `/ship`
+- **WARN**: Show warnings, ask user if they want to fix
+- **FAIL**: List blockers, offer to fix with `/go`
+
+Avoid skipping security reviews, approving with failing tests, or ignoring performance warnings in hot paths.
+"""

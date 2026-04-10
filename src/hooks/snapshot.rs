@@ -2,7 +2,9 @@ use super::common::*;
 
 fn get_obs_summary() -> Option<String> {
     let obs = obs_dir();
-    if !obs.is_dir() { return None; }
+    if !obs.is_dir() {
+        return None;
+    }
 
     let today_str = today();
     let mut files: Vec<String> = list_files(&obs, ".jsonl")
@@ -26,15 +28,26 @@ fn get_obs_summary() -> Option<String> {
         }
     }
 
-    if records.is_empty() { return None; }
+    if records.is_empty() {
+        return None;
+    }
 
     let scored: Vec<_> = records.iter().filter(|r| r.score.is_some()).collect();
-    let errors: Vec<_> = scored.iter().filter(|r| r.result.as_deref() == Some("error")).collect();
+    let errors: Vec<_> = scored
+        .iter()
+        .filter(|r| r.result.as_deref() == Some("error"))
+        .collect();
     let total = scored.len();
-    let success_rate = if total > 0 { ((total - errors.len()) as f64 / total as f64 * 100.0) as u32 } else { 100 };
+    let success_rate = if total > 0 {
+        ((total - errors.len()) as f64 / total as f64 * 100.0) as u32
+    } else {
+        100
+    };
     let avg_score = if total > 0 {
         scored.iter().map(|r| r.score.unwrap_or(0.0)).sum::<f64>() / total as f64
-    } else { 1.0 };
+    } else {
+        1.0
+    };
 
     let mut error_cats: std::collections::HashMap<&str, u64> = std::collections::HashMap::new();
     for e in &errors {
@@ -52,20 +65,31 @@ fn get_obs_summary() -> Option<String> {
         String::new()
     };
 
-    Some(format!("{} obs, {success_rate}% success, avg={avg_score:.2}{error_str}", records.len()))
+    Some(format!(
+        "{} obs, {success_rate}% success, avg={avg_score:.2}{error_str}",
+        records.len()
+    ))
 }
 
 pub fn run(input: &HookInput) -> i32 {
-    if !harness_exists() { return 0; }
+    if !harness_exists() {
+        return 0;
+    }
     ensure_dir(&sessions_dir());
 
     let obs_summary = get_obs_summary();
 
     let summary = if let Some(ref obs) = obs_summary {
-        let conv = input.conversation_summary.as_deref().unwrap_or("Context compaction");
+        let conv = input
+            .conversation_summary
+            .as_deref()
+            .unwrap_or("Context compaction");
         format!("{conv}. Eval: {obs}")
     } else {
-        input.conversation_summary.clone().unwrap_or_else(|| "Context compaction triggered".into())
+        input
+            .conversation_summary
+            .clone()
+            .unwrap_or_else(|| "Context compaction triggered".into())
     };
 
     let snapshot = SessionSnapshot {
@@ -76,16 +100,25 @@ pub fn run(input: &HookInput) -> i32 {
         context_usage: input.context_usage,
     };
 
-    let filename = format!("snapshot_{}.json", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis());
+    let filename = format!(
+        "snapshot_{}.json",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    );
 
     let path = sessions_dir().join(&filename);
     if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
         let _ = std::fs::write(&path, json);
     }
 
-    hint("snapshot", &format!("Saved: {filename}{}", obs_summary.map(|s| format!(" ({s})")).unwrap_or_default()));
+    hint(
+        "snapshot",
+        &format!(
+            "Saved: {filename}{}",
+            obs_summary.map(|s| format!(" ({s})")).unwrap_or_default()
+        ),
+    );
     0
 }

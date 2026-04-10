@@ -35,31 +35,53 @@ fn score_bash(output: &str, command: &str) -> ScoreDimensions {
         quality = 0.7;
     }
     static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)warning|WARN").unwrap());
-    static DEPREC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
+    static DEPREC_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
     if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
         quality = (quality - 0.3).max(0.0);
     }
 
     let len = output.len();
-    let cost = if len > 50000 { 0.3 } else if len > 20000 { 0.6 } else { 1.0 };
+    let cost = if len > 50000 {
+        0.3
+    } else if len > 20000 {
+        0.6
+    } else {
+        1.0
+    };
 
-    ScoreDimensions { tool_success, output_quality: quality, execution_cost: cost }
+    ScoreDimensions {
+        tool_success,
+        output_quality: quality,
+        execution_cost: cost,
+    }
 }
 
-fn score_edit(output: &str, prev_action: Option<&str>, curr_action: Option<&str>) -> ScoreDimensions {
+fn score_edit(
+    output: &str,
+    prev_action: Option<&str>,
+    curr_action: Option<&str>,
+) -> ScoreDimensions {
     let failure = classify_failure(output);
     let tool_success = if failure.is_none() { 1.0 } else { 0.0 };
 
     let mut quality: f64 = 1.0;
-    static NO_CHANGE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)no changes|file not found").unwrap());
-    if NO_CHANGE_RE.is_match(output) { quality = 0.3; }
+    static NO_CHANGE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)no changes|file not found").unwrap());
+    if NO_CHANGE_RE.is_match(output) {
+        quality = 0.3;
+    }
     if let (Some(prev), Some(curr)) = (prev_action, curr_action)
         && prev == curr
     {
         quality = quality.min(0.7);
     }
 
-    ScoreDimensions { tool_success, output_quality: quality, execution_cost: 1.0 }
+    ScoreDimensions {
+        tool_success,
+        output_quality: quality,
+        execution_cost: 1.0,
+    }
 }
 
 fn score_write(output: &str) -> ScoreDimensions {
@@ -73,7 +95,8 @@ fn score_write(output: &str) -> ScoreDimensions {
 }
 
 fn score_read_search(output: &str) -> ScoreDimensions {
-    static NO_MATCH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
+    static NO_MATCH_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
     let has_results = !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
     ScoreDimensions {
         tool_success: if has_results { 1.0 } else { 0.0 },
@@ -83,15 +106,23 @@ fn score_read_search(output: &str) -> ScoreDimensions {
 }
 
 pub fn run(input: &HookInput) -> i32 {
-    if !harness_exists() { return 0; }
+    if !harness_exists() {
+        return 0;
+    }
     ensure_dir(&obs_dir());
 
     let session_file = obs_dir().join(format!("session_{}.jsonl", session_id()));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
     let action = input.tool_input.as_ref().map(|v| {
-        v.get("command").and_then(|c| c.as_str()).map(String::from)
-            .or_else(|| v.get("file_path").and_then(|c| c.as_str()).map(String::from))
+        v.get("command")
+            .and_then(|c| c.as_str())
+            .map(String::from)
+            .or_else(|| {
+                v.get("file_path")
+                    .and_then(|c| c.as_str())
+                    .map(String::from)
+            })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
                 s[..s.len().min(200)].to_string()
@@ -121,11 +152,20 @@ pub fn run(input: &HookInput) -> i32 {
         let combined = format!("{output}\n{stderr}");
 
         record.failure_category = classify_failure(&combined).map(String::from);
-        record.result = Some(if record.failure_category.is_none() { "success" } else { "error" }.into());
+        record.result = Some(
+            if record.failure_category.is_none() {
+                "success"
+            } else {
+                "error"
+            }
+            .into(),
+        );
 
         let dims = match tool_cat {
             "bash" => {
-                let cmd = input.tool_input.as_ref()
+                let cmd = input
+                    .tool_input
+                    .as_ref()
                     .and_then(|v| v.get("command"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -138,7 +178,11 @@ pub fn run(input: &HookInput) -> i32 {
             "write" => score_write(&combined),
             "read" | "glob" | "grep" => score_read_search(&combined),
             _ => ScoreDimensions {
-                tool_success: if record.failure_category.is_none() { 1.0 } else { 0.0 },
+                tool_success: if record.failure_category.is_none() {
+                    1.0
+                } else {
+                    0.0
+                },
                 output_quality: 1.0,
                 execution_cost: 1.0,
             },

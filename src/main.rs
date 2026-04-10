@@ -33,7 +33,12 @@ fn main() {
         }
         _ => {
             eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install>");
-            eprintln!("       epic-harness install <codex|gemini|cursor|antigravity> [--local] [--dry-run]");
+            eprintln!(
+                "       epic-harness install <codex|gemini|cursor|antigravity> [--local] [--dry-run]"
+            );
+            eprintln!(
+                "       (install syncs embedded files; root-only GEMINI.md/AGENTS.md only if missing)"
+            );
             1
         }
     };

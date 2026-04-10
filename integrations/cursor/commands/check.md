@@ -1,4 +1,5 @@
 ---
+name: check
 description: "Verify everything — parallel code review + security audit + performance analysis"
 ---
 

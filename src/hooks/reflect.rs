@@ -9,17 +9,45 @@ use super::common::*;
 fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
     let scored: Vec<_> = observations.iter().filter(|o| o.score.is_some()).collect();
     let total = scored.len() as u64;
-    let errors: Vec<_> = scored.iter().filter(|o| o.result.as_deref() == Some("error")).collect();
-    let success_rate = if total > 0 { round3((total - errors.len() as u64) as f64 / total as f64) } else { 1.0 };
-    let avg_score = if total > 0 { round3(scored.iter().map(|o| o.score.unwrap_or(0.0)).sum::<f64>() / total as f64) } else { 0.0 };
+    let errors: Vec<_> = scored
+        .iter()
+        .filter(|o| o.result.as_deref() == Some("error"))
+        .collect();
+    let success_rate = if total > 0 {
+        round3((total - errors.len() as u64) as f64 / total as f64)
+    } else {
+        1.0
+    };
+    let avg_score = if total > 0 {
+        round3(scored.iter().map(|o| o.score.unwrap_or(0.0)).sum::<f64>() / total as f64)
+    } else {
+        0.0
+    };
 
     // Score distribution
     let mut buckets: HashMap<String, u64> = [
-        ("0.0-0.2", 0), ("0.2-0.4", 0), ("0.4-0.6", 0), ("0.6-0.8", 0), ("0.8-1.0", 0),
-    ].into_iter().map(|(k, v)| (k.into(), v)).collect();
+        ("0.0-0.2", 0),
+        ("0.2-0.4", 0),
+        ("0.4-0.6", 0),
+        ("0.6-0.8", 0),
+        ("0.8-1.0", 0),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.into(), v))
+    .collect();
     for o in &scored {
         let s = o.score.unwrap_or(0.0);
-        let key = if s < 0.2 { "0.0-0.2" } else if s < 0.4 { "0.2-0.4" } else if s < 0.6 { "0.4-0.6" } else if s < 0.8 { "0.6-0.8" } else { "0.8-1.0" };
+        let key = if s < 0.2 {
+            "0.0-0.2"
+        } else if s < 0.4 {
+            "0.2-0.4"
+        } else if s < 0.6 {
+            "0.4-0.6"
+        } else if s < 0.8 {
+            "0.6-0.8"
+        } else {
+            "0.8-1.0"
+        };
         *buckets.get_mut(key).unwrap() += 1;
     }
 
@@ -27,7 +55,10 @@ fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
     let mut tool_map: HashMap<String, ToolStats> = HashMap::new();
     for o in &scored {
         let cat = &o.tool_category;
-        let ts = tool_map.entry(cat.clone()).or_insert_with(|| ToolStats { tool_category: cat.clone(), ..Default::default() });
+        let ts = tool_map.entry(cat.clone()).or_insert_with(|| ToolStats {
+            tool_category: cat.clone(),
+            ..Default::default()
+        });
         ts.total += 1;
         if o.result.as_deref() == Some("error") {
             ts.errors += 1;
@@ -36,7 +67,8 @@ fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         } else {
             ts.successes += 1;
         }
-        ts.avg_score = ((ts.avg_score * (ts.total - 1) as f64) + o.score.unwrap_or(0.0)) / ts.total as f64;
+        ts.avg_score =
+            ((ts.avg_score * (ts.total - 1) as f64) + o.score.unwrap_or(0.0)) / ts.total as f64;
     }
 
     // Per-error stats
@@ -52,14 +84,23 @@ fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         let ext = o.file_ext.as_deref().unwrap_or("unknown");
         let es = ext_map.entry(ext.into()).or_default();
         es.total += 1;
-        if o.result.as_deref() == Some("error") { es.errors += 1; }
+        if o.result.as_deref() == Some("error") {
+            es.errors += 1;
+        }
     }
     for es in ext_map.values_mut() {
-        es.success_rate = if es.total > 0 { round3((es.total - es.errors) as f64 / es.total as f64) } else { 1.0 };
+        es.success_rate = if es.total > 0 {
+            round3((es.total - es.errors) as f64 / es.total as f64)
+        } else {
+            1.0
+        };
     }
 
     // Dimension averages
-    let dims_scored: Vec<_> = scored.iter().filter_map(|o| o.dimensions.as_ref()).collect();
+    let dims_scored: Vec<_> = scored
+        .iter()
+        .filter_map(|o| o.dimensions.as_ref())
+        .collect();
     let dim_avg = if !dims_scored.is_empty() {
         let n = dims_scored.len() as f64;
         ScoreDimensions {
@@ -103,25 +144,41 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
 
             let curr_snippet = curr.error_snippet.as_deref().unwrap_or("");
             let prev_snippet = prev.error_snippet.as_deref().unwrap_or("");
-            let curr_hash = if !curr_snippet.is_empty() { hash_string(&normalize_error(curr_snippet)) } else { String::new() };
-            let prev_hash_val = if !prev_snippet.is_empty() { hash_string(&normalize_error(prev_snippet)) } else { String::new() };
+            let curr_hash = if !curr_snippet.is_empty() {
+                hash_string(&normalize_error(curr_snippet))
+            } else {
+                String::new()
+            };
+            let prev_hash_val = if !prev_snippet.is_empty() {
+                hash_string(&normalize_error(prev_snippet))
+            } else {
+                String::new()
+            };
 
             let same_error = curr.result.as_deref() == Some("error")
                 && prev.result.as_deref() == Some("error")
                 && curr.failure_category == prev.failure_category
                 && curr.failure_category.is_some()
-                && curr.action.is_some() && prev.action.is_some()
-                && extract_file(curr.action.as_deref().unwrap_or("")) == extract_file(prev.action.as_deref().unwrap_or(""))
+                && curr.action.is_some()
+                && prev.action.is_some()
+                && extract_file(curr.action.as_deref().unwrap_or(""))
+                    == extract_file(prev.action.as_deref().unwrap_or(""))
                 && (curr_hash == prev_hash_val || curr_hash.is_empty() || prev_hash_val.is_empty());
 
             if same_error {
                 streak += 1;
-                streak_file = extract_file(curr.action.as_deref().unwrap_or("")).unwrap_or("").to_string();
+                streak_file = extract_file(curr.action.as_deref().unwrap_or(""))
+                    .unwrap_or("")
+                    .to_string();
                 streak_category = curr.failure_category.clone().unwrap_or_default();
                 prev_hash = curr_hash;
             } else {
                 if streak >= REPEATED_ERROR_MIN {
-                    let hash_note = if !prev_hash.is_empty() { format!(" [hash:{prev_hash}]") } else { String::new() };
+                    let hash_note = if !prev_hash.is_empty() {
+                        format!(" [hash:{prev_hash}]")
+                    } else {
+                        String::new()
+                    };
                     patterns.push(DetectedPattern {
                         pattern_type: "repeated_same_error".into(),
                         description: format!("{streak_category} repeated {streak}x on {streak_file}{hash_note}"),
@@ -135,13 +192,25 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             }
         }
         if streak >= REPEATED_ERROR_MIN {
-            let hash_note = if !prev_hash.is_empty() { format!(" [hash:{prev_hash}]") } else { String::new() };
+            let hash_note = if !prev_hash.is_empty() {
+                format!(" [hash:{prev_hash}]")
+            } else {
+                String::new()
+            };
             patterns.push(DetectedPattern {
                 pattern_type: "repeated_same_error".into(),
-                description: format!("{streak_category} repeated {streak}x on {streak_file}{hash_note}"),
+                description: format!(
+                    "{streak_category} repeated {streak}x on {streak_file}{hash_note}"
+                ),
                 count: streak,
-                involved_files: if streak_file.is_empty() { vec![] } else { vec![streak_file] },
-                suggested_remediation: format!("Stop retrying the same approach for {streak_category}. Re-read the full error."),
+                involved_files: if streak_file.is_empty() {
+                    vec![]
+                } else {
+                    vec![streak_file]
+                },
+                suggested_remediation: format!(
+                    "Stop retrying the same approach for {streak_category}. Re-read the full error."
+                ),
             });
         }
     }
@@ -155,9 +224,17 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 && o.result.as_deref() == Some("success")
                 && o.action.is_some()
             {
-                let file = extract_file(o.action.as_deref().unwrap_or("")).unwrap_or(o.action.as_deref().unwrap_or(""));
-                let basename = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or(file);
-                for next in scored.iter().take((i + FTB_LOOKAHEAD + 1).min(scored.len())).skip(i + 1) {
+                let file = extract_file(o.action.as_deref().unwrap_or(""))
+                    .unwrap_or(o.action.as_deref().unwrap_or(""));
+                let basename = Path::new(file)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(file);
+                for next in scored
+                    .iter()
+                    .take((i + FTB_LOOKAHEAD + 1).min(scored.len()))
+                    .skip(i + 1)
+                {
                     if next.result.as_deref() == Some("error") && next.tool_category == "bash" {
                         let snippet = next.error_snippet.as_deref().unwrap_or("");
                         if snippet.contains(file) || snippet.contains(basename) {
@@ -168,7 +245,10 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 }
             }
         }
-        let ftb_entries: Vec<_> = ftb_files.iter().filter(|(_, c)| **c >= FTB_MIN_CYCLES).collect();
+        let ftb_entries: Vec<_> = ftb_files
+            .iter()
+            .filter(|(_, c)| **c >= FTB_MIN_CYCLES)
+            .collect();
         if !ftb_entries.is_empty() {
             let files: Vec<String> = ftb_entries.iter().map(|(f, _)| f.to_string()).collect();
             let total: u64 = ftb_entries.iter().map(|(_, c)| **c).sum();
@@ -189,7 +269,9 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
         let mut file_runs: HashMap<String, u64> = HashMap::new();
 
         for o in &scored {
-            let file = extract_file(o.action.as_deref().unwrap_or("")).unwrap_or("").to_string();
+            let file = extract_file(o.action.as_deref().unwrap_or(""))
+                .unwrap_or("")
+                .to_string();
             if !file.is_empty() && file == prev_file {
                 run_length += 1;
             } else {
@@ -207,13 +289,18 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
         }
 
         for (file, count) in &file_runs {
-            let basename = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or(file);
+            let basename = Path::new(file)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(file);
             patterns.push(DetectedPattern {
                 pattern_type: "long_debug_loop".into(),
                 description: format!("Stuck on {basename} for {count} consecutive operations"),
                 count: *count,
                 involved_files: vec![file.clone()],
-                suggested_remediation: "Stuck in debug loop. Stop, re-read the surrounding code context (100+ lines).".into(),
+                suggested_remediation:
+                    "Stuck in debug loop. Stop, re-read the surrounding code context (100+ lines)."
+                        .into(),
             });
         }
     }
@@ -222,15 +309,26 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
     {
         let mut file_stats: HashMap<String, (u64, u64)> = HashMap::new(); // (edits, errors)
         for o in &scored {
-            let file = extract_file(o.action.as_deref().unwrap_or("")).unwrap_or("").to_string();
-            if file.is_empty() { continue; }
+            let file = extract_file(o.action.as_deref().unwrap_or(""))
+                .unwrap_or("")
+                .to_string();
+            if file.is_empty() {
+                continue;
+            }
             let entry = file_stats.entry(file).or_default();
-            if o.tool_category == "edit" || o.tool_category == "write" { entry.0 += 1; }
-            if o.result.as_deref() == Some("error") { entry.1 += 1; }
+            if o.tool_category == "edit" || o.tool_category == "write" {
+                entry.0 += 1;
+            }
+            if o.result.as_deref() == Some("error") {
+                entry.1 += 1;
+            }
         }
         for (file, (edits, errors)) in &file_stats {
             if *edits >= THRASH_MIN_EDITS && *errors >= THRASH_MIN_ERRORS {
-                let basename = Path::new(file).file_name().and_then(|n| n.to_str()).unwrap_or(file);
+                let basename = Path::new(file)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(file);
                 patterns.push(DetectedPattern {
                     pattern_type: "thrashing".into(),
                     description: format!("Edit↔Error thrashing on {basename} ({edits} edits, {errors} errors)"),
@@ -277,7 +375,12 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
                 rm_dir(&evolved);
                 copy_dir(&backup, &evolved);
                 metrics.stagnation_count = 0;
-                hint("reflect", &format!("Stagnation detected ({STAGNATION_LIMIT} sessions). Rolled back evolved skills."));
+                hint(
+                    "reflect",
+                    &format!(
+                        "Stagnation detected ({STAGNATION_LIMIT} sessions). Rolled back evolved skills."
+                    ),
+                );
                 return (true, false, before_count);
             }
         }
@@ -294,41 +397,68 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
 
     // 4a. From failure patterns
     for pattern in &analysis.failure_patterns {
-        if seeded as usize >= cap { break; }
+        if seeded as usize >= cap {
+            break;
+        }
         let name = format!("evo-{}", pattern.pattern_type);
-        if existing.contains(&name) { continue; }
+        if existing.contains(&name) {
+            continue;
+        }
         write_skill(&name, &build_pattern_skill(pattern));
         seeded += 1;
     }
 
     // 4b. From weak tools
     for stats in analysis.per_tool_stats.values() {
-        if seeded as usize >= cap { break; }
-        let rate = if stats.total > 0 { stats.successes as f64 / stats.total as f64 } else { 1.0 };
-        if rate >= WEAK_TOOL_RATE || stats.total < WEAK_TOOL_MIN_OBS { continue; }
+        if seeded as usize >= cap {
+            break;
+        }
+        let rate = if stats.total > 0 {
+            stats.successes as f64 / stats.total as f64
+        } else {
+            1.0
+        };
+        if rate >= WEAK_TOOL_RATE || stats.total < WEAK_TOOL_MIN_OBS {
+            continue;
+        }
         let name = format!("evo-{}-discipline", stats.tool_category);
-        if existing.contains(&name) { continue; }
+        if existing.contains(&name) {
+            continue;
+        }
         write_skill(&name, &build_tool_skill(stats));
         seeded += 1;
     }
 
     // 4c. From weak extensions
     for (ext, stats) in &analysis.per_ext_stats {
-        if seeded as usize >= cap { break; }
-        if stats.success_rate >= WEAK_EXT_RATE || stats.total < WEAK_EXT_MIN_OBS || ext == "unknown" { continue; }
+        if seeded as usize >= cap {
+            break;
+        }
+        if stats.success_rate >= WEAK_EXT_RATE || stats.total < WEAK_EXT_MIN_OBS || ext == "unknown"
+        {
+            continue;
+        }
         let clean = ext.trim_start_matches('.');
         let name = format!("evo-{clean}-care");
-        if existing.contains(&name) { continue; }
+        if existing.contains(&name) {
+            continue;
+        }
         write_skill(&name, &build_ext_skill(ext, stats));
         seeded += 1;
     }
 
     // 4d. From high-frequency errors
     for (category, count) in &analysis.per_error_stats {
-        if seeded as usize >= cap { break; }
-        if *count < HIGH_FREQ_ERROR_MIN { continue; }
+        if seeded as usize >= cap {
+            break;
+        }
+        if *count < HIGH_FREQ_ERROR_MIN {
+            continue;
+        }
         let name = format!("evo-fix-{}", category.replace('_', "-"));
-        if existing.contains(&name) { continue; }
+        if existing.contains(&name) {
+            continue;
+        }
         write_skill(&name, &build_failure_skill(category, *count));
         seeded += 1;
     }
@@ -345,23 +475,45 @@ fn write_skill(name: &str, content: &str) {
 fn build_pattern_skill(p: &DetectedPattern) -> String {
     format!(
         "---\nname: {}\ndescription: \"Auto-evolved from {}x {} pattern.\"\n---\n\n# {}\n\n**Detected**: {}\n**Files**: {}\n\n## Remediation\n{}\n\n## Red Flags\n- Retrying the same approach that already failed\n- Not reading the full error context\n- Patching symptoms instead of root cause\n",
-        p.pattern_type, p.count, p.pattern_type, p.pattern_type, p.description,
-        if p.involved_files.is_empty() { "various".into() } else { p.involved_files.join(", ") },
+        p.pattern_type,
+        p.count,
+        p.pattern_type,
+        p.pattern_type,
+        p.description,
+        if p.involved_files.is_empty() {
+            "various".into()
+        } else {
+            p.involved_files.join(", ")
+        },
         p.suggested_remediation,
     )
 }
 
 fn build_tool_skill(stats: &ToolStats) -> String {
-    let rate = if stats.total > 0 { (stats.successes as f64 / stats.total as f64 * 100.0) as u32 } else { 0 };
+    let rate = if stats.total > 0 {
+        (stats.successes as f64 / stats.total as f64 * 100.0) as u32
+    } else {
+        0
+    };
     let mut top: Vec<_> = stats.failure_categories.iter().collect();
     top.sort_by(|a, b| b.1.cmp(a.1));
     top.truncate(3);
-    let failures = top.iter().map(|(c, n)| format!("- {c}: {n} occurrences")).collect::<Vec<_>>().join("\n");
+    let failures = top
+        .iter()
+        .map(|(c, n)| format!("- {c}: {n} occurrences"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     format!(
         "---\nname: {cat}-discipline\ndescription: \"Auto-evolved. {cat} tool success rate was {rate}%.\"\n---\n\n# {cat} discipline\n\nSuccess rate: {rate}% ({s}/{t})\n\n## Top Failure Types\n{failures}\n\n## Process\n1. Before using {cat}: verify preconditions\n2. Check the expected output format\n3. Validate paths and arguments exist\n4. On failure: read the FULL error, don't retry blindly\n\n## Red Flags\n- {cat} success rate still below 60%\n- Same error type repeating\n",
-        cat = stats.tool_category, s = stats.successes, t = stats.total,
-        failures = if failures.is_empty() { "- various errors".into() } else { failures },
+        cat = stats.tool_category,
+        s = stats.successes,
+        t = stats.total,
+        failures = if failures.is_empty() {
+            "- various errors".into()
+        } else {
+            failures
+        },
     )
 }
 
@@ -369,17 +521,28 @@ fn build_ext_skill(ext: &str, stats: &ExtStats) -> String {
     let rate = (stats.success_rate * 100.0) as u32;
     format!(
         "---\nname: {clean}-care\ndescription: \"Auto-evolved. {ext} files had {rate}% success rate.\"\n---\n\n# {ext} file care\n\nSuccess rate: {rate}% across {t} operations\n\n## Process\n1. Before editing {ext} files: run type-check / lint / build\n2. After editing: immediately verify\n3. If error: read the full diagnostic before re-editing\n\n## Red Flags\n- Editing {ext} files without verifying afterward\n- Ignoring compiler/linter warnings\n",
-        clean = ext.trim_start_matches('.'), t = stats.total,
+        clean = ext.trim_start_matches('.'),
+        t = stats.total,
     )
 }
 
 fn build_failure_skill(category: &str, count: u64) -> String {
     let remediation = match category {
-        "type_error" => "Check variable types. Read the full type signature. Use explicit type annotations.",
-        "syntax_error" => "Check brackets, commas, semicolons. Ensure template literals are properly closed.",
-        "test_fail" => "Read the assertion message carefully. Check expected vs actual. Run the failing test in isolation.",
-        "lint_fail" => "Run the linter and fix all warnings. Configure the editor to show lint errors inline.",
-        "build_fail" => "Run `tsc --noEmit` (or equivalent) to see all errors. Fix type errors before runtime testing.",
+        "type_error" => {
+            "Check variable types. Read the full type signature. Use explicit type annotations."
+        }
+        "syntax_error" => {
+            "Check brackets, commas, semicolons. Ensure template literals are properly closed."
+        }
+        "test_fail" => {
+            "Read the assertion message carefully. Check expected vs actual. Run the failing test in isolation."
+        }
+        "lint_fail" => {
+            "Run the linter and fix all warnings. Configure the editor to show lint errors inline."
+        }
+        "build_fail" => {
+            "Run `tsc --noEmit` (or equivalent) to see all errors. Fix type errors before runtime testing."
+        }
         "permission_denied" => "Check file permissions. Don't write to system directories.",
         "timeout" => "Command took too long. Consider a more targeted approach.",
         "not_found" => "File or command not found. Verify the path exists. Use glob to locate.",
@@ -395,65 +558,106 @@ fn build_failure_skill(category: &str, count: u64) -> String {
 // ── Phase 5: Trend ──────────────────────────────────
 
 fn compute_trend(history: &[SessionScoreEntry]) -> &'static str {
-    let recent: Vec<_> = history.iter().rev().take(5).collect::<Vec<_>>().into_iter().rev().collect();
-    if recent.len() < 2 { return "stable"; }
+    let recent: Vec<_> = history
+        .iter()
+        .rev()
+        .take(5)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if recent.len() < 2 {
+        return "stable";
+    }
     let n = recent.len() as f64;
     let (mut sx, mut sy, mut sxy, mut sxx) = (0.0, 0.0, 0.0, 0.0);
     for (i, e) in recent.iter().enumerate() {
         let x = i as f64;
-        sx += x; sy += e.avg_score; sxy += x * e.avg_score; sxx += x * x;
+        sx += x;
+        sy += e.avg_score;
+        sxy += x * e.avg_score;
+        sxx += x * x;
     }
     let denom = n * sxx - sx * sx;
-    if denom.abs() < f64::EPSILON { return "stable"; }
+    if denom.abs() < f64::EPSILON {
+        return "stable";
+    }
     let slope = (n * sxy - sx * sy) / denom;
-    if slope > 0.01 { "improving" } else if slope < -0.01 { "declining" } else { "stable" }
+    if slope > 0.01 {
+        "improving"
+    } else if slope < -0.01 {
+        "declining"
+    } else {
+        "stable"
+    }
 }
 
 // ── Phase 6: Skill Attribution ──────────────────────
 
-fn update_skill_attribution(metrics: &mut Metrics, analysis: &SessionAnalysis, evolved_skills: &[String]) {
+fn update_skill_attribution(
+    metrics: &mut Metrics,
+    analysis: &SessionAnalysis,
+    evolved_skills: &[String],
+) {
     for skill in evolved_skills {
-        let attr = metrics.skill_attribution.entry(skill.clone()).or_insert(SkillAttribution {
-            skill_name: skill.clone(),
-            sessions_active: 0,
-            avg_score_with: 0.0,
-            avg_score_without: 0.0,
-            first_seen: now_iso(),
-        });
+        let attr = metrics
+            .skill_attribution
+            .entry(skill.clone())
+            .or_insert(SkillAttribution {
+                skill_name: skill.clone(),
+                sessions_active: 0,
+                avg_score_with: 0.0,
+                avg_score_without: 0.0,
+                first_seen: now_iso(),
+            });
         attr.sessions_active += 1;
         attr.avg_score_with = round3(
-            ((attr.avg_score_with * (attr.sessions_active - 1) as f64) + analysis.avg_score) / attr.sessions_active as f64,
+            ((attr.avg_score_with * (attr.sessions_active - 1) as f64) + analysis.avg_score)
+                / attr.sessions_active as f64,
         );
     }
 
     let total_sessions = metrics.total_sessions + 1;
     // Sum of all composite avg_scores across all sessions (history + current).
     // Use score_history (avg_score field, not avg_success_rate) for historical sessions.
-    let all_scores_sum = metrics.score_history.iter().map(|e| e.avg_score).sum::<f64>() + analysis.avg_score;
+    let all_scores_sum = metrics
+        .score_history
+        .iter()
+        .map(|e| e.avg_score)
+        .sum::<f64>()
+        + analysis.avg_score;
     for attr in metrics.skill_attribution.values_mut() {
         let without = total_sessions.saturating_sub(attr.sessions_active);
         if without > 0 {
             attr.avg_score_without = round3(
-                (all_scores_sum - (attr.avg_score_with * attr.sessions_active as f64)) / without as f64,
+                (all_scores_sum - (attr.avg_score_with * attr.sessions_active as f64))
+                    / without as f64,
             );
         }
     }
 
-    metrics.skill_attribution.retain(|name, _| evolved_skills.contains(name));
+    metrics
+        .skill_attribution
+        .retain(|name, _| evolved_skills.contains(name));
 }
 
 // ── Phase 7: Cross-project export ───────────────────
 
 fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) {
-    if !cross_project_file().is_file() { return; }
+    if !cross_project_file().is_file() {
+        return;
+    }
     ensure_dir(&global_harness_dir());
 
-    let project_name = cwd().file_name()
+    let project_name = cwd()
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
         .to_string();
 
-    let weak_tools: Vec<String> = analysis.per_tool_stats.iter()
+    let weak_tools: Vec<String> = analysis
+        .per_tool_stats
+        .iter()
         .filter(|(_, s)| s.total >= 5 && (s.successes as f64 / s.total as f64) < 0.6)
         .map(|(cat, _)| cat.clone())
         .collect();
@@ -479,7 +683,9 @@ fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) {
 
 fn gate_skills() {
     let evolved = evolved_dir();
-    if !evolved.is_dir() { return; }
+    if !evolved.is_dir() {
+        return;
+    }
 
     for name in list_dirs(&evolved) {
         let skill_file = evolved.join(&name).join("SKILL.md");
@@ -510,7 +716,9 @@ fn gate_skills() {
 fn build_summary(analysis: &SessionAnalysis) -> String {
     let mut parts = vec![format!(
         "{} obs, {:.1}% success, avg={}",
-        analysis.total_observations, analysis.success_rate * 100.0, analysis.avg_score,
+        analysis.total_observations,
+        analysis.success_rate * 100.0,
+        analysis.avg_score,
     )];
 
     let mut top_errors: Vec<_> = analysis.per_error_stats.iter().collect();
@@ -522,20 +730,30 @@ fn build_summary(analysis: &SessionAnalysis) -> String {
     }
 
     if !analysis.failure_patterns.is_empty() {
-        let pats: Vec<&str> = analysis.failure_patterns.iter().map(|p| p.pattern_type.as_str()).collect();
+        let pats: Vec<&str> = analysis
+            .failure_patterns
+            .iter()
+            .map(|p| p.pattern_type.as_str())
+            .collect();
         parts.push(format!("patterns=[{}]", pats.join(",")));
     }
 
     parts.join(" | ")
 }
 
-fn round3(v: f64) -> f64 { (v * 1000.0).round() / 1000.0 }
+fn round3(v: f64) -> f64 {
+    (v * 1000.0).round() / 1000.0
+}
 
 // ── Main Hook ───────────────────────────────────────
 
 pub fn run(_input: &HookInput) -> i32 {
-    if !harness_exists() { return 0; }
-    if !obs_dir().is_dir() { return 0; }
+    if !harness_exists() {
+        return 0;
+    }
+    if !obs_dir().is_dir() {
+        return 0;
+    }
 
     // 1. Collect today's observations
     let today_str = today();
@@ -543,14 +761,18 @@ pub fn run(_input: &HookInput) -> i32 {
         .into_iter()
         .filter(|f| f.contains(&today_str))
         .collect();
-    if obs_files.is_empty() { return 0; }
+    if obs_files.is_empty() {
+        return 0;
+    }
 
     let mut observations: Vec<ObsRecord> = vec![];
     for f in &obs_files {
         let recs: Vec<ObsRecord> = read_jsonl_typed(&obs_dir().join(f));
         observations.extend(recs);
     }
-    if observations.len() < 3 { return 0; }
+    if observations.len() < 3 {
+        return 0;
+    }
 
     // 2. Analyze
     let mut analysis = analyze_session(&observations);
@@ -558,12 +780,17 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 3. Stagnation
     let mut metrics: Metrics = read_json(&metrics_file(), default_metrics());
-    let (should_rollback, improved, rolled_back_count) = check_stagnation(&mut metrics, analysis.avg_score);
+    let (should_rollback, improved, rolled_back_count) =
+        check_stagnation(&mut metrics, analysis.avg_score);
 
     // 4. Seed evolved skills
     ensure_dir(&evolved_dir());
     let existing = list_dirs(&evolved_dir());
-    let seeded = if !should_rollback { seed_smart_skills(&analysis, &existing) } else { 0 };
+    let seeded = if !should_rollback {
+        seed_smart_skills(&analysis, &existing)
+    } else {
+        0
+    };
 
     // 5. Gate
     gate_skills();
@@ -590,12 +817,20 @@ pub fn run(_input: &HookInput) -> i32 {
     append_jsonl(&evolution_file(), &record);
 
     // 9. Session handoff context
-    let last_errors: Vec<String> = observations.iter()
+    let last_errors: Vec<String> = observations
+        .iter()
         .filter(|o| o.result.as_deref() == Some("error"))
-        .rev().take(3).collect::<Vec<_>>().into_iter().rev()
+        .rev()
+        .take(3)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
         .map(|o| {
             let cat = o.failure_category.as_deref().unwrap_or("unknown");
-            let snippet = o.error_snippet.as_deref().unwrap_or(o.action.as_deref().unwrap_or(""));
+            let snippet = o
+                .error_snippet
+                .as_deref()
+                .unwrap_or(o.action.as_deref().unwrap_or(""));
             format!("{cat}: {}", &snippet[..snippet.len().min(100)])
         })
         .collect();
@@ -619,7 +854,8 @@ pub fn run(_input: &HookInput) -> i32 {
 
     metrics.total_sessions += 1;
     metrics.avg_success_rate = round3(
-        ((metrics.avg_success_rate * (metrics.total_sessions - 1) as f64) + analysis.success_rate) / metrics.total_sessions as f64,
+        ((metrics.avg_success_rate * (metrics.total_sessions - 1) as f64) + analysis.success_rate)
+            / metrics.total_sessions as f64,
     );
     metrics.total_evolved_skills = record.total_evolved;
     metrics.last_session = Some(now_iso());
@@ -636,48 +872,107 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 11. Report
-    hint("reflect", &format!("Session: {:.1}% success, avg_score={} ({} obs)",
-        analysis.success_rate * 100.0, analysis.avg_score, analysis.total_observations));
+    hint(
+        "reflect",
+        &format!(
+            "Session: {:.1}% success, avg_score={} ({} obs)",
+            analysis.success_rate * 100.0,
+            analysis.avg_score,
+            analysis.total_observations
+        ),
+    );
 
-    let weak_tools: Vec<String> = analysis.per_tool_stats.iter()
+    let weak_tools: Vec<String> = analysis
+        .per_tool_stats
+        .iter()
         .filter(|(_, s)| s.total >= 5 && (s.successes as f64 / s.total as f64) < 0.6)
-        .map(|(cat, s)| format!("{cat} {}%", (s.successes as f64 / s.total as f64 * 100.0) as u32))
+        .map(|(cat, s)| {
+            format!(
+                "{cat} {}%",
+                (s.successes as f64 / s.total as f64 * 100.0) as u32
+            )
+        })
         .collect();
-    if !weak_tools.is_empty() { hint("reflect", &format!("Weak tools: {}", weak_tools.join(", "))); }
+    if !weak_tools.is_empty() {
+        hint("reflect", &format!("Weak tools: {}", weak_tools.join(", ")));
+    }
 
-    let weak_exts: Vec<String> = analysis.per_ext_stats.iter()
+    let weak_exts: Vec<String> = analysis
+        .per_ext_stats
+        .iter()
         .filter(|(_, s)| s.total >= 3 && s.success_rate < 0.5)
         .map(|(ext, s)| format!("{ext} {}%", (s.success_rate * 100.0) as u32))
         .collect();
-    if !weak_exts.is_empty() { hint("reflect", &format!("Weak file types: {}", weak_exts.join(", "))); }
+    if !weak_exts.is_empty() {
+        hint(
+            "reflect",
+            &format!("Weak file types: {}", weak_exts.join(", ")),
+        );
+    }
 
     if !analysis.failure_patterns.is_empty() {
-        let pats: Vec<String> = analysis.failure_patterns.iter()
+        let pats: Vec<String> = analysis
+            .failure_patterns
+            .iter()
             .map(|p| format!("{}({})", p.pattern_type, p.count))
             .collect();
         hint("reflect", &format!("Patterns: {}", pats.join(", ")));
     }
 
-    if seeded > 0 { hint("reflect", &format!("Evolved {seeded} new skill(s)")); }
-    if should_rollback { hint("reflect", &format!("Rolled back {rolled_back_count} stagnant skills")); }
-    hint("reflect", &format!("Trend: {} ({} sessions)", metrics.trend, metrics.score_history.len()));
+    if seeded > 0 {
+        hint("reflect", &format!("Evolved {seeded} new skill(s)"));
+    }
+    if should_rollback {
+        hint(
+            "reflect",
+            &format!("Rolled back {rolled_back_count} stagnant skills"),
+        );
+    }
+    hint(
+        "reflect",
+        &format!(
+            "Trend: {} ({} sessions)",
+            metrics.trend,
+            metrics.score_history.len()
+        ),
+    );
 
     // Skill attribution report
-    let effective: Vec<_> = metrics.skill_attribution.values()
+    let effective: Vec<_> = metrics
+        .skill_attribution
+        .values()
         .filter(|a| a.sessions_active >= 2 && a.avg_score_with > a.avg_score_without + 0.02)
         .collect();
-    let ineffective: Vec<_> = metrics.skill_attribution.values()
+    let ineffective: Vec<_> = metrics
+        .skill_attribution
+        .values()
         .filter(|a| a.sessions_active >= 2 && a.avg_score_with < a.avg_score_without - 0.02)
         .collect();
     if !effective.is_empty() {
-        let parts: Vec<String> = effective.iter()
-            .map(|s| format!("{}(+{}%)", s.skill_name, ((s.avg_score_with - s.avg_score_without) * 100.0) as i32))
+        let parts: Vec<String> = effective
+            .iter()
+            .map(|s| {
+                format!(
+                    "{}(+{}%)",
+                    s.skill_name,
+                    ((s.avg_score_with - s.avg_score_without) * 100.0) as i32
+                )
+            })
             .collect();
-        hint("reflect", &format!("Effective skills: {}", parts.join(", ")));
+        hint(
+            "reflect",
+            &format!("Effective skills: {}", parts.join(", ")),
+        );
     }
     if !ineffective.is_empty() {
         let names: Vec<&str> = ineffective.iter().map(|s| s.skill_name.as_str()).collect();
-        hint("reflect", &format!("Ineffective skills: {} — consider /evolve rollback", names.join(", ")));
+        hint(
+            "reflect",
+            &format!(
+                "Ineffective skills: {} — consider /evolve rollback",
+                names.join(", ")
+            ),
+        );
     }
 
     0
@@ -687,7 +982,13 @@ pub fn run(_input: &HookInput) -> i32 {
 mod tests {
     use super::*;
 
-    fn make_obs(tool: &str, cat: &str, result: &str, score: f64, action: Option<&str>) -> ObsRecord {
+    fn make_obs(
+        tool: &str,
+        cat: &str,
+        result: &str,
+        score: f64,
+        action: Option<&str>,
+    ) -> ObsRecord {
         ObsRecord {
             timestamp: "2026-04-09T12:00:00Z".into(),
             tool: tool.into(),
@@ -695,9 +996,21 @@ mod tests {
             action: action.map(String::from),
             result: Some(result.into()),
             score: Some(score),
-            dimensions: Some(ScoreDimensions { tool_success: if result == "success" { 1.0 } else { 0.0 }, output_quality: score, execution_cost: 1.0 }),
-            failure_category: if result == "error" { Some("type_error".into()) } else { None },
-            error_snippet: if result == "error" { Some("TypeError: x is not a function".into()) } else { None },
+            dimensions: Some(ScoreDimensions {
+                tool_success: if result == "success" { 1.0 } else { 0.0 },
+                output_quality: score,
+                execution_cost: 1.0,
+            }),
+            failure_category: if result == "error" {
+                Some("type_error".into())
+            } else {
+                None
+            },
+            error_snippet: if result == "error" {
+                Some("TypeError: x is not a function".into())
+            } else {
+                None
+            },
             file_ext: Some(".ts".into()),
             sequence_id: Some(1),
         }
@@ -781,7 +1094,11 @@ mod tests {
             obs.push(make_obs("Bash", "bash", "error", 0.0, Some("/src/main.ts")));
         }
         let patterns = detect_patterns(&obs);
-        assert!(patterns.iter().any(|p| p.pattern_type == "repeated_same_error"));
+        assert!(
+            patterns
+                .iter()
+                .any(|p| p.pattern_type == "repeated_same_error")
+        );
     }
 
     #[test]
@@ -791,14 +1108,24 @@ mod tests {
             make_obs("Bash", "bash", "error", 0.0, Some("/src/main.ts")),
         ];
         let patterns = detect_patterns(&obs);
-        assert!(!patterns.iter().any(|p| p.pattern_type == "repeated_same_error"));
+        assert!(
+            !patterns
+                .iter()
+                .any(|p| p.pattern_type == "repeated_same_error")
+        );
     }
 
     #[test]
     fn detect_long_debug_loop() {
         let mut obs = vec![];
         for _ in 0..6 {
-            obs.push(make_obs("Edit", "edit", "success", 0.8, Some("/src/buggy.ts")));
+            obs.push(make_obs(
+                "Edit",
+                "edit",
+                "success",
+                0.8,
+                Some("/src/buggy.ts"),
+            ));
         }
         let patterns = detect_patterns(&obs);
         assert!(patterns.iter().any(|p| p.pattern_type == "long_debug_loop"));
@@ -808,7 +1135,13 @@ mod tests {
     fn no_debug_loop_below_threshold() {
         let mut obs = vec![];
         for _ in 0..4 {
-            obs.push(make_obs("Edit", "edit", "success", 0.8, Some("/src/buggy.ts")));
+            obs.push(make_obs(
+                "Edit",
+                "edit",
+                "success",
+                0.8,
+                Some("/src/buggy.ts"),
+            ));
         }
         let patterns = detect_patterns(&obs);
         assert!(!patterns.iter().any(|p| p.pattern_type == "long_debug_loop"));
@@ -818,7 +1151,13 @@ mod tests {
     fn detect_thrashing() {
         let mut obs = vec![];
         for _ in 0..4 {
-            obs.push(make_obs("Edit", "edit", "success", 0.8, Some("/src/main.ts")));
+            obs.push(make_obs(
+                "Edit",
+                "edit",
+                "success",
+                0.8,
+                Some("/src/main.ts"),
+            ));
             obs.push(make_obs("Bash", "bash", "error", 0.0, Some("/src/main.ts")));
         }
         let patterns = detect_patterns(&obs);
@@ -850,37 +1189,43 @@ mod tests {
 
     #[test]
     fn trend_improving() {
-        let history: Vec<SessionScoreEntry> = (0..5).map(|i| SessionScoreEntry {
-            timestamp: format!("2026-04-0{}", i + 1),
-            success_rate: 0.5 + i as f64 * 0.1,
-            avg_score: 0.5 + i as f64 * 0.1,
-            observations: 10,
-            dimension_averages: ScoreDimensions::default(),
-        }).collect();
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|i| SessionScoreEntry {
+                timestamp: format!("2026-04-0{}", i + 1),
+                success_rate: 0.5 + i as f64 * 0.1,
+                avg_score: 0.5 + i as f64 * 0.1,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
         assert_eq!(compute_trend(&history), "improving");
     }
 
     #[test]
     fn trend_declining() {
-        let history: Vec<SessionScoreEntry> = (0..5).map(|i| SessionScoreEntry {
-            timestamp: format!("2026-04-0{}", i + 1),
-            success_rate: 0.9 - i as f64 * 0.1,
-            avg_score: 0.9 - i as f64 * 0.1,
-            observations: 10,
-            dimension_averages: ScoreDimensions::default(),
-        }).collect();
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|i| SessionScoreEntry {
+                timestamp: format!("2026-04-0{}", i + 1),
+                success_rate: 0.9 - i as f64 * 0.1,
+                avg_score: 0.9 - i as f64 * 0.1,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
         assert_eq!(compute_trend(&history), "declining");
     }
 
     #[test]
     fn trend_stable_flat() {
-        let history: Vec<SessionScoreEntry> = (0..5).map(|i| SessionScoreEntry {
-            timestamp: format!("2026-04-0{}", i + 1),
-            success_rate: 0.75,
-            avg_score: 0.75,
-            observations: 10,
-            dimension_averages: ScoreDimensions::default(),
-        }).collect();
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|i| SessionScoreEntry {
+                timestamp: format!("2026-04-0{}", i + 1),
+                success_rate: 0.75,
+                avg_score: 0.75,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
         assert_eq!(compute_trend(&history), "stable");
     }
 
@@ -965,11 +1310,23 @@ mod tests {
         let body_unlimited = content.split("---").nth(2).unwrap_or("").trim();
 
         // splitn(3) body starts at the closing "---" delimiter and contains everything after it
-        assert!(body_splitn.starts_with("# Body"), "splitn body: {:?}", body_splitn);
+        assert!(
+            body_splitn.starts_with("# Body"),
+            "splitn body: {:?}",
+            body_splitn
+        );
         // splitn(3) body preserves the embedded "---" inside the body
-        assert!(body_splitn.contains("more content"), "splitn must preserve full body: {:?}", body_splitn);
+        assert!(
+            body_splitn.contains("more content"),
+            "splitn must preserve full body: {:?}",
+            body_splitn
+        );
         // unlimited split's nth(2) stops at the *body's* "---", truncating it
-        assert!(!body_unlimited.contains("more content"), "unlimited split truncates body: {:?}", body_unlimited);
+        assert!(
+            !body_unlimited.contains("more content"),
+            "unlimited split truncates body: {:?}",
+            body_unlimited
+        );
         // splitn body must be >= 20 chars (passes gate validation)
         assert!(body_splitn.len() >= 20);
     }
@@ -1000,8 +1357,15 @@ mod tests {
         let evolved = vec!["evo-test".to_string()];
         update_skill_attribution(&mut metrics, &analysis, &evolved);
 
-        let attr = metrics.skill_attribution.get("evo-test").expect("attribution entry missing");
-        assert!((attr.avg_score_with - 0.70).abs() < 0.01, "avg_score_with should be 0.70, got {}", attr.avg_score_with);
+        let attr = metrics
+            .skill_attribution
+            .get("evo-test")
+            .expect("attribution entry missing");
+        assert!(
+            (attr.avg_score_with - 0.70).abs() < 0.01,
+            "avg_score_with should be 0.70, got {}",
+            attr.avg_score_with
+        );
         // avg_score_without should be close to 0.60 (from score_history), not 0.99
         assert!(
             (attr.avg_score_without - 0.60).abs() < 0.05,
@@ -1014,17 +1378,22 @@ mod tests {
     #[test]
     fn trend_no_nan_with_zero_denominator() {
         // All scores the same → n*sxx - sx*sx == 0 → division by zero → NaN slope
-        let history: Vec<SessionScoreEntry> = (0..5).map(|i| SessionScoreEntry {
-            timestamp: format!("2026-04-0{}", i + 1),
-            success_rate: 0.80,
-            avg_score: 0.80,
-            observations: 10,
-            dimension_averages: ScoreDimensions::default(),
-        }).collect();
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|i| SessionScoreEntry {
+                timestamp: format!("2026-04-0{}", i + 1),
+                success_rate: 0.80,
+                avg_score: 0.80,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
         let trend = compute_trend(&history);
         // Must not be "NaN" / must be a valid string
-        assert!(trend == "stable" || trend == "improving" || trend == "declining",
-            "trend must be a valid value, got: {:?}", trend);
+        assert!(
+            trend == "stable" || trend == "improving" || trend == "declining",
+            "trend must be a valid value, got: {:?}",
+            trend
+        );
         assert_eq!(trend, "stable");
     }
 
@@ -1061,7 +1430,11 @@ mod tests {
 
     #[test]
     fn ext_skill_has_ext_name() {
-        let stats = ExtStats { total: 10, errors: 5, success_rate: 0.5 };
+        let stats = ExtStats {
+            total: 10,
+            errors: 5,
+            success_rate: 0.5,
+        };
         let skill = build_ext_skill(".ts", &stats);
         assert!(skill.contains(".ts"));
         assert!(skill.contains("50%"));

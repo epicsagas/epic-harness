@@ -79,7 +79,7 @@ epic-harness works with Claude Code and 4 additional AI coding tools. All tools 
 | **Antigravity** | — ³ | ✓ 6 workflows | ✓ 6 skills | ✓ 4 personas | ✓ Manager view |
 
 ¹ No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
-² Requires Cursor 1.7+  
+² Requires Cursor 1.7+ — `hooks.json` uses Cursor’s schema (`version`, camelCase `preToolUse` / `postToolUse` / `sessionEnd`, `Shell` matcher for shell tools)  
 ³ No hook system — AGENTS.md rules + explicit `epic-harness resume/reflect` via terminal
 
 ### Install for other tools
@@ -100,6 +100,8 @@ epic-harness install cursor --local
 # Preview without making changes
 epic-harness install gemini --dry-run
 ```
+
+Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
 
 ## Commands
 

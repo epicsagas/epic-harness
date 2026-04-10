@@ -147,11 +147,13 @@ pub struct EvolutionRecord {
     pub analysis_summary: String,
 }
 
-
-
 impl Default for ScoreDimensions {
     fn default() -> Self {
-        Self { tool_success: 0.0, output_quality: 0.0, execution_cost: 0.0 }
+        Self {
+            tool_success: 0.0,
+            output_quality: 0.0,
+            execution_cost: 0.0,
+        }
     }
 }
 
@@ -191,7 +193,11 @@ pub fn project_slug() -> String {
     let name = path
         .components()
         .filter_map(|c| {
-            if let std::path::Component::Normal(s) = c { s.to_str() } else { None }
+            if let std::path::Component::Normal(s) = c {
+                s.to_str()
+            } else {
+                None
+            }
         })
         .last()
         .unwrap_or("project")
@@ -199,7 +205,13 @@ pub fn project_slug() -> String {
     // Sanitize: replace any char that isn't alphanumeric, hyphen, or underscore.
     let safe_name: String = name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let full = path.to_string_lossy();
     let mut h: u32 = 0;
@@ -212,30 +224,59 @@ pub fn project_slug() -> String {
 /// Per-project data lives in `~/.harness/projects/{slug}/` — outside the
 /// project tree so it never pollutes git and survives project deletion.
 pub fn harness_dir() -> PathBuf {
-    dirs_home().join(".harness").join("projects").join(project_slug())
+    dirs_home()
+        .join(".harness")
+        .join("projects")
+        .join(project_slug())
 }
 
 /// Legacy project-local path used for migration detection only.
-pub(crate) fn local_harness_dir() -> PathBuf { cwd().join(".harness") }
+pub(crate) fn local_harness_dir() -> PathBuf {
+    cwd().join(".harness")
+}
 
-pub fn obs_dir() -> PathBuf { harness_dir().join("obs") }
-pub fn sessions_dir() -> PathBuf { harness_dir().join("sessions") }
-pub fn memory_dir() -> PathBuf { harness_dir().join("memory") }
-pub fn evolved_dir() -> PathBuf { harness_dir().join("evolved") }
-pub fn evolved_backup_dir() -> PathBuf { harness_dir().join("evolved_backup") }
-pub fn team_dir() -> PathBuf { harness_dir().join("team") }
+pub fn obs_dir() -> PathBuf {
+    harness_dir().join("obs")
+}
+pub fn sessions_dir() -> PathBuf {
+    harness_dir().join("sessions")
+}
+pub fn memory_dir() -> PathBuf {
+    harness_dir().join("memory")
+}
+pub fn evolved_dir() -> PathBuf {
+    harness_dir().join("evolved")
+}
+pub fn evolved_backup_dir() -> PathBuf {
+    harness_dir().join("evolved_backup")
+}
+pub fn team_dir() -> PathBuf {
+    harness_dir().join("team")
+}
 
-pub fn metrics_file() -> PathBuf { harness_dir().join("metrics.json") }
-pub fn evolution_file() -> PathBuf { harness_dir().join("evolution.jsonl") }
+pub fn metrics_file() -> PathBuf {
+    harness_dir().join("metrics.json")
+}
+pub fn evolution_file() -> PathBuf {
+    harness_dir().join("evolution.jsonl")
+}
 
 /// guard-rules.yaml stays in the project tree so teams can git-track it.
-pub fn guard_rules_file() -> PathBuf { local_harness_dir().join("guard-rules.yaml") }
+pub fn guard_rules_file() -> PathBuf {
+    local_harness_dir().join("guard-rules.yaml")
+}
 
-pub fn global_harness_dir() -> PathBuf { dirs_home().join(".harness").join("global") }
-pub fn global_patterns_file() -> PathBuf { global_harness_dir().join("patterns.jsonl") }
+pub fn global_harness_dir() -> PathBuf {
+    dirs_home().join(".harness").join("global")
+}
+pub fn global_patterns_file() -> PathBuf {
+    global_harness_dir().join("patterns.jsonl")
+}
 
 /// Opt-in marker lives in the global dir (not per-project).
-pub fn cross_project_file() -> PathBuf { global_harness_dir().join(".cross-project-enabled") }
+pub fn cross_project_file() -> PathBuf {
+    global_harness_dir().join(".cross-project-enabled")
+}
 
 fn dirs_home() -> PathBuf {
     match std::env::var("HOME") {
@@ -243,7 +284,9 @@ fn dirs_home() -> PathBuf {
         _ => {
             // HOME is unset or empty (common in some CI environments).
             // Fall back to /tmp so harness data stays off the project tree.
-            eprintln!("[harness] WARNING: $HOME is not set — storing harness data in /tmp/.harness");
+            eprintln!(
+                "[harness] WARNING: $HOME is not set — storing harness data in /tmp/.harness"
+            );
             PathBuf::from("/tmp")
         }
     }
@@ -257,15 +300,42 @@ struct FailureRule {
 }
 
 const FAILURE_RULES: &[FailureRule] = &[
-    FailureRule { pattern: r"(?i)TypeError|type error", category: "type_error" },
-    FailureRule { pattern: r"(?i)SyntaxError|Unexpected token|Parse error", category: "syntax_error" },
-    FailureRule { pattern: r"(?i)FAIL(?:ED|ING)?[\s:]|test.*fail|AssertionError|assert\.\w+", category: "test_fail" },
-    FailureRule { pattern: r"(?i)\blint\b.*(?:error|fail)|eslint.*error|biome.*error|oxlint.*error", category: "lint_fail" },
-    FailureRule { pattern: r"(?i)build.*fail|tsc.*error|error TS\d+|compilation.*fail", category: "build_fail" },
-    FailureRule { pattern: r"(?i)EACCES|permission denied", category: "permission_denied" },
-    FailureRule { pattern: r"(?i)timeout|ETIMEDOUT|timed out", category: "timeout" },
-    FailureRule { pattern: r"(?i)ENOENT|No such file or directory", category: "not_found" },
-    FailureRule { pattern: r"(?m)(?:^|\n)\s*(?:Error|error|ERROR):|Traceback|at [\w.]+\s*\(|Unhandled|uncaught exception", category: "runtime_error" },
+    FailureRule {
+        pattern: r"(?i)TypeError|type error",
+        category: "type_error",
+    },
+    FailureRule {
+        pattern: r"(?i)SyntaxError|Unexpected token|Parse error",
+        category: "syntax_error",
+    },
+    FailureRule {
+        pattern: r"(?i)FAIL(?:ED|ING)?[\s:]|test.*fail|AssertionError|assert\.\w+",
+        category: "test_fail",
+    },
+    FailureRule {
+        pattern: r"(?i)\blint\b.*(?:error|fail)|eslint.*error|biome.*error|oxlint.*error",
+        category: "lint_fail",
+    },
+    FailureRule {
+        pattern: r"(?i)build.*fail|tsc.*error|error TS\d+|compilation.*fail",
+        category: "build_fail",
+    },
+    FailureRule {
+        pattern: r"(?i)EACCES|permission denied",
+        category: "permission_denied",
+    },
+    FailureRule {
+        pattern: r"(?i)timeout|ETIMEDOUT|timed out",
+        category: "timeout",
+    },
+    FailureRule {
+        pattern: r"(?i)ENOENT|No such file or directory",
+        category: "not_found",
+    },
+    FailureRule {
+        pattern: r"(?m)(?:^|\n)\s*(?:Error|error|ERROR):|Traceback|at [\w.]+\s*\(|Unhandled|uncaught exception",
+        category: "runtime_error",
+    },
 ];
 
 static COMPILED_RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
@@ -276,10 +346,14 @@ static COMPILED_RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
 });
 
 pub fn classify_failure(output: &str) -> Option<&'static str> {
-    if output.is_empty() { return None; }
+    if output.is_empty() {
+        return None;
+    }
     let sample = &output[..output.len().min(2000)];
     for (rx, cat) in COMPILED_RULES.iter() {
-        if rx.is_match(sample) { return Some(cat); }
+        if rx.is_match(sample) {
+            return Some(cat);
+        }
     }
     None
 }
@@ -297,7 +371,8 @@ pub fn classify_tool(name: &str) -> &'static str {
 }
 
 pub fn extract_file_ext(input: &serde_json::Value) -> Option<String> {
-    let file_path = input.get("file_path")
+    let file_path = input
+        .get("file_path")
         .or_else(|| input.get("path"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
@@ -310,7 +385,8 @@ pub fn extract_file_ext(input: &serde_json::Value) -> Option<String> {
 
     let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("");
     static EXT_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\.(ts|js|py|go|rs|java|c|cpp|rb|sh|json|yaml|yml|md|css|html|tsx|jsx)\b").unwrap()
+        Regex::new(r"\.(ts|js|py|go|rs|java|c|cpp|rb|sh|json|yaml|yml|md|css|html|tsx|jsx)\b")
+            .unwrap()
     });
     EXT_RE.find(cmd).map(|m| m.as_str().to_string())
 }
@@ -337,7 +413,9 @@ pub fn today() -> String {
     loop {
         let leap = is_leap(y);
         let days_in_year = if leap { 366 } else { 365 };
-        if remaining < days_in_year { break; }
+        if remaining < days_in_year {
+            break;
+        }
         remaining -= days_in_year;
         y += 1;
     }
@@ -349,7 +427,10 @@ pub fn today() -> String {
     };
     let mut m = 0usize;
     for (i, &d) in month_days.iter().enumerate() {
-        if remaining < d as i64 { m = i; break; }
+        if remaining < d as i64 {
+            m = i;
+            break;
+        }
         remaining -= d as i64;
     }
     format!("{:04}{:02}{:02}", y, m + 1, remaining + 1)
@@ -376,7 +457,9 @@ pub fn now_iso() -> String {
     loop {
         let leap = is_leap(y);
         let days_in_year = if leap { 366 } else { 365 };
-        if remaining < days_in_year { break; }
+        if remaining < days_in_year {
+            break;
+        }
         remaining -= days_in_year;
         y += 1;
     }
@@ -388,10 +471,21 @@ pub fn now_iso() -> String {
     };
     let mut mo = 0usize;
     for (i, &d) in month_days.iter().enumerate() {
-        if remaining < d as i64 { mo = i; break; }
+        if remaining < d as i64 {
+            mo = i;
+            break;
+        }
         remaining -= d as i64;
     }
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", y, mo + 1, remaining + 1, h, m, s)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
+        y,
+        mo + 1,
+        remaining + 1,
+        h,
+        m,
+        s
+    )
 }
 
 pub fn hint(tag: &str, msg: &str) {
@@ -463,7 +557,9 @@ pub fn list_files(dir: &Path, ext: &str) -> Vec<String> {
 }
 
 pub fn copy_dir(src: &Path, dest: &Path) {
-    if !src.is_dir() { return; }
+    if !src.is_dir() {
+        return;
+    }
     ensure_dir(dest);
     if let Ok(entries) = fs::read_dir(src) {
         for entry in entries.flatten() {
@@ -478,12 +574,17 @@ pub fn copy_dir(src: &Path, dest: &Path) {
     }
 }
 
-pub struct CopyResult { pub ok: u64, pub errors: u64 }
+pub struct CopyResult {
+    pub ok: u64,
+    pub errors: u64,
+}
 
 /// Like `copy_dir` but counts successes and errors instead of silently ignoring failures.
 pub fn copy_dir_counted(src: &Path, dest: &Path) -> CopyResult {
     let mut result = CopyResult { ok: 0, errors: 0 };
-    if !src.is_dir() { return result; }
+    if !src.is_dir() {
+        return result;
+    }
     ensure_dir(dest);
     if let Ok(entries) = fs::read_dir(src) {
         for entry in entries.flatten() {
@@ -540,15 +641,17 @@ pub fn compute_score(dims: &ScoreDimensions) -> f64 {
 pub fn hash_string(s: &str) -> String {
     let mut hash: u32 = 0;
     for b in s.bytes() {
-        hash = hash.wrapping_shl(5).wrapping_sub(hash).wrapping_add(b as u32);
+        hash = hash
+            .wrapping_shl(5)
+            .wrapping_sub(hash)
+            .wrapping_add(b as u32);
     }
     format!("{:08x}", hash)
 }
 
 pub fn normalize_error(snippet: &str) -> String {
-    static TS_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.\dZ]*").unwrap()
-    });
+    static TS_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.\dZ]*").unwrap());
     static LC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r":\d+:\d+").unwrap());
     static PATH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"/[\w./-]+/").unwrap());
     static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
@@ -569,17 +672,28 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if trimmed == "blocked:" { section = Some("blocked"); continue; }
-        if trimmed == "warned:" { section = Some("warned"); continue; }
+        if trimmed == "blocked:" {
+            section = Some("blocked");
+            continue;
+        }
+        if trimmed == "warned:" {
+            section = Some("warned");
+            continue;
+        }
         let Some(sec) = section else { continue };
-        if !trimmed.starts_with("- ") { continue; }
+        if !trimmed.starts_with("- ") {
+            continue;
+        }
 
         let entry = &trimmed[2..];
         // Format: "pattern: <regex> | msg: <message>"
         if let Some((pat_part, msg_part)) = entry.split_once(" | msg: ") {
             let pat_str = pat_part.trim_start_matches("pattern:").trim();
             if let Ok(rx) = Regex::new(pat_str) {
-                let rule = GuardRule { pattern: rx, msg: msg_part.trim().to_string() };
+                let rule = GuardRule {
+                    pattern: rx,
+                    msg: msg_part.trim().to_string(),
+                };
                 match sec {
                     "blocked" => blocked.push(rule),
                     "warned" => warned.push(rule),
@@ -597,9 +711,7 @@ pub struct GuardRule {
 }
 
 pub fn extract_file(action: &str) -> Option<&str> {
-    static FILE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(/[\w./-]+\.\w+)").unwrap()
-    });
+    static FILE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(/[\w./-]+\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
 }
 
@@ -610,12 +722,18 @@ mod tests {
     // ── classify_failure ────────────────────────────
     #[test]
     fn classify_type_error() {
-        assert_eq!(classify_failure("TypeError: x is not a function"), Some("type_error"));
+        assert_eq!(
+            classify_failure("TypeError: x is not a function"),
+            Some("type_error")
+        );
     }
 
     #[test]
     fn classify_syntax_error() {
-        assert_eq!(classify_failure("SyntaxError: Unexpected token '}'"), Some("syntax_error"));
+        assert_eq!(
+            classify_failure("SyntaxError: Unexpected token '}'"),
+            Some("syntax_error")
+        );
     }
 
     #[test]
@@ -625,32 +743,50 @@ mod tests {
 
     #[test]
     fn classify_lint_fail() {
-        assert_eq!(classify_failure("eslint error: no-unused-vars"), Some("lint_fail"));
+        assert_eq!(
+            classify_failure("eslint error: no-unused-vars"),
+            Some("lint_fail")
+        );
     }
 
     #[test]
     fn classify_build_fail() {
-        assert_eq!(classify_failure("error TS2304: Cannot find name 'x'"), Some("build_fail"));
+        assert_eq!(
+            classify_failure("error TS2304: Cannot find name 'x'"),
+            Some("build_fail")
+        );
     }
 
     #[test]
     fn classify_permission_denied() {
-        assert_eq!(classify_failure("EACCES: permission denied"), Some("permission_denied"));
+        assert_eq!(
+            classify_failure("EACCES: permission denied"),
+            Some("permission_denied")
+        );
     }
 
     #[test]
     fn classify_timeout() {
-        assert_eq!(classify_failure("ETIMEDOUT: connection timed out"), Some("timeout"));
+        assert_eq!(
+            classify_failure("ETIMEDOUT: connection timed out"),
+            Some("timeout")
+        );
     }
 
     #[test]
     fn classify_not_found() {
-        assert_eq!(classify_failure("ENOENT: No such file or directory"), Some("not_found"));
+        assert_eq!(
+            classify_failure("ENOENT: No such file or directory"),
+            Some("not_found")
+        );
     }
 
     #[test]
     fn classify_runtime_error() {
-        assert_eq!(classify_failure("Error: something went wrong"), Some("runtime_error"));
+        assert_eq!(
+            classify_failure("Error: something went wrong"),
+            Some("runtime_error")
+        );
     }
 
     #[test]
@@ -697,19 +833,31 @@ mod tests {
     // ── compute_score ───────────────────────────────
     #[test]
     fn score_perfect() {
-        let dims = ScoreDimensions { tool_success: 1.0, output_quality: 1.0, execution_cost: 1.0 };
+        let dims = ScoreDimensions {
+            tool_success: 1.0,
+            output_quality: 1.0,
+            execution_cost: 1.0,
+        };
         assert_eq!(compute_score(&dims), 1.0);
     }
 
     #[test]
     fn score_zero() {
-        let dims = ScoreDimensions { tool_success: 0.0, output_quality: 0.0, execution_cost: 0.0 };
+        let dims = ScoreDimensions {
+            tool_success: 0.0,
+            output_quality: 0.0,
+            execution_cost: 0.0,
+        };
         assert_eq!(compute_score(&dims), 0.0);
     }
 
     #[test]
     fn score_weighted() {
-        let dims = ScoreDimensions { tool_success: 1.0, output_quality: 0.0, execution_cost: 0.0 };
+        let dims = ScoreDimensions {
+            tool_success: 1.0,
+            output_quality: 0.0,
+            execution_cost: 0.0,
+        };
         assert_eq!(compute_score(&dims), 0.5); // 0.5 * 1.0
     }
 
@@ -789,7 +937,10 @@ warned:
 
     #[test]
     fn extract_file_from_command() {
-        assert_eq!(extract_file("cat /project/src/index.ts"), Some("/project/src/index.ts"));
+        assert_eq!(
+            extract_file("cat /project/src/index.ts"),
+            Some("/project/src/index.ts")
+        );
     }
 
     #[test]
@@ -818,7 +969,11 @@ warned:
         // slug before the hash must not contain filesystem-unsafe characters
         let slug = project_slug();
         let name_part = slug.rsplitn(2, '-').nth(1).unwrap_or("");
-        assert!(name_part.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            name_part
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        );
     }
 
     #[test]

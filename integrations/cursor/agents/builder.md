@@ -1,6 +1,7 @@
 ---
 name: builder
 description: "Implements a single task using TDD. Writes test first, then code, then verifies."
+model: inherit
 tools: [Read, Edit, Write, Bash, Grep, Glob]
 ---
 

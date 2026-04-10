@@ -9,50 +9,77 @@ struct BuiltinRule {
 }
 
 const BLOCKED_RULES: &[BuiltinRule] = &[
-    BuiltinRule { pattern: r"git\s+push\s+.*--force\s+(origin\s+)?(main|master)\b", msg: "Force push to main/master blocked" },
-    BuiltinRule { pattern: r"rm\s+-rf\s+/([^a-zA-Z0-9_]|$)", msg: "rm -rf / blocked" },
-    BuiltinRule { pattern: r"(?i)DROP\s+(DATABASE|TABLE)\s+.*prod", msg: "DROP on production DB blocked" },
+    BuiltinRule {
+        pattern: r"git\s+push\s+.*--force\s+(origin\s+)?(main|master)\b",
+        msg: "Force push to main/master blocked",
+    },
+    BuiltinRule {
+        pattern: r"rm\s+-rf\s+/([^a-zA-Z0-9_]|$)",
+        msg: "rm -rf / blocked",
+    },
+    BuiltinRule {
+        pattern: r"(?i)DROP\s+(DATABASE|TABLE)\s+.*prod",
+        msg: "DROP on production DB blocked",
+    },
 ];
 
 const WARNED_RULES: &[BuiltinRule] = &[
-    BuiltinRule { pattern: r"git\s+push\s+.*--force", msg: "Force push — ensure this is intentional" },
-    BuiltinRule { pattern: r"git\s+reset\s+--hard", msg: "Hard reset will discard local changes" },
-    BuiltinRule { pattern: r"rm\s+-rf\s+", msg: "Recursive delete — double-check the path" },
+    BuiltinRule {
+        pattern: r"git\s+push\s+.*--force",
+        msg: "Force push — ensure this is intentional",
+    },
+    BuiltinRule {
+        pattern: r"git\s+reset\s+--hard",
+        msg: "Hard reset will discard local changes",
+    },
+    BuiltinRule {
+        pattern: r"rm\s+-rf\s+",
+        msg: "Recursive delete — double-check the path",
+    },
 ];
 
 static COMPILED_BLOCKED: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
-    BLOCKED_RULES.iter()
+    BLOCKED_RULES
+        .iter()
         .filter_map(|r| Regex::new(r.pattern).ok().map(|rx| (rx, r.msg)))
         .collect()
 });
 
 static COMPILED_WARNED: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
-    WARNED_RULES.iter()
+    WARNED_RULES
+        .iter()
         .filter_map(|r| Regex::new(r.pattern).ok().map(|rx| (rx, r.msg)))
         .collect()
 });
 
 fn check_blocked(cmd: &str) -> Option<&'static str> {
     for (rx, msg) in COMPILED_BLOCKED.iter() {
-        if rx.is_match(cmd) { return Some(msg); }
+        if rx.is_match(cmd) {
+            return Some(msg);
+        }
     }
     None
 }
 
 fn check_warned(cmd: &str) -> Vec<&'static str> {
-    COMPILED_WARNED.iter()
+    COMPILED_WARNED
+        .iter()
         .filter(|(rx, _)| rx.is_match(cmd))
         .map(|(_, msg)| *msg)
         .collect()
 }
 
 pub fn run(input: &HookInput) -> i32 {
-    let cmd = input.tool_input.as_ref()
+    let cmd = input
+        .tool_input
+        .as_ref()
         .and_then(|v| v.get("command"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    if cmd.is_empty() { return 0; }
+    if cmd.is_empty() {
+        return 0;
+    }
 
     // Check built-in blocked rules
     if let Some(msg) = check_blocked(cmd) {
@@ -62,7 +89,8 @@ pub fn run(input: &HookInput) -> i32 {
 
     // Check custom blocked rules
     let rules_file = common::guard_rules_file();
-    if common::harness_exists() && rules_file.is_file()
+    if common::harness_exists()
+        && rules_file.is_file()
         && let Ok(content) = std::fs::read_to_string(&rules_file)
     {
         let (custom_blocked, custom_warned) = common::parse_guard_rules(&content);

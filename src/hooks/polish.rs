@@ -13,8 +13,15 @@ fn try_exec(cmd: &str, cwd: &Path) -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
 }
 
-fn feedback_to_observe(file_path: &str, formatter: &str, success: bool, error_snippet: Option<&str>) {
-    if !harness_exists() { return; }
+fn feedback_to_observe(
+    file_path: &str,
+    formatter: &str,
+    success: bool,
+    error_snippet: Option<&str>,
+) {
+    if !harness_exists() {
+        return;
+    }
     ensure_dir(&obs_dir());
 
     let dims = ScoreDimensions {
@@ -40,8 +47,17 @@ fn feedback_to_observe(file_path: &str, formatter: &str, success: bool, error_sn
         result: Some(if success { "success" } else { "error" }.into()),
         score: Some(compute_score(&dims)),
         dimensions: Some(dims),
-        failure_category: if success { None } else {
-            Some(if formatter == "tsc" { "build_fail" } else { "lint_fail" }.into())
+        failure_category: if success {
+            None
+        } else {
+            Some(
+                if formatter == "tsc" {
+                    "build_fail"
+                } else {
+                    "lint_fail"
+                }
+                .into(),
+            )
         },
         error_snippet: error_snippet.map(|s| s[..s.len().min(500)].to_string()),
         file_ext: ext,
@@ -58,21 +74,29 @@ fn format_js(file_path: &str, wd: &Path) {
 
     if has_biome {
         if try_exec(&format!("npx biome format --write \"{file_path}\""), wd).is_some() {
-            let name = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
+            let name = Path::new(file_path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy();
             hint("polish", &format!("Biome: {name}"));
             feedback_to_observe(file_path, "biome", true, None);
         }
     } else if has_prettier
         && try_exec(&format!("npx prettier --write \"{file_path}\""), wd).is_some()
     {
-        let name = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
+        let name = Path::new(file_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
         hint("polish", &format!("Prettier: {name}"));
         feedback_to_observe(file_path, "prettier", true, None);
     }
 }
 
 fn check_ts(file_path: &str, wd: &Path) {
-    if !wd.join("tsconfig.json").is_file() { return; }
+    if !wd.join("tsconfig.json").is_file() {
+        return;
+    }
     if let Some(out) = try_exec("npx tsc --noEmit --pretty false 2>&1 | head -10", wd) {
         if out.contains("error TS") {
             let snippet = &out[..out.len().min(500)];
@@ -88,7 +112,10 @@ fn format_python(file_path: &str, wd: &Path) {
     let formatted = try_exec(&format!("ruff format \"{file_path}\" 2>/dev/null"), wd).is_some()
         || try_exec(&format!("black \"{file_path}\" 2>/dev/null"), wd).is_some();
     if formatted {
-        let name = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
+        let name = Path::new(file_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
         hint("polish", &format!("Formatted: {name}"));
         feedback_to_observe(file_path, "ruff/black", true, None);
     }
@@ -96,19 +123,26 @@ fn format_python(file_path: &str, wd: &Path) {
 
 fn format_go(file_path: &str, wd: &Path) {
     if try_exec(&format!("gofmt -w \"{file_path}\""), wd).is_some() {
-        let name = Path::new(file_path).file_name().unwrap_or_default().to_string_lossy();
+        let name = Path::new(file_path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
         hint("polish", &format!("gofmt: {name}"));
         feedback_to_observe(file_path, "gofmt", true, None);
     }
 }
 
 pub fn run(input: &HookInput) -> i32 {
-    let file_path = input.tool_input.as_ref()
+    let file_path = input
+        .tool_input
+        .as_ref()
         .and_then(|v| v.get("file_path"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    if file_path.is_empty() { return 0; }
+    if file_path.is_empty() {
+        return 0;
+    }
 
     let ext = Path::new(file_path)
         .extension()

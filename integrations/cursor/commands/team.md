@@ -1,4 +1,5 @@
 ---
+name: team
 description: "Design a project-specific agent team — analyze codebase and generate custom agents + skills"
 ---
 

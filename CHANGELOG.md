@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Cursor `hooks.json`**: aligned with [Cursor hooks schema](https://cursor.com/docs/hooks) — `"version": 1`, camelCase events (`preToolUse`, `postToolUse`, `sessionEnd`), and `Shell` matcher for guard (Claude Code–style `PreToolUse` / `Bash` was not recognized, so hooks could appear unloaded)
+- Cursor slash commands: added required YAML `name` field (kebab-case) alongside `description` so the Cursor slash menu shows summaries instead of only `(user)` — matches [Cursor command frontmatter](https://cursor.com/docs/reference/plugins)
+- Cursor agents: added `model: inherit` in frontmatter per [Cursor subagents](https://cursor.com/docs/subagents)
+- `epic-harness install`: non-root integration files are **synced** (written when missing or when content differs from the embedded copy), fixing skipped installs when a placeholder file already existed (e.g. empty `hooks.json`). `GEMINI.md` / `AGENTS.md` remain create-if-missing only
 - Harness data directory moved from `cwd()/.harness/` to `~/.harness/projects/{slug}/`
   — prevents git pollution and survives project deletion
 - `guard-rules.yaml` stays at `cwd()/.harness/guard-rules.yaml` for team git-sharing

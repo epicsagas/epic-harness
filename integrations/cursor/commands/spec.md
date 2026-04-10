@@ -1,4 +1,5 @@
 ---
+name: spec
 description: "Define what to build — clarify requirements through conversation and produce a spec document"
 ---
 

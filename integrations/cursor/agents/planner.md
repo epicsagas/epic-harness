@@ -1,6 +1,7 @@
 ---
 name: planner
 description: "Breaks down a goal into ordered, parallelizable tasks with dependencies."
+model: inherit
 tools: [Read, Grep, Glob]
 ---
 

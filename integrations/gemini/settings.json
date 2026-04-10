@@ -1,28 +1,55 @@
 {
+  "hooksConfig": {
+    "enabled": true,
+    "notifications": true
+  },
   "hooks": {
     "BeforeAgent": [
       {
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic-harness not found'",
-        "description": "Restore session snapshot, load project memory and evolved skills"
+        "hooks": [
+          {
+            "name": "harness-resume",
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null || for p in /usr/local/bin/epic-harness ~/.cargo/bin/epic-harness; do if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic-harness not found'",
+            "description": "Restore session snapshot, load project memory and evolved skills"
+          }
+        ]
       }
     ],
     "AfterAgent": [
       {
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic-harness not found'",
-        "description": "Analyze session observations, evolve skills, gate improvements, save metrics"
+        "hooks": [
+          {
+            "name": "harness-reflect",
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null || for p in /usr/local/bin/epic-harness ~/.cargo/bin/epic-harness; do if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic-harness not found'",
+            "description": "Analyze session observations, evolve skills, gate improvements, save metrics"
+          }
+        ]
       }
     ],
     "BeforeModel": [
       {
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic-harness not found'",
-        "description": "Scan prompt context for dangerous shell patterns and blocked commands (best-effort, no PreToolUse equivalent in Gemini CLI)"
+        "hooks": [
+          {
+            "name": "harness-guard",
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null || for p in /usr/local/bin/epic-harness ~/.cargo/bin/epic-harness; do if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic-harness not found'",
+            "description": "Scan prompt context for dangerous shell patterns and blocked commands"
+          }
+        ]
       }
     ],
     "AfterModel": [
       {
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'",
-        "async": true,
-        "description": "Record multi-dimensional tool usage scores (tool_success, output_quality, execution_cost) into .harness/obs/"
+        "hooks": [
+          {
+            "name": "harness-observe",
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null || for p in /usr/local/bin/epic-harness ~/.cargo/bin/epic-harness; do if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'",
+            "description": "Record multi-dimensional tool usage scores"
+          }
+        ]
       }
     ]
   }

@@ -1,6 +1,7 @@
 ---
 name: auditor
 description: "Audits code for security vulnerabilities and performance issues."
+model: inherit
 tools: [Read, Grep, Glob, Bash]
 ---
 

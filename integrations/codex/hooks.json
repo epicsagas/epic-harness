@@ -26,36 +26,14 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'"
           }
         ],
-        "description": "Auto-format + typecheck + lint warning after edits"
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
-          }
-        ],
-        "description": "Auto-format + typecheck + lint warning after writes"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'",
-            "async": true,
-            "timeout": 5
-          }
-        ],
-        "description": "Record tool result for evolution loop"
+        "description": "Record Bash tool result for evolution loop (Codex PostToolUse only intercepts Bash)"
       }
     ],
     "Stop": [

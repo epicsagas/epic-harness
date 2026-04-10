@@ -1,4 +1,5 @@
 ---
+name: ship
 description: "Ship it — create PR, verify CI, merge. End-to-end delivery."
 ---
 

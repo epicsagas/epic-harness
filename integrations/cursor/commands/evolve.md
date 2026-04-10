@@ -1,4 +1,5 @@
 ---
+name: evolve
 description: "Trigger skill evolution manually — analyze observations, evolve skills, show status, or rollback"
 ---
 

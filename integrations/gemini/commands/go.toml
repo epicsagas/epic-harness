@@ -1,0 +1,23 @@
+description = "Build it - plan, execute tasks sequentially with TDD, and verify. The main execution engine."
+prompt = """
+- Check if a spec exists (`.harness/specs/` or recent conversation). If not, run a quick inline spec conversation first.
+- Check if `.harness/team/` exists - if yes, use project-specific agents.
+
+Break the work into ordered tasks (Task 1, Task 2, etc. with dependencies).
+Show the plan and get user confirmation.
+
+For each task, execute one at a time:
+- Write the failing test first (Red)
+- Implement the minimum code to pass (Green)
+- Refactor if needed (Refactor)
+- Invoke `verify` skill before marking the task done
+- Invoke `debug` skill if tests fail
+Complete each task fully before starting the next.
+
+After all tasks complete:
+- Run the full test suite
+- Check for integration issues between tasks
+- Fix any failures before proceeding
+
+Summarize what was built, what tests pass, and any remaining issues.
+"""

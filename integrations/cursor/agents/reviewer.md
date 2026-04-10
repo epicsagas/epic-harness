@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: "Reviews code for quality, correctness, style, and test coverage."
+model: inherit
 tools: [Read, Grep, Glob, Bash]
 ---
 

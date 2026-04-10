@@ -1,4 +1,5 @@
 ---
+name: go
 description: "Build it — auto-plan, delegate to sub-agents with TDD, and verify. The main execution engine."
 ---
 

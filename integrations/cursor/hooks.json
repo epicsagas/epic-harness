@@ -1,35 +1,31 @@
 {
+  "version": 1,
   "hooks": {
-    "PreToolUse": [
+    "preToolUse": [
       {
-        "matcher": "Bash",
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic-harness not found, skipping guard'",
-        "description": "Block dangerous shell commands before execution"
+        "matcher": "Shell",
+        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic-harness not found, skipping guard'"
       }
     ],
-    "PostToolUse": [
+    "postToolUse": [
       {
         "matcher": "Edit",
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found, skipping polish'",
-        "description": "Auto-format and type-check after file edits"
+        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found, skipping polish'"
       },
       {
         "matcher": "Write",
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found, skipping polish'",
-        "description": "Auto-format and type-check after file writes"
+        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found, skipping polish'"
       },
       {
         "matcher": "*",
         "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found, skipping observe'",
-        "async": true,
-        "description": "Record multi-dimensional tool usage observations (async, non-blocking)"
+        "async": true
       }
     ],
-    "SessionEnd": [
+    "sessionEnd": [
       {
         "matcher": "*",
-        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic-harness not found, skipping reflect'",
-        "description": "Analyze session observations and evolve skills at session end"
+        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic-harness not found, skipping reflect'"
       }
     ]
   }
