@@ -269,6 +269,9 @@ $RECYCLE.BIN/
 *.crl
 *.pem.txt
 
+.claude/
 .agents/
 .collet/
 .harness/
+.cursor/
+.gemini/
