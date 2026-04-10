@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::{self, IsTerminal, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 // ── Embedded integration files ────────────────────────────────────────────────
@@ -235,76 +236,96 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     ]
 );
 
-static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
-    "antigravity",
+static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
+    "opencode",
     [
         (
-            "AGENTS.md",
-            include_str!("../../integrations/antigravity/AGENTS.md")
+            "commands/check.md",
+            include_str!("../../integrations/opencode/commands/check.md")
         ),
         (
-            "skills/document.md",
-            include_str!("../../integrations/antigravity/skills/document.md")
+            "commands/evolve.md",
+            include_str!("../../integrations/opencode/commands/evolve.md")
         ),
         (
-            "skills/perf.md",
-            include_str!("../../integrations/antigravity/skills/perf.md")
+            "commands/go.md",
+            include_str!("../../integrations/opencode/commands/go.md")
         ),
         (
-            "skills/secure.md",
-            include_str!("../../integrations/antigravity/skills/secure.md")
+            "commands/ship.md",
+            include_str!("../../integrations/opencode/commands/ship.md")
         ),
         (
-            "skills/simplify.md",
-            include_str!("../../integrations/antigravity/skills/simplify.md")
+            "commands/spec.md",
+            include_str!("../../integrations/opencode/commands/spec.md")
         ),
         (
-            "skills/tdd.md",
-            include_str!("../../integrations/antigravity/skills/tdd.md")
-        ),
-        (
-            "skills/verify.md",
-            include_str!("../../integrations/antigravity/skills/verify.md")
-        ),
-        (
-            "workflows/check.md",
-            include_str!("../../integrations/antigravity/workflows/check.md")
-        ),
-        (
-            "workflows/evolve.md",
-            include_str!("../../integrations/antigravity/workflows/evolve.md")
-        ),
-        (
-            "workflows/go.md",
-            include_str!("../../integrations/antigravity/workflows/go.md")
-        ),
-        (
-            "workflows/ship.md",
-            include_str!("../../integrations/antigravity/workflows/ship.md")
-        ),
-        (
-            "workflows/spec.md",
-            include_str!("../../integrations/antigravity/workflows/spec.md")
-        ),
-        (
-            "workflows/team.md",
-            include_str!("../../integrations/antigravity/workflows/team.md")
-        ),
-        (
-            "agents/auditor.md",
-            include_str!("../../integrations/antigravity/agents/auditor.md")
+            "commands/team.md",
+            include_str!("../../integrations/opencode/commands/team.md")
         ),
         (
             "agents/builder.md",
-            include_str!("../../integrations/antigravity/agents/builder.md")
-        ),
-        (
-            "agents/planner.md",
-            include_str!("../../integrations/antigravity/agents/planner.md")
+            include_str!("../../integrations/opencode/agents/builder.md")
         ),
         (
             "agents/reviewer.md",
-            include_str!("../../integrations/antigravity/agents/reviewer.md")
+            include_str!("../../integrations/opencode/agents/reviewer.md")
+        ),
+        (
+            "agents/auditor.md",
+            include_str!("../../integrations/opencode/agents/auditor.md")
+        ),
+        (
+            "agents/planner.md",
+            include_str!("../../integrations/opencode/agents/planner.md")
+        ),
+        (
+            "plugins/epic-harness.js",
+            include_str!("../../integrations/opencode/plugins/epic-harness.js")
+        ),
+    ]
+);
+
+static CLINE_FILES: &[(&str, &str)] = integration_files!(
+    "cline",
+    [
+        (
+            "hooks/PreToolUse",
+            include_str!("../../integrations/cline/hooks/PreToolUse")
+        ),
+        (
+            "hooks/PostToolUse",
+            include_str!("../../integrations/cline/hooks/PostToolUse")
+        ),
+        (
+            "hooks/TaskStart",
+            include_str!("../../integrations/cline/hooks/TaskStart")
+        ),
+        (
+            "hooks/TaskResume",
+            include_str!("../../integrations/cline/hooks/TaskResume")
+        ),
+        (
+            "hooks/TaskCancel",
+            include_str!("../../integrations/cline/hooks/TaskCancel")
+        ),
+        (
+            "rules/epic-harness.md",
+            include_str!("../../integrations/cline/rules/epic-harness.md")
+        ),
+    ]
+);
+
+static AIDER_FILES: &[(&str, &str)] = integration_files!(
+    "aider",
+    [
+        (
+            ".aider.conf.yml",
+            include_str!("../../integrations/aider/.aider.conf.yml")
+        ),
+        (
+            ".aider/CONVENTIONS.md",
+            include_str!("../../integrations/aider/.aider/CONVENTIONS.md")
         ),
     ]
 );
@@ -322,13 +343,15 @@ struct ToolConfig {
     files: &'static [(&'static str, &'static str)],
     /// Extra note shown after install
     note: Option<&'static str>,
-    /// Alternative destination for files whose relative path starts with `alt_prefix`.
-    /// Used by Codex to route `skills/` to `~/.agents/skills/` per the official spec.
+    /// Files whose relative path starts with this prefix are written to `alt_dir` instead of
+    /// `global_dir`. Used to route `skills/` to `~/.agents/skills/` for Codex and Gemini.
     alt_dir: Option<PathBuf>,
     alt_prefix: &'static str,
     /// Files that should never be overwritten if they already exist (e.g. config.toml).
     /// Unlike root_files these live inside the tool dir, not in cwd.
     preserve_files: &'static [&'static str],
+    /// Files that must be made executable after writing (chmod +x on Unix).
+    executable_files: &'static [&'static str],
 }
 
 fn tool_config(tool: &str) -> Option<ToolConfig> {
@@ -348,6 +371,7 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             alt_prefix: "skills/",
             // config.toml may contain user-customised settings — never overwrite.
             preserve_files: &["config.toml"],
+            executable_files: &[],
         }),
         "gemini" => Some(ToolConfig {
             global_dir: PathBuf::from(&home).join(".gemini"),
@@ -360,6 +384,7 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             alt_dir: Some(PathBuf::from(&home).join(".agents")),
             alt_prefix: "skills/",
             preserve_files: &[],
+            executable_files: &[],
         }),
         "cursor" => Some(ToolConfig {
             global_dir: PathBuf::from(&home).join(".cursor"),
@@ -370,102 +395,227 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             alt_dir: None,
             alt_prefix: "",
             preserve_files: &[],
+            executable_files: &[],
         }),
-        "antigravity" => Some(ToolConfig {
-            global_dir: PathBuf::from(&home).join(".agents"),
-            local_dir: cwd.join(".agents"),
-            root_files: &["AGENTS.md"],
-            files: ANTIGRAVITY_FILES,
-            note: Some("Ring 0 hooks not available — using AGENTS.md + skills/workflows instead."),
+        "opencode" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home).join(".config").join("opencode"),
+            local_dir: cwd.join(".opencode"),
+            root_files: &[],
+            files: OPENCODE_FILES,
+            note: Some("Place plugins/epic-harness.js in your OpenCode plugin directory."),
             alt_dir: None,
             alt_prefix: "",
             preserve_files: &[],
+            executable_files: &[],
+        }),
+        "cline" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home)
+                .join("Documents")
+                .join("Cline")
+                .join("Rules"),
+            local_dir: cwd.join(".clinerules"),
+            root_files: &[],
+            files: CLINE_FILES,
+            note: Some(
+                "Hook scripts have been made executable. \
+                 For global hooks, also copy hooks/ to ~/Documents/Cline/Rules/Hooks/.",
+            ),
+            alt_dir: None,
+            alt_prefix: "",
+            preserve_files: &[],
+            executable_files: &[
+                "hooks/PreToolUse",
+                "hooks/PostToolUse",
+                "hooks/TaskStart",
+                "hooks/TaskResume",
+                "hooks/TaskCancel",
+            ],
+        }),
+        // Aider has no hook system. We install:
+        //  - ~/.aider.conf.yml  (auto-loads conventions; preserved if already exists)
+        //  - ~/.aider/CONVENTIONS.md  (coding rules injected into every session)
+        // global_dir = $HOME so both paths resolve correctly.
+        "aider" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home),
+            local_dir: cwd.clone(),
+            root_files: &[],
+            files: AIDER_FILES,
+            note: Some("No hook system available. Conventions are loaded via .aider.conf.yml."),
+            alt_dir: None,
+            alt_prefix: "",
+            preserve_files: &[".aider.conf.yml"],
+            executable_files: &[],
         }),
         _ => None,
     }
 }
 
+// ── Progress bar ──────────────────────────────────────────────────────────────
+
+struct Progress {
+    tool: String,
+    total: usize,
+    current: usize,
+    added: usize,
+    updated: usize,
+    unchanged: usize,
+    dry_run: bool,
+    tty: bool,
+}
+
+impl Progress {
+    fn new(tool: &str, total: usize, dry_run: bool) -> Self {
+        Self {
+            tool: tool.to_string(),
+            total,
+            current: 0,
+            added: 0,
+            updated: 0,
+            unchanged: 0,
+            dry_run,
+            tty: io::stderr().is_terminal(),
+        }
+    }
+
+    fn tick(&mut self, filename: &str, status: FileStatus) {
+        self.current += 1;
+        match status {
+            FileStatus::Added => self.added += 1,
+            FileStatus::Updated => self.updated += 1,
+            FileStatus::Unchanged => self.unchanged += 1,
+        }
+
+        if self.tty {
+            let filled = if self.total > 0 {
+                (self.current * 20) / self.total
+            } else {
+                20
+            };
+            let bar: String = std::iter::repeat('=')
+                .take(filled.saturating_sub(1))
+                .chain(if filled > 0 && filled < 20 {
+                    std::iter::once('>')
+                } else {
+                    std::iter::once('=')
+                })
+                .chain(std::iter::repeat(' ').take(20 - filled))
+                .collect();
+
+            let name = if filename.len() > 26 {
+                &filename[filename.len() - 26..]
+            } else {
+                filename
+            };
+
+            let tag = if self.dry_run { "dry-run" } else { &self.tool };
+            eprint!(
+                "\r  {:<8} [{}] {:>2}/{:<2}  {:<26}",
+                tag, bar, self.current, self.total, name
+            );
+            let _ = io::stderr().flush();
+        } else {
+            // Non-TTY (CI / piped): compact one-line summary per tool, not per file
+        }
+    }
+
+    fn finish(&self) {
+        let dry = if self.dry_run { " (dry-run)" } else { "" };
+        if self.tty {
+            eprint!("\r{}\r", " ".repeat(60)); // clear bar line
+            eprintln!(
+                "  {:<8} ✓ {} files{}  ({} added, {} updated, {} unchanged)",
+                self.tool, self.total, dry, self.added, self.updated, self.unchanged
+            );
+        } else {
+            eprintln!(
+                "[harness] {}: {} files{}  ({} added, {} updated, {} unchanged)",
+                self.tool, self.total, dry, self.added, self.updated, self.unchanged
+            );
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum FileStatus {
+    Added,
+    Updated,
+    Unchanged,
+}
+
 // ── Install logic ─────────────────────────────────────────────────────────────
 
 /// Root-only files (GEMINI.md, AGENTS.md): never overwrite — user may have edited or merged.
-fn write_if_missing(dest: &Path, content: &str, dry_run: bool) {
+/// Returns the FileStatus so the caller can update progress.
+fn write_if_missing(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
     if dest.exists() {
-        println!("[harness] ~ {} (exists, skipping)", dest.display());
-        return;
+        return FileStatus::Unchanged;
     }
     if dry_run {
-        println!("[dry-run] write {}", dest.display());
-        return;
+        return FileStatus::Added;
     }
     if let Some(parent) = dest.parent() {
         let _ = fs::create_dir_all(parent);
     }
     match fs::write(dest, content) {
-        Ok(_) => println!("[harness] + {}", dest.display()),
-        Err(e) => eprintln!("[harness] ERROR writing {}: {e}", dest.display()),
+        Ok(_) => FileStatus::Added,
+        Err(e) => {
+            eprintln!("\n[harness] ERROR writing {}: {e}", dest.display());
+            FileStatus::Unchanged
+        }
     }
 }
 
 /// Hooks, commands, agents, rules, skills, etc.: write if missing or content differs from embedded.
-fn write_or_sync(dest: &Path, content: &str, dry_run: bool) {
+fn write_or_sync(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
     let existed = dest.exists();
     let is_settings_json = dest.file_name().map_or(false, |n| n == "settings.json");
 
     if is_settings_json && existed {
         // For settings.json, merge instead of overwriting to preserve theme, auth, etc.
-        let existing_content = match fs::read_to_string(dest) {
-            Ok(s) => s,
-            Err(_) => "".to_string(),
-        };
+        let existing_content = fs::read_to_string(dest).unwrap_or_default();
 
-        let mut existing_json: serde_json::Value = match serde_json::from_str(&existing_content) {
-            Ok(j) => j,
-            Err(_) => serde_json::json!({}),
-        };
+        let mut existing_json: serde_json::Value =
+            serde_json::from_str(&existing_content).unwrap_or(serde_json::json!({}));
+        let new_json: serde_json::Value =
+            serde_json::from_str(content).unwrap_or(serde_json::json!({}));
 
-        let new_json: serde_json::Value = match serde_json::from_str(content) {
-            Ok(j) => j,
-            Err(_) => serde_json::json!({}),
-        };
-
-        // Merge hooksConfig and hooks into the existing JSON
-        if let Some(new_hooks_config) = new_json.get("hooksConfig") {
-            existing_json["hooksConfig"] = new_hooks_config.clone();
+        if let Some(v) = new_json.get("hooksConfig") {
+            existing_json["hooksConfig"] = v.clone();
         }
-        if let Some(new_hooks) = new_json.get("hooks") {
-            existing_json["hooks"] = new_hooks.clone();
+        if let Some(v) = new_json.get("hooks") {
+            existing_json["hooks"] = v.clone();
         }
 
-        let merged_content = serde_json::to_string_pretty(&existing_json).unwrap_or_else(|_| content.to_string());
-        
-        if existing_content == merged_content {
-            println!("[harness] = {} (merged, unchanged)", dest.display());
-            return;
-        }
+        let merged =
+            serde_json::to_string_pretty(&existing_json).unwrap_or_else(|_| content.to_string());
 
+        if existing_content == merged {
+            return FileStatus::Unchanged;
+        }
         if dry_run {
-            println!("[dry-run] merge {}", dest.display());
-            return;
+            return FileStatus::Updated;
         }
-
-        match fs::write(dest, merged_content) {
-            Ok(_) => println!("[harness] # {} (merged/updated)", dest.display()),
-            Err(e) => eprintln!("[harness] ERROR merging {}: {e}", dest.display()),
+        match fs::write(dest, merged) {
+            Ok(_) => return FileStatus::Updated,
+            Err(e) => eprintln!("\n[harness] ERROR merging {}: {e}", dest.display()),
         }
-        return;
+        return FileStatus::Unchanged;
     }
 
     let unchanged = existed
         && fs::read_to_string(dest)
             .map(|existing| existing == content)
             .unwrap_or(false);
+
     if unchanged {
-        println!("[harness] = {} (unchanged)", dest.display());
-        return;
+        return FileStatus::Unchanged;
     }
     if dry_run {
-        println!("[dry-run] write {}", dest.display());
-        return;
+        return if existed {
+            FileStatus::Updated
+        } else {
+            FileStatus::Added
+        };
     }
     if let Some(parent) = dest.parent() {
         let _ = fs::create_dir_all(parent);
@@ -473,45 +623,88 @@ fn write_or_sync(dest: &Path, content: &str, dry_run: bool) {
     match fs::write(dest, content) {
         Ok(_) => {
             if existed {
-                println!("[harness] # {} (updated)", dest.display());
+                FileStatus::Updated
             } else {
-                println!("[harness] + {}", dest.display());
+                FileStatus::Added
             }
         }
-        Err(e) => eprintln!("[harness] ERROR writing {}: {e}", dest.display()),
+        Err(e) => {
+            eprintln!("\n[harness] ERROR writing {}: {e}", dest.display());
+            FileStatus::Unchanged
+        }
     }
 }
 
-pub fn run(args: &[String]) -> i32 {
-    // Parse: epic-harness install <tool> [--local] [--dry-run]
-    let tool = match args.first() {
-        Some(t) => t.as_str(),
-        None => {
-            eprintln!(
-                "Usage: epic-harness install <codex|gemini|cursor|antigravity> [--local] [--dry-run]"
-            );
-            eprintln!(
-                "       Embedded integration files are synced (missing or outdated files are written)."
-            );
-            eprintln!("       Root files (GEMINI.md, AGENTS.md) are only created if absent.");
-            eprintln!("       epic-harness install --list");
-            return 1;
+/// Make a file executable on Unix (no-op on other platforms).
+fn make_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(path, perms);
         }
-    };
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path; // no-op on Windows
+    }
+}
 
-    if tool == "--list" || tool == "list" {
-        println!("Available integrations: codex, gemini, cursor, antigravity");
-        return 0;
+// ── Interactive menu ──────────────────────────────────────────────────────────
+
+const TOOLS: &[(&str, &str)] = &[
+    ("codex", "OpenAI Codex CLI"),
+    ("gemini", "Google Gemini CLI"),
+    ("cursor", "Cursor IDE"),
+    ("opencode", "OpenCode"),
+    ("cline", "Cline (VS Code)"),
+    ("aider", "Aider"),
+];
+
+fn interactive_menu() -> Vec<String> {
+    eprintln!();
+    eprintln!("epic-harness — Select integrations to install");
+    eprintln!("──────────────────────────────────────────────");
+    for (i, (name, desc)) in TOOLS.iter().enumerate() {
+        eprintln!("  [{}] {:<12} {}", i + 1, name, desc);
+    }
+    eprintln!("  [a] All of the above");
+    eprintln!();
+    eprint!("Selection (e.g. 1,3 or a): ");
+    let _ = io::stderr().flush();
+
+    let mut line = String::new();
+    if io::stdin().read_line(&mut line).is_err() {
+        return vec![];
+    }
+    let line = line.trim().to_lowercase();
+
+    if line == "a" || line == "all" {
+        return TOOLS.iter().map(|(name, _)| name.to_string()).collect();
     }
 
-    let local = args.iter().any(|a| a == "--local");
-    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let mut selected = Vec::new();
+    for token in line.split(',') {
+        let token = token.trim();
+        if let Ok(n) = token.parse::<usize>() {
+            if n >= 1 && n <= TOOLS.len() {
+                selected.push(TOOLS[n - 1].0.to_string());
+            }
+        }
+    }
+    selected
+}
 
+// ── Install a single tool ─────────────────────────────────────────────────────
+
+fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let cfg = match tool_config(tool) {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: codex, gemini, cursor, antigravity"
+                "[harness] Unknown tool '{tool}'. Use one of: codex, gemini, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -524,12 +717,11 @@ pub fn run(args: &[String]) -> i32 {
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-    println!("[harness] Installing {tool} → {}", target_dir.display());
     if let Some(note) = cfg.note {
-        println!("[harness] Note: {note}");
+        eprintln!("[harness] Note: {note}");
     }
 
-    // For --local installs, alt_dir also becomes local (sibling of target_dir's parent).
+    // Resolve alt_dir for --local installs
     let alt_target: Option<PathBuf> = cfg.alt_dir.as_ref().map(|global_alt| {
         if local {
             cwd.join(
@@ -542,33 +734,35 @@ pub fn run(args: &[String]) -> i32 {
         }
     });
 
+    let mut progress = Progress::new(tool, cfg.files.len(), dry_run);
+
     for (rel, content) in cfg.files {
-        // Root files (GEMINI.md, AGENTS.md) go into cwd, not the tool dir.
-        let dest = if cfg.root_files.contains(rel) {
+        let dest = if !cfg.alt_prefix.is_empty()
+            && rel.starts_with(cfg.alt_prefix)
+            && alt_target.is_some()
+        {
+            alt_target.as_ref().unwrap().join(rel)
+        } else if cfg.root_files.contains(rel) {
             cwd.join(rel)
         } else {
             target_dir.join(rel)
         };
 
-        if cfg.root_files.contains(rel) || cfg.preserve_files.contains(rel) {
-            write_if_missing(&dest, content, dry_run);
+        let status = if cfg.root_files.contains(rel) || cfg.preserve_files.contains(rel) {
+            write_if_missing(&dest, content, dry_run)
         } else {
-            write_or_sync(&dest, content, dry_run);
+            write_or_sync(&dest, content, dry_run)
+        };
+
+        // chmod +x for executable files (e.g. Cline hook scripts)
+        if !dry_run && cfg.executable_files.contains(rel) {
+            make_executable(&dest);
         }
 
-        // Gemini-specific: also sync agents/ and skills/ to ~/.agents/ for Antigravity compatibility.
-        if tool == "gemini" && (rel.starts_with("agents/") || rel.starts_with("skills/")) {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-            let alt_dest = if local {
-                cwd.join(".agents").join(rel)
-            } else {
-                Path::new(&home).join(".agents").join(rel)
-            };
-            if alt_dest != dest {
-                write_or_sync(&alt_dest, content, dry_run);
-            }
-        }
+        progress.tick(rel, status);
     }
+
+    progress.finish();
 
     // Codex-specific: warn if config.toml exists but codex_hooks is not enabled.
     if tool == "codex" {
@@ -578,18 +772,58 @@ pub fn run(args: &[String]) -> i32 {
                 .map(|s| s.contains("codex_hooks"))
                 .unwrap_or(false);
             if !ok {
-                println!();
-                println!("[harness] WARNING: ~/.codex/config.toml exists but does not enable hooks.");
-                println!("[harness] Hooks are OFF by default. Add these lines to enable them:");
-                println!();
-                println!("    [features]");
-                println!("    codex_hooks = true");
-                println!();
-                println!("[harness] Then restart Codex for the change to take effect.");
+                eprintln!();
+                eprintln!("[harness] WARNING: ~/.codex/config.toml exists but does not enable hooks.");
+                eprintln!("[harness] Hooks are OFF by default. Add these lines to enable them:");
+                eprintln!();
+                eprintln!("    [features]");
+                eprintln!("    codex_hooks = true");
+                eprintln!();
+                eprintln!("[harness] Then restart Codex for the change to take effect.");
             }
         }
     }
 
-    println!("[harness] Done.");
     0
+}
+
+// ── Public entry point ────────────────────────────────────────────────────────
+
+pub fn run(args: &[String]) -> i32 {
+    // Parse: epic-harness install [<tool>] [--local] [--dry-run]
+    let local = args.iter().any(|a| a == "--local");
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+
+    // First positional arg that isn't a flag
+    let tool_arg = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(|s| s.as_str());
+
+    match tool_arg {
+        None => {
+            // Interactive menu
+            let selected = interactive_menu();
+            if selected.is_empty() {
+                eprintln!("[harness] No integrations selected.");
+                return 0;
+            }
+            let mut exit = 0;
+            for tool in &selected {
+                eprintln!("[harness] Installing {tool}...");
+                let code = install_tool(tool, local, dry_run);
+                if code != 0 {
+                    exit = code;
+                }
+            }
+            exit
+        }
+
+        Some("--list" | "list") => {
+            println!("Available integrations: codex, gemini, cursor, opencode, cline, aider");
+            0
+        }
+
+        Some(tool) => install_tool(tool, local, dry_run),
+    }
 }

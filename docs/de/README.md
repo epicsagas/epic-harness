@@ -66,16 +66,40 @@ cargo install --path .
 
 Die Binary wird automatisch von den Hooks erkannt. Falls nicht vorhanden, wird auf Node.js zurueckgegriffen.
 
-### Integration für andere Tools installieren
+## Multi-Tool-Unterstuetzung
 
-Installiere zuerst die Rust-Binary (erforderlich), dann die Integration für dein Tool:
+epic-harness funktioniert mit Claude Code und 6 weiteren KI-Coding-Tools. Alle Tools teilen dasselbe `~/.harness/projects/{slug}/`-Datenverzeichnis.
+
+| Tool | Ring 0 Hooks | Commands/Prompts | Skills | Agents |
+|------|-------------|------------------|--------|--------|
+| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
+| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
+| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
+| **Cline** | ✓ Full⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ Requires `codex_hooks = true` in `~/.codex/config.toml`; PostToolUse intercepts Bash only  
+² No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
+³ Requires Cursor 1.7+  
+⁴ JS plugin: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel hook scripts  
+⁶ No hook system — conventions injected via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
+
+### Integration fuer andere Tools installieren
 
 ```bash
-# Integration installieren (global, Standard)
-epic-harness install codex        # Codex CLI  → ~/.codex/
-epic-harness install gemini       # Gemini CLI → ~/.gemini/
-epic-harness install cursor       # Cursor     → ~/.cursor/
-epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+# Interaktives Menue
+epic-harness install
+
+# Direkte Installation
+epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic-harness install gemini       # Gemini CLI  → ~/.gemini/
+epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic-harness install opencode     # OpenCode    → ~/.config/opencode/
+epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
+epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # Projektlokal installieren
 epic-harness install cursor --local

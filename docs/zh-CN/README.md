@@ -66,21 +66,45 @@ cargo install --path .
 
 钩子会自动检测该二进制文件。如果不存在，则回退到 Node.js。
 
+## 多工具支持
+
+epic-harness 支持 Claude Code 以及另外 6 款 AI 编程工具。所有工具共享同一个 `~/.harness/projects/{slug}/` 数据目录。
+
+| 工具 | Ring 0 钩子 | 命令/提示词 | 技能 | 代理 |
+|------|-------------|------------|------|------|
+| **Claude Code** | ✓ 完整 | ✓ 6 条命令 | ✓ 8 个技能 | ✓ 4 |
+| **Codex CLI** | ✓ 完整¹ | ✓ 6 个提示词 | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
+| **Gemini CLI** | ✓ 部分² | ✓ 6 条命令 | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ 完整³ | ✓ 6 条命令 | ✓ 通过规则 | ✓ 4 |
+| **OpenCode** | ✓ 部分⁴ | ✓ 6 条命令 | — | ✓ 4 |
+| **Cline** | ✓ 完整⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ 需在 `~/.codex/config.toml` 中设置 `codex_hooks = true`；PostToolUse 仅拦截 Bash  
+² 无 `PreToolUse` 等效项 — guard 在 `BeforeModel` 级别运行  
+³ 需要 Cursor 1.7+  
+⁴ JS 插件：`session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel 钩子脚本  
+⁶ 无钩子系统 — 约定通过 `.aider/CONVENTIONS.md` + `.aider.conf.yml` 注入
+
 ### 为其他工具安装
 
-首先安装 Rust 二进制文件（必须），然后为您的工具安装集成：
-
 ```bash
-# 安装集成（全局，默认）
-epic-harness install codex        # Codex CLI  → ~/.codex/
-epic-harness install gemini       # Gemini CLI → ~/.gemini/
-epic-harness install cursor       # Cursor     → ~/.cursor/
-epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+# 交互式菜单（选择要安装的工具）
+epic-harness install
+
+# 直接安装
+epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic-harness install gemini       # Gemini CLI  → ~/.gemini/
+epic-harness install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
+epic-harness install opencode     # OpenCode    → ~/.config/opencode/
+epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
+epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # 安装到项目本地
 epic-harness install cursor --local
 
-# 预览而不进行任何更改
+# 预览（不做实际更改）
 epic-harness install gemini --dry-run
 ```
 

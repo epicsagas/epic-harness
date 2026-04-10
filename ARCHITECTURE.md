@@ -161,7 +161,7 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 | Chose | Gave Up | Reason |
 |-------|---------|--------|
 | 6 commands | 23+ commands (gstack) | Minimize surface area. The rest is automated. |
-| Claude Code only | Cross-harness support | Deep hook integration required for evolution. |
+| 7 tools (Claude Code + 6) | Universal cross-harness support | Deep hook integration required for full Ring 0 on each tool. |
 | JS single runtime | Python/Bun multi-runtime | Zero dependencies + simple install. |
 | File+function tracking | Symbol-level tracking (Serena) | No LSP dependency. Function names via grep-level regex. |
 | Heuristic evolution | ML-based evolution (A-Evolve) | Hook execution time constraint + interpretability. |
@@ -200,7 +200,9 @@ epic-harness/
 │   ├── auditor.md
 │   └── planner.md
 ├── hooks/             # Ring 0 + Ring 3
-│   ├── hooks.json     ← hook registration
+│   ├── hooks.json     ← hook registration (Claude Code)
+│   ├── bin/
+│   │   └── epic-harness  ← Rust binary (primary, ~4x faster)
 │   └── scripts/
 │       ├── common.js  ← shared utils + constants + validation
 │       ├── resume.js
@@ -209,6 +211,13 @@ epic-harness/
 │       ├── observe.js ← 3-axis scoring + function extraction
 │       ├── snapshot.js
 │       └── reflect.js ← evolution engine (6 phases)
+├── integrations/      # Per-tool integration files
+│   ├── codex/         # hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
+│   ├── gemini/        # settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)
+│   ├── cursor/        # hooks.json, commands/(6), agents/(4)
+│   ├── opencode/      # commands/(6), agents/(4), plugins/epic-harness.js
+│   ├── cline/         # hooks/(5 scripts), rules/epic-harness.md
+│   └── aider/         # .aider.conf.yml, .aider/CONVENTIONS.md
 ├── references/        # Checklists
 │   ├── security.md
 │   ├── performance.md

@@ -1,7 +1,5 @@
 ---
-name: spec
 description: "Define what to build — clarify requirements through conversation and produce a spec document"
-command: /spec
 ---
 
 # /spec — Define What to Build
@@ -31,7 +29,6 @@ You are starting the **Spec** phase. Your job is to extract a clear, actionable 
 Save the spec to `.harness/specs/SPEC-{timestamp}.md` if the user approves.
 
 ## Red Flags
-
 - Writing code before the spec is approved
 - Assuming requirements that weren't stated
 - Producing a 3-page spec for a 1-line change

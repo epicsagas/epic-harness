@@ -7,7 +7,13 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
-    // Read stdin once, pass to subcommand (skip if TTY — no EOF would arrive)
+    // install reads stdin itself (interactive menu) — skip pre-reading for it.
+    if subcmd == "install" {
+        let code = hooks::install::run(&args[2..].to_vec());
+        std::process::exit(code);
+    }
+
+    // Read stdin once, pass to hook subcommands (skip if TTY — no EOF would arrive)
     let mut stdin_buf = String::new();
     if !io::stdin().is_terminal() {
         let _ = io::stdin().read_to_string(&mut stdin_buf);
@@ -26,7 +32,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" => hooks::install::run(&args[2..].to_vec()),
+        "install" => unreachable!(),
         "version" => {
             eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
             0
@@ -34,10 +40,10 @@ fn main() {
         _ => {
             eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install>");
             eprintln!(
-                "       epic-harness install <codex|gemini|cursor|antigravity> [--local] [--dry-run]"
+                "       epic-harness install [codex|gemini|cursor|opencode|cline|aider] [--local] [--dry-run]"
             );
             eprintln!(
-                "       (install syncs embedded files; root-only GEMINI.md/AGENTS.md only if missing)"
+                "       (omit tool name for interactive menu; root-only GEMINI.md only if missing)"
             );
             1
         }

@@ -1,0 +1,81 @@
+#!/bin/sh
+# epic-harness PreToolUse hook for Cline
+#
+# Cline calls this script before every tool execution.
+# stdin: JSON with toolName, toolInput, etc.
+# stdout: JSON {"cancel": false} or {"cancel": true, "errorMessage": "..."}
+#
+# This hook calls epic-harness guard. If guard exits 2 (blocked),
+# we return cancel:true so Cline skips the tool call.
+
+set -u
+
+BINARY=""
+if command -v epic-harness >/dev/null 2>&1; then
+  BINARY="epic-harness"
+elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
+  BINARY="$HOME/.cargo/bin/epic-harness"
+fi
+
+# If binary not found, allow all tool use
+if [ -z "$BINARY" ]; then
+  printf '{"cancel":false}'
+  exit 0
+fi
+
+# Read Cline's input JSON from stdin
+CLINE_JSON=$(cat)
+
+# Build a HookInput JSON for epic-harness.
+# Extract toolName and toolInput from Cline's JSON using jq (preferred),
+# python3 (fallback), or pass empty values as a last resort.
+TOOL_NAME=""
+TOOL_INPUT="{}"
+
+if command -v jq >/dev/null 2>&1; then
+  TOOL_NAME=$(printf '%s' "$CLINE_JSON" | jq -r '.toolName // ""')
+  TOOL_INPUT=$(printf '%s' "$CLINE_JSON" | jq -c '.toolInput // {}')
+elif command -v python3 >/dev/null 2>&1; then
+  TOOL_NAME=$(printf '%s' "$CLINE_JSON" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('toolName', ''))
+except Exception:
+    print('')
+")
+  TOOL_INPUT=$(printf '%s' "$CLINE_JSON" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(json.dumps(d.get('toolInput', {})))
+except Exception:
+    print('{}')
+")
+fi
+
+# Only run guard for shell-like tools to avoid unnecessary overhead
+case "$TOOL_NAME" in
+  execute_command|bash|shell|run_command|terminal)
+    ;;
+  *)
+    printf '{"cancel":false}'
+    exit 0
+    ;;
+esac
+
+# Build the HookInput JSON
+HOOK_INPUT=$(printf '{"tool_name":"%s","tool_input":%s,"tool_output":{},"conversation_summary":null,"pending_tasks":[],"context_usage":null}' \
+  "$TOOL_NAME" "$TOOL_INPUT")
+
+# Call guard; capture stderr for the reason message
+GUARD_STDERR=$(printf '%s' "$HOOK_INPUT" | "$BINARY" guard 2>&1)
+GUARD_EXIT=$?
+
+if [ "$GUARD_EXIT" -eq 2 ]; then
+  # Escape the reason for JSON (replace " with \")
+  REASON=$(printf '%s' "$GUARD_STDERR" | sed 's/"/\\"/g' | tr '\n' ' ')
+  printf '{"cancel":true,"errorMessage":"%s"}' "$REASON"
+else
+  printf '{"cancel":false}'
+fi

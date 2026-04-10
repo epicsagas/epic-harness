@@ -14,6 +14,13 @@
 - `src/ts/` — TypeScript source (Node.js fallback)
 - `presets/` — Cold-start skill templates (embedded in Rust binary at compile time)
 - `references/` — Checklists (security, performance, testing, team-patterns)
+- `integrations/` — Per-tool integration files (6 tools):
+  - `codex/` — hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
+  - `gemini/` — settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)
+  - `cursor/` — hooks.json, commands/(6), agents/(4)
+  - `opencode/` — commands/(6), agents/(4), plugins/epic-harness.js
+  - `cline/` — hooks/(5 scripts), rules/epic-harness.md
+  - `aider/` — .aider.conf.yml, .aider/CONVENTIONS.md
 
 ## Architecture: 4-Ring Model
 

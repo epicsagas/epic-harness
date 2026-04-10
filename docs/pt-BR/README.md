@@ -66,18 +66,42 @@ cargo install --path .
 
 O binário é detectado automaticamente pelos hooks. Se ausente, os hooks utilizam Node.js como fallback.
 
+## Suporte a Múltiplas Ferramentas
+
+epic-harness funciona com Claude Code e 6 ferramentas adicionais de programação com IA. Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projects/{slug}/`.
+
+| Tool | Ring 0 Hooks | Commands/Prompts | Skills | Agents |
+|------|-------------|------------------|--------|--------|
+| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
+| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
+| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
+| **Cline** | ✓ Full⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ Requires `codex_hooks = true` in `~/.codex/config.toml`; PostToolUse intercepts Bash only  
+² No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
+³ Requires Cursor 1.7+  
+⁴ JS plugin: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel hook scripts  
+⁶ No hook system — conventions injected via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
+
 ### Instalar para outras ferramentas
 
-Instale primeiro o binário Rust (obrigatório) e depois a integração para a sua ferramenta:
-
 ```bash
-# Instalar integração (global, padrão)
-epic-harness install codex        # Codex CLI  → ~/.codex/
-epic-harness install gemini       # Gemini CLI → ~/.gemini/
-epic-harness install cursor       # Cursor     → ~/.cursor/
-epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+# Menu interativo
+epic-harness install
 
-# Instalar localmente no projeto
+# Instalação direta
+epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic-harness install gemini       # Gemini CLI  → ~/.gemini/
+epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic-harness install opencode     # OpenCode    → ~/.config/opencode/
+epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
+epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+
+# Instalação local no projeto
 epic-harness install cursor --local
 
 # Visualizar sem realizar alterações

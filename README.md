@@ -68,36 +68,43 @@ The binary is automatically detected by hooks. If absent, hooks fall back to Nod
 
 ## Multi-Tool Support
 
-epic-harness works with Claude Code and 4 additional AI coding tools. All tools share the same `~/.harness/projects/{slug}/` data directory.
+epic-harness works with Claude Code and 6 additional AI coding tools. All tools share the same `~/.harness/projects/{slug}/` data directory.
 
-| Tool | Ring 0 Hooks | Commands | Skills | Agents | Parallel Agents |
-|------|-------------|----------|--------|--------|----------------|
-| **Claude Code** | ✓ Full | ✓ 6 | ✓ 8 | ✓ 4 | ✓ Native |
-| **Codex CLI** | ✓ Full | ✓ 6 | ✓ 7 | ✓ 4 | ✓ Native |
-| **Gemini CLI** | ✓ Partial¹ | ✓ 6 | ✓ 7 | ✓ 4 | — Sequential |
-| **Cursor** | ✓ Full² | ✓ 6 | ✓ via rules | ✓ 4 | ✓ Sub-agents |
-| **Antigravity** | — ³ | ✓ 6 workflows | ✓ 6 skills | ✓ 4 personas | ✓ Manager view |
+| Tool | Ring 0 Hooks | Commands/Prompts | Skills | Agents |
+|------|-------------|------------------|--------|--------|
+| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
+| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
+| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
+| **Cline** | ✓ Full⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-¹ No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
-² Requires Cursor 1.7+ — `hooks.json` uses Cursor’s schema (`version`, camelCase `preToolUse` / `postToolUse` / `sessionEnd`, `Shell` matcher for shell tools)  
-³ No hook system — AGENTS.md rules + explicit `epic-harness resume/reflect` via terminal
+¹ Requires `codex_hooks = true` in `~/.codex/config.toml`; PostToolUse intercepts Bash only  
+² No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
+³ Requires Cursor 1.7+  
+⁴ JS plugin: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel hook scripts  
+⁶ No hook system — conventions injected via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
 
 ### Install for other tools
 
 ```bash
-# Install the Rust binary first (required for all tools)
-brew install epicsagas/tap/epic-harness
+# Interactive menu (select which tools to install)
+epic-harness install
 
-# Then install the integration (global by default)
-epic-harness install codex        # Codex CLI  → ~/.codex/
-epic-harness install gemini       # Gemini CLI → ~/.gemini/
-epic-harness install cursor       # Cursor     → ~/.cursor/
-epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+# Direct install
+epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic-harness install gemini       # Gemini CLI  → ~/.gemini/
+epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic-harness install opencode     # OpenCode    → ~/.config/opencode/
+epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
+epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
-# Project-local install instead
+# Project-local install
 epic-harness install cursor --local
 
-# Preview without making changes
+# Preview without changes
 epic-harness install gemini --dry-run
 ```
 

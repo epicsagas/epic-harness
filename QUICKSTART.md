@@ -5,7 +5,6 @@
 ## Prerequisites
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) installed
-- Node.js ≥ 20 (for building hooks)
 - Git
 
 ## Install
@@ -20,10 +19,9 @@ Or manually:
 
 ```bash
 git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
-cd ~/.claude/plugins/epic
-npm install
-npm run build
 ```
+
+The Rust binary handles all hooks. If you also want to install for other tools (Codex, Gemini, Cursor, OpenCode, Cline, Aider), run `epic-harness install` for an interactive menu.
 
 ## First Session
 
@@ -63,7 +61,7 @@ If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is 
 
 | Symptom | Fix |
 |---------|-----|
-| Hooks not running | Run `npm run build` in the plugin directory |
+| Hooks not running | Verify the `epic-harness` binary is in PATH (`which epic-harness`); Node.js fallback used if absent |
 | `.harness/` not created | Restart Claude Code session (resume hook initializes it) |
 | `/evolve status` empty | Need at least 1 completed session first |
 

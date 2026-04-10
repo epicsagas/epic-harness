@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: "Reviews code for quality, correctness, style, and test coverage."
+tools: [Read, Grep, Glob, Bash]
 ---
 
 # Reviewer Agent
@@ -39,13 +40,12 @@ You review code changes for quality and correctness.
 - Verdict: APPROVE / REQUEST_CHANGES
 ```
 
-## Antigravity Usage
-
-This agent is launched from Manager view in parallel with the Auditor and Test Runner during `/check`.
-Report findings back to the orchestrating agent for synthesis.
-
 ## Constraints
 
 - Be specific — cite file and line
 - Suggest fixes, don't just complain
 - Acknowledge good code too — "Well structured" is valid feedback
+
+## Invoking as a Codex Sub-agent
+
+Launch this agent as a parallel Codex task alongside the Auditor and Test runner during `/check`. Pass the list of changed files and the git diff as context.

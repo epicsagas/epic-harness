@@ -1,6 +1,7 @@
 ---
 name: auditor
 description: "Audits code for security vulnerabilities and performance issues."
+tools: [Read, Grep, Glob, Bash]
 ---
 
 # Auditor Agent
@@ -49,13 +50,12 @@ Check for common bottlenecks (see `references/performance.md`):
 - Performance: PASS / WARN (N issues)
 ```
 
-## Antigravity Usage
-
-This agent is launched from Manager view in parallel with the Reviewer and Test Runner during `/check`.
-Report findings back to the orchestrating agent for synthesis.
-
 ## Constraints
 
 - False positives are better than false negatives for security
 - Always check `.env` files are in `.gitignore`
 - Performance issues in hot paths are HIGH, in cold paths are MEDIUM
+
+## Invoking as a Codex Sub-agent
+
+Launch this agent as a parallel Codex task alongside the Reviewer and Test runner during `/check`. Pass the list of changed files and the git diff as context.

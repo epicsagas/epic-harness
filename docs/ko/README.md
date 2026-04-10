@@ -66,16 +66,40 @@ cargo install --path .
 
 바이너리가 감지되면 훅에서 자동으로 사용합니다. 없으면 Node.js로 폴백합니다.
 
+## 멀티 도구 지원
+
+epic-harness는 Claude Code와 6개의 추가 AI 코딩 도구에서 동작합니다. 모든 도구는 동일한 `~/.harness/projects/{slug}/` 데이터 디렉토리를 공유합니다.
+
+| 도구 | Ring 0 훅 | 명령어/프롬프트 | 스킬 | 에이전트 |
+|------|-------------|------------------|--------|--------|
+| **Claude Code** | ✓ 전체 | ✓ 6개 명령어 | ✓ 8개 스킬 | ✓ 4개 |
+| **Codex CLI** | ✓ 전체¹ | ✓ 6개 프롬프트 | ✓ 7개 (`~/.agents/skills/`) | ✓ 4개 |
+| **Gemini CLI** | ✓ 부분²  | ✓ 6개 명령어 | ✓ 7개 | ✓ 4개 |
+| **Cursor** | ✓ 전체³ | ✓ 6개 명령어 | ✓ 규칙 경유 | ✓ 4개 |
+| **OpenCode** | ✓ 부분⁴ | ✓ 6개 명령어 | — | ✓ 4개 |
+| **Cline** | ✓ 전체⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요; PostToolUse는 Bash만 가로챔  
+² `PreToolUse` 동등 기능 없음 — guard가 `BeforeModel` 레벨에서 실행  
+³ Cursor 1.7+ 필요  
+⁴ JS 플러그인: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel 훅 스크립트  
+⁶ 훅 시스템 없음 — 컨벤션을 `.aider/CONVENTIONS.md` + `.aider.conf.yml`로 주입
+
 ### 다른 도구에 설치
 
-먼저 Rust 바이너리를 설치하고(필수), 이후 사용하는 도구에 인테그레이션을 설치합니다:
-
 ```bash
-# 인테그레이션 설치 (글로벌, 기본값)
-epic-harness install codex        # Codex CLI  → ~/.codex/
-epic-harness install gemini       # Gemini CLI → ~/.gemini/
-epic-harness install cursor       # Cursor     → ~/.cursor/
-epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+# 인터랙티브 메뉴 (설치할 도구 선택)
+epic-harness install
+
+# 직접 설치
+epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic-harness install gemini       # Gemini CLI  → ~/.gemini/
+epic-harness install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ 필요)
+epic-harness install opencode     # OpenCode    → ~/.config/opencode/
+epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
+epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # 프로젝트 로컬 설치
 epic-harness install cursor --local

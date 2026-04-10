@@ -1,0 +1,68 @@
+#!/bin/sh
+# epic-harness PostToolUse hook for Cline
+#
+# Cline calls this script after every tool execution.
+# stdin: JSON with toolName, toolInput, toolOutput, etc.
+# stdout: JSON {"cancel": false}
+#
+# Records the tool call into the epic-harness observation pipeline
+# in the background — never blocks Cline.
+
+set -u
+
+BINARY=""
+if command -v epic-harness >/dev/null 2>&1; then
+  BINARY="epic-harness"
+elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
+  BINARY="$HOME/.cargo/bin/epic-harness"
+fi
+
+if [ -n "$BINARY" ]; then
+  CLINE_JSON=$(cat)
+
+  TOOL_NAME=""
+  TOOL_INPUT="{}"
+  TOOL_OUTPUT="{}"
+
+  if command -v jq >/dev/null 2>&1; then
+    TOOL_NAME=$(printf '%s' "$CLINE_JSON" | jq -r '.toolName // ""')
+    TOOL_INPUT=$(printf '%s' "$CLINE_JSON" | jq -c '.toolInput // {}')
+    TOOL_OUTPUT=$(printf '%s' "$CLINE_JSON" | jq -c '.toolOutput // {}')
+  elif command -v python3 >/dev/null 2>&1; then
+    TOOL_NAME=$(printf '%s' "$CLINE_JSON" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('toolName', ''))
+except Exception:
+    print('')
+")
+    TOOL_INPUT=$(printf '%s' "$CLINE_JSON" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(json.dumps(d.get('toolInput', {})))
+except Exception:
+    print('{}')
+")
+    TOOL_OUTPUT=$(printf '%s' "$CLINE_JSON" | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(json.dumps(d.get('toolOutput', {})))
+except Exception:
+    print('{}')
+")
+  fi
+
+  HOOK_INPUT=$(printf '{"tool_name":"%s","tool_input":%s,"tool_output":%s,"conversation_summary":null,"pending_tasks":[],"context_usage":null}' \
+    "$TOOL_NAME" "$TOOL_INPUT" "$TOOL_OUTPUT")
+
+  # Fire-and-forget: run observe in background, do not block
+  printf '%s' "$HOOK_INPUT" | "$BINARY" observe >/dev/null 2>&1 &
+else
+  # Discard stdin if binary not found
+  cat >/dev/null
+fi
+
+printf '{"cancel":false}'

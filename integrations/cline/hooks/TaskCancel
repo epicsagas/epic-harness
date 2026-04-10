@@ -1,0 +1,26 @@
+#!/bin/sh
+# epic-harness TaskCancel hook for Cline
+#
+# Cline calls this when a task is cancelled.
+# Triggers reflect in the background to evolve skills from the session.
+# stdin: JSON with task metadata
+# stdout: JSON {"cancel": false}
+
+set -u
+
+BINARY=""
+if command -v epic-harness >/dev/null 2>&1; then
+  BINARY="epic-harness"
+elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
+  BINARY="$HOME/.cargo/bin/epic-harness"
+fi
+
+if [ -n "$BINARY" ]; then
+  HOOK_INPUT='{"tool_name":"TaskCancel","tool_input":{},"tool_output":{},"conversation_summary":null,"pending_tasks":[],"context_usage":null}'
+  # Fire-and-forget: reflect may take a moment
+  printf '%s' "$HOOK_INPUT" | "$BINARY" reflect >/dev/null 2>&1 &
+else
+  cat >/dev/null
+fi
+
+printf '{"cancel":false}'

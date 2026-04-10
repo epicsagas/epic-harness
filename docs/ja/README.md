@@ -66,16 +66,40 @@ cargo install --path .
 
 バイナリはフックによって自動検出されます。存在しない場合、フックはNode.jsにフォールバックします。
 
+## マルチツールサポート
+
+epic-harnessはClaude Codeと6つの追加AIコーディングツールで動作します。すべてのツールは同じ `~/.harness/projects/{slug}/` データディレクトリを共有します。
+
+| ツール | Ring 0 フック | コマンド/プロンプト | スキル | エージェント |
+|------|-------------|------------------|--------|--------|
+| **Claude Code** | ✓ フル | ✓ 6コマンド | ✓ 8スキル | ✓ 4 |
+| **Codex CLI** | ✓ フル¹ | ✓ 6プロンプト | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
+| **Gemini CLI** | ✓ 部分²  | ✓ 6コマンド | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ フル³ | ✓ 6コマンド | ✓ ルール経由 | ✓ 4 |
+| **OpenCode** | ✓ 部分⁴ | ✓ 6コマンド | — | ✓ 4 |
+| **Cline** | ✓ フル⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ `~/.codex/config.toml` に `codex_hooks = true` が必要; PostToolUseはBashのみインターセプト  
+² `PreToolUse` 相当機能なし — guardは `BeforeModel` レベルで実行  
+³ Cursor 1.7+ が必要  
+⁴ JSプラグイン: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel フックスクリプト  
+⁶ フックシステムなし — コンベンションを `.aider/CONVENTIONS.md` + `.aider.conf.yml` で注入
+
 ### 他のツールにインストール
 
-まずRustバイナリをインストールし（必須）、次にツール用のインテグレーションをインストールします：
-
 ```bash
-# インテグレーションをインストール（グローバル、デフォルト）
-epic-harness install codex        # Codex CLI  → ~/.codex/
-epic-harness install gemini       # Gemini CLI → ~/.gemini/
-epic-harness install cursor       # Cursor     → ~/.cursor/
-epic-harness install antigravity  # Antigravity → ~/.agents/ + AGENTS.md
+# インタラクティブメニュー（インストールするツールを選択）
+epic-harness install
+
+# 直接インストール
+epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic-harness install gemini       # Gemini CLI  → ~/.gemini/
+epic-harness install cursor       # Cursor      → ~/.cursor/（Cursor 1.7+ 必要）
+epic-harness install opencode     # OpenCode    → ~/.config/opencode/
+epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
+epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # プロジェクトローカルにインストール
 epic-harness install cursor --local
