@@ -1,0 +1,49 @@
+---
+description: epic-harness session context
+alwaysApply: true
+---
+# epic-harness Context
+
+## Session Start
+
+At the beginning of every session:
+- Read `.harness/memory/` for project-specific rules and patterns
+- If `.harness/sessions/*.json` exists, read the latest file for previous session context (resume state)
+- Report any evolved skills found in `.harness/evolved/` — list their names and descriptions
+- Run `epic-harness resume` if the binary is available: `command -v epic-harness && epic-harness resume`
+
+Note: Cursor does not expose a session-start hook. This rule provides equivalent always-on context that achieves the same result.
+
+## Auto-Behaviors
+
+The following skills activate automatically based on context signals:
+
+| Signal | Skill Triggered |
+|--------|----------------|
+| Auth, session, token, password, permissions code | `secure` checklist |
+| Database query, ORM, SQL, migration code | `secure` + `perf` checklist |
+| File exceeds 200 lines | `simplify` skill |
+| Test failure encountered | `debug` skill (diagnose root cause before retrying) |
+| Before marking any task complete | `verify` skill (build + test + lint) |
+| New feature or bug fix | `tdd` skill (write test first) |
+
+## Harness Memory
+
+Always consult `.harness/memory/` before starting work. These files contain:
+- Project-specific coding patterns and conventions
+- Known pitfalls and anti-patterns for this codebase
+- Cross-session learnings from the evolution engine
+
+## Evolved Skills
+
+If `.harness/evolved/` contains skill directories, treat them as supplementary guidance.
+Static skills (tdd, secure, verify, simplify, perf, debug) always take priority over evolved skills.
+Evolved skills extend, not replace, built-in behaviors.
+
+## Snapshot on Completion
+
+When a significant task is complete, run:
+```
+epic-harness snapshot
+```
+This preserves session state for future resume.

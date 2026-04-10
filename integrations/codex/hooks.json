@@ -1,0 +1,74 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Restore previous session context + load project memory and evolved skills"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Auto-format + typecheck + lint warning after edits"
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Auto-format + typecheck + lint warning after writes"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'",
+            "async": true,
+            "timeout": 5
+          }
+        ],
+        "description": "Record tool result for evolution loop"
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Analyze session observations -> evolve skills -> gate mutations"
+      }
+    ]
+  }
+}
