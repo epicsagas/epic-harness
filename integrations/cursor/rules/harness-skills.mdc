@@ -1,0 +1,116 @@
+---
+description: epic-harness quality skills
+alwaysApply: true
+---
+# epic-harness Quality Skills
+
+Core skill rules applied automatically throughout every session.
+
+---
+
+## TDD — Test-Driven Development
+
+**Always write a failing test before any implementation.**
+
+Red → Green → Refactor. One behavior per cycle.
+
+- Test name reads like a spec: `it("returns 401 when token is expired")`
+- Run test — confirm it fails for the right reason (Red)
+- Write minimum code to pass (Green)
+- Refactor without changing behavior, rerun tests (Refactor)
+
+Anti-patterns to reject:
+- "I'll add tests later" — write the test NOW
+- "This is too simple to test" — if it has a return value, it's testable
+- Writing implementation before any test exists
+
+Evidence required before claiming done:
+- [ ] Failing test output shown (Red)
+- [ ] Passing test output shown (Green)
+- [ ] Test covers behavior, not implementation details
+
+---
+
+## Secure — Security Review
+
+**Apply when touching auth, database, API endpoints, secrets, or user input.**
+
+Checklist (mark each ✓ or N/A):
+- [ ] All user input sanitized before use in queries
+- [ ] Parameterized queries used — no string-concatenated SQL
+- [ ] No `eval()`, `exec()`, or template injection vectors
+- [ ] Auth checks on every protected endpoint
+- [ ] No hardcoded credentials or secrets in code
+- [ ] Sensitive data not logged (passwords, tokens, PII)
+- [ ] `.env` files in `.gitignore`
+- [ ] RBAC/permissions checked before data access
+
+Anti-patterns to reject:
+- Storing secrets in committed config files
+- "We'll harden it before production"
+- Internal API = trusted (it is not)
+
+---
+
+## Verify — Pre-Completion Check
+
+**Run before marking any task done, before /ship, before reporting success.**
+
+```bash
+# Build
+npm run build   # or: go build ./... | cargo build | make
+
+# Test
+npm test        # or: go test ./... | pytest | cargo test
+
+# Lint
+npm run lint    # or: golangci-lint run | ruff check | cargo clippy
+
+# Type check (if applicable)
+npx tsc --noEmit
+```
+
+All must exit 0. If anything fails, fix it — do not report success.
+
+Final sanity:
+- [ ] No debug `console.log` / `print` statements left
+- [ ] No unexplained `TODO` or `FIXME` introduced
+- [ ] No hardcoded test values or credentials
+
+Evidence required: show actual command output for each check.
+
+---
+
+## Simplify — Code Simplification
+
+**Apply when a file exceeds 200 lines, a function exceeds 40 lines, or nesting is 3+ levels deep.**
+
+Process:
+1. Measure: line count, complexity, nesting depth
+2. Extract function / Extract constant / Extract module
+3. Rename for clarity (what it holds/does, not how)
+4. Remove dead code, merge duplicates
+5. Verify: all tests still pass, no behavior change
+
+Constraints:
+- One simplification at a time — verify between each
+- Never simplify and add features in the same change
+
+---
+
+## Perf — Performance Review
+
+**Apply when writing loops, database queries, rendering logic, or data processing.**
+
+Critical checks:
+- [ ] No N+1 queries — use JOIN, eager loading, or batch fetch
+- [ ] Pagination on list endpoints — never load all records
+- [ ] No unbounded arrays or caches growing without limit
+- [ ] Event listeners removed / unsubscribed when done
+- [ ] Async I/O in request paths — no synchronous file or network calls
+- [ ] Expensive calculations memoized where inputs are stable
+
+Anti-patterns to reject:
+- "Premature optimization" — N+1 queries are never premature
+- Loading all records when only count is needed
+- Synchronous file I/O in request handlers

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-tool support**: epic-harness now works with Codex CLI, Gemini CLI, Cursor, and Google Antigravity
+  — full Ring 0 hooks + commands + skills + agents ported for each tool
+- `integrations/codex/` — hooks.json (SessionStart/PreToolUse/PostToolUse/Stop), 6 commands, 7 skills, 4 agents
+- `integrations/gemini/` — settings.json (BeforeAgent/AfterAgent/BeforeModel/AfterModel), GEMINI.md snippet, 6 commands, 7 skills, 4 agents
+- `integrations/cursor/` — hooks.json (PreToolUse/PostToolUse/SessionEnd), .mdc rules, 6 commands, 4 agents (requires Cursor 1.7+)
+- `integrations/antigravity/` — AGENTS.md config, .agents/skills/, .agents/workflows/ (6 commands), 4 agent personas; Manager view used for parallel agent execution
+- `install.sh` — unified installer: `./install.sh --tool=<codex|gemini|cursor|antigravity> [--global] [--dry-run]`
+- `project_slug()`: stable `{dirname}-{6-char hex}` identifier to namespace per-project data
+- Auto-migration: on first session, existing `cwd()/.harness/` is copied to the new global path
+
 ### Changed
 
 - Harness data directory moved from `cwd()/.harness/` to `~/.harness/projects/{slug}/`
@@ -14,11 +26,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `guard-rules.yaml` stays at `cwd()/.harness/guard-rules.yaml` for team git-sharing
 - `cross_project_file` opt-in marker moved to `~/.harness/global/` (was per-project)
 - `global_harness_dir` renamed from `~/.harness-global/` to `~/.harness/global/`
-
-### Added
-
-- `project_slug()`: stable `{dirname}-{4-char hex}` identifier to namespace per-project data
-- Auto-migration: on first session, existing `cwd()/.harness/` is copied to the new global path
 
 ## [0.1.3] — 2026-04-09
 

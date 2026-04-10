@@ -66,6 +66,43 @@ cargo install --path .
 
 The binary is automatically detected by hooks. If absent, hooks fall back to Node.js.
 
+## Multi-Tool Support
+
+epic-harness works with Claude Code and 4 additional AI coding tools. All tools share the same `~/.harness/projects/{slug}/` data directory.
+
+| Tool | Ring 0 Hooks | Commands | Skills | Agents | Parallel Agents |
+|------|-------------|----------|--------|--------|----------------|
+| **Claude Code** | ✓ Full | ✓ 6 | ✓ 8 | ✓ 4 | ✓ Native |
+| **Codex CLI** | ✓ Full | ✓ 6 | ✓ 7 | ✓ 4 | ✓ Native |
+| **Gemini CLI** | ✓ Partial¹ | ✓ 6 | ✓ 7 | ✓ 4 | — Sequential |
+| **Cursor** | ✓ Full² | ✓ 6 | ✓ via rules | ✓ 4 | ✓ Sub-agents |
+| **Antigravity** | — ³ | ✓ 6 workflows | ✓ 6 skills | ✓ 4 personas | ✓ Manager view |
+
+¹ No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
+² Requires Cursor 1.7+  
+³ No hook system — AGENTS.md rules + explicit `epic-harness resume/reflect` via terminal
+
+### Install for other tools
+
+```bash
+# Install the Rust binary first (required for all tools)
+brew install epicsagas/tap/epic-harness
+
+# Then install the integration
+./install.sh --tool=codex        # Codex CLI  (~/.codex/ or .codex/)
+./install.sh --tool=gemini       # Gemini CLI (~/.gemini/ or .gemini/)
+./install.sh --tool=cursor       # Cursor     (~/.cursor/ or .cursor/)
+./install.sh --tool=antigravity  # Antigravity (.agents/ + AGENTS.md)
+
+# Use --global for user-wide install, default is project-local
+./install.sh --tool=cursor --global
+
+# Preview without making changes
+./install.sh --tool=gemini --dry-run
+```
+
+See `integrations/{tool}/install.md` for per-tool details.
+
 ## Commands
 
 | Command | What it does |
