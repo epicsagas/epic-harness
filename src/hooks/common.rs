@@ -188,46 +188,52 @@ pub fn cwd() -> PathBuf {
 /// - Name is sanitized to `[a-zA-Z0-9_-]` to be safe as a directory component.
 /// - 6-char hex hash (24 bits) prevents collisions between same-named projects.
 pub fn project_slug() -> String {
-    let path = cwd();
-    // Walk components to find the last meaningful segment (handles "/" edge case).
-    let name = path
-        .components()
-        .filter_map(|c| {
-            if let std::path::Component::Normal(s) = c {
-                s.to_str()
-            } else {
-                None
-            }
-        })
-        .last()
-        .unwrap_or("project")
-        .to_string();
-    // Sanitize: replace any char that isn't alphanumeric, hyphen, or underscore.
-    let safe_name: String = name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    let full = path.to_string_lossy();
-    let mut h: u32 = 0;
-    for b in full.bytes() {
-        h = h.wrapping_shl(5).wrapping_sub(h).wrapping_add(b as u32);
-    }
-    format!("{}-{:06x}", safe_name, h & 0x00ff_ffff)
+    static SLUG: LazyLock<String> = LazyLock::new(|| {
+        let path = cwd();
+        // Walk components to find the last meaningful segment (handles "/" edge case).
+        let name = path
+            .components()
+            .filter_map(|c| {
+                if let std::path::Component::Normal(s) = c {
+                    s.to_str()
+                } else {
+                    None
+                }
+            })
+            .last()
+            .unwrap_or("project")
+            .to_string();
+        // Sanitize: replace any char that isn't alphanumeric, hyphen, or underscore.
+        let safe_name: String = name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let full = path.to_string_lossy();
+        let mut h: u32 = 0;
+        for b in full.bytes() {
+            h = h.wrapping_shl(5).wrapping_sub(h).wrapping_add(b as u32);
+        }
+        format!("{}-{:06x}", safe_name, h & 0x00ff_ffff)
+    });
+    SLUG.clone()
 }
 
 /// Per-project data lives in `~/.harness/projects/{slug}/` — outside the
 /// project tree so it never pollutes git and survives project deletion.
 pub fn harness_dir() -> PathBuf {
-    dirs_home()
-        .join(".harness")
-        .join("projects")
-        .join(project_slug())
+    static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+        dirs_home()
+            .join(".harness")
+            .join("projects")
+            .join(project_slug())
+    });
+    DIR.clone()
 }
 
 /// Legacy project-local path used for migration detection only.
@@ -287,16 +293,20 @@ pub fn cross_project_file() -> PathBuf {
 
 fn dirs_home() -> PathBuf {
     // Check HOME (Linux/macOS) then USERPROFILE (Windows)
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| {
-            // Fall back to /tmp so harness data stays off the project tree.
-            eprintln!(
-                "[harness] WARNING: Neither $HOME nor $USERPROFILE is set — storing harness data in /tmp/.harness"
-            );
-            PathBuf::from("/tmp")
-        })
+    if let Ok(h) = std::env::var("HOME") {
+        return PathBuf::from(h);
+    }
+    if let Ok(up) = std::env::var("USERPROFILE") {
+        return PathBuf::from(up);
+    }
+    // Windows fallback: HOMEDRIVE + HOMEPATH
+    if let (Ok(drive), Ok(path)) = (std::env::var("HOMEDRIVE"), std::env::var("HOMEPATH")) {
+        return PathBuf::from(format!("{}{}", drive, path));
+    }
+
+    // Fail loudly if home directory cannot be determined.
+    // Falling back to /tmp is insecure as it's typically world-readable.
+    panic!("[harness] FATAL: Home directory not detected. Please set HOME or USERPROFILE.");
 }
 
 // ── Failure Classification ──────────────────────────

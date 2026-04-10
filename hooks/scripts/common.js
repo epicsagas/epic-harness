@@ -2,25 +2,26 @@
  * Shared utilities for all hook scripts.
  */
 import { readFileSync, appendFileSync, existsSync, mkdirSync, readdirSync, statSync, rmSync, copyFileSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join, extname, basename } from "node:path";
 // ── Paths ────────────────────────────────────────────
 export const CWD = process.cwd();
 /** Stable per-project slug: `{sanitized-dirname}-{6 hex chars}`. Mirrors Rust project_slug(). */
 function projectSlug() {
-    const name = (CWD.split("/").filter(Boolean).pop() ?? "project")
+    // Use basename() for cross-platform path handling (handles both / and \)
+    const name = (basename(CWD) || "project")
         .replace(/[^a-zA-Z0-9_-]/g, "_");
     let h = 0;
-    for (let i = 0; i < CWD.length; i++) {
-        // Mirrors Rust: wrapping u32 arithmetic on UTF-8 bytes (ASCII-compatible)
-        h = (((h << 5) >>> 0) - h + (CWD.charCodeAt(i) & 0xff)) >>> 0;
+    // Use Buffer to get UTF-8 bytes, matching Rust's full.bytes()
+    const bytes = Buffer.from(CWD, "utf8");
+    for (let i = 0; i < bytes.length; i++) {
+        h = (((h << 5) >>> 0) - h + bytes[i]) >>> 0;
     }
     return `${name}-${(h & 0x00ffffff).toString(16).padStart(6, "0")}`;
 }
-const HOME = process.env.HOME || process.env.USERPROFILE || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : "/tmp");
-if (!HOME || HOME === "/tmp") {
-    process.stderr.write("[harness] WARNING: Home directory not detected — storing harness data in /tmp/.harness\n");
+const HOME = process.env.HOME || process.env.USERPROFILE || (process.env.HOMEDRIVE && process.env.HOMEPATH ? process.env.HOMEDRIVE + process.env.HOMEPATH : "");
+if (!HOME) {
+    throw new Error("[harness] FATAL: Home directory not detected. Please set HOME or USERPROFILE.");
 }
-
 /** Per-project data directory: ~/.harness/projects/{slug}/ */
 export const HARNESS_DIR = join(HOME, ".harness", "projects", projectSlug());
 /** Legacy project-local path — used for migration detection only. */

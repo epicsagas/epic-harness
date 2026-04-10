@@ -99,8 +99,8 @@ test("computeTrend: improving/stable/declining", () => {
 
 // ── gateSkills ─────────────────────────────────────────
 test("gateSkills: removes invalid skills, keeps valid ones", () => {
-  // Setup temp evolved dir
-  const testDir = join(process.cwd(), ".harness", "evolved");
+  // Use the real EVOLVED_DIR which is now slug-based under HOME
+  const testDir = EVOLVED_DIR;
   mkdirSync(join(testDir, "evo-good"), { recursive: true });
   mkdirSync(join(testDir, "evo-bad"), { recursive: true });
   mkdirSync(join(testDir, "evo-no-file"), { recursive: true });
