@@ -6,5 +6,5 @@ prompt = """
 Write a concise spec covering: Goal, Scope, Requirements, Acceptance criteria, and Technical notes.
 
 Show the spec in digestible chunks. Get explicit approval before proceeding.
-Save the spec to `.harness/specs/SPEC-{timestamp}.md` if the user approves.
+Save the spec to `$(epic-harness path)/specs/SPEC-{timestamp}.md` if the user approves.
 """

@@ -1,7 +1,7 @@
 description = "Build it - plan, execute tasks sequentially with TDD, and verify. The main execution engine."
 prompt = """
-- Check if a spec exists (`.harness/specs/` or recent conversation). If not, run a quick inline spec conversation first.
-- Check if `.harness/team/` exists - if yes, use project-specific agents.
+- Check if a spec exists (`$(epic-harness path)/specs/` or recent conversation). If not, run a quick inline spec conversation first.
+- Check if `$(epic-harness path)/team/` exists - if yes, use project-specific agents.
 
 Break the work into ordered tasks (Task 1, Task 2, etc. with dependencies).
 Show the plan and get user confirmation.

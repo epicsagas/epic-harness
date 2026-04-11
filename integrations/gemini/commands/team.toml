@@ -7,8 +7,8 @@ prompt = """
 Choose an architecture pattern (Pipeline, Fan-out/Fan-in, Expert Pool, Producer-Reviewer, Supervisor).
 Recommend team composition (3-6 agents max). Show user and get approval.
 
-Create files in `.harness/team/` (agents, skills, playbook.md).
+Create files in `$(epic-harness path)/team/` (agents, skills, playbook.md).
 Each agent file should have frontmatter (name, description, tools, model) and detailed instructions.
 
-Add a pointer in `.harness/memory/team.md` so `/go` knows to use this team.
+Add a pointer in `$(epic-harness path)/memory/team.md` so `/go` knows to use this team.
 """

@@ -108,7 +108,7 @@ These agents are referenced by `/go` and `/check` commands when launching sub-ta
 ls .cursor/hooks.json .cursor/rules/ .cursor/commands/ .cursor/agents/
 ```
 
-Start a new Cursor session. The Composer should load harness context from `.harness/memory/` and report any evolved skills from `.harness/evolved/`.
+Start a new Cursor session. The Composer should load harness context from `$(epic-harness path)/memory/` and report any evolved skills from `$(epic-harness path)/evolved/`.
 
 ---
 

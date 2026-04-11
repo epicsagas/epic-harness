@@ -27,10 +27,10 @@ Choose the best architecture pattern:
 Recommend team composition (3-6 agents max). Show user and get approval.
 
 ### Phase 3: Generate
-Create files in `.harness/team/`:
+Create files in `$(epic-harness path)/team/`:
 
 ```
-.harness/team/
+$(epic-harness path)/team/
 ├── agents/
 │   ├── <role-1>.md      # Agent definition (frontmatter + instructions)
 │   ├── <role-2>.md
@@ -54,7 +54,7 @@ model: <model>
 ```
 
 ### Phase 4: Connect
-Add a pointer in `.harness/memory/team.md` so `/go` knows to use this team.
+Add a pointer in `$(epic-harness path)/memory/team.md` so `/go` knows to use this team.
 
 ## Constraints
 - Max 6 agents (more = diminishing returns)

@@ -87,7 +87,7 @@ If you see `[harness] epic-harness not found`, ensure the binary is in PATH.
 
 ## Data Location
 
-All per-project harness data lives in `.harness/` at your project root:
+All per-project harness data lives in `$(epic-harness path)/` at your project root:
 
 ```
 .harness/

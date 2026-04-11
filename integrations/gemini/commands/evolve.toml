@@ -1,31 +1,31 @@
 description = "Trigger skill evolution manually - analyze observations, evolve skills, show status, or rollback"
 prompt = """
 Run evolution now:
-1. Read observation logs from `.harness/obs/`
+1. Read observation logs from `$(epic-harness path)/obs/`
 2. Analyze failure patterns across all sessions
 3. Identify weak areas (error types, recurring failures)
-4. Generate or improve evolved skills in `.harness/evolved/`
+4. Generate or improve evolved skills in `$(epic-harness path)/evolved/`
 5. Gate: validate new skills (format, dedup, cap of 10)
 6. Report what changed
 
 Show evolution dashboard:
-Read `.harness/metrics.json` and `.harness/evolution.jsonl`, then display the dashboard with Overview, Score History, Evolved Skills, and Last Session Analysis.
+Read `$(epic-harness path)/metrics.json` and `$(epic-harness path)/evolution.jsonl`, then display the dashboard with Overview, Score History, Evolved Skills, and Last Session Analysis.
 
 Long-term analysis:
-Read `.harness/evolution.jsonl`, display Trend Over Time, Cumulative Pattern Frequency, Skill Effectiveness, and Dispatch Analysis.
+Read `$(epic-harness path)/evolution.jsonl`, display Trend Over Time, Cumulative Pattern Frequency, Skill Effectiveness, and Dispatch Analysis.
 
 Cross-project patterns:
 Read `~/.harness-global/patterns.jsonl`, display Weak Tools Across Projects and Common Error Patterns.
-Opt-in: create `.harness/.cross-project-enabled` file.
+Opt-in: create `$(epic-harness path)/.cross-project-enabled` file.
 
 Undo last evolution:
-1. If `.harness/evolved_backup/` exists, restore it to `.harness/evolved/`
-2. Otherwise, read `.harness/evolution.jsonl` for last entry, remove skills seeded in that entry
+1. If `$(epic-harness path)/evolved_backup/` exists, restore it to `$(epic-harness path)/evolved/`
+2. Otherwise, read `$(epic-harness path)/evolution.jsonl` for last entry, remove skills seeded in that entry
 3. Append a rollback record to evolution.jsonl
 4. Report what was rolled back
 
 Clear all evolution data:
-1. Remove `.harness/evolved/`, `.harness/evolved_backup/`
+1. Remove `$(epic-harness path)/evolved/`, `$(epic-harness path)/evolved_backup/`
 2. Clear `metrics.json` and `evolution.jsonl`
 3. Confirm with user first
 """

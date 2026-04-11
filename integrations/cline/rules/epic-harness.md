@@ -26,9 +26,9 @@ Use these in your Cline chat:
 | `/evolve` | Inspect or trigger skill evolution |
 | `/team` | Generate project-specific agent team |
 
-## .harness/ Directory
+## ~/.harness/projects/{slug}/ Directory
 
-Project-level memory lives in `.harness/`:
+Project-level memory lives in `$(epic-harness path)/`:
 - `obs/` — tool observation logs (scored by success, quality, cost)
 - `evolved/` — auto-generated skills from your patterns
 - `metrics.json` — session trends and skill effectiveness
