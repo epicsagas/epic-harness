@@ -843,3 +843,120 @@ pub fn run(args: &[String]) -> i32 {
         Some(tool) => install_tool(tool, local, dry_run),
     }
 }
+
+// ── Uninstall ─────────────────────────────────────────────────────────────────
+
+fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
+    let cfg = match tool_config(tool) {
+        Some(c) => c,
+        None => {
+            eprintln!(
+                "[harness] Unknown tool '{tool}'. Use one of: codex, gemini, cursor, opencode, cline, aider"
+            );
+            return 1;
+        }
+    };
+
+    let target_dir = if local { &cfg.local_dir } else { &cfg.global_dir };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let alt_target: Option<PathBuf> = cfg.alt_dir.as_ref().map(|global_alt| {
+        if local {
+            cwd.join(global_alt.file_name().unwrap_or(std::ffi::OsStr::new("agents")))
+        } else {
+            global_alt.clone()
+        }
+    });
+
+    let mut removed = 0usize;
+    let mut skipped = 0usize;
+
+    for (rel, _) in cfg.files {
+        // Resolve destination path (mirrors install logic)
+        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
+            if let Some(alt) = &alt_target {
+                alt.join(rel)
+            } else {
+                target_dir.join(rel)
+            }
+        } else if cfg.root_files.contains(rel) {
+            cwd.join(rel)
+        } else {
+            target_dir.join(rel)
+        };
+
+        // Never auto-delete root files (e.g. GEMINI.md) — user may have edited them.
+        if cfg.root_files.contains(rel) {
+            eprintln!("  skip  {}", dest.display());
+            skipped += 1;
+            continue;
+        }
+
+        if dest.exists() {
+            if !dry_run {
+                if let Err(e) = fs::remove_file(&dest) {
+                    eprintln!("\n[harness] ERROR removing {}: {e}", dest.display());
+                } else {
+                    removed += 1;
+                }
+            } else {
+                removed += 1;
+            }
+        }
+    }
+
+    // Prune empty directories left behind
+    if !dry_run {
+        let dirs_to_try: Vec<PathBuf> = cfg
+            .files
+            .iter()
+            .filter_map(|(rel, _)| {
+                let dest = target_dir.join(rel);
+                dest.parent().map(|p| p.to_path_buf())
+            })
+            .collect();
+        for dir in dirs_to_try {
+            let _ = fs::remove_dir(&dir); // silently ignore non-empty
+        }
+        let _ = fs::remove_dir(target_dir);
+    }
+
+    let dry = if dry_run { " (dry-run)" } else { "" };
+    eprintln!(
+        "  {:<8} ✓ removed {removed} files{dry}  ({skipped} root files skipped — delete manually if needed)",
+        tool
+    );
+    0
+}
+
+pub fn run_uninstall(args: &[String]) -> i32 {
+    let local = args.iter().any(|a| a == "--local");
+    let dry_run = args.iter().any(|a| a == "--dry-run");
+    let tool_arg = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(|s| s.as_str());
+
+    match tool_arg {
+        None => {
+            let selected = interactive_menu();
+            if selected.is_empty() {
+                eprintln!("[harness] No integrations selected.");
+                return 0;
+            }
+            let mut exit = 0;
+            for tool in &selected {
+                eprintln!("[harness] Uninstalling {tool}...");
+                let code = uninstall_tool(tool, local, dry_run);
+                if code != 0 {
+                    exit = code;
+                }
+            }
+            exit
+        }
+        Some("--list" | "list") => {
+            println!("Available integrations: codex, gemini, cursor, opencode, cline, aider");
+            0
+        }
+        Some(tool) => uninstall_tool(tool, local, dry_run),
+    }
+}

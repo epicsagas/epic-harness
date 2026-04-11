@@ -7,9 +7,13 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
-    // install reads stdin itself (interactive menu) — skip pre-reading for it.
+    // install/uninstall read stdin themselves (interactive menu) — skip pre-reading.
     if subcmd == "install" {
         let code = hooks::install::run(&args[2..]);
+        std::process::exit(code);
+    }
+    if subcmd == "uninstall" {
+        let code = hooks::install::run_uninstall(&args[2..]);
         std::process::exit(code);
     }
 
@@ -42,7 +46,7 @@ fn main() {
             0
         }
         _ => {
-            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install|path>");
+            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install|uninstall|path>");
             eprintln!(
                 "       epic-harness install [codex|gemini|cursor|opencode|cline|aider] [--local] [--dry-run]"
             );
