@@ -379,10 +379,9 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &["GEMINI.md"],
             files: GEMINI_FILES,
             note: Some("If GEMINI.md already exists, append the section manually."),
-            // Gemini CLI also discovers agents/ and skills/ from standard .agents/ location.
-            // Using alt_dir ensures shared resources are not duplicated or conflicting.
-            alt_dir: Some(PathBuf::from(&home).join(".agents")),
-            alt_prefix: "skills/",
+            // Gemini CLI loads skills from ~/.gemini/skills/ — install directly there.
+            alt_dir: None,
+            alt_prefix: "",
             preserve_files: &[],
             executable_files: &[],
         }),

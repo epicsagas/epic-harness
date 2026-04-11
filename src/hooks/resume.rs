@@ -135,12 +135,23 @@ pub fn run(_input: &HookInput) -> i32 {
                 ),
             );
         } else {
+            // Remove migrated local dir; guard-rules.yaml lives at project root
+            // (.harness/guard-rules.yaml) — move it up before deleting the dir.
+            let guard_src = local.join("guard-rules.yaml");
+            let guard_dst = cwd().join(".harness").join("guard-rules.yaml");
+            if guard_src.exists() && !guard_dst.exists() {
+                // guard-rules is *inside* local — it will be deleted with the dir.
+                // Copy it to a standalone location the user can check into git.
+                let root_guard = cwd().join("guard-rules.yaml");
+                if !root_guard.exists() {
+                    let _ = std::fs::copy(&guard_src, &root_guard);
+                }
+            }
+            let _ = std::fs::remove_dir_all(&local);
             hint(
                 "resume",
                 &format!(
-                    "Migrated .harness/ → {} ({} files). \
-                 You can now delete .harness/ from the project \
-                 (keep .harness/guard-rules.yaml if present).",
+                    "Migrated .harness/ → {} ({} files). Removed project-local .harness/.",
                     harness_dir().display(),
                     copied.ok
                 ),
