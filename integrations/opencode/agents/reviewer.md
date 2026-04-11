@@ -1,7 +1,9 @@
 ---
 name: reviewer
 description: "Reviews code for quality, correctness, style, and test coverage."
-tools: [Read, Grep, Glob, Bash]
+tools:
+  write: false
+  edit: false
 ---
 
 # Reviewer Agent

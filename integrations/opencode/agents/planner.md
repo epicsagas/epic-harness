@@ -1,7 +1,10 @@
 ---
 name: planner
 description: "Breaks down a goal into ordered, parallelizable tasks with dependencies."
-tools: [Read, Grep, Glob]
+tools:
+  write: false
+  edit: false
+  bash: false
 ---
 
 # Planner Agent
