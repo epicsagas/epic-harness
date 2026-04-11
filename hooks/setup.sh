@@ -4,6 +4,11 @@
 
 set -euo pipefail
 
+# Skip on native Windows (non-WSL) — Node.js fallbacks handle that environment
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) exit 0 ;;
+esac
+
 PLUGIN_BIN="${CLAUDE_PLUGIN_ROOT:-}/hooks/bin/epic-harness"
 
 # Already available — nothing to do
