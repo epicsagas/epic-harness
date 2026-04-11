@@ -33,12 +33,16 @@ fn main() {
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
         "install" => unreachable!(),
+        "path" => {
+            println!("{}", hooks::common::harness_dir().display());
+            0
+        }
         "version" => {
             eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
             0
         }
         _ => {
-            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install>");
+            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install|path>");
             eprintln!(
                 "       epic-harness install [codex|gemini|cursor|opencode|cline|aider] [--local] [--dry-run]"
             );
