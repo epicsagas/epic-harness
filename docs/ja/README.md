@@ -108,6 +108,32 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## 統合メモリ
+
+すべてのエージェントは `~/.harness/memory/` にある単一のナレッジグラフを共有します。
+
+```bash
+# 決定事項を追加
+harness mem add "authはJWTではなくセッションクッキーを使用する"
+
+# セマンティック検索
+harness mem query "認証方式"
+
+# 全文検索
+harness mem search "JWT"
+
+# D3.jsナレッジグラフのWeb UIを起動 (http://localhost:7700)
+harness mem serve
+
+# Claude Code用MCPサーバーを登録（5つのネイティブツール: mem_add, mem_query, mem_search, mem_related, mem_context）
+harness mem mcp-install
+
+# 既存のプロジェクト別メモリを移行
+harness mem migrate --all
+```
+
+エージェントはPostToolUseフックを通じてアーキテクチャの決定事項を自動記録します。セッション開始時に関連するメモリがコンテキストに注入されます。
+
 ## コマンド
 
 | コマンド | 機能 |

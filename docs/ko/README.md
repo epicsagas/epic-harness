@@ -108,6 +108,32 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## 통합 메모리
+
+모든 에이전트는 `~/.harness/memory/`에 있는 단일 지식 그래프를 공유합니다.
+
+```bash
+# 결정 사항 추가
+harness mem add "auth는 JWT 대신 세션 쿠키를 사용한다"
+
+# 시맨틱 검색
+harness mem query "인증 방식"
+
+# 전체 텍스트 검색
+harness mem search "JWT"
+
+# D3.js 지식 그래프 Web UI 실행 (http://localhost:7700)
+harness mem serve
+
+# Claude Code용 MCP 서버 등록 (5개 네이티브 도구: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# 기존 프로젝트별 메모리 이전
+harness mem migrate --all
+```
+
+에이전트는 PostToolUse 훅을 통해 아키텍처 결정 사항을 자동으로 기록합니다. 세션 시작 시 관련 메모리가 컨텍스트에 주입됩니다.
+
 ## 명령어
 
 | 명령어 | 기능 |

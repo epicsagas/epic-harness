@@ -115,6 +115,29 @@ epic-harness install gemini --dry-run
 
 Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
 
+## Unified Memory
+
+All agents share a single knowledge graph at `~/.harness/memory/`.
+
+```bash
+# Add a memory node
+harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+
+# Query
+harness mem query --type decision --project my-project
+
+# Full-text search
+harness mem search "JWT"
+
+# Knowledge graph web UI
+harness mem serve          # → http://localhost:7700
+
+# Register as MCP server (Claude Code native tool call)
+harness mem mcp-install --path /path/to/hooks/scripts/mem-mcp.cjs
+```
+
+Agents auto-record architectural decisions from PostToolUse hooks. Session start injects relevant project memories as context. Existing per-project memories migrate via `harness mem migrate --all`.
+
 ## Commands
 
 | Command | What it does |
@@ -315,6 +338,12 @@ Project-specific data lives in your home directory. This survives project deleti
 ├── team/             # /team generated agents and skills
 ├── evolution.jsonl   # Full evolution history
 └── metrics.json      # Aggregate stats + skill attribution
+
+~/.harness/memory/
+├── nodes/            # Knowledge nodes (YAML frontmatter + Markdown body)
+├── edges.jsonl       # Directed graph edges
+├── index.json        # Fast lookup index
+└── graph.json        # Cached graph (for web UI)
 ```
 
 You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.

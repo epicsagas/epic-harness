@@ -108,6 +108,32 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## एकीकृत मेमोरी
+
+सभी एजेंट `~/.harness/memory/` में एक साझा नॉलेज ग्राफ़ उपयोग करते हैं।
+
+```bash
+# निर्णय जोड़ें
+harness mem add "auth JWT की बजाय session cookies उपयोग करता है"
+
+# सिमेंटिक खोज
+harness mem query "प्रमाणीकरण दृष्टिकोण"
+
+# पूर्ण-पाठ खोज
+harness mem search "JWT"
+
+# D3.js नॉलेज ग्राफ़ Web UI शुरू करें (http://localhost:7700)
+harness mem serve
+
+# Claude Code के लिए MCP सर्वर पंजीकृत करें (5 नेटिव टूल्स: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# मौजूदा प्रोजेक्ट-वार मेमोरी माइग्रेट करें
+harness mem migrate --all
+```
+
+एजेंट PostToolUse हुक्स के माध्यम से आर्किटेक्चर निर्णय स्वचालित रूप से रिकॉर्ड करते हैं। सेशन शुरू होने पर प्रासंगिक मेमोरी कॉन्टेक्स्ट में इंजेक्ट की जाती है।
+
 ## कमांड
 
 | कमांड | यह क्या करता है |

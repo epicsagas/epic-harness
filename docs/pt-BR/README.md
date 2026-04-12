@@ -108,6 +108,32 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## Memória Unificada
+
+Todos os agentes compartilham um único grafo de conhecimento em `~/.harness/memory/`.
+
+```bash
+# Adicionar uma decisão
+harness mem add "auth usa cookies de sessão em vez de JWT"
+
+# Busca semântica
+harness mem query "abordagem de autenticação"
+
+# Busca por texto completo
+harness mem search "JWT"
+
+# Iniciar a interface Web do grafo de conhecimento D3.js (http://localhost:7700)
+harness mem serve
+
+# Registrar servidor MCP para Claude Code (5 ferramentas nativas: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# Migrar memórias existentes por projeto
+harness mem migrate --all
+```
+
+Os agentes registram decisões de arquitetura automaticamente via hooks PostToolUse. No início da sessão, memórias relevantes são injetadas no contexto.
+
 ## Comandos
 
 | Comando | O que faz |

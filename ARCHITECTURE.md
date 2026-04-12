@@ -173,6 +173,86 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 3. **Metrics horizon**: Only the last 50 sessions are retained. Long-term trends require direct analysis of `evolution.jsonl`.
 4. **Single agent**: The evolution loop assumes a single Claude Code session. Concurrent multi-agent execution may cause observation conflicts.
 
+## Unified Memory Layer
+
+A cross-agent knowledge graph that persists developer decisions, patterns, and context across all supported coding tools.
+
+### Storage Layout
+
+```
+~/.harness/memory/
+├── nodes/         # One file per node: YAML frontmatter + Markdown body
+├── edges.jsonl    # Directed graph edges (append-only)
+├── index.json     # Fast lookup index (id → file, tags, type)
+└── graph.json     # Cached serialized graph (rebuilt for web UI)
+```
+
+### Node Schema
+
+Each node is a Markdown file with YAML frontmatter:
+
+```yaml
+---
+id: <uuid-v4>
+title: "JWT rotation strategy"
+type: decision          # concept | pattern | project | decision | error
+tags: [auth, security]
+project: my-project     # optional project scope
+created: 2026-04-12T00:00:00Z
+updated: 2026-04-12T00:00:00Z
+---
+Body text in Markdown ...
+```
+
+### Edge Relations
+
+Directed edges stored in `edges.jsonl`. Valid relation types:
+
+| Relation | Meaning |
+|----------|---------|
+| `uses` | Node A depends on or applies Node B |
+| `extends` | Node A is a specialization of Node B |
+| `conflicts` | Node A and Node B represent conflicting approaches |
+| `replaces` | Node A supersedes Node B |
+| `related` | Loose association (bidirectional by convention) |
+| `caused_by` | Error node A was caused by Node B |
+
+### Access Patterns
+
+| Interface | Description |
+|-----------|-------------|
+| CLI (`harness mem`) | 13 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `serve`, `validate`, `migrate`, `context`, `mcp-install` |
+| REST API (Rust server) | Embedded in the `epic-harness` binary; same port 7700 |
+| REST API (Node.js fallback) | `node hooks/scripts/mem-server.cjs --port 7700` |
+| MCP tools | `hooks/scripts/mem-mcp.cjs` — 5 tools: `mem_add`, `mem_query`, `mem_search`, `mem_related`, `mem_context`; register via `harness mem mcp-install` |
+
+### Auto-Recording Pipeline
+
+```
+PostToolUse hook
+    ↓ keyword detection (architectural terms, decision markers)
+    ↓ secret masking + sensitive path filtering
+    ↓ fire-and-forget (2 s timeout, never blocks the hook)
+harness mem add → ~/.harness/memory/nodes/<uuid>.md
+```
+
+The observe hook scans tool output for signals indicating an architectural decision or notable pattern. Matching content is stored as a `decision` or `pattern` node automatically without user action.
+
+### Session Context Injection
+
+On session start, the `resume` hook calls `harness mem context --project <slug>` and injects the returned node summaries as agent context. Only nodes scoped to the current project (or unscoped global nodes) are surfaced, keeping injection size bounded.
+
+### Web UI Architecture
+
+`harness mem serve` starts the REST server and opens `http://localhost:7700`. The UI is a single HTML bundle (embedded in the Rust binary via `include_str!`) with no external CDN dependencies:
+
+- **Graph view**: D3.js force-directed layout — nodes colored by type, edges labeled by relation
+- **Search**: Realtime full-text search powered by the index
+- **CRUD**: Inline Markdown editor (marked.js rendering) + edge linking panel
+- **Theme**: Dark by default
+
+Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node routes, secret masking applied before storage, sensitive file paths filtered from auto-recorded content.
+
 ## File Map
 
 ```
@@ -204,13 +284,15 @@ epic-harness/
 │   ├── bin/
 │   │   └── epic-harness  ← Rust binary (primary, ~4x faster)
 │   └── scripts/
-│       ├── common.js  ← shared utils + constants + validation
+│       ├── common.js      ← shared utils + constants + validation
 │       ├── resume.js
 │       ├── guard.js
 │       ├── polish.js
-│       ├── observe.js ← 3-axis scoring + function extraction
+│       ├── observe.js     ← 3-axis scoring + function extraction
 │       ├── snapshot.js
-│       └── reflect.js ← evolution engine (6 phases)
+│       ├── reflect.js     ← evolution engine (6 phases)
+│       ├── mem-mcp.cjs    ← MCP server (5 native MCP tools for Claude Code)
+│       └── mem-server.cjs ← Node.js fallback REST server (port 7700)
 ├── integrations/      # Per-tool integration files
 │   ├── codex/         # hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
 │   ├── gemini/        # settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)

@@ -108,6 +108,32 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## 统一记忆
+
+所有代理共享 `~/.harness/memory/` 下的单一知识图谱。
+
+```bash
+# 添加决策记录
+harness mem add "auth 使用 Session Cookie 而非 JWT"
+
+# 语义搜索
+harness mem query "认证方式"
+
+# 全文搜索
+harness mem search "JWT"
+
+# 启动 D3.js 知识图谱 Web UI（http://localhost:7700）
+harness mem serve
+
+# 为 Claude Code 注册 MCP 服务器（5 个原生工具：mem_add、mem_query、mem_search、mem_related、mem_context）
+harness mem mcp-install
+
+# 迁移现有的各项目记忆
+harness mem migrate --all
+```
+
+代理通过 PostToolUse 钩子自动记录架构决策。会话开始时，相关记忆会被注入到上下文中。
+
 ## 命令
 
 | 命令 | 功能 |

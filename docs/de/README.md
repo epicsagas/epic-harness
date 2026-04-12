@@ -108,6 +108,32 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## Einheitlicher Speicher
+
+Alle Agenten teilen sich einen einzigen Wissensgraphen unter `~/.harness/memory/`.
+
+```bash
+# Entscheidung hinzufuegen
+harness mem add "auth verwendet Session-Cookies statt JWT"
+
+# Semantische Suche
+harness mem query "Authentifizierungsansatz"
+
+# Volltextsuche
+harness mem search "JWT"
+
+# D3.js-Wissensgraph-Web-UI starten (http://localhost:7700)
+harness mem serve
+
+# MCP-Server fuer Claude Code registrieren (5 native Tools: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# Bestehende projektspezifische Erinnerungen migrieren
+harness mem migrate --all
+```
+
+Agenten zeichnen Architekturentscheidungen automatisch ueber PostToolUse-Hooks auf. Beim Sitzungsstart werden relevante Erinnerungen in den Kontext injiziert.
+
 ## Befehle
 
 | Befehl | Beschreibung |
