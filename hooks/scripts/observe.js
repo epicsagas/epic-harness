@@ -131,14 +131,15 @@ function maybeRecordMemory(input, resolvedOutputText) {
         return;
     // Skip sensitive file paths — never record credentials or key files
     const filePath = input.tool_input?.file_path || '';
-    const SENSITIVE_PATHS = /\.env|secrets?|credentials?|\.pem|\.key|id_rsa|\.pfx|\.p12/i;
+    const SENSITIVE_PATHS = /\.env|secrets?|credentials?|\.pem|\.key|id_rsa|\.pfx|\.p12|\.npmrc|\.netrc|kubeconfig|\.token/i;
     if (SENSITIVE_PATHS.test(filePath))
         return;
     const text = resolvedOutputText + (input.assistant_message ?? '');
     if (!MEM_KEYWORDS.some(k => text.toLowerCase().includes(k)))
         return;
-    const title = extractTitle(text);
-    const body = maskBodySecrets(text.slice(0, 500));
+    const safeText = maskBodySecrets(text.slice(0, 500));
+    const title = extractTitle(safeText);
+    const body = safeText;
     const project = detectProject();
     execFile('epic-harness', [
         'mem', 'add',

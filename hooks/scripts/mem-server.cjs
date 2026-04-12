@@ -414,6 +414,7 @@ async function handleRequest(req, res) {
         try {
           output = await execAsync('grep', ['-rl', '--include=*.md', '--', q, nodesDir]);
         } catch (grepErr) {
+          process.stderr.write(`[mem-server] search error: ${grepErr.message}\n`);
           output = '';
         }
       }

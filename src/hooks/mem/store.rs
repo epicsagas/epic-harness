@@ -85,9 +85,16 @@ pub fn graph_path() -> PathBuf {
 }
 
 pub fn validate_node_id(id: &str) -> bool {
-    // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-    // Accept only hex chars and hyphens, length 36
-    id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+    // UUID v4 strict: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
+    // Validates length, hyphen positions, version (4), and variant bits
+    let b = id.as_bytes();
+    b.len() == 36
+        && b[8] == b'-' && b[13] == b'-' && b[18] == b'-' && b[23] == b'-'
+        && b[14] == b'4'
+        && matches!(b[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B')
+        && b.iter().enumerate().all(|(i, &c)| {
+            matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit()
+        })
 }
 
 pub fn safe_node_path(id: &str) -> Option<PathBuf> {

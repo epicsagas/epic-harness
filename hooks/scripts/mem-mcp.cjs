@@ -143,7 +143,10 @@ function readEdges() {
   return edges;
 }
 
+const VALID_NODE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function loadNodeById(id) {
+  if (!VALID_NODE_ID.test(id)) return null;
   const filePath = path.join(nodesDir(), `${id}.md`);
   if (!fs.existsSync(filePath)) return null;
   try {
