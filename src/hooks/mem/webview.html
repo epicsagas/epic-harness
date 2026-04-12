@@ -81,6 +81,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 .toolbar-btn.primary { background: var(--accent); border-color: var(--accent); }
 .toolbar-btn.primary:hover { opacity: 0.85; }
 #node-count-badge { margin-left: auto; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+#btn-lang { min-width: 38px; font-weight: 700; letter-spacing: 0.5px; }
 
 /* ── Filter Panel ──────────────────────────────────────────── */
 #filter-panel {
@@ -288,14 +289,15 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
   <div id="topbar">
     <h1>UNIFIED MEMORY</h1>
     <div id="search-wrap">
-      <input id="search-input" type="text" placeholder="노드 검색..." autocomplete="off">
-      <button id="search-clear" title="초기화">&times;</button>
+      <input id="search-input" type="text" placeholder="Search nodes..." data-i18n-placeholder="search_placeholder" autocomplete="off">
+      <button id="search-clear" title="Clear">&times;</button>
     </div>
     <span id="search-results-count"></span>
-    <button class="toolbar-btn primary" id="btn-add-node">+ 노드 추가</button>
-    <button class="toolbar-btn" id="btn-add-edge">엣지 연결</button>
-    <button class="toolbar-btn" id="btn-rebuild">그래프 재빌드</button>
+    <button class="toolbar-btn primary" id="btn-add-node" data-i18n="btn_add_node">+ Add Node</button>
+    <button class="toolbar-btn" id="btn-add-edge" data-i18n="btn_add_edge">Link Edge</button>
+    <button class="toolbar-btn" id="btn-rebuild" data-i18n="btn_rebuild">Rebuild Graph</button>
     <span id="node-count-badge"></span>
+    <button class="toolbar-btn" id="btn-lang" title="Language">EN</button>
   </div>
 
   <!-- Filter Panel -->
@@ -316,10 +318,10 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
     </div>
     <div class="filter-section">
       <div class="filter-title">Project</div>
-      <select id="project-select" class="form-select"><option value="">전체</option></select>
+      <select id="project-select" class="form-select"><option value="" data-i18n="opt_all">All</option></select>
     </div>
     <div class="filter-section" id="search-section" style="display:none">
-      <div class="filter-title">검색 결과</div>
+      <div class="filter-title" data-i18n="search_results">Search Results</div>
       <div id="search-results-list"></div>
     </div>
   </div>
@@ -335,7 +337,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
     <div id="graph-tooltip"></div>
     <div id="loading-overlay">
       <div class="spinner"></div>
-      <div id="loading-msg">그래프 데이터 로딩 중...</div>
+      <div id="loading-msg" data-i18n="loading_graph">Loading graph...</div>
     </div>
     <div id="error-banner"></div>
   </div>
@@ -343,7 +345,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
   <!-- Detail Panel -->
   <div id="detail-panel">
     <div id="detail-header">
-      <span id="detail-title">노드 상세</span>
+      <span id="detail-title" data-i18n="node_detail">Node Detail</span>
       <span id="detail-type-badge" class="type-badge"></span>
       <button id="panel-close">&times;</button>
     </div>
@@ -351,14 +353,14 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
       <div id="view-mode">
         <div id="detail-tags"></div>
         <div class="meta-grid" id="detail-meta"></div>
-        <div class="section-heading">본문</div>
+        <div class="section-heading" data-i18n="section_body">Body</div>
         <div id="detail-markdown"></div>
-        <div class="section-heading">연결 엣지</div>
+        <div class="section-heading" data-i18n="section_edges">Connected Edges</div>
         <div class="edges-list" id="detail-edges"></div>
       </div>
       <div id="edit-form">
         <div class="form-group">
-          <label class="form-label">제목</label>
+          <label class="form-label" data-i18n="lbl_title">Title</label>
           <input id="edit-title" class="form-input" type="text">
         </div>
         <div class="form-group">
@@ -372,22 +374,22 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
           </select>
         </div>
         <div class="form-group">
-          <label class="form-label">Tags (쉼표 구분)</label>
+          <label class="form-label" data-i18n="lbl_tags">Tags (comma-separated)</label>
           <input id="edit-tags" class="form-input" type="text">
         </div>
         <div class="form-group">
-          <label class="form-label">본문 (Markdown)</label>
+          <label class="form-label" data-i18n="lbl_body">Body (Markdown)</label>
           <textarea id="edit-body" class="form-textarea" rows="8"></textarea>
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn primary" id="edit-save">저장</button>
-          <button class="btn" id="edit-cancel">취소</button>
+          <button class="btn primary" id="edit-save" data-i18n="btn_save">Save</button>
+          <button class="btn" id="edit-cancel" data-i18n="btn_cancel">Cancel</button>
         </div>
       </div>
     </div>
     <div class="action-row" id="detail-actions">
-      <button class="action-btn" id="btn-edit-node">편집</button>
-      <button class="action-btn danger" id="btn-delete-node">삭제</button>
+      <button class="action-btn" id="btn-edit-node" data-i18n="btn_edit">Edit</button>
+      <button class="action-btn danger" id="btn-delete-node" data-i18n="btn_delete">Delete</button>
     </div>
   </div>
 </div>
@@ -396,13 +398,13 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 <div id="modal-add-node" class="modal-overlay-base">
   <div class="modal-box">
     <div class="modal-header">
-      <span>노드 추가</span>
+      <span data-i18n="modal_add_node">Add Node</span>
       <button class="modal-close" data-close="modal-add-node">&times;</button>
     </div>
     <div class="modal-body">
       <div class="form-group">
-        <label class="form-label">제목 *</label>
-        <input id="new-title" class="form-input" type="text" placeholder="노드 제목">
+        <label class="form-label" data-i18n="lbl_title_req">Title *</label>
+        <input id="new-title" class="form-input" type="text" placeholder="Node title" data-i18n-placeholder="ph_node_title">
       </div>
       <div class="form-group">
         <label class="form-label">Type</label>
@@ -415,7 +417,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Tags (쉼표 구분)</label>
+        <label class="form-label" data-i18n="lbl_tags">Tags (comma-separated)</label>
         <input id="new-tags" class="form-input" type="text" placeholder="tag1, tag2">
       </div>
       <div class="form-group">
@@ -423,13 +425,13 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
         <input id="new-projects" class="form-input" type="text" placeholder="project1, project2">
       </div>
       <div class="form-group">
-        <label class="form-label">본문 (Markdown)</label>
-        <textarea id="new-body" class="form-textarea" rows="5" placeholder="# 제목&#10;내용을 입력하세요..."></textarea>
+        <label class="form-label" data-i18n="lbl_body">Body (Markdown)</label>
+        <textarea id="new-body" class="form-textarea" rows="5" placeholder="# Title&#10;Content..."></textarea>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" data-close="modal-add-node">취소</button>
-      <button class="btn primary" id="modal-save-btn">저장</button>
+      <button class="btn" data-close="modal-add-node" data-i18n="btn_cancel">Cancel</button>
+      <button class="btn primary" id="modal-save-btn" data-i18n="btn_save">Save</button>
     </div>
   </div>
 </div>
@@ -438,16 +440,16 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 <div id="modal-add-edge" class="modal-overlay-base">
   <div class="modal-box">
     <div class="modal-header">
-      <span>엣지 연결</span>
+      <span data-i18n="modal_add_edge">Link Edge</span>
       <button class="modal-close" data-close="modal-add-edge">&times;</button>
     </div>
     <div class="modal-body">
       <div class="form-group">
-        <label class="form-label">Source 노드</label>
+        <label class="form-label" data-i18n="lbl_source_node">Source Node</label>
         <select id="edge-source" class="form-select"></select>
       </div>
       <div class="form-group">
-        <label class="form-label">Target 노드</label>
+        <label class="form-label" data-i18n="lbl_target_node">Target Node</label>
         <select id="edge-target" class="form-select"></select>
       </div>
       <div class="form-group">
@@ -469,8 +471,8 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn" data-close="modal-add-edge">취소</button>
-      <button class="btn primary" id="edge-save-btn">연결</button>
+      <button class="btn" data-close="modal-add-edge" data-i18n="btn_cancel">Cancel</button>
+      <button class="btn primary" id="edge-save-btn" data-i18n="btn_connect">Connect</button>
     </div>
   </div>
 </div>
@@ -478,15 +480,134 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 <!-- Confirm Dialog -->
 <div id="confirm-dialog">
   <div class="confirm-box">
-    <p id="confirm-msg">이 노드를 삭제하시겠습니까?</p>
+    <p id="confirm-msg"></p>
     <div class="btn-row">
-      <button class="btn" id="confirm-no">취소</button>
-      <button class="btn danger" id="confirm-yes">삭제</button>
+      <button class="btn" id="confirm-no" data-i18n="btn_cancel">Cancel</button>
+      <button class="btn danger" id="confirm-yes" data-i18n="btn_delete">Delete</button>
     </div>
   </div>
 </div>
 
 <script>
+/* ════════════════════════════════════════════════════
+   i18n
+   ════════════════════════════════════════════════════ */
+const I18N = {
+  en: {
+    search_placeholder: 'Search nodes...',
+    btn_add_node:       '+ Add Node',
+    btn_add_edge:       'Link Edge',
+    btn_rebuild:        'Rebuild Graph',
+    opt_all:            'All',
+    search_results:     'Search Results',
+    loading_graph:      'Loading graph...',
+    rebuilding:         'Rebuilding...',
+    node_detail:        'Node Detail',
+    section_body:       'Body',
+    section_edges:      'Connected Edges',
+    lbl_title:          'Title',
+    lbl_title_req:      'Title *',
+    lbl_tags:           'Tags (comma-separated)',
+    lbl_body:           'Body (Markdown)',
+    btn_save:           'Save',
+    btn_cancel:         'Cancel',
+    btn_edit:           'Edit',
+    btn_delete:         'Delete',
+    btn_connect:        'Connect',
+    modal_add_node:     'Add Node',
+    modal_add_edge:     'Link Edge',
+    lbl_source_node:    'Source Node',
+    lbl_target_node:    'Target Node',
+    ph_node_title:      'Node title',
+    no_body:            'No body',
+    no_edges:           'No connected edges',
+    err_title_req:      'Title is required.',
+    err_select_st:      'Select source and target.',
+    err_same_st:        'Source and target must differ.',
+    err_load_graph:     'Graph load failed:',
+    err_rebuild:        'Rebuild failed:',
+    err_node_detail:    'Node detail load failed:',
+    err_search:         'Search failed:',
+    err_add_node:       'Add node failed:',
+    err_edit_node:      'Edit node failed:',
+    err_del_node:       'Delete node failed:',
+    err_add_edge:       'Link edge failed:',
+    opt_select:         'Select...',
+    nodes_unit:         'nodes',
+    edges_unit:         'edges',
+    links_unit:         'links',
+    results_unit:       'results',
+  },
+  ko: {
+    search_placeholder: '노드 검색...',
+    btn_add_node:       '+ 노드 추가',
+    btn_add_edge:       '엣지 연결',
+    btn_rebuild:        '그래프 재빌드',
+    opt_all:            '전체',
+    search_results:     '검색 결과',
+    loading_graph:      '그래프 데이터 로딩 중...',
+    rebuilding:         '재빌드 중...',
+    node_detail:        '노드 상세',
+    section_body:       '본문',
+    section_edges:      '연결 엣지',
+    lbl_title:          '제목',
+    lbl_title_req:      '제목 *',
+    lbl_tags:           'Tags (쉼표 구분)',
+    lbl_body:           '본문 (Markdown)',
+    btn_save:           '저장',
+    btn_cancel:         '취소',
+    btn_edit:           '편집',
+    btn_delete:         '삭제',
+    btn_connect:        '연결',
+    modal_add_node:     '노드 추가',
+    modal_add_edge:     '엣지 연결',
+    lbl_source_node:    'Source 노드',
+    lbl_target_node:    'Target 노드',
+    ph_node_title:      '노드 제목',
+    no_body:            '본문 없음',
+    no_edges:           '연결된 엣지 없음',
+    err_title_req:      '제목을 입력하세요.',
+    err_select_st:      'source와 target을 선택하세요.',
+    err_same_st:        'source와 target이 같을 수 없습니다.',
+    err_load_graph:     '그래프 로딩 실패:',
+    err_rebuild:        '재빌드 실패:',
+    err_node_detail:    '노드 상세 로딩 실패:',
+    err_search:         '검색 실패:',
+    err_add_node:       '노드 추가 실패:',
+    err_edit_node:      '노드 수정 실패:',
+    err_del_node:       '노드 삭제 실패:',
+    err_add_edge:       '엣지 추가 실패:',
+    opt_select:         '선택...',
+    nodes_unit:         '노드',
+    edges_unit:         '엣지',
+    links_unit:         '연결',
+    results_unit:       '건',
+  },
+};
+
+let lang = localStorage.getItem('harness-mem-lang') || 'en';
+
+function t(key) { return (I18N[lang] && I18N[lang][key]) || (I18N.en[key]) || key; }
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    const val = t(key);
+    if (val) el.textContent = val;
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.dataset.i18nPlaceholder;
+    const val = t(key);
+    if (val) el.placeholder = val;
+  });
+  // project-select first option
+  const firstOpt = document.querySelector('#project-select option[data-i18n="opt_all"]');
+  if (firstOpt) firstOpt.textContent = t('opt_all');
+  // lang button label
+  const btnLang = document.getElementById('btn-lang');
+  if (btnLang) btnLang.textContent = lang.toUpperCase();
+}
+
 /* ════════════════════════════════════════════════════
    Config & Constants
    ════════════════════════════════════════════════════ */
@@ -576,6 +697,7 @@ function closeModal(id) { document.getElementById(id).classList.remove('visible'
    Boot
    ════════════════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', () => {
+  applyI18n();
   initD3();
   bindUI();
   loadGraph();
@@ -585,28 +707,28 @@ window.addEventListener('DOMContentLoaded', () => {
    Data
    ════════════════════════════════════════════════════ */
 async function loadGraph() {
-  showLoading(true, '그래프 데이터 로딩 중...');
+  showLoading(true, t('loading_graph'));
   try {
     const data = await api('/graph');
     ingestGraph(data);
     buildSidebar();
     renderGraph();
   } catch (e) {
-    showErr('그래프 로딩 실패: ' + e.message);
+    showErr(t('err_load_graph') + ' ' + e.message);
   } finally {
     showLoading(false);
   }
 }
 
 async function reloadGraph() {
-  showLoading(true, '재빌드 중...');
+  showLoading(true, t('rebuilding'));
   try {
     const data = await api('/graph');
     ingestGraph(data);
     buildSidebar();
     renderGraph();
   } catch (e) {
-    showErr('재빌드 실패: ' + e.message);
+    showErr(t('err_rebuild') + ' ' + e.message);
   } finally {
     showLoading(false);
   }
@@ -684,7 +806,7 @@ function buildSidebar() {
   S.nodes.forEach(n => (n.projects||[]).forEach(p => projs.add(p)));
   const sel = document.getElementById('project-select');
   const prev = sel.value;
-  sel.innerHTML = '<option value="">전체</option>';
+  sel.innerHTML = `<option value="" data-i18n="opt_all">${t('opt_all')}</option>`;
   [...projs].sort().forEach(p => {
     const o = document.createElement('option');
     o.value = p; o.textContent = p;
@@ -694,7 +816,7 @@ function buildSidebar() {
 
   // count badge
   document.getElementById('node-count-badge').textContent =
-    `${S.nodes.length} 노드 / ${S.edges.length} 엣지`;
+    `${S.nodes.length} ${t('nodes_unit')} / ${S.edges.length} ${t('edges_unit')}`;
 
   // populate edge modal selects
   populateEdgeSelects();
@@ -839,7 +961,7 @@ function renderGraph() {
     .on('dblclick', (ev, d) => { ev.stopPropagation(); selectNode(d.id).then(openEditForm); })
     .on('mouseenter', (ev, d) => {
       tooltip.style.display = 'block';
-      tooltip.innerHTML = `<strong>${d.title||d.id}</strong><br><span style="color:var(--text-muted);font-size:11px">${d.type||''} &middot; ${d._deg} 연결</span>`;
+      tooltip.innerHTML = `<strong>${d.title||d.id}</strong><br><span style="color:var(--text-muted);font-size:11px">${d.type||''} &middot; ${d._deg} ${t('links_unit')}</span>`;
     })
     .on('mousemove', (ev) => {
       const rc = wrap.getBoundingClientRect();
@@ -902,7 +1024,7 @@ async function openDetailPanel(id) {
     S.currentNode = node;
     renderDetail(node);
   } catch(e) {
-    showErr('노드 상세 로딩 실패: ' + e.message);
+    showErr(t('err_node_detail') + ' ' + e.message);
   }
 }
 
@@ -936,13 +1058,13 @@ function renderDetail(node) {
   const md = document.getElementById('detail-markdown');
   md.innerHTML = node.body
     ? marked.parse(node.body)
-    : '<span style="color:var(--text-muted)">본문 없음</span>';
+    : `<span style="color:var(--text-muted)">${t('no_body')}</span>`;
 
   // edges
   const edgesEl = document.getElementById('detail-edges');
   const related = S.edges.filter(e => e.source===node.id || e.target===node.id);
   if (!related.length) {
-    edgesEl.innerHTML = '<span style="color:var(--text-muted);font-size:12px">연결된 엣지 없음</span>';
+    edgesEl.innerHTML = `<span style="color:var(--text-muted);font-size:12px">${t('no_edges')}</span>`;
   } else {
     edgesEl.innerHTML = '';
     related.forEach(edge => {
@@ -1000,7 +1122,7 @@ const doSearch = debounce(async (q) => {
     S.searchHits = hitSet;
 
     if (nodeSel) nodeSel.classed('highlighted', d => hitSet.has(d.id));
-    document.getElementById('search-results-count').textContent = `${res.length}건`;
+    document.getElementById('search-results-count').textContent = `${res.length} ${t('results_unit')}`;
 
     const list = document.getElementById('search-results-list');
     list.innerHTML = '';
@@ -1019,7 +1141,7 @@ const doSearch = debounce(async (q) => {
 
     applyFilters();
   } catch(e) {
-    showErr('검색 실패: ' + e.message);
+    showErr(t('err_search') + ' ' + e.message);
   }
 }, 300);
 
@@ -1060,6 +1182,16 @@ function bindUI() {
   document.getElementById('project-select').addEventListener('change', e => {
     S.activeProject = e.target.value;
     applyFilters();
+  });
+
+  /* language toggle */
+  document.getElementById('btn-lang').addEventListener('click', () => {
+    lang = lang === 'en' ? 'ko' : 'en';
+    localStorage.setItem('harness-mem-lang', lang);
+    applyI18n();
+    // refresh dynamic areas that were already rendered
+    if (S.currentNode) renderDetail(S.currentNode);
+    if (S.nodes.length) buildSidebar();
   });
 
   /* toolbar */
@@ -1116,7 +1248,7 @@ function bindUI() {
    ════════════════════════════════════════════════════ */
 async function saveNewNode() {
   const title = document.getElementById('new-title').value.trim();
-  if (!title) { showErr('제목을 입력하세요.'); return; }
+  if (!title) { showErr(t('err_title_req')); return; }
   const body = {
     title,
     type:     document.getElementById('new-type').value,
@@ -1130,7 +1262,7 @@ async function saveNewNode() {
     clearNewNodeForm();
     await reloadGraph();
   } catch(e) {
-    showErr('노드 추가 실패: ' + e.message);
+    showErr(t('err_add_node') + ' ' + e.message);
   }
 }
 
@@ -1159,15 +1291,16 @@ async function saveEditNode() {
     await openDetailPanel(n.id);
     buildSidebar();
   } catch(e) {
-    showErr('노드 수정 실패: ' + e.message);
+    showErr(t('err_edit_node') + ' ' + e.message);
   }
 }
 
 function confirmDelete() {
   const n = S.currentNode;
   if (!n) return;
-  document.getElementById('confirm-msg').textContent =
-    `"${n.title || n.id}" 노드를 삭제하시겠습니까?`;
+  document.getElementById('confirm-msg').textContent = lang === 'ko'
+    ? `"${n.title || n.id}" 노드를 삭제하시겠습니까?`
+    : `Delete node "${n.title || n.id}"?`;
   document.getElementById('confirm-dialog').classList.add('visible');
   document.getElementById('confirm-yes').onclick = () => deleteNode(n.id);
 }
@@ -1181,7 +1314,7 @@ async function deleteNode(id) {
     if (nodeSel) nodeSel.classed('selected', false);
     await reloadGraph();
   } catch(e) {
-    showErr('노드 삭제 실패: ' + e.message);
+    showErr(t('err_del_node') + ' ' + e.message);
   }
 }
 
@@ -1190,14 +1323,14 @@ async function saveEdge() {
   const tgt = document.getElementById('edge-target').value;
   const rel = document.getElementById('edge-relation').value;
   const w   = parseFloat(document.getElementById('edge-weight').value) || 1.0;
-  if (!src || !tgt) { showErr('source와 target을 선택하세요.'); return; }
-  if (src === tgt)   { showErr('source와 target이 같을 수 없습니다.'); return; }
+  if (!src || !tgt) { showErr(t('err_select_st')); return; }
+  if (src === tgt)   { showErr(t('err_same_st')); return; }
   try {
     await api('/edges', { method: 'POST', body: JSON.stringify({ source:src, target:tgt, relation:rel, weight:w }) });
     closeModal('modal-add-edge');
     await reloadGraph();
   } catch(e) {
-    showErr('엣지 추가 실패: ' + e.message);
+    showErr(t('err_add_edge') + ' ' + e.message);
   }
 }
 
@@ -1206,7 +1339,7 @@ function populateEdgeSelects() {
   ['edge-source','edge-target'].forEach(id => {
     const sel = document.getElementById(id);
     const prev = sel.value;
-    sel.innerHTML = '<option value="">선택...</option>';
+    sel.innerHTML = `<option value="">${t('opt_select')}</option>`;
     sorted.forEach(n => {
       const o = document.createElement('option');
       o.value = n.id;
