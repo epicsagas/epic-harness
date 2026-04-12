@@ -1,8 +1,9 @@
 # harness-mem MCP Server
 
-`hooks/scripts/mem-mcp.cjs` is a JSON-RPC 2.0 over stdio MCP server.
-It exposes the unified memory store as native tools to any MCP-compatible agent
-(Claude Code, Cursor, Gemini CLI, OpenCode, and others).
+The unified memory store is exposed as a native MCP server built directly into
+the `epic-harness` binary. No Node.js or external runtime is required.
+
+Transport: JSON-RPC 2.0 over stdio (MCP protocol version `2024-11-05`).
 
 ## Automatic registration (via `install`)
 
@@ -18,19 +19,11 @@ Running `epic-harness install <tool>` **automatically** injects
 | cline | workspace-level only | — |
 | aider | no MCP support | — |
 
-The path to `mem-mcp.cjs` is resolved automatically:
-1. `<bin-dir>/hooks/scripts/mem-mcp.cjs` (installed release)
-2. `<repo-root>/hooks/scripts/mem-mcp.cjs` (dev build)
-3. `~/.harness/bin/mem-mcp.cjs` (manual placement)
-
 ## Standalone registration for Claude Code
 
 ```bash
-# Auto-detect path and register in ~/.claude/settings.json
+# Register in ~/.claude/settings.json
 epic-harness mem mcp-install
-
-# Specify path explicitly
-epic-harness mem mcp-install --path /path/to/mem-mcp.cjs
 
 # Preview without writing
 epic-harness mem mcp-install --dry-run
@@ -42,8 +35,8 @@ The resulting entry in `~/.claude/settings.json`:
 {
   "mcpServers": {
     "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+      "command": "/path/to/epic-harness",
+      "args": ["mem", "mcp"]
     }
   }
 }
@@ -57,8 +50,8 @@ The resulting entry in `~/.claude/settings.json`:
 {
   "mcpServers": {
     "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+      "command": "epic-harness",
+      "args": ["mem", "mcp"]
     }
   }
 }
@@ -70,8 +63,8 @@ The resulting entry in `~/.claude/settings.json`:
 {
   "mcpServers": {
     "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+      "command": "epic-harness",
+      "args": ["mem", "mcp"]
     }
   }
 }
@@ -83,8 +76,8 @@ The resulting entry in `~/.claude/settings.json`:
 {
   "mcpServers": {
     "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+      "command": "epic-harness",
+      "args": ["mem", "mcp"]
     }
   }
 }
@@ -109,14 +102,14 @@ The resulting entry in `~/.claude/settings.json`:
 ## Testing
 
 ```bash
-# Unit tests
-node hooks/scripts/mem-mcp.test.cjs
+# Start MCP server manually (reads JSON-RPC from stdin)
+epic-harness mem mcp
 
-# Initialize
+# Initialize handshake
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test","version":"1.0"}}}' \
-  | node hooks/scripts/mem-mcp.cjs
+  | epic-harness mem mcp
 
 # List available tools
 echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | node hooks/scripts/mem-mcp.cjs
+  | epic-harness mem mcp
 ```

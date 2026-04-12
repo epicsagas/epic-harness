@@ -54,11 +54,7 @@ fn test_mcp_install_dry_run() {
     fs::write(&settings_path, "{}").unwrap();
     set_claude_settings(&settings_path);
 
-    let code = run_mem(&[
-        "mcp-install",
-        "--path", "/tmp/fake-mem-mcp.cjs",
-        "--dry-run",
-    ]);
+    let code = run_mem(&["mcp-install", "--dry-run"]);
     assert_eq!(code, 0, "mcp-install --dry-run should exit 0");
 
     // File should remain unchanged
@@ -76,20 +72,17 @@ fn test_mcp_install_writes_settings() {
     fs::write(&settings_path, "{}").unwrap();
     set_claude_settings(&settings_path);
 
-    let code = run_mem(&[
-        "mcp-install",
-        "--path", "/tmp/fake-mem-mcp.cjs",
-    ]);
+    let code = run_mem(&["mcp-install"]);
     assert_eq!(code, 0, "mcp-install should exit 0");
 
     let content = fs::read_to_string(&settings_path).unwrap();
     let val: serde_json::Value = serde_json::from_str(&content).unwrap();
     let server = &val["mcpServers"]["harness-mem"];
-    assert_eq!(server["command"].as_str().unwrap(), "node");
-    assert_eq!(
-        server["args"][0].as_str().unwrap(),
-        "/tmp/fake-mem-mcp.cjs"
-    );
+    // Now registers the Rust binary, not node
+    let command = server["command"].as_str().unwrap();
+    assert!(!command.is_empty(), "command should be non-empty");
+    assert_eq!(server["args"][0].as_str().unwrap(), "mem");
+    assert_eq!(server["args"][1].as_str().unwrap(), "mcp");
 }
 
 #[test]
@@ -101,8 +94,8 @@ fn test_mcp_install_already_registered() {
     let existing = serde_json::json!({
         "mcpServers": {
             "harness-mem": {
-                "command": "node",
-                "args": ["/old/path/mem-mcp.cjs"]
+                "command": "epic-harness",
+                "args": ["mem", "mcp"]
             }
         }
     });
@@ -110,18 +103,15 @@ fn test_mcp_install_already_registered() {
     fs::write(&settings_path, serde_json::to_string(&existing).unwrap()).unwrap();
     set_claude_settings(&settings_path);
 
-    let code = run_mem(&[
-        "mcp-install",
-        "--path", "/tmp/fake-mem-mcp.cjs",
-    ]);
+    let code = run_mem(&["mcp-install"]);
     assert_eq!(code, 0, "already registered should exit 0");
 
-    // Content should be unchanged (old path preserved)
+    // Content should be unchanged
     let content = fs::read_to_string(&settings_path).unwrap();
     let val: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(
-        val["mcpServers"]["harness-mem"]["args"][0].as_str().unwrap(),
-        "/old/path/mem-mcp.cjs",
+        val["mcpServers"]["harness-mem"]["command"].as_str().unwrap(),
+        "epic-harness",
         "existing registration should not be overwritten"
     );
 }
@@ -379,10 +369,7 @@ fn test_mcp_install_no_leftover_tmp() {
     fs::write(&settings_path, "{}").unwrap();
     set_claude_settings(&settings_path);
 
-    let code = run_mem(&[
-        "mcp-install",
-        "--path", "/tmp/fake-mem-mcp.cjs",
-    ]);
+    let code = run_mem(&["mcp-install"]);
     assert_eq!(code, 0, "mcp-install should exit 0");
 
     // No fixed-name .json.tmp should be left behind

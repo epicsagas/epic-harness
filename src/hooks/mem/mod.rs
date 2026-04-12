@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod graph;
+pub mod mcp;
 pub mod server;
 pub mod store;
 

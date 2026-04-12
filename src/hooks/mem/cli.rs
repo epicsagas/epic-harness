@@ -27,7 +27,8 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ("validate",    "Check all node files for parse errors"),
     ("migrate",     "Import legacy project memory files"),
     ("context",     "Show recently-updated nodes for a project"),
-    ("mcp-install", "Register the harness-mem MCP server"),
+    ("mcp",         "Run as stdio MCP server (JSON-RPC 2.0)"),
+    ("mcp-install", "Register the harness-mem MCP server in Claude Code"),
     ("serve",       "Start the REST + Web UI server"),
     ("help",        "Show this help message"),
 ];
@@ -213,6 +214,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         "validate"    => cmd_validate(),
         "migrate"     => cmd_migrate(&args[1..]),
         "context"     => cmd_context(&args[1..]),
+        "mcp"         => return super::mcp::run_mcp_server(),
         "mcp-install" => cmd_mcp_install(&args[1..]),
         "serve"       => return super::server::serve(&args[1..]),
         "help" | "--help" | "-h" => {
@@ -638,81 +640,6 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
     Ok(0)
 }
 
-/// mem-mcp.cjs embedded in the binary — extracted on demand to ~/.harness/bin/
-static MEM_MCP_CJS: &str = include_str!("../../../hooks/scripts/mem-mcp.cjs");
-
-/// Scan ~/.claude/plugins/cache/epicsagas/epic/<ver>/hooks/scripts/mem-mcp.cjs
-/// Returns the most recently modified version's path if found.
-fn find_in_claude_plugin_cache() -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    let cache_dir = PathBuf::from(&home)
-        .join(".claude").join("plugins").join("cache")
-        .join("epicsagas").join("epic");
-    if !cache_dir.exists() { return None; }
-
-    // Collect all version dirs that contain the target file
-    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(&cache_dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let p = e.path().join("hooks").join("scripts").join("mem-mcp.cjs");
-            if p.exists() {
-                let mtime = fs::metadata(e.path()).ok()?.modified().ok()?;
-                Some((mtime, p))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    candidates.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
-    candidates.into_iter().next().map(|(_, p)| p)
-}
-
-/// Returns the path to mem-mcp.cjs, extracting it from the embedded copy if needed.
-fn find_or_extract_mcp_cjs() -> io::Result<PathBuf> {
-    // 1. Cargo dev build: repo root relative to binary (target/debug -> repo root)
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(c) = exe.parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .map(|repo| repo.join("hooks").join("scripts").join("mem-mcp.cjs"))
-            .filter(|c| c.exists())
-    {
-        return Ok(c);
-    }
-
-    // 2. Claude Code plugin cache (~/.claude/plugins/cache/epicsagas/epic/<ver>/...)
-    if let Some(c) = find_in_claude_plugin_cache() {
-        return Ok(c);
-    }
-
-    // 3. ~/.harness/bin/mem-mcp.cjs — already extracted
-    let dest = harness_bin_dir().join("mem-mcp.cjs");
-    if dest.exists() {
-        return Ok(dest);
-    }
-
-    // 4. Extract embedded copy to ~/.harness/bin/mem-mcp.cjs
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&dest, MEM_MCP_CJS)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
-    }
-    Ok(dest)
-}
-
-fn harness_bin_dir() -> PathBuf {
-    let root = std::env::var("HARNESS_ROOT")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(root).join(".harness").join("bin")
-}
-
 fn claude_settings_path() -> PathBuf {
     if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") {
         return PathBuf::from(p);
@@ -722,15 +649,17 @@ fn claude_settings_path() -> PathBuf {
         .join("settings.json")
 }
 
+fn find_epic_harness_binary() -> String {
+    // Prefer the currently-running binary path
+    if let Ok(exe) = std::env::current_exe() {
+        return exe.to_string_lossy().into_owned();
+    }
+    "epic-harness".to_string()
+}
+
 fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let (_, flags) = parse_flags(args);
     let dry_run = flags.contains_key("dry-run");
-
-    let mcp_path = if let Some(p) = flags.get("path") {
-        p.clone()
-    } else {
-        find_or_extract_mcp_cjs()?.to_string_lossy().into_owned()
-    };
 
     let settings_path = claude_settings_path();
 
@@ -748,9 +677,10 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
         return Ok(0);
     }
 
+    let binary = find_epic_harness_binary();
     let entry = serde_json::json!({
-        "command": "node",
-        "args": [mcp_path]
+        "command": binary,
+        "args": ["mem", "mcp"]
     });
 
     if dry_run {
