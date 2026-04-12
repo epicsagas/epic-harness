@@ -652,17 +652,18 @@ fn make_executable(path: &Path) {
 
 // ── MCP injection ─────────────────────────────────────────────────────────────
 
-/// Returns the absolute path to mem-mcp.cjs, searching common locations.
-fn find_mcp_cjs() -> Option<PathBuf> {
-    // 1. Sibling to the running binary: <bin-dir>/hooks/scripts/mem-mcp.cjs
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(c) = exe.parent()
-            .map(|d| d.join("hooks").join("scripts").join("mem-mcp.cjs"))
-            .filter(|c| c.exists())
-    {
-        return Some(c);
-    }
-    // 2. Cargo dev build: target/debug -> target -> repo root
+static MEM_MCP_CJS: &str = include_str!("../../hooks/scripts/mem-mcp.cjs");
+
+fn harness_bin_dir() -> PathBuf {
+    let root = std::env::var("HARNESS_ROOT")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(root).join(".harness").join("bin")
+}
+
+/// Returns path to mem-mcp.cjs, extracting the embedded copy to ~/.harness/bin/ if needed.
+fn find_or_extract_mcp_cjs() -> Option<PathBuf> {
+    // 1. Cargo dev build: target/debug -> target -> repo root
     if let Ok(exe) = std::env::current_exe()
         && let Some(c) = exe.parent()
             .and_then(|p| p.parent())
@@ -672,22 +673,34 @@ fn find_mcp_cjs() -> Option<PathBuf> {
     {
         return Some(c);
     }
-    // 3. ~/.harness/bin/mem-mcp.cjs
-    if let Ok(home) = std::env::var("HOME") {
-        let c = PathBuf::from(home).join(".harness").join("bin").join("mem-mcp.cjs");
-        if c.exists() { return Some(c); }
+
+    // 2. ~/.harness/bin/mem-mcp.cjs — already extracted
+    let dest = harness_bin_dir().join("mem-mcp.cjs");
+    if dest.exists() {
+        return Some(dest);
     }
-    None
+
+    // 3. Extract embedded copy
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).ok()?;
+    }
+    fs::write(&dest, MEM_MCP_CJS).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
+    }
+    Some(dest)
 }
 
 /// Injects `mcpServers.harness-mem` into the tool's settings JSON file.
 /// Silently skips if the settings file doesn't exist or already has the entry.
 fn inject_mcp(tool: &str, target_dir: &Path) {
-    let mcp_cjs = match find_mcp_cjs() {
+    let mcp_cjs = match find_or_extract_mcp_cjs() {
         Some(p) => p,
         None => {
             eprintln!(
-                "[harness] Note: mem-mcp.cjs not found — skipping MCP registration.\n\
+                "[harness] Note: failed to extract mem-mcp.cjs — skipping MCP registration.\n\
                  [harness] Run 'epic-harness mem mcp-install --path <path/to/mem-mcp.cjs>' manually."
             );
             return;

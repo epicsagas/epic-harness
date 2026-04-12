@@ -638,17 +638,12 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
     Ok(0)
 }
 
-/// Search common locations for mem-mcp.cjs.
-fn find_mcp_cjs() -> Option<PathBuf> {
-    // 1. Sibling to running binary: <bin-dir>/hooks/scripts/mem-mcp.cjs
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(c) = exe.parent()
-            .map(|d| d.join("hooks").join("scripts").join("mem-mcp.cjs"))
-            .filter(|c| c.exists())
-    {
-        return Some(c);
-    }
-    // 2. Cargo dev build: target/debug -> target -> repo root
+/// mem-mcp.cjs embedded in the binary — extracted on demand to ~/.harness/bin/
+static MEM_MCP_CJS: &str = include_str!("../../../hooks/scripts/mem-mcp.cjs");
+
+/// Returns the path to mem-mcp.cjs, extracting it from the embedded copy if needed.
+fn find_or_extract_mcp_cjs() -> io::Result<PathBuf> {
+    // 1. Cargo dev build: repo root relative to binary (target/debug -> repo root)
     if let Ok(exe) = std::env::current_exe()
         && let Some(c) = exe.parent()
             .and_then(|p| p.parent())
@@ -656,14 +651,33 @@ fn find_mcp_cjs() -> Option<PathBuf> {
             .map(|repo| repo.join("hooks").join("scripts").join("mem-mcp.cjs"))
             .filter(|c| c.exists())
     {
-        return Some(c);
+        return Ok(c);
     }
-    // 3. ~/.harness/bin/mem-mcp.cjs
-    if let Ok(home) = std::env::var("HOME") {
-        let c = PathBuf::from(home).join(".harness").join("bin").join("mem-mcp.cjs");
-        if c.exists() { return Some(c); }
+
+    // 2. ~/.harness/bin/mem-mcp.cjs — already extracted
+    let dest = harness_bin_dir().join("mem-mcp.cjs");
+    if dest.exists() {
+        return Ok(dest);
     }
-    None
+
+    // 3. Extract embedded copy to ~/.harness/bin/mem-mcp.cjs
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&dest, MEM_MCP_CJS)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o755));
+    }
+    Ok(dest)
+}
+
+fn harness_bin_dir() -> PathBuf {
+    let root = std::env::var("HARNESS_ROOT")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(root).join(".harness").join("bin")
 }
 
 fn claude_settings_path() -> PathBuf {
@@ -682,12 +696,7 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let mcp_path = if let Some(p) = flags.get("path") {
         p.clone()
     } else {
-        find_mcp_cjs().map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                "mem-mcp.cjs not found. Specify --path <path/to/mem-mcp.cjs>",
-            )
-        })?
+        find_or_extract_mcp_cjs()?.to_string_lossy().into_owned()
     };
 
     let settings_path = claude_settings_path();
