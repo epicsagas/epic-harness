@@ -3,14 +3,29 @@ use std::sync::LazyLock;
 
 use super::common::*;
 
+static MASK_BEARER: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
+static MASK_SK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
+static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret)[=:]\s*\S+").unwrap()
+});
+
+pub fn mask_secrets(s: &str) -> String {
+    let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
+    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
+    let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
+    s.into_owned()
+}
+
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
 });
 
 fn get_next_sequence_id(session_file: &std::path::Path) -> u64 {
-    std::fs::read(session_file)
-        .map(|buf| buf.iter().filter(|&&b| b == b'\n').count() as u64 + 1)
-        .unwrap_or(1)
+    std::fs::metadata(session_file)
+        .map(|m| m.len())
+        .unwrap_or(0)
 }
 
 fn get_last_action(session_file: &std::path::Path) -> Option<String> {
@@ -192,7 +207,8 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            record.error_snippet = Some(combined[..combined.len().min(500)].to_string());
+            let masked = mask_secrets(&combined[..combined.len().min(500)]);
+            record.error_snippet = Some(masked);
         }
     }
 
@@ -310,6 +326,27 @@ mod tests {
         assert_eq!(dims.tool_success, 0.0);
     }
 
+    // ── get_next_sequence_id ────────────────────────
+    #[test]
+    fn sequence_id_zero_for_missing_file() {
+        let path = std::path::Path::new("/tmp/epic_harness_nonexistent_file_xyzzy.jsonl");
+        assert_eq!(get_next_sequence_id(path), 0);
+    }
+
+    #[test]
+    fn sequence_id_increases_with_content() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join("epic_harness_seq_test.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        let id_empty = get_next_sequence_id(&path);
+        f.write_all(b"{\"a\":1}\n").unwrap();
+        f.flush().unwrap();
+        let id_after = get_next_sequence_id(&path);
+        assert!(id_after > id_empty);
+        let _ = std::fs::remove_file(&path);
+    }
+
     // ── compute_score integration ───────────────────
     #[test]
     fn score_bash_perfect_run() {
@@ -324,5 +361,37 @@ mod tests {
         let score = compute_score(&dims);
         assert!(score <= 0.5);
         assert_eq!(dims.tool_success, 0.0);
+    }
+
+    // ── mask_secrets ────────────────────────────────
+    #[test]
+    fn test_mask_bearer_token() {
+        let input = r#"curl -H "Authorization: Bearer sk-abc123XYZ" failed"#;
+        let output = mask_secrets(input);
+        assert!(!output.contains("sk-abc123XYZ"), "Bearer token must be redacted");
+        assert!(output.contains("Bearer <REDACTED>"), "must have redacted placeholder");
+    }
+
+    #[test]
+    fn test_mask_sk_key() {
+        let input = "Error: invalid key sk-proj-abcDEF12345678 supplied";
+        let output = mask_secrets(input);
+        assert!(!output.contains("sk-proj-abcDEF12345678"), "sk- key must be redacted");
+        assert!(output.contains("sk-<REDACTED>"), "must have sk-<REDACTED>");
+    }
+
+    #[test]
+    fn test_mask_password_equals() {
+        let input = "connection failed: password=s3cr3tP@ss! reason=timeout";
+        let output = mask_secrets(input);
+        assert!(!output.contains("s3cr3tP@ss!"), "password value must be redacted");
+        assert!(output.contains("<REDACTED>"), "must have redacted placeholder");
+    }
+
+    #[test]
+    fn test_mask_safe_text_unchanged() {
+        let input = "all tests passed in 42ms, no errors found";
+        let output = mask_secrets(input);
+        assert_eq!(output, input, "safe text must not be modified");
     }
 }

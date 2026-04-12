@@ -48,7 +48,7 @@ fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         } else {
             "0.8-1.0"
         };
-        *buckets.get_mut(key).unwrap() += 1;
+        *buckets.entry(key.into()).or_default() += 1;
     }
 
     // Per-tool stats

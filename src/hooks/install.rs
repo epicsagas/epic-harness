@@ -960,3 +960,118 @@ pub fn run_uninstall(args: &[String]) -> i32 {
         Some(tool) => uninstall_tool(tool, local, dry_run),
     }
 }
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_dir() -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("epic_test_{}_{}", std::process::id(), rand_suffix()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Cheap non-crypto suffix so parallel tests don't collide.
+    fn rand_suffix() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() as u64)
+            .unwrap_or(0)
+    }
+
+    // ── write_if_missing ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_write_if_missing_creates_new_file() {
+        let dir = tmp_dir();
+        let dest = dir.join("new.md");
+        let status = write_if_missing(&dest, "hello", false);
+        assert!(matches!(status, FileStatus::Added));
+        assert!(dest.exists());
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "hello");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_if_missing_skips_existing() {
+        let dir = tmp_dir();
+        let dest = dir.join("existing.md");
+        fs::write(&dest, "original").unwrap();
+        let status = write_if_missing(&dest, "new content", false);
+        assert!(matches!(status, FileStatus::Unchanged));
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "original");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── write_or_sync ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_write_or_sync_creates_new() {
+        let dir = tmp_dir();
+        let dest = dir.join("brand_new.txt");
+        let status = write_or_sync(&dest, "content", false);
+        assert!(matches!(status, FileStatus::Added));
+        assert!(dest.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_or_sync_updates_changed() {
+        let dir = tmp_dir();
+        let dest = dir.join("changed.txt");
+        fs::write(&dest, "old").unwrap();
+        let status = write_or_sync(&dest, "new", false);
+        assert!(matches!(status, FileStatus::Updated));
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "new");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_or_sync_unchanged_same_content() {
+        let dir = tmp_dir();
+        let dest = dir.join("same.txt");
+        fs::write(&dest, "identical").unwrap();
+        let status = write_or_sync(&dest, "identical", false);
+        assert!(matches!(status, FileStatus::Unchanged));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_or_sync_dry_run_no_write() {
+        let dir = tmp_dir();
+        let dest = dir.join("dry.txt");
+        // File does not exist; dry_run should return Added but not create file.
+        let status = write_or_sync(&dest, "content", true);
+        assert!(matches!(status, FileStatus::Added));
+        assert!(!dest.exists());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_or_sync_merges_settings_json() {
+        let dir = tmp_dir();
+        let dest = dir.join("settings.json");
+        // Existing file has a user key that must survive the merge.
+        fs::write(
+            &dest,
+            r#"{"theme":"dark","hooksConfig":{"old":true}}"#,
+        )
+        .unwrap();
+        let new_content = r#"{"hooksConfig":{"new":true}}"#;
+        let status = write_or_sync(&dest, new_content, false);
+        assert!(matches!(status, FileStatus::Updated));
+        let written = fs::read_to_string(&dest).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&written).unwrap();
+        // Existing key preserved.
+        assert_eq!(v["theme"], "dark");
+        // hooksConfig updated to new value.
+        assert_eq!(v["hooksConfig"]["new"], true);
+        // Old hooksConfig key gone (replaced, not merged within hooksConfig).
+        assert!(v["hooksConfig"]["old"].is_null());
+        let _ = fs::remove_dir_all(dir);
+    }
+}
