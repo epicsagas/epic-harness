@@ -47,17 +47,31 @@ fn main() {
             0
         }
         _ => {
-            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|mem|install|uninstall|path>");
-            eprintln!(
-                "       epic-harness install [codex|gemini|cursor|opencode|cline|aider] [--local] [--dry-run]"
-            );
-            eprintln!(
-                "       epic-harness mem <add|edit|delete|query|search|related|link|graph|validate|migrate|context|serve>"
-            );
-            eprintln!(
-                "       (omit tool name for interactive menu; root-only GEMINI.md only if missing)"
-            );
-            1
+            let is_unknown = !matches!(subcmd, "help" | "--help" | "-h");
+            if is_unknown {
+                eprintln!("error: unknown subcommand '{subcmd}'\n");
+            }
+            eprintln!("epic-harness {} — Self-evolving agent harness for Claude Code\n", env!("CARGO_PKG_VERSION"));
+            eprintln!("USAGE:");
+            eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
+            eprintln!("HOOK SUBCOMMANDS (invoked automatically by Claude Code hooks):");
+            eprintln!("  resume       Restore session context on conversation start");
+            eprintln!("  guard        Block/warn on dangerous shell commands");
+            eprintln!("  observe      Record tool call observations for pattern analysis");
+            eprintln!("  polish       Auto-format and typecheck after file edits");
+            eprintln!("  snapshot     Save session state mid-conversation");
+            eprintln!("  reflect      Analyze observations and evolve skills (session end)\n");
+            eprintln!("USER SUBCOMMANDS:");
+            eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
+            eprintln!("  install      Install harness into a supported AI tool");
+            eprintln!("  uninstall    Remove harness from a supported AI tool");
+            eprintln!("  path         Print the harness data directory");
+            eprintln!("  version      Print version\n");
+            eprintln!("INSTALL TARGETS:  codex  gemini  cursor  opencode  cline  aider");
+            eprintln!("  --local       Install in ./.claude/ instead of ~/.claude/");
+            eprintln!("  --dry-run     Preview without writing\n");
+            eprintln!("Run 'epic-harness mem help' for memory subcommand details.");
+            if is_unknown { 1 } else { 0 }
         }
     };
 
