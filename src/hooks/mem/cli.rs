@@ -641,6 +641,34 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
 /// mem-mcp.cjs embedded in the binary — extracted on demand to ~/.harness/bin/
 static MEM_MCP_CJS: &str = include_str!("../../../hooks/scripts/mem-mcp.cjs");
 
+/// Scan ~/.claude/plugins/cache/epicsagas/epic/<ver>/hooks/scripts/mem-mcp.cjs
+/// Returns the most recently modified version's path if found.
+fn find_in_claude_plugin_cache() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let cache_dir = PathBuf::from(&home)
+        .join(".claude").join("plugins").join("cache")
+        .join("epicsagas").join("epic");
+    if !cache_dir.exists() { return None; }
+
+    // Collect all version dirs that contain the target file
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(&cache_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let p = e.path().join("hooks").join("scripts").join("mem-mcp.cjs");
+            if p.exists() {
+                let mtime = fs::metadata(e.path()).ok()?.modified().ok()?;
+                Some((mtime, p))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    candidates.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    candidates.into_iter().next().map(|(_, p)| p)
+}
+
 /// Returns the path to mem-mcp.cjs, extracting it from the embedded copy if needed.
 fn find_or_extract_mcp_cjs() -> io::Result<PathBuf> {
     // 1. Cargo dev build: repo root relative to binary (target/debug -> repo root)
@@ -654,13 +682,18 @@ fn find_or_extract_mcp_cjs() -> io::Result<PathBuf> {
         return Ok(c);
     }
 
-    // 2. ~/.harness/bin/mem-mcp.cjs — already extracted
+    // 2. Claude Code plugin cache (~/.claude/plugins/cache/epicsagas/epic/<ver>/...)
+    if let Some(c) = find_in_claude_plugin_cache() {
+        return Ok(c);
+    }
+
+    // 3. ~/.harness/bin/mem-mcp.cjs — already extracted
     let dest = harness_bin_dir().join("mem-mcp.cjs");
     if dest.exists() {
         return Ok(dest);
     }
 
-    // 3. Extract embedded copy to ~/.harness/bin/mem-mcp.cjs
+    // 4. Extract embedded copy to ~/.harness/bin/mem-mcp.cjs
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent)?;
     }

@@ -661,6 +661,32 @@ fn harness_bin_dir() -> PathBuf {
     PathBuf::from(root).join(".harness").join("bin")
 }
 
+/// Scan ~/.claude/plugins/cache/epicsagas/epic/<ver>/hooks/scripts/mem-mcp.cjs
+fn find_in_claude_plugin_cache() -> Option<PathBuf> {
+    let home = std::env::var("HOME").ok()?;
+    let cache_dir = PathBuf::from(&home)
+        .join(".claude").join("plugins").join("cache")
+        .join("epicsagas").join("epic");
+    if !cache_dir.exists() { return None; }
+
+    let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = fs::read_dir(&cache_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let p = e.path().join("hooks").join("scripts").join("mem-mcp.cjs");
+            if p.exists() {
+                let mtime = fs::metadata(e.path()).ok()?.modified().ok()?;
+                Some((mtime, p))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.into_iter().next().map(|(_, p)| p)
+}
+
 /// Returns path to mem-mcp.cjs, extracting the embedded copy to ~/.harness/bin/ if needed.
 fn find_or_extract_mcp_cjs() -> Option<PathBuf> {
     // 1. Cargo dev build: target/debug -> target -> repo root
@@ -674,13 +700,18 @@ fn find_or_extract_mcp_cjs() -> Option<PathBuf> {
         return Some(c);
     }
 
-    // 2. ~/.harness/bin/mem-mcp.cjs — already extracted
+    // 2. Claude Code plugin cache
+    if let Some(c) = find_in_claude_plugin_cache() {
+        return Some(c);
+    }
+
+    // 3. ~/.harness/bin/mem-mcp.cjs — already extracted
     let dest = harness_bin_dir().join("mem-mcp.cjs");
     if dest.exists() {
         return Some(dest);
     }
 
-    // 3. Extract embedded copy
+    // 4. Extract embedded copy
     if let Some(parent) = dest.parent() {
         fs::create_dir_all(parent).ok()?;
     }
