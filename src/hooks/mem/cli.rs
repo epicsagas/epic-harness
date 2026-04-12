@@ -15,31 +15,224 @@ use super::store::{
     write_node, Edge, IndexNode, Node, NodeFrontmatter,
 };
 
+const SUBCOMMANDS: &[(&str, &str)] = &[
+    ("add",         "Add a new memory node"),
+    ("edit",        "Edit an existing node"),
+    ("delete",      "Delete a node and its edges"),
+    ("query",       "List/filter nodes from the index"),
+    ("search",      "Full-text search across node files"),
+    ("related",     "BFS traversal — find related nodes"),
+    ("link",        "Create a directed edge between two nodes"),
+    ("graph",       "Manage the graph cache (rebuild)"),
+    ("validate",    "Check all node files for parse errors"),
+    ("migrate",     "Import legacy project memory files"),
+    ("context",     "Show recently-updated nodes for a project"),
+    ("mcp-install", "Register the harness-mem MCP server"),
+    ("serve",       "Start the REST + Web UI server"),
+    ("help",        "Show this help message"),
+];
+
+fn print_help() {
+    println!("harness mem — Cross-Agent Unified Memory\n");
+    println!("USAGE:");
+    println!("  harness mem <SUBCOMMAND> [OPTIONS]\n");
+    println!("SUBCOMMANDS:");
+    for (name, desc) in SUBCOMMANDS {
+        println!("  {name:<14} {desc}");
+    }
+    println!("\nRun 'harness mem <SUBCOMMAND> --help' for subcommand-specific options.");
+}
+
+fn print_subcommand_help(sub: &str) {
+    match sub {
+        "add" => {
+            println!("harness mem add — Add a new memory node\n");
+            println!("USAGE:");
+            println!("  harness mem add [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --title <text>      Node title (default: Untitled)");
+            println!("  --type <type>       Node type: concept|decision|pattern|task|... (default: concept)");
+            println!("  --tags <a,b,c>      Comma-separated tags");
+            println!("  --project <name>    Associate with a project slug");
+            println!("  --agent <name>      Associate with an agent name");
+            println!("  --body <text>       Node body content");
+            println!("\nOUTPUT: {{\"id\":\"<uuid>\"}}");
+        }
+        "edit" => {
+            println!("harness mem edit — Edit an existing node\n");
+            println!("USAGE:");
+            println!("  harness mem edit <ID> [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --title <text>      New title");
+            println!("  --type <type>       New node type");
+            println!("  --tags <a,b,c>      Replace tags (comma-separated)");
+            println!("  --body <text>       Replace body content");
+            println!("\nOUTPUT: {{\"id\":\"<uuid>\"}}");
+        }
+        "delete" => {
+            println!("harness mem delete — Delete a node and its edges\n");
+            println!("USAGE:");
+            println!("  harness mem delete <ID>\n");
+            println!("OUTPUT: {{\"deleted\":\"<uuid>\"}}");
+        }
+        "query" => {
+            println!("harness mem query — List/filter nodes from the index\n");
+            println!("USAGE:");
+            println!("  harness mem query [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --tag <tag>         Filter by tag");
+            println!("  --type <type>       Filter by node type");
+            println!("  --project <name>    Filter by project slug");
+            println!("  --agent <name>      Filter by agent name");
+            println!("\nOUTPUT: JSON array of matching index nodes");
+        }
+        "search" => {
+            println!("harness mem search — Full-text search across node files\n");
+            println!("USAGE:");
+            println!("  harness mem search <QUERY>\n");
+            println!("  Uses ripgrep (rg) with grep fallback.");
+            println!("\nOUTPUT: matching lines (file:line:content)");
+        }
+        "related" => {
+            println!("harness mem related — BFS traversal to find related nodes\n");
+            println!("USAGE:");
+            println!("  harness mem related <ID> [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --depth <n>         Max traversal hops (default: 2)");
+            println!("\nOUTPUT: JSON array of related node IDs");
+        }
+        "link" => {
+            println!("harness mem link — Create a directed edge between two nodes\n");
+            println!("USAGE:");
+            println!("  harness mem link <SRC-ID> <DST-ID> [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --relation <name>   Edge label (default: related)");
+            println!("  --weight <float>    Edge weight (default: 1.0)");
+            println!("\nOUTPUT: {{\"edge_id\":\"<uuid>\"}}");
+        }
+        "graph" => {
+            println!("harness mem graph — Manage the graph cache\n");
+            println!("USAGE:");
+            println!("  harness mem graph rebuild\n");
+            println!("  Rebuilds graph.json from current nodes + edges.");
+            println!("\nOUTPUT: {{\"status\":\"ok\"}}");
+        }
+        "validate" => {
+            println!("harness mem validate — Check all node files for parse errors\n");
+            println!("USAGE:");
+            println!("  harness mem validate\n");
+            println!("OUTPUT: JSON array of {{\"file\", \"error\"}} — empty array if all valid.");
+            println!("EXIT:   0 if valid, 1 if any errors found");
+        }
+        "migrate" => {
+            println!("harness mem migrate — Import legacy project memory files\n");
+            println!("USAGE:");
+            println!("  harness mem migrate [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --project <slug>    Migrate only this project (default: all)");
+            println!("  --all               Migrate all projects");
+            println!("  --dry-run           Preview without writing");
+            println!("\nOUTPUT: {{\"migrated\":<n>, \"dry_run\":<bool>, \"nodes\":[...]}}");
+        }
+        "context" => {
+            println!("harness mem context — Show recently-updated nodes\n");
+            println!("USAGE:");
+            println!("  harness mem context [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --project <name>    Filter by project slug");
+            println!("  --limit <n>         Max nodes to return (default: 5)");
+            println!("\nOUTPUT: JSON array of index nodes sorted by updated desc");
+        }
+        "mcp-install" => {
+            println!("harness mem mcp-install — Register the harness-mem MCP server\n");
+            println!("USAGE:");
+            println!("  harness mem mcp-install --path <path/to/mem-mcp.cjs> [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --path <path>       Path to mem-mcp.cjs (required)");
+            println!("  --dry-run           Preview without writing settings.json");
+        }
+        "serve" => {
+            println!("harness mem serve — Start the REST + Web UI server\n");
+            println!("USAGE:");
+            println!("  harness mem serve [OPTIONS]\n");
+            println!("OPTIONS:");
+            println!("  --port <n>          Port to listen on (default: 7700)");
+            println!("\n  Web UI: http://localhost:7700");
+            println!("  API:    http://localhost:7700/api/nodes");
+        }
+        _ => print_help(),
+    }
+}
+
+/// Levenshtein distance for "did you mean?" suggestions (max checked distance: 3)
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.iter().enumerate() {
+        let mut curr = vec![0usize; b.len() + 1];
+        curr[0] = i + 1;
+        for (j, cb) in b.iter().enumerate() {
+            curr[j + 1] = if ca == cb {
+                prev[j]
+            } else {
+                1 + prev[j + 1].min(curr[j]).min(prev[j])
+            };
+        }
+        prev = curr;
+    }
+    prev[b.len()]
+}
+
 pub fn dispatch(args: &[String]) -> i32 {
     let sub = match args.first().map(|s| s.as_str()) {
         Some(s) => s,
         None => {
-            eprintln!("Usage: harness mem <add|edit|delete|query|search|related|link|graph|validate|migrate|context|serve>");
-            return 1;
+            print_help();
+            return 0;  // help is not an error
         }
     };
 
+    // --help / -h on any subcommand
+    if args.get(1).map(|s| s.as_str()) == Some("--help")
+        || args.get(1).map(|s| s.as_str()) == Some("-h")
+    {
+        print_subcommand_help(sub);
+        return 0;
+    }
+
     let result = match sub {
-        "add" => cmd_add(&args[1..]),
-        "edit" => cmd_edit(&args[1..]),
-        "delete" => cmd_delete(&args[1..]),
-        "query" => cmd_query(&args[1..]),
-        "search" => cmd_search(&args[1..]),
-        "related" => cmd_related(&args[1..]),
-        "link" => cmd_link(&args[1..]),
-        "graph" => cmd_graph(&args[1..]),
-        "validate" => cmd_validate(),
-        "migrate" => cmd_migrate(&args[1..]),
-        "context" => cmd_context(&args[1..]),
+        "add"         => cmd_add(&args[1..]),
+        "edit"        => cmd_edit(&args[1..]),
+        "delete"      => cmd_delete(&args[1..]),
+        "query"       => cmd_query(&args[1..]),
+        "search"      => cmd_search(&args[1..]),
+        "related"     => cmd_related(&args[1..]),
+        "link"        => cmd_link(&args[1..]),
+        "graph"       => cmd_graph(&args[1..]),
+        "validate"    => cmd_validate(),
+        "migrate"     => cmd_migrate(&args[1..]),
+        "context"     => cmd_context(&args[1..]),
         "mcp-install" => cmd_mcp_install(&args[1..]),
-        "serve" => return super::server::serve(&args[1..]),
+        "serve"       => return super::server::serve(&args[1..]),
+        "help" | "--help" | "-h" => {
+            print_help();
+            return 0;
+        }
         _ => {
-            eprintln!("Unknown mem subcommand: {sub}");
+            // "did you mean?" suggestion
+            let known: Vec<&str> = SUBCOMMANDS.iter().map(|(n, _)| *n).collect();
+            let best = known.iter()
+                .filter_map(|&name| {
+                    let d = levenshtein(sub, name);
+                    if d <= 3 { Some((d, name)) } else { None }
+                })
+                .min_by_key(|(d, _)| *d);
+            eprintln!("error: unknown subcommand '{sub}'");
+            if let Some((_, suggestion)) = best {
+                eprintln!("       did you mean '{suggestion}'?");
+            }
+            eprintln!("\nRun 'harness mem help' for available subcommands.");
             return 1;
         }
     };
@@ -47,7 +240,7 @@ pub fn dispatch(args: &[String]) -> i32 {
     match result {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("Error: {e}");
+            eprintln!("error: {e}");
             1
         }
     }
