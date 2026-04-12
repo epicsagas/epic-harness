@@ -39,13 +39,18 @@ Ring 3 — Evolve (self-improving)
 
 ## Install
 
-```bash
-# Claude Code plugin CLI
-claude plugins marketplace add epicsagas/epic-harness
-claude plugins install epic@epicsagas
+```
+# Claude Code plugin (recommended)
+/plugin marketplace add epicsagas/claude-plugins
+/plugin install epic@epicsagas
+```
 
-# Or manually
-git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
+```bash
+# Or from source
+git clone https://github.com/epicsagas/epic-harness.git
+cd epic-harness
+cargo install --path .
+epic-harness install
 ```
 
 ### Rust binary (optional, ~4x faster hooks)
