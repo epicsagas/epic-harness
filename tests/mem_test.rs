@@ -236,3 +236,145 @@ fn test_validate() {
     let code = run_mem(&["validate"]);
     assert_eq!(code, 1, "validate should fail when corrupt file exists");
 }
+
+// ── Fix 1: Edge lock tests ─────────────────────────────
+
+#[test]
+fn test_delete_edge_by_id_is_consistent() {
+    use epic_harness::hooks::mem::store::{append_edge, delete_edge_by_id, read_edges, Edge};
+
+    let root = temp_root();
+    set_root(&root);
+
+    let edge_a = Edge {
+        id: "edge-aaa".to_string(),
+        source: "src-1".to_string(),
+        target: "tgt-1".to_string(),
+        relation: "uses".to_string(),
+        weight: 1.0,
+        ts: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let edge_b = Edge {
+        id: "edge-bbb".to_string(),
+        source: "src-2".to_string(),
+        target: "tgt-2".to_string(),
+        relation: "blocks".to_string(),
+        weight: 0.5,
+        ts: "2026-01-01T00:00:01Z".to_string(),
+    };
+
+    append_edge(&edge_a).unwrap();
+    append_edge(&edge_b).unwrap();
+    assert_eq!(read_edges().len(), 2, "should have 2 edges before delete");
+
+    delete_edge_by_id("edge-aaa").unwrap();
+    let remaining = read_edges();
+    assert_eq!(remaining.len(), 1, "should have 1 edge after delete");
+    assert_eq!(remaining[0].id, "edge-bbb");
+}
+
+#[test]
+fn test_remove_edges_for_node_is_consistent() {
+    use epic_harness::hooks::mem::store::{append_edge, remove_edges_for_node, read_edges, Edge};
+
+    let root = temp_root();
+    set_root(&root);
+
+    for i in 0..3u32 {
+        let edge = Edge {
+            id: format!("edge-{i}"),
+            source: "node-x".to_string(),
+            target: format!("node-{i}"),
+            relation: "uses".to_string(),
+            weight: 1.0,
+            ts: "2026-01-01T00:00:00Z".to_string(),
+        };
+        append_edge(&edge).unwrap();
+    }
+    let unrelated = Edge {
+        id: "edge-unrelated".to_string(),
+        source: "node-other".to_string(),
+        target: "node-another".to_string(),
+        relation: "related".to_string(),
+        weight: 1.0,
+        ts: "2026-01-01T00:00:00Z".to_string(),
+    };
+    append_edge(&unrelated).unwrap();
+
+    remove_edges_for_node("node-x").unwrap();
+    let remaining = read_edges();
+    assert_eq!(remaining.len(), 1, "only unrelated edge should remain");
+    assert_eq!(remaining[0].id, "edge-unrelated");
+}
+
+// ── Fix 2: validate_node_id + safe_node_path tests ────
+
+#[test]
+fn test_validate_node_id_valid() {
+    use epic_harness::hooks::mem::store::validate_node_id;
+
+    // Valid UUID v4
+    assert!(validate_node_id("550e8400-e29b-41d4-a716-446655440000"));
+    assert!(validate_node_id("00000000-0000-4000-8000-000000000000"));
+}
+
+#[test]
+fn test_validate_node_id_invalid() {
+    use epic_harness::hooks::mem::store::validate_node_id;
+
+    assert!(!validate_node_id("../etc/passwd"));
+    assert!(!validate_node_id("../../secret"));
+    assert!(!validate_node_id("short"));
+    assert!(!validate_node_id("550e8400-e29b-41d4-a716-4466554400000")); // 37 chars
+    assert!(!validate_node_id("550e8400/e29b/41d4/a716/446655440000")); // slashes
+}
+
+#[test]
+fn test_safe_node_path_rejects_traversal() {
+    use epic_harness::hooks::mem::store::safe_node_path;
+
+    let root = temp_root();
+    set_root(&root);
+
+    assert!(safe_node_path("../etc/passwd").is_none());
+    assert!(safe_node_path("../../secret").is_none());
+    assert!(safe_node_path("short").is_none());
+}
+
+#[test]
+fn test_safe_node_path_accepts_valid_uuid() {
+    use epic_harness::hooks::mem::store::safe_node_path;
+
+    let root = temp_root();
+    set_root(&root);
+
+    let result = safe_node_path("550e8400-e29b-41d4-a716-446655440000");
+    assert!(result.is_some());
+    let p = result.unwrap();
+    assert!(p.to_string_lossy().ends_with("550e8400-e29b-41d4-a716-446655440000.md"));
+}
+
+// ── Fix 4: mcp-install tmp file unique name test ───────
+
+#[test]
+fn test_mcp_install_no_leftover_tmp() {
+    let root = temp_root();
+    set_root(&root);
+
+    let settings_path = root.join("settings.json");
+    fs::write(&settings_path, "{}").unwrap();
+    set_claude_settings(&settings_path);
+
+    let code = run_mem(&[
+        "mcp-install",
+        "--path", "/tmp/fake-mem-mcp.cjs",
+    ]);
+    assert_eq!(code, 0, "mcp-install should exit 0");
+
+    // No fixed-name .json.tmp should be left behind
+    let fixed_tmp = settings_path.with_extension("json.tmp");
+    assert!(
+        !fixed_tmp.exists(),
+        "fixed-name tmp file should not remain after install"
+    );
+}

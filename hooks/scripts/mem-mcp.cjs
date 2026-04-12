@@ -105,7 +105,15 @@ function rebuildIndex() {
       continue;
     }
     if (!node || !node.id) continue;
-    index.nodes.push(node.id);
+    const meta = node;
+    index.nodes.push({
+      id: meta.id,
+      title: meta.title || '',
+      type: meta.type || 'concept',
+      tags: meta.tags || [],
+      projects: meta.projects || [],
+      updated: meta.updated || new Date().toISOString(),
+    });
     const tags = Array.isArray(node.tags) ? node.tags : [];
     for (const tag of tags) {
       if (!index.by_tag[tag]) index.by_tag[tag] = [];
@@ -273,8 +281,12 @@ function toolMemQuery(args) {
       : projSet;
   }
 
-  // If no filters supplied, use all nodes
-  const ids = candidates ? [...candidates] : index.nodes;
+  // If no filters supplied, use all nodes (may be id strings or IndexNode objects)
+  const allIds = candidates
+    ? [...candidates]
+    : index.nodes.map((n) => (typeof n === 'object' ? n.id : n));
+
+  const ids = allIds;
 
   const results = [];
   for (const id of ids) {
@@ -304,22 +316,21 @@ function toolMemSearch(args) {
   if (!fs.existsSync(nd)) return [];
 
   let output = '';
-  const rgArgs = ['-l', '--', query, nd];
-  const grepArgs = ['-rl', query, nd];
 
   try {
-    output = execFileSync('rg', rgArgs, {
+    output = execFileSync('rg', ['-l', '--', query, nd], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
   } catch {
     try {
-      output = execFileSync('grep', grepArgs, {
+      output = execFileSync('grep', ['-rl', '--', query, nd], {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (grepErr) {
-      output = grepErr.stdout || '';
+      // exit code 1 means no matches; stdout is a string due to encoding: 'utf8'
+      output = (typeof grepErr.stdout === 'string' ? grepErr.stdout : '') ;
     }
   }
 
@@ -376,7 +387,7 @@ function toolMemRelated(args) {
         id: neighbor,
         title: node ? node.title : null,
         type: node ? node.type : null,
-        relation: edge.type || 'related',
+        relation: edge.relation || 'related',
         depth: d + 1,
       });
     }
@@ -393,7 +404,7 @@ function toolMemContext(args) {
   if (project && index.by_project[project]) {
     ids = index.by_project[project];
   } else {
-    ids = index.nodes;
+    ids = index.nodes.map((n) => (typeof n === 'object' ? n.id : n));
   }
 
   // Sort by updated (most recent first) — load to compare

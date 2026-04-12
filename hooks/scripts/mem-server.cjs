@@ -23,7 +23,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execFileSync } = require('child_process');
+const { execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 
 // ── Helpers ───────────────────────────────────────────
@@ -90,7 +90,14 @@ function rebuildIndex(memRoot) {
     const node = parseNodeFile(content);
     if (!node || !node.id) continue;
 
-    index.nodes.push(node.id);
+    index.nodes.push({
+      id: node.id,
+      title: node.title || '',
+      type: node.type || '',
+      tags: Array.isArray(node.tags) ? node.tags : [],
+      projects: node.project ? [node.project] : [],
+      updated: node.updated || '',
+    });
 
     // by_tag
     const tags = Array.isArray(node.tags) ? node.tags : [];
@@ -114,6 +121,64 @@ function rebuildIndex(memRoot) {
 
   atomicWrite(path.join(memRoot, 'index.json'), JSON.stringify(index, null, 2));
   return index;
+}
+
+function rebuildMaps(nodes) {
+  const by_tag = {};
+  const by_type = {};
+  const by_project = {};
+  for (const n of nodes) {
+    for (const tag of (n.tags || [])) {
+      if (!by_tag[tag]) by_tag[tag] = [];
+      by_tag[tag].push(n.id);
+    }
+    if (n.type) {
+      if (!by_type[n.type]) by_type[n.type] = [];
+      by_type[n.type].push(n.id);
+    }
+    for (const proj of (n.projects || [])) {
+      if (!by_project[proj]) by_project[proj] = [];
+      by_project[proj].push(n.id);
+    }
+  }
+  return { by_tag, by_type, by_project };
+}
+
+function upsertIndex(memRoot, nodeObj) {
+  const index = loadIndex(memRoot);
+  // Remove existing entry for this id
+  index.nodes = index.nodes.filter((n) => n.id !== nodeObj.id);
+  // Push new IndexNode
+  index.nodes.push({
+    id: nodeObj.id,
+    title: nodeObj.title || '',
+    type: nodeObj.type || '',
+    tags: Array.isArray(nodeObj.tags) ? nodeObj.tags : [],
+    projects: nodeObj.project ? [nodeObj.project] : (nodeObj.projects || []),
+    updated: nodeObj.updated || '',
+  });
+  const maps = rebuildMaps(index.nodes);
+  const updated = { nodes: index.nodes, ...maps };
+  atomicWrite(path.join(memRoot, 'index.json'), JSON.stringify(updated, null, 2));
+  return updated;
+}
+
+function removeFromIndex(memRoot, id) {
+  const index = loadIndex(memRoot);
+  index.nodes = index.nodes.filter((n) => n.id !== id);
+  const maps = rebuildMaps(index.nodes);
+  const updated = { nodes: index.nodes, ...maps };
+  atomicWrite(path.join(memRoot, 'index.json'), JSON.stringify(updated, null, 2));
+  return updated;
+}
+
+function execAsync(cmd, args) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { encoding: 'utf8', timeout: 5000 }, (err, stdout) => {
+      if (err && err.code !== 1) reject(err);
+      else resolve(stdout || '');
+    });
+  });
 }
 
 function buildNodeMarkdown(fields) {
@@ -157,7 +222,7 @@ function readBody(req) {
   });
 }
 
-function handleRequest(req, res) {
+async function handleRequest(req, res) {
   const memRoot = getMemRoot();
   const url = new URL(req.url, `http://localhost`);
   const pathname = url.pathname;
@@ -223,21 +288,20 @@ function handleRequest(req, res) {
     }
 
     if (method === 'PUT') {
-      readBody(req)
-        .then((fields) => {
-          if (!fs.existsSync(filePath)) return send(res, 404, { error: 'Node not found' });
-          const updated = new Date().toISOString();
-          const markdown = buildNodeMarkdown({ ...fields, id, updated });
-          if (!fs.existsSync(nodesDir)) fs.mkdirSync(nodesDir, { recursive: true });
-          atomicWrite(filePath, markdown);
-          rebuildIndex(memRoot);
-          return send(res, 200, { id, updated });
-        })
-        .catch((e) => {
-          process.stderr.write(`PUT /api/nodes/${id}: ${e.message}\n`);
-          send(res, 400, { error: e.message });
-        });
-      return;
+      try {
+        const fields = await readBody(req);
+        if (!fs.existsSync(filePath)) return send(res, 404, { error: 'Node not found' });
+        const updated = new Date().toISOString();
+        const nodeData = { ...fields, id, updated };
+        const markdown = buildNodeMarkdown(nodeData);
+        if (!fs.existsSync(nodesDir)) fs.mkdirSync(nodesDir, { recursive: true });
+        atomicWrite(filePath, markdown);
+        upsertIndex(memRoot, nodeData);
+        return send(res, 200, { id, updated });
+      } catch (e) {
+        process.stderr.write(`PUT /api/nodes/${id}: ${e.message}\n`);
+        return send(res, 400, { error: e.message });
+      }
     }
 
     if (method === 'DELETE') {
@@ -261,7 +325,7 @@ function handleRequest(req, res) {
           atomicWrite(edgesPath, filtered.join('\n') + (filtered.length ? '\n' : ''));
         }
 
-        rebuildIndex(memRoot);
+        removeFromIndex(memRoot, id);
         return send(res, 200, { id, deleted: true });
       } catch (e) {
         process.stderr.write(`DELETE /api/nodes/${id}: ${e.message}\n`);
@@ -272,22 +336,21 @@ function handleRequest(req, res) {
 
   // POST /api/nodes
   if (method === 'POST' && pathname === '/api/nodes') {
-    readBody(req)
-      .then((fields) => {
-        const id = randomUUID();
-        const created = new Date().toISOString();
-        const nodesDir = path.join(memRoot, 'nodes');
-        if (!fs.existsSync(nodesDir)) fs.mkdirSync(nodesDir, { recursive: true });
-        const markdown = buildNodeMarkdown({ ...fields, id, created, updated: created });
-        atomicWrite(path.join(nodesDir, `${id}.md`), markdown);
-        rebuildIndex(memRoot);
-        return send(res, 201, { id, created });
-      })
-      .catch((e) => {
-        process.stderr.write(`POST /api/nodes: ${e.message}\n`);
-        send(res, 400, { error: e.message });
-      });
-    return;
+    try {
+      const fields = await readBody(req);
+      const id = randomUUID();
+      const created = new Date().toISOString();
+      const nodesDir = path.join(memRoot, 'nodes');
+      if (!fs.existsSync(nodesDir)) fs.mkdirSync(nodesDir, { recursive: true });
+      const nodeData = { ...fields, id, created, updated: created };
+      const markdown = buildNodeMarkdown(nodeData);
+      atomicWrite(path.join(nodesDir, `${id}.md`), markdown);
+      upsertIndex(memRoot, nodeData);
+      return send(res, 201, { id, created });
+    } catch (e) {
+      process.stderr.write(`POST /api/nodes: ${e.message}\n`);
+      return send(res, 400, { error: e.message });
+    }
   }
 
   // POST /api/edges
@@ -344,19 +407,14 @@ function handleRequest(req, res) {
     if (!fs.existsSync(nodesDir)) return send(res, 200, []);
 
     try {
-      // Try ripgrep first, fall back to grep
       let output = '';
-      const grepArgs = ['-rl', '--include=*.md', q, nodesDir];
-      const rgArgs = ['-l', q, nodesDir];
       try {
-        output = execFileSync('rg', rgArgs, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+        output = await execAsync('rg', ['-l', '--', q, nodesDir]);
       } catch {
         try {
-          output = execFileSync('grep', grepArgs, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+          output = await execAsync('grep', ['-rl', '--include=*.md', '--', q, nodesDir]);
         } catch (grepErr) {
-          // grep exits 1 when no matches — that's OK
-          if (grepErr.status !== 1) throw grepErr;
-          output = grepErr.stdout || '';
+          output = '';
         }
       }
 
@@ -386,7 +444,7 @@ function handleRequest(req, res) {
 
 function startServer(port) {
   const server = http.createServer(handleRequest);
-  server.listen(port);
+  server.listen(port, '127.0.0.1');
   return server;
 }
 

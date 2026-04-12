@@ -84,6 +84,20 @@ pub fn graph_path() -> PathBuf {
     memory_dir().join("graph.json")
 }
 
+pub fn validate_node_id(id: &str) -> bool {
+    // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    // Accept only hex chars and hyphens, length 36
+    id.len() == 36 && id.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+pub fn safe_node_path(id: &str) -> Option<PathBuf> {
+    if validate_node_id(id) {
+        Some(nodes_dir().join(format!("{id}.md")))
+    } else {
+        None
+    }
+}
+
 pub fn node_path(id: &str) -> PathBuf {
     nodes_dir().join(format!("{id}.md"))
 }
@@ -212,8 +226,8 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Create file if not exists so lock can be acquired
-    let _ = fs::OpenOptions::new().create(true).append(true).open(&path);
+    // Touch file to ensure it exists before acquiring the lock
+    fs::OpenOptions::new().create(true).write(true).open(&path).ok();
     let _lock = FileLock::acquire(&path)?;
     let line = serde_json::to_string(edge).unwrap_or_default();
     let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
@@ -244,6 +258,10 @@ pub fn write_edges(edges: &[Edge]) -> io::Result<()> {
 }
 
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
+    let path = edges_path();
+    // Touch file to ensure it exists before acquiring the lock
+    fs::OpenOptions::new().create(true).write(true).open(&path).ok();
+    let _lock = FileLock::acquire(&path)?;
     let edges: Vec<Edge> = read_edges()
         .into_iter()
         .filter(|e| e.id != edge_id)
@@ -252,6 +270,10 @@ pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
 }
 
 pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
+    let path = edges_path();
+    // Touch file to ensure it exists before acquiring the lock
+    fs::OpenOptions::new().create(true).write(true).open(&path).ok();
+    let _lock = FileLock::acquire(&path)?;
     let edges: Vec<Edge> = read_edges()
         .into_iter()
         .filter(|e| e.source != node_id && e.target != node_id)

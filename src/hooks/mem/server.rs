@@ -8,7 +8,8 @@ use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
     append_edge, delete_edge_by_id, delete_node_file, graph_path, index_path, node_path,
     now_iso, parse_node, read_edges, read_index, read_node, remove_edges_for_node,
-    remove_from_index, upsert_index, write_node, Edge, Node, NodeFrontmatter,
+    remove_from_index, safe_node_path, upsert_index, validate_node_id, write_node, Edge, Node,
+    NodeFrontmatter,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
@@ -58,7 +59,7 @@ pub fn serve(args: &[String]) -> i32 {
         .and_then(|w| w[1].parse().ok())
         .unwrap_or(7700);
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("127.0.0.1:{port}");
     let server = match Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {
@@ -129,48 +130,63 @@ pub fn serve(args: &[String]) -> i32 {
             // ── GET /api/nodes/:id ────────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Get) => {
                 let id = url.trim_start_matches("/api/nodes/").to_string();
-                let result = read_node(&id);
-                let (body, code) = match result {
-                    Ok(node) => {
-                        let v = serde_json::json!({
-                            "id": node.frontmatter.id,
-                            "type": node.frontmatter.node_type,
-                            "title": node.frontmatter.title,
-                            "tags": node.frontmatter.tags,
-                            "projects": node.frontmatter.projects,
-                            "agents": node.frontmatter.agents,
-                            "created": node.frontmatter.created,
-                            "updated": node.frontmatter.updated,
-                            "body": node.body
-                        });
-                        (v.to_string(), 200u16)
-                    }
-                    Err(e) => (format!("{{\"error\":\"{e}\"}}"), 404),
-                };
-                Box::new(move || json_response(&body, code))
+                if !validate_node_id(&id) {
+                    let body = "{\"error\":\"invalid node id\"}".to_string();
+                    Box::new(move || json_response(&body, 400))
+                } else {
+                    let result = read_node(&id);
+                    let (body, code) = match result {
+                        Ok(node) => {
+                            let v = serde_json::json!({
+                                "id": node.frontmatter.id,
+                                "type": node.frontmatter.node_type,
+                                "title": node.frontmatter.title,
+                                "tags": node.frontmatter.tags,
+                                "projects": node.frontmatter.projects,
+                                "agents": node.frontmatter.agents,
+                                "created": node.frontmatter.created,
+                                "updated": node.frontmatter.updated,
+                                "body": node.body
+                            });
+                            (v.to_string(), 200u16)
+                        }
+                        Err(e) => (format!("{{\"error\":\"{e}\"}}"), 404),
+                    };
+                    Box::new(move || json_response(&body, code))
+                }
             }
 
             // ── PUT /api/nodes/:id ────────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Put) => {
                 let id = url.trim_start_matches("/api/nodes/").to_string();
-                let mut body = String::new();
-                let _ = request.as_reader().read_to_string(&mut body);
-                let result = handle_put_node(&id, &body);
-                let (resp_body, code) = match result {
-                    Ok(_) => (format!("{{\"id\":\"{id}\"}}"), 200u16),
-                    Err(e) => (format!("{{\"error\":\"{e}\"}}"), 400),
-                };
-                Box::new(move || json_response(&resp_body, code))
+                if !validate_node_id(&id) {
+                    let body = "{\"error\":\"invalid node id\"}".to_string();
+                    Box::new(move || json_response(&body, 400))
+                } else {
+                    let mut body = String::new();
+                    let _ = request.as_reader().read_to_string(&mut body);
+                    let result = handle_put_node(&id, &body);
+                    let (resp_body, code) = match result {
+                        Ok(_) => (format!("{{\"id\":\"{id}\"}}"), 200u16),
+                        Err(e) => (format!("{{\"error\":\"{e}\"}}"), 400),
+                    };
+                    Box::new(move || json_response(&resp_body, code))
+                }
             }
 
             // ── DELETE /api/nodes/:id ─────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Delete) => {
                 let id = url.trim_start_matches("/api/nodes/").to_string();
-                let _ = delete_node_file(&id);
-                let _ = remove_edges_for_node(&id);
-                let _ = remove_from_index(&id);
-                let body = format!("{{\"deleted\":\"{id}\"}}");
-                Box::new(move || json_response(&body, 200))
+                if !validate_node_id(&id) {
+                    let body = "{\"error\":\"invalid node id\"}".to_string();
+                    Box::new(move || json_response(&body, 400))
+                } else {
+                    let _ = delete_node_file(&id);
+                    let _ = remove_edges_for_node(&id);
+                    let _ = remove_from_index(&id);
+                    let body = format!("{{\"deleted\":\"{id}\"}}");
+                    Box::new(move || json_response(&body, 200))
+                }
             }
 
             // ── GET /api/search?q=... ─────────────────────────
@@ -288,6 +304,7 @@ fn do_search(query: &str) -> Vec<String> {
     let dir = super::store::nodes_dir();
     let output = std::process::Command::new("rg")
         .arg("-l")
+        .arg("--")
         .arg(query)
         .arg(dir.to_str().unwrap_or("."))
         .output();
@@ -302,6 +319,7 @@ fn do_search(query: &str) -> Vec<String> {
         _ => {
             let o = std::process::Command::new("grep")
                 .arg("-rl")
+                .arg("--")
                 .arg(query)
                 .arg(dir.to_str().unwrap_or("."))
                 .output()

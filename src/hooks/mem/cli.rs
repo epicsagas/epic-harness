@@ -461,7 +461,11 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     if let Some(parent) = settings_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp_path = settings_path.with_extension("json.tmp");
+    // Use process ID in tmp filename to avoid collisions (file permissions rely on umask, acceptable for local dev tool)
+    let tmp_path = settings_path.with_file_name(format!(
+        "settings.{}.json.tmp",
+        std::process::id()
+    ));
     fs::write(&tmp_path, &new_content)?;
     fs::rename(&tmp_path, &settings_path)?;
 

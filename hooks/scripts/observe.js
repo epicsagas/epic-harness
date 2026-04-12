@@ -113,32 +113,32 @@ function detectProject() {
         ?.toLowerCase()
         .replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
 }
+/** Mask common secret patterns in arbitrary text before storing. */
+function maskBodySecrets(text) {
+    return text
+        .replace(/sk-[A-Za-z0-9\-_]{20,}/g, '<REDACTED>')
+        .replace(/(?:api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*\S+/gi, (m) => m.replace(/[:=]\s*\S+/, '=<REDACTED>'))
+        .replace(/Bearer\s+\S+/gi, 'Bearer <REDACTED>');
+}
 /**
  * Fire-and-forget: if the tool output or assistant message contains a decision
  * keyword, record it to the unified memory store via `epic-harness mem add`.
  * Failures are silently ignored — this must never block the main hook flow.
  */
-function maybeRecordMemory(input) {
+function maybeRecordMemory(input, resolvedOutputText) {
     const toolName = (input.tool_name ?? '').toLowerCase();
     if (toolName !== 'write' && toolName !== 'edit')
         return;
-    const resolvedText = (() => {
-        if (input.tool_output)
-            return input.tool_output.output ?? '';
-        if (input.tool_result != null) {
-            if (typeof input.tool_result === 'string')
-                return input.tool_result;
-            if (typeof input.tool_result === 'object' && input.tool_result !== null)
-                return input.tool_result.output ?? '';
-            return String(input.tool_result);
-        }
-        return '';
-    })();
-    const text = resolvedText + (input.assistant_message ?? '');
+    // Skip sensitive file paths — never record credentials or key files
+    const filePath = input.tool_input?.file_path || '';
+    const SENSITIVE_PATHS = /\.env|secrets?|credentials?|\.pem|\.key|id_rsa|\.pfx|\.p12/i;
+    if (SENSITIVE_PATHS.test(filePath))
+        return;
+    const text = resolvedOutputText + (input.assistant_message ?? '');
     if (!MEM_KEYWORDS.some(k => text.toLowerCase().includes(k)))
         return;
     const title = extractTitle(text);
-    const body = text.slice(0, 500);
+    const body = maskBodySecrets(text.slice(0, 500));
     const project = detectProject();
     execFile('epic-harness', [
         'mem', 'add',
@@ -237,6 +237,6 @@ runHook((input) => {
     appendJsonl(sessionFile, record);
     // Auto-record architectural decisions/patterns to unified memory (fire-and-forget)
     if (resolvedOutput) {
-        maybeRecordMemory(input);
+        maybeRecordMemory(input, resolvedOutput.output);
     }
 });
