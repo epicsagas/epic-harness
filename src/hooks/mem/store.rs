@@ -1,4 +1,4 @@
-/// store.rs — Node/Edge file I/O (atomic write, file lock)
+//! store.rs — Node/Edge file I/O (atomic write, file lock)
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -97,6 +97,9 @@ pub fn validate_node_id(id: &str) -> bool {
         })
 }
 
+/// Returns a validated path for a node file, or `None` if `id` is not a valid UUID v4.
+/// Used in integration tests and security-sensitive call sites.
+#[allow(dead_code)]
 pub fn safe_node_path(id: &str) -> Option<PathBuf> {
     if validate_node_id(id) {
         Some(nodes_dir().join(format!("{id}.md")))
@@ -234,7 +237,7 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     // Touch file to ensure it exists before acquiring the lock
-    fs::OpenOptions::new().create(true).write(true).open(&path).ok();
+    fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).ok();
     let _lock = FileLock::acquire(&path)?;
     let line = serde_json::to_string(edge).unwrap_or_default();
     let mut f = fs::OpenOptions::new().create(true).append(true).open(&path)?;
@@ -267,7 +270,7 @@ pub fn write_edges(edges: &[Edge]) -> io::Result<()> {
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
     let path = edges_path();
     // Touch file to ensure it exists before acquiring the lock
-    fs::OpenOptions::new().create(true).write(true).open(&path).ok();
+    fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).ok();
     let _lock = FileLock::acquire(&path)?;
     let edges: Vec<Edge> = read_edges()
         .into_iter()
@@ -279,7 +282,7 @@ pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
 pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
     let path = edges_path();
     // Touch file to ensure it exists before acquiring the lock
-    fs::OpenOptions::new().create(true).write(true).open(&path).ok();
+    fs::OpenOptions::new().create(true).truncate(false).write(true).open(&path).ok();
     let _lock = FileLock::acquire(&path)?;
     let edges: Vec<Edge> = read_edges()
         .into_iter()
@@ -414,5 +417,5 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }

@@ -1,22 +1,20 @@
-/// server.rs — tiny_http based REST API server
+//! server.rs — tiny_http based REST API server
 
-use std::io::{self, Cursor, Read};
+use std::io::Cursor;
 
 use tiny_http::{Header, Method, Response, Server};
 
-use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_edge_by_id, delete_node_file, graph_path, index_path, node_path,
-    now_iso, parse_node, read_edges, read_index, read_node, remove_edges_for_node,
-    remove_from_index, safe_node_path, upsert_index, validate_node_id, write_node, Edge, Node,
-    NodeFrontmatter,
+    append_edge, delete_edge_by_id, delete_node_file, graph_path, now_iso, read_index, read_node,
+    remove_edges_for_node, remove_from_index, upsert_index, validate_node_id, write_node, Edge,
+    Node, NodeFrontmatter,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
 
 fn cors_headers() -> Vec<Header> {
     vec![
-        Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost").unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, PUT, DELETE, OPTIONS").unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
         Header::from_bytes(b"Content-Type", b"application/json").unwrap(),
@@ -25,30 +23,31 @@ fn cors_headers() -> Vec<Header> {
 
 fn html_headers() -> Vec<Header> {
     vec![
-        Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost").unwrap(),
         Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
     ]
 }
 
 fn json_response(body: &str, code: u16) -> Response<Cursor<Vec<u8>>> {
     let data = body.as_bytes().to_vec();
-    let mut resp = Response::new(
+    let len = data.len();
+    Response::new(
         tiny_http::StatusCode(code),
         cors_headers(),
-        Cursor::new(data.clone()),
-        Some(data.len()),
+        Cursor::new(data),
+        Some(len),
         None,
-    );
-    resp
+    )
 }
 
 fn html_response(body: &str) -> Response<Cursor<Vec<u8>>> {
     let data = body.as_bytes().to_vec();
+    let len = data.len();
     Response::new(
         tiny_http::StatusCode(200),
         html_headers(),
-        Cursor::new(data.clone()),
-        Some(data.len()),
+        Cursor::new(data),
+        Some(len),
         None,
     )
 }
@@ -106,7 +105,8 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── DELETE /api/edges/:id ─────────────────────────
             _ if url.starts_with("/api/edges/") && matches!(request.method(), Method::Delete) => {
-                let edge_id = url.trim_start_matches("/api/edges/").to_string();
+                let edge_id = url.trim_start_matches("/api/edges/")
+                    .split('?').next().unwrap_or("").to_string();
                 let result = delete_edge_by_id(&edge_id);
                 let (body, code) = match result {
                     Ok(_) => (format!("{{\"deleted\":\"{edge_id}\"}}"), 200u16),
@@ -129,7 +129,8 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── GET /api/nodes/:id ────────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Get) => {
-                let id = url.trim_start_matches("/api/nodes/").to_string();
+                let id = url.trim_start_matches("/api/nodes/")
+                    .split('?').next().unwrap_or("").to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -158,7 +159,8 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── PUT /api/nodes/:id ────────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Put) => {
-                let id = url.trim_start_matches("/api/nodes/").to_string();
+                let id = url.trim_start_matches("/api/nodes/")
+                    .split('?').next().unwrap_or("").to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -176,7 +178,8 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── DELETE /api/nodes/:id ─────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Delete) => {
-                let id = url.trim_start_matches("/api/nodes/").to_string();
+                let id = url.trim_start_matches("/api/nodes/")
+                    .split('?').next().unwrap_or("").to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -287,11 +290,16 @@ fn handle_put_node(id: &str, body: &str) -> Result<(), String> {
 
 fn handle_post_edge(body: &str) -> Result<String, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let source = v["source"].as_str().unwrap_or("").to_string();
+    let target = v["target"].as_str().unwrap_or("").to_string();
+    if !validate_node_id(&source) || !validate_node_id(&target) {
+        return Err("invalid source or target node id".to_string());
+    }
     let edge_id = uuid::Uuid::new_v4().to_string();
     let edge = Edge {
         id: edge_id.clone(),
-        source: v["source"].as_str().unwrap_or("").to_string(),
-        target: v["target"].as_str().unwrap_or("").to_string(),
+        source,
+        target,
         relation: v["relation"].as_str().unwrap_or("related").to_string(),
         weight: v["weight"].as_f64().unwrap_or(1.0),
         ts: now_iso(),
@@ -337,25 +345,24 @@ fn do_search(query: &str) -> Vec<String> {
 }
 
 fn percent_decode(s: &str) -> String {
-    let mut result = String::new();
-    let mut chars = s.chars().peekable();
     let bytes: Vec<u8> = s.bytes().collect();
+    let mut decoded: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = &s[i + 1..i + 3];
+            let hex = std::str::from_utf8(&bytes[i+1..i+3]).unwrap_or("");
             if let Ok(b) = u8::from_str_radix(hex, 16) {
-                result.push(b as char);
+                decoded.push(b);
                 i += 3;
                 continue;
             }
         }
         if bytes[i] == b'+' {
-            result.push(' ');
+            decoded.push(b' ');
         } else {
-            result.push(bytes[i] as char);
+            decoded.push(bytes[i]);
         }
         i += 1;
     }
-    result
+    String::from_utf8_lossy(&decoded).into_owned()
 }

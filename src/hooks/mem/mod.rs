@@ -1,4 +1,4 @@
-/// mem/mod.rs — Cross-Agent Unified Memory System
+//! mem/mod.rs — Cross-Agent Unified Memory System
 
 pub mod cli;
 pub mod graph;

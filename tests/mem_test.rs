@@ -1,12 +1,14 @@
-/// mem_test.rs — Integration tests for the mem module
-/// Uses HARNESS_ROOT env var to redirect ~/.harness to a temp dir.
+//! mem_test.rs — Integration tests for the mem module
+//! Uses HARNESS_ROOT env var to redirect ~/.harness to a temp dir.
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Mutex;
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn temp_root() -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -15,10 +17,10 @@ fn temp_root() -> PathBuf {
     base
 }
 
-fn set_root(root: &PathBuf) {
-    // HARNESS_ROOT overrides HOME in the store module
-    // SAFETY: tests run serially (cargo test -- --test-threads=1) and
-    // no other thread reads env vars concurrently in this test binary.
+fn set_root(root: &Path) {
+    // HARNESS_ROOT overrides HOME in the store module.
+    // SAFETY: caller must hold ENV_LOCK before calling this function.
+    // All env-var-dependent tests acquire ENV_LOCK to serialize access.
     unsafe {
         env::set_var("HARNESS_ROOT", root.to_str().unwrap());
     }
@@ -33,7 +35,7 @@ fn run_mem(args: &[&str]) -> i32 {
     epic_harness::hooks::mem::run(&args)
 }
 
-fn set_claude_settings(path: &PathBuf) {
+fn set_claude_settings(path: &Path) {
     unsafe {
         env::set_var("CLAUDE_SETTINGS_PATH", path.to_str().unwrap());
     }
@@ -43,6 +45,7 @@ fn set_claude_settings(path: &PathBuf) {
 
 #[test]
 fn test_mcp_install_dry_run() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -65,6 +68,7 @@ fn test_mcp_install_dry_run() {
 
 #[test]
 fn test_mcp_install_writes_settings() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -90,6 +94,7 @@ fn test_mcp_install_writes_settings() {
 
 #[test]
 fn test_mcp_install_already_registered() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -123,6 +128,7 @@ fn test_mcp_install_already_registered() {
 
 #[test]
 fn test_add_and_query() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -157,6 +163,7 @@ fn test_add_and_query() {
 
 #[test]
 fn test_link_and_related() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -195,6 +202,7 @@ fn test_link_and_related() {
 
 #[test]
 fn test_migrate_dry_run() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -219,6 +227,7 @@ fn test_migrate_dry_run() {
 
 #[test]
 fn test_validate() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
@@ -241,6 +250,7 @@ fn test_validate() {
 
 #[test]
 fn test_delete_edge_by_id_is_consistent() {
+    let _guard = ENV_LOCK.lock().unwrap();
     use epic_harness::hooks::mem::store::{append_edge, delete_edge_by_id, read_edges, Edge};
 
     let root = temp_root();
@@ -275,6 +285,7 @@ fn test_delete_edge_by_id_is_consistent() {
 
 #[test]
 fn test_remove_edges_for_node_is_consistent() {
+    let _guard = ENV_LOCK.lock().unwrap();
     use epic_harness::hooks::mem::store::{append_edge, remove_edges_for_node, read_edges, Edge};
 
     let root = temp_root();
@@ -331,6 +342,7 @@ fn test_validate_node_id_invalid() {
 
 #[test]
 fn test_safe_node_path_rejects_traversal() {
+    let _guard = ENV_LOCK.lock().unwrap();
     use epic_harness::hooks::mem::store::safe_node_path;
 
     let root = temp_root();
@@ -343,6 +355,7 @@ fn test_safe_node_path_rejects_traversal() {
 
 #[test]
 fn test_safe_node_path_accepts_valid_uuid() {
+    let _guard = ENV_LOCK.lock().unwrap();
     use epic_harness::hooks::mem::store::safe_node_path;
 
     let root = temp_root();
@@ -358,6 +371,7 @@ fn test_safe_node_path_accepts_valid_uuid() {
 
 #[test]
 fn test_mcp_install_no_leftover_tmp() {
+    let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 

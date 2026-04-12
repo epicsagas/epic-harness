@@ -1,4 +1,4 @@
-/// cli.rs — CLI subcommand parsing + dispatch
+//! cli.rs — CLI subcommand parsing + dispatch
 
 use std::collections::HashMap;
 use std::fs;
@@ -10,13 +10,13 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_edge_by_id, delete_node_file, edges_path, memory_dir, node_path,
-    nodes_dir, now_iso, parse_node, read_edges, read_index, read_node, remove_edges_for_node,
-    remove_from_index, upsert_index, write_edges, write_node, Edge, Node, NodeFrontmatter,
+    append_edge, delete_node_file, nodes_dir, now_iso, parse_node, read_index, read_node,
+    remove_edges_for_node, remove_from_index, upsert_index, validate_node_id, write_index,
+    write_node, Edge, IndexNode, Node, NodeFrontmatter,
 };
 
 pub fn dispatch(args: &[String]) -> i32 {
-    let sub = match args.get(0).map(|s| s.as_str()) {
+    let sub = match args.first().map(|s| s.as_str()) {
         Some(s) => s,
         None => {
             eprintln!("Usage: harness mem <add|edit|delete|query|search|related|link|graph|validate|migrate|context|serve>");
@@ -119,6 +119,9 @@ fn cmd_add(args: &[String]) -> io::Result<i32> {
 fn cmd_edit(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
     let id = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "edit requires <id>"))?;
+    if !validate_node_id(id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+    }
 
     let mut node = read_node(id)?;
 
@@ -145,6 +148,9 @@ fn cmd_edit(args: &[String]) -> io::Result<i32> {
 fn cmd_delete(args: &[String]) -> io::Result<i32> {
     let (pos, _) = parse_flags(args);
     let id = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "delete requires <id>"))?;
+    if !validate_node_id(id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+    }
 
     delete_node_file(id)?;
     let _ = remove_edges_for_node(id);
@@ -201,6 +207,7 @@ fn cmd_search(args: &[String]) -> io::Result<i32> {
     let output = Command::new("rg")
         .arg("--line-number")
         .arg("--no-heading")
+        .arg("--")
         .arg(query)
         .arg(dir.to_str().unwrap_or("."))
         .output();
@@ -213,6 +220,7 @@ fn cmd_search(args: &[String]) -> io::Result<i32> {
             // grep fallback
             let o = Command::new("grep")
                 .arg("-rn")
+                .arg("--")
                 .arg(query)
                 .arg(dir.to_str().unwrap_or("."))
                 .output()
@@ -232,6 +240,9 @@ fn cmd_search(args: &[String]) -> io::Result<i32> {
 fn cmd_related(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
     let id = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "related requires <id>"))?;
+    if !validate_node_id(id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+    }
     let depth: usize = flags
         .get("depth")
         .and_then(|d| d.parse().ok())
@@ -251,6 +262,9 @@ fn cmd_link(args: &[String]) -> io::Result<i32> {
     }
     let src = &pos[0];
     let dst = &pos[1];
+    if !validate_node_id(src) || !validate_node_id(dst) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+    }
     let relation = flags.get("relation").cloned().unwrap_or_else(|| "related".to_string());
     let weight: f64 = flags.get("weight").and_then(|w| w.parse().ok()).unwrap_or(1.0);
 
@@ -331,6 +345,7 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
 
     let mut migrated = 0;
     let mut results: Vec<serde_json::Value> = vec![];
+    let mut all_migrated_nodes: Vec<Node> = vec![];
 
     let slugs: Vec<String> = if all || project_filter.is_none() {
         fs::read_dir(&projects_dir)?
@@ -386,10 +401,40 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
 
             if !dry_run {
                 write_node(&node)?;
-                let _ = upsert_index(&node);
+                all_migrated_nodes.push(node);
             }
             migrated += 1;
         }
+    }
+
+    // Batch index rebuild: O(N) disk I/O instead of O(N²)
+    if !dry_run && !all_migrated_nodes.is_empty() {
+        let mut idx = read_index();
+        for node in &all_migrated_nodes {
+            let fm = &node.frontmatter;
+            idx.nodes.retain(|n| n.id != fm.id);
+            idx.nodes.push(IndexNode {
+                id: fm.id.clone(),
+                title: fm.title.clone(),
+                node_type: fm.node_type.clone(),
+                tags: fm.tags.clone(),
+                projects: fm.projects.clone(),
+                updated: fm.updated.clone(),
+            });
+        }
+        idx.by_tag.clear();
+        idx.by_type.clear();
+        idx.by_project.clear();
+        for n in &idx.nodes {
+            for tag in &n.tags {
+                idx.by_tag.entry(tag.clone()).or_default().push(n.id.clone());
+            }
+            idx.by_type.entry(n.node_type.clone()).or_default().push(n.id.clone());
+            for proj in &n.projects {
+                idx.by_project.entry(proj.clone()).or_default().push(n.id.clone());
+            }
+        }
+        let _ = write_index(&idx);
     }
 
     println!("{}", serde_json::to_string_pretty(&serde_json::json!({

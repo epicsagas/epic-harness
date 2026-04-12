@@ -1,12 +1,11 @@
-/// graph.rs — Graph build + traversal (related, rebuild)
+//! graph.rs — Graph build + traversal (related, rebuild)
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
-use std::fs;
 use std::io;
 
 use super::store::{
-    graph_path, list_node_ids, node_path, read_edges, read_node, atomic_write,
+    atomic_write, graph_path, list_node_ids, read_edges, read_node,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,18 +62,18 @@ pub fn rebuild_graph() -> io::Result<()> {
     Ok(())
 }
 
-pub fn read_graph() -> Graph {
-    let path = graph_path();
-    if !path.exists() {
-        return Graph::default();
-    }
-    let content = fs::read_to_string(&path).unwrap_or_default();
-    serde_json::from_str(&content).unwrap_or_default()
-}
-
 /// BFS traversal from `start_id` up to `depth` hops using edges.jsonl
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let edges = read_edges();
+
+    // Build adjacency map once: O(E)
+    let mut adj: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for edge in &edges {
+        adj.entry(edge.source.clone()).or_default().push(edge.target.clone());
+        adj.entry(edge.target.clone()).or_default().push(edge.source.clone());
+    }
+
+    // BFS: O(N + E) total
     let mut visited: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<(String, usize)> = VecDeque::new();
     queue.push_back((start_id.to_string(), 0));
@@ -85,15 +84,8 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
         if d >= depth {
             continue;
         }
-        for edge in &edges {
-            let neighbor = if edge.source == current {
-                Some(&edge.target)
-            } else if edge.target == current {
-                Some(&edge.source)
-            } else {
-                None
-            };
-            if let Some(nb) = neighbor {
+        if let Some(neighbors) = adj.get(&current) {
+            for nb in neighbors {
                 if !visited.contains(nb.as_str()) {
                     visited.insert(nb.clone());
                     result.push(nb.clone());
@@ -105,6 +97,3 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     result
 }
 
-pub fn node_path_exists(id: &str) -> bool {
-    node_path(id).exists()
-}
