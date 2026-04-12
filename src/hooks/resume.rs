@@ -301,6 +301,33 @@ pub fn run(_input: &HookInput) -> i32 {
         hint("resume", &format!("Memory: {} file(s)", mem_files.len()));
     }
 
+    // 5a. Unified memory context: if ~/.harness/memory/ exists, emit relevant
+    //     entries for the current project to stderr so the agent can ingest them.
+    //     Runs `epic-harness mem context --project <slug>` non-blocking if available.
+    {
+        let unified_mem = global_harness_dir()
+            .parent()
+            .map(|p| p.join("memory"))
+            .unwrap_or_default();
+        if unified_mem.is_dir() {
+            let slug = project_slug();
+            // Attempt to surface mem context inline (best-effort, non-fatal)
+            match std::process::Command::new("epic-harness")
+                .args(["mem", "context", "--project", &slug])
+                .output()
+            {
+                Ok(out) if !out.stdout.is_empty() => {
+                    let ctx = String::from_utf8_lossy(&out.stdout);
+                    eprintln!("[harness/mem] Relevant memory for '{slug}':");
+                    for line in ctx.lines().take(20) {
+                        eprintln!("  {line}");
+                    }
+                }
+                _ => {} // binary not yet installed or no entries — silently skip
+            }
+        }
+    }
+
     // 6. Stack
     if !stacks.is_empty() {
         hint("resume", &format!("Stack: {}", stacks.join(", ")));

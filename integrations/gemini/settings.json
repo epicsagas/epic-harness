@@ -48,6 +48,12 @@
             "type": "command",
             "command": "EH=$(command -v epic-harness 2>/dev/null || for p in /usr/local/bin/epic-harness ~/.cargo/bin/epic-harness; do if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'",
             "description": "Record multi-dimensional tool usage scores"
+          },
+          {
+            "name": "harness-mem-observe",
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null || for p in /usr/local/bin/epic-harness ~/.cargo/bin/epic-harness; do if [ -x \"$p\" ]; then echo \"$p\"; break; fi; done); test -n \"$EH\" && \"$EH\" mem-observe || true",
+            "description": "Auto-record architectural decisions and patterns to unified memory store"
           }
         ]
       }

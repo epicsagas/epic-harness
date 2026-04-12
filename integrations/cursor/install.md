@@ -152,3 +152,38 @@ Confirm `.mdc` files are in `.cursor/rules/` (not a subdirectory). Restart Curso
 
 **Commands not appearing**
 Confirm `.md` files are in `.cursor/commands/`. In Composer, type `/` to see available custom commands.
+
+---
+
+## Memory Integration
+
+epic-harness includes a unified memory store shared across all agents and tools.
+
+**Session start — inject relevant context:**
+```bash
+epic-harness mem context --project <slug>
+```
+This is surfaced automatically at session start via the `harness-context.mdc` rule.
+
+**Manual add — record a decision or pattern:**
+```bash
+epic-harness mem add --title "Chose Postgres over SQLite" --type decision --body "SQLite lacks concurrent writes needed for our workload."
+```
+
+**Supported `--type` values:** `decision`, `pattern`, `note`, `architecture`
+
+**Web UI — browse and search all memory:**
+```bash
+epic-harness mem serve
+# → http://localhost:7700
+```
+
+**Auto-record via hook:** The `postToolUse` hook runs `epic-harness mem-observe` after every Edit/Write tool call. If the tool output or assistant message contains decision keywords (`decision`, `architecture`, `pattern`, `chose`, `decided`, `approach`), the entry is recorded automatically.
+
+**Shorthand via `harness` symlink** (if `hooks/bin/harness → epic-harness` exists):
+```bash
+harness mem add --title "..." --type decision --body "..."
+harness mem context --project <slug>
+harness mem serve
+```
+The symlink is created automatically by `epic-harness install`. Run `epic-harness install --check` to verify.

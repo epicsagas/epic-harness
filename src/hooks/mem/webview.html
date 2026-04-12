@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cross-Agent Unified Memory</title>
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="https://unpkg.com/marked/marked.min.js"></script>
+<style>
+/* ── CSS Variables ─────────────────────────────────────────── */
+:root {
+  --bg:        #1a1a2e;
+  --surface:   #16213e;
+  --surface2:  #0f3460;
+  --accent:    #e94560;
+  --accent2:   #533483;
+  --text:      #e0e0e0;
+  --text-muted:#8a8a9a;
+  --border:    #2a2a4a;
+  --radius:    6px;
+  --font:      system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --c-concept:  #4a9eff;
+  --c-pattern:  #4ade80;
+  --c-project:  #a855f7;
+  --c-decision: #f97316;
+  --c-error:    #ef4444;
+  --c-default:  #94a3b8;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
+
+/* ── App Shell ─────────────────────────────────────────────── */
+#app {
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  grid-template-columns: 250px 1fr;
+  height: 100vh;
+}
+#app.panel-open { grid-template-columns: 250px 1fr 350px; }
+
+/* ── Topbar ────────────────────────────────────────────────── */
+#topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  z-index: 100;
+}
+#topbar h1 { font-size: 13px; font-weight: 600; white-space: nowrap; color: var(--accent); letter-spacing: 0.5px; }
+#search-wrap { flex: 1; max-width: 400px; position: relative; }
+#search-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 13px;
+  padding: 5px 32px 5px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+#search-input:focus { border-color: var(--accent); }
+#search-clear {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 16px; line-height: 1; display: none;
+}
+#search-clear.visible { display: block; }
+#search-results-count { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.toolbar-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 10px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-size: 12px; cursor: pointer; white-space: nowrap;
+  transition: background 0.15s;
+}
+.toolbar-btn:hover { background: var(--accent2); }
+.toolbar-btn.primary { background: var(--accent); border-color: var(--accent); }
+.toolbar-btn.primary:hover { opacity: 0.85; }
+#node-count-badge { margin-left: auto; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+/* ── Filter Panel ──────────────────────────────────────────── */
+#filter-panel {
+  background: var(--surface); border-right: 1px solid var(--border);
+  overflow-y: auto; padding: 12px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+.filter-section { display: flex; flex-direction: column; gap: 8px; }
+.filter-title {
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--text-muted); border-bottom: 1px solid var(--border); padding-bottom: 4px;
+}
+.filter-row { display: flex; align-items: center; gap: 7px; cursor: pointer; }
+.filter-row input[type=checkbox] { accent-color: var(--accent); cursor: pointer; }
+.type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.filter-label { font-size: 13px; flex: 1; }
+.filter-count { font-size: 11px; color: var(--text-muted); }
+#tag-cloud { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag-chip {
+  padding: 2px 7px; border-radius: 20px; font-size: 11px;
+  background: var(--surface2); border: 1px solid var(--border);
+  cursor: pointer; transition: background 0.12s, border-color 0.12s;
+}
+.tag-chip:hover { border-color: var(--accent); }
+.tag-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+#project-select {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); padding: 5px 8px;
+  font-size: 13px; outline: none;
+}
+#search-results-list { display: flex; flex-direction: column; gap: 4px; }
+.search-result-item {
+  padding: 6px 8px; border-radius: var(--radius);
+  background: var(--bg); border: 1px solid var(--border);
+  cursor: pointer; transition: border-color 0.12s;
+}
+.search-result-item:hover { border-color: var(--accent); }
+.search-result-title { font-size: 12px; font-weight: 500; }
+.search-result-snippet { font-size: 11px; color: var(--text-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-result-type { font-size: 10px; color: var(--accent); }
+
+/* ── Graph Canvas ──────────────────────────────────────────── */
+#graph-wrap { position: relative; overflow: hidden; background: var(--bg); }
+#graph-svg { width: 100%; height: 100%; display: block; }
+.graph-link { stroke-opacity: 0.5; fill: none; }
+.graph-link-label { font-size: 9px; fill: var(--text-muted); pointer-events: none; }
+.graph-node circle { cursor: pointer; stroke-width: 1.5px; transition: stroke-width 0.1s; }
+.graph-node:hover circle { stroke-width: 3px; }
+.graph-node.selected circle { stroke-width: 3px; stroke: #fff !important; }
+.graph-node.highlighted circle { stroke-width: 3px; stroke: var(--accent) !important; }
+.graph-node.dimmed { opacity: 0.12; pointer-events: none; }
+.graph-node text { pointer-events: none; font-size: 10px; fill: var(--text); }
+.graph-link.dimmed { opacity: 0.04; }
+#zoom-controls { position: absolute; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
+.zoom-btn {
+  width: 30px; height: 30px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); font-size: 16px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+}
+.zoom-btn:hover { background: var(--surface2); }
+#graph-tooltip {
+  position: absolute; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 6px 10px; font-size: 12px;
+  pointer-events: none; display: none; max-width: 200px; z-index: 50;
+}
+#loading-overlay {
+  position: absolute; inset: 0; background: var(--bg);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; z-index: 200;
+}
+.spinner {
+  width: 36px; height: 36px; border: 3px solid var(--border);
+  border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-msg { color: var(--text-muted); font-size: 13px; }
+#error-banner {
+  position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+  background: #7f1d1d; border: 1px solid var(--c-error);
+  border-radius: var(--radius); padding: 8px 16px; font-size: 13px;
+  color: #fca5a5; display: none; z-index: 300; max-width: 500px; text-align: center;
+}
+
+/* ── Detail Panel ──────────────────────────────────────────── */
+#detail-panel { background: var(--surface); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow: hidden; }
+#app.panel-open #detail-panel { display: flex; }
+#detail-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+#detail-title { flex: 1; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type-badge {
+  padding: 2px 8px; border-radius: 20px; font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;
+}
+#panel-close { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; line-height: 1; padding: 2px; }
+#panel-close:hover { color: var(--text); }
+#detail-body { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+#detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.detail-tag { padding: 2px 8px; border-radius: 20px; font-size: 11px; background: var(--surface2); border: 1px solid var(--border); }
+.meta-grid { display: grid; grid-template-columns: 80px 1fr; gap: 4px 8px; font-size: 12px; }
+.meta-key { color: var(--text-muted); }
+.meta-val { color: var(--text); word-break: break-all; }
+#detail-markdown { font-size: 13px; line-height: 1.6; color: var(--text); }
+#detail-markdown h1,#detail-markdown h2,#detail-markdown h3 { margin: 10px 0 6px; }
+#detail-markdown p { margin-bottom: 8px; }
+#detail-markdown code { background: var(--bg); padding: 1px 5px; border-radius: 3px; font-size: 12px; font-family: "SF Mono","Fira Code",monospace; }
+#detail-markdown pre { background: var(--bg); padding: 10px; border-radius: var(--radius); overflow-x: auto; margin: 8px 0; }
+#detail-markdown pre code { background: none; padding: 0; }
+#detail-markdown ul,#detail-markdown ol { padding-left: 18px; margin-bottom: 8px; }
+#detail-markdown a { color: var(--accent); }
+#detail-markdown blockquote { border-left: 3px solid var(--accent2); padding-left: 10px; color: var(--text-muted); margin: 8px 0; }
+.edges-list { display: flex; flex-direction: column; gap: 5px; }
+.edge-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 8px; background: var(--bg); border-radius: var(--radius);
+  border: 1px solid var(--border); cursor: pointer; font-size: 12px;
+  transition: border-color 0.12s;
+}
+.edge-item:hover { border-color: var(--accent); }
+.edge-rel { padding: 1px 6px; border-radius: 20px; font-size: 10px; background: var(--surface2); white-space: nowrap; }
+.edge-target { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-dir { color: var(--text-muted); font-size: 11px; }
+.action-row {
+  display: flex; gap: 8px; flex-shrink: 0;
+  padding: 10px 12px; border-top: 1px solid var(--border);
+}
+.action-btn {
+  flex: 1; padding: 7px; border-radius: var(--radius);
+  border: 1px solid var(--border); background: var(--surface2);
+  color: var(--text); font-size: 12px; cursor: pointer; transition: background 0.12s;
+}
+.action-btn:hover { background: var(--accent2); }
+.action-btn.danger { border-color: var(--c-error); color: var(--c-error); }
+.action-btn.danger:hover { background: #7f1d1d; }
+#edit-form { display: none; flex-direction: column; gap: 10px; }
+#edit-form.visible { display: flex; }
+#view-mode.hidden { display: none; }
+.section-heading { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); }
+
+/* ── Forms ─────────────────────────────────────────────────── */
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-label { font-size: 11px; color: var(--text-muted); font-weight: 500; }
+.form-input,.form-select,.form-textarea {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; padding: 6px 8px;
+  font-family: var(--font); outline: none; transition: border-color 0.15s;
+}
+.form-input:focus,.form-select:focus,.form-textarea:focus { border-color: var(--accent); }
+.form-textarea { resize: vertical; min-height: 120px; font-family: "SF Mono","Fira Code",monospace; font-size: 12px; }
+
+/* ── Modals ────────────────────────────────────────────────── */
+.modal-overlay-base {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500;
+  display: none; align-items: center; justify-content: center;
+}
+.modal-overlay-base.visible { display: flex; }
+.modal-box {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; width: 460px; max-width: 96vw; max-height: 90vh;
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--border); font-weight: 600;
+}
+.modal-close { background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; }
+.modal-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.modal-footer {
+  padding: 12px 16px; border-top: 1px solid var(--border);
+  display: flex; justify-content: flex-end; gap: 8px;
+}
+.btn { padding: 7px 14px; border-radius: var(--radius); font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--surface2); color: var(--text); transition: background 0.12s; }
+.btn:hover { background: var(--accent2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover { opacity: 0.85; }
+.btn.danger { border-color: var(--c-error); color: var(--c-error); background: #7f1d1d; }
+
+/* ── Confirm Dialog ────────────────────────────────────────── */
+#confirm-dialog {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  z-index: 600; display: none; align-items: center; justify-content: center;
+}
+#confirm-dialog.visible { display: flex; }
+.confirm-box {
+  background: var(--surface); border: 1px solid var(--c-error);
+  border-radius: 10px; padding: 20px 24px; max-width: 340px;
+  text-align: center; display: flex; flex-direction: column; gap: 12px;
+}
+.confirm-box p { font-size: 14px; }
+.confirm-box .btn-row { display: flex; gap: 10px; justify-content: center; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--surface2); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- Topbar -->
+  <div id="topbar">
+    <h1>UNIFIED MEMORY</h1>
+    <div id="search-wrap">
+      <input id="search-input" type="text" placeholder="노드 검색..." autocomplete="off">
+      <button id="search-clear" title="초기화">&times;</button>
+    </div>
+    <span id="search-results-count"></span>
+    <button class="toolbar-btn primary" id="btn-add-node">+ 노드 추가</button>
+    <button class="toolbar-btn" id="btn-add-edge">엣지 연결</button>
+    <button class="toolbar-btn" id="btn-rebuild">그래프 재빌드</button>
+    <span id="node-count-badge"></span>
+  </div>
+
+  <!-- Filter Panel -->
+  <div id="filter-panel">
+    <div class="filter-section">
+      <div class="filter-title">Type</div>
+      <div id="type-filters">
+        <label class="filter-row"><input type="checkbox" data-type="concept" checked><span class="type-dot" style="background:var(--c-concept)"></span><span class="filter-label">Concept</span><span class="filter-count" id="cnt-concept">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="pattern" checked><span class="type-dot" style="background:var(--c-pattern)"></span><span class="filter-label">Pattern</span><span class="filter-count" id="cnt-pattern">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="project" checked><span class="type-dot" style="background:var(--c-project)"></span><span class="filter-label">Project</span><span class="filter-count" id="cnt-project">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="decision" checked><span class="type-dot" style="background:var(--c-decision)"></span><span class="filter-label">Decision</span><span class="filter-count" id="cnt-decision">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="error" checked><span class="type-dot" style="background:var(--c-error)"></span><span class="filter-label">Error</span><span class="filter-count" id="cnt-error">0</span></label>
+      </div>
+    </div>
+    <div class="filter-section">
+      <div class="filter-title">Tags</div>
+      <div id="tag-cloud"></div>
+    </div>
+    <div class="filter-section">
+      <div class="filter-title">Project</div>
+      <select id="project-select" class="form-select"><option value="">전체</option></select>
+    </div>
+    <div class="filter-section" id="search-section" style="display:none">
+      <div class="filter-title">검색 결과</div>
+      <div id="search-results-list"></div>
+    </div>
+  </div>
+
+  <!-- Graph Canvas -->
+  <div id="graph-wrap">
+    <svg id="graph-svg"></svg>
+    <div id="zoom-controls">
+      <button class="zoom-btn" id="btn-zoom-in">+</button>
+      <button class="zoom-btn" id="btn-zoom-reset">&#8857;</button>
+      <button class="zoom-btn" id="btn-zoom-out">&#8722;</button>
+    </div>
+    <div id="graph-tooltip"></div>
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <div id="loading-msg">그래프 데이터 로딩 중...</div>
+    </div>
+    <div id="error-banner"></div>
+  </div>
+
+  <!-- Detail Panel -->
+  <div id="detail-panel">
+    <div id="detail-header">
+      <span id="detail-title">노드 상세</span>
+      <span id="detail-type-badge" class="type-badge"></span>
+      <button id="panel-close">&times;</button>
+    </div>
+    <div id="detail-body">
+      <div id="view-mode">
+        <div id="detail-tags"></div>
+        <div class="meta-grid" id="detail-meta"></div>
+        <div class="section-heading">본문</div>
+        <div id="detail-markdown"></div>
+        <div class="section-heading">연결 엣지</div>
+        <div class="edges-list" id="detail-edges"></div>
+      </div>
+      <div id="edit-form">
+        <div class="form-group">
+          <label class="form-label">제목</label>
+          <input id="edit-title" class="form-input" type="text">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Type</label>
+          <select id="edit-type" class="form-select">
+            <option value="concept">Concept</option>
+            <option value="pattern">Pattern</option>
+            <option value="project">Project</option>
+            <option value="decision">Decision</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Tags (쉼표 구분)</label>
+          <input id="edit-tags" class="form-input" type="text">
+        </div>
+        <div class="form-group">
+          <label class="form-label">본문 (Markdown)</label>
+          <textarea id="edit-body" class="form-textarea" rows="8"></textarea>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn primary" id="edit-save">저장</button>
+          <button class="btn" id="edit-cancel">취소</button>
+        </div>
+      </div>
+    </div>
+    <div class="action-row" id="detail-actions">
+      <button class="action-btn" id="btn-edit-node">편집</button>
+      <button class="action-btn danger" id="btn-delete-node">삭제</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Node Modal -->
+<div id="modal-add-node" class="modal-overlay-base">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span>노드 추가</span>
+      <button class="modal-close" data-close="modal-add-node">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">제목 *</label>
+        <input id="new-title" class="form-input" type="text" placeholder="노드 제목">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Type</label>
+        <select id="new-type" class="form-select">
+          <option value="concept">Concept</option>
+          <option value="pattern">Pattern</option>
+          <option value="project">Project</option>
+          <option value="decision">Decision</option>
+          <option value="error">Error</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Tags (쉼표 구분)</label>
+        <input id="new-tags" class="form-input" type="text" placeholder="tag1, tag2">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Projects</label>
+        <input id="new-projects" class="form-input" type="text" placeholder="project1, project2">
+      </div>
+      <div class="form-group">
+        <label class="form-label">본문 (Markdown)</label>
+        <textarea id="new-body" class="form-textarea" rows="5" placeholder="# 제목&#10;내용을 입력하세요..."></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close="modal-add-node">취소</button>
+      <button class="btn primary" id="modal-save-btn">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Edge Modal -->
+<div id="modal-add-edge" class="modal-overlay-base">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span>엣지 연결</span>
+      <button class="modal-close" data-close="modal-add-edge">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Source 노드</label>
+        <select id="edge-source" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Target 노드</label>
+        <select id="edge-target" class="form-select"></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Relation</label>
+        <select id="edge-relation" class="form-select">
+          <option value="relates_to">relates_to</option>
+          <option value="depends_on">depends_on</option>
+          <option value="implements">implements</option>
+          <option value="extends">extends</option>
+          <option value="conflicts_with">conflicts_with</option>
+          <option value="caused_by">caused_by</option>
+          <option value="resolves">resolves</option>
+          <option value="references">references</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Weight (0.0 ~ 1.0)</label>
+        <input id="edge-weight" class="form-input" type="number" min="0" max="1" step="0.1" value="1.0">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" data-close="modal-add-edge">취소</button>
+      <button class="btn primary" id="edge-save-btn">연결</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm Dialog -->
+<div id="confirm-dialog">
+  <div class="confirm-box">
+    <p id="confirm-msg">이 노드를 삭제하시겠습니까?</p>
+    <div class="btn-row">
+      <button class="btn" id="confirm-no">취소</button>
+      <button class="btn danger" id="confirm-yes">삭제</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════════════
+   Config & Constants
+   ════════════════════════════════════════════════════ */
+const API_BASE = 'http://localhost:7700/api';
+
+const TYPE_HEX = {
+  concept:  '#4a9eff',
+  pattern:  '#4ade80',
+  project:  '#a855f7',
+  decision: '#f97316',
+  error:    '#ef4444',
+};
+const REL_HEX = {
+  depends_on:     '#f97316',
+  implements:     '#4ade80',
+  extends:        '#a855f7',
+  conflicts_with: '#ef4444',
+  caused_by:      '#fbbf24',
+  resolves:       '#4a9eff',
+  references:     '#94a3b8',
+  relates_to:     '#64748b',
+};
+
+function typeHex(t) { return TYPE_HEX[t] || '#94a3b8'; }
+function relHex(r)  { return REL_HEX[r]  || '#64748b'; }
+
+/* ════════════════════════════════════════════════════
+   State
+   ════════════════════════════════════════════════════ */
+const S = {
+  nodes: [],
+  edges: [],
+  nodeMap: {},
+  activeTypes: new Set(['concept','pattern','project','decision','error']),
+  activeTags:  new Set(),
+  activeProject: '',
+  searchHits: null,   // Set<id> | null
+  selectedId: null,
+  currentNode: null,  // full node detail loaded from API
+};
+
+/* ════════════════════════════════════════════════════
+   D3 refs
+   ════════════════════════════════════════════════════ */
+let svg, gMain, sim;
+let linkSel, nodeSel, linkLblSel;
+let zoomB;
+const pinned = {};  // id → {x,y}
+
+/* ════════════════════════════════════════════════════
+   Utilities
+   ════════════════════════════════════════════════════ */
+function debounce(fn, ms) {
+  let t;
+  return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(API_BASE + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText} (${path})`);
+  if (r.status === 204 || r.headers.get('content-length') === '0') return null;
+  return r.json();
+}
+
+function showErr(msg) {
+  console.error('[mem]', msg);
+  const el = document.getElementById('error-banner');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = 'none'; }, 6000);
+}
+
+function showLoading(on, msg) {
+  const el = document.getElementById('loading-overlay');
+  el.style.display = on ? 'flex' : 'none';
+  if (msg) document.getElementById('loading-msg').textContent = msg;
+}
+
+function openModal(id)  { document.getElementById(id).classList.add('visible'); }
+function closeModal(id) { document.getElementById(id).classList.remove('visible'); }
+
+/* ════════════════════════════════════════════════════
+   Boot
+   ════════════════════════════════════════════════════ */
+window.addEventListener('DOMContentLoaded', () => {
+  initD3();
+  bindUI();
+  loadGraph();
+});
+
+/* ════════════════════════════════════════════════════
+   Data
+   ════════════════════════════════════════════════════ */
+async function loadGraph() {
+  showLoading(true, '그래프 데이터 로딩 중...');
+  try {
+    const data = await api('/graph');
+    ingestGraph(data);
+    buildSidebar();
+    renderGraph();
+  } catch (e) {
+    showErr('그래프 로딩 실패: ' + e.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function reloadGraph() {
+  showLoading(true, '재빌드 중...');
+  try {
+    const data = await api('/graph');
+    ingestGraph(data);
+    buildSidebar();
+    renderGraph();
+  } catch (e) {
+    showErr('재빌드 실패: ' + e.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+function ingestGraph(data) {
+  S.nodes = data.nodes || [];
+  S.edges = data.edges || [];
+  S.nodeMap = {};
+  S.nodes.forEach(n => { S.nodeMap[n.id] = n; });
+}
+
+/* ════════════════════════════════════════════════════
+   Filter helpers
+   ════════════════════════════════════════════════════ */
+function visNodes() {
+  return S.nodes.filter(n => {
+    if (!S.activeTypes.has(n.type || 'concept')) return false;
+    if (S.activeTags.size) {
+      if (!(n.tags||[]).some(t => S.activeTags.has(t))) return false;
+    }
+    if (S.activeProject) {
+      if (!(n.projects||[]).includes(S.activeProject)) return false;
+    }
+    if (S.searchHits !== null) {
+      if (!S.searchHits.has(n.id)) return false;
+    }
+    return true;
+  });
+}
+
+function visEdges(idSet) {
+  return S.edges.filter(e => idSet.has(e.source) && idSet.has(e.target));
+}
+
+function applyFilters() {
+  const vn = visNodes();
+  const ids = new Set(vn.map(n => n.id));
+  const ve  = visEdges(ids);
+  updateVisibility(ids, ve);
+}
+
+/* ════════════════════════════════════════════════════
+   Sidebar
+   ════════════════════════════════════════════════════ */
+function buildSidebar() {
+  // type counts
+  const cnt = {};
+  S.nodes.forEach(n => { const t = n.type||'concept'; cnt[t]=(cnt[t]||0)+1; });
+  ['concept','pattern','project','decision','error'].forEach(t => {
+    const el = document.getElementById('cnt-' + t);
+    if (el) el.textContent = cnt[t] || 0;
+  });
+
+  // tag cloud (top 40 by frequency)
+  const tc = {};
+  S.nodes.forEach(n => (n.tags||[]).forEach(t => { tc[t]=(tc[t]||0)+1; }));
+  const tags = Object.entries(tc).sort((a,b)=>b[1]-a[1]).slice(0,40);
+  const cloud = document.getElementById('tag-cloud');
+  cloud.innerHTML = '';
+  tags.forEach(([tag]) => {
+    const chip = document.createElement('span');
+    chip.className = 'tag-chip' + (S.activeTags.has(tag) ? ' active' : '');
+    chip.textContent = tag;
+    chip.addEventListener('click', () => {
+      S.activeTags.has(tag) ? S.activeTags.delete(tag) : S.activeTags.add(tag);
+      chip.classList.toggle('active', S.activeTags.has(tag));
+      applyFilters();
+    });
+    cloud.appendChild(chip);
+  });
+
+  // project dropdown
+  const projs = new Set();
+  S.nodes.forEach(n => (n.projects||[]).forEach(p => projs.add(p)));
+  const sel = document.getElementById('project-select');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">전체</option>';
+  [...projs].sort().forEach(p => {
+    const o = document.createElement('option');
+    o.value = p; o.textContent = p;
+    sel.appendChild(o);
+  });
+  if (prev) sel.value = prev;
+
+  // count badge
+  document.getElementById('node-count-badge').textContent =
+    `${S.nodes.length} 노드 / ${S.edges.length} 엣지`;
+
+  // populate edge modal selects
+  populateEdgeSelects();
+}
+
+/* ════════════════════════════════════════════════════
+   D3 Initialization
+   ════════════════════════════════════════════════════ */
+function initD3() {
+  svg   = d3.select('#graph-svg');
+  gMain = svg.append('g').attr('class', 'g-main');
+  gMain.append('g').attr('class', 'g-links');
+  gMain.append('g').attr('class', 'g-link-labels');
+  gMain.append('g').attr('class', 'g-nodes');
+
+  zoomB = d3.zoom()
+    .scaleExtent([0.04, 5])
+    .on('zoom', ev => gMain.attr('transform', ev.transform));
+  svg.call(zoomB).on('dblclick.zoom', null);
+
+  svg.on('click', () => {
+    S.selectedId = null;
+    closeDetailPanel();
+    if (nodeSel) nodeSel.classed('selected', false);
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   D3 Render
+   ════════════════════════════════════════════════════ */
+function nodeR(deg) { return Math.min(26, Math.max(6, 6 + Math.sqrt(deg) * 2.4)); }
+
+function renderGraph() {
+  const vn  = visNodes();
+  const ids = new Set(vn.map(n => n.id));
+  const ve  = visEdges(ids);
+
+  // degree map
+  const deg = {};
+  ve.forEach(e => { deg[e.source]=(deg[e.source]||0)+1; deg[e.target]=(deg[e.target]||0)+1; });
+
+  const isLarge = vn.length > 400;
+
+  // sim nodes (preserve pinned)
+  const simNodes = vn.map(n => {
+    const p = pinned[n.id];
+    return { ...n, _deg: deg[n.id]||0, x: p?.x, y: p?.y, fx: p?.x, fy: p?.y };
+  });
+  const byId = {};
+  simNodes.forEach(n => { byId[n.id] = n; });
+
+  const simEdges = ve
+    .map(e => ({ ...e, source: byId[e.source], target: byId[e.target] }))
+    .filter(e => e.source && e.target);
+
+  // stop previous sim
+  if (sim) sim.stop();
+
+  const W = document.getElementById('graph-wrap').clientWidth;
+  const H = document.getElementById('graph-wrap').clientHeight;
+
+  sim = d3.forceSimulation(simNodes)
+    .alphaDecay(isLarge ? 0.06 : 0.028)
+    .velocityDecay(isLarge ? 0.72 : 0.42)
+    .force('link', d3.forceLink(simEdges)
+      .id(d => d.id)
+      .distance(d => 55 + (1 - (d.weight||1)) * 55)
+      .strength(0.35))
+    .force('charge', d3.forceManyBody()
+      .strength(isLarge ? -70 : -160)
+      .distanceMax(280))
+    .force('center', d3.forceCenter(W/2, H/2))
+    .force('collide', d3.forceCollide().radius(d => nodeR(d._deg) + 4));
+
+  /* -- Links -- */
+  linkSel = gMain.select('.g-links')
+    .selectAll('line.graph-link')
+    .data(simEdges, d => (d.id || `${d.source.id}::${d.target.id}`))
+    .join('line')
+    .attr('class', 'graph-link')
+    .attr('stroke', d => relHex(d.relation))
+    .attr('stroke-width', d => Math.max(1, (d.weight||1)*2));
+
+  /* -- Link labels (skip when large) -- */
+  if (!isLarge) {
+    linkLblSel = gMain.select('.g-link-labels')
+      .selectAll('text.graph-link-label')
+      .data(simEdges, d => (d.id || `${d.source.id}::${d.target.id}`))
+      .join('text')
+      .attr('class', 'graph-link-label')
+      .text(d => d.relation||'');
+  } else {
+    gMain.select('.g-link-labels').selectAll('text').remove();
+    linkLblSel = null;
+  }
+
+  /* -- Nodes -- */
+  nodeSel = gMain.select('.g-nodes')
+    .selectAll('g.graph-node')
+    .data(simNodes, d => d.id)
+    .join(
+      enter => {
+        const g = enter.append('g').attr('class', 'graph-node');
+        g.append('circle');
+        g.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em');
+        return g;
+      },
+      update => update,
+      exit => exit.remove()
+    );
+
+  nodeSel.select('circle')
+    .attr('r', d => nodeR(d._deg))
+    .attr('fill', d => typeHex(d.type))
+    .attr('stroke', d => typeHex(d.type))
+    .attr('fill-opacity', 0.82);
+
+  nodeSel.select('text')
+    .attr('y', d => nodeR(d._deg) + 12)
+    .text(d => {
+      const t = d.title || d.id;
+      return t.length > 14 ? t.slice(0,13)+'…' : t;
+    });
+
+  // re-apply selection state
+  if (S.selectedId) nodeSel.classed('selected', d => d.id === S.selectedId);
+  if (S.searchHits) nodeSel.classed('highlighted', d => S.searchHits.has(d.id));
+
+  // drag
+  nodeSel.call(
+    d3.drag()
+      .on('start', (ev, d) => { if (!ev.active) sim.alphaTarget(0.2).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag',  (ev, d) => { d.fx=ev.x; d.fy=ev.y; })
+      .on('end',   (ev, d) => { if (!ev.active) sim.alphaTarget(0); pinned[d.id]={x:d.fx,y:d.fy}; })
+  );
+
+  // events
+  const tooltip = document.getElementById('graph-tooltip');
+  const wrap    = document.getElementById('graph-wrap');
+  nodeSel
+    .on('click', (ev, d) => { ev.stopPropagation(); selectNode(d.id); })
+    .on('dblclick', (ev, d) => { ev.stopPropagation(); selectNode(d.id).then(openEditForm); })
+    .on('mouseenter', (ev, d) => {
+      tooltip.style.display = 'block';
+      tooltip.innerHTML = `<strong>${d.title||d.id}</strong><br><span style="color:var(--text-muted);font-size:11px">${d.type||''} &middot; ${d._deg} 연결</span>`;
+    })
+    .on('mousemove', (ev) => {
+      const rc = wrap.getBoundingClientRect();
+      tooltip.style.left = (ev.clientX - rc.left + 14) + 'px';
+      tooltip.style.top  = (ev.clientY - rc.top  - 18) + 'px';
+    })
+    .on('mouseleave', () => { tooltip.style.display = 'none'; });
+
+  /* -- Tick -- */
+  const skip = isLarge ? 3 : 1;
+  let tc = 0;
+  sim.on('tick', () => {
+    if (++tc % skip !== 0) return;
+    linkSel
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+    if (linkLblSel) {
+      linkLblSel
+        .attr('x', d => (d.source.x + d.target.x)/2)
+        .attr('y', d => (d.source.y + d.target.y)/2);
+    }
+    nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   Visibility Update (filter without full re-render)
+   ════════════════════════════════════════════════════ */
+function updateVisibility(visIdSet, visEdgeArr) {
+  if (!nodeSel) { renderGraph(); return; }
+
+  const eKeys = new Set(visEdgeArr.map(e => {
+    const s = typeof e.source==='object' ? e.source.id : e.source;
+    const t = typeof e.target==='object' ? e.target.id : e.target;
+    return `${s}::${t}`;
+  }));
+
+  nodeSel.classed('dimmed', d => !visIdSet.has(d.id));
+  if (linkSel) linkSel.classed('dimmed', d => {
+    const s = typeof d.source==='object' ? d.source.id : d.source;
+    const t = typeof d.target==='object' ? d.target.id : d.target;
+    return !eKeys.has(`${s}::${t}`);
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   Selection & Detail Panel
+   ════════════════════════════════════════════════════ */
+async function selectNode(id) {
+  S.selectedId = id;
+  if (nodeSel) nodeSel.classed('selected', d => d.id === id);
+  await openDetailPanel(id);
+}
+
+async function openDetailPanel(id) {
+  document.getElementById('app').classList.add('panel-open');
+  showViewMode();
+  try {
+    const node = await api(`/nodes/${id}`);
+    S.currentNode = node;
+    renderDetail(node);
+  } catch(e) {
+    showErr('노드 상세 로딩 실패: ' + e.message);
+  }
+}
+
+function closeDetailPanel() {
+  document.getElementById('app').classList.remove('panel-open');
+  S.currentNode = null;
+}
+
+function renderDetail(node) {
+  document.getElementById('detail-title').textContent = node.title || node.id;
+
+  const badge = document.getElementById('detail-type-badge');
+  badge.textContent = node.type || 'unknown';
+  badge.style.cssText = `background:${typeHex(node.type)};color:#fff`;
+
+  // tags
+  const tagsEl = document.getElementById('detail-tags');
+  tagsEl.innerHTML = (node.tags||[])
+    .map(t => `<span class="detail-tag">${t}</span>`).join('');
+
+  // meta
+  document.getElementById('detail-meta').innerHTML = [
+    ['ID',      node.id],
+    ['Projects',(node.projects||[]).join(', ') || '—'],
+    ['Agents',  (node.agents||[]).join(', ')   || '—'],
+    ['Created', node.created ? new Date(node.created).toLocaleString('ko-KR') : '—'],
+    ['Updated', node.updated ? new Date(node.updated).toLocaleString('ko-KR') : '—'],
+  ].map(([k,v]) => `<span class="meta-key">${k}</span><span class="meta-val">${v}</span>`).join('');
+
+  // markdown
+  const md = document.getElementById('detail-markdown');
+  md.innerHTML = node.body
+    ? marked.parse(node.body)
+    : '<span style="color:var(--text-muted)">본문 없음</span>';
+
+  // edges
+  const edgesEl = document.getElementById('detail-edges');
+  const related = S.edges.filter(e => e.source===node.id || e.target===node.id);
+  if (!related.length) {
+    edgesEl.innerHTML = '<span style="color:var(--text-muted);font-size:12px">연결된 엣지 없음</span>';
+  } else {
+    edgesEl.innerHTML = '';
+    related.forEach(edge => {
+      const out = edge.source === node.id;
+      const othId = out ? edge.target : edge.source;
+      const oth = S.nodeMap[othId] || { id: othId, title: othId };
+      const item = document.createElement('div');
+      item.className = 'edge-item';
+      const rc = relHex(edge.relation);
+      item.innerHTML = `
+        <span class="edge-dir">${out ? '→' : '←'}</span>
+        <span class="edge-rel" style="background:${rc}22;border:1px solid ${rc}55;color:${rc}">${edge.relation||'?'}</span>
+        <span class="edge-target">${oth.title||oth.id}</span>
+      `;
+      item.addEventListener('click', () => selectNode(othId));
+      edgesEl.appendChild(item);
+    });
+  }
+}
+
+function showViewMode() {
+  document.getElementById('view-mode').classList.remove('hidden');
+  document.getElementById('edit-form').classList.remove('visible');
+  document.getElementById('detail-actions').style.display = 'flex';
+}
+
+function openEditForm() {
+  const n = S.currentNode;
+  if (!n) return;
+  document.getElementById('edit-title').value = n.title || '';
+  document.getElementById('edit-type').value  = n.type  || 'concept';
+  document.getElementById('edit-tags').value   = (n.tags||[]).join(', ');
+  document.getElementById('edit-body').value   = n.body  || '';
+  document.getElementById('view-mode').classList.add('hidden');
+  document.getElementById('edit-form').classList.add('visible');
+  document.getElementById('detail-actions').style.display = 'none';
+}
+
+/* ════════════════════════════════════════════════════
+   Search
+   ════════════════════════════════════════════════════ */
+const doSearch = debounce(async (q) => {
+  const qTrim = q.trim();
+  if (!qTrim) {
+    S.searchHits = null;
+    document.getElementById('search-section').style.display = 'none';
+    document.getElementById('search-results-count').textContent = '';
+    if (nodeSel) nodeSel.classed('highlighted', false);
+    applyFilters();
+    return;
+  }
+  try {
+    const res = await api('/search?q=' + encodeURIComponent(qTrim));
+    const hitSet = new Set(res.map(r => r.id));
+    S.searchHits = hitSet;
+
+    if (nodeSel) nodeSel.classed('highlighted', d => hitSet.has(d.id));
+    document.getElementById('search-results-count').textContent = `${res.length}건`;
+
+    const list = document.getElementById('search-results-list');
+    list.innerHTML = '';
+    res.slice(0,25).forEach(r => {
+      const el = document.createElement('div');
+      el.className = 'search-result-item';
+      el.innerHTML = `
+        <div class="search-result-type">${r.type||''}</div>
+        <div class="search-result-title">${r.title||r.id}</div>
+        ${r.snippet ? `<div class="search-result-snippet">${r.snippet}</div>` : ''}
+      `;
+      el.addEventListener('click', () => selectNode(r.id));
+      list.appendChild(el);
+    });
+    document.getElementById('search-section').style.display = res.length ? 'flex' : 'none';
+
+    applyFilters();
+  } catch(e) {
+    showErr('검색 실패: ' + e.message);
+  }
+}, 300);
+
+/* ════════════════════════════════════════════════════
+   UI Bindings
+   ════════════════════════════════════════════════════ */
+function bindUI() {
+  /* modal close via data-close attribute */
+  document.querySelectorAll('[data-close]').forEach(btn => {
+    btn.addEventListener('click', () => closeModal(btn.dataset.close));
+  });
+
+  /* click outside modal to close */
+  document.querySelectorAll('.modal-overlay-base').forEach(ov => {
+    ov.addEventListener('click', e => { if (e.target === ov) closeModal(ov.id); });
+  });
+
+  /* search */
+  const si = document.getElementById('search-input');
+  const sc = document.getElementById('search-clear');
+  si.addEventListener('input', e => {
+    sc.classList.toggle('visible', e.target.value.length > 0);
+    doSearch(e.target.value);
+  });
+  sc.addEventListener('click', () => {
+    si.value = ''; sc.classList.remove('visible'); doSearch('');
+  });
+
+  /* type filters */
+  document.querySelectorAll('#type-filters input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      cb.checked ? S.activeTypes.add(cb.dataset.type) : S.activeTypes.delete(cb.dataset.type);
+      applyFilters();
+    });
+  });
+
+  /* project filter */
+  document.getElementById('project-select').addEventListener('change', e => {
+    S.activeProject = e.target.value;
+    applyFilters();
+  });
+
+  /* toolbar */
+  document.getElementById('btn-add-node').addEventListener('click', () => {
+    openModal('modal-add-node');
+    document.getElementById('new-title').focus();
+  });
+  document.getElementById('btn-add-edge').addEventListener('click', () => openModal('modal-add-edge'));
+  document.getElementById('btn-rebuild').addEventListener('click', reloadGraph);
+
+  /* add node save */
+  document.getElementById('modal-save-btn').addEventListener('click', saveNewNode);
+
+  /* add edge save */
+  document.getElementById('edge-save-btn').addEventListener('click', saveEdge);
+
+  /* detail panel close */
+  document.getElementById('panel-close').addEventListener('click', () => {
+    S.selectedId = null;
+    closeDetailPanel();
+    if (nodeSel) nodeSel.classed('selected', false);
+  });
+
+  /* edit / delete */
+  document.getElementById('btn-edit-node').addEventListener('click', openEditForm);
+  document.getElementById('btn-delete-node').addEventListener('click', confirmDelete);
+  document.getElementById('edit-save').addEventListener('click', saveEditNode);
+  document.getElementById('edit-cancel').addEventListener('click', showViewMode);
+
+  /* confirm dialog */
+  document.getElementById('confirm-no').addEventListener('click', () =>
+    document.getElementById('confirm-dialog').classList.remove('visible'));
+
+  /* zoom */
+  document.getElementById('btn-zoom-in').addEventListener('click', () =>
+    svg.transition().duration(220).call(zoomB.scaleBy, 1.4));
+  document.getElementById('btn-zoom-out').addEventListener('click', () =>
+    svg.transition().duration(220).call(zoomB.scaleBy, 0.7));
+  document.getElementById('btn-zoom-reset').addEventListener('click', () =>
+    svg.transition().duration(380).call(zoomB.transform, d3.zoomIdentity));
+
+  /* keyboard shortcuts */
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      ['modal-add-node','modal-add-edge'].forEach(closeModal);
+      document.getElementById('confirm-dialog').classList.remove('visible');
+      if (document.getElementById('edit-form').classList.contains('visible')) showViewMode();
+    }
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   CRUD
+   ════════════════════════════════════════════════════ */
+async function saveNewNode() {
+  const title = document.getElementById('new-title').value.trim();
+  if (!title) { showErr('제목을 입력하세요.'); return; }
+  const body = {
+    title,
+    type:     document.getElementById('new-type').value,
+    tags:     csvToArr(document.getElementById('new-tags').value),
+    projects: csvToArr(document.getElementById('new-projects').value),
+    body:     document.getElementById('new-body').value,
+  };
+  try {
+    await api('/nodes', { method: 'POST', body: JSON.stringify(body) });
+    closeModal('modal-add-node');
+    clearNewNodeForm();
+    await reloadGraph();
+  } catch(e) {
+    showErr('노드 추가 실패: ' + e.message);
+  }
+}
+
+function clearNewNodeForm() {
+  ['new-title','new-tags','new-projects','new-body'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+}
+
+async function saveEditNode() {
+  const n = S.currentNode;
+  if (!n) return;
+  const body = {
+    title: document.getElementById('edit-title').value.trim(),
+    type:  document.getElementById('edit-type').value,
+    tags:  csvToArr(document.getElementById('edit-tags').value),
+    body:  document.getElementById('edit-body').value,
+  };
+  try {
+    await api(`/nodes/${n.id}`, { method: 'PUT', body: JSON.stringify(body) });
+    // update local cache
+    const idx = S.nodes.findIndex(x => x.id === n.id);
+    if (idx !== -1) Object.assign(S.nodes[idx], body);
+    Object.assign(S.nodeMap[n.id]||{}, body);
+    showViewMode();
+    await openDetailPanel(n.id);
+    buildSidebar();
+  } catch(e) {
+    showErr('노드 수정 실패: ' + e.message);
+  }
+}
+
+function confirmDelete() {
+  const n = S.currentNode;
+  if (!n) return;
+  document.getElementById('confirm-msg').textContent =
+    `"${n.title || n.id}" 노드를 삭제하시겠습니까?`;
+  document.getElementById('confirm-dialog').classList.add('visible');
+  document.getElementById('confirm-yes').onclick = () => deleteNode(n.id);
+}
+
+async function deleteNode(id) {
+  document.getElementById('confirm-dialog').classList.remove('visible');
+  try {
+    await api(`/nodes/${id}`, { method: 'DELETE' });
+    S.selectedId = null;
+    closeDetailPanel();
+    if (nodeSel) nodeSel.classed('selected', false);
+    await reloadGraph();
+  } catch(e) {
+    showErr('노드 삭제 실패: ' + e.message);
+  }
+}
+
+async function saveEdge() {
+  const src = document.getElementById('edge-source').value;
+  const tgt = document.getElementById('edge-target').value;
+  const rel = document.getElementById('edge-relation').value;
+  const w   = parseFloat(document.getElementById('edge-weight').value) || 1.0;
+  if (!src || !tgt) { showErr('source와 target을 선택하세요.'); return; }
+  if (src === tgt)   { showErr('source와 target이 같을 수 없습니다.'); return; }
+  try {
+    await api('/edges', { method: 'POST', body: JSON.stringify({ source:src, target:tgt, relation:rel, weight:w }) });
+    closeModal('modal-add-edge');
+    await reloadGraph();
+  } catch(e) {
+    showErr('엣지 추가 실패: ' + e.message);
+  }
+}
+
+function populateEdgeSelects() {
+  const sorted = [...S.nodes].sort((a,b) => (a.title||'').localeCompare(b.title||''));
+  ['edge-source','edge-target'].forEach(id => {
+    const sel = document.getElementById(id);
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">선택...</option>';
+    sorted.forEach(n => {
+      const o = document.createElement('option');
+      o.value = n.id;
+      o.textContent = `${n.title||n.id} (${n.type||''})`;
+      sel.appendChild(o);
+    });
+    if (prev) sel.value = prev;
+  });
+}
+
+/* ════════════════════════════════════════════════════
+   Utils
+   ════════════════════════════════════════════════════ */
+function csvToArr(s) {
+  return s.split(',').map(t => t.trim()).filter(Boolean);
+}
+</script>
+</body>
+</html>

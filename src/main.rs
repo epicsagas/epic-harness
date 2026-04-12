@@ -37,6 +37,7 @@ fn main() {
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
         "install" => unreachable!(),
+        "mem" => hooks::mem::run(&args[1..]),
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0
@@ -46,9 +47,12 @@ fn main() {
             0
         }
         _ => {
-            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|install|uninstall|path>");
+            eprintln!("Usage: epic-harness <resume|guard|polish|observe|snapshot|reflect|mem|install|uninstall|path>");
             eprintln!(
                 "       epic-harness install [codex|gemini|cursor|opencode|cline|aider] [--local] [--dry-run]"
+            );
+            eprintln!(
+                "       epic-harness mem <add|edit|delete|query|search|related|link|graph|validate|migrate|context|serve>"
             );
             eprintln!(
                 "       (omit tool name for interactive menu; root-only GEMINI.md only if missing)"

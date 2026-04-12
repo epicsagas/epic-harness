@@ -11,11 +11,22 @@ keywords = ["claude-code", "plugin", "agent", "harness", "ai"]
 categories = ["command-line-utilities", "development-tools"]
 exclude = ["ref/", "tests/", ".harness/", "hooks/scripts/", "hooks/bin/"]
 
+[[bin]]
+name = "epic-harness"
+path = "src/main.rs"
+
+[lib]
+name = "epic_harness"
+path = "src/lib.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 crossterm = { version = "0.28", default-features = false, features = ["events"] }
+serde_yaml = "0.9"
+uuid = { version = "1", features = ["v4"] }
+tiny_http = "0.12"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.gz"

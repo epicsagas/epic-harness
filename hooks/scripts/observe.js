@@ -11,6 +11,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
 import { runHook, harnessExists, ensureDir, appendJsonl, classifyTool, classifyFailure, extractFileExt, OBS_DIR, DISPATCH_DIR, today, now, SCORE_WEIGHTS, getSessionId, } from "./common.js";
 // ── Sequence counter (O(1) via byte counting) ──────
 function getNextSequenceId(sessionFile) {
@@ -96,6 +97,58 @@ function getLastAction(sessionFile) {
         return null;
     }
 }
+// ── Memory auto-record ──────────────────────────────
+const MEM_KEYWORDS = ['decision', 'architecture', 'pattern', 'chose', 'decided', 'approach'];
+/** Extract a short title from arbitrary text (first sentence or first 80 chars). */
+function extractTitle(text) {
+    const first = text.trim().split(/[\n.!?]/)[0].trim();
+    return first.slice(0, 80) || 'Untitled decision';
+}
+/** Derive a project slug from cwd (last path segment, lowercase, hyphens). */
+function detectProject() {
+    return (process.env.PWD ?? process.cwd())
+        .split('/')
+        .filter(Boolean)
+        .pop()
+        ?.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-') ?? 'unknown';
+}
+/**
+ * Fire-and-forget: if the tool output or assistant message contains a decision
+ * keyword, record it to the unified memory store via `epic-harness mem add`.
+ * Failures are silently ignored — this must never block the main hook flow.
+ */
+function maybeRecordMemory(input) {
+    const toolName = (input.tool_name ?? '').toLowerCase();
+    if (toolName !== 'write' && toolName !== 'edit')
+        return;
+    const resolvedText = (() => {
+        if (input.tool_output)
+            return input.tool_output.output ?? '';
+        if (input.tool_result != null) {
+            if (typeof input.tool_result === 'string')
+                return input.tool_result;
+            if (typeof input.tool_result === 'object' && input.tool_result !== null)
+                return input.tool_result.output ?? '';
+            return String(input.tool_result);
+        }
+        return '';
+    })();
+    const text = resolvedText + (input.assistant_message ?? '');
+    if (!MEM_KEYWORDS.some(k => text.toLowerCase().includes(k)))
+        return;
+    const title = extractTitle(text);
+    const body = text.slice(0, 500);
+    const project = detectProject();
+    execFile('epic-harness', [
+        'mem', 'add',
+        '--title', title,
+        '--type', 'decision',
+        '--project', project,
+        '--agent', 'claude-code',
+        '--body', body,
+    ], { timeout: 2000 }, () => { /* fire-and-forget */ });
+}
 // ── Main hook ───────────────────────────────────────
 /** Log a dispatch event (called externally or via skill triggers) */
 export function logDispatch(signal, skills, contextHint) {
@@ -133,10 +186,23 @@ runHook((input) => {
             ?? input.tool_input.file_path
             ?? JSON.stringify(input.tool_input).slice(0, 200);
     }
+    // Resolve tool output: prefer tool_output (structured) then tool_result (Claude Code actual field)
+    const resolvedOutput = input.tool_output
+        ? { output: input.tool_output.output ?? "", stderr: input.tool_output.stderr ?? "" }
+        : input.tool_result != null
+            ? typeof input.tool_result === "string"
+                ? { output: input.tool_result, stderr: "" }
+                : typeof input.tool_result === "object" && input.tool_result !== null
+                    ? {
+                        output: input.tool_result.output ?? "",
+                        stderr: input.tool_result.stderr ?? "",
+                    }
+                    : { output: String(input.tool_result), stderr: "" }
+            : null;
     // Post-tool: multi-dimensional scoring
-    if (input.tool_output) {
-        const output = input.tool_output.output ?? "";
-        const stderr = input.tool_output.stderr ?? "";
+    if (resolvedOutput) {
+        const output = resolvedOutput.output;
+        const stderr = resolvedOutput.stderr;
         const combined = output + "\n" + stderr;
         // Classify failure
         record.failure_category = classifyFailure(combined);
@@ -169,4 +235,8 @@ runHook((input) => {
         }
     }
     appendJsonl(sessionFile, record);
+    // Auto-record architectural decisions/patterns to unified memory (fire-and-forget)
+    if (resolvedOutput) {
+        maybeRecordMemory(input);
+    }
 });

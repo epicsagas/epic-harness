@@ -83,3 +83,34 @@ If you see `[harness] epic-harness not found`, ensure the binary is in your PATH
 
 > **Note**: Gemini CLI has no PreToolUse/PostToolUse equivalent. Guard runs at the BeforeModel
 > level as a best-effort scan of prompt context for dangerous bash patterns.
+
+## Memory Integration
+
+epic-harness includes a unified memory store shared across all agents and tools.
+
+**Session start — inject relevant context:**
+```bash
+epic-harness mem context --project <slug>
+```
+This is called automatically via the `BeforeAgent` hook (via `resume`). The output surfaces recent decisions, patterns, and notes for the current project.
+
+**Manual add — record a decision or pattern:**
+```bash
+epic-harness mem add --title "Chose Postgres over SQLite" --type decision --body "SQLite lacks concurrent writes needed for our workload."
+```
+
+**Supported `--type` values:** `decision`, `pattern`, `note`, `architecture`
+
+**Web UI — browse and search all memory:**
+```bash
+epic-harness mem serve
+# → http://localhost:7700
+```
+
+**Shorthand via `harness` symlink** (if `hooks/bin/harness → epic-harness` exists):
+```bash
+harness mem add --title "..." --type decision --body "..."
+harness mem context --project <slug>
+harness mem serve
+```
+The symlink is created automatically by `epic-harness install`. Run `epic-harness install --check` to verify.
