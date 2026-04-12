@@ -638,6 +638,34 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
     Ok(0)
 }
 
+/// Search common locations for mem-mcp.cjs.
+fn find_mcp_cjs() -> Option<PathBuf> {
+    // 1. Sibling to running binary: <bin-dir>/hooks/scripts/mem-mcp.cjs
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(c) = exe.parent()
+            .map(|d| d.join("hooks").join("scripts").join("mem-mcp.cjs"))
+            .filter(|c| c.exists())
+    {
+        return Some(c);
+    }
+    // 2. Cargo dev build: target/debug -> target -> repo root
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(c) = exe.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .map(|repo| repo.join("hooks").join("scripts").join("mem-mcp.cjs"))
+            .filter(|c| c.exists())
+    {
+        return Some(c);
+    }
+    // 3. ~/.harness/bin/mem-mcp.cjs
+    if let Ok(home) = std::env::var("HOME") {
+        let c = PathBuf::from(home).join(".harness").join("bin").join("mem-mcp.cjs");
+        if c.exists() { return Some(c); }
+    }
+    None
+}
+
 fn claude_settings_path() -> PathBuf {
     if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") {
         return PathBuf::from(p);
@@ -654,10 +682,12 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let mcp_path = if let Some(p) = flags.get("path") {
         p.clone()
     } else {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "mem-mcp.cjs not found. Specify --path",
-        ));
+        find_mcp_cjs().map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "mem-mcp.cjs not found. Specify --path <path/to/mem-mcp.cjs>",
+            )
+        })?
     };
 
     let settings_path = claude_settings_path();

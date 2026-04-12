@@ -1,89 +1,122 @@
-# harness-mem MCP 서버 등록 가이드
+# harness-mem MCP Server
 
-`hooks/scripts/mem-mcp.cjs`는 JSON-RPC 2.0 over stdio MCP 서버입니다.
-Claude Code, Cursor, Gemini CLI 등 MCP를 지원하는 모든 에이전트에서 네이티브 도구로 메모리를 쿼리·기록할 수 있습니다.
+`hooks/scripts/mem-mcp.cjs` is a JSON-RPC 2.0 over stdio MCP server.
+It exposes the unified memory store as native tools to any MCP-compatible agent
+(Claude Code, Cursor, Gemini CLI, OpenCode, and others).
 
-## Claude Code에서 harness-mem MCP 등록
+## Automatic registration (via `install`)
 
-`~/.claude/settings.json`에 아래 블록을 추가하세요 (경로는 실제 설치 위치로 교체):
+Running `epic-harness install <tool>` **automatically** injects
+`mcpServers.harness-mem` into the tool's settings file.
 
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/epic-harness/hooks/scripts/mem-mcp.cjs"]
-    }
-  }
-}
-```
+| Tool | Settings file | Auto-registered |
+|------|--------------|-----------------|
+| gemini | `~/.gemini/settings.json` | ✓ |
+| cursor | `~/.cursor/mcp.json` | ✓ |
+| opencode | `~/.config/opencode/config.json` | ✓ |
+| codex | n/a (no mcpServers concept) | — |
+| cline | workspace-level only | — |
+| aider | no MCP support | — |
 
-또는 프로젝트 루트의 `.claude/settings.json`에 추가하면 프로젝트 범위로 적용됩니다.
+The path to `mem-mcp.cjs` is resolved automatically:
+1. `<bin-dir>/hooks/scripts/mem-mcp.cjs` (installed release)
+2. `<repo-root>/hooks/scripts/mem-mcp.cjs` (dev build)
+3. `~/.harness/bin/mem-mcp.cjs` (manual placement)
 
-## Cursor에서 등록
-
-`.cursor/mcp.json` (또는 전역 `~/.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/epic-harness/hooks/scripts/mem-mcp.cjs"],
-      "env": {
-        "HARNESS_ROOT": "/path/to/.harness"
-      }
-    }
-  }
-}
-```
-
-## Gemini CLI에서 등록
-
-`~/.gemini/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "node",
-      "args": ["/path/to/epic-harness/hooks/scripts/mem-mcp.cjs"]
-    }
-  }
-}
-```
-
-## 환경 변수
-
-| 변수 | 기본값 | 설명 |
-|------|--------|------|
-| `HARNESS_ROOT` | `~/.harness` | 메모리 저장소 루트 경로 |
-
-## 제공 도구 (5개)
-
-| 도구 | 설명 |
-|------|------|
-| `mem_add` | 새 메모리 노드 추가 (아키텍처 결정, 패턴, 오류 등) |
-| `mem_query` | tag/type/project 필터로 노드 조회 |
-| `mem_search` | 전체 텍스트 키워드 검색 |
-| `mem_related` | 지식 그래프 엣지 BFS 탐색으로 연관 노드 반환 |
-| `mem_context` | 세션 시작 시 프로젝트 컨텍스트 로드 |
-
-## 자동 등록 (예정)
-
-`epic-harness install --mcp` 플래그 실행 시 현재 에이전트를 자동 감지하여 위 설정을 자동으로 주입합니다.
-
-## 테스트
+## Standalone registration for Claude Code
 
 ```bash
-# 단위 테스트 직접 실행
+# Auto-detect path and register in ~/.claude/settings.json
+epic-harness mem mcp-install
+
+# Specify path explicitly
+epic-harness mem mcp-install --path /path/to/mem-mcp.cjs
+
+# Preview without writing
+epic-harness mem mcp-install --dry-run
+```
+
+The resulting entry in `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "harness-mem": {
+      "command": "node",
+      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+    }
+  }
+}
+```
+
+## Manual registration for other tools
+
+### Cursor — `~/.cursor/mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "harness-mem": {
+      "command": "node",
+      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+    }
+  }
+}
+```
+
+### Gemini CLI — `~/.gemini/settings.json`
+
+```json
+{
+  "mcpServers": {
+    "harness-mem": {
+      "command": "node",
+      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+    }
+  }
+}
+```
+
+### OpenCode — `~/.config/opencode/config.json`
+
+```json
+{
+  "mcpServers": {
+    "harness-mem": {
+      "command": "node",
+      "args": ["/path/to/hooks/scripts/mem-mcp.cjs"]
+    }
+  }
+}
+```
+
+## Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARNESS_ROOT` | `~/.harness` | Memory store root directory |
+
+## Available tools (5)
+
+| Tool | Description |
+|------|-------------|
+| `mem_add` | Add a new memory node (decisions, patterns, errors, etc.) |
+| `mem_query` | Query nodes by tag / type / project filter |
+| `mem_search` | Full-text keyword search across all nodes |
+| `mem_related` | BFS traversal of the knowledge graph to find related nodes |
+| `mem_context` | Load project context at session start |
+
+## Testing
+
+```bash
+# Unit tests
 node hooks/scripts/mem-mcp.test.cjs
 
-# stdio 수동 테스트
+# Initialize
 echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test","version":"1.0"}}}' \
   | node hooks/scripts/mem-mcp.cjs
 
-# tools/list 확인
+# List available tools
 echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   | node hooks/scripts/mem-mcp.cjs
 ```
