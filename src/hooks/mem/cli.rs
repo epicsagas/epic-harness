@@ -147,9 +147,11 @@ fn print_subcommand_help(sub: &str) {
         "mcp-install" => {
             println!("harness mem mcp-install — Register the harness-mem MCP server\n");
             println!("USAGE:");
-            println!("  harness mem mcp-install --path <path/to/mem-mcp.cjs> [OPTIONS]\n");
+            println!("  harness mem mcp-install [OPTIONS]\n");
+            println!("Registers `epic-harness mem mcp` as mcpServers.harness-mem in");
+            println!("~/.claude/settings.json. No Node.js or external files needed.\n");
             println!("OPTIONS:");
-            println!("  --path <path>       Path to mem-mcp.cjs (required)");
+            println!("  --force             Overwrite an existing harness-mem registration");
             println!("  --dry-run           Preview without writing settings.json");
         }
         "serve" => {
@@ -660,6 +662,7 @@ fn find_epic_harness_binary() -> String {
 fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let (_, flags) = parse_flags(args);
     let dry_run = flags.contains_key("dry-run");
+    let force   = flags.contains_key("force");
 
     let settings_path = claude_settings_path();
 
@@ -672,8 +675,8 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let mut settings: serde_json::Value = serde_json::from_str(&raw)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse settings.json: {e}")))?;
 
-    if settings["mcpServers"]["harness-mem"].is_object() {
-        println!("harness-mem already registered");
+    if settings["mcpServers"]["harness-mem"].is_object() && !force {
+        println!("harness-mem already registered (use --force to overwrite)");
         return Ok(0);
     }
 
