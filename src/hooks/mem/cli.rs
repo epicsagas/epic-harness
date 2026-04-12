@@ -36,6 +36,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         "validate" => cmd_validate(),
         "migrate" => cmd_migrate(&args[1..]),
         "context" => cmd_context(&args[1..]),
+        "mcp-install" => cmd_mcp_install(&args[1..]),
         "serve" => return super::server::serve(&args[1..]),
         _ => {
             eprintln!("Unknown mem subcommand: {sub}");
@@ -396,6 +397,78 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
         "dry_run": dry_run,
         "nodes": results
     })).unwrap_or_default());
+    Ok(0)
+}
+
+fn claude_settings_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+        .join(".claude")
+        .join("settings.json")
+}
+
+fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
+    let (_, flags) = parse_flags(args);
+    let dry_run = flags.contains_key("dry-run");
+
+    let mcp_path = if let Some(p) = flags.get("path") {
+        p.clone()
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "mem-mcp.cjs not found. Specify --path",
+        ));
+    };
+
+    let settings_path = claude_settings_path();
+
+    let raw = if settings_path.exists() {
+        fs::read_to_string(&settings_path)?
+    } else {
+        "{}".to_string()
+    };
+
+    let mut settings: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse settings.json: {e}")))?;
+
+    if settings["mcpServers"]["harness-mem"].is_object() {
+        println!("harness-mem already registered");
+        return Ok(0);
+    }
+
+    let entry = serde_json::json!({
+        "command": "node",
+        "args": [mcp_path]
+    });
+
+    if dry_run {
+        println!(
+            "Would add to {}:\n  mcpServers.harness-mem = {}",
+            settings_path.display(),
+            serde_json::to_string_pretty(&entry).unwrap_or_default()
+        );
+        return Ok(0);
+    }
+
+    settings["mcpServers"]["harness-mem"] = entry;
+
+    let new_content = serde_json::to_string_pretty(&settings)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    // Atomic write
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let tmp_path = settings_path.with_extension("json.tmp");
+    fs::write(&tmp_path, &new_content)?;
+    fs::rename(&tmp_path, &settings_path)?;
+
+    println!(
+        "✓ Registered harness-mem MCP server in {}\n  Restart Claude Code to activate.",
+        settings_path.display()
+    );
     Ok(0)
 }
 

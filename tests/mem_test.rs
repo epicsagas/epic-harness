@@ -33,7 +33,93 @@ fn run_mem(args: &[&str]) -> i32 {
     epic_harness::hooks::mem::run(&args)
 }
 
+fn set_claude_settings(path: &PathBuf) {
+    unsafe {
+        env::set_var("CLAUDE_SETTINGS_PATH", path.to_str().unwrap());
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────
+
+#[test]
+fn test_mcp_install_dry_run() {
+    let root = temp_root();
+    set_root(&root);
+
+    // Create a settings.json in temp dir
+    let settings_path = root.join("settings.json");
+    fs::write(&settings_path, "{}").unwrap();
+    set_claude_settings(&settings_path);
+
+    let code = run_mem(&[
+        "mcp-install",
+        "--path", "/tmp/fake-mem-mcp.cjs",
+        "--dry-run",
+    ]);
+    assert_eq!(code, 0, "mcp-install --dry-run should exit 0");
+
+    // File should remain unchanged
+    let content = fs::read_to_string(&settings_path).unwrap();
+    assert_eq!(content, "{}", "dry-run should not modify settings.json");
+}
+
+#[test]
+fn test_mcp_install_writes_settings() {
+    let root = temp_root();
+    set_root(&root);
+
+    let settings_path = root.join("settings.json");
+    fs::write(&settings_path, "{}").unwrap();
+    set_claude_settings(&settings_path);
+
+    let code = run_mem(&[
+        "mcp-install",
+        "--path", "/tmp/fake-mem-mcp.cjs",
+    ]);
+    assert_eq!(code, 0, "mcp-install should exit 0");
+
+    let content = fs::read_to_string(&settings_path).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let server = &val["mcpServers"]["harness-mem"];
+    assert_eq!(server["command"].as_str().unwrap(), "node");
+    assert_eq!(
+        server["args"][0].as_str().unwrap(),
+        "/tmp/fake-mem-mcp.cjs"
+    );
+}
+
+#[test]
+fn test_mcp_install_already_registered() {
+    let root = temp_root();
+    set_root(&root);
+
+    let existing = serde_json::json!({
+        "mcpServers": {
+            "harness-mem": {
+                "command": "node",
+                "args": ["/old/path/mem-mcp.cjs"]
+            }
+        }
+    });
+    let settings_path = root.join("settings.json");
+    fs::write(&settings_path, serde_json::to_string(&existing).unwrap()).unwrap();
+    set_claude_settings(&settings_path);
+
+    let code = run_mem(&[
+        "mcp-install",
+        "--path", "/tmp/fake-mem-mcp.cjs",
+    ]);
+    assert_eq!(code, 0, "already registered should exit 0");
+
+    // Content should be unchanged (old path preserved)
+    let content = fs::read_to_string(&settings_path).unwrap();
+    let val: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(
+        val["mcpServers"]["harness-mem"]["args"][0].as_str().unwrap(),
+        "/old/path/mem-mcp.cjs",
+        "existing registration should not be overwritten"
+    );
+}
 
 #[test]
 fn test_add_and_query() {
