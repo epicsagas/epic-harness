@@ -161,9 +161,27 @@ pub fn run(input: &HookInput) -> i32 {
         sequence_id: Some(seq_id),
     };
 
-    if let Some(tool_output) = &input.tool_output {
-        let output = tool_output.output.as_deref().unwrap_or("");
-        let stderr = tool_output.stderr.as_deref().unwrap_or("");
+    // Resolve tool output: prefer tool_output (structured) then tool_result (Claude Code actual field)
+    let resolved_output: Option<(String, String)> = if let Some(to) = &input.tool_output {
+        let out = to.output.as_deref().unwrap_or("").to_string();
+        let err = to.stderr.as_deref().unwrap_or("").to_string();
+        Some((out, err))
+    } else if let Some(tr) = &input.tool_result {
+        let s = match tr {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Object(obj) => {
+                let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
+                let err = obj.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+                format!("{out}\n{err}")
+            }
+            other => other.to_string(),
+        };
+        Some((s, String::new()))
+    } else {
+        None
+    };
+
+    if let Some((output, stderr)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
         record.failure_category = classify_failure(&combined).map(String::from);
@@ -393,5 +411,37 @@ mod tests {
         let input = "all tests passed in 42ms, no errors found";
         let output = mask_secrets(input);
         assert_eq!(output, input, "safe text must not be modified");
+    }
+
+    // ── tool_result resolution ──────────────────────────
+    #[test]
+    fn tool_result_string_scores() {
+        // Simulate Claude Code PostToolUse payload with tool_result as string
+        let input = HookInput {
+            tool_name: Some("Bash".into()),
+            tool_input: Some(serde_json::json!({"command": "echo hello"})),
+            tool_output: None,
+            tool_result: Some(serde_json::json!("hello\n")),
+            ..Default::default()
+        };
+        let output = input.tool_result.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(output, "hello\n");
+    }
+
+    #[test]
+    fn tool_result_object_scores() {
+        let input = HookInput {
+            tool_name: Some("Bash".into()),
+            tool_input: Some(serde_json::json!({"command": "ls"})),
+            tool_output: None,
+            tool_result: Some(serde_json::json!({"output": "file.txt\n", "stderr": ""})),
+            ..Default::default()
+        };
+        if let Some(serde_json::Value::Object(obj)) = &input.tool_result {
+            let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
+            assert_eq!(out, "file.txt\n");
+        } else {
+            panic!("expected object");
+        }
     }
 }

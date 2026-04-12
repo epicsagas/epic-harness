@@ -150,10 +150,25 @@ runHook((input: HookInput) => {
       ?? JSON.stringify(input.tool_input).slice(0, 200);
   }
 
+  // Resolve tool output: prefer tool_output (structured) then tool_result (Claude Code actual field)
+  const resolvedOutput: { output: string; stderr: string } | null =
+    input.tool_output
+      ? { output: input.tool_output.output ?? "", stderr: input.tool_output.stderr ?? "" }
+      : input.tool_result != null
+        ? typeof input.tool_result === "string"
+          ? { output: input.tool_result, stderr: "" }
+          : typeof input.tool_result === "object" && input.tool_result !== null
+            ? {
+                output: ((input.tool_result as Record<string, unknown>).output as string) ?? "",
+                stderr: ((input.tool_result as Record<string, unknown>).stderr as string) ?? "",
+              }
+            : { output: String(input.tool_result), stderr: "" }
+        : null;
+
   // Post-tool: multi-dimensional scoring
-  if (input.tool_output) {
-    const output = input.tool_output.output ?? "";
-    const stderr = input.tool_output.stderr ?? "";
+  if (resolvedOutput) {
+    const output = resolvedOutput.output;
+    const stderr = resolvedOutput.stderr;
     const combined = output + "\n" + stderr;
 
     // Classify failure

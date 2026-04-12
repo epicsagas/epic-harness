@@ -11,7 +11,10 @@ use std::sync::LazyLock;
 pub struct HookInput {
     pub tool_name: Option<String>,
     pub tool_input: Option<serde_json::Value>,
+    /// Legacy structured output (kept for forward compat)
     pub tool_output: Option<ToolOutput>,
+    /// Claude Code actual PostToolUse payload field (string or object)
+    pub tool_result: Option<serde_json::Value>,
     pub conversation_summary: Option<String>,
     pub pending_tasks: Option<Vec<String>>,
     pub context_usage: Option<f64>,

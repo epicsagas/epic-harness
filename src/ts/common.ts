@@ -24,7 +24,10 @@ export type ToolCategory = "bash" | "edit" | "write" | "read" | "glob" | "grep" 
 export interface HookInput {
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  /** Legacy structured output (kept for forward compat) */
   tool_output?: { output?: string; stderr?: string };
+  /** Claude Code actual PostToolUse payload field */
+  tool_result?: string | { output?: string; stderr?: string } | unknown;
   conversation_summary?: string;
   pending_tasks?: string[];
   context_usage?: number;
