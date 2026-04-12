@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -928,8 +928,8 @@ function renderDetail(node) {
     ['ID',      node.id],
     ['Projects',(node.projects||[]).join(', ') || '—'],
     ['Agents',  (node.agents||[]).join(', ')   || '—'],
-    ['Created', node.created ? new Date(node.created).toLocaleString('ko-KR') : '—'],
-    ['Updated', node.updated ? new Date(node.updated).toLocaleString('ko-KR') : '—'],
+    ['Created', node.created ? new Date(node.created).toLocaleString() : '—'],
+    ['Updated', node.updated ? new Date(node.updated).toLocaleString() : '—'],
   ].map(([k,v]) => `<span class="meta-key">${k}</span><span class="meta-val">${v}</span>`).join('');
 
   // markdown
