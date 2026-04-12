@@ -132,8 +132,8 @@ harness mem search "JWT"
 # Knowledge graph web UI
 harness mem serve          # → http://localhost:7700
 
-# Register as MCP server (Claude Code native tool call)
-harness mem mcp-install --path /path/to/hooks/scripts/mem-mcp.cjs
+# Register as MCP server (Claude Code native tool call, no Node.js needed)
+harness mem mcp-install
 ```
 
 Agents auto-record architectural decisions from PostToolUse hooks. Session start injects relevant project memories as context. Existing per-project memories migrate via `harness mem migrate --all`.

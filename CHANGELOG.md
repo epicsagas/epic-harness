@@ -12,11 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 13 CLI subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `serve`, `validate`, `migrate`, `context`, `mcp-install`
   - Knowledge graph: typed nodes (concept/pattern/project/decision/error) + directed edges (uses/extends/conflicts/replaces/related/caused_by)
   - Web UI: `harness mem serve` → `http://localhost:7700` — D3.js force-directed graph, realtime search, CRUD (Markdown editor, edge linking), dark theme
-  - MCP server (`hooks/scripts/mem-mcp.cjs`): 5 native MCP tools (`mem_add`, `mem_query`, `mem_search`, `mem_related`, `mem_context`) — register via `harness mem mcp-install`
+  - MCP server (`epic-harness mem mcp`): 5 native MCP tools (`mem_add`, `mem_query`, `mem_search`, `mem_related`, `mem_context`) — register via `harness mem mcp-install`
   - Auto-recording: PostToolUse hook detects decisions/patterns → auto-stores (fire-and-forget, secret-masked)
   - Session context injection: relevant project memories injected at session start via `resume` hook
   - Migration: `harness mem migrate --all [--dry-run]` converts existing per-project memories to unified store
-  - Node.js fallback server: `node hooks/scripts/mem-server.cjs --port 7700`
   - Security: 127.0.0.1 binding, UUID v4 strict path validation, secret masking, sensitive file path filtering
 - **opencode integration**: JS plugin (`plugins/epic-harness.js`) for session/tool lifecycle hooks, 6 commands, 4 agents → `~/.config/opencode/`
 - **cline integration**: 5 executable hook scripts (PreToolUse/PostToolUse/TaskStart/TaskResume/TaskCancel) → `~/Documents/Cline/Rules/Hooks/`

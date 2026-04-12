@@ -1,6 +1,6 @@
 //! mcp.rs — Stdio JSON-RPC 2.0 MCP server for the unified memory system
 //!
-//! Replaces the old Node.js `hooks/scripts/mem-mcp.cjs`.
+//! Memory features require the `epic-harness` binary — no Node.js runtime needed.
 //! Usage: `epic-harness mem mcp`
 //!
 //! Implements MCP protocol version 2024-11-05 over stdin/stdout.

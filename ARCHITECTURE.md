@@ -222,9 +222,8 @@ Directed edges stored in `edges.jsonl`. Valid relation types:
 | Interface | Description |
 |-----------|-------------|
 | CLI (`harness mem`) | 13 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `serve`, `validate`, `migrate`, `context`, `mcp-install` |
-| REST API (Rust server) | Embedded in the `epic-harness` binary; same port 7700 |
-| REST API (Node.js fallback) | `node hooks/scripts/mem-server.cjs --port 7700` |
-| MCP tools | `hooks/scripts/mem-mcp.cjs` — 5 tools: `mem_add`, `mem_query`, `mem_search`, `mem_related`, `mem_context`; register via `harness mem mcp-install` |
+| REST API | `epic-harness mem serve` — embedded Rust server, port 7700 |
+| MCP tools | `epic-harness mem mcp` — 5 tools: `mem_add`, `mem_query`, `mem_search`, `mem_related`, `mem_context`; register via `harness mem mcp-install` |
 
 ### Auto-Recording Pipeline
 
@@ -291,8 +290,7 @@ epic-harness/
 │       ├── observe.js     ← 3-axis scoring + function extraction
 │       ├── snapshot.js
 │       ├── reflect.js     ← evolution engine (6 phases)
-│       ├── mem-mcp.cjs    ← MCP server (5 native MCP tools for Claude Code)
-│       └── mem-server.cjs ← Node.js fallback REST server (port 7700)
+│       └── (mem-mcp.cjs and mem-server.cjs removed — both integrated into Rust binary)
 ├── integrations/      # Per-tool integration files
 │   ├── codex/         # hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
 │   ├── gemini/        # settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)
