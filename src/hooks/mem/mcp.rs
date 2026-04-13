@@ -12,8 +12,8 @@ use std::io::{self, BufRead, Write};
 
 use super::graph::related_nodes;
 use super::store::{
-    find_node_by_title_recent, now_iso, query_nodes, read_node, search_nodes, upsert_index,
-    validate_node_id, write_node, Node, NodeFrontmatter,
+    now_iso, query_nodes, read_node, search_nodes, validate_node_id,
+    write_node_dedup, Node, NodeFrontmatter,
 };
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
@@ -108,12 +108,6 @@ fn tool_mem_add(args: &Value) -> Value {
         _ => return json!({ "error": "mem_add requires title, type, and body" }),
     };
 
-    // Dedup: if a node with the same title was stored within the last 24 h,
-    // return the existing id rather than creating a duplicate.
-    if let Some(existing_id) = find_node_by_title_recent(&title, 24) {
-        return json!({ "id": existing_id, "deduplicated": true });
-    }
-
     let tags: Vec<String> = args["tags"]
         .as_array()
         .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
@@ -142,14 +136,12 @@ fn tool_mem_add(args: &Value) -> Value {
         body,
     };
 
-    if let Err(e) = write_node(&node) {
-        return json!({ "error": format!("write failed: {e}") });
+    // write_node_dedup: single DB open, dedup check + write in one connection
+    match write_node_dedup(&node, 24) {
+        Ok((existing_id, true))  => json!({ "id": existing_id, "deduplicated": true }),
+        Ok((_, false))           => json!({ "id": id, "created": now }),
+        Err(e)                   => json!({ "error": format!("write failed: {e}") }),
     }
-    if let Err(e) = upsert_index(&node) {
-        return json!({ "error": format!("index update failed: {e}") });
-    }
-
-    json!({ "id": id, "created": now })
 }
 
 fn tool_mem_query(args: &Value) -> Value {

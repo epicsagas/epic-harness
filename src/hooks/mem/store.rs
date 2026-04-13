@@ -170,10 +170,11 @@ pub fn open_db() -> io::Result<Connection> {
             ts       TEXT NOT NULL
         );
 
-        CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
-        CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
-        CREATE INDEX IF NOT EXISTS idx_nodes_type   ON nodes(type);
+        CREATE INDEX IF NOT EXISTS idx_edges_source  ON edges(source);
+        CREATE INDEX IF NOT EXISTS idx_edges_target  ON edges(target);
+        CREATE INDEX IF NOT EXISTS idx_nodes_type    ON nodes(type);
         CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
         ",
     )
     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -509,10 +510,12 @@ pub fn remove_from_index(node_id: &str) -> io::Result<()> {
 // ── Deduplication ─────────────────────────────────────
 
 /// Returns the ID of an existing node with the same title updated within the
-/// last `window_hours` hours.  Used to prevent duplicate writes when multiple
-/// callers (observe hook + skills + direct MCP) all fire for the same event.
-pub fn find_node_by_title_recent(title: &str, window_hours: u64) -> Option<String> {
-    let conn = open_db().ok()?;
+/// last `window_hours` hours.  Uses the composite idx_nodes_title_updated index
+/// for O(log N) lookup.  Used to prevent duplicate writes when multiple callers
+/// (observe hook + skills + direct MCP) fire for the same event.
+fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hours: u64) -> Option<String> {
+    // window_hours is u64 — no SQL injection risk; bind parameter not supported
+    // inside datetime() modifier strings in SQLite.
     let sql = format!(
         "SELECT id FROM nodes
          WHERE title = ?1
@@ -522,6 +525,38 @@ pub fn find_node_by_title_recent(title: &str, window_hours: u64) -> Option<Strin
     );
     conn.query_row(&sql, params![title], |row| row.get::<_, String>(0))
         .ok()
+}
+
+/// Public entry point — opens its own connection (used by callers that don't
+/// already have one open, e.g. observe.js / CLI dedup-only checks).
+pub fn find_node_by_title_recent(title: &str, window_hours: u64) -> Option<String> {
+    let conn = open_db().ok()?;
+    find_duplicate_in_conn(&conn, title, window_hours)
+}
+
+/// Write-with-dedup: opens a single connection, checks for a duplicate, and
+/// writes only when none is found.  Returns `(id, was_deduplicated)`.
+pub fn write_node_dedup(node: &Node, window_hours: u64) -> io::Result<(String, bool)> {
+    let conn = open_db()?;
+    let title = &node.frontmatter.title;
+
+    if let Some(existing_id) = find_duplicate_in_conn(&conn, title, window_hours) {
+        return Ok((existing_id, true));
+    }
+
+    let fm = &node.frontmatter;
+    conn.execute(
+        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            fm.id, fm.node_type, fm.title,
+            join_csv(&fm.tags), join_csv(&fm.projects), join_csv(&fm.agents),
+            fm.created, fm.updated, node.body,
+        ],
+    )
+    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    Ok((node.frontmatter.id.clone(), false))
 }
 
 // ── FTS search ────────────────────────────────────────
