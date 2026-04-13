@@ -79,3 +79,11 @@ Before claiming documentation is done, show ALL applicable:
 - Comments that restate the code: `// increment i` → `i++`
 - Outdated comments that contradict the code
 - Missing docs on public API that others will call
+
+## Memory Integration
+
+Check existing memory before writing docs to avoid duplication:
+```
+epic-harness mem search "<module or function name>"
+# or via MCP: mem_search(query="<module or function name>")
+```

@@ -57,3 +57,17 @@ Before claiming TDD is done, show ALL of these:
 - Test that tests implementation details instead of behavior
 - Skipping the refactor step
 - Multiple behaviors in one test
+
+## Memory Integration
+
+**Session start**: Load relevant patterns before implementing.
+```
+epic-harness mem search "<feature keyword>"
+# or via MCP: mem_search(query="<feature keyword>")
+```
+
+**After refactor** (if a notable pattern emerged):
+```
+epic-harness mem add --title "<pattern name>" --type pattern --tags "<stack>,tdd" --body "<what was learned>"
+# or via MCP: mem_add(title="...", type="pattern", body="...", tags=[...])
+```

@@ -64,3 +64,17 @@ Before claiming security review is complete, show ALL applicable:
 - Storing secrets in code or config files committed to git
 - Using `HTTP` instead of `HTTPS` for sensitive data
 - `eval()` or string-concatenated SQL anywhere
+
+## Memory Integration
+
+**Before review**: Check known security patterns.
+```
+epic-harness mem search "security" --limit 5
+# or via MCP: mem_search(query="security")
+```
+
+**After review** (if a security decision was made):
+```
+epic-harness mem add --title "<decision>" --type decision --tags "security" --body "<rationale>"
+# or via MCP: mem_add(title="...", type="decision", tags=["security"], body="...")
+```
