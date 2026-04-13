@@ -7,13 +7,17 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
-    // install/uninstall read stdin themselves (interactive menu) — skip pre-reading.
+    // These subcommands read stdin themselves — skip pre-reading.
     if subcmd == "install" {
         let code = hooks::install::run(&args[2..]);
         std::process::exit(code);
     }
     if subcmd == "uninstall" {
         let code = hooks::install::run_uninstall(&args[2..]);
+        std::process::exit(code);
+    }
+    if subcmd == "mem" {
+        let code = hooks::mem::run(&args[1..]);
         std::process::exit(code);
     }
 
