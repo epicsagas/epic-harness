@@ -40,8 +40,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" => unreachable!(),
-        "mem" => hooks::mem::run(&args[1..]),
+        "install" | "uninstall" | "mem" => unreachable!(),
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0

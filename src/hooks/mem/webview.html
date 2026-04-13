@@ -8,15 +8,17 @@
 <script>
 /* lightweight markdown → HTML (no external dependency) */
 const marked = { parse(md) {
-  return md
+  const h = md
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
     .replace(/^### (.+)$/gm,'<h3>$1</h3>')
     .replace(/^## (.+)$/gm,'<h2>$1</h2>')
     .replace(/^# (.+)$/gm,'<h1>$1</h1>')
     .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
     .replace(/`(.+?)`/g,'<code>$1</code>')
-    .replace(/^- (.+)$/gm,'<li>$1</li>')
-    .replace(/(<li>.*<\/li>)/gs,'<ul>$1</ul>')
+    .replace(/^- (.+)$/gm,'<li>$1</li>');
+  // Wrap only contiguous runs of <li> into <ul>
+  return h
+    .replace(/((?:<li>.*?<\/li>\n?)+)/gs, '<ul>$1</ul>')
     .replace(/\n{2,}/g,'<br><br>')
     .replace(/\n/g,'<br>');
 }};
@@ -653,6 +655,7 @@ const REL_HEX = {
 };
 
 function typeHex(t) { return TYPE_HEX[t] || '#94a3b8'; }
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function relHex(r)  { return REL_HEX[r]  || '#64748b'; }
 
 /* ════════════════════════════════════════════════════
@@ -982,7 +985,7 @@ function renderGraph() {
     .on('dblclick', (ev, d) => { ev.stopPropagation(); selectNode(d.id).then(openEditForm); })
     .on('mouseenter', (ev, d) => {
       tooltip.style.display = 'block';
-      tooltip.innerHTML = `<strong>${d.title||d.id}</strong><br><span style="color:var(--text-muted);font-size:11px">${d.type||''} &middot; ${d._deg} ${t('links_unit')}</span>`;
+      tooltip.innerHTML = `<strong>${esc(d.title||d.id)}</strong><br><span style="color:var(--text-muted);font-size:11px">${esc(d.type||'')} &middot; ${d._deg} ${t('links_unit')}</span>`;
     })
     .on('mousemove', (ev) => {
       const rc = wrap.getBoundingClientRect();
