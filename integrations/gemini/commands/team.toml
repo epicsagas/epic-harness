@@ -1,5 +1,7 @@
 description = "Design a project-specific agent team - analyze codebase and generate custom agents + skills"
 prompt = """
+CRITICAL: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 1. Read project metadata (GEMINI.md, README, build files).
 2. Explore directory structure.
 3. Identify tech stack, modules, test framework, and deploy method.
@@ -7,8 +9,8 @@ prompt = """
 Choose an architecture pattern (Pipeline, Fan-out/Fan-in, Expert Pool, Producer-Reviewer, Supervisor).
 Recommend team composition (3-6 agents max). Show user and get approval.
 
-Create files in `$(epic-harness path)/team/` (agents, skills, playbook.md).
+Create files in `$HARNESS_DIR/team/` (agents, skills, playbook.md).
 Each agent file should have frontmatter (name, description, tools, model) and detailed instructions.
 
-Add a pointer in `$(epic-harness path)/memory/team.md` so `/go` knows to use this team.
+Add a pointer in `$HARNESS_DIR/memory/team.md` so `/go` knows to use this team.
 """

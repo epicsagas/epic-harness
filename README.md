@@ -115,6 +115,71 @@ epic-harness install gemini --dry-run
 
 Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
 
+## Unified Memory
+
+All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). No Node.js or external runtime required.
+
+```bash
+# Add a memory node
+harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+
+# Filter query
+harness mem query --type decision --project my-project
+
+# Full-text search (FTS5)
+harness mem search "JWT"
+
+# Knowledge graph web UI
+harness mem serve          # → http://localhost:7700
+
+# Register as MCP server in Claude Code (no Node.js needed)
+harness mem mcp-install
+
+# Export all nodes to Markdown for Git backup
+harness mem export --out ./docs/memory
+```
+
+### How the Knowledge Graph Works
+
+The graph auto-accumulates from normal session work — no manual input needed.
+
+**Data flow:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Node types (7):**
+
+| Type | Created by | Content |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Session success rate, avg score, trend |
+| `error` | Auto (reflect) | Repeated error patterns (≥3 consecutive same error) |
+| `pattern` | Auto (reflect) | Weak tools, thrashing, fix-then-break cycles |
+| `concept` | Manual / MCP | Architecture concepts, technical knowledge |
+| `decision` | Manual / MCP | ADRs, design decisions |
+| `project` | Manual / MCP | Project metadata |
+| `resolution` | Manual / MCP | Error resolution recipes |
+
+**Auto-accumulation conditions:**
+
+| Condition | Node created |
+|-----------|-------------|
+| Every session end | `session` (always) |
+| Same error ≥3 times in a row | `error` (repeated_same_error) |
+| Edit→Error alternating | `pattern` (thrashing) |
+| Tool success rate <60% (min 5 obs) | `pattern` (weak_tool) |
+| File type success rate <50% (min 3 obs) | `pattern` (weak_filetype) |
+| Edit success → Bash error cycles | `pattern` (fix_then_break) |
+
+> **Note:** Clean sessions (no errors) only produce `session` nodes. The graph becomes rich after 2–3 real development sessions with build failures, test failures, or debugging cycles.
+
+Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically migrated to SQLite on first run.
+
 ## Commands
 
 | Command | What it does |
@@ -164,7 +229,7 @@ Fuses A-Evolve's benchmark patterns into Claude Code's hook system.
 
 ### Multi-Dimensional Scoring
 
-Every tool call is scored on 3 axes. Weights are configurable via `SCORE_WEIGHTS` in `src/ts/common.ts` (or `src/hooks/common.rs`):
+Every tool call is scored on 3 axes. Weights are configurable via `SCORE_WEIGHTS` in `src/hooks/common.rs`:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -183,7 +248,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### Pattern Detection (4 types)
 
-All thresholds are configurable constants in `src/ts/common.ts` (or `src/hooks/common.rs`):
+All thresholds are configurable constants in `src/hooks/common.rs`:
 
 | Pattern | Detects | Constant | Default |
 |---------|---------|----------|---------|
@@ -315,6 +380,12 @@ Project-specific data lives in your home directory. This survives project deleti
 ├── team/             # /team generated agents and skills
 ├── evolution.jsonl   # Full evolution history
 └── metrics.json      # Aggregate stats + skill attribution
+
+~/.harness/memory/
+├── nodes/            # Knowledge nodes (YAML frontmatter + Markdown body)
+├── edges.jsonl       # Directed graph edges
+├── index.json        # Fast lookup index
+└── graph.json        # Cached graph (for web UI)
 ```
 
 You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
@@ -328,28 +399,19 @@ cargo install --path .          # Build + install to ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Update plugin binary
 ```
 
-### Node.js (fallback)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### How hooks are dispatched
 
-Each hook in `hooks.json` looks for the Rust binary in three places, then falls back to Node.js:
+Each hook in `hooks.json` looks for the Rust binary in two places:
 
 ```
 1. Plugin local: hooks/bin/epic-harness
 2. PATH:         ~/.cargo/bin/epic-harness (via cargo install)
-3. Fallback:     node hooks/scripts/<hook>.js
 ```
 
 ### Tests
 
 ```bash
-cargo test       # 98 Rust unit tests
-npm test         # Node.js unit + e2e tests
+cargo test       # Rust unit + integration tests
 ```
 
 ## Acknowledgments

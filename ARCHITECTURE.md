@@ -94,7 +94,7 @@ sequenceDiagram
 1. **Execution time constraint**: Hooks must complete in <1 second. ML inference cost is prohibitive.
 2. **Observation data scale**: 10-100 observations per session. Statistical significance doesn't require ML.
 3. **Interpretability**: Threshold-based rules are debuggable. "Why was this skill created?" can be answered instantly.
-4. **Tuning ergonomics**: A single constant in `common.js` per threshold. More intuitive than ML hyperparameters.
+4. **Tuning ergonomics**: A single constant in `common.rs` per threshold. More intuitive than ML hyperparameters.
 
 ## Skill System Design
 
@@ -173,6 +173,89 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 3. **Metrics horizon**: Only the last 50 sessions are retained. Long-term trends require direct analysis of `evolution.jsonl`.
 4. **Single agent**: The evolution loop assumes a single Claude Code session. Concurrent multi-agent execution may cause observation conflicts.
 
+## Unified Memory Layer
+
+A cross-agent knowledge graph that persists developer decisions, patterns, and context across all supported coding tools.
+
+### Storage Layout
+
+```
+~/.harness/
+├── memory.db      # SQLite database (WAL mode, FTS5 full-text search)
+├── graph.json     # Cached serialized graph (rebuilt for web UI)
+└── exports/       # Optional Markdown dump for Git backup (mem export)
+```
+
+**Schema:**
+- `nodes` — id, type, title, tags, projects, agents, created, updated, body
+- `nodes_fts` — FTS5 virtual table (title + body + tags), auto-synced via triggers
+- `edges` — id, source, target, relation, weight, ts
+
+Legacy file-based stores (`memory/nodes/*.md`, `memory/edges.jsonl`) are automatically migrated to SQLite on first run and a `memory/.migrated` marker is written to prevent re-migration.
+
+### Node Schema
+
+```yaml
+id: <uuid-v4>
+title: "JWT rotation strategy"
+type: decision          # concept | pattern | project | decision | error
+tags: [auth, security]
+projects: [my-project]  # optional project scope
+created: 2026-04-12T00:00:00Z
+updated: 2026-04-12T00:00:00Z
+---
+Body text in Markdown ...
+```
+
+### Edge Relations
+
+Directed edges stored in the `edges` table. Valid relation types:
+
+| Relation | Meaning |
+|----------|---------|
+| `uses` | Node A depends on or applies Node B |
+| `extends` | Node A is a specialization of Node B |
+| `conflicts` | Node A and Node B represent conflicting approaches |
+| `replaces` | Node A supersedes Node B |
+| `related` | Loose association (bidirectional by convention) |
+| `caused_by` | Error node A was caused by Node B |
+
+### Access Patterns
+
+| Interface | Description |
+|-----------|-------------|
+| CLI (`harness mem`) | 15 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `export`, `serve`, `validate`, `migrate`, `context`, `mcp`, `mcp-install` |
+| REST API | `epic-harness mem serve` — embedded Rust server, port 7700 |
+| MCP server | `epic-harness mem mcp` — stdio JSON-RPC 2.0, 5 tools; register via `harness mem mcp-install [--force]` |
+| Git backup | `epic-harness mem export [--out <dir>]` — dumps all nodes to Markdown |
+
+### Auto-Recording Pipeline
+
+```
+PostToolUse hook
+    ↓ keyword detection (architectural terms, decision markers)
+    ↓ secret masking + sensitive path filtering
+    ↓ fire-and-forget (2 s timeout, never blocks the hook)
+harness mem add → ~/.harness/memory.db (SQLite INSERT + FTS5 index)
+```
+
+The observe hook scans tool output for signals indicating an architectural decision or notable pattern. Matching content is stored as a `decision` or `pattern` node automatically without user action.
+
+### Session Context Injection
+
+On session start, the `resume` hook calls `harness mem context --project <slug>` and injects the returned node summaries as agent context. Only nodes scoped to the current project (or unscoped global nodes) are surfaced, keeping injection size bounded.
+
+### Web UI Architecture
+
+`harness mem serve` starts the REST server and opens `http://localhost:7700`. The UI is a single HTML bundle (embedded in the Rust binary via `include_str!`) with no external CDN dependencies:
+
+- **Graph view**: D3.js force-directed layout — nodes colored by type, edges labeled by relation
+- **Search**: Realtime full-text search powered by the index
+- **CRUD**: Inline Markdown editor (marked.js rendering) + edge linking panel
+- **Theme**: Dark by default
+
+Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node routes, secret masking applied before storage, sensitive file paths filtered from auto-recorded content.
+
 ## File Map
 
 ```
@@ -202,15 +285,7 @@ epic-harness/
 ├── hooks/             # Ring 0 + Ring 3
 │   ├── hooks.json     ← hook registration (Claude Code)
 │   ├── bin/
-│   │   └── epic-harness  ← Rust binary (primary, ~4x faster)
-│   └── scripts/
-│       ├── common.js  ← shared utils + constants + validation
-│       ├── resume.js
-│       ├── guard.js
-│       ├── polish.js
-│       ├── observe.js ← 3-axis scoring + function extraction
-│       ├── snapshot.js
-│       └── reflect.js ← evolution engine (6 phases)
+│   │   └── epic-harness  ← Rust single binary
 ├── integrations/      # Per-tool integration files
 │   ├── codex/         # hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
 │   ├── gemini/        # settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)

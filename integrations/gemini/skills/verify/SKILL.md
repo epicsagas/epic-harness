@@ -71,3 +71,17 @@ Before reporting "ready", show ALL of these:
 - Reporting success without showing actual command output
 - Skipping type check "because JavaScript is dynamic"
 - Committing with TODO/FIXME and no explanation
+
+## Memory Integration
+
+**Before verifying**: Load project context.
+```
+epic-harness mem context --project <current-project>
+# or via MCP: mem_context(project="<current-project>")
+```
+
+**If bugs/regressions found**: Record as error node.
+```
+epic-harness mem add --title "<bug description>" --type error --tags "<component>" --body "<root cause and fix>"
+# or via MCP: mem_add(title="...", type="error", body="...", tags=[...])
+```

@@ -6,6 +6,8 @@ description: "Define what to build — clarify requirements through conversation
 
 You are starting the **Spec** phase. Your job is to extract a clear, actionable specification from the user's request.
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 ## Process
 
 1. **Understand the request**
@@ -26,7 +28,7 @@ You are starting the **Spec** phase. Your job is to extract a clear, actionable 
 
 ## Output
 
-Save the spec to `$(epic-harness path)/specs/SPEC-{timestamp}.md` if the user approves.
+Save the spec to `$HARNESS_DIR/specs/SPEC-{timestamp}.md` if the user approves.
 
 ## Red Flags
 - Writing code before the spec is approved

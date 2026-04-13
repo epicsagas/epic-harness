@@ -4,21 +4,23 @@ description: "Trigger skill evolution manually — analyze observations, evolve 
 
 # /evolve — Manual Evolution Trigger
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 You are the **Evolution Engine** — analyze past sessions to improve skills.
 
 ## Sub-commands
 
 ### `/evolve` (default) — Run evolution now
-1. Read observation logs from `$(epic-harness path)/obs/`
+1. Read observation logs from `$HARNESS_DIR/obs/`
 2. Analyze failure patterns across all sessions
 3. Identify weak areas (error types, recurring failures)
-4. Generate or improve evolved skills in `$(epic-harness path)/evolved/`
+4. Generate or improve evolved skills in `$HARNESS_DIR/evolved/`
 5. Gate: validate new skills (format, dedup, cap of 10)
 6. Report what changed
 
 ### `/evolve status` — Show evolution dashboard
 
-Read `$(epic-harness path)/metrics.json` and `$(epic-harness path)/evolution.jsonl`, then display:
+Read `$HARNESS_DIR/metrics.json` and `$HARNESS_DIR/evolution.jsonl`, then display:
 
 ```
 ## Evolution Dashboard
@@ -36,14 +38,14 @@ Read `$(epic-harness path)/metrics.json` and `$(epic-harness path)/evolution.jso
 (read score_history array, show dimension_averages for each)
 
 ### Evolved Skills
-(list $(epic-harness path)/evolved/*/SKILL.md with name and description from frontmatter)
+(list $HARNESS_DIR/evolved/*/SKILL.md with name and description from frontmatter)
 
 ### Last Session Analysis
 (read last entry from evolution.jsonl)
 ```
 
 ### `/evolve rollback` — Undo last evolution
-1. If `$(epic-harness path)/evolved_backup/` exists, restore it to `$(epic-harness path)/evolved/`
+1. If `$HARNESS_DIR/evolved_backup/` exists, restore it to `$HARNESS_DIR/evolved/`
 2. Append a rollback record to evolution.jsonl
 3. Report what was rolled back
 

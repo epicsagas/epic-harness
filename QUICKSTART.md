@@ -61,7 +61,7 @@ If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is 
 
 | Symptom | Fix |
 |---------|-----|
-| Hooks not running | Verify the `epic-harness` binary is in PATH (`which epic-harness`); Node.js fallback used if absent |
+| Hooks not running | Verify the `epic-harness` binary is in PATH (`which epic-harness`); run `hooks/setup.sh` to auto-install |
 | `~/.harness/projects/` not created | Restart Claude Code session (resume hook initializes it) |
 | `/evolve status` empty | Need at least 1 completed session first |
 

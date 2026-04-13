@@ -32,14 +32,5 @@
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "build": "tsc",
-    "clean": "rm -rf hooks/scripts",
-    "test": "npm run build && node --test tests/*.test.mjs",
-    "prepublishOnly": "npm run build"
-  },
-  "devDependencies": {
-    "@types/node": "^25.5.2",
-    "typescript": "^5.7.0"
-  }
+  "scripts": {}
 }

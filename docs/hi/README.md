@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-बाइनरी हुक्स द्वारा स्वचालित रूप से पहचानी जाती है। अनुपस्थित होने पर, हुक्स Node.js पर फ़ॉलबैक करते हैं।
+बाइनरी हुक्स द्वारा स्वचालित रूप से पहचानी जाती है।
 
 ## मल्टी-टूल सपोर्ट
 
@@ -108,6 +108,73 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## एकीकृत मेमोरी
+
+सभी एजेंट `~/.harness/memory/` में एक साझा नॉलेज ग्राफ़ उपयोग करते हैं।
+
+```bash
+# निर्णय जोड़ें
+harness mem add "auth JWT की बजाय session cookies उपयोग करता है"
+
+# सिमेंटिक खोज
+harness mem query "प्रमाणीकरण दृष्टिकोण"
+
+# पूर्ण-पाठ खोज
+harness mem search "JWT"
+
+# D3.js नॉलेज ग्राफ़ Web UI शुरू करें (http://localhost:7700)
+harness mem serve
+
+# Claude Code के लिए MCP सर्वर पंजीकृत करें (5 नेटिव टूल्स: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# मौजूदा प्रोजेक्ट-वार मेमोरी माइग्रेट करें
+harness mem migrate --all
+```
+
+एजेंट PostToolUse हुक्स के माध्यम से आर्किटेक्चर निर्णय स्वचालित रूप से रिकॉर्ड करते हैं। सेशन शुरू होने पर प्रासंगिक मेमोरी कॉन्टेक्स्ट में इंजेक्ट की जाती है।
+
+### नॉलेज ग्राफ़ कैसे काम करता है
+
+ग्राफ़ सामान्य सेशन कार्य से स्वचालित रूप से संचित होता है — किसी मैन्युअल इनपुट की आवश्यकता नहीं।
+
+**डेटा प्रवाह:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**नोड प्रकार (7):**
+
+| प्रकार | किसके द्वारा बनाया गया | सामग्री |
+|------|-----------|---------|
+| `session` | Auto (reflect) | सेशन सफलता दर, औसत स्कोर, ट्रेंड |
+| `error` | Auto (reflect) | दोहराए गए त्रुटि पैटर्न (≥3 लगातार समान त्रुटि) |
+| `pattern` | Auto (reflect) | कमज़ोर टूल्स, thrashing, fix-then-break चक्र |
+| `concept` | मैन्युअल / MCP | आर्किटेक्चर अवधारणाएँ, तकनीकी ज्ञान |
+| `decision` | मैन्युअल / MCP | ADRs, डिज़ाइन निर्णय |
+| `project` | मैन्युअल / MCP | प्रोजेक्ट मेटाडेटा |
+| `resolution` | मैन्युअल / MCP | त्रुटि समाधान रेसिपी |
+
+**स्वचालित संचय की शर्तें:**
+
+| शर्त | बनाया गया नोड |
+|-----------|-------------|
+| प्रत्येक सेशन समाप्ति | `session` (हमेशा) |
+| समान त्रुटि लगातार ≥3 बार | `error` (repeated_same_error) |
+| Edit→Error बारी-बारी | `pattern` (thrashing) |
+| टूल सफलता दर <60% (न्यूनतम 5 अवलोकन) | `pattern` (weak_tool) |
+| फ़ाइल प्रकार सफलता दर <50% (न्यूनतम 3 अवलोकन) | `pattern` (weak_filetype) |
+| Edit सफलता → Bash त्रुटि चक्र | `pattern` (fix_then_break) |
+
+> **नोट:** स्वच्छ सेशन (कोई त्रुटि नहीं) केवल `session` नोड उत्पन्न करते हैं। ग्राफ़ 2–3 वास्तविक विकास सेशन के बाद समृद्ध होता है जिनमें बिल्ड विफलताएँ, टेस्ट विफलताएँ, या डिबगिंग चक्र हों।
+
+मौजूदा फ़ाइल-आधारित मेमोरी (`nodes/*.md`, `edges.jsonl`) पहले रन पर स्वचालित रूप से SQLite में माइग्रेट हो जाती हैं।
+
 ## कमांड
 
 | कमांड | यह क्या करता है |
@@ -136,7 +203,7 @@ epic-harness install gemini --dry-run
 
 ## हुक्स (Ring 0)
 
-अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए, बाइनरी उपलब्ध न होने पर Node.js पर फ़ॉलबैक करते हैं।
+अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए।
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -157,7 +224,7 @@ A-Evolve के बेंचमार्क पैटर्न को Claude Cod
 
 ### बहु-आयामी स्कोरिंग
 
-प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `src/ts/common.ts` (या `src/hooks/common.rs`) में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
+प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `src/hooks/common.rs` में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -176,7 +243,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### पैटर्न डिटेक्शन (4 प्रकार)
 
-सभी थ्रेशोल्ड `src/ts/common.ts` (या `src/hooks/common.rs`) में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
+सभी थ्रेशोल्ड `src/hooks/common.rs` में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
 
 | पैटर्न | क्या पहचानता है | कॉन्स्टेंट | डिफ़ॉल्ट |
 |---------|---------|----------|---------|
@@ -322,28 +389,19 @@ cargo install --path .          # बिल्ड + ~/.cargo/bin/ में इ�
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # प्लगइन बाइनरी अपडेट
 ```
 
-### Node.js (फ़ॉलबैक)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### हुक्स कैसे डिस्पैच होते हैं
 
-`hooks.json` में प्रत्येक हुक तीन स्थानों पर Rust बाइनरी खोजता है, फिर Node.js पर फ़ॉलबैक करता है:
+`hooks.json` में प्रत्येक हुक दो स्थानों पर Rust बाइनरी खोजता है:
 
 ```
 1. प्लगइन लोकल: hooks/bin/epic-harness
 2. PATH:         ~/.cargo/bin/epic-harness (cargo install के माध्यम से)
-3. फ़ॉलबैक:     node hooks/scripts/<hook>.js
 ```
 
 ### टेस्ट
 
 ```bash
 cargo test       # 98 Rust यूनिट टेस्ट
-npm test         # Node.js यूनिट + e2e टेस्ट
 ```
 
 ## आभार

@@ -2,6 +2,7 @@ pub mod common;
 pub mod guard;
 mod install_wizard;
 pub mod install;
+pub mod mem;
 pub mod observe;
 pub mod polish;
 pub mod reflect;

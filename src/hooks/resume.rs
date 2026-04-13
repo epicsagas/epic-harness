@@ -1,6 +1,7 @@
 use std::fs;
 
 use super::common::*;
+use super::mem::store;
 
 const BANNER: &[&str] = &[
     "",
@@ -299,6 +300,56 @@ pub fn run(_input: &HookInput) -> i32 {
     let mem_files = list_files(&memory_dir(), ".md");
     if !mem_files.is_empty() {
         hint("resume", &format!("Memory: {} file(s)", mem_files.len()));
+    }
+
+    // 5a. Unified memory context: if ~/.harness/memory/ exists, emit relevant
+    //     entries for the current project to stderr so the agent can ingest them.
+    //     Runs `epic-harness mem context --project <slug>` non-blocking if available.
+    {
+        let unified_mem = global_harness_dir()
+            .parent()
+            .map(|p| p.join("memory"))
+            .unwrap_or_default();
+        if unified_mem.is_dir() {
+            let slug = project_slug();
+            // Attempt to surface mem context inline (best-effort, non-fatal)
+            match std::process::Command::new("epic-harness")
+                .args(["mem", "context", "--project", &slug])
+                .output()
+            {
+                Ok(out) if !out.stdout.is_empty() => {
+                    let ctx = String::from_utf8_lossy(&out.stdout);
+                    eprintln!("[harness/mem] Relevant memory for '{slug}':");
+                    for line in ctx.lines().take(20) {
+                        eprintln!("  {line}");
+                    }
+                }
+                _ => {} // binary not yet installed or no entries — silently skip
+            }
+        }
+    }
+
+    // 5b. Knowledge graph recall: surface recent patterns/errors from memory.db
+    {
+        let slug = project_slug();
+        let nodes = store::recall_project_nodes(&slug, 10);
+        let patterns: Vec<_> = nodes.iter()
+            .filter(|n| n.frontmatter.node_type == "pattern" || n.frontmatter.node_type == "error")
+            .take(5)
+            .collect();
+        if !patterns.is_empty() {
+            hint("resume", "Knowledge graph — recent patterns:");
+            for n in &patterns {
+                hint("resume", &format!("  [{}] {}", n.frontmatter.node_type, n.frontmatter.title));
+            }
+        }
+    }
+
+    // 5c. Memory decay: tag stale nodes (90+ days)
+    if let Ok(staled) = store::tag_stale_nodes(90)
+        && staled > 0
+    {
+        hint("resume", &format!("Memory decay: tagged {staled} stale node(s)"));
     }
 
     // 6. Stack

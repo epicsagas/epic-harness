@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-O binário é detectado automaticamente pelos hooks. Se ausente, os hooks utilizam Node.js como fallback.
+O binário é detectado automaticamente pelos hooks.
 
 ## Suporte a Múltiplas Ferramentas
 
@@ -108,6 +108,73 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## Memória Unificada
+
+Todos os agentes compartilham um único grafo de conhecimento em `~/.harness/memory/`.
+
+```bash
+# Adicionar uma decisão
+harness mem add "auth usa cookies de sessão em vez de JWT"
+
+# Busca semântica
+harness mem query "abordagem de autenticação"
+
+# Busca por texto completo
+harness mem search "JWT"
+
+# Iniciar a interface Web do grafo de conhecimento D3.js (http://localhost:7700)
+harness mem serve
+
+# Registrar servidor MCP para Claude Code (5 ferramentas nativas: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# Migrar memórias existentes por projeto
+harness mem migrate --all
+```
+
+Os agentes registram decisões de arquitetura automaticamente via hooks PostToolUse. No início da sessão, memórias relevantes são injetadas no contexto.
+
+### Como o Grafo de Conhecimento Funciona
+
+O grafo se acumula automaticamente a partir do trabalho normal de sessão — nenhuma entrada manual necessária.
+
+**Fluxo de dados:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Tipos de nós (7):**
+
+| Tipo | Criado por | Conteúdo |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Taxa de sucesso da sessão, pontuação média, tendência |
+| `error` | Auto (reflect) | Padrões de erros repetidos (≥3 erros iguais consecutivos) |
+| `pattern` | Auto (reflect) | Ferramentas fracas, thrashing, ciclos fix-then-break |
+| `concept` | Manual / MCP | Conceitos de arquitetura, conhecimento técnico |
+| `decision` | Manual / MCP | ADRs, decisões de design |
+| `project` | Manual / MCP | Metadados do projeto |
+| `resolution` | Manual / MCP | Receitas de resolução de erros |
+
+**Condições de acumulação automática:**
+
+| Condição | Nó criado |
+|-----------|-------------|
+| Cada fim de sessão | `session` (sempre) |
+| Mesmo erro ≥3 vezes seguidas | `error` (repeated_same_error) |
+| Edit→Error alternando | `pattern` (thrashing) |
+| Taxa de sucesso da ferramenta <60% (mín. 5 observações) | `pattern` (weak_tool) |
+| Taxa de sucesso do tipo de arquivo <50% (mín. 3 observações) | `pattern` (weak_filetype) |
+| Ciclos de sucesso em Edit → erro em Bash | `pattern` (fix_then_break) |
+
+> **Nota:** Sessões limpas (sem erros) produzem apenas nós `session`. O grafo se enriquece após 2–3 sessões reais de desenvolvimento com falhas de build, falhas de testes ou ciclos de depuração.
+
+Memórias existentes baseadas em arquivos (`nodes/*.md`, `edges.jsonl`) são automaticamente migradas para SQLite na primeira execução.
+
 ## Comandos
 
 | Comando | O que faz |
@@ -136,7 +203,7 @@ As skills são acionadas automaticamente com base no contexto. Você não precis
 
 ## Hooks (Ring 0)
 
-Executam de forma invisível. Nenhuma ação do usuário é necessária. Implementados como um **único binário Rust** (`epic-harness`) com subcomandos, com fallback para Node.js caso o binário não esteja disponível.
+Executam de forma invisível. Nenhuma ação do usuário é necessária. Implementados como um **único binário Rust** (`epic-harness`) com subcomandos.
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -157,7 +224,7 @@ Integra os padrões de benchmark do A-Evolve ao sistema de hooks do Claude Code.
 
 ### Pontuação Multidimensional
 
-Cada chamada de ferramenta é avaliada em 3 eixos. Os pesos são configuráveis via `SCORE_WEIGHTS` em `src/ts/common.ts` (ou `src/hooks/common.rs`):
+Cada chamada de ferramenta é avaliada em 3 eixos. Os pesos são configuráveis via `SCORE_WEIGHTS` em `src/hooks/common.rs`:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -176,7 +243,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### Detecção de Padrões (4 tipos)
 
-Todos os limites são constantes configuráveis em `src/ts/common.ts` (ou `src/hooks/common.rs`):
+Todos os limites são constantes configuráveis em `src/hooks/common.rs`:
 
 | Padrão | Detecta | Constante | Padrão |
 |--------|---------|-----------|--------|
@@ -322,28 +389,19 @@ cargo install --path .          # Compilar + instalar em ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Atualizar binário do plugin
 ```
 
-### Node.js (fallback)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### Como os hooks são despachados
 
-Cada hook em `hooks.json` procura o binário Rust em três locais, depois faz fallback para Node.js:
+Cada hook em `hooks.json` procura o binário Rust em dois locais:
 
 ```
 1. Local do plugin: hooks/bin/epic-harness
 2. PATH:            ~/.cargo/bin/epic-harness (via cargo install)
-3. Fallback:        node hooks/scripts/<hook>.js
 ```
 
 ### Testes
 
 ```bash
 cargo test       # 98 testes unitários Rust
-npm test         # Testes unitários + e2e Node.js
 ```
 
 ## Agradecimentos
