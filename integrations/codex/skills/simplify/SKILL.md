@@ -65,3 +65,11 @@ Before claiming simplification is done, show ALL of these:
 - Simplifying code you don't understand
 - Over-abstracting (3 files for a 10-line utility)
 - Mixing simplification with feature additions
+
+## Memory Integration
+
+If a significant architectural insight emerged from simplification:
+```
+epic-harness mem add --title "<insight>" --type concept --tags "architecture,refactor" --body "<what was simplified and why>"
+# or via MCP: mem_add(title="...", type="concept", tags=["architecture"], body="...")
+```

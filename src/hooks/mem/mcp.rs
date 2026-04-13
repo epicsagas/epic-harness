@@ -1,0 +1,351 @@
+//! mcp.rs — Stdio JSON-RPC 2.0 MCP server for the unified memory system
+//!
+//! Memory features require the `epic-harness` binary — no Node.js runtime needed.
+//! Usage: `epic-harness mem mcp`
+//!
+//! Implements MCP protocol version 2024-11-05 over stdin/stdout.
+//! Tools: mem_add, mem_query, mem_search, mem_related, mem_context
+
+use serde::Deserialize;
+use serde_json::{json, Value};
+use std::io::{self, BufRead, Write};
+
+use super::graph::related_nodes;
+use super::store::{
+    new_uuid, now_iso, query_nodes, read_node, search_nodes, validate_node_id,
+    write_node_dedup, Node, NodeFrontmatter,
+};
+
+// ── Tool definitions ───────────────────────────────────────────────────────────
+
+fn tool_definitions() -> Value {
+    json!([
+        {
+            "name": "mem_add",
+            "description": "Add a new memory node to the unified knowledge graph. Use for architectural decisions, patterns, recurring errors, or project-specific knowledge.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title":   { "type": "string", "description": "Short descriptive title" },
+                    "type": {
+                        "type": "string",
+                        "enum": ["concept", "pattern", "project", "decision", "error", "session", "resolution"],
+                        "description": "Node type"
+                    },
+                    "body":    { "type": "string", "description": "Markdown content (the actual knowledge)" },
+                    "tags":    { "type": "array", "items": { "type": "string" }, "description": "Tags for filtering" },
+                    "project": { "type": "string", "description": "Project slug (optional)" }
+                },
+                "required": ["title", "type", "body"]
+            }
+        },
+        {
+            "name": "mem_query",
+            "description": "Query memory nodes by filter. Returns relevant memories for the current context.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tag":     { "type": "string" },
+                    "type": {
+                        "type": "string",
+                        "enum": ["concept", "pattern", "project", "decision", "error", "session", "resolution"]
+                    },
+                    "project": { "type": "string" },
+                    "limit":   { "type": "number", "default": 10 }
+                }
+            }
+        },
+        {
+            "name": "mem_search",
+            "description": "Full-text search across all memory nodes. Use when you need to find specific knowledge by keyword.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Search keyword or phrase" }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "mem_related",
+            "description": "Find nodes related to a given node via the knowledge graph edges.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id":    { "type": "string", "description": "Node ID" },
+                    "depth": { "type": "number", "default": 2, "description": "Graph traversal depth" }
+                },
+                "required": ["id"]
+            }
+        },
+        {
+            "name": "mem_context",
+            "description": "Get relevant memory context for a project. Call at session start to load project-specific knowledge.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "project": { "type": "string", "description": "Project slug" },
+                    "limit":   { "type": "number", "default": 5 }
+                }
+            }
+        }
+    ])
+}
+
+// ── Tool implementations ───────────────────────────────────────────────────────
+
+fn tool_mem_add(args: &Value) -> Value {
+    let title = match args["title"].as_str() {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return json!({ "error": "mem_add requires title, type, and body" }),
+    };
+    let node_type = match args["type"].as_str() {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return json!({ "error": "mem_add requires title, type, and body" }),
+    };
+    let body = match args["body"].as_str() {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return json!({ "error": "mem_add requires title, type, and body" }),
+    };
+
+    let tags: Vec<String> = args["tags"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+
+    let projects: Vec<String> = args["project"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| vec![s.to_string()])
+        .unwrap_or_default();
+
+    let id = new_uuid();
+    let now = now_iso();
+
+    let node = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            node_type,
+            title,
+            tags,
+            projects,
+            agents: vec![],
+            created: now.clone(),
+            updated: now.clone(),
+        },
+        body,
+    };
+
+    // write_node_dedup: single DB open, dedup check + write in one connection
+    match write_node_dedup(&node, 24) {
+        Ok((existing_id, true))  => json!({ "id": existing_id, "deduplicated": true }),
+        Ok((_, false))           => json!({ "id": id, "created": now }),
+        Err(e)                   => json!({ "error": format!("write failed: {e}") }),
+    }
+}
+
+fn tool_mem_query(args: &Value) -> Value {
+    let tag = args["tag"].as_str();
+    let type_filter = args["type"].as_str();
+    let project = args["project"].as_str();
+    let limit = args["limit"].as_u64().unwrap_or(10) as usize;
+
+    let nodes = query_nodes(tag, type_filter, project, limit);
+    let results: Vec<Value> = nodes.iter().map(|node| {
+        let fm = &node.frontmatter;
+        json!({
+            "id":      fm.id,
+            "title":   fm.title,
+            "type":    fm.node_type,
+            "tags":    fm.tags,
+            "updated": fm.updated,
+            "projects": fm.projects,
+            "body":    node.body.chars().take(200).collect::<String>()
+        })
+    }).collect();
+
+    json!(results)
+}
+
+fn tool_mem_search(args: &Value) -> Value {
+    let query = match args["query"].as_str() {
+        Some(s) if !s.is_empty() => s,
+        _ => return json!({ "error": "mem_search requires query" }),
+    };
+
+    let nodes = search_nodes(query, 10);
+    let results: Vec<Value> = nodes
+        .iter()
+        .map(|node| {
+            let snippet: String = node.body.chars().take(160).collect::<String>().replace('\n', " ");
+            json!({
+                "id":      node.frontmatter.id,
+                "title":   node.frontmatter.title,
+                "type":    node.frontmatter.node_type,
+                "snippet": snippet
+            })
+        })
+        .collect();
+
+    json!(results)
+}
+
+fn tool_mem_related(args: &Value) -> Value {
+    let id = match args["id"].as_str() {
+        Some(s) if !s.is_empty() => s,
+        _ => return json!({ "error": "mem_related requires id" }),
+    };
+    if !validate_node_id(id) {
+        return json!({ "error": "invalid node id" });
+    }
+
+    let depth = args["depth"].as_u64().unwrap_or(2) as usize;
+    let related_ids = related_nodes(id, depth);
+
+    let results: Vec<Value> = related_ids
+        .iter()
+        .filter_map(|rid| {
+            read_node(rid).ok().map(|node| {
+                json!({
+                    "id":    node.frontmatter.id,
+                    "title": node.frontmatter.title,
+                    "type":  node.frontmatter.node_type
+                })
+            })
+        })
+        .collect();
+
+    json!(results)
+}
+
+fn tool_mem_context(args: &Value) -> Value {
+    let project = args["project"].as_str();
+    let limit = args["limit"].as_u64().unwrap_or(5) as usize;
+
+    // query_nodes returns updated DESC from SQLite
+    let nodes = query_nodes(None, None, project, limit);
+
+    let results: Vec<Value> = nodes.iter().map(|node| {
+        json!({
+            "id":      node.frontmatter.id,
+            "title":   node.frontmatter.title,
+            "type":    node.frontmatter.node_type,
+            "tags":    node.frontmatter.tags,
+            "updated": node.frontmatter.updated,
+            "summary": node.body.chars().take(300).collect::<String>()
+        })
+    }).collect();
+
+    json!(results)
+}
+
+fn call_tool(name: &str, args: &Value) -> Value {
+    let result = match name {
+        "mem_add"     => tool_mem_add(args),
+        "mem_query"   => tool_mem_query(args),
+        "mem_search"  => tool_mem_search(args),
+        "mem_related" => tool_mem_related(args),
+        "mem_context" => tool_mem_context(args),
+        _ => json!({ "error": format!("Unknown tool: {name}") }),
+    };
+    json!({ "content": [{ "type": "text", "text": result.to_string() }] })
+}
+
+// ── JSON-RPC dispatch ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RpcRequest {
+    #[allow(dead_code)]
+    jsonrpc: String,
+    id: Option<Value>,
+    method: String,
+    params: Option<Value>,
+}
+
+fn send(obj: &Value) {
+    let mut out = io::stdout().lock();
+    let _ = writeln!(out, "{}", obj);
+    let _ = out.flush();
+}
+
+fn handle_message(msg: &RpcRequest) {
+    match msg.method.as_str() {
+        "initialize" => {
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": msg.id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": { "tools": {} },
+                    "serverInfo": { "name": "harness-mem", "version": env!("CARGO_PKG_VERSION") }
+                }
+            });
+            send(&resp);
+        }
+        "notifications/initialized" => {
+            // client notification, no response
+        }
+        "tools/list" => {
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": msg.id,
+                "result": { "tools": tool_definitions() }
+            });
+            send(&resp);
+        }
+        "tools/call" => {
+            let params = msg.params.as_ref().and_then(|p| p.as_object());
+            let tool_name = params
+                .and_then(|p| p.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let tool_args = params
+                .and_then(|p| p.get("arguments"))
+                .cloned()
+                .unwrap_or(json!({}));
+
+            let result = call_tool(tool_name, &tool_args);
+            let resp = json!({
+                "jsonrpc": "2.0",
+                "id": msg.id,
+                "result": result
+            });
+            send(&resp);
+        }
+        _ => {
+            if msg.id.is_some() {
+                let resp = json!({
+                    "jsonrpc": "2.0",
+                    "id": msg.id,
+                    "error": { "code": -32601, "message": "Method not found" }
+                });
+                send(&resp);
+            }
+        }
+    }
+}
+
+// ── Entry point ────────────────────────────────────────────────────────────────
+
+/// Run the stdio MCP server loop. Reads newline-delimited JSON-RPC from stdin.
+pub fn run_mcp_server() -> i32 {
+    let stdin = io::stdin();
+    for line in stdin.lock().lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        let line = line.trim().to_string();
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<RpcRequest>(&line) {
+            Ok(msg) => handle_message(&msg),
+            Err(_) => {
+                // Ignore parse errors silently (per MCP spec)
+            }
+        }
+    }
+    0
+}
+

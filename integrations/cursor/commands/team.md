@@ -5,6 +5,8 @@ description: "Design a project-specific agent team — analyze codebase and gene
 
 # /team — Design Your Agent Team
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 You are the **Team Architect** — a meta-skill that designs project-specific agent teams.
 
 ## Process
@@ -28,10 +30,10 @@ Choose the best architecture pattern:
 Recommend team composition (3-6 agents max). Show user and get approval.
 
 ### Phase 3: Generate
-Create files in `$(epic-harness path)/team/`:
+Create files in `$HARNESS_DIR/team/`:
 
 ```
-$(epic-harness path)/team/
+$HARNESS_DIR/team/
 ├── agents/
 │   ├── <role-1>.md      # Agent definition (frontmatter + instructions)
 │   ├── <role-2>.md
@@ -55,7 +57,7 @@ model: sonnet
 ```
 
 ### Phase 4: Connect
-Add a pointer in `$(epic-harness path)/memory/team.md` so `/go` knows to use this team.
+Add a pointer in `$HARNESS_DIR/memory/team.md` so `/go` knows to use this team.
 
 ## Cursor Sub-Agent Note
 

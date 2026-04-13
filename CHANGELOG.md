@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Unified Memory system** (`harness mem`): cross-agent knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5), shared by all supported coding agents
+  - 15 CLI subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `export`, `serve`, `validate`, `migrate`, `context`, `mcp`, `mcp-install`
+  - **SQLite + FTS5 storage**: single `~/.harness/memory.db` — fast full-text search, ACID transactions, WAL concurrency; no rg/grep subprocess
+  - **Auto-migration**: legacy `nodes/*.md` + `edges.jsonl` automatically imported into SQLite on first run
+  - **`mem export`**: dumps all nodes to `~/.harness/exports/<id>.md` for Git-diffable plain-text backup; supports `--out <dir>` and `--dry-run`
+  - Knowledge graph: typed nodes (concept/pattern/project/decision/error) + directed edges (uses/extends/conflicts/replaces/related/caused_by)
+  - Web UI: `harness mem serve` → `http://localhost:7700` — D3.js force-directed graph, realtime search, CRUD, EN/KO language toggle, dark theme
+  - **MCP server** (`epic-harness mem mcp`): native Rust stdio JSON-RPC 2.0 server, 5 tools — no Node.js required; register via `harness mem mcp-install [--force]`
+  - Auto-recording: PostToolUse hook detects decisions/patterns → auto-stores (fire-and-forget, secret-masked)
+  - Session context injection: relevant project memories injected at session start via `resume` hook
+  - Migration: `harness mem migrate --all [--dry-run]` converts existing per-project memories to unified store
+  - Security: 127.0.0.1 binding, UUID v4 strict path validation, secret masking, sensitive file path filtering
 - **opencode integration**: JS plugin (`plugins/epic-harness.js`) for session/tool lifecycle hooks, 6 commands, 4 agents → `~/.config/opencode/`
 - **cline integration**: 5 executable hook scripts (PreToolUse/PostToolUse/TaskStart/TaskResume/TaskCancel) → `~/Documents/Cline/Rules/Hooks/`
 - **aider integration**: `.aider.conf.yml` + `.aider/CONVENTIONS.md` — no hook system, conventions auto-loaded via `read:` config

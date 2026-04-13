@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-バイナリはフックによって自動検出されます。存在しない場合、フックはNode.jsにフォールバックします。
+バイナリはフックによって自動検出されます。
 
 ## マルチツールサポート
 
@@ -108,6 +108,73 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## 統合メモリ
+
+すべてのエージェントは `~/.harness/memory/` にある単一のナレッジグラフを共有します。
+
+```bash
+# 決定事項を追加
+harness mem add "authはJWTではなくセッションクッキーを使用する"
+
+# セマンティック検索
+harness mem query "認証方式"
+
+# 全文検索
+harness mem search "JWT"
+
+# D3.jsナレッジグラフのWeb UIを起動 (http://localhost:7700)
+harness mem serve
+
+# Claude Code用MCPサーバーを登録（5つのネイティブツール: mem_add, mem_query, mem_search, mem_related, mem_context）
+harness mem mcp-install
+
+# 既存のプロジェクト別メモリを移行
+harness mem migrate --all
+```
+
+エージェントはPostToolUseフックを通じてアーキテクチャの決定事項を自動記録します。セッション開始時に関連するメモリがコンテキストに注入されます。
+
+### ナレッジグラフの仕組み
+
+グラフは通常のセッション作業から自動的に蓄積されます — 手動入力は不要です。
+
+**データフロー:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**ノードタイプ (7):**
+
+| タイプ | 作成元 | 内容 |
+|------|-----------|---------|
+| `session` | Auto (reflect) | セッション成功率、平均スコア、トレンド |
+| `error` | Auto (reflect) | 繰り返しエラーパターン (≥3回連続の同一エラー) |
+| `pattern` | Auto (reflect) | 弱いツール、スラッシング、fix-then-breakサイクル |
+| `concept` | 手動 / MCP | アーキテクチャ概念、技術的知識 |
+| `decision` | 手動 / MCP | ADR、設計上の決定 |
+| `project` | 手動 / MCP | プロジェクトメタデータ |
+| `resolution` | 手動 / MCP | エラー解決レシピ |
+
+**自動蓄積の条件:**
+
+| 条件 | 作成されるノード |
+|-----------|-------------|
+| 各セッション終了時 | `session` (常時) |
+| 同一エラーが3回以上連続 | `error` (repeated_same_error) |
+| Edit→Errorの交互発生 | `pattern` (thrashing) |
+| ツール成功率 <60% (最低5回の観測) | `pattern` (weak_tool) |
+| ファイルタイプ成功率 <50% (最低3回の観測) | `pattern` (weak_filetype) |
+| Edit成功 → Bashエラーのサイクル | `pattern` (fix_then_break) |
+
+> **注意:** クリーンなセッション (エラーなし) は `session` ノードのみを生成します。グラフはビルド失敗、テスト失敗、デバッグサイクルを含む2〜3回の実際の開発セッション後に充実します。
+
+既存のファイルベースのメモリ (`nodes/*.md`, `edges.jsonl`) は初回実行時に自動的にSQLiteへ移行されます。
+
 ## コマンド
 
 | コマンド | 機能 |
@@ -136,7 +203,7 @@ epic-harness install gemini --dry-run
 
 ## フック（Ring 0）
 
-不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されており、バイナリが利用できない場合はNode.jsにフォールバックします。
+不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されています。
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -157,7 +224,7 @@ A-EvolveのベンチマークパターンをClaude Codeのフックシステム�
 
 ### 多次元スコアリング
 
-すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `src/ts/common.ts`（または `src/hooks/common.rs`）の `SCORE_WEIGHTS` で設定可能です：
+すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `src/hooks/common.rs`の `SCORE_WEIGHTS` で設定可能です：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -176,7 +243,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### パターン検出（4タイプ）
 
-すべての閾値は `src/ts/common.ts`（または `src/hooks/common.rs`）の設定可能な定数です：
+すべての閾値は `src/hooks/common.rs`の設定可能な定数です：
 
 | パターン | 検出内容 | 定数 | デフォルト |
 |---------|---------|----------|---------|
@@ -322,28 +389,19 @@ cargo install --path .          # ビルド + ~/.cargo/bin/ にインストー�
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # プラグインバイナリを更新
 ```
 
-### Node.js（フォールバック）
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### フックのディスパッチ方法
 
-`hooks.json` の各フックは3箇所でRustバイナリを探し、見つからない場合はNode.jsにフォールバックします：
+`hooks.json` の各フックは2箇所でRustバイナリを探します：
 
 ```
 1. プラグインローカル: hooks/bin/epic-harness
 2. PATH:              ~/.cargo/bin/epic-harness（cargo install経由）
-3. フォールバック:     node hooks/scripts/<hook>.js
 ```
 
 ### テスト
 
 ```bash
 cargo test       # 98件のRustユニットテスト
-npm test         # Node.js ユニット + e2eテスト
 ```
 
 ## 謝辞

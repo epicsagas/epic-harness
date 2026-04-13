@@ -63,3 +63,17 @@ Before claiming performance review is complete, show ALL applicable:
 - Loading all records when only count is needed
 - Synchronous file I/O in request handlers
 - Missing pagination on list endpoints
+
+## Memory Integration
+
+**Before review**: Check known performance patterns.
+```
+epic-harness mem search "performance" --limit 5
+# or via MCP: mem_search(query="performance")
+```
+
+**After review** (if a perf pattern or bottleneck found):
+```
+epic-harness mem add --title "<pattern>" --type pattern --tags "performance" --body "<finding and fix>"
+# or via MCP: mem_add(title="...", type="pattern", tags=["performance"], body="...")
+```

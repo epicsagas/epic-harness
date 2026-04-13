@@ -19,7 +19,7 @@ description: "Context window management. Use when context usage exceeds 70%. Sum
 
 ### 2. Preserve
 Before compacting, ensure critical state is saved:
-- Current task and progress → `$(epic-harness path)/sessions/`
+- Current task and progress → `$HARNESS_DIR/sessions/`
 - Key decisions made → note in conversation
 - Files being worked on → list explicitly
 
@@ -36,9 +36,9 @@ Summary for compaction:
 
 ### 4. Resume
 After compaction, the `resume` hook will reload:
-- Session snapshot from `$(epic-harness path)/sessions/`
-- Project memory from `$(epic-harness path)/memory/`
-- Evolved skills from `$(epic-harness path)/evolved/`
+- Session snapshot from `$HARNESS_DIR/sessions/`
+- Project memory from `$HARNESS_DIR/memory/`
+- Evolved skills from `$HARNESS_DIR/evolved/`
 
 ## Anti-Rationalization
 
@@ -56,7 +56,7 @@ Before compacting, confirm ALL of these:
 - [ ] Files being worked on listed explicitly
 - [ ] Key decisions recorded (not just "some decisions were made")
 - [ ] Next step specified clearly
-- [ ] Snapshot written to `$(epic-harness path)/sessions/` (show file name)
+- [ ] Snapshot written to `$HARNESS_DIR/sessions/` (show file name)
 
 **Compacting without a summary = guaranteed context loss.**
 

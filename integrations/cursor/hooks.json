@@ -20,6 +20,11 @@
         "matcher": "*",
         "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found, skipping observe'",
         "async": true
+      },
+      {
+        "matcher": "*",
+        "command": "EH=$(command -v epic-harness 2>/dev/null); SLUG=$(basename \"$(pwd)\" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g'); test -n \"$EH\" && \"$EH\" mem-observe --project \"$SLUG\" --agent cursor || true",
+        "async": true
       }
     ],
     "sessionEnd": [

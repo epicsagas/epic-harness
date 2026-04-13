@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-钩子会自动检测该二进制文件。如果不存在，则回退到 Node.js。
+钩子会自动检测该二进制文件。
 
 ## 多工具支持
 
@@ -108,6 +108,73 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## 统一记忆
+
+所有代理共享 `~/.harness/memory/` 下的单一知识图谱。
+
+```bash
+# 添加决策记录
+harness mem add "auth 使用 Session Cookie 而非 JWT"
+
+# 语义搜索
+harness mem query "认证方式"
+
+# 全文搜索
+harness mem search "JWT"
+
+# 启动 D3.js 知识图谱 Web UI（http://localhost:7700）
+harness mem serve
+
+# 为 Claude Code 注册 MCP 服务器（5 个原生工具：mem_add、mem_query、mem_search、mem_related、mem_context）
+harness mem mcp-install
+
+# 迁移现有的各项目记忆
+harness mem migrate --all
+```
+
+代理通过 PostToolUse 钩子自动记录架构决策。会话开始时，相关记忆会被注入到上下文中。
+
+### 知识图谱的工作原理
+
+图谱从正常的会话工作中自动积累——无需手动输入。
+
+**数据流：**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**节点类型 (7)：**
+
+| 类型 | 创建方式 | 内容 |
+|------|-----------|---------|
+| `session` | 自动 (reflect) | 会话成功率、平均分数、趋势 |
+| `error` | 自动 (reflect) | 重复错误模式（≥3 次连续相同错误） |
+| `pattern` | 自动 (reflect) | 弱工具、thrashing、fix-then-break 循环 |
+| `concept` | 手动 / MCP | 架构概念、技术知识 |
+| `decision` | 手动 / MCP | ADR、设计决策 |
+| `project` | 手动 / MCP | 项目元数据 |
+| `resolution` | 手动 / MCP | 错误解决方案 |
+
+**自动积累条件：**
+
+| 条件 | 创建的节点 |
+|-----------|-------------|
+| 每次会话结束 | `session`（始终） |
+| 相同错误连续 ≥3 次 | `error` (repeated_same_error) |
+| Edit→Error 交替出现 | `pattern` (thrashing) |
+| 工具成功率 <60%（至少 5 次观测） | `pattern` (weak_tool) |
+| 文件类型成功率 <50%（至少 3 次观测） | `pattern` (weak_filetype) |
+| Edit 成功 → Bash 错误循环 | `pattern` (fix_then_break) |
+
+> **注意：** 干净的会话（无错误）只会产生 `session` 节点。在经历 2–3 次包含构建失败、测试失败或调试循环的真实开发会话后，图谱会变得丰富。
+
+现有的基于文件的记忆（`nodes/*.md`、`edges.jsonl`）在首次运行时会自动迁移到 SQLite。
+
 ## 命令
 
 | 命令 | 功能 |
@@ -136,7 +203,7 @@ epic-harness install gemini --dry-run
 
 ## 钩子（Ring 0）
 
-静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现，若二进制不可用则回退到 Node.js。
+静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现。
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -157,7 +224,7 @@ epic-harness resume | guard | polish | observe | snapshot | reflect
 
 ### 多维评分
 
-每次工具调用按 3 个维度评分。权重可通过 `src/ts/common.ts`（或 `src/hooks/common.rs`）中的 `SCORE_WEIGHTS` 配置：
+每次工具调用按 3 个维度评分。权重可通过 `src/hooks/common.rs`中的 `SCORE_WEIGHTS` 配置：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -176,7 +243,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 模式检测（4 种类型）
 
-所有阈值均为 `src/ts/common.ts`（或 `src/hooks/common.rs`）中的可配置常量：
+所有阈值均为 `src/hooks/common.rs`中的可配置常量：
 
 | 模式 | 检测内容 | 常量 | 默认值 |
 |---------|---------|----------|---------|
@@ -322,28 +389,19 @@ cargo install --path .          # 构建 + 安装到 ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # 更新插件二进制
 ```
 
-### Node.js（备选）
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### 钩子调度方式
 
-`hooks.json` 中的每个钩子按以下顺序查找 Rust 二进制文件，然后回退到 Node.js：
+`hooks.json` 中的每个钩子按以下顺序查找 Rust 二进制文件：
 
 ```
 1. 插件本地: hooks/bin/epic-harness
 2. PATH:     ~/.cargo/bin/epic-harness（通过 cargo install）
-3. 回退:     node hooks/scripts/<hook>.js
 ```
 
 ### 测试
 
 ```bash
 cargo test       # 98 个 Rust 单元测试
-npm test         # Node.js 单元 + 端到端测试
 ```
 
 ## 致谢

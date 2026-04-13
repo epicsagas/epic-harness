@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-Le binaire est automatiquement détecté par les hooks. S'il est absent, les hooks se rabattent sur Node.js.
+Le binaire est automatiquement détecté par les hooks.
 
 ## Support multi-outils
 
@@ -108,6 +108,73 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## Mémoire unifiée
+
+Tous les agents partagent un graphe de connaissances unique sous `~/.harness/memory/`.
+
+```bash
+# Ajouter une décision
+harness mem add "auth utilise des cookies de session plutôt que JWT"
+
+# Recherche sémantique
+harness mem query "approche d'authentification"
+
+# Recherche plein texte
+harness mem search "JWT"
+
+# Lancer l'interface Web du graphe de connaissances D3.js (http://localhost:7700)
+harness mem serve
+
+# Enregistrer le serveur MCP pour Claude Code (5 outils natifs : mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# Migrer les mémoires existantes par projet
+harness mem migrate --all
+```
+
+Les agents enregistrent automatiquement les décisions architecturales via les hooks PostToolUse. Au démarrage de la session, les mémoires pertinentes sont injectées dans le contexte.
+
+### Comment fonctionne le Graphe de Connaissances
+
+Le graphe s'accumule automatiquement à partir du travail normal de session — aucune saisie manuelle nécessaire.
+
+**Flux de données :**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Types de noeuds (7) :**
+
+| Type | Créé par | Contenu |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Taux de réussite de la session, score moyen, tendance |
+| `error` | Auto (reflect) | Schémas d'erreurs répétées (≥3 erreurs identiques consécutives) |
+| `pattern` | Auto (reflect) | Outils faibles, thrashing, cycles fix-then-break |
+| `concept` | Manuel / MCP | Concepts d'architecture, connaissances techniques |
+| `decision` | Manuel / MCP | ADRs, décisions de conception |
+| `project` | Manuel / MCP | Métadonnées du projet |
+| `resolution` | Manuel / MCP | Recettes de résolution d'erreurs |
+
+**Conditions d'accumulation automatique :**
+
+| Condition | Noeud créé |
+|-----------|-------------|
+| Chaque fin de session | `session` (toujours) |
+| Même erreur ≥3 fois de suite | `error` (repeated_same_error) |
+| Edit→Error en alternance | `pattern` (thrashing) |
+| Taux de réussite de l'outil <60% (min. 5 observations) | `pattern` (weak_tool) |
+| Taux de réussite du type de fichier <50% (min. 3 observations) | `pattern` (weak_filetype) |
+| Cycles de succès Edit → erreur Bash | `pattern` (fix_then_break) |
+
+> **Note :** Les sessions propres (sans erreurs) ne produisent que des noeuds `session`. Le graphe s'enrichit après 2–3 sessions de développement réelles avec des échecs de build, des échecs de tests ou des cycles de débogage.
+
+Les mémoires existantes basées sur des fichiers (`nodes/*.md`, `edges.jsonl`) sont automatiquement migrées vers SQLite lors de la première exécution.
+
 ## Commandes
 
 | Commande | Ce qu'elle fait |
@@ -136,7 +203,7 @@ Les compétences se déclenchent automatiquement en fonction du contexte. Vous n
 
 ## Hooks (Ring 0)
 
-S'exécutent de manière invisible. Aucune action utilisateur requise. Implémentés sous forme d'un **unique binaire Rust** (`epic-harness`) avec des sous-commandes, se rabattant sur Node.js si le binaire n'est pas disponible.
+S'exécutent de manière invisible. Aucune action utilisateur requise. Implémentés sous forme d'un **unique binaire Rust** (`epic-harness`) avec des sous-commandes.
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -157,7 +224,7 @@ Fusionne les patterns de benchmark d'A-Evolve dans le système de hooks de Claud
 
 ### Notation multi-dimensionnelle
 
-Chaque appel d'outil est noté sur 3 axes. Les pondérations sont configurables via `SCORE_WEIGHTS` dans `src/ts/common.ts` (ou `src/hooks/common.rs`) :
+Chaque appel d'outil est noté sur 3 axes. Les pondérations sont configurables via `SCORE_WEIGHTS` dans `src/hooks/common.rs` :
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -176,7 +243,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### Détection de patterns (4 types)
 
-Tous les seuils sont des constantes configurables dans `src/ts/common.ts` (ou `src/hooks/common.rs`) :
+Tous les seuils sont des constantes configurables dans `src/hooks/common.rs` :
 
 | Pattern | Détecte | Constante | Défaut |
 |---------|---------|-----------|--------|
@@ -322,28 +389,19 @@ cargo install --path .          # Compiler + installer dans ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Mettre à jour le binaire du plugin
 ```
 
-### Node.js (solution de repli)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### Dispatching des hooks
 
-Chaque hook dans `hooks.json` cherche le binaire Rust à trois emplacements, puis se rabat sur Node.js :
+Chaque hook dans `hooks.json` cherche le binaire Rust à deux emplacements :
 
 ```
 1. Local au plugin : hooks/bin/epic-harness
 2. PATH :           ~/.cargo/bin/epic-harness (via cargo install)
-3. Repli :          node hooks/scripts/<hook>.js
 ```
 
 ### Tests
 
 ```bash
 cargo test       # 98 tests unitaires Rust
-npm test         # Tests unitaires + e2e Node.js
 ```
 
 ## Remerciements

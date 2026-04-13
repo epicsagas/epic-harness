@@ -12,7 +12,7 @@
           },
           {
             "type": "command",
-            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/resume.js\""
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume"
           }
         ],
         "description": "Auto-install binary if missing, then restore previous session context + load project memory and evolved skills"
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/guard.js\""
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard"
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/polish.js\""
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish"
           }
         ],
         "description": "Auto-format + typecheck + lint warning after edits"
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/observe.js\"",
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe",
             "async": true,
             "timeout": 5
           }
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/snapshot.js\""
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot"
           }
         ],
         "description": "Save working state before context compaction"
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/reflect.js\""
+            "command": "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect"
           }
         ],
         "description": "Analyze session observations → evolve skills → gate mutations"

@@ -4,21 +4,23 @@ description: "Trigger skill evolution manually — analyze observations, evolve 
 
 # /evolve — Manual Evolution Trigger
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 You are the **Evolution Engine** — analyze past sessions to improve skills.
 
 ## Sub-commands
 
 ### `/evolve` (default) — Run evolution now
-1. Read observation logs from `$(epic-harness path)/obs/`
+1. Read observation logs from `$HARNESS_DIR/obs/`
 2. Analyze failure patterns across all sessions
 3. Identify weak areas (error types, recurring failures)
-4. Generate or improve evolved skills in `$(epic-harness path)/evolved/`
+4. Generate or improve evolved skills in `$HARNESS_DIR/evolved/`
 5. Gate: validate new skills (format, dedup, cap of 10)
 6. Report what changed
 
 ### `/evolve status` — Show evolution dashboard
 
-Read `$(epic-harness path)/metrics.json` and `$(epic-harness path)/evolution.jsonl`, then display:
+Read `$HARNESS_DIR/metrics.json` and `$HARNESS_DIR/evolution.jsonl`, then display:
 
 ```
 ## Evolution Dashboard
@@ -36,7 +38,7 @@ Read `$(epic-harness path)/metrics.json` and `$(epic-harness path)/evolution.jso
 (read score_history array, show dimension_averages for each)
 
 ### Evolved Skills
-(list $(epic-harness path)/evolved/*/SKILL.md with name and description from frontmatter)
+(list $HARNESS_DIR/evolved/*/SKILL.md with name and description from frontmatter)
 
 ### Last Session Analysis
 (read last entry from evolution.jsonl)
@@ -49,7 +51,7 @@ Read `$(epic-harness path)/metrics.json` and `$(epic-harness path)/evolution.jso
 
 ### `/evolve history` — Long-term analysis
 
-Read `$(epic-harness path)/evolution.jsonl` (full history), then display:
+Read `$HARNESS_DIR/evolution.jsonl` (full history), then display:
 
 ```
 ## Evolution History
@@ -67,13 +69,13 @@ Read `$(epic-harness path)/evolution.jsonl` (full history), then display:
 |---------|-------------|------------|-----------|
 
 ### Skill Effectiveness
-Read `$(epic-harness path)/metrics.json` → `skill_attribution`, then display:
+Read `$HARNESS_DIR/metrics.json` → `skill_attribution`, then display:
 | Skill | Sessions Active | Avg Score With | Avg Score Without | Delta |
 |-------|----------------|----------------|-------------------|-------|
 (highlight positive delta = effective, negative = consider removing)
 
 ### Dispatch Analysis
-Read `$(epic-harness path)/dispatch/dispatch_*.jsonl`, then display:
+Read `$HARNESS_DIR/dispatch/dispatch_*.jsonl`, then display:
 | Skill | Times Invoked | Top Trigger Signals |
 |-------|--------------|---------------------|
 ```
@@ -93,17 +95,17 @@ Read `~/.harness-global/patterns.jsonl`, then display:
 |------------|----------|-------------------|
 ```
 
-To opt-in: create `$(epic-harness path)/.cross-project-enabled` file.
+To opt-in: create `$HARNESS_DIR/.cross-project-enabled` file.
 To opt-out: remove it.
 
 ### `/evolve rollback` — Undo last evolution
-1. If `$(epic-harness path)/evolved_backup/` exists, restore it to `$(epic-harness path)/evolved/`
-2. Otherwise, read `$(epic-harness path)/evolution.jsonl` for last entry, remove skills seeded in that entry
+1. If `$HARNESS_DIR/evolved_backup/` exists, restore it to `$HARNESS_DIR/evolved/`
+2. Otherwise, read `$HARNESS_DIR/evolution.jsonl` for last entry, remove skills seeded in that entry
 3. Append a rollback record to evolution.jsonl
 4. Report what was rolled back
 
 ### `/evolve reset` — Clear all evolution data
-1. Remove `$(epic-harness path)/evolved/`, `$(epic-harness path)/evolved_backup/`
+1. Remove `$HARNESS_DIR/evolved/`, `$HARNESS_DIR/evolved_backup/`
 2. Clear `metrics.json` and `evolution.jsonl`
 3. Confirm with user first
 
@@ -114,7 +116,7 @@ This command lets you trigger it manually or inspect the state.
 
 ```
 Observe (PostToolUse — multi-dimensional scoring)
-    ↓ $(epic-harness path)/obs/session_YYYYMMDD.jsonl
+    ↓ $HARNESS_DIR/obs/session_YYYYMMDD.jsonl
 Analyze (Stop or /evolve)
     ↓ SessionAnalysis: per-tool, per-ext, score distribution
     ↓ Pattern detection: repeated_same_error, fix_then_break, long_debug_loop, thrashing

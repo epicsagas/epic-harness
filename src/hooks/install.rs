@@ -650,6 +650,76 @@ fn make_executable(path: &Path) {
     }
 }
 
+// ── MCP injection ─────────────────────────────────────────────────────────────
+
+/// Injects `mcpServers.harness-mem` into the tool's settings JSON file.
+/// Registers `epic-harness mem mcp` as the MCP server command (no Node.js required).
+/// Silently skips if the settings file doesn't exist or already has the entry.
+fn inject_mcp(tool: &str, target_dir: &Path) {
+    let settings_path = match tool {
+        "codex"    => None, // Codex uses hooks.json, no mcpServers concept
+        "gemini"   => Some(target_dir.join("settings.json")),
+        "cursor"   => Some(target_dir.join("mcp.json")),
+        "opencode" => Some(target_dir.join("opencode.json")),
+        "cline"    => None, // Cline MCP is configured per-workspace, not via global install
+        "aider"    => None, // No MCP support
+        _          => None,
+    };
+
+    let settings_path = match settings_path {
+        Some(p) => p,
+        None => return, // tool doesn't support MCP via a settings file
+    };
+
+    let raw = if settings_path.exists() {
+        fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    };
+
+    let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+
+    // Use the current running binary path for reliability; fall back to bare name
+    let binary = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "epic-harness".to_string());
+
+    // opencode uses { "mcp": { "name": { type, command[] } } }
+    // Others use { "mcpServers": { "name": { command, args[] } } }
+    if tool == "opencode" {
+        if json["mcp"]["harness-mem"].is_object() {
+            eprintln!("[harness] mcp.harness-mem already registered in {tool} settings — skipping.");
+            return;
+        }
+        json["mcp"]["harness-mem"] = serde_json::json!({
+            "type": "local",
+            "command": [binary, "mem", "mcp"]
+        });
+    } else {
+        if json["mcpServers"]["harness-mem"].is_object() {
+            eprintln!("[harness] mcpServers.harness-mem already registered in {tool} settings — skipping.");
+            return;
+        }
+        json["mcpServers"]["harness-mem"] = serde_json::json!({
+            "command": binary,
+            "args": ["mem", "mcp"]
+        });
+    }
+
+    let out = serde_json::to_string_pretty(&json).unwrap_or_else(|_| raw.clone());
+
+    if let Some(parent) = settings_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let tmp = settings_path.with_extension("tmp");
+    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &settings_path).is_ok() {
+        eprintln!(
+            "[harness] Registered mcpServers.harness-mem in {}",
+            settings_path.display()
+        );
+    }
+}
+
 // ── Interactive menu ──────────────────────────────────────────────────────────
 
 const TOOLS: &[(&str, &str)] = &[
@@ -779,6 +849,13 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     }
 
     progress.finish();
+
+    // Inject harness-mem MCP server entry into the tool's settings file.
+    if !dry_run {
+        inject_mcp(tool, target_dir);
+    } else {
+        eprintln!("[harness] dry-run: would inject mcpServers.harness-mem into {tool} settings");
+    }
 
     // Codex-specific: warn if config.toml exists but codex_hooks is not enabled.
     if tool == "codex" {

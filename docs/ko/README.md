@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-바이너리가 감지되면 훅에서 자동으로 사용합니다. 없으면 Node.js로 폴백합니다.
+바이너리가 감지되면 훅에서 자동으로 사용합니다.
 
 ## 멀티 도구 지원
 
@@ -108,6 +108,73 @@ epic-harness install cursor --local
 epic-harness install gemini --dry-run
 ```
 
+## 통합 메모리
+
+모든 에이전트는 `~/.harness/memory/`에 있는 단일 지식 그래프를 공유합니다.
+
+```bash
+# 결정 사항 추가
+harness mem add "auth는 JWT 대신 세션 쿠키를 사용한다"
+
+# 시맨틱 검색
+harness mem query "인증 방식"
+
+# 전체 텍스트 검색
+harness mem search "JWT"
+
+# D3.js 지식 그래프 Web UI 실행 (http://localhost:7700)
+harness mem serve
+
+# Claude Code용 MCP 서버 등록 (5개 네이티브 도구: mem_add, mem_query, mem_search, mem_related, mem_context)
+harness mem mcp-install
+
+# 기존 프로젝트별 메모리 이전
+harness mem migrate --all
+```
+
+에이전트는 PostToolUse 훅을 통해 아키텍처 결정 사항을 자동으로 기록합니다. 세션 시작 시 관련 메모리가 컨텍스트에 주입됩니다.
+
+### 지식 그래프 작동 방식
+
+그래프는 일반적인 세션 작업에서 자동으로 축적됩니다 — 수동 입력이 필요 없습니다.
+
+**데이터 흐름:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**노드 유형 (7):**
+
+| 유형 | 생성 주체 | 내용 |
+|------|-----------|---------|
+| `session` | Auto (reflect) | 세션 성공률, 평균 점수, 추세 |
+| `error` | Auto (reflect) | 반복 에러 패턴 (≥3회 연속 동일 에러) |
+| `pattern` | Auto (reflect) | 취약 도구, thrashing, fix-then-break 사이클 |
+| `concept` | 수동 / MCP | 아키텍처 개념, 기술 지식 |
+| `decision` | 수동 / MCP | ADR, 설계 결정 |
+| `project` | 수동 / MCP | 프로젝트 메타데이터 |
+| `resolution` | 수동 / MCP | 에러 해결 레시피 |
+
+**자동 축적 조건:**
+
+| 조건 | 생성되는 노드 |
+|-----------|-------------|
+| 매 세션 종료 시 | `session` (항상) |
+| 동일 에러 ≥3회 연속 | `error` (repeated_same_error) |
+| Edit→Error 교대 발생 | `pattern` (thrashing) |
+| 도구 성공률 <60% (최소 5회 관측) | `pattern` (weak_tool) |
+| 파일 유형 성공률 <50% (최소 3회 관측) | `pattern` (weak_filetype) |
+| Edit 성공 → Bash 에러 사이클 | `pattern` (fix_then_break) |
+
+> **참고:** 클린 세션(에러 없음)은 `session` 노드만 생성합니다. 그래프는 빌드 실패, 테스트 실패, 디버깅 사이클이 포함된 2~3회의 실제 개발 세션 후에 풍부해집니다.
+
+기존 파일 기반 메모리(`nodes/*.md`, `edges.jsonl`)는 첫 실행 시 자동으로 SQLite로 마이그레이션됩니다.
+
 ## 명령어
 
 | 명령어 | 기능 |
@@ -136,7 +203,7 @@ epic-harness install gemini --dry-run
 
 ## 훅 (Ring 0)
 
-투명하게 실행됩니다. 사용자 조작이 필요 없습니다. **단일 Rust 바이너리** (`epic-harness`)의 서브커맨드로 구현되며, 바이너리가 없으면 Node.js로 폴백합니다.
+투명하게 실행됩니다. 사용자 조작이 필요 없습니다. **단일 Rust 바이너리** (`epic-harness`)의 서브커맨드로 구현됩니다.
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -157,7 +224,7 @@ A-Evolve의 벤치마크 패턴을 Claude Code 훅 시스템에 통합합니다.
 
 ### 다차원 스코어링
 
-모든 도구 호출은 3개 축으로 평가됩니다. 가중치는 `src/ts/common.ts` (또는 `src/hooks/common.rs`)의 `SCORE_WEIGHTS`로 설정 가능합니다:
+모든 도구 호출은 3개 축으로 평가됩니다. 가중치는 `src/hooks/common.rs`의 `SCORE_WEIGHTS`로 설정 가능합니다:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -176,7 +243,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 패턴 감지 (4가지 유형)
 
-모든 임계값은 `src/ts/common.ts` (또는 `src/hooks/common.rs`)에서 설정 가능합니다:
+모든 임계값은 `src/hooks/common.rs`에서 설정 가능합니다:
 
 | 패턴 | 감지 대상 | 상수 | 기본값 |
 |---------|---------|----------|---------|
@@ -322,28 +389,19 @@ cargo install --path .          # 빌드 + ~/.cargo/bin/에 설치
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # 플러그인 바이너리 업데이트
 ```
 
-### Node.js (폴백)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### 훅 디스패치 방식
 
-`hooks.json`의 각 훅은 세 곳에서 Rust 바이너리를 찾은 후 Node.js로 폴백합니다:
+`hooks.json`의 각 훅은 두 곳에서 Rust 바이너리를 찾습니다:
 
 ```
 1. 플러그인 로컬: hooks/bin/epic-harness
 2. PATH:         ~/.cargo/bin/epic-harness (cargo install 경유)
-3. 폴백:         node hooks/scripts/<hook>.js
 ```
 
 ### 테스트
 
 ```bash
 cargo test       # 98개 Rust 단위 테스트
-npm test         # Node.js 단위 + e2e 테스트
 ```
 
 ## 감사의 말
