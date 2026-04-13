@@ -123,24 +123,6 @@ jobs:
       - name: Publish
         run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
-  publish-npm:
-    name: Publish to npm
-    needs: release
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Publish
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
   update-homebrew:
     name: Update Homebrew Tap
     needs: release
