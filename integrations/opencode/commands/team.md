@@ -4,7 +4,7 @@ description: "Design a project-specific agent team — analyze codebase and gene
 
 # /team — Design Your Agent Team
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
 
 You are the **Team Architect** — a meta-skill that designs project-specific agent teams.
 

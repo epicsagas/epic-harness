@@ -91,21 +91,21 @@ epic-harness funktioniert mit Claude Code und 6 weiteren KI-Coding-Tools. Alle T
 
 ```bash
 # Interaktives Menue
-epic-harness install
+epic install
 
 # Direkte Installation
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # Projektlokal installieren
-epic-harness install cursor --local
+epic install cursor --local
 
 # Vorschau ohne Aenderungen
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 ## Einheitlicher Speicher
@@ -206,7 +206,7 @@ Skills werden automatisch basierend auf dem Kontext ausgeloest. Du musst sie nic
 Laufen unsichtbar. Keine Benutzeraktion erforderlich. Implementiert als **einzelne Rust-Binary** (`epic-harness`) mit Unterbefehlen.
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | Hook | Wann | Funktion |

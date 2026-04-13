@@ -50,7 +50,7 @@ Ring 3 — Evolve (self-improving)
 git clone https://github.com/epicsagas/epic-harness.git
 cd epic-harness
 cargo install --path .
-epic-harness install
+epic install
 ```
 
 ### Rust binary (optional, ~4x faster hooks)
@@ -96,21 +96,21 @@ epic-harness works with Claude Code and 6 additional AI coding tools. All tools 
 
 ```bash
 # Interactive menu (select which tools to install)
-epic-harness install
+epic install
 
 # Direct install
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # Project-local install
-epic-harness install cursor --local
+epic install cursor --local
 
 # Preview without changes
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
@@ -211,7 +211,7 @@ Skills trigger automatically based on context. You don't need to invoke them.
 Run invisibly. No user action needed. Implemented as a **single Rust binary** (`epic-harness`) with subcommands, falling back to Node.js if the binary is not available.
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | Hook | When | Does |

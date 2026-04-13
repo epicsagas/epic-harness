@@ -91,21 +91,21 @@ epic-harness는 Claude Code와 6개의 추가 AI 코딩 도구에서 동작합�
 
 ```bash
 # 인터랙티브 메뉴 (설치할 도구 선택)
-epic-harness install
+epic install
 
 # 직접 설치
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ 필요)
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ 필요)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # 프로젝트 로컬 설치
-epic-harness install cursor --local
+epic install cursor --local
 
 # 변경 없이 미리보기
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 ## 통합 메모리
@@ -203,10 +203,10 @@ SessionStart hook → resume (context injection) → next session gets hints
 
 ## 훅 (Ring 0)
 
-투명하게 실행됩니다. 사용자 조작이 필요 없습니다. **단일 Rust 바이너리** (`epic-harness`)의 서브커맨드로 구현됩니다.
+투명하게 실행됩니다. 사용자 조작이 필요 없습니다. **단일 Rust 바이너리** (`epic` / `epic-harness`)의 서브커맨드로 구현됩니다.
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | 훅 | 시점 | 동작 |

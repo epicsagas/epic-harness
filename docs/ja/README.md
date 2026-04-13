@@ -91,21 +91,21 @@ epic-harnessはClaude Codeと6つの追加AIコーディングツールで動作
 
 ```bash
 # インタラクティブメニュー（インストールするツールを選択）
-epic-harness install
+epic install
 
 # 直接インストール
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/（Cursor 1.7+ 必要）
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/（Cursor 1.7+ 必要）
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # プロジェクトローカルにインストール
-epic-harness install cursor --local
+epic install cursor --local
 
 # 変更なしでプレビュー
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 ## 統合メモリ
@@ -206,7 +206,7 @@ SessionStart hook → resume (context injection) → next session gets hints
 不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されています。
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | フック | タイミング | 動作 |
