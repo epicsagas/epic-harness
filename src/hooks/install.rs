@@ -660,7 +660,7 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
         "codex"    => None, // Codex uses hooks.json, no mcpServers concept
         "gemini"   => Some(target_dir.join("settings.json")),
         "cursor"   => Some(target_dir.join("mcp.json")),
-        "opencode" => Some(target_dir.join("config.json")),
+        "opencode" => Some(target_dir.join("opencode.json")),
         "cline"    => None, // Cline MCP is configured per-workspace, not via global install
         "aider"    => None, // No MCP support
         _          => None,
@@ -679,21 +679,32 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 
     let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
-    // Already registered — don't overwrite
-    if json["mcpServers"]["harness-mem"].is_object() {
-        eprintln!("[harness] mcpServers.harness-mem already registered in {tool} settings — skipping.");
-        return;
-    }
-
     // Use the current running binary path for reliability; fall back to bare name
     let binary = std::env::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "epic-harness".to_string());
 
-    json["mcpServers"]["harness-mem"] = serde_json::json!({
-        "command": binary,
-        "args": ["mem", "mcp"]
-    });
+    // opencode uses { "mcp": { "name": { type, command[] } } }
+    // Others use { "mcpServers": { "name": { command, args[] } } }
+    if tool == "opencode" {
+        if json["mcp"]["harness-mem"].is_object() {
+            eprintln!("[harness] mcp.harness-mem already registered in {tool} settings — skipping.");
+            return;
+        }
+        json["mcp"]["harness-mem"] = serde_json::json!({
+            "type": "local",
+            "command": [binary, "mem", "mcp"]
+        });
+    } else {
+        if json["mcpServers"]["harness-mem"].is_object() {
+            eprintln!("[harness] mcpServers.harness-mem already registered in {tool} settings — skipping.");
+            return;
+        }
+        json["mcpServers"]["harness-mem"] = serde_json::json!({
+            "command": binary,
+            "args": ["mem", "mcp"]
+        });
+    }
 
     let out = serde_json::to_string_pretty(&json).unwrap_or_else(|_| raw.clone());
 
