@@ -702,9 +702,78 @@ fn inject_mcp_claude() {
             return;
         }
     };
-    let tmp = claude_json.with_file_name(format!(".claude.{}.json.tmp", std::process::id()));
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = claude_json
+        .with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
         eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
+    } else {
+        eprintln!("[harness] Failed to write ~/.claude.json");
+    }
+}
+
+/// Removes `mcpServers.harness-mem` from `~/.claude.json`.
+/// Mirror of `inject_mcp_claude()` — called by `uninstall_tool` for the "claude" tool.
+fn remove_mcp_claude(dry_run: bool) {
+    let Some(home) = std::env::var_os("HOME") else {
+        eprintln!("[harness] Could not determine home directory — skipping Claude MCP removal.");
+        return;
+    };
+    let claude_json = std::path::Path::new(&home).join(".claude.json");
+
+    if !claude_json.exists() {
+        eprintln!("[harness] ~/.claude.json not found — nothing to remove.");
+        return;
+    }
+
+    let raw = match fs::read_to_string(&claude_json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[harness] Failed to read ~/.claude.json: {e}");
+            return;
+        }
+    };
+
+    let mut json: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[harness] Failed to parse ~/.claude.json: {e}");
+            return;
+        }
+    };
+
+    if !json["mcpServers"]["harness-mem"].is_object() {
+        eprintln!("[harness] mcpServers.harness-mem not found in ~/.claude.json — nothing to remove.");
+        return;
+    }
+
+    if dry_run {
+        eprintln!("[harness] (dry-run) would remove mcpServers.harness-mem from ~/.claude.json");
+        return;
+    }
+
+    if let Some(servers) = json["mcpServers"].as_object_mut() {
+        servers.remove("harness-mem");
+    }
+
+    let out = match serde_json::to_string_pretty(&json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
+            return;
+        }
+    };
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp = claude_json
+        .with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
+    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
+        eprintln!("[harness] Removed mcpServers.harness-mem from ~/.claude.json");
     } else {
         eprintln!("[harness] Failed to write ~/.claude.json");
     }
@@ -1060,6 +1129,12 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
             let _ = fs::remove_dir(&dir); // silently ignore non-empty
         }
         let _ = fs::remove_dir(target_dir);
+    }
+
+    // Claude: no files were installed — only MCP injection. Remove the MCP entry.
+    if tool == "claude" {
+        remove_mcp_claude(dry_run);
+        return 0;
     }
 
     let dry = if dry_run { " (dry-run)" } else { "" };
