@@ -41,7 +41,7 @@ Ring 3 — Evolución (auto-mejora)
 
 ```bash
 # Marketplace de plugins de Claude Code
-claude plugins marketplace add epicsagas/epic-harness
+claude plugins marketplace add epicsagas/plugins
 claude plugins install epic@epicsagas
 
 # O manualmente

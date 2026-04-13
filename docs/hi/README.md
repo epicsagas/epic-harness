@@ -41,7 +41,7 @@ Ring 3 — इवॉल्व (स्वयं-सुधार करने व�
 
 ```bash
 # Claude Code प्लगइन मार्केटप्लेस
-claude plugins marketplace add epicsagas/epic-harness
+claude plugins marketplace add epicsagas/plugins
 claude plugins install epic@epicsagas
 
 # या मैन्युअल रूप से

@@ -41,7 +41,7 @@ Ring 3 — 진화 (자기 개선)
 
 ```bash
 # Claude Code 플러그인 CLI
-claude plugins marketplace add epicsagas/epic-harness
+claude plugins marketplace add epicsagas/plugins
 claude plugins install epic@epicsagas
 
 # 또는 수동 설치

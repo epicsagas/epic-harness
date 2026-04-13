@@ -11,7 +11,7 @@
 
 ```bash
 # Via Claude Code plugin marketplace
-/plugin marketplace add epicsagas/epic-harness
+/plugin marketplace add epicsagas/plugins
 /plugin install harness@epic
 ```
 

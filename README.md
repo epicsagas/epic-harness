@@ -41,7 +41,7 @@ Ring 3 — Evolve (self-improving)
 
 ```
 # Claude Code plugin (recommended)
-/plugin marketplace add epicsagas/claude-plugins
+/plugin marketplace add epicsagas/plugins
 /plugin install epic@epicsagas
 ```
 

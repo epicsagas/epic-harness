@@ -41,7 +41,7 @@ Ring 3 — Evolve (auto-aprimoramento)
 
 ```bash
 # Marketplace de plugins do Claude Code
-claude plugins marketplace add epicsagas/epic-harness
+claude plugins marketplace add epicsagas/plugins
 claude plugins install epic@epicsagas
 
 # Ou manualmente
