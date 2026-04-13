@@ -15,6 +15,10 @@ exclude = ["ref/", "tests/", ".harness/", "hooks/bin/"]
 name = "epic-harness"
 path = "src/main.rs"
 
+[[bin]]
+name = "epic"
+path = "src/main.rs"
+
 [lib]
 name = "epic_harness"
 path = "src/lib.rs"
