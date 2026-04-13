@@ -4,6 +4,8 @@ title: "epic-harness — Codex CLI Integration Install Guide"
 
 # epic-harness Codex CLI Integration
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 ## Prerequisites
 
 Ensure the `epic-harness` binary is in your PATH:
@@ -87,7 +89,7 @@ If you see `[harness] epic-harness not found`, ensure the binary is in PATH.
 
 ## Data Location
 
-All per-project harness data lives in `$(epic-harness path)/` at your project root:
+All per-project harness data lives in `$HARNESS_DIR/` at your project root:
 
 ```
 .harness/

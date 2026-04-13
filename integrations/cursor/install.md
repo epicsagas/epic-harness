@@ -1,5 +1,7 @@
 # epic-harness Cursor Integration — Install Guide
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 ## Requirements
 
 - **Cursor 1.7 or later** — hooks (`preToolUse`, `postToolUse`, `sessionEnd`) and custom slash commands require Cursor 1.7+
@@ -108,7 +110,7 @@ These agents are referenced by `/go` and `/check` commands when launching sub-ta
 ls .cursor/hooks.json .cursor/rules/ .cursor/commands/ .cursor/agents/
 ```
 
-Start a new Cursor session. The Composer should load harness context from `$(epic-harness path)/memory/` and report any evolved skills from `$(epic-harness path)/evolved/`.
+Start a new Cursor session. The Composer should load harness context from `$HARNESS_DIR/memory/` and report any evolved skills from `$HARNESS_DIR/evolved/`.
 
 ---
 

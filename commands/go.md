@@ -9,8 +9,9 @@ You are starting the **Go** phase — the core execution engine of epic-harness.
 ## Process
 
 ### Step 0: Preflight
-- Check if a spec exists (`$(epic-harness path)/specs/` or recent conversation). If not, run a quick inline spec conversation first.
-- Check if `$(epic-harness path)/team/` exists — if yes, use project-specific agents.
+- Run `HARNESS_DIR=$(epic-harness path)` to resolve the data directory.
+- Check if a spec exists (`$HARNESS_DIR/specs/` or recent conversation). If not, run a quick inline spec conversation first.
+- Check if `$HARNESS_DIR/team/` exists — if yes, use project-specific agents.
 
 ### Step 1: Plan
 Break the work into ordered tasks:

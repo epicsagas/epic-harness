@@ -5,6 +5,8 @@ description: "Context window management. Use when context usage exceeds 70%. Sum
 
 # Context — Context Window Management
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 ## When to Trigger
 - Context window > 70% capacity
 - Long conversation with many tool calls
@@ -19,7 +21,7 @@ description: "Context window management. Use when context usage exceeds 70%. Sum
 
 ### 2. Preserve
 Before compacting, ensure critical state is saved:
-- Current task and progress → `$(epic-harness path)/sessions/`
+- Current task and progress → `$HARNESS_DIR/sessions/`
 - Key decisions made → **save to memory before compacting**:
   ```
   epic-harness mem add --title "<decision>" --type decision --tags "<project>" --body "<context and rationale>"
@@ -40,9 +42,9 @@ Summary for compaction:
 
 ### 4. Resume
 After compaction, the `resume` hook (BeforeAgent) will reload:
-- Session snapshot from `$(epic-harness path)/sessions/`
+- Session snapshot from `$HARNESS_DIR/sessions/`
 - Project memory from `~/.harness/memory.db` via `resume` hook
-- Evolved skills from `$(epic-harness path)/evolved/`
+- Evolved skills from `$HARNESS_DIR/evolved/`
 - Reload project context manually if needed:
   ```
   epic-harness mem context --project <current-project>
@@ -66,7 +68,7 @@ Before compacting, confirm ALL of these:
 - [ ] Key decisions recorded (not just "some decisions were made")
 - [ ] Next step specified clearly
 - [ ] Key decisions saved to memory (show mem add output or MCP call)
-- [ ] Snapshot written to `$(epic-harness path)/sessions/` (show file name)
+- [ ] Snapshot written to `$HARNESS_DIR/sessions/` (show file name)
 
 **Compacting without a summary = guaranteed context loss.**
 

@@ -1,5 +1,7 @@
 # epic-harness
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 This project uses the **epic-harness** automation layer. The hooks in
 `.clinerules/hooks/` (or `~/Documents/Cline/Rules/Hooks/`) run automatically
 around every tool call. Here is what they do:
@@ -28,7 +30,7 @@ Use these in your Cline chat:
 
 ## ~/.harness/projects/{slug}/ Directory
 
-Project-level memory lives in `$(epic-harness path)/`:
+Project-level memory lives in `$HARNESS_DIR/`:
 - `obs/` — tool observation logs (scored by success, quality, cost)
 - `evolved/` — auto-generated skills from your patterns
 - `metrics.json` — session trends and skill effectiveness

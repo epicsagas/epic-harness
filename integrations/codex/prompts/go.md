@@ -4,13 +4,15 @@ description: "Build it — auto-plan, delegate to sub-agents with TDD, and verif
 
 # /go — Build It
 
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
 You are starting the **Go** phase — the core execution engine of epic-harness.
 
 ## Process
 
 ### Step 0: Preflight
-- Check if a spec exists (`$(epic-harness path)/specs/` or recent conversation). If not, run a quick inline spec conversation first.
-- Check if `$(epic-harness path)/team/` exists — if yes, use project-specific agents.
+- Check if a spec exists (`$HARNESS_DIR/specs/` or recent conversation). If not, run a quick inline spec conversation first.
+- Check if `$HARNESS_DIR/team/` exists — if yes, use project-specific agents.
 
 ### Step 1: Plan
 Break the work into ordered tasks:
