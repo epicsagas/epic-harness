@@ -711,6 +711,7 @@ fn inject_mcp_claude() {
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
         eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
     } else {
+        let _ = fs::remove_file(&tmp); // clean up tmp on failure
         eprintln!("[harness] Failed to write ~/.claude.json");
     }
 }
@@ -745,7 +746,7 @@ fn remove_mcp_claude(dry_run: bool) {
         }
     };
 
-    if !json["mcpServers"]["harness-mem"].is_object() {
+    if json["mcpServers"].get("harness-mem").is_none() {
         eprintln!("[harness] mcpServers.harness-mem not found in ~/.claude.json — nothing to remove.");
         return;
     }
@@ -775,6 +776,7 @@ fn remove_mcp_claude(dry_run: bool) {
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
         eprintln!("[harness] Removed mcpServers.harness-mem from ~/.claude.json");
     } else {
+        let _ = fs::remove_file(&tmp); // clean up tmp on failure
         eprintln!("[harness] Failed to write ~/.claude.json");
     }
 }
@@ -1068,6 +1070,12 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         }
     };
 
+    // Claude Code: no files to remove — only MCP entry in ~/.claude.json.
+    if tool == "claude" {
+        remove_mcp_claude(dry_run);
+        return 0;
+    }
+
     let target_dir = if local { &cfg.local_dir } else { &cfg.global_dir };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let alt_target: Option<PathBuf> = cfg.alt_dir.as_ref().map(|global_alt| {
@@ -1129,12 +1137,6 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
             let _ = fs::remove_dir(&dir); // silently ignore non-empty
         }
         let _ = fs::remove_dir(target_dir);
-    }
-
-    // Claude: no files were installed — only MCP injection. Remove the MCP entry.
-    if tool == "claude" {
-        remove_mcp_claude(dry_run);
-        return 0;
     }
 
     let dry = if dry_run { " (dry-run)" } else { "" };
