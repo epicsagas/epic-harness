@@ -161,10 +161,10 @@ fn print_subcommand_help(sub: &str) {
             println!("USAGE:");
             println!("  harness mem mcp-install [OPTIONS]\n");
             println!("Registers `epic-harness mem mcp` as mcpServers.harness-mem in");
-            println!("~/.claude/settings.json. No Node.js or external files needed.\n");
+            println!("~/.claude.json. No Node.js or external files needed.\n");
             println!("OPTIONS:");
             println!("  --force             Overwrite an existing harness-mem registration");
-            println!("  --dry-run           Preview without writing settings.json");
+            println!("  --dry-run           Preview without writing ~/.claude.json");
         }
         "serve" => {
             println!("harness mem serve — Start the REST + Web UI server\n");
@@ -628,13 +628,12 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
     Ok(0)
 }
 
-fn claude_settings_path() -> PathBuf {
+fn claude_json_path() -> PathBuf {
     if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") {
         return PathBuf::from(p);
     }
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
-        .join(".claude")
-        .join("settings.json")
+    // Claude Code stores MCP config in ~/.claude.json (global app state), not ~/.claude/settings.json
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude.json")
 }
 
 fn cmd_export(args: &[String]) -> io::Result<i32> {
@@ -692,7 +691,7 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let dry_run = flags.contains_key("dry-run");
     let force   = flags.contains_key("force");
 
-    let settings_path = claude_settings_path();
+    let settings_path = claude_json_path();
 
     let raw = if settings_path.exists() {
         fs::read_to_string(&settings_path)?
@@ -701,7 +700,7 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     };
 
     let mut settings: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse settings.json: {e}")))?;
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse ~/.claude.json: {e}")))?;
 
     if settings["mcpServers"]["harness-mem"].is_object() && !force {
         println!("harness-mem already registered (use --force to overwrite)");
@@ -734,7 +733,7 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     }
     // Use process ID in tmp filename to avoid collisions (file permissions rely on umask, acceptable for local dev tool)
     let tmp_path = settings_path.with_file_name(format!(
-        "settings.{}.json.tmp",
+        ".claude.{}.json.tmp",
         std::process::id()
     ));
     fs::write(&tmp_path, &new_content)?;
