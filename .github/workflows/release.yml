@@ -71,14 +71,14 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           tar -czf ${{ matrix.artifact }} \
-            -C target/${{ matrix.target }}/release epic-harness
+            -C target/${{ matrix.target }}/release epic-harness epic
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Compress-Archive `
-            -Path target/${{ matrix.target }}/release/epic-harness.exe `
+            -Path @("target/${{ matrix.target }}/release/epic-harness.exe", "target/${{ matrix.target }}/release/epic.exe") `
             -DestinationPath ${{ matrix.artifact }}
 
       - name: Upload artifact
