@@ -136,9 +136,6 @@ jobs:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Install and build
-        run: npm ci && npm run build
-
       - name: Publish
         run: npm publish --access public
         env:
