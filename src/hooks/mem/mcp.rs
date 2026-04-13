@@ -12,7 +12,7 @@ use std::io::{self, BufRead, Write};
 
 use super::graph::related_nodes;
 use super::store::{
-    now_iso, read_index, read_node, search_nodes, upsert_index, validate_node_id,
+    now_iso, query_nodes, read_node, search_nodes, upsert_index, validate_node_id,
     write_node, Node, NodeFrontmatter,
 };
 
@@ -152,55 +152,19 @@ fn tool_mem_query(args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
-    let idx = read_index();
-
-    // Build candidate id set from index filters
-    let mut candidates: Option<std::collections::HashSet<String>> = None;
-
-    if let Some(t) = tag {
-        if let Some(ids) = idx.by_tag.get(t) {
-            candidates = Some(ids.iter().cloned().collect());
-        }
-    }
-    if let Some(ty) = type_filter {
-        if let Some(ids) = idx.by_type.get(ty) {
-            let type_set: std::collections::HashSet<String> = ids.iter().cloned().collect();
-            candidates = Some(match candidates {
-                Some(c) => c.intersection(&type_set).cloned().collect(),
-                None => type_set,
-            });
-        }
-    }
-    if let Some(p) = project {
-        if let Some(ids) = idx.by_project.get(p) {
-            let proj_set: std::collections::HashSet<String> = ids.iter().cloned().collect();
-            candidates = Some(match candidates {
-                Some(c) => c.intersection(&proj_set).cloned().collect(),
-                None => proj_set,
-            });
-        }
-    }
-
-    let all_ids: Vec<String> = match candidates {
-        Some(set) => set.into_iter().collect(),
-        None => idx.nodes.iter().map(|n| n.id.clone()).collect(),
-    };
-
-    let mut results = vec![];
-    for id in all_ids.iter().take(limit) {
-        if let Ok(node) = read_node(id) {
-            let fm = &node.frontmatter;
-            results.push(json!({
-                "id":      fm.id,
-                "title":   fm.title,
-                "type":    fm.node_type,
-                "tags":    fm.tags,
-                "updated": fm.updated,
-                "projects": fm.projects,
-                "body":    node.body.chars().take(200).collect::<String>()
-            }));
-        }
-    }
+    let nodes = query_nodes(tag, type_filter, project, limit);
+    let results: Vec<Value> = nodes.iter().map(|node| {
+        let fm = &node.frontmatter;
+        json!({
+            "id":      fm.id,
+            "title":   fm.title,
+            "type":    fm.node_type,
+            "tags":    fm.tags,
+            "updated": fm.updated,
+            "projects": fm.projects,
+            "body":    node.body.chars().take(200).collect::<String>()
+        })
+    }).collect();
 
     json!(results)
 }
@@ -260,39 +224,19 @@ fn tool_mem_context(args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
-    let idx = read_index();
+    // query_nodes returns updated DESC from SQLite
+    let nodes = query_nodes(None, None, project, limit);
 
-    let ids: Vec<String> = if let Some(p) = project {
-        idx.by_project
-            .get(p)
-            .cloned()
-            .unwrap_or_default()
-    } else {
-        idx.nodes.iter().map(|n| n.id.clone()).collect()
-    };
-
-    let mut nodes: Vec<_> = ids
-        .iter()
-        .filter_map(|id| read_node(id).ok())
-        .collect();
-
-    // Sort by updated desc
-    nodes.sort_by(|a, b| b.frontmatter.updated.cmp(&a.frontmatter.updated));
-
-    let results: Vec<Value> = nodes
-        .iter()
-        .take(limit)
-        .map(|node| {
-            json!({
-                "id":       node.frontmatter.id,
-                "title":    node.frontmatter.title,
-                "type":     node.frontmatter.node_type,
-                "tags":     node.frontmatter.tags,
-                "updated":  node.frontmatter.updated,
-                "summary":  node.body.chars().take(300).collect::<String>()
-            })
+    let results: Vec<Value> = nodes.iter().map(|node| {
+        json!({
+            "id":      node.frontmatter.id,
+            "title":   node.frontmatter.title,
+            "type":    node.frontmatter.node_type,
+            "tags":    node.frontmatter.tags,
+            "updated": node.frontmatter.updated,
+            "summary": node.body.chars().take(300).collect::<String>()
         })
-        .collect();
+    }).collect();
 
     json!(results)
 }

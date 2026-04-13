@@ -6,8 +6,8 @@ use tiny_http::{Header, Method, Response, Server};
 
 use super::store::{
     append_edge, delete_edge_by_id, delete_node_file, graph_path, now_iso, read_index, read_node,
-    remove_edges_for_node, remove_from_index, upsert_index, validate_node_id, write_node, Edge,
-    Node, NodeFrontmatter,
+    remove_edges_for_node, remove_from_index, search_nodes, upsert_index, validate_node_id,
+    write_node, Edge, Node, NodeFrontmatter,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
@@ -309,39 +309,11 @@ fn handle_post_edge(body: &str) -> Result<String, String> {
 }
 
 fn do_search(query: &str) -> Vec<String> {
-    let dir = super::store::nodes_dir();
-    let output = std::process::Command::new("rg")
-        .arg("-l")
-        .arg("--")
-        .arg(query)
-        .arg(dir.to_str().unwrap_or("."))
-        .output();
-
-    match output {
-        Ok(o) if !o.stdout.is_empty() => {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(|l| l.to_string())
-                .collect()
-        }
-        _ => {
-            let o = std::process::Command::new("grep")
-                .arg("-rl")
-                .arg("--")
-                .arg(query)
-                .arg(dir.to_str().unwrap_or("."))
-                .output()
-                .unwrap_or_else(|_| std::process::Output {
-                    status: std::process::ExitStatus::default(),
-                    stdout: vec![],
-                    stderr: vec![],
-                });
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .map(|l| l.to_string())
-                .collect()
-        }
-    }
+    // Use SQLite FTS5 — no rg/grep subprocess needed
+    search_nodes(query, 20)
+        .into_iter()
+        .map(|n| n.frontmatter.id)
+        .collect()
 }
 
 fn percent_decode(s: &str) -> String {
