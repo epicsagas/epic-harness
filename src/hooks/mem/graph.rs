@@ -4,9 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 use std::io;
 
-use super::store::{
-    atomic_write, graph_path, list_node_ids, read_edges, read_node,
-};
+use super::store::{atomic_write, graph_path, list_node_ids, read_edges, read_node};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
@@ -62,15 +60,20 @@ pub fn rebuild_graph() -> io::Result<()> {
     Ok(())
 }
 
-/// BFS traversal from `start_id` up to `depth` hops using edges.jsonl
+/// BFS traversal from `start_id` up to `depth` hops using the DB edges table.
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let edges = read_edges();
 
     // Build adjacency map once: O(E)
-    let mut adj: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut adj: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for edge in &edges {
-        adj.entry(edge.source.clone()).or_default().push(edge.target.clone());
-        adj.entry(edge.target.clone()).or_default().push(edge.source.clone());
+        adj.entry(edge.source.clone())
+            .or_default()
+            .push(edge.target.clone());
+        adj.entry(edge.target.clone())
+            .or_default()
+            .push(edge.source.clone());
     }
 
     // BFS: O(N + E) total
@@ -96,4 +99,3 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     }
     result
 }
-

@@ -4,14 +4,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
-use std::process::Command;
 
 use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_node_file, nodes_dir, now_iso, parse_node, read_index, read_node,
-    remove_edges_for_node, remove_from_index, upsert_index, validate_node_id, write_index,
+    append_edge, delete_node_file, now_iso, parse_node, query_nodes, read_index, read_node,
+    remove_edges_for_node, remove_from_index, search_nodes, upsert_index, validate_node_id,
     write_node, Edge, IndexNode, Node, NodeFrontmatter,
 };
 
@@ -358,79 +357,65 @@ fn cmd_delete(args: &[String]) -> io::Result<i32> {
 
 fn cmd_query(args: &[String]) -> io::Result<i32> {
     let (_, flags) = parse_flags(args);
-    let idx = read_index();
+    let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(100);
 
-    let mut nodes = idx.nodes.clone();
+    let tag = flags.get("tag").map(|s| s.as_str());
+    let node_type = flags.get("type").map(|s| s.as_str());
+    let project = flags.get("project").map(|s| s.as_str());
 
-    if let Some(tag) = flags.get("tag") {
-        if let Some(ids) = idx.by_tag.get(tag) {
-            let id_set: std::collections::HashSet<_> = ids.iter().collect();
-            nodes.retain(|n| id_set.contains(&n.id));
-        } else {
-            nodes.clear();
-        }
-    }
-    if let Some(t) = flags.get("type") {
-        nodes.retain(|n| &n.node_type == t);
-    }
-    if let Some(proj) = flags.get("project") {
-        nodes.retain(|n| n.projects.contains(proj));
-    }
-    if let Some(agent) = flags.get("agent") {
-        // agent filter requires reading each node file
-        let filtered: Vec<_> = nodes
-            .into_iter()
-            .filter(|n| {
-                read_node(&n.id)
-                    .map(|nd| nd.frontmatter.agents.contains(agent))
-                    .unwrap_or(false)
-            })
-            .collect();
-        nodes = filtered;
+    // For agent filter we use query_nodes then post-filter (agents column not indexed)
+    let agent = flags.get("agent").cloned();
+
+    let mut nodes = query_nodes(tag, node_type, project, limit);
+
+    if let Some(ref agent_val) = agent {
+        nodes.retain(|n| n.frontmatter.agents.contains(agent_val));
     }
 
-    let out = serde_json::to_string_pretty(&nodes)
+    // Convert to IndexNode-like JSON for API compatibility
+    let index_nodes: Vec<IndexNode> = nodes
+        .iter()
+        .map(|n| IndexNode {
+            id: n.frontmatter.id.clone(),
+            title: n.frontmatter.title.clone(),
+            node_type: n.frontmatter.node_type.clone(),
+            tags: n.frontmatter.tags.clone(),
+            projects: n.frontmatter.projects.clone(),
+            updated: n.frontmatter.updated.clone(),
+        })
+        .collect();
+
+    let out = serde_json::to_string_pretty(&index_nodes)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     println!("{out}");
     Ok(0)
 }
 
 fn cmd_search(args: &[String]) -> io::Result<i32> {
-    let (pos, _) = parse_flags(args);
-    let query = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "search requires <query>"))?;
-    let dir = nodes_dir();
+    let (pos, flags) = parse_flags(args);
+    let query = pos.first().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "search requires <query>")
+    })?;
+    let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(20);
 
-    // Try rg first, fall back to grep
-    let output = Command::new("rg")
-        .arg("--line-number")
-        .arg("--no-heading")
-        .arg("--")
-        .arg(query)
-        .arg(dir.to_str().unwrap_or("."))
-        .output();
+    let nodes = search_nodes(query, limit);
+    let results: Vec<serde_json::Value> = nodes
+        .iter()
+        .map(|n| {
+            serde_json::json!({
+                "id":      n.frontmatter.id,
+                "title":   n.frontmatter.title,
+                "type":    n.frontmatter.node_type,
+                "tags":    n.frontmatter.tags,
+                "updated": n.frontmatter.updated,
+                "snippet": n.body.chars().take(200).collect::<String>()
+            })
+        })
+        .collect();
 
-    let result = match output {
-        Ok(o) if o.status.success() || !o.stdout.is_empty() => {
-            String::from_utf8_lossy(&o.stdout).to_string()
-        }
-        _ => {
-            // grep fallback
-            let o = Command::new("grep")
-                .arg("-rn")
-                .arg("--")
-                .arg(query)
-                .arg(dir.to_str().unwrap_or("."))
-                .output()
-                .unwrap_or_else(|_| std::process::Output {
-                    status: std::process::ExitStatus::default(),
-                    stdout: vec![],
-                    stderr: vec![],
-                });
-            String::from_utf8_lossy(&o.stdout).to_string()
-        }
-    };
-
-    print!("{result}");
+    let out = serde_json::to_string_pretty(&results)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    println!("{out}");
     Ok(0)
 }
 
@@ -495,26 +480,40 @@ fn cmd_graph(args: &[String]) -> io::Result<i32> {
 }
 
 fn cmd_validate() -> io::Result<i32> {
-    let dir = nodes_dir();
-    if !dir.exists() {
-        println!("[]");
-        return Ok(0);
+    use super::store::list_node_ids;
+
+    // In SQLite mode: nodes stored in DB are always valid.
+    // We also check for any legacy .md files in the old nodes dir for completeness.
+    let ids = list_node_ids()?;
+    let mut errors: Vec<serde_json::Value> = vec![];
+
+    // Check DB nodes can be read back without error (integrity check)
+    for id in &ids {
+        if super::store::read_node(id).is_err() {
+            errors.push(serde_json::json!({
+                "id": id,
+                "error": "failed to read node from DB"
+            }));
+        }
     }
 
-    let mut errors: Vec<serde_json::Value> = vec![];
-    for entry in fs::read_dir(&dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-        if !name.ends_with(".md") {
-            continue;
-        }
-        let content = fs::read_to_string(&path).unwrap_or_default();
-        if parse_node(&content).is_none() {
-            errors.push(serde_json::json!({
-                "file": name,
-                "error": "failed to parse frontmatter"
-            }));
+    // Also check legacy .md files if they exist in the harness dir
+    let legacy_dir = super::store::nodes_dir().join("nodes");
+    if legacy_dir.exists() {
+        for entry in fs::read_dir(&legacy_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if !name.ends_with(".md") {
+                continue;
+            }
+            let content = fs::read_to_string(&path).unwrap_or_default();
+            if parse_node(&content).is_none() {
+                errors.push(serde_json::json!({
+                    "file": name,
+                    "error": "failed to parse frontmatter"
+                }));
+            }
         }
     }
 
@@ -604,35 +603,7 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
         }
     }
 
-    // Batch index rebuild: O(N) disk I/O instead of O(N²)
-    if !dry_run && !all_migrated_nodes.is_empty() {
-        let mut idx = read_index();
-        for node in &all_migrated_nodes {
-            let fm = &node.frontmatter;
-            idx.nodes.retain(|n| n.id != fm.id);
-            idx.nodes.push(IndexNode {
-                id: fm.id.clone(),
-                title: fm.title.clone(),
-                node_type: fm.node_type.clone(),
-                tags: fm.tags.clone(),
-                projects: fm.projects.clone(),
-                updated: fm.updated.clone(),
-            });
-        }
-        idx.by_tag.clear();
-        idx.by_type.clear();
-        idx.by_project.clear();
-        for n in &idx.nodes {
-            for tag in &n.tags {
-                idx.by_tag.entry(tag.clone()).or_default().push(n.id.clone());
-            }
-            idx.by_type.entry(n.node_type.clone()).or_default().push(n.id.clone());
-            for proj in &n.projects {
-                idx.by_project.entry(proj.clone()).or_default().push(n.id.clone());
-            }
-        }
-        let _ = write_index(&idx);
-    }
+    // Index is maintained automatically by the SQLite DB (write_node handles it).
 
     println!("{}", serde_json::to_string_pretty(&serde_json::json!({
         "migrated": migrated,

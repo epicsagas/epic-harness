@@ -12,7 +12,7 @@ use std::io::{self, BufRead, Write};
 
 use super::graph::related_nodes;
 use super::store::{
-    list_node_ids, nodes_dir, now_iso, read_index, read_node, upsert_index, validate_node_id,
+    now_iso, read_index, read_node, search_nodes, upsert_index, validate_node_id,
     write_node, Node, NodeFrontmatter,
 };
 
@@ -153,7 +153,6 @@ fn tool_mem_query(args: &Value) -> Value {
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
     let idx = read_index();
-    let nd = nodes_dir();
 
     // Build candidate id set from index filters
     let mut candidates: Option<std::collections::HashSet<String>> = None;
@@ -187,10 +186,6 @@ fn tool_mem_query(args: &Value) -> Value {
         None => idx.nodes.iter().map(|n| n.id.clone()).collect(),
     };
 
-    if !nd.exists() {
-        return json!([]);
-    }
-
     let mut results = vec![];
     for id in all_ids.iter().take(limit) {
         if let Ok(node) = read_node(id) {
@@ -212,48 +207,23 @@ fn tool_mem_query(args: &Value) -> Value {
 
 fn tool_mem_search(args: &Value) -> Value {
     let query = match args["query"].as_str() {
-        Some(s) if !s.is_empty() => s.to_lowercase(),
+        Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_search requires query" }),
     };
 
-    let nd = nodes_dir();
-    if !nd.exists() {
-        return json!([]);
-    }
-
-    let ids = match list_node_ids() {
-        Ok(v) => v,
-        Err(_) => return json!([]),
-    };
-
-    let mut results = vec![];
-    for id in &ids {
-        if results.len() >= 10 {
-            break;
-        }
-        let Ok(node) = read_node(id) else { continue };
-        let content = format!("{} {}", node.frontmatter.title, node.body).to_lowercase();
-        if !content.contains(&query) {
-            continue;
-        }
-        // Find snippet
-        let idx = content.find(&query).unwrap_or(0);
-        let raw = format!("{} {}", node.frontmatter.title, node.body);
-        let start = idx.saturating_sub(40);
-        let snippet: String = raw
-            .chars()
-            .skip(start)
-            .take(160)
-            .collect::<String>()
-            .replace('\n', " ");
-
-        results.push(json!({
-            "id":      node.frontmatter.id,
-            "title":   node.frontmatter.title,
-            "type":    node.frontmatter.node_type,
-            "snippet": snippet
-        }));
-    }
+    let nodes = search_nodes(query, 10);
+    let results: Vec<Value> = nodes
+        .iter()
+        .map(|node| {
+            let snippet: String = node.body.chars().take(160).collect::<String>().replace('\n', " ");
+            json!({
+                "id":      node.frontmatter.id,
+                "title":   node.frontmatter.title,
+                "type":    node.frontmatter.node_type,
+                "snippet": snippet
+            })
+        })
+        .collect();
 
     json!(results)
 }

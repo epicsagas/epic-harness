@@ -134,21 +134,20 @@ fn test_add_and_query() {
     ]);
     assert_eq!(code, 0, "add should succeed");
 
-    // Verify node file was created
-    let nodes_dir = root.join(".harness").join("memory").join("nodes");
-    assert!(nodes_dir.exists(), "nodes dir should be created");
-    let entries: Vec<_> = fs::read_dir(&nodes_dir).unwrap().collect();
-    assert_eq!(entries.len(), 1, "exactly one node file should exist");
+    // Verify node exists in DB via read_index
+    let idx = epic_harness::hooks::mem::store::read_index();
+    let nodes = &idx.nodes;
+    assert_eq!(nodes.len(), 1, "exactly one node should be in DB");
+    assert_eq!(nodes[0].title, "JWT Rotation Pattern");
+    assert!(nodes[0].tags.contains(&"auth".to_string()));
 
-    // Query by tag
-    let idx_path = root.join(".harness").join("memory").join("index.json");
-    assert!(idx_path.exists(), "index.json should exist");
-    let idx_content = fs::read_to_string(&idx_path).unwrap();
-    let idx: serde_json::Value = serde_json::from_str(&idx_content).unwrap();
-    let nodes = idx["nodes"].as_array().unwrap();
-    assert_eq!(nodes.len(), 1);
-    assert_eq!(nodes[0]["title"].as_str().unwrap(), "JWT Rotation Pattern");
-    assert!(nodes[0]["tags"].as_array().unwrap().contains(&serde_json::json!("auth")));
+    // Query by tag via CLI
+    let code2 = run_mem(&["query", "--tag", "auth"]);
+    assert_eq!(code2, 0, "query by tag should succeed");
+
+    // Query by type
+    let code3 = run_mem(&["query", "--type", "pattern"]);
+    assert_eq!(code3, 0, "query by type should succeed");
 }
 
 #[test]
@@ -167,23 +166,21 @@ fn test_link_and_related() {
         "--tags", "b", "--body", "body b",
     ]);
 
-    // Get their IDs from index
-    let idx_content = fs::read_to_string(root.join(".harness/memory/index.json")).unwrap();
-    let idx: serde_json::Value = serde_json::from_str(&idx_content).unwrap();
-    let nodes = idx["nodes"].as_array().unwrap();
+    // Get their IDs from store
+    let idx = epic_harness::hooks::mem::store::read_index();
+    let nodes = &idx.nodes;
     assert_eq!(nodes.len(), 2);
-    let id_a = nodes[0]["id"].as_str().unwrap().to_string();
-    let id_b = nodes[1]["id"].as_str().unwrap().to_string();
+    let id_a = nodes[0].id.clone();
+    let id_b = nodes[1].id.clone();
 
     // Link A -> B
     let code = run_mem(&["link", &id_a, &id_b, "--relation", "uses"]);
     assert_eq!(code, 0, "link should succeed");
 
-    // Verify edges file
-    let edges_path = root.join(".harness/memory/edges.jsonl");
-    assert!(edges_path.exists(), "edges.jsonl should exist");
-    let edges_content = fs::read_to_string(&edges_path).unwrap();
-    assert!(edges_content.contains("uses"), "edge should have 'uses' relation");
+    // Verify edges exist in DB
+    let edges = epic_harness::hooks::mem::store::read_edges();
+    assert!(!edges.is_empty(), "edges should be stored in DB");
+    assert!(edges.iter().any(|e| e.relation == "uses"), "edge should have 'uses' relation");
 
     // related from A should return B
     let related = epic_harness::hooks::mem::graph::related_nodes(&id_a, 2);
@@ -205,14 +202,9 @@ fn test_migrate_dry_run() {
     let code = run_mem(&["migrate", "--project", "my-proj", "--dry-run"]);
     assert_eq!(code, 0, "migrate --dry-run should succeed");
 
-    // No nodes should have been written
-    let nodes_dir = root.join(".harness/memory/nodes");
-    let count = if nodes_dir.exists() {
-        fs::read_dir(&nodes_dir).unwrap().count()
-    } else {
-        0
-    };
-    assert_eq!(count, 0, "dry-run should not write any node files");
+    // No nodes should have been written to DB
+    let idx = epic_harness::hooks::mem::store::read_index();
+    assert_eq!(idx.nodes.len(), 0, "dry-run should not write any nodes to DB");
 }
 
 #[test]
@@ -221,22 +213,24 @@ fn test_validate() {
     let root = temp_root();
     set_root(&root);
 
-    // Add a valid node
+    // Add a valid node via CLI (goes to DB)
     run_mem(&[
         "add", "--title", "Valid Node", "--type", "concept",
         "--tags", "test", "--body", "valid body",
     ]);
 
-    // Inject a corrupt node file
-    let nodes_dir = root.join(".harness/memory/nodes");
-    fs::write(nodes_dir.join("corrupt.md"), "not valid frontmatter at all").unwrap();
+    // validate should pass for DB-based nodes (they are always structurally valid)
+    // Inject a legacy corrupt .md file to trigger the legacy-path validation
+    let legacy_dir = root.join(".harness").join("nodes");
+    fs::create_dir_all(&legacy_dir).unwrap();
+    fs::write(legacy_dir.join("corrupt.md"), "not valid frontmatter at all").unwrap();
 
-    // validate should exit 1 and report the corrupt file
+    // validate should exit 1 and report the corrupt legacy file
     let code = run_mem(&["validate"]);
-    assert_eq!(code, 1, "validate should fail when corrupt file exists");
+    assert_eq!(code, 1, "validate should fail when corrupt legacy file exists");
 }
 
-// ── Fix 1: Edge lock tests ─────────────────────────────
+// ── SQLite edge tests ──────────────────────────────────
 
 #[test]
 fn test_delete_edge_by_id_is_consistent() {
@@ -308,7 +302,7 @@ fn test_remove_edges_for_node_is_consistent() {
     assert_eq!(remaining[0].id, "edge-unrelated");
 }
 
-// ── Fix 2: validate_node_id + safe_node_path tests ────
+// ── validate_node_id + safe_node_path tests ───────────
 
 #[test]
 fn test_validate_node_id_valid() {
@@ -357,7 +351,7 @@ fn test_safe_node_path_accepts_valid_uuid() {
     assert!(p.to_string_lossy().ends_with("550e8400-e29b-41d4-a716-446655440000.md"));
 }
 
-// ── Fix 4: mcp-install tmp file unique name test ───────
+// ── mcp-install tmp file unique name test ─────────────
 
 #[test]
 fn test_mcp_install_no_leftover_tmp() {
@@ -378,4 +372,31 @@ fn test_mcp_install_no_leftover_tmp() {
         !fixed_tmp.exists(),
         "fixed-name tmp file should not remain after install"
     );
+}
+
+// ── search_nodes FTS test ─────────────────────────────
+
+#[test]
+fn test_search_nodes_fts() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    use epic_harness::hooks::mem::store::search_nodes;
+
+    let root = temp_root();
+    set_root(&root);
+
+    run_mem(&[
+        "add", "--title", "Rust Async Pattern", "--type", "pattern",
+        "--tags", "rust,async", "--body", "Use tokio for async runtime.",
+    ]);
+    run_mem(&[
+        "add", "--title", "Python Basics", "--type", "concept",
+        "--tags", "python", "--body", "Python is a scripting language.",
+    ]);
+
+    let results = search_nodes("tokio", 10);
+    assert_eq!(results.len(), 1, "FTS should find one node matching 'tokio'");
+    assert_eq!(results[0].frontmatter.title, "Rust Async Pattern");
+
+    let all = search_nodes("pattern", 10);
+    assert!(!all.is_empty(), "FTS should find nodes with 'pattern' in title or tags");
 }
