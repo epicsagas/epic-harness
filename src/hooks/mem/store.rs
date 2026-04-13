@@ -153,6 +153,7 @@ pub fn open_db() -> io::Result<Connection> {
 
         CREATE INDEX IF NOT EXISTS idx_edges_source  ON edges(source);
         CREATE INDEX IF NOT EXISTS idx_edges_target  ON edges(target);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_src_tgt_rel ON edges(source, target, relation);
         CREATE INDEX IF NOT EXISTS idx_nodes_type    ON nodes(type);
         CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
         CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
@@ -487,6 +488,95 @@ pub fn write_node_dedup(node: &Node, window_hours: u64) -> io::Result<(String, b
     Ok((node.frontmatter.id.clone(), false))
 }
 
+/// Write-with-dedup using an existing connection (for batch/transaction use).
+pub fn write_node_dedup_conn(
+    conn: &Connection,
+    node: &Node,
+    window_hours: u64,
+) -> io::Result<(String, bool)> {
+    let title = &node.frontmatter.title;
+
+    if let Some(existing_id) = find_duplicate_in_conn(conn, title, window_hours) {
+        return Ok((existing_id, true));
+    }
+
+    let fm = &node.frontmatter;
+    conn.execute(
+        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            fm.id, fm.node_type, fm.title,
+            join_csv(&fm.tags), join_csv(&fm.projects), join_csv(&fm.agents),
+            fm.created, fm.updated, node.body,
+        ],
+    )
+    .map_err(io::Error::other)?;
+
+    Ok((node.frontmatter.id.clone(), false))
+}
+
+/// Append an edge using an existing connection (for batch/transaction use).
+pub fn append_edge_conn(conn: &Connection, edge: &Edge) -> io::Result<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
+    )
+    .map_err(io::Error::other)?;
+    Ok(())
+}
+
+/// Tag nodes not updated within `days` as stale by appending "stale" to their tags.
+pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
+    let conn = open_db()?;
+    // Compute cutoff timestamp in Rust to avoid format!() SQL interpolation.
+    let cutoff_secs = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(days * 86400);
+    let cutoff = {
+        let s = cutoff_secs;
+        let (y, m, d) = days_to_ymd(s / 86400);
+        let hh = (s / 3600) % 24;
+        let mm = (s / 60) % 60;
+        let ss = s % 60;
+        format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    };
+    let changed = conn.execute(
+        "UPDATE nodes SET tags = CASE
+            WHEN tags = '' THEN 'stale'
+            WHEN ',' || tags || ',' NOT LIKE '%,stale,%' THEN tags || ',stale'
+            ELSE tags
+         END
+         WHERE updated < ?1
+           AND ',' || tags || ',' NOT LIKE '%,stale,%'",
+        params![cutoff],
+    ).map_err(io::Error::other)?;
+    Ok(changed as u64)
+}
+
+/// Query recent nodes for a project, excluding stale ones by default.
+pub fn recall_project_nodes(project: &str, limit: usize) -> Vec<Node> {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let sql = "SELECT id, type, title, tags, projects, agents, created, updated, body
+               FROM nodes
+               WHERE (',' || projects || ',' LIKE '%,' || ?1 || ',%')
+                 AND (',' || tags || ',' NOT LIKE '%,stale,%')
+               ORDER BY updated DESC
+               LIMIT ?2";
+    let mut stmt = match conn.prepare(sql) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    stmt.query_map(params![project, limit as i64], row_to_node)
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
 // ── FTS search ────────────────────────────────────────
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
@@ -587,6 +677,12 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
     }
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+// ── UUID ─────────────────────────────────────────────
+
+pub fn new_uuid() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 // ── Timestamp ─────────────────────────────────────────

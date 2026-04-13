@@ -389,3 +389,169 @@ fn test_search_nodes_fts() {
     let all = search_nodes("pattern", 10);
     assert!(!all.is_empty(), "FTS should find nodes with 'pattern' in title or tags");
 }
+
+// ── write_node_dedup_conn + append_edge_conn tests ───
+
+#[test]
+fn test_write_node_dedup_conn_and_append_edge_conn() {
+    use epic_harness::hooks::mem::store::{
+        open_db, write_node_dedup_conn, append_edge_conn, new_uuid, now_iso,
+        Node, NodeFrontmatter, Edge, read_node,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+    let ts = now_iso();
+
+    // Create two nodes via conn-based dedup
+    let node_a = Node {
+        frontmatter: NodeFrontmatter {
+            id: new_uuid(),
+            node_type: "pattern".into(),
+            title: "test pattern A".into(),
+            tags: vec!["auto".into()],
+            projects: vec!["testproj".into()],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts.clone(),
+        },
+        body: "pattern body A".into(),
+    };
+    let (id_a, deduped_a) = write_node_dedup_conn(&conn, &node_a, 24).unwrap();
+    assert!(!deduped_a, "first write should not be deduped");
+
+    // Second write with same title should be deduped
+    let node_a2 = Node {
+        frontmatter: NodeFrontmatter {
+            id: new_uuid(),
+            title: "test pattern A".into(),
+            ..node_a.frontmatter.clone()
+        },
+        body: "different body".into(),
+    };
+    let (id_a2, deduped_a2) = write_node_dedup_conn(&conn, &node_a2, 24).unwrap();
+    assert!(deduped_a2, "duplicate title within 24h should be deduped");
+    assert_eq!(id_a, id_a2, "deduped ID should match original");
+
+    let node_b = Node {
+        frontmatter: NodeFrontmatter {
+            id: new_uuid(),
+            node_type: "session".into(),
+            title: "test session B".into(),
+            tags: vec!["auto".into(), "session".into()],
+            projects: vec!["testproj".into()],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts.clone(),
+        },
+        body: "session body".into(),
+    };
+    let (id_b, _) = write_node_dedup_conn(&conn, &node_b, 24).unwrap();
+
+    // Create edge via conn
+    let edge = Edge {
+        id: new_uuid(),
+        source: id_b.clone(),
+        target: id_a.clone(),
+        relation: "detected_in".into(),
+        weight: 1.0,
+        ts: ts.clone(),
+    };
+    append_edge_conn(&conn, &edge).unwrap();
+
+    // Verify nodes exist
+    drop(conn); // release connection before read_node opens its own
+    let read_a = read_node(&id_a).unwrap();
+    assert_eq!(read_a.frontmatter.node_type, "pattern");
+    let read_b = read_node(&id_b).unwrap();
+    assert_eq!(read_b.frontmatter.node_type, "session");
+}
+
+// ── recall_project_nodes test ───────────────────────
+
+#[test]
+fn test_recall_project_nodes() {
+    use epic_harness::hooks::mem::store::{
+        open_db, write_node_dedup_conn, recall_project_nodes, new_uuid, now_iso,
+        Node, NodeFrontmatter,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+    let ts = now_iso();
+
+    // Create nodes for two different projects
+    for (proj, title) in [("myproj", "myproj: pattern"), ("otherproj", "otherproj: pattern")] {
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: new_uuid(),
+                node_type: "pattern".into(),
+                title: title.into(),
+                tags: vec!["auto".into()],
+                projects: vec![proj.into()],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+            },
+            body: "body".into(),
+        };
+        write_node_dedup_conn(&conn, &node, 24).unwrap();
+    }
+    drop(conn);
+
+    let results = recall_project_nodes("myproj", 10);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].frontmatter.title.contains("myproj"));
+
+    let other = recall_project_nodes("otherproj", 10);
+    assert_eq!(other.len(), 1);
+}
+
+// ── tag_stale_nodes test ────────────────────────────
+
+#[test]
+fn test_tag_stale_nodes() {
+    use epic_harness::hooks::mem::store::{
+        open_db, tag_stale_nodes, read_node, new_uuid,
+    };
+    use rusqlite::params;
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+    let id = new_uuid();
+
+    // Insert a node with an old timestamp (200 days ago)
+    conn.execute(
+        "INSERT INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
+         VALUES (?1, 'error', 'old error', 'auto', 'proj', '', datetime('now', '-200 days'), datetime('now', '-200 days'), 'old body')",
+        params![id],
+    ).unwrap();
+
+    // Insert a fresh node
+    let fresh_id = new_uuid();
+    conn.execute(
+        "INSERT INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
+         VALUES (?1, 'pattern', 'fresh pattern', 'auto', 'proj', '', datetime('now'), datetime('now'), 'fresh body')",
+        params![fresh_id],
+    ).unwrap();
+    drop(conn);
+
+    let staled = tag_stale_nodes(90).unwrap();
+    assert_eq!(staled, 1, "only the old node should be tagged stale");
+
+    let node = read_node(&id).unwrap();
+    assert!(node.frontmatter.tags.contains(&"stale".to_string()), "old node should have stale tag");
+
+    let fresh = read_node(&fresh_id).unwrap();
+    assert!(!fresh.frontmatter.tags.contains(&"stale".to_string()), "fresh node should not be stale");
+
+    // Running again should not double-tag
+    let staled2 = tag_stale_nodes(90).unwrap();
+    assert_eq!(staled2, 0, "already-stale node should not be re-tagged");
+}

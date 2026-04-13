@@ -12,7 +12,7 @@ use std::io::{self, BufRead, Write};
 
 use super::graph::related_nodes;
 use super::store::{
-    now_iso, query_nodes, read_node, search_nodes, validate_node_id,
+    new_uuid, now_iso, query_nodes, read_node, search_nodes, validate_node_id,
     write_node_dedup, Node, NodeFrontmatter,
 };
 
@@ -29,7 +29,7 @@ fn tool_definitions() -> Value {
                     "title":   { "type": "string", "description": "Short descriptive title" },
                     "type": {
                         "type": "string",
-                        "enum": ["concept", "pattern", "project", "decision", "error"],
+                        "enum": ["concept", "pattern", "project", "decision", "error", "session", "resolution"],
                         "description": "Node type"
                     },
                     "body":    { "type": "string", "description": "Markdown content (the actual knowledge)" },
@@ -48,7 +48,7 @@ fn tool_definitions() -> Value {
                     "tag":     { "type": "string" },
                     "type": {
                         "type": "string",
-                        "enum": ["concept", "pattern", "project", "decision", "error"]
+                        "enum": ["concept", "pattern", "project", "decision", "error", "session", "resolution"]
                     },
                     "project": { "type": "string" },
                     "limit":   { "type": "number", "default": 10 }
@@ -349,35 +349,3 @@ pub fn run_mcp_server() -> i32 {
     0
 }
 
-// ── UUID generation (std-only, no uuid crate) ─────────────────────────────────
-
-fn new_uuid() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    // Seed from time + pid for uniqueness
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    let pid = std::process::id();
-
-    // Mix entropy sources using a simple LCG
-    let mut state = (nanos as u64).wrapping_add(pid as u64).wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-    let r = |s: &mut u64| -> u8 {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-        (*s >> 33) as u8
-    };
-
-    let mut b = [0u8; 16];
-    for byte in &mut b {
-        *byte = r(&mut state);
-    }
-    // Set version 4 and variant bits
-    b[6] = (b[6] & 0x0f) | 0x40;
-    b[8] = (b[8] & 0x3f) | 0x80;
-
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
-        b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]
-    )
-}

@@ -1,6 +1,7 @@
 use std::fs;
 
 use super::common::*;
+use super::mem::store;
 
 const BANNER: &[&str] = &[
     "",
@@ -326,6 +327,29 @@ pub fn run(_input: &HookInput) -> i32 {
                 _ => {} // binary not yet installed or no entries — silently skip
             }
         }
+    }
+
+    // 5b. Knowledge graph recall: surface recent patterns/errors from memory.db
+    {
+        let slug = project_slug();
+        let nodes = store::recall_project_nodes(&slug, 10);
+        let patterns: Vec<_> = nodes.iter()
+            .filter(|n| n.frontmatter.node_type == "pattern" || n.frontmatter.node_type == "error")
+            .take(5)
+            .collect();
+        if !patterns.is_empty() {
+            hint("resume", "Knowledge graph — recent patterns:");
+            for n in &patterns {
+                hint("resume", &format!("  [{}] {}", n.frontmatter.node_type, n.frontmatter.title));
+            }
+        }
+    }
+
+    // 5c. Memory decay: tag stale nodes (90+ days)
+    if let Ok(staled) = store::tag_stale_nodes(90)
+        && staled > 0
+    {
+        hint("resume", &format!("Memory decay: tagged {staled} stale node(s)"));
     }
 
     // 6. Stack

@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use super::common::*;
+use super::mem::store;
 
 // ── Phase 1: Session Analysis ───────────────────────
 
@@ -745,6 +746,182 @@ fn round3(v: f64) -> f64 {
     (v * 1000.0).round() / 1000.0
 }
 
+// ── Phase 8: Memory Auto-Ingest ────────────────────
+
+/// Ingest session analysis results into the knowledge graph.
+/// Returns (nodes_created, edges_created).
+fn ingest_to_memory(
+    analysis: &SessionAnalysis,
+    patterns: &[DetectedPattern],
+) -> (u64, u64) {
+    let conn = match store::open_db() {
+        Ok(c) => c,
+        Err(_) => return (0, 0),
+    };
+
+    let slug = project_slug();
+    let ts = now_iso();
+    let dedup_hours = 24u64;
+    let tx = match conn.unchecked_transaction() {
+        Ok(t) => t,
+        Err(_) => return (0, 0),
+    };
+
+    let mut nodes_created = 0u64;
+    let mut edges_created = 0u64;
+    let mut session_node_id = String::new();
+
+    // 8a. Session summary node
+    {
+        let title = format!("session: {} {:.0}% avg={}", slug, analysis.success_rate * 100.0, analysis.avg_score);
+        let body = build_summary(analysis);
+        let node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: store::new_uuid(),
+                node_type: "session".into(),
+                title,
+                tags: vec!["auto".into(), "session".into()],
+                projects: vec![slug.clone()],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+            },
+            body,
+        };
+        match store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+            Ok((id, false)) => { session_node_id = id; nodes_created += 1; }
+            Ok((id, true)) => { session_node_id = id; }
+            Err(_) => {}
+        }
+    }
+
+    // 8b. Pattern nodes + edges to session
+    let mut pattern_node_ids: Vec<(String, Vec<String>)> = vec![]; // (node_id, involved_files)
+    for pattern in patterns {
+        let title = format!("{}: {} ({}x)", slug, pattern.pattern_type, pattern.count);
+        let body = format!(
+            "**Pattern**: {}\n**Description**: {}\n**Files**: {}\n**Remediation**: {}",
+            pattern.pattern_type,
+            pattern.description,
+            if pattern.involved_files.is_empty() { "various".into() } else { pattern.involved_files.join(", ") },
+            pattern.suggested_remediation,
+        );
+        let node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: store::new_uuid(),
+                node_type: "pattern".into(),
+                title,
+                tags: vec!["auto".into(), pattern.pattern_type.clone()],
+                projects: vec![slug.clone()],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+            },
+            body,
+        };
+        if let Ok((id, deduped)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+            let files = pattern.involved_files.clone();
+            pattern_node_ids.push((id.clone(), files));
+            if !deduped {
+                nodes_created += 1;
+            }
+            // Edge: session → pattern (detected_in)
+            if !session_node_id.is_empty() {
+                let edge = store::Edge {
+                    id: store::new_uuid(),
+                    source: session_node_id.clone(),
+                    target: id,
+                    relation: "detected_in".into(),
+                    weight: 1.0,
+                    ts: ts.clone(),
+                };
+                if store::append_edge_conn(&tx, &edge).is_ok() {
+                    edges_created += 1;
+                }
+            }
+        }
+    }
+
+    // 8c. Weak tool nodes
+    for (cat, stats) in &analysis.per_tool_stats {
+        let rate = if stats.total > 0 { stats.successes as f64 / stats.total as f64 } else { 1.0 };
+        if rate >= WEAK_TOOL_RATE || stats.total < WEAK_TOOL_MIN_OBS {
+            continue;
+        }
+        let title = format!("{}: weak tool {} ({:.0}%)", slug, cat, rate * 100.0);
+        let body = format!(
+            "Tool `{}` success rate: {:.1}% ({}/{} ops)\nTop failures: {:?}",
+            cat, rate * 100.0, stats.successes, stats.total, stats.failure_categories,
+        );
+        let node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: store::new_uuid(),
+                node_type: "error".into(),
+                title,
+                tags: vec!["auto".into(), "weak-tool".into(), cat.clone()],
+                projects: vec![slug.clone()],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+            },
+            body,
+        };
+        if let Ok((_, false)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+            nodes_created += 1;
+        }
+    }
+
+    // 8d. High-frequency error nodes
+    for (category, count) in &analysis.per_error_stats {
+        if *count < HIGH_FREQ_ERROR_MIN {
+            continue;
+        }
+        let title = format!("{}: high-freq {} ({}x)", slug, category, count);
+        let body = format!("Error category `{}` occurred {} times in this session.", category, count);
+        let node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: store::new_uuid(),
+                node_type: "error".into(),
+                title,
+                tags: vec!["auto".into(), "high-freq-error".into(), category.clone()],
+                projects: vec![slug.clone()],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+            },
+            body,
+        };
+        if let Ok((_, false)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+            nodes_created += 1;
+        }
+    }
+
+    // 8e. Auto edges between patterns sharing files
+    for i in 0..pattern_node_ids.len() {
+        for j in (i + 1)..pattern_node_ids.len() {
+            let (id_a, files_a) = &pattern_node_ids[i];
+            let (id_b, files_b) = &pattern_node_ids[j];
+            let shared: Vec<_> = files_a.iter().filter(|f| files_b.contains(f)).collect();
+            if !shared.is_empty() {
+                let edge = store::Edge {
+                    id: store::new_uuid(),
+                    source: id_a.clone(),
+                    target: id_b.clone(),
+                    relation: "related".into(),
+                    weight: shared.len() as f64,
+                    ts: ts.clone(),
+                };
+                if store::append_edge_conn(&tx, &edge).is_ok() {
+                    edges_created += 1;
+                }
+            }
+        }
+    }
+
+    let _ = tx.commit();
+    (nodes_created, edges_created)
+}
+
 // ── Main Hook ───────────────────────────────────────
 
 pub fn run(_input: &HookInput) -> i32 {
@@ -801,7 +978,10 @@ pub fn run(_input: &HookInput) -> i32 {
     // 7. Cross-project export
     export_to_global(&analysis, &analysis.failure_patterns);
 
-    // 8. Evolution record
+    // 8. Memory auto-ingest (knowledge graph)
+    let (mem_nodes, mem_edges) = ingest_to_memory(&analysis, &analysis.failure_patterns);
+
+    // 9. Evolution record
     let record = EvolutionRecord {
         timestamp: now_iso(),
         observations: analysis.total_observations,
@@ -816,7 +996,7 @@ pub fn run(_input: &HookInput) -> i32 {
     };
     append_jsonl(&evolution_file(), &record);
 
-    // 9. Session handoff context
+    // 10. Session handoff context
     let last_errors: Vec<String> = observations
         .iter()
         .filter(|o| o.result.as_deref() == Some("error"))
@@ -838,7 +1018,7 @@ pub fn run(_input: &HookInput) -> i32 {
         metrics.last_error_context = Some(last_errors.join(" | "));
     }
 
-    // 10. Update metrics
+    // 11. Update metrics
     let score_entry = SessionScoreEntry {
         timestamp: now_iso(),
         success_rate: analysis.success_rate,
@@ -871,7 +1051,7 @@ pub fn run(_input: &HookInput) -> i32 {
         let _ = fs::write(metrics_file(), json);
     }
 
-    // 11. Report
+    // 12. Report
     hint(
         "reflect",
         &format!(
@@ -972,6 +1152,13 @@ pub fn run(_input: &HookInput) -> i32 {
                 "Ineffective skills: {} — consider /evolve rollback",
                 names.join(", ")
             ),
+        );
+    }
+
+    if mem_nodes > 0 || mem_edges > 0 {
+        hint(
+            "reflect",
+            &format!("Memory: +{mem_nodes} nodes, +{mem_edges} edges ingested"),
         );
     }
 
