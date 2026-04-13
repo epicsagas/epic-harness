@@ -97,25 +97,6 @@ pub fn validate_node_id(id: &str) -> bool {
         })
 }
 
-/// Returns a validated path stub for compatibility. In the SQLite world this
-/// is not used for actual I/O, but tests rely on `is_some()` / `is_none()`.
-#[allow(dead_code)]
-pub fn safe_node_path(id: &str) -> Option<PathBuf> {
-    if validate_node_id(id) {
-        // Return a path that ends with the expected filename, even though the
-        // file will never actually exist on disk.
-        Some(
-            db_path()
-                .parent()
-                .unwrap_or_else(|| Path::new("/tmp"))
-                .join("nodes")
-                .join(format!("{id}.md")),
-        )
-    } else {
-        None
-    }
-}
-
 // ── DB connection + schema ─────────────────────────────
 
 pub fn open_db() -> io::Result<Connection> {
@@ -124,11 +105,11 @@ pub fn open_db() -> io::Result<Connection> {
         fs::create_dir_all(parent)?;
     }
     let conn = Connection::open(&path)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
     // WAL mode for better concurrency
     conn.execute_batch("PRAGMA journal_mode=WAL;")
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS nodes (
@@ -177,7 +158,7 @@ pub fn open_db() -> io::Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
         ",
     )
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
 
     // Auto-migrate legacy file-based store on first open
     auto_migrate_legacy(&conn);
@@ -227,20 +208,20 @@ fn auto_migrate_legacy(conn: &Connection) {
 
     // Import edges.jsonl
     let edges_path = harness_dir.join("memory").join("edges.jsonl");
-    if edges_path.exists() {
-        if let Ok(content) = fs::read_to_string(&edges_path) {
-            for line in content.lines() {
-                if let Ok(edge) = serde_json::from_str::<Edge>(line) {
-                    let _ = conn.execute(
-                        "INSERT OR IGNORE INTO edges
-                         (id, source, target, relation, weight, ts)
-                         VALUES (?1,?2,?3,?4,?5,?6)",
-                        rusqlite::params![
-                            edge.id, edge.source, edge.target,
-                            edge.relation, edge.weight, edge.ts,
-                        ],
-                    );
-                }
+    if edges_path.exists()
+        && let Ok(content) = fs::read_to_string(&edges_path)
+    {
+        for line in content.lines() {
+            if let Ok(edge) = serde_json::from_str::<Edge>(line) {
+                let _ = conn.execute(
+                    "INSERT OR IGNORE INTO edges
+                     (id, source, target, relation, weight, ts)
+                     VALUES (?1,?2,?3,?4,?5,?6)",
+                    rusqlite::params![
+                        edge.id, edge.source, edge.target,
+                        edge.relation, edge.weight, edge.ts,
+                    ],
+                );
             }
         }
     }
@@ -262,30 +243,23 @@ fn split_csv(s: &str) -> Vec<String> {
         .collect()
 }
 
-fn row_to_node(
-    id: String,
-    node_type: String,
-    title: String,
-    tags: String,
-    projects: String,
-    agents: String,
-    created: String,
-    updated: String,
-    body: String,
-) -> Node {
-    Node {
+fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
+    let tags: String = row.get(3)?;
+    let projects: String = row.get(4)?;
+    let agents: String = row.get(5)?;
+    Ok(Node {
         frontmatter: NodeFrontmatter {
-            id,
-            node_type,
-            title,
+            id: row.get(0)?,
+            node_type: row.get(1)?,
+            title: row.get(2)?,
             tags: split_csv(&tags),
             projects: split_csv(&projects),
             agents: split_csv(&agents),
-            created,
-            updated,
+            created: row.get(6)?,
+            updated: row.get(7)?,
         },
-        body,
-    }
+        body: row.get(8)?,
+    })
 }
 
 // ── Node I/O ──────────────────────────────────────────
@@ -308,7 +282,7 @@ pub fn write_node(node: &Node) -> io::Result<()> {
             node.body,
         ],
     )
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -318,19 +292,7 @@ pub fn read_node(id: &str) -> io::Result<Node> {
         "SELECT id, type, title, tags, projects, agents, created, updated, body
          FROM nodes WHERE id = ?1",
         params![id],
-        |row| {
-            Ok(row_to_node(
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-            ))
-        },
+        row_to_node,
     )
     .map_err(|_| io::Error::new(io::ErrorKind::NotFound, format!("node not found: {id}")))
 }
@@ -338,7 +300,7 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 pub fn delete_node_file(id: &str) -> io::Result<()> {
     let conn = open_db()?;
     conn.execute("DELETE FROM nodes WHERE id = ?1", params![id])
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -346,10 +308,10 @@ pub fn list_node_ids() -> io::Result<Vec<String>> {
     let conn = open_db()?;
     let mut stmt = conn
         .prepare("SELECT id FROM nodes")
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     let ids: Vec<String> = stmt
         .query_map([], |row| row.get(0))
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?
+        .map_err(io::Error::other)?
         .filter_map(|r| r.ok())
         .collect();
     Ok(ids)
@@ -364,7 +326,7 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
     )
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -393,31 +355,10 @@ pub fn read_edges() -> Vec<Edge> {
     .unwrap_or_default()
 }
 
-#[allow(dead_code)]
-pub fn write_edges(edges: &[Edge]) -> io::Result<()> {
-    let conn = open_db()?;
-    let tx = conn
-        .unchecked_transaction()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    tx.execute("DELETE FROM edges", [])
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    for edge in edges {
-        tx.execute(
-            "INSERT INTO edges (id, source, target, relation, weight, ts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
-        )
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    }
-    tx.commit()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    Ok(())
-}
-
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
     let conn = open_db()?;
     conn.execute("DELETE FROM edges WHERE id = ?1", params![edge_id])
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -427,7 +368,7 @@ pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
         "DELETE FROM edges WHERE source = ?1 OR target = ?1",
         params![node_id],
     )
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -491,12 +432,6 @@ pub fn read_index() -> Index {
     }
 }
 
-/// No-op: index is derived from the DB automatically.
-#[allow(dead_code)]
-pub fn write_index(_index: &Index) -> io::Result<()> {
-    Ok(())
-}
-
 /// Upsert a node into the DB (same as write_node — the index IS the DB).
 pub fn upsert_index(node: &Node) -> io::Result<()> {
     write_node(node)
@@ -527,13 +462,6 @@ fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hours: u64) -> 
         .ok()
 }
 
-/// Public entry point — opens its own connection (used by callers that don't
-/// already have one open, e.g. observe.js / CLI dedup-only checks).
-pub fn find_node_by_title_recent(title: &str, window_hours: u64) -> Option<String> {
-    let conn = open_db().ok()?;
-    find_duplicate_in_conn(&conn, title, window_hours)
-}
-
 /// Write-with-dedup: opens a single connection, checks for a duplicate, and
 /// writes only when none is found.  Returns `(id, was_deduplicated)`.
 pub fn write_node_dedup(node: &Node, window_hours: u64) -> io::Result<(String, bool)> {
@@ -554,7 +482,7 @@ pub fn write_node_dedup(node: &Node, window_hours: u64) -> io::Result<(String, b
             fm.created, fm.updated, node.body,
         ],
     )
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    .map_err(io::Error::other)?;
 
     Ok((node.frontmatter.id.clone(), false))
 }
@@ -575,19 +503,7 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    stmt.query_map(params![query, limit as i64], |row| {
-        Ok(row_to_node(
-            row.get(0)?,
-            row.get(1)?,
-            row.get(2)?,
-            row.get(3)?,
-            row.get(4)?,
-            row.get(5)?,
-            row.get(6)?,
-            row.get(7)?,
-            row.get(8)?,
-        ))
-    })
+    stmt.query_map(params![query, limit as i64], row_to_node)
     .map(|rows| rows.filter_map(|r| r.ok()).collect())
     .unwrap_or_default()
 }
@@ -635,26 +551,13 @@ pub fn query_nodes(
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    stmt.query_map([], |row| {
-        Ok(row_to_node(
-            row.get(0)?,
-            row.get(1)?,
-            row.get(2)?,
-            row.get(3)?,
-            row.get(4)?,
-            row.get(5)?,
-            row.get(6)?,
-            row.get(7)?,
-            row.get(8)?,
-        ))
-    })
+    stmt.query_map([], row_to_node)
     .map(|rows| rows.filter_map(|r| r.ok()).collect())
     .unwrap_or_default()
 }
 
 // ── Node serialization (kept for migrate import) ──────
 
-#[allow(dead_code)]
 pub fn serialize_node(node: &Node) -> String {
     let fm = serde_yaml::to_string(&node.frontmatter).unwrap_or_default();
     format!("---\n{}---\n{}", fm, node.body)

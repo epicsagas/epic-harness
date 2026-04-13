@@ -325,30 +325,19 @@ fn test_validate_node_id_invalid() {
 }
 
 #[test]
-fn test_safe_node_path_rejects_traversal() {
-    let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::safe_node_path;
+fn test_validate_node_id_rejects_traversal() {
+    use epic_harness::hooks::mem::store::validate_node_id;
 
-    let root = temp_root();
-    set_root(&root);
-
-    assert!(safe_node_path("../etc/passwd").is_none());
-    assert!(safe_node_path("../../secret").is_none());
-    assert!(safe_node_path("short").is_none());
+    assert!(!validate_node_id("../etc/passwd"));
+    assert!(!validate_node_id("../../secret"));
+    assert!(!validate_node_id("short"));
 }
 
 #[test]
-fn test_safe_node_path_accepts_valid_uuid() {
-    let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::safe_node_path;
+fn test_validate_node_id_accepts_valid_uuid() {
+    use epic_harness::hooks::mem::store::validate_node_id;
 
-    let root = temp_root();
-    set_root(&root);
-
-    let result = safe_node_path("550e8400-e29b-41d4-a716-446655440000");
-    assert!(result.is_some());
-    let p = result.unwrap();
-    assert!(p.to_string_lossy().ends_with("550e8400-e29b-41d4-a716-446655440000.md"));
+    assert!(validate_node_id("550e8400-e29b-41d4-a716-446655440000"));
 }
 
 // ── mcp-install tmp file unique name test ─────────────
