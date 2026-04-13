@@ -652,10 +652,56 @@ fn make_executable(path: &Path) {
 
 // ── MCP injection ─────────────────────────────────────────────────────────────
 
+/// Injects `mcpServers.harness-mem` into `~/.claude.json`.
+/// Claude Code uses this file (not ~/.claude/settings.json) for global app state including MCP.
+fn inject_mcp_claude() {
+    let Some(home) = std::env::var_os("HOME") else {
+        eprintln!("[harness] Could not determine home directory — skipping Claude MCP injection.");
+        return;
+    };
+    let claude_json = std::path::Path::new(&home).join(".claude.json");
+
+    let raw = if claude_json.exists() {
+        fs::read_to_string(&claude_json).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    };
+
+    let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+
+    if json["mcpServers"]["harness-mem"].is_object() {
+        eprintln!("[harness] mcpServers.harness-mem already registered in ~/.claude.json — skipping.");
+        return;
+    }
+
+    let binary = std::env::current_exe()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| "epic-harness".to_string());
+
+    json["mcpServers"]["harness-mem"] = serde_json::json!({
+        "command": binary,
+        "args": ["mem", "mcp"]
+    });
+
+    let out = serde_json::to_string_pretty(&json).unwrap_or_else(|_| raw.clone());
+    let tmp = claude_json.with_extension("tmp");
+    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
+        eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
+    } else {
+        eprintln!("[harness] Failed to write ~/.claude.json");
+    }
+}
+
 /// Injects `mcpServers.harness-mem` into the tool's settings JSON file.
 /// Registers `epic-harness mem mcp` as the MCP server command (no Node.js required).
 /// Silently skips if the settings file doesn't exist or already has the entry.
 fn inject_mcp(tool: &str, target_dir: &Path) {
+    // Claude Code stores MCP config in ~/.claude.json (global app state), not settings.json
+    if tool == "claude" {
+        inject_mcp_claude();
+        return;
+    }
+
     let settings_path = match tool {
         "codex"    => None, // Codex uses hooks.json, no mcpServers concept
         "gemini"   => Some(target_dir.join("settings.json")),
@@ -723,6 +769,7 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 // ── Interactive menu ──────────────────────────────────────────────────────────
 
 const TOOLS: &[(&str, &str)] = &[
+    ("claude", "Claude Code"),
     ("codex", "OpenAI Codex CLI"),
     ("gemini", "Google Gemini CLI"),
     ("cursor", "Cursor IDE"),
