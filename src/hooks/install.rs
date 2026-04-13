@@ -445,6 +445,18 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             preserve_files: &[".aider.conf.yml"],
             executable_files: &[],
         }),
+        // Claude Code: no files to copy — only MCP injection via inject_mcp_claude().
+        "claude" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home),
+            local_dir: cwd.clone(),
+            root_files: &[],
+            files: &[],
+            note: Some("Registers harness-mem MCP server in ~/.claude.json."),
+            alt_dir: None,
+            alt_prefix: "",
+            preserve_files: &[],
+            executable_files: &[],
+        }),
         _ => None,
     }
 }
@@ -683,8 +695,14 @@ fn inject_mcp_claude() {
         "args": ["mem", "mcp"]
     });
 
-    let out = serde_json::to_string_pretty(&json).unwrap_or_else(|_| raw.clone());
-    let tmp = claude_json.with_extension("tmp");
+    let out = match serde_json::to_string_pretty(&json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
+            return;
+        }
+    };
+    let tmp = claude_json.with_file_name(format!(".claude.{}.json.tmp", std::process::id()));
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
         eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
     } else {
@@ -834,7 +852,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: codex, gemini, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, gemini, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -975,7 +993,7 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: codex, gemini, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, gemini, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -1100,11 +1118,14 @@ mod tests {
 
     /// Cheap non-crypto suffix so parallel tests don't collide.
     fn rand_suffix() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as u64)
-            .unwrap_or(0)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        nanos ^ (COUNTER.fetch_add(1, Ordering::Relaxed) << 32)
     }
 
     // ── write_if_missing ──────────────────────────────────────────────────────
