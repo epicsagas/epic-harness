@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-바이너리가 감지되면 훅에서 자동으로 사용합니다. 없으면 Node.js로 폴백합니다.
+바이너리가 감지되면 훅에서 자동으로 사용합니다.
 
 ## 멀티 도구 지원
 
@@ -162,7 +162,7 @@ harness mem migrate --all
 
 ## 훅 (Ring 0)
 
-투명하게 실행됩니다. 사용자 조작이 필요 없습니다. **단일 Rust 바이너리** (`epic-harness`)의 서브커맨드로 구현되며, 바이너리가 없으면 Node.js로 폴백합니다.
+투명하게 실행됩니다. 사용자 조작이 필요 없습니다. **단일 Rust 바이너리** (`epic-harness`)의 서브커맨드로 구현됩니다.
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -183,7 +183,7 @@ A-Evolve의 벤치마크 패턴을 Claude Code 훅 시스템에 통합합니다.
 
 ### 다차원 스코어링
 
-모든 도구 호출은 3개 축으로 평가됩니다. 가중치는 `src/ts/common.ts` (또는 `src/hooks/common.rs`)의 `SCORE_WEIGHTS`로 설정 가능합니다:
+모든 도구 호출은 3개 축으로 평가됩니다. 가중치는 `src/hooks/common.rs`의 `SCORE_WEIGHTS`로 설정 가능합니다:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -202,7 +202,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 패턴 감지 (4가지 유형)
 
-모든 임계값은 `src/ts/common.ts` (또는 `src/hooks/common.rs`)에서 설정 가능합니다:
+모든 임계값은 `src/hooks/common.rs`에서 설정 가능합니다:
 
 | 패턴 | 감지 대상 | 상수 | 기본값 |
 |---------|---------|----------|---------|
@@ -348,28 +348,19 @@ cargo install --path .          # 빌드 + ~/.cargo/bin/에 설치
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # 플러그인 바이너리 업데이트
 ```
 
-### Node.js (폴백)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### 훅 디스패치 방식
 
-`hooks.json`의 각 훅은 세 곳에서 Rust 바이너리를 찾은 후 Node.js로 폴백합니다:
+`hooks.json`의 각 훅은 두 곳에서 Rust 바이너리를 찾습니다:
 
 ```
 1. 플러그인 로컬: hooks/bin/epic-harness
 2. PATH:         ~/.cargo/bin/epic-harness (cargo install 경유)
-3. 폴백:         node hooks/scripts/<hook>.js
 ```
 
 ### 테스트
 
 ```bash
 cargo test       # 98개 Rust 단위 테스트
-npm test         # Node.js 단위 + e2e 테스트
 ```
 
 ## 감사의 말

@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-バイナリはフックによって自動検出されます。存在しない場合、フックはNode.jsにフォールバックします。
+バイナリはフックによって自動検出されます。
 
 ## マルチツールサポート
 
@@ -162,7 +162,7 @@ harness mem migrate --all
 
 ## フック（Ring 0）
 
-不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されており、バイナリが利用できない場合はNode.jsにフォールバックします。
+不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されています。
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -183,7 +183,7 @@ A-EvolveのベンチマークパターンをClaude Codeのフックシステム�
 
 ### 多次元スコアリング
 
-すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `src/ts/common.ts`（または `src/hooks/common.rs`）の `SCORE_WEIGHTS` で設定可能です：
+すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `src/hooks/common.rs`の `SCORE_WEIGHTS` で設定可能です：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -202,7 +202,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### パターン検出（4タイプ）
 
-すべての閾値は `src/ts/common.ts`（または `src/hooks/common.rs`）の設定可能な定数です：
+すべての閾値は `src/hooks/common.rs`の設定可能な定数です：
 
 | パターン | 検出内容 | 定数 | デフォルト |
 |---------|---------|----------|---------|
@@ -348,28 +348,19 @@ cargo install --path .          # ビルド + ~/.cargo/bin/ にインストー�
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # プラグインバイナリを更新
 ```
 
-### Node.js（フォールバック）
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### フックのディスパッチ方法
 
-`hooks.json` の各フックは3箇所でRustバイナリを探し、見つからない場合はNode.jsにフォールバックします：
+`hooks.json` の各フックは2箇所でRustバイナリを探します：
 
 ```
 1. プラグインローカル: hooks/bin/epic-harness
 2. PATH:              ~/.cargo/bin/epic-harness（cargo install経由）
-3. フォールバック:     node hooks/scripts/<hook>.js
 ```
 
 ### テスト
 
 ```bash
 cargo test       # 98件のRustユニットテスト
-npm test         # Node.js ユニット + e2eテスト
 ```
 
 ## 謝辞

@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-钩子会自动检测该二进制文件。如果不存在，则回退到 Node.js。
+钩子会自动检测该二进制文件。
 
 ## 多工具支持
 
@@ -162,7 +162,7 @@ harness mem migrate --all
 
 ## 钩子（Ring 0）
 
-静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现，若二进制不可用则回退到 Node.js。
+静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现。
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -183,7 +183,7 @@ epic-harness resume | guard | polish | observe | snapshot | reflect
 
 ### 多维评分
 
-每次工具调用按 3 个维度评分。权重可通过 `src/ts/common.ts`（或 `src/hooks/common.rs`）中的 `SCORE_WEIGHTS` 配置：
+每次工具调用按 3 个维度评分。权重可通过 `src/hooks/common.rs`中的 `SCORE_WEIGHTS` 配置：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -202,7 +202,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 模式检测（4 种类型）
 
-所有阈值均为 `src/ts/common.ts`（或 `src/hooks/common.rs`）中的可配置常量：
+所有阈值均为 `src/hooks/common.rs`中的可配置常量：
 
 | 模式 | 检测内容 | 常量 | 默认值 |
 |---------|---------|----------|---------|
@@ -348,28 +348,19 @@ cargo install --path .          # 构建 + 安装到 ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # 更新插件二进制
 ```
 
-### Node.js（备选）
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### 钩子调度方式
 
-`hooks.json` 中的每个钩子按以下顺序查找 Rust 二进制文件，然后回退到 Node.js：
+`hooks.json` 中的每个钩子按以下顺序查找 Rust 二进制文件：
 
 ```
 1. 插件本地: hooks/bin/epic-harness
 2. PATH:     ~/.cargo/bin/epic-harness（通过 cargo install）
-3. 回退:     node hooks/scripts/<hook>.js
 ```
 
 ### 测试
 
 ```bash
 cargo test       # 98 个 Rust 单元测试
-npm test         # Node.js 单元 + 端到端测试
 ```
 
 ## 致谢

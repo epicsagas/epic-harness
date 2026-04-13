@@ -94,7 +94,7 @@ sequenceDiagram
 1. **Execution time constraint**: Hooks must complete in <1 second. ML inference cost is prohibitive.
 2. **Observation data scale**: 10-100 observations per session. Statistical significance doesn't require ML.
 3. **Interpretability**: Threshold-based rules are debuggable. "Why was this skill created?" can be answered instantly.
-4. **Tuning ergonomics**: A single constant in `common.js` per threshold. More intuitive than ML hyperparameters.
+4. **Tuning ergonomics**: A single constant in `common.rs` per threshold. More intuitive than ML hyperparameters.
 
 ## Skill System Design
 
@@ -285,16 +285,7 @@ epic-harness/
 ├── hooks/             # Ring 0 + Ring 3
 │   ├── hooks.json     ← hook registration (Claude Code)
 │   ├── bin/
-│   │   └── epic-harness  ← Rust binary (primary, ~4x faster)
-│   └── scripts/
-│       ├── common.js      ← shared utils + constants + validation
-│       ├── resume.js
-│       ├── guard.js
-│       ├── polish.js
-│       ├── observe.js     ← 3-axis scoring + function extraction
-│       ├── snapshot.js
-│       ├── reflect.js     ← evolution engine (6 phases)
-│       └── (mem-mcp.cjs and mem-server.cjs removed — both integrated into Rust binary)
+│   │   └── epic-harness  ← Rust single binary
 ├── integrations/      # Per-tool integration files
 │   ├── codex/         # hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
 │   ├── gemini/        # settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)

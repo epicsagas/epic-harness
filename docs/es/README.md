@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-El binario se detecta automáticamente por los hooks. Si no está presente, los hooks recurren a Node.js como respaldo.
+El binario se detecta automáticamente por los hooks.
 
 ## Compatibilidad con múltiples herramientas
 
@@ -162,7 +162,7 @@ Los skills se activan automáticamente según el contexto. No necesitas invocarl
 
 ## Hooks (Ring 0)
 
-Se ejecutan de forma invisible. No requieren acción del usuario. Implementados como un **único binario Rust** (`epic-harness`) con subcomandos, con respaldo en Node.js si el binario no está disponible.
+Se ejecutan de forma invisible. No requieren acción del usuario. Implementados como un **único binario Rust** (`epic-harness`) con subcomandos.
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -183,7 +183,7 @@ Fusiona los patrones de benchmark de A-Evolve en el sistema de hooks de Claude C
 
 ### Puntuación multidimensional
 
-Cada llamada a herramienta se puntúa en 3 ejes. Los pesos son configurables mediante `SCORE_WEIGHTS` en `src/ts/common.ts` (o `src/hooks/common.rs`):
+Cada llamada a herramienta se puntúa en 3 ejes. Los pesos son configurables mediante `SCORE_WEIGHTS` en `src/hooks/common.rs`:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -202,7 +202,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### Detección de patrones (4 tipos)
 
-Todos los umbrales son constantes configurables en `src/ts/common.ts` (o `src/hooks/common.rs`):
+Todos los umbrales son constantes configurables en `src/hooks/common.rs`:
 
 | Patrón | Detecta | Constante | Por defecto |
 |--------|---------|-----------|-------------|
@@ -348,28 +348,19 @@ cargo install --path .          # Compilar + instalar en ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Actualizar binario del plugin
 ```
 
-### Node.js (respaldo)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### Cómo se despachan los hooks
 
-Cada hook en `hooks.json` busca el binario Rust en tres ubicaciones, y luego recurre a Node.js como respaldo:
+Cada hook en `hooks.json` busca el binario Rust en dos ubicaciones:
 
 ```
 1. Local del plugin: hooks/bin/epic-harness
 2. PATH:             ~/.cargo/bin/epic-harness (vía cargo install)
-3. Respaldo:         node hooks/scripts/<hook>.js
 ```
 
 ### Tests
 
 ```bash
 cargo test       # 98 tests unitarios de Rust
-npm test         # Tests unitarios + e2e de Node.js
 ```
 
 ## Agradecimientos

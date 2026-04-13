@@ -190,7 +190,7 @@ Fuses A-Evolve's benchmark patterns into Claude Code's hook system.
 
 ### Multi-Dimensional Scoring
 
-Every tool call is scored on 3 axes. Weights are configurable via `SCORE_WEIGHTS` in `src/ts/common.ts` (or `src/hooks/common.rs`):
+Every tool call is scored on 3 axes. Weights are configurable via `SCORE_WEIGHTS` in `src/hooks/common.rs`:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -209,7 +209,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### Pattern Detection (4 types)
 
-All thresholds are configurable constants in `src/ts/common.ts` (or `src/hooks/common.rs`):
+All thresholds are configurable constants in `src/hooks/common.rs`:
 
 | Pattern | Detects | Constant | Default |
 |---------|---------|----------|---------|
@@ -360,28 +360,19 @@ cargo install --path .          # Build + install to ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Update plugin binary
 ```
 
-### Node.js (fallback)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### How hooks are dispatched
 
-Each hook in `hooks.json` looks for the Rust binary in three places, then falls back to Node.js:
+Each hook in `hooks.json` looks for the Rust binary in two places:
 
 ```
 1. Plugin local: hooks/bin/epic-harness
 2. PATH:         ~/.cargo/bin/epic-harness (via cargo install)
-3. Fallback:     node hooks/scripts/<hook>.js
 ```
 
 ### Tests
 
 ```bash
-cargo test       # 98 Rust unit tests
-npm test         # Node.js unit + e2e tests
+cargo test       # Rust unit + integration tests
 ```
 
 ## Acknowledgments

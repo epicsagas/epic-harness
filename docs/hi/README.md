@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-बाइनरी हुक्स द्वारा स्वचालित रूप से पहचानी जाती है। अनुपस्थित होने पर, हुक्स Node.js पर फ़ॉलबैक करते हैं।
+बाइनरी हुक्स द्वारा स्वचालित रूप से पहचानी जाती है।
 
 ## मल्टी-टूल सपोर्ट
 
@@ -162,7 +162,7 @@ harness mem migrate --all
 
 ## हुक्स (Ring 0)
 
-अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए, बाइनरी उपलब्ध न होने पर Node.js पर फ़ॉलबैक करते हैं।
+अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए।
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -183,7 +183,7 @@ A-Evolve के बेंचमार्क पैटर्न को Claude Cod
 
 ### बहु-आयामी स्कोरिंग
 
-प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `src/ts/common.ts` (या `src/hooks/common.rs`) में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
+प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `src/hooks/common.rs` में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -202,7 +202,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### पैटर्न डिटेक्शन (4 प्रकार)
 
-सभी थ्रेशोल्ड `src/ts/common.ts` (या `src/hooks/common.rs`) में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
+सभी थ्रेशोल्ड `src/hooks/common.rs` में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
 
 | पैटर्न | क्या पहचानता है | कॉन्स्टेंट | डिफ़ॉल्ट |
 |---------|---------|----------|---------|
@@ -348,28 +348,19 @@ cargo install --path .          # बिल्ड + ~/.cargo/bin/ में इ�
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # प्लगइन बाइनरी अपडेट
 ```
 
-### Node.js (फ़ॉलबैक)
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### हुक्स कैसे डिस्पैच होते हैं
 
-`hooks.json` में प्रत्येक हुक तीन स्थानों पर Rust बाइनरी खोजता है, फिर Node.js पर फ़ॉलबैक करता है:
+`hooks.json` में प्रत्येक हुक दो स्थानों पर Rust बाइनरी खोजता है:
 
 ```
 1. प्लगइन लोकल: hooks/bin/epic-harness
 2. PATH:         ~/.cargo/bin/epic-harness (cargo install के माध्यम से)
-3. फ़ॉलबैक:     node hooks/scripts/<hook>.js
 ```
 
 ### टेस्ट
 
 ```bash
 cargo test       # 98 Rust यूनिट टेस्ट
-npm test         # Node.js यूनिट + e2e टेस्ट
 ```
 
 ## आभार

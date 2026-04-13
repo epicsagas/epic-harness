@@ -9,7 +9,7 @@ homepage = "https://github.com/epicsagas/epic-harness"
 readme = "README.md"
 keywords = ["claude-code", "plugin", "agent", "harness", "ai"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["ref/", "tests/", ".harness/", "hooks/scripts/", "hooks/bin/"]
+exclude = ["ref/", "tests/", ".harness/", "hooks/bin/"]
 
 [[bin]]
 name = "epic-harness"

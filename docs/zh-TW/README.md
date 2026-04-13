@@ -64,7 +64,7 @@ cargo binstall epic-harness
 cargo install --path .
 ```
 
-hooks 會自動偵測二進位檔。若不存在，則回退至 Node.js。
+hooks 會自動偵測二進位檔。
 
 ## 多工具支援
 
@@ -162,7 +162,7 @@ harness mem migrate --all
 
 ## Hooks（Ring 0）
 
-不可見地運行，無需使用者操作。以**單一 Rust 二進位檔**（`epic-harness`）搭配子指令實作，若二進位檔不可用則回退至 Node.js。
+不可見地運行，無需使用者操作。以**單一 Rust 二進位檔**（`epic-harness`）搭配子指令實作。
 
 ```
 epic-harness resume | guard | polish | observe | snapshot | reflect
@@ -183,7 +183,7 @@ epic-harness resume | guard | polish | observe | snapshot | reflect
 
 ### 多維度評分
 
-每次工具呼叫依 3 個軸向評分。權重可透過 `src/ts/common.ts`（或 `src/hooks/common.rs`）中的 `SCORE_WEIGHTS` 設定：
+每次工具呼叫依 3 個軸向評分。權重可透過 `src/hooks/common.rs`中的 `SCORE_WEIGHTS` 設定：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -202,7 +202,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 模式偵測（4 種類型）
 
-所有閾值皆為 `src/ts/common.ts`（或 `src/hooks/common.rs`）中的可設定常數：
+所有閾值皆為 `src/hooks/common.rs`中的可設定常數：
 
 | 模式 | 偵測內容 | 常數 | 預設值 |
 |---------|---------|----------|---------|
@@ -348,28 +348,19 @@ cargo install --path .          # 建構 + 安裝至 ~/.cargo/bin/
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # 更新外掛二進位檔
 ```
 
-### Node.js（備用）
-
-```bash
-npm install
-npm run build    # TypeScript (src/ts/) → hooks/scripts/*.js
-```
-
 ### Hooks 如何分派
 
-`hooks.json` 中的每個 hook 會在三個位置尋找 Rust 二進位檔，然後回退至 Node.js：
+`hooks.json` 中的每個 hook 會在兩個位置尋找 Rust 二進位檔：
 
 ```
 1. 外掛本地：hooks/bin/epic-harness
 2. PATH：    ~/.cargo/bin/epic-harness（透過 cargo install）
-3. 備用：    node hooks/scripts/<hook>.js
 ```
 
 ### 測試
 
 ```bash
 cargo test       # 98 個 Rust 單元測試
-npm test         # Node.js 單元 + 端對端測試
 ```
 
 ## 致謝
