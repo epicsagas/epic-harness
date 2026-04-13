@@ -11,19 +11,31 @@ esac
 
 PLUGIN_BIN="${CLAUDE_PLUGIN_ROOT:-}/hooks/bin/epic-harness"
 
-# Already available — nothing to do
-if test -x "$PLUGIN_BIN" || command -v epic-harness >/dev/null 2>&1; then
-  exit 0
+# Resolve the binary: plugin-local → PATH
+EH=""
+if test -x "$PLUGIN_BIN"; then
+  EH="$PLUGIN_BIN"
+elif command -v epic-harness >/dev/null 2>&1; then
+  EH="$(command -v epic-harness)"
 fi
 
-echo "[epic plugin] epic-harness binary not found — installing..."
+# Install if missing
+if test -z "$EH"; then
+  echo "[epic plugin] epic-harness binary not found — installing..."
+  if command -v cargo-binstall >/dev/null 2>&1; then
+    cargo binstall -y --no-confirm epic-harness
+  elif command -v cargo >/dev/null 2>&1; then
+    cargo install epic-harness
+  else
+    echo "[epic plugin] cargo not found. Install Rust from https://rustup.rs then restart Claude Code." >&2
+    exit 0
+  fi
+  EH="$(command -v epic-harness 2>/dev/null || true)"
+fi
 
-if command -v cargo-binstall >/dev/null 2>&1; then
-  cargo binstall -y --no-confirm epic-harness
-elif command -v cargo >/dev/null 2>&1; then
-  cargo install epic-harness
-else
-  echo "[epic plugin] cargo not found. Install Rust from https://rustup.rs then restart Claude Code." >&2
+# Auto-register MCP server (idempotent — skips if already registered)
+if test -n "$EH"; then
+  "$EH" mem mcp-install 2>/dev/null || true
 fi
 
 exit 0
