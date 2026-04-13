@@ -134,6 +134,47 @@ harness mem migrate --all
 
 Agenten zeichnen Architekturentscheidungen automatisch ueber PostToolUse-Hooks auf. Beim Sitzungsstart werden relevante Erinnerungen in den Kontext injiziert.
 
+### Wie der Wissensgraph funktioniert
+
+Der Graph akkumuliert sich automatisch aus der normalen Sitzungsarbeit — keine manuelle Eingabe erforderlich.
+
+**Datenfluss:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Knotentypen (7):**
+
+| Typ | Erstellt durch | Inhalt |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Sitzungs-Erfolgsrate, Durchschnittsscore, Trend |
+| `error` | Auto (reflect) | Wiederholte Fehlermuster (≥3 aufeinanderfolgende gleiche Fehler) |
+| `pattern` | Auto (reflect) | Schwache Tools, Thrashing, Fix-then-Break-Zyklen |
+| `concept` | Manuell / MCP | Architekturkonzepte, technisches Wissen |
+| `decision` | Manuell / MCP | ADRs, Designentscheidungen |
+| `project` | Manuell / MCP | Projektmetadaten |
+| `resolution` | Manuell / MCP | Fehlerloesungsrezepte |
+
+**Bedingungen fuer automatische Akkumulation:**
+
+| Bedingung | Erstellter Knoten |
+|-----------|-------------|
+| Jedes Sitzungsende | `session` (immer) |
+| Gleicher Fehler ≥3 Mal hintereinander | `error` (repeated_same_error) |
+| Edit→Error abwechselnd | `pattern` (thrashing) |
+| Tool-Erfolgsrate <60% (min. 5 Beobachtungen) | `pattern` (weak_tool) |
+| Dateityp-Erfolgsrate <50% (min. 3 Beobachtungen) | `pattern` (weak_filetype) |
+| Edit-Erfolg → Bash-Fehler-Zyklen | `pattern` (fix_then_break) |
+
+> **Hinweis:** Saubere Sitzungen (keine Fehler) erzeugen nur `session`-Knoten. Der Graph wird nach 2–3 echten Entwicklungssitzungen mit Build-Fehlern, Testfehlern oder Debugging-Zyklen reichhaltig.
+
+Bestehende dateibasierte Erinnerungen (`nodes/*.md`, `edges.jsonl`) werden beim ersten Start automatisch nach SQLite migriert.
+
 ## Befehle
 
 | Befehl | Beschreibung |

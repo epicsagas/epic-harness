@@ -134,6 +134,47 @@ harness mem migrate --all
 
 Os agentes registram decisões de arquitetura automaticamente via hooks PostToolUse. No início da sessão, memórias relevantes são injetadas no contexto.
 
+### Como o Grafo de Conhecimento Funciona
+
+O grafo se acumula automaticamente a partir do trabalho normal de sessão — nenhuma entrada manual necessária.
+
+**Fluxo de dados:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Tipos de nós (7):**
+
+| Tipo | Criado por | Conteúdo |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Taxa de sucesso da sessão, pontuação média, tendência |
+| `error` | Auto (reflect) | Padrões de erros repetidos (≥3 erros iguais consecutivos) |
+| `pattern` | Auto (reflect) | Ferramentas fracas, thrashing, ciclos fix-then-break |
+| `concept` | Manual / MCP | Conceitos de arquitetura, conhecimento técnico |
+| `decision` | Manual / MCP | ADRs, decisões de design |
+| `project` | Manual / MCP | Metadados do projeto |
+| `resolution` | Manual / MCP | Receitas de resolução de erros |
+
+**Condições de acumulação automática:**
+
+| Condição | Nó criado |
+|-----------|-------------|
+| Cada fim de sessão | `session` (sempre) |
+| Mesmo erro ≥3 vezes seguidas | `error` (repeated_same_error) |
+| Edit→Error alternando | `pattern` (thrashing) |
+| Taxa de sucesso da ferramenta <60% (mín. 5 observações) | `pattern` (weak_tool) |
+| Taxa de sucesso do tipo de arquivo <50% (mín. 3 observações) | `pattern` (weak_filetype) |
+| Ciclos de sucesso em Edit → erro em Bash | `pattern` (fix_then_break) |
+
+> **Nota:** Sessões limpas (sem erros) produzem apenas nós `session`. O grafo se enriquece após 2–3 sessões reais de desenvolvimento com falhas de build, falhas de testes ou ciclos de depuração.
+
+Memórias existentes baseadas em arquivos (`nodes/*.md`, `edges.jsonl`) são automaticamente migradas para SQLite na primeira execução.
+
 ## Comandos
 
 | Comando | O que faz |

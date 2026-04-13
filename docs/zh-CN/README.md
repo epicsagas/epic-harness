@@ -134,6 +134,47 @@ harness mem migrate --all
 
 代理通过 PostToolUse 钩子自动记录架构决策。会话开始时，相关记忆会被注入到上下文中。
 
+### 知识图谱的工作原理
+
+图谱从正常的会话工作中自动积累——无需手动输入。
+
+**数据流：**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**节点类型 (7)：**
+
+| 类型 | 创建方式 | 内容 |
+|------|-----------|---------|
+| `session` | 自动 (reflect) | 会话成功率、平均分数、趋势 |
+| `error` | 自动 (reflect) | 重复错误模式（≥3 次连续相同错误） |
+| `pattern` | 自动 (reflect) | 弱工具、thrashing、fix-then-break 循环 |
+| `concept` | 手动 / MCP | 架构概念、技术知识 |
+| `decision` | 手动 / MCP | ADR、设计决策 |
+| `project` | 手动 / MCP | 项目元数据 |
+| `resolution` | 手动 / MCP | 错误解决方案 |
+
+**自动积累条件：**
+
+| 条件 | 创建的节点 |
+|-----------|-------------|
+| 每次会话结束 | `session`（始终） |
+| 相同错误连续 ≥3 次 | `error` (repeated_same_error) |
+| Edit→Error 交替出现 | `pattern` (thrashing) |
+| 工具成功率 <60%（至少 5 次观测） | `pattern` (weak_tool) |
+| 文件类型成功率 <50%（至少 3 次观测） | `pattern` (weak_filetype) |
+| Edit 成功 → Bash 错误循环 | `pattern` (fix_then_break) |
+
+> **注意：** 干净的会话（无错误）只会产生 `session` 节点。在经历 2–3 次包含构建失败、测试失败或调试循环的真实开发会话后，图谱会变得丰富。
+
+现有的基于文件的记忆（`nodes/*.md`、`edges.jsonl`）在首次运行时会自动迁移到 SQLite。
+
 ## 命令
 
 | 命令 | 功能 |

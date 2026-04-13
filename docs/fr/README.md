@@ -134,6 +134,47 @@ harness mem migrate --all
 
 Les agents enregistrent automatiquement les décisions architecturales via les hooks PostToolUse. Au démarrage de la session, les mémoires pertinentes sont injectées dans le contexte.
 
+### Comment fonctionne le Graphe de Connaissances
+
+Le graphe s'accumule automatiquement à partir du travail normal de session — aucune saisie manuelle nécessaire.
+
+**Flux de données :**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Types de noeuds (7) :**
+
+| Type | Créé par | Contenu |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Taux de réussite de la session, score moyen, tendance |
+| `error` | Auto (reflect) | Schémas d'erreurs répétées (≥3 erreurs identiques consécutives) |
+| `pattern` | Auto (reflect) | Outils faibles, thrashing, cycles fix-then-break |
+| `concept` | Manuel / MCP | Concepts d'architecture, connaissances techniques |
+| `decision` | Manuel / MCP | ADRs, décisions de conception |
+| `project` | Manuel / MCP | Métadonnées du projet |
+| `resolution` | Manuel / MCP | Recettes de résolution d'erreurs |
+
+**Conditions d'accumulation automatique :**
+
+| Condition | Noeud créé |
+|-----------|-------------|
+| Chaque fin de session | `session` (toujours) |
+| Même erreur ≥3 fois de suite | `error` (repeated_same_error) |
+| Edit→Error en alternance | `pattern` (thrashing) |
+| Taux de réussite de l'outil <60% (min. 5 observations) | `pattern` (weak_tool) |
+| Taux de réussite du type de fichier <50% (min. 3 observations) | `pattern` (weak_filetype) |
+| Cycles de succès Edit → erreur Bash | `pattern` (fix_then_break) |
+
+> **Note :** Les sessions propres (sans erreurs) ne produisent que des noeuds `session`. Le graphe s'enrichit après 2–3 sessions de développement réelles avec des échecs de build, des échecs de tests ou des cycles de débogage.
+
+Les mémoires existantes basées sur des fichiers (`nodes/*.md`, `edges.jsonl`) sont automatiquement migrées vers SQLite lors de la première exécution.
+
 ## Commandes
 
 | Commande | Ce qu'elle fait |

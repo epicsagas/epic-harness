@@ -139,7 +139,46 @@ harness mem mcp-install
 harness mem export --out ./docs/memory
 ```
 
-Agents auto-record architectural decisions from PostToolUse hooks. Session start injects relevant project memories as context. Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically migrated to SQLite on first run.
+### How the Knowledge Graph Works
+
+The graph auto-accumulates from normal session work — no manual input needed.
+
+**Data flow:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Node types (7):**
+
+| Type | Created by | Content |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Session success rate, avg score, trend |
+| `error` | Auto (reflect) | Repeated error patterns (≥3 consecutive same error) |
+| `pattern` | Auto (reflect) | Weak tools, thrashing, fix-then-break cycles |
+| `concept` | Manual / MCP | Architecture concepts, technical knowledge |
+| `decision` | Manual / MCP | ADRs, design decisions |
+| `project` | Manual / MCP | Project metadata |
+| `resolution` | Manual / MCP | Error resolution recipes |
+
+**Auto-accumulation conditions:**
+
+| Condition | Node created |
+|-----------|-------------|
+| Every session end | `session` (always) |
+| Same error ≥3 times in a row | `error` (repeated_same_error) |
+| Edit→Error alternating | `pattern` (thrashing) |
+| Tool success rate <60% (min 5 obs) | `pattern` (weak_tool) |
+| File type success rate <50% (min 3 obs) | `pattern` (weak_filetype) |
+| Edit success → Bash error cycles | `pattern` (fix_then_break) |
+
+> **Note:** Clean sessions (no errors) only produce `session` nodes. The graph becomes rich after 2–3 real development sessions with build failures, test failures, or debugging cycles.
+
+Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically migrated to SQLite on first run.
 
 ## Commands
 

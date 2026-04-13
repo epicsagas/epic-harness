@@ -134,6 +134,47 @@ harness mem migrate --all
 
 Los agentes registran decisiones de arquitectura automáticamente mediante hooks PostToolUse. Al inicio de la sesión, las memorias relevantes se inyectan en el contexto.
 
+### Cómo funciona el Grafo de Conocimiento
+
+El grafo se acumula automáticamente a partir del trabajo normal de sesión — no se necesita entrada manual.
+
+**Flujo de datos:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**Tipos de nodos (7):**
+
+| Tipo | Creado por | Contenido |
+|------|-----------|---------|
+| `session` | Auto (reflect) | Tasa de éxito de la sesión, puntuación promedio, tendencia |
+| `error` | Auto (reflect) | Patrones de errores repetidos (≥3 errores iguales consecutivos) |
+| `pattern` | Auto (reflect) | Herramientas débiles, thrashing, ciclos fix-then-break |
+| `concept` | Manual / MCP | Conceptos de arquitectura, conocimiento técnico |
+| `decision` | Manual / MCP | ADRs, decisiones de diseño |
+| `project` | Manual / MCP | Metadatos del proyecto |
+| `resolution` | Manual / MCP | Recetas de resolución de errores |
+
+**Condiciones de acumulación automática:**
+
+| Condición | Nodo creado |
+|-----------|-------------|
+| Cada fin de sesión | `session` (siempre) |
+| Mismo error ≥3 veces seguidas | `error` (repeated_same_error) |
+| Edit→Error alternando | `pattern` (thrashing) |
+| Tasa de éxito de herramienta <60% (mín. 5 observaciones) | `pattern` (weak_tool) |
+| Tasa de éxito de tipo de archivo <50% (mín. 3 observaciones) | `pattern` (weak_filetype) |
+| Ciclos de éxito en Edit → error en Bash | `pattern` (fix_then_break) |
+
+> **Nota:** Las sesiones limpias (sin errores) solo producen nodos `session`. El grafo se enriquece después de 2–3 sesiones reales de desarrollo con fallos de build, fallos de tests o ciclos de depuración.
+
+Las memorias existentes basadas en archivos (`nodes/*.md`, `edges.jsonl`) se migran automáticamente a SQLite en la primera ejecución.
+
 ## Comandos
 
 | Comando | Qué hace |

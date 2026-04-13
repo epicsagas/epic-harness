@@ -134,6 +134,47 @@ harness mem migrate --all
 
 에이전트는 PostToolUse 훅을 통해 아키텍처 결정 사항을 자동으로 기록합니다. 세션 시작 시 관련 메모리가 컨텍스트에 주입됩니다.
 
+### 지식 그래프 작동 방식
+
+그래프는 일반적인 세션 작업에서 자동으로 축적됩니다 — 수동 입력이 필요 없습니다.
+
+**데이터 흐름:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**노드 유형 (7):**
+
+| 유형 | 생성 주체 | 내용 |
+|------|-----------|---------|
+| `session` | Auto (reflect) | 세션 성공률, 평균 점수, 추세 |
+| `error` | Auto (reflect) | 반복 에러 패턴 (≥3회 연속 동일 에러) |
+| `pattern` | Auto (reflect) | 취약 도구, thrashing, fix-then-break 사이클 |
+| `concept` | 수동 / MCP | 아키텍처 개념, 기술 지식 |
+| `decision` | 수동 / MCP | ADR, 설계 결정 |
+| `project` | 수동 / MCP | 프로젝트 메타데이터 |
+| `resolution` | 수동 / MCP | 에러 해결 레시피 |
+
+**자동 축적 조건:**
+
+| 조건 | 생성되는 노드 |
+|-----------|-------------|
+| 매 세션 종료 시 | `session` (항상) |
+| 동일 에러 ≥3회 연속 | `error` (repeated_same_error) |
+| Edit→Error 교대 발생 | `pattern` (thrashing) |
+| 도구 성공률 <60% (최소 5회 관측) | `pattern` (weak_tool) |
+| 파일 유형 성공률 <50% (최소 3회 관측) | `pattern` (weak_filetype) |
+| Edit 성공 → Bash 에러 사이클 | `pattern` (fix_then_break) |
+
+> **참고:** 클린 세션(에러 없음)은 `session` 노드만 생성합니다. 그래프는 빌드 실패, 테스트 실패, 디버깅 사이클이 포함된 2~3회의 실제 개발 세션 후에 풍부해집니다.
+
+기존 파일 기반 메모리(`nodes/*.md`, `edges.jsonl`)는 첫 실행 시 자동으로 SQLite로 마이그레이션됩니다.
+
 ## 명령어
 
 | 명령어 | 기능 |

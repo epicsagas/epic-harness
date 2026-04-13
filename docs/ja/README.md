@@ -134,6 +134,47 @@ harness mem migrate --all
 
 エージェントはPostToolUseフックを通じてアーキテクチャの決定事項を自動記録します。セッション開始時に関連するメモリがコンテキストに注入されます。
 
+### ナレッジグラフの仕組み
+
+グラフは通常のセッション作業から自動的に蓄積されます — 手動入力は不要です。
+
+**データフロー:**
+
+```
+PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
+                                                   ↓
+SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
+                                                   ↓
+SessionStart hook → resume (context injection) → next session gets hints
+```
+
+**ノードタイプ (7):**
+
+| タイプ | 作成元 | 内容 |
+|------|-----------|---------|
+| `session` | Auto (reflect) | セッション成功率、平均スコア、トレンド |
+| `error` | Auto (reflect) | 繰り返しエラーパターン (≥3回連続の同一エラー) |
+| `pattern` | Auto (reflect) | 弱いツール、スラッシング、fix-then-breakサイクル |
+| `concept` | 手動 / MCP | アーキテクチャ概念、技術的知識 |
+| `decision` | 手動 / MCP | ADR、設計上の決定 |
+| `project` | 手動 / MCP | プロジェクトメタデータ |
+| `resolution` | 手動 / MCP | エラー解決レシピ |
+
+**自動蓄積の条件:**
+
+| 条件 | 作成されるノード |
+|-----------|-------------|
+| 各セッション終了時 | `session` (常時) |
+| 同一エラーが3回以上連続 | `error` (repeated_same_error) |
+| Edit→Errorの交互発生 | `pattern` (thrashing) |
+| ツール成功率 <60% (最低5回の観測) | `pattern` (weak_tool) |
+| ファイルタイプ成功率 <50% (最低3回の観測) | `pattern` (weak_filetype) |
+| Edit成功 → Bashエラーのサイクル | `pattern` (fix_then_break) |
+
+> **注意:** クリーンなセッション (エラーなし) は `session` ノードのみを生成します。グラフはビルド失敗、テスト失敗、デバッグサイクルを含む2〜3回の実際の開発セッション後に充実します。
+
+既存のファイルベースのメモリ (`nodes/*.md`, `edges.jsonl`) は初回実行時に自動的にSQLiteへ移行されます。
+
 ## コマンド
 
 | コマンド | 機能 |
