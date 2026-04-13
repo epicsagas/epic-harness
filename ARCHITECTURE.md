@@ -180,24 +180,27 @@ A cross-agent knowledge graph that persists developer decisions, patterns, and c
 ### Storage Layout
 
 ```
-~/.harness/memory/
-├── nodes/         # One file per node: YAML frontmatter + Markdown body
-├── edges.jsonl    # Directed graph edges (append-only)
-├── index.json     # Fast lookup index (id → file, tags, type)
-└── graph.json     # Cached serialized graph (rebuilt for web UI)
+~/.harness/
+├── memory.db      # SQLite database (WAL mode, FTS5 full-text search)
+├── graph.json     # Cached serialized graph (rebuilt for web UI)
+└── exports/       # Optional Markdown dump for Git backup (mem export)
 ```
+
+**Schema:**
+- `nodes` — id, type, title, tags, projects, agents, created, updated, body
+- `nodes_fts` — FTS5 virtual table (title + body + tags), auto-synced via triggers
+- `edges` — id, source, target, relation, weight, ts
+
+Legacy file-based stores (`memory/nodes/*.md`, `memory/edges.jsonl`) are automatically migrated to SQLite on first run and a `memory/.migrated` marker is written to prevent re-migration.
 
 ### Node Schema
 
-Each node is a Markdown file with YAML frontmatter:
-
 ```yaml
----
 id: <uuid-v4>
 title: "JWT rotation strategy"
 type: decision          # concept | pattern | project | decision | error
 tags: [auth, security]
-project: my-project     # optional project scope
+projects: [my-project]  # optional project scope
 created: 2026-04-12T00:00:00Z
 updated: 2026-04-12T00:00:00Z
 ---
@@ -206,7 +209,7 @@ Body text in Markdown ...
 
 ### Edge Relations
 
-Directed edges stored in `edges.jsonl`. Valid relation types:
+Directed edges stored in the `edges` table. Valid relation types:
 
 | Relation | Meaning |
 |----------|---------|
@@ -221,9 +224,10 @@ Directed edges stored in `edges.jsonl`. Valid relation types:
 
 | Interface | Description |
 |-----------|-------------|
-| CLI (`harness mem`) | 13 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `serve`, `validate`, `migrate`, `context`, `mcp-install` |
+| CLI (`harness mem`) | 15 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `export`, `serve`, `validate`, `migrate`, `context`, `mcp`, `mcp-install` |
 | REST API | `epic-harness mem serve` — embedded Rust server, port 7700 |
-| MCP tools | `epic-harness mem mcp` — 5 tools: `mem_add`, `mem_query`, `mem_search`, `mem_related`, `mem_context`; register via `harness mem mcp-install` |
+| MCP server | `epic-harness mem mcp` — stdio JSON-RPC 2.0, 5 tools; register via `harness mem mcp-install [--force]` |
+| Git backup | `epic-harness mem export [--out <dir>]` — dumps all nodes to Markdown |
 
 ### Auto-Recording Pipeline
 
@@ -232,7 +236,7 @@ PostToolUse hook
     ↓ keyword detection (architectural terms, decision markers)
     ↓ secret masking + sensitive path filtering
     ↓ fire-and-forget (2 s timeout, never blocks the hook)
-harness mem add → ~/.harness/memory/nodes/<uuid>.md
+harness mem add → ~/.harness/memory.db (SQLite INSERT + FTS5 index)
 ```
 
 The observe hook scans tool output for signals indicating an architectural decision or notable pattern. Matching content is stored as a `decision` or `pattern` node automatically without user action.

@@ -117,26 +117,29 @@ Integration files in the tool directory (`hooks.json`, commands, agents, skills,
 
 ## Unified Memory
 
-All agents share a single knowledge graph at `~/.harness/memory/`.
+All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). No Node.js or external runtime required.
 
 ```bash
 # Add a memory node
 harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
 
-# Query
+# Filter query
 harness mem query --type decision --project my-project
 
-# Full-text search
+# Full-text search (FTS5)
 harness mem search "JWT"
 
 # Knowledge graph web UI
 harness mem serve          # → http://localhost:7700
 
-# Register as MCP server (Claude Code native tool call, no Node.js needed)
+# Register as MCP server in Claude Code (no Node.js needed)
 harness mem mcp-install
+
+# Export all nodes to Markdown for Git backup
+harness mem export --out ./docs/memory
 ```
 
-Agents auto-record architectural decisions from PostToolUse hooks. Session start injects relevant project memories as context. Existing per-project memories migrate via `harness mem migrate --all`.
+Agents auto-record architectural decisions from PostToolUse hooks. Session start injects relevant project memories as context. Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically migrated to SQLite on first run.
 
 ## Commands
 
