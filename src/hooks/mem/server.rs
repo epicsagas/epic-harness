@@ -68,7 +68,7 @@ pub fn serve(args: &[String]) -> i32 {
         }
     };
 
-    println!("Listening on http://localhost:{port}");
+    eprintln!("[harness] Web UI listening on http://localhost:{port}");
 
     for mut request in server.incoming_requests() {
         let method = request.method().clone();

@@ -38,4 +38,27 @@ if test -n "$EH"; then
   "$EH" mem mcp-install 2>/dev/null || true
 fi
 
+# Auto-start knowledge graph web UI (port 7700)
+if test -n "$EH"; then
+  WEBUI_PORT="${HARNESS_WEBUI_PORT:-7700}"
+
+  if ! curl -sf "http://127.0.0.1:${WEBUI_PORT}/" >/dev/null 2>&1; then
+    # Double-fork to detach from hook process group
+    ( "$EH" mem serve --port "$WEBUI_PORT" </dev/null >/dev/null 2>&1 & ) &
+    disown 2>/dev/null || true
+
+    # Wait for bind, then open browser
+    for _ in 1 2 3; do
+      sleep 1
+      curl -sf "http://127.0.0.1:${WEBUI_PORT}/" >/dev/null 2>&1 && break
+    done
+    if curl -sf "http://127.0.0.1:${WEBUI_PORT}/" >/dev/null 2>&1; then
+      case "$(uname -s)" in
+        Darwin) open "http://localhost:${WEBUI_PORT}" 2>/dev/null ;;
+        *)      xdg-open "http://localhost:${WEBUI_PORT}" 2>/dev/null ;;
+      esac
+    fi
+  fi
+fi
+
 exit 0
