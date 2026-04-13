@@ -179,10 +179,8 @@ pub fn run(input: &HookInput) -> i32 {
         Some((out, err))
     } else if let Some(tr) = &input.tool_response {
         Some(resolve_json_value(tr))
-    } else if let Some(tr) = &input.tool_result {
-        Some(resolve_json_value(tr))
     } else {
-        None
+        input.tool_result.as_ref().map(resolve_json_value)
     };
 
     if let Some((output, stderr)) = resolved_output {
