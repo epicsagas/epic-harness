@@ -852,6 +852,8 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
             "[harness] Registered mcpServers.harness-mem in {}",
             settings_path.display()
         );
+    } else {
+        let _ = fs::remove_file(&tmp); // clean up tmp on failure
     }
 }
 
