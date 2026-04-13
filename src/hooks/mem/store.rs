@@ -178,7 +178,74 @@ pub fn open_db() -> io::Result<Connection> {
     )
     .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
+    // Auto-migrate legacy file-based store on first open
+    auto_migrate_legacy(&conn);
+
     Ok(conn)
+}
+
+/// Silently import any legacy `nodes/*.md` + `edges.jsonl` into the DB.
+/// Runs only once — leaves a `.migrated` marker in the old nodes dir.
+fn auto_migrate_legacy(conn: &Connection) {
+    let harness_dir = db_path()
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("/tmp"))
+        .to_path_buf();
+    let legacy_nodes_dir = harness_dir.join("memory").join("nodes");
+    let marker = harness_dir.join("memory").join(".migrated");
+
+    // Already migrated or no legacy data
+    if marker.exists() || !legacy_nodes_dir.exists() {
+        return;
+    }
+
+    // Import nodes/*.md
+    let mut count = 0usize;
+    if let Ok(entries) = fs::read_dir(&legacy_nodes_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let Ok(content) = fs::read_to_string(&path) else { continue };
+            let Some(node) = parse_node(&content) else { continue };
+            let fm = &node.frontmatter;
+            let _ = conn.execute(
+                "INSERT OR IGNORE INTO nodes
+                 (id, type, title, tags, projects, agents, created, updated, body)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                rusqlite::params![
+                    fm.id, fm.node_type, fm.title,
+                    join_csv(&fm.tags), join_csv(&fm.projects), join_csv(&fm.agents),
+                    fm.created, fm.updated, node.body,
+                ],
+            );
+            count += 1;
+        }
+    }
+
+    // Import edges.jsonl
+    let edges_path = harness_dir.join("memory").join("edges.jsonl");
+    if edges_path.exists() {
+        if let Ok(content) = fs::read_to_string(&edges_path) {
+            for line in content.lines() {
+                if let Ok(edge) = serde_json::from_str::<Edge>(line) {
+                    let _ = conn.execute(
+                        "INSERT OR IGNORE INTO edges
+                         (id, source, target, relation, weight, ts)
+                         VALUES (?1,?2,?3,?4,?5,?6)",
+                        rusqlite::params![
+                            edge.id, edge.source, edge.target,
+                            edge.relation, edge.weight, edge.ts,
+                        ],
+                    );
+                }
+            }
+        }
+    }
+
+    // Write marker so we never run again
+    let _ = fs::write(&marker, format!("migrated {} nodes\n", count));
 }
 
 // ── Helpers ───────────────────────────────────────────
