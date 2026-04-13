@@ -308,11 +308,19 @@ fn handle_post_edge(body: &str) -> Result<String, String> {
     Ok(edge_id)
 }
 
-fn do_search(query: &str) -> Vec<String> {
-    // Use SQLite FTS5 — no rg/grep subprocess needed
+fn do_search(query: &str) -> Vec<serde_json::Value> {
+    use serde_json::json;
     search_nodes(query, 20)
         .into_iter()
-        .map(|n| n.frontmatter.id)
+        .map(|n| {
+            let snippet: String = n.body.chars().take(160).collect::<String>().replace('\n', " ");
+            json!({
+                "id": n.frontmatter.id,
+                "title": n.frontmatter.title,
+                "type": n.frontmatter.node_type,
+                "snippet": snippet
+            })
+        })
         .collect()
 }
 

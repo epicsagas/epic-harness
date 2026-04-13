@@ -23,8 +23,10 @@
   --c-pattern:  #4ade80;
   --c-project:  #a855f7;
   --c-decision: #f97316;
-  --c-error:    #ef4444;
-  --c-default:  #94a3b8;
+  --c-error:      #ef4444;
+  --c-session:    #fbbf24;
+  --c-resolution: #22d3ee;
+  --c-default:    #94a3b8;
 }
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
@@ -310,6 +312,8 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
         <label class="filter-row"><input type="checkbox" data-type="project" checked><span class="type-dot" style="background:var(--c-project)"></span><span class="filter-label">Project</span><span class="filter-count" id="cnt-project">0</span></label>
         <label class="filter-row"><input type="checkbox" data-type="decision" checked><span class="type-dot" style="background:var(--c-decision)"></span><span class="filter-label">Decision</span><span class="filter-count" id="cnt-decision">0</span></label>
         <label class="filter-row"><input type="checkbox" data-type="error" checked><span class="type-dot" style="background:var(--c-error)"></span><span class="filter-label">Error</span><span class="filter-count" id="cnt-error">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="session" checked><span class="type-dot" style="background:var(--c-session)"></span><span class="filter-label">Session</span><span class="filter-count" id="cnt-session">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="resolution" checked><span class="type-dot" style="background:var(--c-resolution)"></span><span class="filter-label">Resolution</span><span class="filter-count" id="cnt-resolution">0</span></label>
       </div>
     </div>
     <div class="filter-section">
@@ -614,11 +618,13 @@ function applyI18n() {
 const API_BASE = 'http://localhost:7700/api';
 
 const TYPE_HEX = {
-  concept:  '#4a9eff',
-  pattern:  '#4ade80',
-  project:  '#a855f7',
-  decision: '#f97316',
-  error:    '#ef4444',
+  concept:    '#4a9eff',
+  pattern:    '#4ade80',
+  project:    '#a855f7',
+  decision:   '#f97316',
+  error:      '#ef4444',
+  session:    '#fbbf24',
+  resolution: '#22d3ee',
 };
 const REL_HEX = {
   depends_on:     '#f97316',
@@ -641,7 +647,7 @@ const S = {
   nodes: [],
   edges: [],
   nodeMap: {},
-  activeTypes: new Set(['concept','pattern','project','decision','error']),
+  activeTypes: new Set(['concept','pattern','project','decision','error','session','resolution']),
   activeTags:  new Set(),
   activeProject: '',
   searchHits: null,   // Set<id> | null
