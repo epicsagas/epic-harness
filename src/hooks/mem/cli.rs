@@ -9,9 +9,10 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_node_file, list_node_ids, now_iso, parse_node, query_nodes, read_index,
-    read_node, remove_edges_for_node, remove_from_index, search_nodes, serialize_node,
-    upsert_index, validate_node_id, write_node, Edge, IndexNode, Node, NodeFrontmatter,
+    append_edge, delete_node_file, find_node_by_title_recent, list_node_ids, now_iso, parse_node,
+    query_nodes, read_index, read_node, remove_edges_for_node, remove_from_index, search_nodes,
+    serialize_node, upsert_index, validate_node_id, write_node, Edge, IndexNode, Node,
+    NodeFrontmatter,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -300,6 +301,13 @@ fn cmd_add(args: &[String]) -> io::Result<i32> {
     let projects = csv_to_vec(flags.get("project").map(|s| s.as_str()).unwrap_or(""));
     let agents = csv_to_vec(flags.get("agent").map(|s| s.as_str()).unwrap_or(""));
     let body = flags.get("body").cloned().unwrap_or_default();
+
+    // Dedup: if a node with the same title was stored within the last 24 h,
+    // return the existing id rather than creating a duplicate.
+    if let Some(existing_id) = find_node_by_title_recent(&title, 24) {
+        println!("{{\"id\":\"{existing_id}\",\"deduplicated\":true}}");
+        return Ok(0);
+    }
 
     let id = Uuid::new_v4().to_string();
     let now = now_iso();

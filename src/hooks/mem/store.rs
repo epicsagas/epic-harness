@@ -506,6 +506,24 @@ pub fn remove_from_index(node_id: &str) -> io::Result<()> {
     delete_node_file(node_id)
 }
 
+// ── Deduplication ─────────────────────────────────────
+
+/// Returns the ID of an existing node with the same title updated within the
+/// last `window_hours` hours.  Used to prevent duplicate writes when multiple
+/// callers (observe hook + skills + direct MCP) all fire for the same event.
+pub fn find_node_by_title_recent(title: &str, window_hours: u64) -> Option<String> {
+    let conn = open_db().ok()?;
+    let sql = format!(
+        "SELECT id FROM nodes
+         WHERE title = ?1
+           AND updated > datetime('now', '-{window_hours} hours')
+         ORDER BY updated DESC
+         LIMIT 1"
+    );
+    conn.query_row(&sql, params![title], |row| row.get::<_, String>(0))
+        .ok()
+}
+
 // ── FTS search ────────────────────────────────────────
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {

@@ -12,8 +12,8 @@ use std::io::{self, BufRead, Write};
 
 use super::graph::related_nodes;
 use super::store::{
-    now_iso, query_nodes, read_node, search_nodes, upsert_index, validate_node_id,
-    write_node, Node, NodeFrontmatter,
+    find_node_by_title_recent, now_iso, query_nodes, read_node, search_nodes, upsert_index,
+    validate_node_id, write_node, Node, NodeFrontmatter,
 };
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
@@ -107,6 +107,12 @@ fn tool_mem_add(args: &Value) -> Value {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => return json!({ "error": "mem_add requires title, type, and body" }),
     };
+
+    // Dedup: if a node with the same title was stored within the last 24 h,
+    // return the existing id rather than creating a duplicate.
+    if let Some(existing_id) = find_node_by_title_recent(&title, 24) {
+        return json!({ "id": existing_id, "deduplicated": true });
+    }
 
     let tags: Vec<String> = args["tags"]
         .as_array()
