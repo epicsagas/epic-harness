@@ -9,9 +9,9 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_node_file, now_iso, parse_node, query_nodes, read_index, read_node,
-    remove_edges_for_node, remove_from_index, search_nodes, upsert_index, validate_node_id,
-    write_node, Edge, IndexNode, Node, NodeFrontmatter,
+    append_edge, delete_node_file, list_node_ids, now_iso, parse_node, query_nodes, read_index,
+    read_node, remove_edges_for_node, remove_from_index, search_nodes, serialize_node,
+    upsert_index, validate_node_id, write_node, Edge, IndexNode, Node, NodeFrontmatter,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -24,6 +24,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ("link",        "Create a directed edge between two nodes"),
     ("graph",       "Manage the graph cache (rebuild)"),
     ("validate",    "Check all node files for parse errors"),
+    ("export",      "Dump all nodes to Markdown files (for Git backup)"),
     ("migrate",     "Import legacy project memory files"),
     ("context",     "Show recently-updated nodes for a project"),
     ("mcp",         "Run as stdio MCP server (JSON-RPC 2.0)"),
@@ -124,6 +125,17 @@ fn print_subcommand_help(sub: &str) {
             println!("OUTPUT: JSON array of {{\"file\", \"error\"}} — empty array if all valid.");
             println!("EXIT:   0 if valid, 1 if any errors found");
         }
+        "export" => {
+            println!("harness mem export — Dump all nodes to Markdown files\n");
+            println!("USAGE:");
+            println!("  harness mem export [OPTIONS]\n");
+            println!("Exports all nodes from the SQLite DB to ~/.harness/exports/<id>.md");
+            println!("Suitable for Git backup and diffing.\n");
+            println!("OPTIONS:");
+            println!("  --out <dir>         Output directory (default: ~/.harness/exports)");
+            println!("  --dry-run           Preview without writing");
+            println!("\nOUTPUT: {{\"exported\":<n>, \"dir\":\"<path>\"}}");
+        }
         "migrate" => {
             println!("harness mem migrate — Import legacy project memory files\n");
             println!("USAGE:");
@@ -213,6 +225,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         "link"        => cmd_link(&args[1..]),
         "graph"       => cmd_graph(&args[1..]),
         "validate"    => cmd_validate(),
+        "export"      => cmd_export(&args[1..]),
         "migrate"     => cmd_migrate(&args[1..]),
         "context"     => cmd_context(&args[1..]),
         "mcp"         => return super::mcp::run_mcp_server(),
@@ -620,6 +633,48 @@ fn claude_settings_path() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
         .join(".claude")
         .join("settings.json")
+}
+
+fn cmd_export(args: &[String]) -> io::Result<i32> {
+    let (_, flags) = parse_flags(args);
+    let dry_run = flags.contains_key("dry-run");
+
+    let out_dir = if let Some(d) = flags.get("out") {
+        PathBuf::from(d)
+    } else {
+        let root = std::env::var("HARNESS_ROOT")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_else(|_| "/tmp".to_string());
+        PathBuf::from(root).join(".harness").join("exports")
+    };
+
+    let ids = list_node_ids()?;
+    let mut exported = 0usize;
+
+    if !dry_run {
+        fs::create_dir_all(&out_dir)?;
+    }
+
+    for id in &ids {
+        let Ok(node) = read_node(id) else { continue };
+        let filename = format!("{}.md", node.frontmatter.id);
+        let path = out_dir.join(&filename);
+        let content = serialize_node(&node);
+
+        if dry_run {
+            println!("Would write: {}", path.display());
+        } else {
+            fs::write(&path, &content)?;
+        }
+        exported += 1;
+    }
+
+    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+        "exported": exported,
+        "dry_run":  dry_run,
+        "dir":      out_dir.display().to_string(),
+    })).unwrap_or_default());
+    Ok(0)
 }
 
 fn find_epic_harness_binary() -> String {
