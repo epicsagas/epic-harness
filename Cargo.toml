@@ -36,7 +36,7 @@ rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.gz"
 pkg-fmt = "tgz"
-bin-dir = "epic-harness"
+bin-dir = "{ bin }"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.zip"
