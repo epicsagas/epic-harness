@@ -91,21 +91,21 @@ epic-harness funciona com Claude Code e 6 ferramentas adicionais de programaçã
 
 ```bash
 # Menu interativo
-epic-harness install
+epic install
 
 # Instalação direta
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # Instalação local no projeto
-epic-harness install cursor --local
+epic install cursor --local
 
 # Visualizar sem realizar alterações
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 ## Memória Unificada
@@ -206,7 +206,7 @@ As skills são acionadas automaticamente com base no contexto. Você não precis
 Executam de forma invisível. Nenhuma ação do usuário é necessária. Implementados como um **único binário Rust** (`epic-harness`) com subcomandos.
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | Hook | Quando | O que faz |

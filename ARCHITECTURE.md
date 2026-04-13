@@ -225,9 +225,9 @@ Directed edges stored in the `edges` table. Valid relation types:
 | Interface | Description |
 |-----------|-------------|
 | CLI (`harness mem`) | 15 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `export`, `serve`, `validate`, `migrate`, `context`, `mcp`, `mcp-install` |
-| REST API | `epic-harness mem serve` — embedded Rust server, port 7700 |
-| MCP server | `epic-harness mem mcp` — stdio JSON-RPC 2.0, 5 tools; register via `harness mem mcp-install [--force]` |
-| Git backup | `epic-harness mem export [--out <dir>]` — dumps all nodes to Markdown |
+| REST API | `epic mem serve` — embedded Rust server, port 7700 |
+| MCP server | `epic mem mcp` — stdio JSON-RPC 2.0, 5 tools; register via `harness mem mcp-install [--force]` |
+| Git backup | `epic mem export [--out <dir>]` — dumps all nodes to Markdown |
 
 ### Auto-Recording Pipeline
 

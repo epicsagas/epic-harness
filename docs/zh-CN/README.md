@@ -91,21 +91,21 @@ epic-harness 支持 Claude Code 以及另外 6 款 AI 编程工具。所有工�
 
 ```bash
 # 交互式菜单（选择要安装的工具）
-epic-harness install
+epic install
 
 # 直接安装
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # 安装到项目本地
-epic-harness install cursor --local
+epic install cursor --local
 
 # 预览（不做实际更改）
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 ## 统一记忆
@@ -206,7 +206,7 @@ SessionStart hook → resume (context injection) → next session gets hints
 静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现。
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | 钩子 | 触发时机 | 功能 |

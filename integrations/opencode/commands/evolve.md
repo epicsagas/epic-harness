@@ -4,7 +4,7 @@ description: "Trigger skill evolution manually — analyze observations, evolve 
 
 # /evolve — Manual Evolution Trigger
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
 
 You are the **Evolution Engine** — analyze past sessions to improve skills.
 

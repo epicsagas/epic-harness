@@ -91,21 +91,21 @@ epic-harness Claude Code और 6 अतिरिक्त AI कोडिंग
 
 ```bash
 # इंटरएक्टिव मेनू
-epic-harness install
+epic install
 
 # सीधे इंस्टॉल करें
-epic-harness install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic-harness install gemini       # Gemini CLI  → ~/.gemini/
-epic-harness install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
-epic-harness install opencode     # OpenCode    → ~/.config/opencode/
-epic-harness install cline        # Cline       → ~/Documents/Cline/Rules/
-epic-harness install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
 # प्रोजेक्ट-लोकल इंस्टॉल करें
-epic-harness install cursor --local
+epic install cursor --local
 
 # बिना बदलाव किए पूर्वावलोकन
-epic-harness install gemini --dry-run
+epic install gemini --dry-run
 ```
 
 ## एकीकृत मेमोरी
@@ -203,10 +203,10 @@ SessionStart hook → resume (context injection) → next session gets hints
 
 ## हुक्स (Ring 0)
 
-अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए।
+अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic` / `epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए।
 
 ```
-epic-harness resume | guard | polish | observe | snapshot | reflect
+epic resume | guard | polish | observe | snapshot | reflect
 ```
 
 | हुक | कब | क्या करता है |

@@ -4,7 +4,7 @@ description: "Define what to build — clarify requirements through conversation
 
 # /spec — Define What to Build
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
 
 You are starting the **Spec** phase. Your job is to extract a clear, actionable specification from the user's request.
 

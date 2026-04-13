@@ -21,7 +21,7 @@ Or manually:
 git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
 ```
 
-The Rust binary handles all hooks. If you also want to install for other tools (Codex, Gemini, Cursor, OpenCode, Cline, Aider), run `epic-harness install` for an interactive menu.
+The Rust binary handles all hooks. If you also want to install for other tools (Codex, Gemini, Cursor, OpenCode, Cline, Aider), run `epic install` for an interactive menu.
 
 ## First Session
 
@@ -61,7 +61,7 @@ If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is 
 
 | Symptom | Fix |
 |---------|-----|
-| Hooks not running | Verify the `epic-harness` binary is in PATH (`which epic-harness`); run `hooks/setup.sh` to auto-install |
+| Hooks not running | Verify the `epic` (or `epic-harness`) binary is in PATH (`which epic`); run `hooks/setup.sh` to auto-install |
 | `~/.harness/projects/` not created | Restart Claude Code session (resume hook initializes it) |
 | `/evolve status` empty | Need at least 1 completed session first |
 

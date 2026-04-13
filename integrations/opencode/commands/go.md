@@ -4,7 +4,7 @@ description: "Build it — auto-plan, delegate to sub-agents with TDD, and verif
 
 # /go — Build It
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=20 20 101 12 61 79 80 81 98 701 703 33 100 204 250 395 398 399 400 702epic path)` first. NEVER use `.harness/` in the project directory.
 
 You are starting the **Go** phase — the core execution engine of epic-harness.
 
