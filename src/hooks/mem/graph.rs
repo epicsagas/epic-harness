@@ -60,6 +60,37 @@ pub fn rebuild_graph() -> io::Result<()> {
     Ok(())
 }
 
+/// Build graph JSON string directly from DB (no file I/O).
+/// Used by the web server to always return fresh data.
+pub fn rebuild_graph_json() -> io::Result<String> {
+    let ids = list_node_ids()?;
+    let mut nodes = vec![];
+    for id in &ids {
+        if let Ok(node) = read_node(id) {
+            nodes.push(GraphNode {
+                id: node.frontmatter.id,
+                title: node.frontmatter.title,
+                node_type: node.frontmatter.node_type,
+                tags: node.frontmatter.tags,
+            });
+        }
+    }
+    let raw_edges = read_edges();
+    let edges: Vec<GraphEdge> = raw_edges
+        .into_iter()
+        .map(|e| GraphEdge {
+            source: e.source,
+            target: e.target,
+            relation: e.relation,
+            weight: e.weight,
+        })
+        .collect();
+
+    let graph = Graph { nodes, edges };
+    serde_json::to_string_pretty(&graph)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
 /// BFS traversal from `start_id` up to `depth` hops using the DB edges table.
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let edges = read_edges();

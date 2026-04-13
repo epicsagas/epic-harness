@@ -15,6 +15,8 @@ pub struct HookInput {
     pub tool_output: Option<ToolOutput>,
     /// Claude Code actual PostToolUse payload field (string or object)
     pub tool_result: Option<serde_json::Value>,
+    /// Claude Code canonical PostToolUse field name
+    pub tool_response: Option<serde_json::Value>,
     pub conversation_summary: Option<String>,
     pub pending_tasks: Option<Vec<String>>,
     pub context_usage: Option<f64>,

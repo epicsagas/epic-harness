@@ -4,8 +4,9 @@ use std::io::Cursor;
 
 use tiny_http::{Header, Method, Response, Server};
 
+use super::graph::rebuild_graph_json;
 use super::store::{
-    append_edge, delete_edge_by_id, delete_node_file, graph_path, now_iso, read_index, read_node,
+    append_edge, delete_edge_by_id, delete_node_file, now_iso, read_index, read_node,
     remove_edges_for_node, remove_from_index, search_nodes, upsert_index, validate_node_id,
     write_node, Edge, Node, NodeFrontmatter,
 };
@@ -79,8 +80,7 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── GET /api/graph ────────────────────────────────
             (Method::Get, "/api/graph") => {
-                let body = std::fs::read_to_string(graph_path())
-                    .unwrap_or_else(|_| "{}".to_string());
+                let body = rebuild_graph_json().unwrap_or_else(|_| "{}".to_string());
                 Box::new(move || json_response(&body, 200))
             }
 

@@ -161,22 +161,26 @@ pub fn run(input: &HookInput) -> i32 {
         sequence_id: Some(seq_id),
     };
 
-    // Resolve tool output: prefer tool_output (structured) then tool_result (Claude Code actual field)
+    // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
+    let resolve_json_value = |v: &serde_json::Value| -> (String, String) {
+        match v {
+            serde_json::Value::String(s) => (s.clone(), String::new()),
+            serde_json::Value::Object(obj) => {
+                let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
+                let err = obj.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+                (format!("{out}\n{err}"), String::new())
+            }
+            other => (other.to_string(), String::new()),
+        }
+    };
     let resolved_output: Option<(String, String)> = if let Some(to) = &input.tool_output {
         let out = to.output.as_deref().unwrap_or("").to_string();
         let err = to.stderr.as_deref().unwrap_or("").to_string();
         Some((out, err))
+    } else if let Some(tr) = &input.tool_response {
+        Some(resolve_json_value(tr))
     } else if let Some(tr) = &input.tool_result {
-        let s = match tr {
-            serde_json::Value::String(s) => s.clone(),
-            serde_json::Value::Object(obj) => {
-                let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
-                let err = obj.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
-                format!("{out}\n{err}")
-            }
-            other => other.to_string(),
-        };
-        Some((s, String::new()))
+        Some(resolve_json_value(tr))
     } else {
         None
     };

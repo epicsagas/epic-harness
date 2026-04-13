@@ -8,10 +8,8 @@
 - `skills/` — 8 auto skills + _dispatch engine
 - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
-  - `hooks/bin/epic-harness` — Rust single binary (primary, ~4x faster)
-  - `hooks/scripts/*.js` — Node.js fallback (compiled from `src/ts/`)
+  - `hooks/bin/epic-harness` — Rust single binary
 - `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
-- `src/ts/` — TypeScript source (Node.js fallback)
 - `presets/` — Cold-start skill templates (embedded in Rust binary at compile time)
 - `references/` — Checklists (security, performance, testing, team-patterns)
 - `integrations/` — Per-tool integration files (6 tools):
@@ -40,13 +38,13 @@ Every tool call scored on 3 axes:
 - `execution_cost` (0.0-1.0): Efficiency
 - **Composite**: `SCORE_WEIGHTS.success×tool_success + SCORE_WEIGHTS.quality×quality + SCORE_WEIGHTS.cost×cost` (default 0.5/0.3/0.2)
 
-All weights configurable via `SCORE_WEIGHTS` in `common.js`.
+All weights configurable via `SCORE_WEIGHTS` in `common.rs`.
 
 ### Failure Classification (9 types)
 type_error, syntax_error, test_fail, lint_fail, build_fail, permission_denied, timeout, not_found, runtime_error
 
 ### Pattern Detection (4 types)
-All thresholds defined as constants in `common.js` for per-project tuning.
+All thresholds defined as constants in `common.rs` for per-project tuning.
 Function-name-level context included (extracted from stack traces, error messages).
 Error message hash-based dedup for improved precision (`hashString` + `normalizeError`).
 - `repeated_same_error`: Consecutive same error + same error hash (`REPEATED_ERROR_MIN`, default 3)
