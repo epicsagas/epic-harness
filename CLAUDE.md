@@ -1,10 +1,10 @@
 # epic-harness
 
-6 commands + auto-trigger skills + self-evolving agent harness.
+7 commands + auto-trigger skills + self-evolving agent harness.
 
 ## Structure
 
-- `commands/` — 6 slash commands (spec, go, check, ship, team, evolve)
+- `commands/` — 7 slash commands (spec, go, check, ship, team, evolve, commit)
 - `skills/` — 8 auto skills + _dispatch engine
 - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
