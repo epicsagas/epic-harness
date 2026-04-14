@@ -353,16 +353,16 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 5c. Memory decay: gradual importance decay (30+ days untouched → 10% decay, floor 0.05)
-    if let Ok(decayed) = store::decay_importance(30, 0.9, 0.05) {
-        if decayed > 0 {
-            hint("resume", &format!("Memory decay: decayed importance for {decayed} node(s)"));
-        }
+    if let Ok(decayed) = store::decay_importance(30, 0.9, 0.05)
+        && decayed > 0
+    {
+        hint("resume", &format!("Memory decay: decayed importance for {decayed} node(s)"));
     }
     // Also tag truly ancient nodes as stale (180+ days)
-    if let Ok(staled) = store::tag_stale_nodes(180) {
-        if staled > 0 {
-            hint("resume", &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"));
-        }
+    if let Ok(staled) = store::tag_stale_nodes(180)
+        && staled > 0
+    {
+        hint("resume", &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"));
     }
 
     // 6. Stack
