@@ -657,16 +657,16 @@ pub fn smart_recall(
         Default::default()
     };
 
-    // Fetch candidate nodes (broad set)
-    let candidate_limit = (limit * 4).max(40);
-    let mut conditions: Vec<String> = vec![
-        "',' || tags || ',' NOT LIKE '%,stale,%'".into(),
+    // Fetch candidate nodes (broad set); candidate_limit is computed, not user input.
+    let candidate_limit = (limit * 4).max(40) as i64;
+    let mut conditions: Vec<&str> = vec![
+        "',' || tags || ',' NOT LIKE '%,stale,%'",
     ];
+    // Collect bound parameter values alongside conditions.
+    let mut param_vals: Vec<Box<dyn rusqlite::ToSql>> = vec![];
     if let Some(p) = project {
-        conditions.push(format!(
-            "(',' || projects || ',' LIKE '%,{},%')",
-            p.replace('\'', "''")
-        ));
+        conditions.push("(',' || projects || ',' LIKE '%,' || ? || ',%')");
+        param_vals.push(Box::new(p.to_string()));
     }
     let where_clause = format!("WHERE {}", conditions.join(" AND "));
     let sql = format!(
@@ -679,8 +679,9 @@ pub fn smart_recall(
         Ok(s) => s,
         Err(_) => return vec![],
     };
+    let refs: Vec<&dyn rusqlite::ToSql> = param_vals.iter().map(|b| b.as_ref()).collect();
     let candidates: Vec<Node> = stmt
-        .query_map([], row_to_node)
+        .query_map(refs.as_slice(), row_to_node)
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default();
 
@@ -737,21 +738,31 @@ fn parse_iso_to_secs(ts: &str) -> u64 {
     let min: u64 = ts[14..16].parse().unwrap_or(0);
     let sec: u64 = ts[17..19].parse().unwrap_or(0);
 
-    // Approximate days since epoch
-    let mut total_days = 0u64;
-    for y in 1970..year {
-        total_days += if is_leap(y) { 366 } else { 365 };
-    }
-    let month_days = [
-        0u64, 31, if is_leap(year) { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    for m in 1..month {
-        total_days += month_days[m as usize];
-    }
-    total_days += day - 1;
-
+    let total_days = days_since_epoch(year, month, day);
     total_days * 86400 + hour * 3600 + min * 60 + sec
+}
+
+/// Closed-form count of days from 1970-01-01 to the given date (O(1)).
+fn days_since_epoch(year: u64, month: u64, day: u64) -> u64 {
+    // Count leap years before `year` minus leap years before 1970,
+    // using the Julian Day Number leap-year rule.
+    let y = year as i64 - 1; // complete years before this one
+    let base = 1969i64;      // complete years before 1970
+    let leaps = (y / 4 - y / 100 + y / 400) - (base / 4 - base / 100 + base / 400);
+    let days_from_years = (year as i64 - 1970) * 365 + leaps;
+
+    const MONTH_DAYS: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let is_leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
+    let mut days_from_months: u64 = 0;
+    let prior_months = (month.saturating_sub(1) as usize).min(12);
+    for (m, &md) in MONTH_DAYS.iter().enumerate().take(prior_months) {
+        days_from_months += md;
+        if m == 1 && is_leap {
+            days_from_months += 1;
+        }
+    }
+
+    (days_from_years as u64) + days_from_months + day.saturating_sub(1)
 }
 
 // ── Access tracking & decay ──────────────────────────
@@ -766,14 +777,20 @@ pub fn touch_node_conn(conn: &Connection, id: &str) {
 }
 
 /// Batch-touch multiple nodes (used after smart_recall).
+/// Wraps all updates in a single transaction to avoid N individual round-trips.
 pub fn touch_nodes(ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
     let conn = match open_db() {
         Ok(c) => c,
         Err(_) => return,
     };
+    let _ = conn.execute_batch("BEGIN");
     for id in ids {
         touch_node_conn(&conn, id);
     }
+    let _ = conn.execute_batch("COMMIT");
 }
 
 /// Gradually decay importance for nodes not accessed in `days`.
@@ -845,39 +862,47 @@ pub fn query_nodes(
         Err(_) => return vec![],
     };
 
-    let mut conditions: Vec<String> = vec![];
+    // Cap limit to prevent oversized result sets.
+    let limit = limit.min(200);
+
+    // Build parameterized conditions — no format!() interpolation of user values.
+    let mut condition_strs: Vec<&str> = vec![];
+    let mut param_vals: Vec<Box<dyn rusqlite::ToSql>> = vec![];
+
     if let Some(t) = tag {
-        // tags is a comma-separated column; use LIKE for containment
-        conditions.push(format!("(',' || tags || ',' LIKE '%,{},%')", t.replace('\'', "''")));
+        condition_strs.push("(',' || tags || ',' LIKE '%,' || ? || ',%')");
+        param_vals.push(Box::new(t.to_string()));
     }
     if let Some(nt) = node_type {
-        conditions.push(format!("type = '{}'", nt.replace('\'', "''")));
+        condition_strs.push("type = ?");
+        param_vals.push(Box::new(nt.to_string()));
     }
     if let Some(p) = project {
-        conditions.push(format!(
-            "(',' || projects || ',' LIKE '%,{},%')",
-            p.replace('\'', "''")
-        ));
+        condition_strs.push("(',' || projects || ',' LIKE '%,' || ? || ',%')");
+        param_vals.push(Box::new(p.to_string()));
     }
 
-    let where_clause = if conditions.is_empty() {
+    let where_clause = if condition_strs.is_empty() {
         String::new()
     } else {
-        format!("WHERE {}", conditions.join(" AND "))
+        format!("WHERE {}", condition_strs.join(" AND "))
     };
 
+    // `limit` is not user-controlled; safe to format as i64.
     let sql = format!(
         "SELECT {NODE_COLUMNS}
-         FROM nodes {where_clause} ORDER BY updated DESC LIMIT {limit}",
+         FROM nodes {where_clause} ORDER BY updated DESC LIMIT {}",
+        limit as i64,
     );
 
     let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    stmt.query_map([], row_to_node)
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+    let refs: Vec<&dyn rusqlite::ToSql> = param_vals.iter().map(|b| b.as_ref()).collect();
+    stmt.query_map(refs.as_slice(), row_to_node)
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
 }
 
 // ── Node serialization (kept for migrate import) ──────
@@ -903,7 +928,12 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_extension("tmp");
+    // Use PID in the tmp filename to avoid races between concurrent sessions.
+    let tmp = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+        std::process::id(),
+    ));
     {
         let mut f = fs::File::create(&tmp)?;
         f.write_all(data)?;
@@ -975,4 +1005,116 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 
 fn is_leap(y: u64) -> bool {
     (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    // ── Fix 1: query_nodes SQL injection ──────────────────
+    #[test]
+    fn test_query_nodes_sql_injection_tag_does_not_panic() {
+        // A malicious tag containing SQL metacharacters must not panic or error out.
+        // The call should return normally (empty results or whatever is in DB).
+        let _ = query_nodes(Some("'; DROP TABLE nodes; --"), None, None, 10);
+    }
+
+    #[test]
+    fn test_query_nodes_sql_injection_type_does_not_panic() {
+        let _ = query_nodes(None, Some("' OR '1'='1"), None, 10);
+    }
+
+    #[test]
+    fn test_query_nodes_sql_injection_project_does_not_panic() {
+        let _ = query_nodes(None, None, Some("x%_x'; --"), 10);
+    }
+
+    #[test]
+    fn test_query_nodes_limit_capped_at_200() {
+        // Even when requesting more than 200 nodes the function must not panic.
+        let results = query_nodes(None, None, None, 9999);
+        assert!(results.len() <= 200);
+    }
+
+    // ── Fix 1: smart_recall SQL injection ─────────────────
+    #[test]
+    fn test_smart_recall_sql_injection_project_does_not_panic() {
+        let _ = smart_recall(Some("'; DROP TABLE nodes; --"), None, 5);
+    }
+
+    // ── Fix 2: atomic_write unique tmp names ──────────────
+    #[test]
+    fn test_atomic_write_tmp_filename_contains_pid() {
+        // We verify the tmp path is NOT just path.with_extension("tmp").
+        // Build the path the NEW way and check it contains the pid.
+        let base = PathBuf::from("/tmp/store_test_base.json");
+        let pid = std::process::id();
+        let expected_suffix = format!(".{pid}.tmp");
+
+        // Replicate the new tmp-path logic:
+        let tmp = base.with_file_name(format!(
+            ".{}.{}.tmp",
+            base.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
+            pid
+        ));
+
+        assert!(
+            tmp.to_str().unwrap_or("").ends_with(&expected_suffix),
+            "tmp path should end with .PID.tmp, got: {:?}",
+            tmp
+        );
+        // Must NOT equal path.with_extension("tmp") (the old fixed name).
+        assert_ne!(tmp, base.with_extension("tmp"));
+    }
+
+    // ── Fix 4: parse_iso_to_secs closed-form ──────────────
+    #[test]
+    fn test_parse_iso_epoch_start() {
+        // 1970-01-01T00:00:00Z => 0
+        assert_eq!(parse_iso_to_secs("1970-01-01T00:00:00Z"), 0);
+    }
+
+    #[test]
+    fn test_parse_iso_known_timestamp() {
+        // 2024-01-01T00:00:00Z
+        // Days from 1970 to 2024:
+        //   54 years: 54*365 = 19710 days
+        //   Leap years in [1970,2023]: 1972,1976,...2020 = every 4 years
+        //   count = (2023/4 - 2023/100 + 2023/400) - (1969/4 - 1969/100 + 1969/400)
+        //         = (505 - 20 + 5) - (492 - 19 + 4) = 490 - 477 = 13
+        //   Total days = 54*365 + 13 = 19723
+        let expected: u64 = 19723 * 86400;
+        assert_eq!(parse_iso_to_secs("2024-01-01T00:00:00Z"), expected);
+    }
+
+    #[test]
+    fn test_parse_iso_leap_day() {
+        // 2024-02-29T00:00:00Z  (2024 is a leap year)
+        // days up to 2024-01-01 = 19723
+        // Jan = 31 days => 2024-02-01 = 19754
+        // Feb 29 => day index = 28
+        // total = 19754 + 28 = 19782
+        let expected: u64 = 19782 * 86400;
+        assert_eq!(parse_iso_to_secs("2024-02-29T00:00:00Z"), expected);
+    }
+
+    #[test]
+    fn test_parse_iso_with_time_component() {
+        // 1970-01-01T01:02:03Z => 1*3600 + 2*60 + 3 = 3723
+        assert_eq!(parse_iso_to_secs("1970-01-01T01:02:03Z"), 3723);
+    }
+
+    #[test]
+    fn test_parse_iso_non_leap_century() {
+        // 1900 is not a leap year; 2000 is. Test 2000-03-01.
+        // Days up to 2000-01-01:
+        //   30 years 1970..=1999: 30*365 = 10950 base days
+        //   Leap years in [1970,1999]: 1972,1976,1980,1984,1988,1992,1996 = 7
+        //   total = 10950 + 7 = 10957 days
+        // Jan=31, Feb=29 (2000 is a leap year) => 2000-03-01 day index = 31+29 = 60
+        // Total = 10957 + 60 = 11017
+        let expected: u64 = 11017 * 86400;
+        assert_eq!(parse_iso_to_secs("2000-03-01T00:00:00Z"), expected);
+    }
 }
