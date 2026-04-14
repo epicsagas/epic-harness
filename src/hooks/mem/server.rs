@@ -1,6 +1,6 @@
 //! server.rs — tiny_http based REST API server
 
-use std::io::Cursor;
+use std::io::{Cursor, Read as _};
 
 use tiny_http::{Header, Method, Response, Server};
 
@@ -15,7 +15,7 @@ const WEBVIEW_HTML: &str = include_str!("webview.html");
 
 fn cors_headers() -> Vec<Header> {
     vec![
-        Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost").unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, PUT, DELETE, OPTIONS").unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
         Header::from_bytes(b"Content-Type", b"application/json").unwrap(),
@@ -24,7 +24,7 @@ fn cors_headers() -> Vec<Header> {
 
 fn html_headers() -> Vec<Header> {
     vec![
-        Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost").unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
         Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
     ]
 }
@@ -94,7 +94,7 @@ pub fn serve(args: &[String]) -> i32 {
             // ── POST /api/nodes ───────────────────────────────
             (Method::Post, "/api/nodes") => {
                 let mut body = String::new();
-                let _ = request.as_reader().read_to_string(&mut body);
+                let _ = request.as_reader().take(1 << 20).read_to_string(&mut body);
                 let result = handle_post_node(&body);
                 let (resp_body, code) = match result {
                     Ok(id) => (format!("{{\"id\":\"{id}\"}}"), 201u16),
@@ -107,18 +107,23 @@ pub fn serve(args: &[String]) -> i32 {
             _ if url.starts_with("/api/edges/") && matches!(request.method(), Method::Delete) => {
                 let edge_id = url.trim_start_matches("/api/edges/")
                     .split('?').next().unwrap_or("").to_string();
-                let result = delete_edge_by_id(&edge_id);
-                let (body, code) = match result {
-                    Ok(_) => (format!("{{\"deleted\":\"{edge_id}\"}}"), 200u16),
-                    Err(e) => (format!("{{\"error\":\"{e}\"}}"), 500),
-                };
-                Box::new(move || json_response(&body, code))
+                if !validate_node_id(&edge_id) {
+                    let body = "{\"error\":\"invalid edge id\"}".to_string();
+                    Box::new(move || json_response(&body, 400))
+                } else {
+                    let result = delete_edge_by_id(&edge_id);
+                    let (body, code) = match result {
+                        Ok(_) => (format!("{{\"deleted\":\"{edge_id}\"}}"), 200u16),
+                        Err(e) => (format!("{{\"error\":\"{e}\"}}"), 500),
+                    };
+                    Box::new(move || json_response(&body, code))
+                }
             }
 
             // ── POST /api/edges ───────────────────────────────
             (Method::Post, "/api/edges") => {
                 let mut body = String::new();
-                let _ = request.as_reader().read_to_string(&mut body);
+                let _ = request.as_reader().take(1 << 20).read_to_string(&mut body);
                 let result = handle_post_edge(&body);
                 let (resp_body, code) = match result {
                     Ok(id) => (format!("{{\"edge_id\":\"{id}\"}}"), 201u16),
@@ -147,6 +152,8 @@ pub fn serve(args: &[String]) -> i32 {
                                 "agents": node.frontmatter.agents,
                                 "created": node.frontmatter.created,
                                 "updated": node.frontmatter.updated,
+                                "importance": node.frontmatter.importance,
+                                "access_count": node.frontmatter.access_count,
                                 "body": node.body
                             });
                             (v.to_string(), 200u16)
@@ -166,7 +173,7 @@ pub fn serve(args: &[String]) -> i32 {
                     Box::new(move || json_response(&body, 400))
                 } else {
                     let mut body = String::new();
-                    let _ = request.as_reader().read_to_string(&mut body);
+                    let _ = request.as_reader().take(1 << 20).read_to_string(&mut body);
                     let result = handle_put_node(&id, &body);
                     let (resp_body, code) = match result {
                         Ok(_) => (format!("{{\"id\":\"{id}\"}}"), 200u16),
@@ -287,6 +294,9 @@ fn handle_put_node(id: &str, body: &str) -> Result<(), String> {
     }
     if let Some(tags) = v["tags"].as_array() {
         node.frontmatter.tags = tags.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
+    }
+    if let Some(imp) = v["importance"].as_f64() {
+        node.frontmatter.importance = imp.clamp(0.0, 1.0);
     }
     node.frontmatter.updated = now_iso();
 
