@@ -1,0 +1,17 @@
+prompt = """
+Generate and execute a git commit following Conventional Commits 1.0.0.
+
+1. Gather context (parallel): `git status`, `git diff HEAD`, `git branch --show-current`, `git log --oneline -5`
+2. Determine commit type: feat|fix|build|chore|ci|docs|style|refactor|perf|test
+3. Generate 3 candidates in `type(scope): description` format, pick the best for clarity, compliance, and consistency with existing commit style.
+4. Optional body: max 3 bullet points when the diff needs extra context.
+5. Execute: `git add <specific files>` then `git commit -m "message"` — no user confirmation needed.
+
+Rules:
+- Lowercase type, optional scope, imperative mood, no period, under 72 chars
+- Breaking changes: `!` before `:` or `BREAKING CHANGE:` footer
+- No emoji, no Co-Authored-By footers
+- Single commit only — suggest splitting if changes span multiple concerns
+- If no changes exist, inform the user
+- Never use --no-verify
+"""
