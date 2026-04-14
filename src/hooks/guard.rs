@@ -73,7 +73,7 @@ fn check_conventional_commit(cmd: &str) -> Option<String> {
         Some(format!(
             "Commit message does not follow Conventional Commits: \"{first_line}\"\n\
              Expected: type(scope): description  (types: feat|fix|build|chore|ci|docs|style|refactor|perf|test)\n\
-             Tip: use /commit to auto-generate a valid message"
+             Rewrite the message as: type(scope): description"
         ))
     }
 }
