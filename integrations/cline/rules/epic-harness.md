@@ -35,3 +35,25 @@ Project-level memory lives in `$HARNESS_DIR/`:
 - `evolved/` — auto-generated skills from your patterns
 - `metrics.json` — session trends and skill effectiveness
 - `guard-rules.yaml` — add custom block/warn shell patterns
+
+## Commit — Conventional Commits Generator
+
+**Always generate Conventional Commits format. Guard blocks non-CC messages.**
+
+Format: `type(scope): description`
+- Lowercase type, optional scope, imperative mood, no period, under 72 chars
+- Breaking changes: append `!` before `:`
+
+Valid types: `feat`, `fix`, `refactor`, `docs`, `test`, `build`, `chore`, `ci`, `style`, `perf`
+
+Process:
+1. `git status` + `git diff HEAD` + `git log --oneline -5` (parallel)
+2. Determine type from the diff — the changes make the type obvious
+3. Stage specific files (`git add <files>`, not `git add -A`)
+4. `git commit -m "type(scope): description"` — execute automatically, no confirmation
+
+Anti-patterns to reject:
+- Vague messages: "update code", "fix stuff", "changes"
+- Wrong type: `feat` for a bug fix, `fix` for a new feature
+- Staging unrelated files
+- Using `--no-verify` to bypass hooks
