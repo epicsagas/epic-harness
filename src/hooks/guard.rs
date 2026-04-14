@@ -28,7 +28,7 @@ const BLOCKED_RULES: &[BuiltinRule] = &[
 /// Types: feat, fix, build, chore, ci, docs, style, refactor, perf, test
 static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.-]+\))?!?:\s.+"
+        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+"
     ).unwrap()
 });
 
@@ -362,6 +362,11 @@ mod tests {
     #[test]
     fn cc_message_with_apostrophe() {
         assert!(check_conventional_commit(r#"git commit -m "feat: it's done""#).is_none());
+    }
+
+    #[test]
+    fn cc_valid_multi_scope() {
+        assert!(check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#).is_none());
     }
 
     #[test]
