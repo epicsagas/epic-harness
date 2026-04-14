@@ -23,6 +23,60 @@ const BLOCKED_RULES: &[BuiltinRule] = &[
     },
 ];
 
+/// Conventional Commits pattern: `type(scope): desc` or `type: desc`
+/// Optional `!` before `:` for breaking changes.
+/// Types: feat, fix, build, chore, ci, docs, style, refactor, perf, test
+static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.-]+\))?!?:\s.+"
+    ).unwrap()
+});
+
+/// Extract the commit message from a `git commit -m "..."` command.
+/// Handles single quotes, double quotes, and HEREDOC `$(cat <<'EOF' ... EOF)` patterns.
+fn extract_commit_message(cmd: &str) -> Option<String> {
+    // HEREDOC: find delimiter after <<, then find that delimiter on its own line
+    static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
+    });
+    if let Some(caps) = HEREDOC_START.captures(cmd) {
+        let delim = &caps[1];
+        // Find content between delimiter declaration and closing delimiter
+        if let Some(start_pos) = cmd.find(&format!("{delim}\n")) {
+            let body_start = start_pos + delim.len() + 1;
+            if let Some(end_pos) = cmd[body_start..].find(&format!("\n{delim}")) {
+                return Some(cmd[body_start..body_start + end_pos].trim().to_string());
+            }
+        }
+        return None;
+    }
+
+    // Simple: git commit -m "msg" or git commit -m 'msg'
+    static SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"git\s+commit\s+.*-m\s+["']([^"']+)["']"#).unwrap()
+    });
+    if let Some(caps) = SIMPLE_RE.captures(cmd) {
+        return Some(caps[1].trim().to_string());
+    }
+
+    None
+}
+
+/// Validate commit message against Conventional Commits.
+/// Returns an error message if invalid, None if valid or not a commit command.
+fn check_conventional_commit(cmd: &str) -> Option<String> {
+    let msg = extract_commit_message(cmd)?;
+    let first_line = msg.lines().next().unwrap_or("").trim();
+    if first_line.is_empty() || CC_RE.is_match(first_line) {
+        None
+    } else {
+        Some(format!(
+            "Commit message does not follow Conventional Commits: \"{first_line}\"\n\
+             Expected: type(scope): description  (types: feat|fix|build|chore|ci|docs|style|refactor|perf|test)"
+        ))
+    }
+}
+
 const WARNED_RULES: &[BuiltinRule] = &[
     BuiltinRule {
         pattern: r"git\s+push\s+.*--force",
@@ -79,6 +133,12 @@ pub fn run(input: &HookInput) -> i32 {
 
     if cmd.is_empty() {
         return 0;
+    }
+
+    // Check conventional commit format
+    if let Some(msg) = check_conventional_commit(cmd) {
+        hint("guard", &format!("BLOCKED: {msg}"));
+        return 2;
     }
 
     // Check built-in blocked rules
@@ -228,6 +288,61 @@ mod tests {
         assert!(check_warned("git status").is_empty());
         assert!(check_warned("ls -la").is_empty());
         assert!(check_warned("npm test").is_empty());
+    }
+
+    // ── Conventional Commits ─────────────────────────
+    #[test]
+    fn cc_valid_feat() {
+        assert!(check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#).is_none());
+    }
+
+    #[test]
+    fn cc_valid_fix_no_scope() {
+        assert!(check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none());
+    }
+
+    #[test]
+    fn cc_valid_breaking() {
+        assert!(check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none());
+    }
+
+    #[test]
+    fn cc_valid_heredoc() {
+        let cmd = "git commit -m \"$(cat <<'EOF'\nfeat(mem): add search\nEOF\n)\"";
+        assert!(check_conventional_commit(cmd).is_none());
+    }
+
+    #[test]
+    fn cc_invalid_no_type() {
+        assert!(check_conventional_commit(r#"git commit -m "added login""#).is_some());
+    }
+
+    #[test]
+    fn cc_invalid_uppercase() {
+        assert!(check_conventional_commit(r#"git commit -m "Feat: add login""#).is_some());
+    }
+
+    #[test]
+    fn cc_not_a_commit() {
+        assert!(check_conventional_commit("git status").is_none());
+    }
+
+    #[test]
+    fn cc_run_blocks_bad_message() {
+        let input = HookInput {
+            tool_input: Some(serde_json::json!({"command": "git commit -m \"added stuff\""})),
+            ..Default::default()
+        };
+        assert_eq!(run(&input), 2);
+    }
+
+    #[test]
+    fn cc_run_allows_good_message() {
+        let input = HookInput {
+            tool_input: Some(serde_json::json!({"command": "git commit -m \"feat: add stuff\""})),
+            ..Default::default()
+        };
+        assert_eq!(run(&input), 0);
     }
 
     // ── run() integration ───────────────────────────
