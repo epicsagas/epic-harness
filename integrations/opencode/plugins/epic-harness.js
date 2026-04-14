@@ -74,6 +74,36 @@ function buildHookInput({ toolName, toolInput, toolOutput } = {}) {
   };
 }
 
+// ── Commit skill — Conventional Commits enforcement ─────────────────────────
+//
+// When a git commit command is detected, enforce CC 1.0.0 format:
+//   type(scope): description
+//
+// Valid types: feat, fix, refactor, docs, test, build, chore, ci, style, perf
+// - Lowercase type, optional scope, imperative mood, no period, under 72 chars
+// - Breaking changes: append `!` before `:`
+// - Stage specific files (not `git add -A`), execute automatically
+// - Guard blocks non-CC messages as safety net
+//
+
+const CC_TYPES = new Set([
+  "feat", "fix", "refactor", "docs", "test",
+  "build", "chore", "ci", "style", "perf",
+]);
+
+/** Check if a command string is a git commit with a non-CC message. */
+function isNonConventionalCommit(command) {
+  if (typeof command !== "string") return false;
+  const match = command.match(/git\s+commit\s+(?:.*-m\s+)["'](.+?)["']/);
+  if (!match) return false;
+  const msg = match[1];
+  // CC format: type(scope): desc  or  type: desc  or  type!: desc
+  const ccPattern = /^[a-z]+(\(.+\))?!?:\s/;
+  if (!ccPattern.test(msg)) return true;
+  const type = msg.match(/^([a-z]+)/)?.[1];
+  return type ? !CC_TYPES.has(type) : true;
+}
+
 // ── Shell-tool detection ──────────────────────────────────────────────────────
 
 const SHELL_TOOL_NAMES = new Set([

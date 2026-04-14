@@ -2,6 +2,382 @@ use std::fs;
 use std::io::{self, IsTerminal, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
+// ── Canonical sources (single source of truth) ──────────────────────────────
+
+static SKILL_COMMIT: &str = include_str!("../../skills/commit/SKILL.md");
+static SKILL_CONTEXT: &str = include_str!("../../skills/context/SKILL.md");
+static SKILL_DEBUG: &str = include_str!("../../skills/debug/SKILL.md");
+static SKILL_DOCUMENT: &str = include_str!("../../skills/document/SKILL.md");
+static SKILL_PERF: &str = include_str!("../../skills/perf/SKILL.md");
+static SKILL_SECURE: &str = include_str!("../../skills/secure/SKILL.md");
+static SKILL_SIMPLIFY: &str = include_str!("../../skills/simplify/SKILL.md");
+static SKILL_TDD: &str = include_str!("../../skills/tdd/SKILL.md");
+static SKILL_VERIFY: &str = include_str!("../../skills/verify/SKILL.md");
+// _dispatch is Claude Code only, not installed to other tools
+
+static AGENT_AUDITOR: &str = include_str!("../../agents/auditor.md");
+static AGENT_BUILDER: &str = include_str!("../../agents/builder.md");
+static AGENT_PLANNER: &str = include_str!("../../agents/planner.md");
+static AGENT_REVIEWER: &str = include_str!("../../agents/reviewer.md");
+
+static CANONICAL_SKILLS: &[(&str, &str)] = &[
+    ("commit", SKILL_COMMIT),
+    ("context", SKILL_CONTEXT),
+    ("debug", SKILL_DEBUG),
+    ("document", SKILL_DOCUMENT),
+    ("perf", SKILL_PERF),
+    ("secure", SKILL_SECURE),
+    ("simplify", SKILL_SIMPLIFY),
+    ("tdd", SKILL_TDD),
+    ("verify", SKILL_VERIFY),
+];
+
+static CANONICAL_AGENTS: &[(&str, &str)] = &[
+    ("auditor", AGENT_AUDITOR),
+    ("builder", AGENT_BUILDER),
+    ("planner", AGENT_PLANNER),
+    ("reviewer", AGENT_REVIEWER),
+];
+
+// ── Per-skill Memory Integration sections (appended for codex/gemini) ───────
+
+static MEM_SECTION_COMMIT: &str = "";
+static MEM_SECTION_CONTEXT: &str = r#"
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+"#;
+static MEM_SECTION_DEBUG: &str = "";
+static MEM_SECTION_DOCUMENT: &str = r#"
+## Memory Integration
+
+Check existing memory before writing docs to avoid duplication:
+```
+epic-harness mem search "<module or function name>"
+# or via MCP: mem_search(query="<module or function name>")
+```
+"#;
+static MEM_SECTION_PERF: &str = r#"
+## Memory Integration
+
+**Before review**: Check known performance patterns.
+```
+epic-harness mem search "performance" --limit 5
+# or via MCP: mem_search(query="performance")
+```
+
+**After review** (if a perf pattern or bottleneck found):
+```
+epic-harness mem add --title "<pattern>" --type pattern --tags "performance" --body "<finding and fix>"
+# or via MCP: mem_add(title="...", type="pattern", tags=["performance"], body="...")
+```
+"#;
+static MEM_SECTION_SECURE: &str = r#"
+## Memory Integration
+
+**Before review**: Check known security patterns.
+```
+epic-harness mem search "security" --limit 5
+# or via MCP: mem_search(query="security")
+```
+
+**After review** (if a security decision was made):
+```
+epic-harness mem add --title "<decision>" --type decision --tags "security" --body "<rationale>"
+# or via MCP: mem_add(title="...", type="decision", tags=["security"], body="...")
+```
+"#;
+static MEM_SECTION_SIMPLIFY: &str = r#"
+## Memory Integration
+
+If a significant architectural insight emerged from simplification:
+```
+epic-harness mem add --title "<insight>" --type concept --tags "architecture,refactor" --body "<what was simplified and why>"
+# or via MCP: mem_add(title="...", type="concept", tags=["architecture"], body="...")
+```
+"#;
+static MEM_SECTION_TDD: &str = r#"
+## Memory Integration
+
+**Session start**: Load relevant patterns before implementing.
+```
+epic-harness mem search "<feature keyword>"
+# or via MCP: mem_search(query="<feature keyword>")
+```
+
+**After refactor** (if a notable pattern emerged):
+```
+epic-harness mem add --title "<pattern name>" --type pattern --tags "<stack>,tdd" --body "<what was learned>"
+# or via MCP: mem_add(title="...", type="pattern", body="...", tags=[...])
+```
+"#;
+static MEM_SECTION_VERIFY: &str = r#"
+## Memory Integration
+
+**Before verifying**: Load project context.
+```
+epic-harness mem context --project <current-project>
+# or via MCP: mem_context(project="<current-project>")
+```
+
+**If bugs/regressions found**: Record as error node.
+```
+epic-harness mem add --title "<bug description>" --type error --tags "<component>" --body "<root cause and fix>"
+# or via MCP: mem_add(title="...", type="error", body="...", tags=[...])
+```
+"#;
+
+fn mem_section_for_skill(name: &str) -> &'static str {
+    match name {
+        "commit" => MEM_SECTION_COMMIT,
+        "context" => MEM_SECTION_CONTEXT,
+        "debug" => MEM_SECTION_DEBUG,
+        "document" => MEM_SECTION_DOCUMENT,
+        "perf" => MEM_SECTION_PERF,
+        "secure" => MEM_SECTION_SECURE,
+        "simplify" => MEM_SECTION_SIMPLIFY,
+        "tdd" => MEM_SECTION_TDD,
+        "verify" => MEM_SECTION_VERIFY,
+        _ => "",
+    }
+}
+
+// ── Per-tool agent addendums ─────────────────────────────────────────────────
+
+static CODEX_AGENT_ADDENDUM_BUILDER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nTo launch this agent for a task, pass the task description and context as the sub-agent prompt. Independent builder tasks can be launched in parallel using Codex's parallel task execution.\n";
+static CODEX_AGENT_ADDENDUM_AUDITOR: &str = "\n\n## Invoking as a Codex Sub-agent\n\nLaunch this agent as a parallel Codex task alongside the Reviewer and Test runner during `/check`. Pass the list of changed files and the git diff as context.\n";
+static CODEX_AGENT_ADDENDUM_PLANNER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nInvoke this agent at the start of `/go` to produce the task breakdown. The output plan drives which builder sub-agents to launch and in what order.\n";
+static CODEX_AGENT_ADDENDUM_REVIEWER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nLaunch this agent as a parallel Codex task alongside the Auditor and Test runner during `/check`. Pass the list of changed files and the git diff as context.\n";
+
+static GEMINI_AGENT_NOTE_BUILDER: &str = "\n> **Gemini CLI note**: Agents run sequentially, not in parallel. Complete this task fully before\n> the next agent or task begins.\n";
+static GEMINI_AGENT_NOTE_AUDITOR: &str = "\n> **Gemini CLI note**: Agents run sequentially. This auditor runs after the reviewer completes.\n";
+static GEMINI_AGENT_NOTE_REVIEWER: &str = "\n> **Gemini CLI note**: Agents run sequentially. This reviewer runs after the build task completes,\n> before the auditor.\n";
+
+// ── Transform functions ─────────────────────────────────────────────────────
+
+/// Strip YAML frontmatter from a markdown document, returning just the body.
+fn strip_frontmatter(md: &str) -> &str {
+    if let Some(rest) = md.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let after = end + 4; // skip past \n---
+        if after < rest.len() {
+            return &rest[after..];
+        }
+        return "";
+    }
+    md
+}
+
+/// Transform a canonical agent for a specific tool.
+fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
+    match tool {
+        "codex" => {
+            let addendum = match name {
+                "builder" => CODEX_AGENT_ADDENDUM_BUILDER,
+                "auditor" => CODEX_AGENT_ADDENDUM_AUDITOR,
+                "planner" => CODEX_AGENT_ADDENDUM_PLANNER,
+                "reviewer" => CODEX_AGENT_ADDENDUM_REVIEWER,
+                _ => "",
+            };
+            format!("{}{}", canonical.trim_end(), addendum)
+        }
+        "gemini" => {
+            // Remap tools in frontmatter
+            let mut result = canonical
+                .replace(
+                    "tools: [Read, Edit, Write, Bash, Grep, Glob]",
+                    "tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]",
+                )
+                .replace(
+                    "tools: [Read, Grep, Glob, Bash]",
+                    "tools: [read_file, grep_search, glob, run_shell_command]",
+                )
+                .replace(
+                    "tools: [Read, Grep, Glob]",
+                    "tools: [read_file, grep_search, glob]",
+                );
+
+            // Insert Gemini note after the first heading line
+            let note = match name {
+                "builder" => GEMINI_AGENT_NOTE_BUILDER,
+                "auditor" => GEMINI_AGENT_NOTE_AUDITOR,
+                "reviewer" => GEMINI_AGENT_NOTE_REVIEWER,
+                _ => "",
+            };
+            if !note.is_empty() {
+                // Insert after first "# " heading line
+                if let Some(pos) = result.find("\n\n## ") {
+                    result.insert_str(pos + 1, note);
+                }
+            }
+
+            // Planner: rewrite parallelization references for sequential execution
+            if name == "planner" {
+                result = result.replace(
+                    "description: \"Breaks down a goal into ordered, parallelizable tasks with dependencies.\"",
+                    "description: \"Breaks down a goal into ordered, sequential tasks with dependencies.\"",
+                );
+                result = result.replace(
+                    "5. **Parallelize**: Mark independent tasks that can run concurrently",
+                    "5. **Sequence**: Order all tasks for sequential execution, grouping independent ones together",
+                );
+                result = result.replace(
+                    "   - Parallel: yes\n",
+                    "   - Could parallelize: yes (but will run sequentially)\n",
+                );
+                result = result.replace(
+                    "   - Parallel: no\n",
+                    "   - Could parallelize: no\n",
+                );
+                result = result.replace(
+                    "   - Parallel: yes (with Task 1)\n",
+                    "   - Could parallelize: yes (but will run sequentially, after Task 2)\n",
+                );
+                result = result.replace(
+                    "### Execution Order\n- Batch 1 (parallel): Task 1, Task 3\n- Batch 2 (sequential): Task 2",
+                    "### Execution Order (sequential)\n1. Task 1 \u{2192} Task 3 \u{2192} Task 2",
+                );
+                // Add Gemini note for planner (has unique placement)
+                if let Some(pos) = result.find("\n\n## Process") {
+                    result.insert_str(
+                        pos + 1,
+                        "\n> **Gemini CLI note**: Gemini CLI runs agents sequentially, not in parallel. Design plans with\n> clear sequential ordering. Mark which tasks could theoretically run in parallel as context for\n> the executor, but assume they will run one at a time.\n",
+                    );
+                }
+            }
+
+            result
+        }
+        "cursor" => {
+            // Add model: inherit before the closing --- of frontmatter
+            if let Some(start) = canonical.strip_prefix("---\n")
+                && let Some(end_pos) = start.find("\n---\n")
+            {
+                let frontmatter = &start[..end_pos];
+                let body = &start[end_pos + 4..]; // skip \n---\n
+                return format!("---\n{}\nmodel: inherit\n---\n{}", frontmatter, body);
+            }
+            canonical.to_string()
+        }
+        "opencode" => {
+            // Replace tools array with dict format
+            let mut result = canonical
+                .replace(
+                    "tools: [Read, Edit, Write, Bash, Grep, Glob]",
+                    "tools:\n  read: true\n  edit: true\n  write: true\n  bash: true",
+                )
+                .replace(
+                    "tools: [Read, Grep, Glob, Bash]",
+                    "tools:\n  write: false\n  edit: false",
+                )
+                .replace(
+                    "tools: [Read, Grep, Glob]",
+                    "tools:\n  write: false\n  edit: false\n  bash: false",
+                );
+
+            // Add Codex sub-agent addendum (opencode uses same text)
+            let addendum = match name {
+                "builder" => CODEX_AGENT_ADDENDUM_BUILDER,
+                "auditor" => CODEX_AGENT_ADDENDUM_AUDITOR,
+                "planner" => CODEX_AGENT_ADDENDUM_PLANNER,
+                "reviewer" => CODEX_AGENT_ADDENDUM_REVIEWER,
+                _ => "",
+            };
+            if !addendum.is_empty() {
+                result = format!("{}{}", result.trim_end(), addendum);
+            }
+            result
+        }
+        _ => canonical.to_string(),
+    }
+}
+
+/// Transform a canonical skill for a specific tool.
+fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
+    match tool {
+        "codex" | "gemini" => {
+            let mut result = canonical.to_string();
+
+            // For context skill: apply inline mem-integration edits
+            if name == "context" {
+                result = result.replace(
+                    "- Key decisions made \u{2192} note in conversation",
+                    "- Key decisions made \u{2192} **save to memory before compacting**:\n  ```\n  epic-harness mem add --title \"<decision>\" --type decision --tags \"<project>\" --body \"<context and rationale>\"\n  # or via MCP: mem_add(title=\"...\", type=\"decision\", body=\"...\")\n  ```",
+                );
+                result = result.replace(
+                    "- Project memory from `$HARNESS_DIR/memory/`",
+                    "- Project memory from `~/.harness/memory.db` via `resume` hook",
+                );
+                // Add reload context after the evolved skills line
+                result = result.replace(
+                    "- Evolved skills from `$HARNESS_DIR/evolved/`",
+                    "- Evolved skills from `$HARNESS_DIR/evolved/`\n- Reload project context manually if needed:\n  ```\n  epic-harness mem context --project <current-project>\n  # or via MCP: mem_context(project=\"<current-project>\")\n  ```",
+                );
+                // Add mem evidence item
+                result = result.replace(
+                    "- [ ] Snapshot written to `$HARNESS_DIR/sessions/` (show file name)",
+                    "- [ ] Key decisions saved to memory (show mem add output or MCP call)\n- [ ] Snapshot written to `$HARNESS_DIR/sessions/` (show file name)",
+                );
+            }
+
+            // Minor text normalizations that codex/gemini versions applied
+            if name == "tdd" || name == "verify" {
+                result = result.replace("subagents", "sub-agents");
+                result = result.replace("subagent", "sub-agent");
+            }
+
+            // Insert CRITICAL HARNESS_DIR line for context
+            if name == "context" {
+                let critical_line = "\n**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.\n";
+                // Insert after frontmatter closing ---
+                if let Some(pos) = result[3..].find("\n---\n") {
+                    let insert_at = 3 + pos + 5;
+                    result.insert_str(insert_at, critical_line);
+                }
+            }
+
+            // Gemini: minor text tweak for tdd
+            if tool == "gemini" && name == "tdd" {
+                result = result.replace(
+                    "- `/go` sub-agents: always",
+                    "- `/go` tasks: always",
+                );
+            }
+            if tool == "gemini" && name == "context" {
+                result = result.replace(
+                    "the `resume` hook will reload:",
+                    "the `resume` hook (BeforeAgent) will reload:",
+                );
+            }
+
+            // Append Memory Integration section
+            let mem_section = mem_section_for_skill(name);
+            if !mem_section.is_empty() && name != "context" {
+                // context's mem section is handled inline above
+                result = format!("{}{}", result.trim_end(), mem_section);
+            }
+
+            result
+        }
+        _ => canonical.to_string(),
+    }
+}
+
+/// Build the cursor harness-skills.mdc from canonical skills.
+fn build_cursor_skills_mdc() -> String {
+    let mut out = String::from(
+        "---\ndescription: \"epic-harness quality skills \u{2014} TDD, security, verify, simplify, perf. Apply when implementing features, touching auth/DB/API code, or before marking tasks done.\"\nalwaysApply: false\n---\n# epic-harness Quality Skills\n\nCore skill rules applied automatically throughout every session.\n",
+    );
+    for (name, content) in CANONICAL_SKILLS {
+        // Skip debug and context for cursor (they are operational, not quality skills)
+        if *name == "debug" || *name == "context" {
+            continue;
+        }
+        let body = strip_frontmatter(content);
+        out.push_str(&format!("\n---\n\n{}\n", body.trim()));
+    }
+    out
+}
+
 // ── Embedded integration files ────────────────────────────────────────────────
 
 macro_rules! integration_files {
@@ -49,50 +425,6 @@ static CODEX_FILES: &[(&str, &str)] = integration_files!(
             "prompts/team.md",
             include_str!("../../integrations/codex/prompts/team.md")
         ),
-        (
-            "skills/context/SKILL.md",
-            include_str!("../../integrations/codex/skills/context/SKILL.md")
-        ),
-        (
-            "skills/document/SKILL.md",
-            include_str!("../../integrations/codex/skills/document/SKILL.md")
-        ),
-        (
-            "skills/perf/SKILL.md",
-            include_str!("../../integrations/codex/skills/perf/SKILL.md")
-        ),
-        (
-            "skills/secure/SKILL.md",
-            include_str!("../../integrations/codex/skills/secure/SKILL.md")
-        ),
-        (
-            "skills/simplify/SKILL.md",
-            include_str!("../../integrations/codex/skills/simplify/SKILL.md")
-        ),
-        (
-            "skills/tdd/SKILL.md",
-            include_str!("../../integrations/codex/skills/tdd/SKILL.md")
-        ),
-        (
-            "skills/verify/SKILL.md",
-            include_str!("../../integrations/codex/skills/verify/SKILL.md")
-        ),
-        (
-            "agents/auditor.md",
-            include_str!("../../integrations/codex/agents/auditor.md")
-        ),
-        (
-            "agents/builder.md",
-            include_str!("../../integrations/codex/agents/builder.md")
-        ),
-        (
-            "agents/planner.md",
-            include_str!("../../integrations/codex/agents/planner.md")
-        ),
-        (
-            "agents/reviewer.md",
-            include_str!("../../integrations/codex/agents/reviewer.md")
-        ),
     ]
 );
 
@@ -131,50 +463,6 @@ static GEMINI_FILES: &[(&str, &str)] = integration_files!(
             "commands/team.toml",
             include_str!("../../integrations/gemini/commands/team.toml")
         ),
-        (
-            "skills/context/SKILL.md",
-            include_str!("../../integrations/gemini/skills/context/SKILL.md")
-        ),
-        (
-            "skills/document/SKILL.md",
-            include_str!("../../integrations/gemini/skills/document/SKILL.md")
-        ),
-        (
-            "skills/perf/SKILL.md",
-            include_str!("../../integrations/gemini/skills/perf/SKILL.md")
-        ),
-        (
-            "skills/secure/SKILL.md",
-            include_str!("../../integrations/gemini/skills/secure/SKILL.md")
-        ),
-        (
-            "skills/simplify/SKILL.md",
-            include_str!("../../integrations/gemini/skills/simplify/SKILL.md")
-        ),
-        (
-            "skills/tdd/SKILL.md",
-            include_str!("../../integrations/gemini/skills/tdd/SKILL.md")
-        ),
-        (
-            "skills/verify/SKILL.md",
-            include_str!("../../integrations/gemini/skills/verify/SKILL.md")
-        ),
-        (
-            "agents/auditor.md",
-            include_str!("../../integrations/gemini/agents/auditor.md")
-        ),
-        (
-            "agents/builder.md",
-            include_str!("../../integrations/gemini/agents/builder.md")
-        ),
-        (
-            "agents/planner.md",
-            include_str!("../../integrations/gemini/agents/planner.md")
-        ),
-        (
-            "agents/reviewer.md",
-            include_str!("../../integrations/gemini/agents/reviewer.md")
-        ),
     ]
 );
 
@@ -188,10 +476,6 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
         (
             "rules/harness-context.mdc",
             include_str!("../../integrations/cursor/rules/harness-context.mdc")
-        ),
-        (
-            "rules/harness-skills.mdc",
-            include_str!("../../integrations/cursor/rules/harness-skills.mdc")
         ),
         (
             "commands/check.md",
@@ -216,22 +500,6 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
         (
             "commands/team.md",
             include_str!("../../integrations/cursor/commands/team.md")
-        ),
-        (
-            "agents/auditor.md",
-            include_str!("../../integrations/cursor/agents/auditor.md")
-        ),
-        (
-            "agents/builder.md",
-            include_str!("../../integrations/cursor/agents/builder.md")
-        ),
-        (
-            "agents/planner.md",
-            include_str!("../../integrations/cursor/agents/planner.md")
-        ),
-        (
-            "agents/reviewer.md",
-            include_str!("../../integrations/cursor/agents/reviewer.md")
         ),
     ]
 );
@@ -262,22 +530,6 @@ static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
         (
             "commands/team.md",
             include_str!("../../integrations/opencode/commands/team.md")
-        ),
-        (
-            "agents/builder.md",
-            include_str!("../../integrations/opencode/agents/builder.md")
-        ),
-        (
-            "agents/reviewer.md",
-            include_str!("../../integrations/opencode/agents/reviewer.md")
-        ),
-        (
-            "agents/auditor.md",
-            include_str!("../../integrations/opencode/agents/auditor.md")
-        ),
-        (
-            "agents/planner.md",
-            include_str!("../../integrations/opencode/agents/planner.md")
         ),
         (
             "plugins/epic-harness.js",
@@ -918,6 +1170,49 @@ fn interactive_menu_fallback() -> Vec<String> {
     selected
 }
 
+// ── Canonical file generation ─────────────────────────────────────────────────
+
+/// Generate transformed canonical skill and agent files for a tool.
+/// Returns a Vec of (relative_path, content) pairs.
+fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+
+    match tool {
+        "codex" | "gemini" => {
+            // Skills: transformed canonical + memory integration
+            for (name, content) in CANONICAL_SKILLS {
+                let transformed = transform_skill(tool, name, content);
+                files.push((format!("skills/{}/SKILL.md", name), transformed));
+            }
+            // Agents: transformed canonical
+            for (name, content) in CANONICAL_AGENTS {
+                let transformed = transform_agent(tool, name, content);
+                files.push((format!("agents/{}.md", name), transformed));
+            }
+        }
+        "cursor" => {
+            // Skills: concatenated into harness-skills.mdc
+            files.push(("rules/harness-skills.mdc".to_string(), build_cursor_skills_mdc()));
+            // Agents: transformed canonical
+            for (name, content) in CANONICAL_AGENTS {
+                let transformed = transform_agent(tool, name, content);
+                files.push((format!("agents/{}.md", name), transformed));
+            }
+        }
+        "opencode" => {
+            // Agents only (no skills for opencode)
+            for (name, content) in CANONICAL_AGENTS {
+                let transformed = transform_agent(tool, name, content);
+                files.push((format!("agents/{}.md", name), transformed));
+            }
+        }
+        // cline, aider: no canonical files to generate
+        _ => {}
+    }
+
+    files
+}
+
 // ── Install a single tool ─────────────────────────────────────────────────────
 
 fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
@@ -955,7 +1250,10 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         }
     });
 
-    let mut progress = Progress::new(tool, cfg.files.len(), dry_run);
+    // Generate canonical files (transformed skills + agents)
+    let canonical = generate_canonical_files(tool);
+    let total_files = cfg.files.len() + canonical.len();
+    let mut progress = Progress::new(tool, total_files, dry_run);
 
     for (rel, content) in cfg.files {
         let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
@@ -983,6 +1281,22 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
             make_executable(&dest);
         }
 
+        progress.tick(rel, status);
+    }
+
+    // Write generated canonical files (skills + agents)
+    for (rel, content) in &canonical {
+        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
+            if let Some(alt) = &alt_target {
+                alt.join(rel)
+            } else {
+                target_dir.join(rel)
+            }
+        } else {
+            target_dir.join(rel)
+        };
+
+        let status = write_or_sync(&dest, content, dry_run);
         progress.tick(rel, status);
     }
 
@@ -1091,7 +1405,11 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let mut removed = 0usize;
     let mut skipped = 0usize;
 
-    for (rel, _) in cfg.files {
+    // Collect all files: static + canonical generated
+    let canonical = generate_canonical_files(tool);
+    let all_files: Vec<(&str, &str)> = cfg.files.to_vec();
+
+    for (rel, _) in &all_files {
         // Resolve destination path (mirrors install logic)
         let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
             if let Some(alt) = &alt_target {
@@ -1125,9 +1443,34 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         }
     }
 
+    // Also remove canonical generated files
+    for (rel, _) in &canonical {
+        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
+            if let Some(alt) = &alt_target {
+                alt.join(rel)
+            } else {
+                target_dir.join(rel)
+            }
+        } else {
+            target_dir.join(rel)
+        };
+
+        if dest.exists() {
+            if !dry_run {
+                if let Err(e) = fs::remove_file(&dest) {
+                    eprintln!("\n[harness] ERROR removing {}: {e}", dest.display());
+                } else {
+                    removed += 1;
+                }
+            } else {
+                removed += 1;
+            }
+        }
+    }
+
     // Prune empty directories left behind
     if !dry_run {
-        let dirs_to_try: Vec<PathBuf> = cfg
+        let mut dirs_to_try: Vec<PathBuf> = cfg
             .files
             .iter()
             .filter_map(|(rel, _)| {
@@ -1135,6 +1478,12 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
                 dest.parent().map(|p| p.to_path_buf())
             })
             .collect();
+        for (rel, _) in &canonical {
+            let dest = target_dir.join(rel);
+            if let Some(p) = dest.parent() {
+                dirs_to_try.push(p.to_path_buf());
+            }
+        }
         for dir in dirs_to_try {
             let _ = fs::remove_dir(&dir); // silently ignore non-empty
         }
@@ -1273,6 +1622,161 @@ mod tests {
         assert!(matches!(status, FileStatus::Added));
         assert!(!dest.exists());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── strip_frontmatter ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_strip_frontmatter_removes_yaml() {
+        let md = "---\nname: test\n---\n\n# Title\n\nBody";
+        assert_eq!(strip_frontmatter(md), "\n\n# Title\n\nBody");
+    }
+
+    #[test]
+    fn test_strip_frontmatter_no_frontmatter() {
+        let md = "# Title\n\nBody";
+        assert_eq!(strip_frontmatter(md), "# Title\n\nBody");
+    }
+
+    // ── transform_agent ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_transform_agent_codex_adds_addendum() {
+        let result = transform_agent("codex", "builder", AGENT_BUILDER);
+        assert!(result.contains("Invoking as a Codex Sub-agent"));
+        assert!(result.contains("parallel task execution"));
+    }
+
+    #[test]
+    fn test_transform_agent_gemini_remaps_tools() {
+        let result = transform_agent("gemini", "builder", AGENT_BUILDER);
+        assert!(result.contains("tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]"));
+        assert!(!result.contains("tools: [Read, Edit, Write, Bash, Grep, Glob]"));
+    }
+
+    #[test]
+    fn test_transform_agent_gemini_adds_note() {
+        let result = transform_agent("gemini", "builder", AGENT_BUILDER);
+        assert!(result.contains("Gemini CLI note"));
+    }
+
+    #[test]
+    fn test_transform_agent_cursor_adds_model_inherit() {
+        let result = transform_agent("cursor", "builder", AGENT_BUILDER);
+        assert!(result.contains("model: inherit"));
+        // Verify frontmatter is valid
+        assert!(result.starts_with("---\n"));
+        assert!(result.contains("\nmodel: inherit\n---\n"));
+    }
+
+    #[test]
+    fn test_transform_agent_opencode_yaml_tools() {
+        let result = transform_agent("opencode", "builder", AGENT_BUILDER);
+        assert!(result.contains("tools:\n  read: true\n  edit: true"));
+        assert!(!result.contains("tools: [Read"));
+    }
+
+    #[test]
+    fn test_transform_agent_opencode_readonly_tools() {
+        let result = transform_agent("opencode", "auditor", AGENT_AUDITOR);
+        assert!(result.contains("write: false"));
+        assert!(result.contains("edit: false"));
+    }
+
+    #[test]
+    fn test_transform_agent_gemini_planner_sequential() {
+        let result = transform_agent("gemini", "planner", AGENT_PLANNER);
+        assert!(result.contains("sequential"));
+        assert!(result.contains("Could parallelize"));
+    }
+
+    // ── transform_skill ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_transform_skill_codex_appends_mem_section() {
+        let result = transform_skill("codex", "tdd", SKILL_TDD);
+        assert!(result.contains("## Memory Integration"));
+        assert!(result.contains("mem_search"));
+    }
+
+    #[test]
+    fn test_transform_skill_codex_no_mem_for_debug() {
+        let result = transform_skill("codex", "debug", SKILL_DEBUG);
+        // Debug already has mem references in canonical; no extra section
+        assert!(!result.contains("## Memory Integration\n\n**Session start"));
+    }
+
+    #[test]
+    fn test_transform_skill_identity_for_cline() {
+        // Cline and aider don't transform skills
+        assert_eq!(transform_skill("cline", "tdd", SKILL_TDD), SKILL_TDD);
+    }
+
+    // ── build_cursor_skills_mdc ──────────────────────────────────────────────
+
+    #[test]
+    fn test_build_cursor_skills_mdc_has_frontmatter() {
+        let mdc = build_cursor_skills_mdc();
+        assert!(mdc.starts_with("---\n"));
+        assert!(mdc.contains("alwaysApply: false"));
+    }
+
+    #[test]
+    fn test_build_cursor_skills_mdc_contains_skills() {
+        let mdc = build_cursor_skills_mdc();
+        assert!(mdc.contains("TDD"));
+        assert!(mdc.contains("Secure"));
+        assert!(mdc.contains("Verify"));
+        assert!(mdc.contains("Simplify"));
+        assert!(mdc.contains("Perf"));
+        assert!(mdc.contains("Commit"));
+    }
+
+    #[test]
+    fn test_build_cursor_skills_mdc_excludes_debug_context() {
+        let mdc = build_cursor_skills_mdc();
+        // debug and context are operational skills, not included in cursor mdc
+        assert!(!mdc.contains("# Debug"));
+        assert!(!mdc.contains("# Context"));
+    }
+
+    // ── generate_canonical_files ──────────────────────────────────────────────
+
+    #[test]
+    fn test_generate_canonical_files_codex() {
+        let files = generate_canonical_files("codex");
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"skills/tdd/SKILL.md"));
+        assert!(paths.contains(&"agents/builder.md"));
+        assert_eq!(files.len(), 9 + 4); // 9 skills + 4 agents
+    }
+
+    #[test]
+    fn test_generate_canonical_files_cursor() {
+        let files = generate_canonical_files("cursor");
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"rules/harness-skills.mdc"));
+        assert!(paths.contains(&"agents/builder.md"));
+        // Cursor: 1 mdc + 4 agents
+        assert_eq!(files.len(), 1 + 4);
+    }
+
+    #[test]
+    fn test_generate_canonical_files_opencode() {
+        let files = generate_canonical_files("opencode");
+        assert_eq!(files.len(), 4); // agents only
+    }
+
+    #[test]
+    fn test_generate_canonical_files_cline_empty() {
+        let files = generate_canonical_files("cline");
+        assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_generate_canonical_files_aider_empty() {
+        let files = generate_canonical_files("aider");
+        assert!(files.is_empty());
     }
 
     #[test]
