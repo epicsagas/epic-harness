@@ -121,6 +121,48 @@ Format failure = lint_fail, typecheck failure = build_fail — feeds into patter
 Skill dispatches logged to `~/.harness/projects/{slug}/dispatch/dispatch_YYYYMMDD.jsonl`.
 Analyze via `/evolve history`.
 
+## Unified Memory (harness-mem)
+
+All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). Registered as MCP server `harness-mem` in Claude Code.
+
+### Smart Recall System
+
+Memory retrieval uses composite scoring instead of simple latest-N:
+- **Scoring formula**: `recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)`
+- **Recency**: Exponential decay with 30-day half-life
+- **Importance**: Type-based defaults — decision(0.9), resolution(0.8), concept(0.7), project(0.7), pattern(0.5), error(0.4), session(0.2)
+- **Access frequency**: Saturates at 20 accesses (access_count / 20)
+- **FTS match**: 1.0 bonus when hint keyword matches via FTS5
+
+### MCP Tools (6)
+
+| Tool | Purpose |
+|------|---------|
+| `mem_recall` | Smart contextual recall — hint + project + graph neighbors. Primary tool for proactive memory retrieval. |
+| `mem_add` | Add node with auto-importance by type. Optional explicit importance (0.0–1.0). |
+| `mem_search` | FTS5 keyword search, results ranked by importance. Configurable limit. |
+| `mem_query` | Filter by tag/type/project. Returns importance + access_count. |
+| `mem_context` | Project-scoped smart recall (no hint). Use at session start. |
+| `mem_related` | BFS graph traversal from a node ID. |
+
+### Memory Lifecycle
+
+- **Access tracking**: Every recall/search/context call increments `access_count` and updates `accessed_at`.
+- **Gradual decay**: Nodes untouched for 30+ days lose 10% importance per cycle (floor=0.05). `pinned` tag prevents decay.
+- **Stale tagging**: Nodes untouched for 180+ days tagged as `stale` and excluded from recall.
+- **Graph augmentation**: `mem_recall` follows 1-hop edges from top results, returning related nodes with connection counts.
+
+### Node Schema
+
+```
+id, type, title, tags, projects, agents, created, updated, body,
+importance (REAL 0.0-1.0), access_count (INTEGER), accessed_at (TEXT)
+```
+
+### Dispatch Integration
+
+_dispatch skill calls `mem_recall` with current task context before invoking any skill. Past decisions (importance=0.9) surface first, preventing contradictory choices across sessions.
+
 ## Project Side Data
 
 `~/.harness/projects/{slug}/` directory accumulates per-project memory, observations, evolved skills:

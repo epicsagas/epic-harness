@@ -42,13 +42,17 @@ This enables Ring 3 to analyze which skills fire most often, which are effective
 
 ## Memory-Augmented Dispatch
 
-Before invoking any skill, check the knowledge graph for relevant context:
+Before invoking any skill, **proactively recall** relevant knowledge from the memory graph:
 
-1. Use `mem_search` or `mem_context` (MCP tools) to query for patterns/errors related to the current file or error
-2. If previous `pattern` or `error` nodes exist for the same file or error category, include their remediation in the skill context
-3. After a significant debugging resolution or architectural decision, record it via `mem_add` with type `resolution` or `decision`
+1. **At task start**: Call `mem_recall` with a hint describing the current task (e.g., "auth refactor", "CI pipeline fix"). This returns relevance-ranked memories combining FTS match, importance, recency, access frequency, and graph connectivity.
+2. **On errors**: Call `mem_recall` with the error category/message as hint. Past resolutions and patterns for similar errors surface automatically.
+3. **On architectural decisions**: Call `mem_recall` with the domain area. Past `decision` nodes (importance=0.9) rank highest and prevent contradictory choices.
+4. **After resolution**: Record via `mem_add` with type `resolution` (auto-importance=0.8) or `decision` (auto-importance=0.9). These high-importance nodes persist across sessions and resist decay.
+5. **Fallback**: If `mem_recall` is unavailable, use `mem_search` (keyword FTS) or `mem_context` (project-scoped smart recall).
 
-This enables cross-session learning: the agent remembers past mistakes and solutions.
+Memory scoring: recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%). Frequently accessed and important memories naturally float to the top; unused noise decays over time.
+
+This enables cross-session learning: the agent remembers past mistakes, decisions, and solutions — and retrieves the most relevant ones for the current context.
 
 ## Evolved Skills
 

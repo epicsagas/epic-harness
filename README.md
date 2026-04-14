@@ -119,15 +119,37 @@ Integration files in the tool directory (`hooks.json`, commands, agents, skills,
 
 All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). No Node.js or external runtime required.
 
-```bash
-# Add a memory node
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+### Smart Recall
 
-# Filter query
+Memory retrieval uses **composite scoring** instead of dumping the latest N entries:
+
+```
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
+```
+
+- **Importance** auto-set by node type: decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
+- **Access tracking**: frequently recalled memories naturally float to the top
+- **Gradual decay**: unused memories lose importance over time (10% per 30 days, floor 0.05)
+- **Graph augmentation**: recall follows 1-hop edges to surface related context
+
+### CLI
+
+```bash
+# Smart recall — relevance-ranked for your current task
+harness mem recall "auth refactor" --project my-project
+
+# Add a memory node (importance auto-set by type, or explicit)
+harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+
+# Filter query (includes importance + access_count)
 harness mem query --type decision --project my-project
 
-# Full-text search (FTS5)
+# Full-text search (ranked by importance)
 harness mem search "JWT"
+
+# Smart context (importance-weighted, not just latest)
+harness mem context --project my-project
 
 # Knowledge graph web UI
 harness mem serve          # → http://localhost:7700
@@ -139,6 +161,19 @@ harness mem mcp-install
 harness mem export --out ./docs/memory
 ```
 
+### MCP Tools (6)
+
+When registered as an MCP server (`harness mem mcp-install`), agents can call these tools directly:
+
+| Tool | Purpose |
+|------|---------|
+| `mem_recall` | **Primary.** Smart contextual recall with hint + project + graph neighbors |
+| `mem_add` | Add node with auto-importance by type (or explicit 0.0–1.0) |
+| `mem_search` | FTS5 keyword search, results ranked by importance |
+| `mem_query` | Filter by tag/type/project |
+| `mem_context` | Project-scoped smart recall (no hint) |
+| `mem_related` | BFS graph traversal from a node ID |
+
 ### How the Knowledge Graph Works
 
 The graph auto-accumulates from normal session work — no manual input needed.
@@ -149,21 +184,32 @@ The graph auto-accumulates from normal session work — no manual input needed.
 PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
                                                    ↓
 SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
-                                                   ↓
-SessionStart hook → resume (context injection) → next session gets hints
+                                                   ↓  (importance set by type)
+SessionStart hook → resume (smart recall) → next session gets relevance-ranked hints
+                              ↓
+                    decay_importance() → unused nodes gradually fade
 ```
 
 **Node types (7):**
 
-| Type | Created by | Content |
-|------|-----------|---------|
-| `session` | Auto (reflect) | Session success rate, avg score, trend |
-| `error` | Auto (reflect) | Repeated error patterns (≥3 consecutive same error) |
-| `pattern` | Auto (reflect) | Weak tools, thrashing, fix-then-break cycles |
-| `concept` | Manual / MCP | Architecture concepts, technical knowledge |
-| `decision` | Manual / MCP | ADRs, design decisions |
-| `project` | Manual / MCP | Project metadata |
-| `resolution` | Manual / MCP | Error resolution recipes |
+| Type | Created by | Default Importance |
+|------|-----------|-------------------|
+| `decision` | Manual / MCP | 0.9 |
+| `resolution` | Manual / MCP | 0.8 |
+| `concept` | Manual / MCP | 0.7 |
+| `project` | Manual / MCP | 0.7 |
+| `pattern` | Auto (reflect) | 0.5 |
+| `error` | Auto (reflect) | 0.4 |
+| `session` | Auto (reflect) | 0.2 |
+
+**Memory lifecycle:**
+
+| Event | What happens |
+|-------|-------------|
+| Node recalled via search/recall/context | `access_count++`, `accessed_at` updated |
+| 30+ days without access | importance decayed by 10% (floor 0.05) |
+| 180+ days without access | tagged `stale`, excluded from recall |
+| Node tagged `pinned` | immune to decay |
 
 **Auto-accumulation conditions:**
 
@@ -381,10 +427,8 @@ Project-specific data lives in your home directory. This survives project deleti
 ├── evolution.jsonl   # Full evolution history
 └── metrics.json      # Aggregate stats + skill attribution
 
-~/.harness/memory/
-├── nodes/            # Knowledge nodes (YAML frontmatter + Markdown body)
-├── edges.jsonl       # Directed graph edges
-├── index.json        # Fast lookup index
+~/.harness/
+├── memory.db         # SQLite knowledge graph (nodes + edges + FTS5)
 └── graph.json        # Cached graph (for web UI)
 ```
 

@@ -22,6 +22,33 @@ pub struct NodeFrontmatter {
     pub agents: Vec<String>,
     pub created: String,
     pub updated: String,
+    /// Importance score (0.0–1.0). Higher = more valuable for recall.
+    #[serde(default = "default_importance")]
+    pub importance: f64,
+    /// How many times this node has been retrieved via recall/search.
+    #[serde(default)]
+    pub access_count: i64,
+    /// Last time this node was accessed (not just updated).
+    #[serde(default)]
+    pub accessed_at: String,
+}
+
+fn default_importance() -> f64 {
+    0.5
+}
+
+/// Default importance by node type.
+pub fn importance_for_type(node_type: &str) -> f64 {
+    match node_type {
+        "decision"   => 0.9,
+        "resolution" => 0.8,
+        "concept"    => 0.7,
+        "project"    => 0.7,
+        "pattern"    => 0.5,
+        "error"      => 0.4,
+        "session"    => 0.2,
+        _            => 0.5,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,15 +140,18 @@ pub fn open_db() -> io::Result<Connection> {
 
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS nodes (
-            id       TEXT PRIMARY KEY,
-            type     TEXT NOT NULL,
-            title    TEXT NOT NULL,
-            tags     TEXT NOT NULL DEFAULT '',
-            projects TEXT NOT NULL DEFAULT '',
-            agents   TEXT NOT NULL DEFAULT '',
-            created  TEXT NOT NULL,
-            updated  TEXT NOT NULL,
-            body     TEXT NOT NULL DEFAULT ''
+            id           TEXT PRIMARY KEY,
+            type         TEXT NOT NULL,
+            title        TEXT NOT NULL,
+            tags         TEXT NOT NULL DEFAULT '',
+            projects     TEXT NOT NULL DEFAULT '',
+            agents       TEXT NOT NULL DEFAULT '',
+            created      TEXT NOT NULL,
+            updated      TEXT NOT NULL,
+            body         TEXT NOT NULL DEFAULT '',
+            importance   REAL NOT NULL DEFAULT 0.5,
+            access_count INTEGER NOT NULL DEFAULT 0,
+            accessed_at  TEXT NOT NULL DEFAULT ''
         );
 
         CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts
@@ -142,7 +172,30 @@ pub fn open_db() -> io::Result<Connection> {
             VALUES (new.rowid, new.title, new.body, new.tags);
         END;
 
-        CREATE TABLE IF NOT EXISTS edges (
+        -- Schema migration: add importance/access columns if missing
+        -- ALTER TABLE IF NOT EXISTS is not supported, so we use a trick:
+        -- these will silently fail if columns already exist.
+        ",
+    )
+    .map_err(io::Error::other)?;
+
+    // Migrate existing DBs: add new columns (ignore errors if already present)
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
+    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN accessed_at TEXT NOT NULL DEFAULT ''");
+
+    // Backfill importance for existing nodes based on type
+    let _ = conn.execute_batch(
+        "UPDATE nodes SET importance = 0.9 WHERE importance = 0.5 AND type = 'decision';
+         UPDATE nodes SET importance = 0.8 WHERE importance = 0.5 AND type = 'resolution';
+         UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'concept';
+         UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'project';
+         UPDATE nodes SET importance = 0.4 WHERE importance = 0.5 AND type = 'error';
+         UPDATE nodes SET importance = 0.2 WHERE importance = 0.5 AND type = 'session';"
+    );
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS edges (
             id       TEXT PRIMARY KEY,
             source   TEXT NOT NULL,
             target   TEXT NOT NULL,
@@ -157,6 +210,8 @@ pub fn open_db() -> io::Result<Connection> {
         CREATE INDEX IF NOT EXISTS idx_nodes_type    ON nodes(type);
         CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
         CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);
         ",
     )
     .map_err(io::Error::other)?;
@@ -193,14 +248,15 @@ fn auto_migrate_legacy(conn: &Connection) {
             let Ok(content) = fs::read_to_string(&path) else { continue };
             let Some(node) = parse_node(&content) else { continue };
             let fm = &node.frontmatter;
+            let imp = importance_for_type(&fm.node_type);
             let _ = conn.execute(
                 "INSERT OR IGNORE INTO nodes
-                 (id, type, title, tags, projects, agents, created, updated, body)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                 (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,'')",
                 rusqlite::params![
                     fm.id, fm.node_type, fm.title,
                     join_csv(&fm.tags), join_csv(&fm.projects), join_csv(&fm.agents),
-                    fm.created, fm.updated, node.body,
+                    fm.created, fm.updated, node.body, imp,
                 ],
             );
             count += 1;
@@ -244,6 +300,14 @@ fn split_csv(s: &str) -> Vec<String> {
         .collect()
 }
 
+/// Standard SELECT columns for node queries. Use with row_to_node().
+const NODE_COLUMNS: &str =
+    "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
+
+/// Same columns but table-prefixed for JOIN queries.
+const NODE_COLUMNS_PREFIXED: &str =
+    "id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
+
 fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
     let tags: String = row.get(3)?;
     let projects: String = row.get(4)?;
@@ -258,6 +322,9 @@ fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
             agents: split_csv(&agents),
             created: row.get(6)?,
             updated: row.get(7)?,
+            importance: row.get(9).unwrap_or(0.5),
+            access_count: row.get::<_, i64>(10).unwrap_or(0),
+            accessed_at: row.get(11).unwrap_or_default(),
         },
         body: row.get(8)?,
     })
@@ -267,10 +334,14 @@ fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
 
 pub fn write_node(node: &Node) -> io::Result<()> {
     let conn = open_db()?;
+    write_node_conn(&conn, node)
+}
+
+fn write_node_conn(conn: &Connection, node: &Node) -> io::Result<()> {
     let fm = &node.frontmatter;
     conn.execute(
-        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             fm.id,
             fm.node_type,
@@ -281,6 +352,9 @@ pub fn write_node(node: &Node) -> io::Result<()> {
             fm.created,
             fm.updated,
             node.body,
+            fm.importance,
+            fm.access_count,
+            fm.accessed_at,
         ],
     )
     .map_err(io::Error::other)?;
@@ -289,13 +363,13 @@ pub fn write_node(node: &Node) -> io::Result<()> {
 
 pub fn read_node(id: &str) -> io::Result<Node> {
     let conn = open_db()?;
-    conn.query_row(
-        "SELECT id, type, title, tags, projects, agents, created, updated, body
-         FROM nodes WHERE id = ?1",
-        params![id],
-        row_to_node,
-    )
-    .map_err(|_| io::Error::new(io::ErrorKind::NotFound, format!("node not found: {id}")))
+    read_node_conn(&conn, id)
+}
+
+pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?1");
+    conn.query_row(&sql, params![id], row_to_node)
+        .map_err(|_| io::Error::new(io::ErrorKind::NotFound, format!("node not found: {id}")))
 }
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {
@@ -467,25 +541,7 @@ fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hours: u64) -> 
 /// writes only when none is found.  Returns `(id, was_deduplicated)`.
 pub fn write_node_dedup(node: &Node, window_hours: u64) -> io::Result<(String, bool)> {
     let conn = open_db()?;
-    let title = &node.frontmatter.title;
-
-    if let Some(existing_id) = find_duplicate_in_conn(&conn, title, window_hours) {
-        return Ok((existing_id, true));
-    }
-
-    let fm = &node.frontmatter;
-    conn.execute(
-        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            fm.id, fm.node_type, fm.title,
-            join_csv(&fm.tags), join_csv(&fm.projects), join_csv(&fm.agents),
-            fm.created, fm.updated, node.body,
-        ],
-    )
-    .map_err(io::Error::other)?;
-
-    Ok((node.frontmatter.id.clone(), false))
+    write_node_dedup_conn(&conn, node, window_hours)
 }
 
 /// Write-with-dedup using an existing connection (for batch/transaction use).
@@ -500,18 +556,7 @@ pub fn write_node_dedup_conn(
         return Ok((existing_id, true));
     }
 
-    let fm = &node.frontmatter;
-    conn.execute(
-        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        params![
-            fm.id, fm.node_type, fm.title,
-            join_csv(&fm.tags), join_csv(&fm.projects), join_csv(&fm.agents),
-            fm.created, fm.updated, node.body,
-        ],
-    )
-    .map_err(io::Error::other)?;
-
+    write_node_conn(conn, node)?;
     Ok((node.frontmatter.id.clone(), false))
 }
 
@@ -556,25 +601,208 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
     Ok(changed as u64)
 }
 
-/// Query recent nodes for a project, excluding stale ones by default.
-pub fn recall_project_nodes(project: &str, limit: usize) -> Vec<Node> {
+// ── Smart recall (composite scoring) ─────────────────
+
+/// Composite relevance score weights.
+const W_RECENCY: f64 = 0.25;
+const W_IMPORTANCE: f64 = 0.35;
+const W_ACCESS: f64 = 0.15;
+const W_FTS: f64 = 0.25;
+
+/// Scored node: a node with a computed relevance score.
+#[derive(Debug, Clone)]
+pub struct ScoredNode {
+    pub node: Node,
+    pub score: f64,
+}
+
+/// Smart recall: returns nodes ranked by composite relevance.
+///
+/// Scoring formula per node:
+///   score = W_RECENCY * recency + W_IMPORTANCE * importance + W_ACCESS * access_freq + W_FTS * fts_match
+///
+/// - recency: 1.0 for today, decays exponentially (half-life = 30 days)
+/// - importance: node.importance (0.0–1.0)
+/// - access_freq: min(1.0, access_count / 20) — saturates at 20 accesses
+/// - fts_match: 1.0 if hint matches via FTS, 0.0 otherwise
+///
+/// Fetches a broad candidate set (4x limit), scores, sorts, returns top `limit`.
+/// Automatically touches returned nodes.
+pub fn smart_recall(
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> Vec<ScoredNode> {
     let conn = match open_db() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    let sql = "SELECT id, type, title, tags, projects, agents, created, updated, body
-               FROM nodes
-               WHERE (',' || projects || ',' LIKE '%,' || ?1 || ',%')
-                 AND (',' || tags || ',' NOT LIKE '%,stale,%')
-               ORDER BY updated DESC
-               LIMIT ?2";
-    let mut stmt = match conn.prepare(sql) {
+
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Gather FTS matches if hint is provided
+    let fts_ids: std::collections::HashSet<String> = if let Some(h) = hint {
+        if !h.is_empty() {
+            search_nodes_conn(&conn, h, limit * 4)
+                .into_iter()
+                .map(|n| n.frontmatter.id.clone())
+                .collect()
+        } else {
+            Default::default()
+        }
+    } else {
+        Default::default()
+    };
+
+    // Fetch candidate nodes (broad set)
+    let candidate_limit = (limit * 4).max(40);
+    let mut conditions: Vec<String> = vec![
+        "',' || tags || ',' NOT LIKE '%,stale,%'".into(),
+    ];
+    if let Some(p) = project {
+        conditions.push(format!(
+            "(',' || projects || ',' LIKE '%,{},%')",
+            p.replace('\'', "''")
+        ));
+    }
+    let where_clause = format!("WHERE {}", conditions.join(" AND "));
+    let sql = format!(
+        "SELECT {NODE_COLUMNS} FROM nodes {where_clause}
+         ORDER BY importance DESC, updated DESC
+         LIMIT {candidate_limit}"
+    );
+
+    let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    stmt.query_map(params![project, limit as i64], row_to_node)
+    let candidates: Vec<Node> = stmt
+        .query_map([], row_to_node)
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+        .unwrap_or_default();
+
+    // Score each candidate
+    let mut scored: Vec<ScoredNode> = candidates
+        .into_iter()
+        .map(|node| {
+            let recency = compute_recency(&node.frontmatter.updated, now_secs);
+            let importance = node.frontmatter.importance;
+            let access_freq = (node.frontmatter.access_count.max(0) as f64 / 20.0).min(1.0);
+            let fts_match = if fts_ids.contains(&node.frontmatter.id) { 1.0 } else { 0.0 };
+
+            let score = W_RECENCY * recency
+                + W_IMPORTANCE * importance
+                + W_ACCESS * access_freq
+                + W_FTS * fts_match;
+
+            ScoredNode { node, score }
+        })
+        .collect();
+
+    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(limit);
+
+    // Touch retrieved nodes
+    for sn in &scored {
+        touch_node_conn(&conn, &sn.node.frontmatter.id);
+    }
+
+    scored
+}
+
+/// Compute recency score (0.0–1.0) with exponential decay, half-life = 30 days.
+fn compute_recency(updated: &str, now_secs: u64) -> f64 {
+    let node_secs = parse_iso_to_secs(updated);
+    if node_secs == 0 || node_secs > now_secs {
+        return 0.5; // unknown or future timestamp
+    }
+    let age_days = (now_secs - node_secs) as f64 / 86400.0;
+    let half_life = 30.0;
+    (-age_days * (2.0_f64.ln()) / half_life).exp()
+}
+
+/// Parse ISO 8601 timestamp to seconds since epoch (best-effort).
+fn parse_iso_to_secs(ts: &str) -> u64 {
+    // Expected format: YYYY-MM-DDThh:mm:ssZ
+    if ts.len() < 19 {
+        return 0;
+    }
+    let year: u64 = ts[0..4].parse().unwrap_or(0);
+    let month: u64 = ts[5..7].parse().unwrap_or(1);
+    let day: u64 = ts[8..10].parse().unwrap_or(1);
+    let hour: u64 = ts[11..13].parse().unwrap_or(0);
+    let min: u64 = ts[14..16].parse().unwrap_or(0);
+    let sec: u64 = ts[17..19].parse().unwrap_or(0);
+
+    // Approximate days since epoch
+    let mut total_days = 0u64;
+    for y in 1970..year {
+        total_days += if is_leap(y) { 366 } else { 365 };
+    }
+    let month_days = [
+        0u64, 31, if is_leap(year) { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    for m in 1..month {
+        total_days += month_days[m as usize];
+    }
+    total_days += day - 1;
+
+    total_days * 86400 + hour * 3600 + min * 60 + sec
+}
+
+// ── Access tracking & decay ──────────────────────────
+
+/// Record an access event: increment access_count and update accessed_at.
+pub fn touch_node_conn(conn: &Connection, id: &str) {
+    let now = now_iso();
+    let _ = conn.execute(
+        "UPDATE nodes SET access_count = access_count + 1, accessed_at = ?1 WHERE id = ?2",
+        params![now, id],
+    );
+}
+
+/// Batch-touch multiple nodes (used after smart_recall).
+pub fn touch_nodes(ids: &[String]) {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    for id in ids {
+        touch_node_conn(&conn, id);
+    }
+}
+
+/// Gradually decay importance for nodes not accessed in `days`.
+/// Instead of binary stale tagging, reduces importance by `factor` (e.g., 0.9 = 10% decay).
+/// Nodes with importance already at or below `floor` are not decayed further.
+/// Returns the number of nodes decayed.
+pub fn decay_importance(days: u64, factor: f64, floor: f64) -> io::Result<u64> {
+    let conn = open_db()?;
+    let cutoff = {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(days * 86400);
+        let (y, m, d) = days_to_ymd(secs / 86400);
+        let hh = (secs / 3600) % 24;
+        let mm = (secs / 60) % 60;
+        let ss = secs % 60;
+        format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    };
+    let changed = conn.execute(
+        "UPDATE nodes SET importance = MAX(?3, importance * ?2)
+         WHERE (accessed_at < ?1 OR accessed_at = '')
+           AND updated < ?1
+           AND importance > ?3
+           AND ',' || tags || ',' NOT LIKE '%,pinned,%'",
+        params![cutoff, factor, floor],
+    ).map_err(io::Error::other)?;
+    Ok(changed as u64)
 }
 
 // ── FTS search ────────────────────────────────────────
@@ -584,18 +812,25 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    let sql = "SELECT n.id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body
-               FROM nodes n
-               JOIN nodes_fts ON n.rowid = nodes_fts.rowid
-               WHERE nodes_fts MATCH ?1
-               LIMIT ?2";
-    let mut stmt = match conn.prepare(sql) {
+    search_nodes_conn(&conn, query, limit)
+}
+
+fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> Vec<Node> {
+    let sql = format!(
+        "SELECT n.{NODE_COLUMNS_PREFIXED}
+         FROM nodes n
+         JOIN nodes_fts ON n.rowid = nodes_fts.rowid
+         WHERE nodes_fts MATCH ?1
+         ORDER BY n.importance DESC
+         LIMIT ?2"
+    );
+    let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(_) => return vec![],
     };
     stmt.query_map(params![query, limit as i64], row_to_node)
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
 }
 
 /// Dynamic filter query.
@@ -632,9 +867,8 @@ pub fn query_nodes(
     };
 
     let sql = format!(
-        "SELECT id, type, title, tags, projects, agents, created, updated, body
-         FROM nodes {} ORDER BY updated DESC LIMIT {}",
-        where_clause, limit
+        "SELECT {NODE_COLUMNS}
+         FROM nodes {where_clause} ORDER BY updated DESC LIMIT {limit}",
     );
 
     let mut stmt = match conn.prepare(&sql) {
