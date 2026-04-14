@@ -54,11 +54,13 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     // Simple: git commit -m "msg" or git commit -m 'msg'
     // Split into two patterns to avoid mismatched quote matching
     // and to allow the other quote type inside the message.
+    // Use non-greedy .*? so we capture the FIRST -m argument (the subject),
+    // not the last one (which would be the body in `git commit -m "subj" -m "body"`).
     static SIMPLE_DQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*-m\s+"([^"]+)""#).unwrap()
+        Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap()
     });
     static SIMPLE_SQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*-m\s+'([^']+)'"#).unwrap()
+        Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap()
     });
     if let Some(caps) = SIMPLE_DQ.captures(cmd) {
         return Some(caps[1].trim().to_string());
@@ -367,6 +369,21 @@ mod tests {
     #[test]
     fn cc_valid_multi_scope() {
         assert!(check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#).is_none());
+    }
+
+    #[test]
+    fn cc_valid_multi_m_body() {
+        // Second -m is the body; subject should be validated, not the body line
+        let cmd = r#"git commit -m "fix(mem): resolve injection" -m "- use rusqlite params""#;
+        assert!(check_conventional_commit(cmd).is_none(), "subject is valid CC, body must be ignored");
+    }
+
+    #[test]
+    fn cc_subject_extracted_not_body() {
+        let msg = extract_commit_message(
+            r#"git commit -m "fix(mem): subject line" -m "- body line one""#,
+        );
+        assert_eq!(msg.as_deref(), Some("fix(mem): subject line"));
     }
 
     #[test]
