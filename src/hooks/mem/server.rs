@@ -6,9 +6,9 @@ use tiny_http::{Header, Method, Response, Server};
 
 use super::graph::rebuild_graph_json;
 use super::store::{
-    append_edge, delete_edge_by_id, delete_node_file, now_iso, read_index, read_node,
-    remove_edges_for_node, remove_from_index, search_nodes, upsert_index, validate_node_id,
-    write_node, Edge, Node, NodeFrontmatter,
+    append_edge, delete_edge_by_id, delete_node_file, importance_for_type, now_iso, read_index,
+    read_node, remove_edges_for_node, remove_from_index, search_nodes, upsert_index,
+    validate_node_id, write_node, Edge, Node, NodeFrontmatter,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
@@ -246,16 +246,23 @@ fn handle_post_node(body: &str) -> Result<String, String> {
         .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
 
+    let node_type = v["type"].as_str().unwrap_or("concept").to_string();
+    let importance = v["importance"].as_f64()
+        .unwrap_or_else(|| importance_for_type(&node_type))
+        .clamp(0.0, 1.0);
     let node = Node {
         frontmatter: NodeFrontmatter {
             id: id.clone(),
-            node_type: v["type"].as_str().unwrap_or("concept").to_string(),
+            node_type,
             title: v["title"].as_str().unwrap_or("Untitled").to_string(),
             tags,
             projects,
             agents,
             created: now.clone(),
             updated: now,
+            importance,
+            access_count: 0,
+            accessed_at: String::new(),
         },
         body: v["body"].as_str().unwrap_or("").to_string(),
     };

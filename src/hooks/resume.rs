@@ -329,27 +329,40 @@ pub fn run(_input: &HookInput) -> i32 {
         }
     }
 
-    // 5b. Knowledge graph recall: surface recent patterns/errors from memory.db
+    // 5b. Knowledge graph recall: smart recall with composite scoring
     {
         let slug = project_slug();
-        let nodes = store::recall_project_nodes(&slug, 10);
-        let patterns: Vec<_> = nodes.iter()
-            .filter(|n| n.frontmatter.node_type == "pattern" || n.frontmatter.node_type == "error")
-            .take(5)
+        let scored = store::smart_recall(Some(&slug), None, 10);
+        let important: Vec<_> = scored.iter()
+            .filter(|sn| {
+                let t = sn.node.frontmatter.node_type.as_str();
+                matches!(t, "decision" | "resolution" | "pattern" | "error" | "concept")
+            })
+            .take(7)
             .collect();
-        if !patterns.is_empty() {
-            hint("resume", "Knowledge graph — recent patterns:");
-            for n in &patterns {
-                hint("resume", &format!("  [{}] {}", n.frontmatter.node_type, n.frontmatter.title));
+        if !important.is_empty() {
+            hint("resume", "Knowledge graph — relevant memories:");
+            for sn in &important {
+                let fm = &sn.node.frontmatter;
+                hint("resume", &format!(
+                    "  [{}] {} (importance={:.1}, score={:.2})",
+                    fm.node_type, fm.title, fm.importance, sn.score
+                ));
             }
         }
     }
 
-    // 5c. Memory decay: tag stale nodes (90+ days)
-    if let Ok(staled) = store::tag_stale_nodes(90)
-        && staled > 0
-    {
-        hint("resume", &format!("Memory decay: tagged {staled} stale node(s)"));
+    // 5c. Memory decay: gradual importance decay (30+ days untouched → 10% decay, floor 0.05)
+    if let Ok(decayed) = store::decay_importance(30, 0.9, 0.05) {
+        if decayed > 0 {
+            hint("resume", &format!("Memory decay: decayed importance for {decayed} node(s)"));
+        }
+    }
+    // Also tag truly ancient nodes as stale (180+ days)
+    if let Ok(staled) = store::tag_stale_nodes(180) {
+        if staled > 0 {
+            hint("resume", &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"));
+        }
     }
 
     // 6. Stack

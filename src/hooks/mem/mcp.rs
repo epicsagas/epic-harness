@@ -10,10 +10,11 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
-use super::graph::related_nodes;
+use super::graph::{graph_neighbors, related_nodes};
 use super::store::{
-    new_uuid, now_iso, query_nodes, read_node, search_nodes, validate_node_id,
-    write_node_dedup, Node, NodeFrontmatter,
+    importance_for_type, new_uuid, now_iso, query_nodes, read_node,
+    search_nodes, smart_recall, touch_nodes, validate_node_id, write_node_dedup,
+    Node, NodeFrontmatter,
 };
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
@@ -34,7 +35,8 @@ fn tool_definitions() -> Value {
                     },
                     "body":    { "type": "string", "description": "Markdown content (the actual knowledge)" },
                     "tags":    { "type": "array", "items": { "type": "string" }, "description": "Tags for filtering" },
-                    "project": { "type": "string", "description": "Project slug (optional)" }
+                    "project": { "type": "string", "description": "Project slug (optional)" },
+                    "importance": { "type": "number", "description": "Importance score 0.0-1.0 (auto-set by type if omitted: decision=0.9, resolution=0.8, concept=0.7, pattern=0.5, error=0.4, session=0.2)" }
                 },
                 "required": ["title", "type", "body"]
             }
@@ -57,11 +59,12 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "mem_search",
-            "description": "Full-text search across all memory nodes. Use when you need to find specific knowledge by keyword.",
+            "description": "Full-text search across all memory nodes. Use when you need to find specific knowledge by keyword. Results ranked by importance.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Search keyword or phrase" }
+                    "query": { "type": "string", "description": "Search keyword or phrase" },
+                    "limit": { "type": "number", "default": 20, "description": "Max results" }
                 },
                 "required": ["query"]
             }
@@ -80,13 +83,27 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "mem_context",
-            "description": "Get relevant memory context for a project. Call at session start to load project-specific knowledge.",
+            "description": "Get relevant memory context for a project. Call at session start to load project-specific knowledge. Uses smart ranking (importance + recency + access frequency).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "project": { "type": "string", "description": "Project slug" },
                     "limit":   { "type": "number", "default": 5 }
                 }
+            }
+        },
+        {
+            "name": "mem_recall",
+            "description": "Smart contextual recall. Finds the most relevant memories for your current task by combining full-text search, importance scoring, recency, access frequency, and graph connectivity. Use this PROACTIVELY when starting a task, debugging, or making architectural decisions — it surfaces past decisions, patterns, and resolutions that are relevant to your current work.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "hint":    { "type": "string", "description": "Describe what you're working on (e.g. 'authentication refactor', 'database migration', 'CI pipeline fix'). Used for semantic matching." },
+                    "project": { "type": "string", "description": "Project slug to scope results" },
+                    "limit":   { "type": "number", "default": 10, "description": "Max nodes to return" },
+                    "include_neighbors": { "type": "boolean", "default": true, "description": "Also return 1-hop graph neighbors of top results" }
+                },
+                "required": ["hint"]
             }
         }
     ])
@@ -119,6 +136,11 @@ fn tool_mem_add(args: &Value) -> Value {
         .map(|s| vec![s.to_string()])
         .unwrap_or_default();
 
+    let importance = args["importance"]
+        .as_f64()
+        .unwrap_or_else(|| importance_for_type(&node_type))
+        .clamp(0.0, 1.0);
+
     let id = new_uuid();
     let now = now_iso();
 
@@ -132,6 +154,9 @@ fn tool_mem_add(args: &Value) -> Value {
             agents: vec![],
             created: now.clone(),
             updated: now.clone(),
+            importance,
+            access_count: 0,
+            accessed_at: String::new(),
         },
         body,
     };
@@ -154,13 +179,15 @@ fn tool_mem_query(args: &Value) -> Value {
     let results: Vec<Value> = nodes.iter().map(|node| {
         let fm = &node.frontmatter;
         json!({
-            "id":      fm.id,
-            "title":   fm.title,
-            "type":    fm.node_type,
-            "tags":    fm.tags,
-            "updated": fm.updated,
-            "projects": fm.projects,
-            "body":    node.body.chars().take(200).collect::<String>()
+            "id":           fm.id,
+            "title":        fm.title,
+            "type":         fm.node_type,
+            "tags":         fm.tags,
+            "updated":      fm.updated,
+            "projects":     fm.projects,
+            "importance":   fm.importance,
+            "access_count": fm.access_count,
+            "body":         node.body.chars().take(200).collect::<String>()
         })
     }).collect();
 
@@ -172,17 +199,24 @@ fn tool_mem_search(args: &Value) -> Value {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_search requires query" }),
     };
+    let limit = args["limit"].as_u64().unwrap_or(20) as usize;
 
-    let nodes = search_nodes(query, 10);
+    let nodes = search_nodes(query, limit);
+
+    // Touch retrieved nodes
+    let ids: Vec<String> = nodes.iter().map(|n| n.frontmatter.id.clone()).collect();
+    touch_nodes(&ids);
+
     let results: Vec<Value> = nodes
         .iter()
         .map(|node| {
-            let snippet: String = node.body.chars().take(160).collect::<String>().replace('\n', " ");
+            let snippet: String = node.body.chars().take(200).collect::<String>().replace('\n', " ");
             json!({
-                "id":      node.frontmatter.id,
-                "title":   node.frontmatter.title,
-                "type":    node.frontmatter.node_type,
-                "snippet": snippet
+                "id":         node.frontmatter.id,
+                "title":      node.frontmatter.title,
+                "type":       node.frontmatter.node_type,
+                "importance": node.frontmatter.importance,
+                "snippet":    snippet
             })
         })
         .collect();
@@ -222,21 +256,89 @@ fn tool_mem_context(args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
-    // query_nodes returns updated DESC from SQLite
-    let nodes = query_nodes(None, None, project, limit);
+    // Use smart_recall for importance-weighted context
+    let scored = smart_recall(project, None, limit);
 
-    let results: Vec<Value> = nodes.iter().map(|node| {
+    let results: Vec<Value> = scored.iter().map(|sn| {
         json!({
-            "id":      node.frontmatter.id,
-            "title":   node.frontmatter.title,
-            "type":    node.frontmatter.node_type,
-            "tags":    node.frontmatter.tags,
-            "updated": node.frontmatter.updated,
-            "summary": node.body.chars().take(300).collect::<String>()
+            "id":         sn.node.frontmatter.id,
+            "title":      sn.node.frontmatter.title,
+            "type":       sn.node.frontmatter.node_type,
+            "tags":       sn.node.frontmatter.tags,
+            "updated":    sn.node.frontmatter.updated,
+            "importance": sn.node.frontmatter.importance,
+            "score":      (sn.score * 1000.0).round() / 1000.0,
+            "summary":    sn.node.body.chars().take(300).collect::<String>()
         })
     }).collect();
 
     json!(results)
+}
+
+fn tool_mem_recall(args: &Value) -> Value {
+    let hint = match args["hint"].as_str() {
+        Some(s) if !s.is_empty() => s,
+        _ => return json!({ "error": "mem_recall requires hint" }),
+    };
+    let project = args["project"].as_str();
+    let limit = args["limit"].as_u64().unwrap_or(10) as usize;
+    let include_neighbors = args["include_neighbors"].as_bool().unwrap_or(true);
+
+    // Phase 1: Smart recall with composite scoring
+    let scored = smart_recall(project, Some(hint), limit);
+
+    let mut results: Vec<Value> = scored.iter().map(|sn| {
+        json!({
+            "id":         sn.node.frontmatter.id,
+            "title":      sn.node.frontmatter.title,
+            "type":       sn.node.frontmatter.node_type,
+            "tags":       sn.node.frontmatter.tags,
+            "importance": sn.node.frontmatter.importance,
+            "score":      (sn.score * 1000.0).round() / 1000.0,
+            "body":       sn.node.body.chars().take(400).collect::<String>()
+        })
+    }).collect();
+
+    // Phase 2: Graph-augmented — include 1-hop neighbors of top results
+    if include_neighbors && !scored.is_empty() {
+        let seed_ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
+        let neighbors = graph_neighbors(&seed_ids);
+
+        // Add up to 5 graph neighbors not already in results
+        let existing_ids: std::collections::HashSet<&str> = scored.iter()
+            .map(|sn| sn.node.frontmatter.id.as_str())
+            .collect();
+
+        let mut neighbor_results: Vec<Value> = vec![];
+        for (nid, connection_count) in neighbors.iter().take(5) {
+            if existing_ids.contains(nid.as_str()) {
+                continue;
+            }
+            if let Ok(node) = read_node(nid) {
+                neighbor_results.push(json!({
+                    "id":          node.frontmatter.id,
+                    "title":       node.frontmatter.title,
+                    "type":        node.frontmatter.node_type,
+                    "tags":        node.frontmatter.tags,
+                    "importance":  node.frontmatter.importance,
+                    "score":       0.0, // graph neighbors don't have a recall score
+                    "body":        node.body.chars().take(200).collect::<String>(),
+                    "via_graph":   true,
+                    "connections": connection_count
+                }));
+            }
+        }
+
+        if !neighbor_results.is_empty() {
+            results.extend(neighbor_results);
+        }
+    }
+
+    json!({
+        "count": results.len(),
+        "hint": hint,
+        "nodes": results
+    })
 }
 
 fn call_tool(name: &str, args: &Value) -> Value {
@@ -246,6 +348,7 @@ fn call_tool(name: &str, args: &Value) -> Value {
         "mem_search"  => tool_mem_search(args),
         "mem_related" => tool_mem_related(args),
         "mem_context" => tool_mem_context(args),
+        "mem_recall"  => tool_mem_recall(args),
         _ => json!({ "error": format!("Unknown tool: {name}") }),
     };
     json!({ "content": [{ "type": "text", "text": result.to_string() }] })

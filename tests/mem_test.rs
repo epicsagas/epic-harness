@@ -416,6 +416,9 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
             agents: vec![],
             created: ts.clone(),
             updated: ts.clone(),
+            importance: 0.5,
+            access_count: 0,
+            accessed_at: String::new(),
         },
         body: "pattern body A".into(),
     };
@@ -445,6 +448,9 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
             agents: vec![],
             created: ts.clone(),
             updated: ts.clone(),
+            importance: 0.2,
+            access_count: 0,
+            accessed_at: String::new(),
         },
         body: "session body".into(),
     };
@@ -469,12 +475,12 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
     assert_eq!(read_b.frontmatter.node_type, "session");
 }
 
-// ── recall_project_nodes test ───────────────────────
+// ── smart_recall test ───────────────────────────────
 
 #[test]
-fn test_recall_project_nodes() {
+fn test_smart_recall() {
     use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, recall_project_nodes, new_uuid, now_iso,
+        open_db, write_node_dedup_conn, smart_recall, new_uuid, now_iso,
         Node, NodeFrontmatter,
     };
     let _guard = ENV_LOCK.lock().unwrap();
@@ -484,8 +490,12 @@ fn test_recall_project_nodes() {
     let conn = open_db().unwrap();
     let ts = now_iso();
 
-    // Create nodes for two different projects
-    for (proj, title) in [("myproj", "myproj: pattern"), ("otherproj", "otherproj: pattern")] {
+    // Create nodes for two different projects with different importance
+    for (proj, title, imp) in [
+        ("myproj", "myproj: auth decision", 0.9),
+        ("myproj", "myproj: build error", 0.4),
+        ("otherproj", "otherproj: pattern", 0.5),
+    ] {
         let node = Node {
             frontmatter: NodeFrontmatter {
                 id: new_uuid(),
@@ -496,6 +506,9 @@ fn test_recall_project_nodes() {
                 agents: vec![],
                 created: ts.clone(),
                 updated: ts.clone(),
+                importance: imp,
+                access_count: 0,
+                accessed_at: String::new(),
             },
             body: "body".into(),
         };
@@ -503,11 +516,21 @@ fn test_recall_project_nodes() {
     }
     drop(conn);
 
-    let results = recall_project_nodes("myproj", 10);
-    assert_eq!(results.len(), 1);
-    assert!(results[0].frontmatter.title.contains("myproj"));
+    // Smart recall for myproj should return 2 nodes, highest importance first
+    let results = smart_recall(Some("myproj"), None, 10);
+    assert_eq!(results.len(), 2, "should find 2 myproj nodes");
+    assert!(results[0].score >= results[1].score, "should be sorted by score desc");
+    assert!(results[0].node.frontmatter.title.contains("auth decision"),
+        "higher importance node should rank first");
 
-    let other = recall_project_nodes("otherproj", 10);
+    // Smart recall with hint should boost FTS-matching nodes
+    let with_hint = smart_recall(Some("myproj"), Some("auth"), 10);
+    assert!(!with_hint.is_empty());
+    assert!(with_hint[0].node.frontmatter.title.contains("auth"),
+        "FTS-matching node should rank highest when hint provided");
+
+    // Other project should only return its own nodes
+    let other = smart_recall(Some("otherproj"), None, 10);
     assert_eq!(other.len(), 1);
 }
 

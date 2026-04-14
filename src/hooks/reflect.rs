@@ -785,6 +785,9 @@ fn ingest_to_memory(
                 agents: vec![],
                 created: ts.clone(),
                 updated: ts.clone(),
+                importance: store::importance_for_type("session"),
+                access_count: 0,
+                accessed_at: String::new(),
             },
             body,
         };
@@ -816,6 +819,9 @@ fn ingest_to_memory(
                 agents: vec![],
                 created: ts.clone(),
                 updated: ts.clone(),
+                importance: store::importance_for_type("pattern"),
+                access_count: 0,
+                accessed_at: String::new(),
             },
             body,
         };
@@ -863,6 +869,9 @@ fn ingest_to_memory(
                 agents: vec![],
                 created: ts.clone(),
                 updated: ts.clone(),
+                importance: store::importance_for_type("error"),
+                access_count: 0,
+                accessed_at: String::new(),
             },
             body,
         };
@@ -888,6 +897,9 @@ fn ingest_to_memory(
                 agents: vec![],
                 created: ts.clone(),
                 updated: ts.clone(),
+                importance: store::importance_for_type("error"),
+                access_count: 0,
+                accessed_at: String::new(),
             },
             body,
         };

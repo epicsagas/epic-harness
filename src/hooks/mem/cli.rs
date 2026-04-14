@@ -9,10 +9,10 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_node_file, list_node_ids, now_iso, parse_node, query_nodes, read_index,
-    read_node, remove_edges_for_node, remove_from_index, search_nodes, serialize_node,
-    upsert_index, validate_node_id, write_node, write_node_dedup, Edge, IndexNode, Node,
-    NodeFrontmatter,
+    append_edge, delete_node_file, importance_for_type, list_node_ids, now_iso, parse_node,
+    query_nodes, read_node, remove_edges_for_node, remove_from_index, search_nodes,
+    serialize_node, smart_recall, upsert_index, validate_node_id, write_node, write_node_dedup,
+    Edge, IndexNode, Node, NodeFrontmatter,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -28,6 +28,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ("export",      "Dump all nodes to Markdown files (for Git backup)"),
     ("migrate",     "Import legacy project memory files"),
     ("context",     "Show recently-updated nodes for a project"),
+    ("recall",      "Smart recall — relevance-ranked memories for current task"),
     ("mcp",         "Run as stdio MCP server (JSON-RPC 2.0)"),
     ("mcp-install", "Register the harness-mem MCP server in Claude Code"),
     ("serve",       "Start the REST + Web UI server"),
@@ -58,6 +59,7 @@ fn print_subcommand_help(sub: &str) {
             println!("  --project <name>    Associate with a project slug");
             println!("  --agent <name>      Associate with an agent name");
             println!("  --body <text>       Node body content");
+            println!("  --importance <0-1>  Importance score (auto-set by type if omitted)");
             println!("\nOUTPUT: {{\"id\":\"<uuid>\"}}");
         }
         "edit" => {
@@ -156,6 +158,18 @@ fn print_subcommand_help(sub: &str) {
             println!("  --limit <n>         Max nodes to return (default: 5)");
             println!("\nOUTPUT: JSON array of index nodes sorted by updated desc");
         }
+        "recall" => {
+            println!("harness mem recall — Smart contextual recall\n");
+            println!("USAGE:");
+            println!("  harness mem recall <HINT> [OPTIONS]\n");
+            println!("ARGUMENTS:");
+            println!("  <HINT>              Describe current task (e.g. 'auth refactor', 'CI fix')\n");
+            println!("OPTIONS:");
+            println!("  --project <name>    Filter by project slug");
+            println!("  --limit <n>         Max nodes to return (default: 10)");
+            println!("\nOUTPUT: JSON array of relevance-scored nodes");
+            println!("\nScoring: recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)");
+        }
         "mcp-install" => {
             println!("harness mem mcp-install — Register the harness-mem MCP server\n");
             println!("USAGE:");
@@ -229,6 +243,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         "export"      => cmd_export(&args[1..]),
         "migrate"     => cmd_migrate(&args[1..]),
         "context"     => cmd_context(&args[1..]),
+        "recall"      => cmd_recall(&args[1..]),
         "mcp"         => return super::mcp::run_mcp_server(),
         "mcp-install" => cmd_mcp_install(&args[1..]),
         "serve"       => return super::server::serve(&args[1..]),
@@ -301,6 +316,10 @@ fn cmd_add(args: &[String]) -> io::Result<i32> {
     let projects = csv_to_vec(flags.get("project").map(|s| s.as_str()).unwrap_or(""));
     let agents  = csv_to_vec(flags.get("agent").map(|s| s.as_str()).unwrap_or(""));
     let body    = flags.get("body").cloned().unwrap_or_default();
+    let importance = flags.get("importance")
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or_else(|| importance_for_type(&node_type))
+        .clamp(0.0, 1.0);
 
     let id  = Uuid::new_v4().to_string();
     let now = now_iso();
@@ -315,6 +334,9 @@ fn cmd_add(args: &[String]) -> io::Result<i32> {
             agents,
             created: now.clone(),
             updated: now,
+            importance,
+            access_count: 0,
+            accessed_at: String::new(),
         },
         body,
     };
@@ -347,6 +369,9 @@ fn cmd_edit(args: &[String]) -> io::Result<i32> {
     }
     if let Some(body) = flags.get("body") {
         node.body = body.clone();
+    }
+    if let Some(imp) = flags.get("importance").and_then(|v| v.parse::<f64>().ok()) {
+        node.frontmatter.importance = imp.clamp(0.0, 1.0);
     }
     node.frontmatter.updated = now_iso();
 
@@ -599,6 +624,9 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
                         agents: vec![],
                         created: now.clone(),
                         updated: now,
+                        importance: importance_for_type("decision"),
+                        access_count: 0,
+                        accessed_at: String::new(),
                     },
                     body: content.clone(),
                 }
@@ -751,18 +779,59 @@ fn cmd_context(args: &[String]) -> io::Result<i32> {
     let project = flags.get("project").cloned().unwrap_or_default();
     let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(5);
 
-    let idx = read_index();
-    let mut nodes = idx.nodes.clone();
+    let project_opt = if project.is_empty() { None } else { Some(project.as_str()) };
+    let scored = smart_recall(project_opt, None, limit);
 
-    if !project.is_empty() {
-        nodes.retain(|n| n.projects.contains(&project));
+    let results: Vec<serde_json::Value> = scored.iter().map(|sn| {
+        let fm = &sn.node.frontmatter;
+        serde_json::json!({
+            "id":           fm.id,
+            "title":        fm.title,
+            "type":         fm.node_type,
+            "tags":         fm.tags,
+            "projects":     fm.projects,
+            "updated":      fm.updated,
+            "importance":   fm.importance,
+            "access_count": fm.access_count,
+            "score":        (sn.score * 1000.0).round() / 1000.0,
+        })
+    }).collect();
+
+    let out = serde_json::to_string_pretty(&results)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    println!("{out}");
+    Ok(0)
+}
+
+fn cmd_recall(args: &[String]) -> io::Result<i32> {
+    let (pos, flags) = parse_flags(args);
+    let hint = pos.first().cloned().unwrap_or_default();
+    let project = flags.get("project").cloned();
+    let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(10);
+
+    if hint.is_empty() {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "recall requires a hint (describe your current task)"));
     }
 
-    // Sort by updated descending
-    nodes.sort_by(|a, b| b.updated.cmp(&a.updated));
-    nodes.truncate(limit);
+    let project_opt = project.as_deref();
+    let hint_opt = Some(hint.as_str());
+    let scored = smart_recall(project_opt, hint_opt, limit);
 
-    let out = serde_json::to_string_pretty(&nodes)
+    let results: Vec<serde_json::Value> = scored.iter().map(|sn| {
+        let fm = &sn.node.frontmatter;
+        serde_json::json!({
+            "id":           fm.id,
+            "title":        fm.title,
+            "type":         fm.node_type,
+            "tags":         fm.tags,
+            "importance":   fm.importance,
+            "access_count": fm.access_count,
+            "score":        (sn.score * 1000.0).round() / 1000.0,
+            "body":         sn.node.body.chars().take(300).collect::<String>(),
+        })
+    }).collect();
+
+    let out = serde_json::to_string_pretty(&results)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     println!("{out}");
     Ok(0)

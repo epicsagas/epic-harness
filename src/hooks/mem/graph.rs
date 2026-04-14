@@ -91,6 +91,27 @@ pub fn rebuild_graph_json() -> io::Result<String> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+/// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
+/// Returns deduplicated neighbor IDs with their connection count (how many seeds link to them).
+pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, usize)> {
+    let edges = read_edges();
+    let seed_set: HashSet<&str> = seed_ids.iter().map(|s| s.as_str()).collect();
+    let mut neighbor_count: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    for edge in &edges {
+        if seed_set.contains(edge.source.as_str()) && !seed_set.contains(edge.target.as_str()) {
+            *neighbor_count.entry(edge.target.clone()).or_default() += 1;
+        }
+        if seed_set.contains(edge.target.as_str()) && !seed_set.contains(edge.source.as_str()) {
+            *neighbor_count.entry(edge.source.clone()).or_default() += 1;
+        }
+    }
+
+    let mut result: Vec<(String, usize)> = neighbor_count.into_iter().collect();
+    result.sort_by(|a, b| b.1.cmp(&a.1)); // most connected first
+    result
+}
+
 /// BFS traversal from `start_id` up to `depth` hops using the DB edges table.
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let edges = read_edges();
