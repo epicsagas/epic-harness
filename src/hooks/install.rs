@@ -159,6 +159,10 @@ fn strip_frontmatter(md: &str) -> &str {
         && let Some(end) = rest.find("\n---")
     {
         let after = end + 4; // skip past \n---
+        // Skip the trailing newline after closing ---
+        if after < rest.len() && rest.as_bytes()[after] == b'\n' {
+            return &rest[after + 1..];
+        }
         if after < rest.len() {
             return &rest[after..];
         }
@@ -1556,6 +1560,28 @@ mod tests {
         nanos ^ (COUNTER.fetch_add(1, Ordering::Relaxed) << 32)
     }
 
+    // ── strip_frontmatter ─────────────────────────────────────────────────────
+
+    #[test]
+    fn strip_frontmatter_no_leading_newline() {
+        let md = "---\nname: test\n---\n# Content\nBody";
+        let result = strip_frontmatter(md);
+        assert_eq!(result, "# Content\nBody");
+        assert!(!result.starts_with('\n'));
+    }
+
+    #[test]
+    fn strip_frontmatter_no_frontmatter() {
+        let md = "# Just content\nBody";
+        assert_eq!(strip_frontmatter(md), md);
+    }
+
+    #[test]
+    fn strip_frontmatter_unclosed() {
+        let md = "---\nname: test\n# No closing";
+        assert_eq!(strip_frontmatter(md), md);
+    }
+
     // ── write_if_missing ──────────────────────────────────────────────────────
 
     #[test]
@@ -1629,7 +1655,7 @@ mod tests {
     #[test]
     fn test_strip_frontmatter_removes_yaml() {
         let md = "---\nname: test\n---\n\n# Title\n\nBody";
-        assert_eq!(strip_frontmatter(md), "\n\n# Title\n\nBody");
+        assert_eq!(strip_frontmatter(md), "\n# Title\n\nBody");
     }
 
     #[test]

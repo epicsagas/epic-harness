@@ -52,10 +52,18 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     }
 
     // Simple: git commit -m "msg" or git commit -m 'msg'
-    static SIMPLE_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*-m\s+["']([^"']+)["']"#).unwrap()
+    // Split into two patterns to avoid mismatched quote matching
+    // and to allow the other quote type inside the message.
+    static SIMPLE_DQ: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"git\s+commit\s+.*-m\s+"([^"]+)""#).unwrap()
     });
-    if let Some(caps) = SIMPLE_RE.captures(cmd) {
+    static SIMPLE_SQ: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"git\s+commit\s+.*-m\s+'([^']+)'"#).unwrap()
+    });
+    if let Some(caps) = SIMPLE_DQ.captures(cmd) {
+        return Some(caps[1].trim().to_string());
+    }
+    if let Some(caps) = SIMPLE_SQ.captures(cmd) {
         return Some(caps[1].trim().to_string());
     }
 
@@ -344,6 +352,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(run(&input), 0);
+    }
+
+    #[test]
+    fn cc_valid_single_quotes() {
+        assert!(check_conventional_commit("git commit -m 'feat: add login'").is_none());
+    }
+
+    #[test]
+    fn cc_message_with_apostrophe() {
+        assert!(check_conventional_commit(r#"git commit -m "feat: it's done""#).is_none());
+    }
+
+    #[test]
+    fn cc_mismatched_quotes_no_match() {
+        assert!(extract_commit_message(r#"git commit -m "bad message'"#).is_none());
     }
 
     // ── run() integration ───────────────────────────
