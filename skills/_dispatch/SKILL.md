@@ -20,6 +20,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | File > 200 lines or high cyclomatic complexity | **simplify** |
 | Public API/function added or changed | **document** |
 | Before completing /go or /ship | **verify** |
+| User wants to commit changes | **commit** |
 | Context window > 70% used | **context** |
 
 ## Priority

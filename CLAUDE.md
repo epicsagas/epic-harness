@@ -4,8 +4,8 @@
 
 ## Structure
 
-- `commands/` — 7 slash commands (spec, go, check, ship, team, evolve, commit)
-- `skills/` — 8 auto skills + _dispatch engine
+- `commands/` — 6 slash commands (spec, go, check, ship, team, evolve)
+- `skills/` — 9 auto skills + _dispatch engine
 - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
