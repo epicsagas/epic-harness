@@ -310,7 +310,7 @@ fn tool_mem_recall(args: &Value) -> Value {
             .collect();
 
         let mut neighbor_results: Vec<Value> = vec![];
-        for (nid, connection_count) in neighbors.iter().take(5) {
+        for (nid, edge_weight) in neighbors.iter().take(5) {
             if existing_ids.contains(nid.as_str()) {
                 continue;
             }
@@ -324,7 +324,7 @@ fn tool_mem_recall(args: &Value) -> Value {
                     "score":       0.0, // graph neighbors don't have a recall score
                     "body":        node.body.chars().take(200).collect::<String>(),
                     "via_graph":   true,
-                    "connections": connection_count
+                    "connections": (edge_weight * 100.0).round() / 100.0
                 }));
             }
         }

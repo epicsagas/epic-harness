@@ -1,7 +1,7 @@
 //! graph.rs — Graph build + traversal (related, rebuild)
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::io;
 
 use rusqlite::params_from_iter;
@@ -94,11 +94,11 @@ pub fn rebuild_graph_json() -> io::Result<String> {
 }
 
 /// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
-/// Returns deduplicated neighbor IDs with their connection count (how many seeds link to them).
+/// Returns `(neighbor_id, total_weight)` — sum of edge weights to any seed node.
+/// Sorted by weight descending (strongest connections first).
 ///
-/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree)
-/// per seed — instead of loading all edges and filtering in Rust.
-pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, usize)> {
+/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
+pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
     }
@@ -108,14 +108,12 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, usize)> {
         Err(_) => return vec![],
     };
 
-    // Build "?,?,..." placeholder string for the IN clause.
-    // The same list is used twice: once for forward edges (source IN seeds)
-    // and once for backward edges (target IN seeds).
     let ph: String = seed_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    // Sum weights per neighbor from both forward and backward edges.
     let sql = format!(
-        "SELECT target FROM edges WHERE source IN ({ph}) \
+        "SELECT target AS nb, SUM(weight) AS w FROM edges WHERE source IN ({ph}) GROUP BY target \
          UNION ALL \
-         SELECT source FROM edges WHERE target IN ({ph})"
+         SELECT source AS nb, SUM(weight) AS w FROM edges WHERE target IN ({ph}) GROUP BY source"
     );
 
     let mut stmt = match conn.prepare(&sql) {
@@ -123,72 +121,67 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, usize)> {
         Err(_) => return vec![],
     };
 
-    // Bind seed_ids twice: first for forward edges, then for backward edges.
-    let neighbor_ids: Vec<String> = stmt
+    let rows: Vec<(String, f64)> = stmt
         .query_map(
             params_from_iter(seed_ids.iter().chain(seed_ids.iter())),
-            |row| row.get(0),
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
         )
         .map(|rows| rows.flatten().collect())
         .unwrap_or_default();
 
-    // Count occurrences per neighbor (= connection strength).
-    // Exclude nodes that are themselves seeds.
+    // Accumulate weights and exclude seeds.
     let seed_set: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for nid in neighbor_ids {
+    let mut weights: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for (nid, w) in rows {
         if !seed_set.contains(nid.as_str()) {
-            *counts.entry(nid).or_default() += 1;
+            *weights.entry(nid).or_default() += w;
         }
     }
 
-    let mut result: Vec<(String, usize)> = counts.into_iter().collect();
-    result.sort_by(|a, b| b.1.cmp(&a.1)); // most connected first
+    let mut result: Vec<(String, f64)> = weights.into_iter().collect();
+    result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     result
 }
 
-/// BFS traversal from `start_id` up to `depth` hops using the DB edges table.
-/// NOTE(perf): For depth <= 3 the full-table-scan approach is acceptable because
-/// `related_nodes` is called once per `mem_related` MCP request, not on every
-/// `mem_recall`. A per-hop targeted IN query would reduce I/O further but adds
-/// complexity; revisit if graph size exceeds ~10k edges.
+/// BFS traversal from `start_id` up to `depth` hops via a SQL recursive CTE.
+///
+/// Uses `idx_edges_source` / `idx_edges_target` on each recursive step so only
+/// reachable edges are touched — O(reachable_edges) instead of O(E) total.
+/// UNION (not UNION ALL) deduplicates visited nodes, preventing re-visits in
+/// cyclic graphs. Results are capped at 500.
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
-    let edges = read_edges();
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
 
-    // Build adjacency map once: O(E)
-    let mut adj: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    for edge in &edges {
-        adj.entry(edge.source.clone())
-            .or_default()
-            .push(edge.target.clone());
-        adj.entry(edge.target.clone())
-            .or_default()
-            .push(edge.source.clone());
-    }
+    let sql = "
+        WITH RECURSIVE bfs(node_id, depth) AS (
+            SELECT target, 1 FROM edges WHERE source = ?1
+            UNION
+            SELECT source, 1 FROM edges WHERE target = ?1
+            UNION
+            SELECT e.target, bfs.depth + 1
+              FROM edges e JOIN bfs ON e.source = bfs.node_id
+             WHERE bfs.depth < ?2
+            UNION
+            SELECT e.source, bfs.depth + 1
+              FROM edges e JOIN bfs ON e.target = bfs.node_id
+             WHERE bfs.depth < ?2
+        )
+        SELECT DISTINCT node_id FROM bfs WHERE node_id != ?1
+        LIMIT 500
+    ";
 
-    // BFS: O(N + E) total
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
-    queue.push_back((start_id.to_string(), 0));
-    visited.insert(start_id.to_string());
-    let mut result = vec![];
-
-    while let Some((current, d)) = queue.pop_front() {
-        if d >= depth {
-            continue;
-        }
-        if let Some(neighbors) = adj.get(&current) {
-            for nb in neighbors {
-                if !visited.contains(nb.as_str()) {
-                    visited.insert(nb.clone());
-                    result.push(nb.clone());
-                    queue.push_back((nb.clone(), d + 1));
-                }
-            }
-        }
-    }
-    result
+    conn.prepare(sql)
+        .and_then(|mut stmt| {
+            stmt.query_map(
+                rusqlite::params![start_id, depth as i64],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|rows| rows.flatten().collect())
+        })
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -273,19 +266,48 @@ mod tests {
         assert!(result.is_empty(), "empty seeds -> empty result");
     }
 
-    /// graph_neighbors counts connection strength (how many seeds link to the neighbor).
+    /// related_nodes uses recursive CTE: depth=1 returns direct neighbors only,
+    /// depth=2 returns 2-hop nodes, and cycles are deduplicated.
+    #[test]
+    fn related_nodes_recursive_cte() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let _dir = setup_temp_db();
+
+        // Chain: A -> B -> C
+        insert_edge("e1", "A", "B");
+        insert_edge("e2", "B", "C");
+
+        // Depth 1: only B
+        let d1 = related_nodes("A", 1);
+        assert!(d1.contains(&"B".to_string()), "depth 1 should reach B");
+        assert!(!d1.contains(&"C".to_string()), "depth 1 should NOT reach C");
+
+        // Depth 2: B and C
+        let d2 = related_nodes("A", 2);
+        assert!(d2.contains(&"B".to_string()), "depth 2 should reach B");
+        assert!(d2.contains(&"C".to_string()), "depth 2 should reach C");
+        assert!(!d2.contains(&"A".to_string()), "start node must not appear");
+
+        // Cycle: C -> A — depth 3 should still deduplicate (no duplicates)
+        insert_edge("e3", "C", "A");
+        let d3 = related_nodes("A", 3);
+        let unique: HashSet<_> = d3.iter().collect();
+        assert_eq!(d3.len(), unique.len(), "no duplicate nodes in cyclic graph");
+    }
+
+    /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
     #[test]
     fn graph_neighbors_connection_count() {
         let _lock = ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
-        // Both seeds A and B connect to C — C should have count 2.
+        // Both seeds A and B connect to C (default weight 1.0 each → total 2.0).
         insert_edge("e1", "A", "C");
         insert_edge("e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
         let result = graph_neighbors(&seeds);
-        let c_count = result.iter().find(|(id, _)| id == "C").map(|(_, n)| *n);
-        assert_eq!(c_count, Some(2), "C connected to both seeds should have count 2");
+        let c_weight = result.iter().find(|(id, _)| id == "C").map(|(_, w)| *w);
+        assert_eq!(c_weight, Some(2.0), "C connected to both seeds should have total weight 2.0");
     }
 }
