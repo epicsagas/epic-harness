@@ -6,15 +6,16 @@
 //! Implements MCP protocol version 2024-11-05 over stdin/stdout.
 //! Tools: mem_add, mem_query, mem_search, mem_related, mem_context
 
+use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
-use super::graph::{graph_neighbors, related_nodes};
+use super::graph::{graph_neighbors_conn, related_nodes_conn};
 use super::store::{
-    importance_for_type, new_uuid, now_iso, query_nodes, read_node,
-    search_nodes, smart_recall, touch_nodes, validate_node_id, write_node_dedup,
-    Node, NodeFrontmatter,
+    importance_for_type, new_uuid, now_iso, open_db, query_nodes_conn, read_node_conn,
+    search_nodes_conn, smart_recall_conn, touch_nodes_conn, validate_node_id,
+    write_node_dedup_conn, Node, NodeFrontmatter,
 };
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ fn tool_definitions() -> Value {
 
 // ── Tool implementations ───────────────────────────────────────────────────────
 
-fn tool_mem_add(args: &Value) -> Value {
+fn tool_mem_add(conn: &Connection, args: &Value) -> Value {
     let title = match args["title"].as_str() {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => return json!({ "error": "mem_add requires title, type, and body" }),
@@ -161,21 +162,20 @@ fn tool_mem_add(args: &Value) -> Value {
         body,
     };
 
-    // write_node_dedup: single DB open, dedup check + write in one connection
-    match write_node_dedup(&node, 24) {
+    match write_node_dedup_conn(conn, &node, 24) {
         Ok((existing_id, true))  => json!({ "id": existing_id, "deduplicated": true }),
         Ok((_, false))           => json!({ "id": id, "created": now }),
         Err(e)                   => json!({ "error": format!("write failed: {e}") }),
     }
 }
 
-fn tool_mem_query(args: &Value) -> Value {
+fn tool_mem_query(conn: &Connection, args: &Value) -> Value {
     let tag = args["tag"].as_str();
     let type_filter = args["type"].as_str();
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
-    let nodes = query_nodes(tag, type_filter, project, limit);
+    let nodes = query_nodes_conn(conn, tag, type_filter, project, limit);
     let results: Vec<Value> = nodes.iter().map(|node| {
         let fm = &node.frontmatter;
         json!({
@@ -194,18 +194,18 @@ fn tool_mem_query(args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_search(args: &Value) -> Value {
+fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
     let query = match args["query"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_search requires query" }),
     };
     let limit = args["limit"].as_u64().unwrap_or(20) as usize;
 
-    let nodes = search_nodes(query, limit);
+    let nodes = search_nodes_conn(conn, query, limit);
 
     // Touch retrieved nodes
     let ids: Vec<String> = nodes.iter().map(|n| n.frontmatter.id.clone()).collect();
-    touch_nodes(&ids);
+    touch_nodes_conn(conn, &ids);
 
     let results: Vec<Value> = nodes
         .iter()
@@ -224,7 +224,7 @@ fn tool_mem_search(args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_related(args: &Value) -> Value {
+fn tool_mem_related(conn: &Connection, args: &Value) -> Value {
     let id = match args["id"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_related requires id" }),
@@ -234,12 +234,12 @@ fn tool_mem_related(args: &Value) -> Value {
     }
 
     let depth = args["depth"].as_u64().unwrap_or(2) as usize;
-    let related_ids = related_nodes(id, depth);
+    let related_ids = related_nodes_conn(conn, id, depth);
 
     let results: Vec<Value> = related_ids
         .iter()
         .filter_map(|rid| {
-            read_node(rid).ok().map(|node| {
+            read_node_conn(conn, rid).ok().map(|node| {
                 json!({
                     "id":    node.frontmatter.id,
                     "title": node.frontmatter.title,
@@ -252,12 +252,12 @@ fn tool_mem_related(args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_context(args: &Value) -> Value {
+fn tool_mem_context(conn: &Connection, args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
     // Use smart_recall for importance-weighted context
-    let scored = smart_recall(project, None, limit);
+    let scored = smart_recall_conn(conn, project, None, limit);
 
     let results: Vec<Value> = scored.iter().map(|sn| {
         json!({
@@ -275,7 +275,7 @@ fn tool_mem_context(args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_recall(args: &Value) -> Value {
+fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
     let hint = match args["hint"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_recall requires hint" }),
@@ -285,7 +285,7 @@ fn tool_mem_recall(args: &Value) -> Value {
     let include_neighbors = args["include_neighbors"].as_bool().unwrap_or(true);
 
     // Phase 1: Smart recall with composite scoring
-    let scored = smart_recall(project, Some(hint), limit);
+    let scored = smart_recall_conn(conn, project, Some(hint), limit);
 
     let mut results: Vec<Value> = scored.iter().map(|sn| {
         json!({
@@ -302,7 +302,7 @@ fn tool_mem_recall(args: &Value) -> Value {
     // Phase 2: Graph-augmented — include 1-hop neighbors of top results
     if include_neighbors && !scored.is_empty() {
         let seed_ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
-        let neighbors = graph_neighbors(&seed_ids);
+        let neighbors = graph_neighbors_conn(conn, &seed_ids);
 
         // Add up to 5 graph neighbors not already in results
         let existing_ids: std::collections::HashSet<&str> = scored.iter()
@@ -314,7 +314,7 @@ fn tool_mem_recall(args: &Value) -> Value {
             if existing_ids.contains(nid.as_str()) {
                 continue;
             }
-            if let Ok(node) = read_node(nid) {
+            if let Ok(node) = read_node_conn(conn, nid) {
                 neighbor_results.push(json!({
                     "id":          node.frontmatter.id,
                     "title":       node.frontmatter.title,
@@ -341,14 +341,14 @@ fn tool_mem_recall(args: &Value) -> Value {
     })
 }
 
-fn call_tool(name: &str, args: &Value) -> Value {
+fn call_tool(conn: &Connection, name: &str, args: &Value) -> Value {
     let result = match name {
-        "mem_add"     => tool_mem_add(args),
-        "mem_query"   => tool_mem_query(args),
-        "mem_search"  => tool_mem_search(args),
-        "mem_related" => tool_mem_related(args),
-        "mem_context" => tool_mem_context(args),
-        "mem_recall"  => tool_mem_recall(args),
+        "mem_add"     => tool_mem_add(conn, args),
+        "mem_query"   => tool_mem_query(conn, args),
+        "mem_search"  => tool_mem_search(conn, args),
+        "mem_related" => tool_mem_related(conn, args),
+        "mem_context" => tool_mem_context(conn, args),
+        "mem_recall"  => tool_mem_recall(conn, args),
         _ => json!({ "error": format!("Unknown tool: {name}") }),
     };
     json!({ "content": [{ "type": "text", "text": result.to_string() }] })
@@ -371,7 +371,7 @@ fn send(obj: &Value) {
     let _ = out.flush();
 }
 
-fn handle_message(msg: &RpcRequest) {
+fn handle_message(conn: &Connection, msg: &RpcRequest) {
     match msg.method.as_str() {
         "initialize" => {
             let resp = json!({
@@ -407,7 +407,7 @@ fn handle_message(msg: &RpcRequest) {
                 .cloned()
                 .unwrap_or(json!({}));
 
-            let result = call_tool(tool_name, &tool_args);
+            let result = call_tool(conn, tool_name, &tool_args);
             let resp = json!({
                 "jsonrpc": "2.0",
                 "id": msg.id,
@@ -431,7 +431,19 @@ fn handle_message(msg: &RpcRequest) {
 // ── Entry point ────────────────────────────────────────────────────────────────
 
 /// Run the stdio MCP server loop. Reads newline-delimited JSON-RPC from stdin.
+///
+/// Opens the database once at startup so that all tool calls within the session
+/// share a single connection — avoids re-running WAL setup and schema migration
+/// on every request.
 pub fn run_mcp_server() -> i32 {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("harness-mem: failed to open database: {e}");
+            return 1;
+        }
+    };
+
     let stdin = io::stdin();
     for line in stdin.lock().lines() {
         let line = match line {
@@ -443,7 +455,7 @@ pub fn run_mcp_server() -> i32 {
             continue;
         }
         match serde_json::from_str::<RpcRequest>(&line) {
-            Ok(msg) => handle_message(&msg),
+            Ok(msg) => handle_message(&conn, &msg),
             Err(_) => {
                 // Ignore parse errors silently (per MCP spec)
             }

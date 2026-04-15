@@ -629,16 +629,13 @@ pub struct ScoredNode {
 ///
 /// Fetches a broad candidate set (4x limit), scores, sorts, returns top `limit`.
 /// Automatically touches returned nodes.
-pub fn smart_recall(
+/// Smart recall using an existing connection.
+pub fn smart_recall_conn(
+    conn: &Connection,
     project: Option<&str>,
     hint: Option<&str>,
     limit: usize,
 ) -> Vec<ScoredNode> {
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -745,10 +742,26 @@ pub fn smart_recall(
 
     // Touch retrieved nodes
     for sn in &scored {
-        touch_node_conn(&conn, &sn.node.frontmatter.id);
+        touch_node_conn(conn, &sn.node.frontmatter.id);
     }
 
     scored
+}
+
+/// Smart recall: returns nodes ranked by composite relevance.
+///
+/// Opens its own connection; for repeated calls within a single session prefer
+/// `smart_recall_conn` to reuse an already-open connection.
+pub fn smart_recall(
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> Vec<ScoredNode> {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    smart_recall_conn(&conn, project, hint, limit)
 }
 
 /// Compute recency score (0.0–1.0) with exponential decay, half-life = 30 days.
@@ -813,6 +826,18 @@ pub fn touch_node_conn(conn: &Connection, id: &str) {
     );
 }
 
+/// Batch-touch multiple nodes using an existing connection.
+pub fn touch_nodes_conn(conn: &Connection, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let _ = conn.execute_batch("BEGIN");
+    for id in ids {
+        touch_node_conn(conn, id);
+    }
+    let _ = conn.execute_batch("COMMIT");
+}
+
 /// Batch-touch multiple nodes (used after smart_recall).
 /// Wraps all updates in a single transaction to avoid N individual round-trips.
 pub fn touch_nodes(ids: &[String]) {
@@ -823,11 +848,7 @@ pub fn touch_nodes(ids: &[String]) {
         Ok(c) => c,
         Err(_) => return,
     };
-    let _ = conn.execute_batch("BEGIN");
-    for id in ids {
-        touch_node_conn(&conn, id);
-    }
-    let _ = conn.execute_batch("COMMIT");
+    touch_nodes_conn(&conn, ids);
 }
 
 /// Gradually decay importance for nodes not accessed in `days`.
@@ -869,7 +890,7 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
     search_nodes_conn(&conn, query, limit)
 }
 
-fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> Vec<Node> {
+pub fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> Vec<Node> {
     let sql = format!(
         "SELECT n.{NODE_COLUMNS_PREFIXED}
          FROM nodes n
@@ -887,18 +908,14 @@ fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> Vec<Node> 
         .unwrap_or_default()
 }
 
-/// Dynamic filter query.
-pub fn query_nodes(
+/// Dynamic filter query using an existing connection.
+pub fn query_nodes_conn(
+    conn: &Connection,
     tag: Option<&str>,
     node_type: Option<&str>,
     project: Option<&str>,
     limit: usize,
 ) -> Vec<Node> {
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-
     // Cap limit to prevent oversized result sets.
     let limit = limit.min(200);
 
@@ -940,6 +957,20 @@ pub fn query_nodes(
     stmt.query_map(refs.as_slice(), row_to_node)
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
         .unwrap_or_default()
+}
+
+/// Dynamic filter query.
+pub fn query_nodes(
+    tag: Option<&str>,
+    node_type: Option<&str>,
+    project: Option<&str>,
+    limit: usize,
+) -> Vec<Node> {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    query_nodes_conn(&conn, tag, node_type, project, limit)
 }
 
 // ── Node serialization (kept for migrate import) ──────

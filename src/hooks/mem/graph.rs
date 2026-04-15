@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io;
 
-use rusqlite::params_from_iter;
+use rusqlite::{Connection, params_from_iter};
 
 use super::store::{atomic_write, graph_path, list_node_ids, open_db, read_edges, read_node};
 
@@ -93,20 +93,12 @@ pub fn rebuild_graph_json() -> io::Result<String> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
-/// Returns `(neighbor_id, total_weight)` — sum of edge weights to any seed node.
-/// Sorted by weight descending (strongest connections first).
-///
-/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
-pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
+/// Get 1-hop neighbors using an existing connection.
+/// Returns `(neighbor_id, total_weight)` sorted by weight descending.
+pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
     }
-
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
 
     let ph: String = seed_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     // Sum weights per neighbor from both forward and backward edges.
@@ -143,18 +135,24 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
     result
 }
 
-/// BFS traversal from `start_id` up to `depth` hops via a SQL recursive CTE.
+/// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
+/// Returns `(neighbor_id, total_weight)` — sum of edge weights to any seed node.
+/// Sorted by weight descending (strongest connections first).
 ///
-/// Uses `idx_edges_source` / `idx_edges_target` on each recursive step so only
-/// reachable edges are touched — O(reachable_edges) instead of O(E) total.
-/// UNION (not UNION ALL) deduplicates visited nodes, preventing re-visits in
-/// cyclic graphs. Results are capped at 500.
-pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
+/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
+pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
+    if seed_ids.is_empty() {
+        return vec![];
+    }
     let conn = match open_db() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
+    graph_neighbors_conn(&conn, seed_ids)
+}
 
+/// BFS traversal using an existing connection.
+pub fn related_nodes_conn(conn: &Connection, start_id: &str, depth: usize) -> Vec<String> {
     let sql = "
         WITH RECURSIVE bfs(node_id, depth) AS (
             SELECT target, 1 FROM edges WHERE source = ?1
@@ -182,6 +180,20 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
             .map(|rows| rows.flatten().collect())
         })
         .unwrap_or_default()
+}
+
+/// BFS traversal from `start_id` up to `depth` hops via a SQL recursive CTE.
+///
+/// Uses `idx_edges_source` / `idx_edges_target` on each recursive step so only
+/// reachable edges are touched — O(reachable_edges) instead of O(E) total.
+/// UNION (not UNION ALL) deduplicates visited nodes, preventing re-visits in
+/// cyclic graphs. Results are capped at 500.
+pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    related_nodes_conn(&conn, start_id, depth)
 }
 
 #[cfg(test)]
