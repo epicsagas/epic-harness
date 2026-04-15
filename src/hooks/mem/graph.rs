@@ -31,21 +31,20 @@ pub struct Graph {
     pub edges: Vec<GraphEdge>,
 }
 
-pub fn rebuild_graph() -> io::Result<()> {
+/// Build a `Graph` value from the current DB state (shared by `rebuild_graph` and `rebuild_graph_json`).
+fn build_graph() -> io::Result<Graph> {
     let ids = list_node_ids()?;
-    let mut nodes = vec![];
-    for id in &ids {
-        if let Ok(node) = read_node(id) {
-            nodes.push(GraphNode {
-                id: node.frontmatter.id,
-                title: node.frontmatter.title,
-                node_type: node.frontmatter.node_type,
-                tags: node.frontmatter.tags,
-            });
-        }
-    }
-    let raw_edges = read_edges();
-    let edges: Vec<GraphEdge> = raw_edges
+    let nodes = ids
+        .iter()
+        .filter_map(|id| read_node(id).ok())
+        .map(|node| GraphNode {
+            id: node.frontmatter.id,
+            title: node.frontmatter.title,
+            node_type: node.frontmatter.node_type,
+            tags: node.frontmatter.tags,
+        })
+        .collect();
+    let edges = read_edges()
         .into_iter()
         .map(|e| GraphEdge {
             source: e.source,
@@ -54,42 +53,19 @@ pub fn rebuild_graph() -> io::Result<()> {
             weight: e.weight,
         })
         .collect();
+    Ok(Graph { nodes, edges })
+}
 
-    let graph = Graph { nodes, edges };
-    let data = serde_json::to_vec_pretty(&graph)
+pub fn rebuild_graph() -> io::Result<()> {
+    let data = serde_json::to_vec_pretty(&build_graph()?)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    atomic_write(&graph_path(), &data)?;
-    Ok(())
+    atomic_write(&graph_path(), &data)
 }
 
 /// Build graph JSON string directly from DB (no file I/O).
 /// Used by the web server to always return fresh data.
 pub fn rebuild_graph_json() -> io::Result<String> {
-    let ids = list_node_ids()?;
-    let mut nodes = vec![];
-    for id in &ids {
-        if let Ok(node) = read_node(id) {
-            nodes.push(GraphNode {
-                id: node.frontmatter.id,
-                title: node.frontmatter.title,
-                node_type: node.frontmatter.node_type,
-                tags: node.frontmatter.tags,
-            });
-        }
-    }
-    let raw_edges = read_edges();
-    let edges: Vec<GraphEdge> = raw_edges
-        .into_iter()
-        .map(|e| GraphEdge {
-            source: e.source,
-            target: e.target,
-            relation: e.relation,
-            weight: e.weight,
-        })
-        .collect();
-
-    let graph = Graph { nodes, edges };
-    serde_json::to_string_pretty(&graph)
+    serde_json::to_string_pretty(&build_graph()?)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 

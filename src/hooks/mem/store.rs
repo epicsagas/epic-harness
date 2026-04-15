@@ -366,6 +366,22 @@ pub fn read_node(id: &str) -> io::Result<Node> {
     read_node_conn(&conn, id)
 }
 
+/// Batch-read multiple nodes by ID in a single `WHERE id IN (...)` query.
+pub fn read_nodes_conn<'a>(conn: &Connection, ids: &[&'a str]) -> Vec<Node> {
+    if ids.is_empty() {
+        return vec![];
+    }
+    let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({ph})");
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    stmt.query_map(rusqlite::params_from_iter(ids.iter()), row_to_node)
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
 pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?1");
     conn.query_row(&sql, params![id], row_to_node)
