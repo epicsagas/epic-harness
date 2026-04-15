@@ -221,15 +221,12 @@ fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
         })
         .collect();
 
-    if results.is_empty() {
-        return json!({
-            "count": 0,
-            "results": results,
-            "note": "no results — check FTS5 query syntax if using special operators"
-        });
+    let count = results.len();
+    let mut resp = json!({ "count": count, "results": results });
+    if count == 0 {
+        resp["note"] = json!("no results — check FTS5 query syntax if using special operators");
     }
-
-    json!(results)
+    resp
 }
 
 fn tool_mem_related(conn: &Connection, args: &Value) -> Value {

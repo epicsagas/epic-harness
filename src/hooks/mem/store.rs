@@ -1106,16 +1106,6 @@ fn is_leap(y: u64) -> bool {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn setup_temp_db() -> tempfile::TempDir {
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        // SAFETY: single-threaded test context guarded by ENV_LOCK mutex.
-        unsafe { std::env::set_var("HARNESS_ROOT", dir.path()); }
-        dir
-    }
 
     fn make_node(id: &str, title: &str, node_type: &str, tags: &[&str], importance: Option<f64>) -> Node {
         let ts = "2024-01-01T00:00:00Z".to_string();

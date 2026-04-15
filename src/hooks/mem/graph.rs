@@ -177,15 +177,12 @@ mod tests {
     use super::*;
     use super::super::store::{append_edge, Edge};
     use std::env;
-    use std::sync::Mutex;
-
-    // Serialize env mutation across all tests in this module.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Set HARNESS_ROOT to a per-test temp dir so tests don't pollute the real DB.
+    /// Caller MUST hold `super::super::TEST_ENV_LOCK` for the duration of the test.
     fn setup_temp_db() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().expect("tmp dir");
-        // SAFETY: guarded by ENV_LOCK; no concurrent env reads within this module.
+        // SAFETY: guarded by the process-wide TEST_ENV_LOCK held by each caller.
         unsafe { env::set_var("HARNESS_ROOT", dir.path().to_str().unwrap()) };
         // Open DB once to initialise schema.
         let _ = open_db().expect("open_db in setup");
@@ -207,7 +204,7 @@ mod tests {
     /// graph_neighbors returns 1-hop neighbors including backward edges.
     #[test]
     fn graph_neighbors_returns_direct_neighbors() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // A -> B, A -> C, D -> A (backward edge)
@@ -229,7 +226,7 @@ mod tests {
     /// graph_neighbors excludes all seeds from the result set.
     #[test]
     fn graph_neighbors_excludes_seeds() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // Seed A -> Seed B -> C
@@ -248,7 +245,7 @@ mod tests {
     /// graph_neighbors with empty seed list returns empty.
     #[test]
     fn graph_neighbors_empty_seeds() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
         let result = graph_neighbors(&[]);
         assert!(result.is_empty(), "empty seeds -> empty result");
@@ -259,7 +256,7 @@ mod tests {
     /// node_id alone). Cycles must not produce duplicate results.
     #[test]
     fn related_nodes_recursive_cte() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // Chain: A -> B -> C
@@ -283,7 +280,7 @@ mod tests {
     /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
     #[test]
     fn graph_neighbors_connection_count() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // Both seeds A and B connect to C (default weight 1.0 each → total 2.0).
