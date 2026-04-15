@@ -14,7 +14,7 @@ use std::io::{self, BufRead, Write};
 use super::graph::{graph_neighbors_conn, related_nodes_conn};
 use super::store::{
     importance_for_type, new_uuid, now_iso, open_db, query_nodes_conn, read_node_conn,
-    search_nodes_conn, smart_recall_conn, touch_nodes_conn, validate_node_id,
+    read_nodes_conn, search_nodes_conn, smart_recall_conn, touch_nodes_conn, validate_node_id,
     write_node_dedup_conn, Node, NodeFrontmatter,
 };
 
@@ -304,32 +304,44 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
         let seed_ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
         let neighbors = graph_neighbors_conn(conn, &seed_ids);
 
-        // Add up to 5 graph neighbors not already in results
+        // Add up to 5 graph neighbors not already in results — batch-read in one query.
         let existing_ids: std::collections::HashSet<&str> = scored.iter()
             .map(|sn| sn.node.frontmatter.id.as_str())
             .collect();
 
-        let mut neighbor_results: Vec<Value> = vec![];
-        for (nid, edge_weight) in neighbors.iter().take(5) {
-            if existing_ids.contains(nid.as_str()) {
-                continue;
-            }
-            if let Ok(node) = read_node_conn(conn, nid) {
-                neighbor_results.push(json!({
-                    "id":          node.frontmatter.id,
-                    "title":       node.frontmatter.title,
-                    "type":        node.frontmatter.node_type,
-                    "tags":        node.frontmatter.tags,
-                    "importance":  node.frontmatter.importance,
-                    "score":       0.0, // graph neighbors don't have a recall score
-                    "body":        node.body.chars().take(200).collect::<String>(),
-                    "via_graph":   true,
-                    "connections": (edge_weight * 100.0).round() / 100.0
-                }));
-            }
-        }
+        // Collect candidate (id, weight) pairs first so we can batch-read nodes.
+        let candidates: Vec<(&str, f64)> = neighbors.iter()
+            .filter(|(nid, _)| !existing_ids.contains(nid.as_str()))
+            .take(5)
+            .map(|(nid, w)| (nid.as_str(), *w))
+            .collect();
 
-        if !neighbor_results.is_empty() {
+        if !candidates.is_empty() {
+            let candidate_ids: Vec<&str> = candidates.iter().map(|(id, _)| *id).collect();
+            let weight_by_id: std::collections::HashMap<&str, f64> =
+                candidates.iter().cloned().collect();
+
+            let neighbor_results: Vec<Value> = read_nodes_conn(conn, &candidate_ids)
+                .into_iter()
+                .map(|node| {
+                    let edge_weight = weight_by_id
+                        .get(node.frontmatter.id.as_str())
+                        .copied()
+                        .unwrap_or(0.0);
+                    json!({
+                        "id":          node.frontmatter.id,
+                        "title":       node.frontmatter.title,
+                        "type":        node.frontmatter.node_type,
+                        "tags":        node.frontmatter.tags,
+                        "importance":  node.frontmatter.importance,
+                        "score":       0.0,
+                        "body":        node.body.chars().take(200).collect::<String>(),
+                        "via_graph":   true,
+                        "connections": (edge_weight * 100.0).round() / 100.0
+                    })
+                })
+                .collect();
+
             results.extend(neighbor_results);
         }
     }
