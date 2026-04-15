@@ -604,10 +604,11 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
 // ── Smart recall (composite scoring) ─────────────────
 
 /// Composite relevance score weights.
-const W_RECENCY: f64 = 0.25;
+const W_RECENCY:    f64 = 0.20;  // was 0.25 — reduced to make room for graph boost
 const W_IMPORTANCE: f64 = 0.35;
-const W_ACCESS: f64 = 0.15;
-const W_FTS: f64 = 0.25;
+const W_ACCESS:     f64 = 0.15;
+const W_FTS:        f64 = 0.20;  // was 0.25
+const W_GRAPH:      f64 = 0.10;  // edge-weight connectivity boost (new)
 
 /// Scored node: a node with a computed relevance score.
 #[derive(Debug, Clone)]
@@ -705,6 +706,42 @@ pub fn smart_recall(
 
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);
+
+    // Graph-boost pass: add W_GRAPH * edge_weight_score for edges between top candidates.
+    if scored.len() > 1 {
+        let ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
+        let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        // Sum edge weights for each node connected to other top-scored candidates.
+        let sql = format!(
+            "SELECT source AS node_id, SUM(weight) AS w FROM edges \
+             WHERE source IN ({ph}) AND target IN ({ph}) GROUP BY source \
+             UNION ALL \
+             SELECT target AS node_id, SUM(weight) AS w FROM edges \
+             WHERE source IN ({ph}) AND target IN ({ph}) GROUP BY target"
+        );
+        if let Ok(mut stmt) = conn.prepare(&sql) {
+            let params: Vec<&dyn rusqlite::ToSql> =
+                ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>()
+                    .into_iter().cycle().take(ids.len() * 4).collect();
+            let weight_map: std::collections::HashMap<String, f64> = stmt
+                .query_map(params.as_slice(), |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+                })
+                .map(|rows| {
+                    let mut map: std::collections::HashMap<String, f64> = Default::default();
+                    for r in rows.flatten() { *map.entry(r.0).or_default() += r.1; }
+                    map
+                })
+                .unwrap_or_default();
+            let max_w = weight_map.values().cloned().fold(0.0_f64, f64::max).max(1.0);
+            for sn in &mut scored {
+                let boost = weight_map.get(&sn.node.frontmatter.id).copied().unwrap_or(0.0);
+                sn.score += W_GRAPH * (boost / max_w);
+            }
+            // Re-sort after boost
+            scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        }
+    }
 
     // Touch retrieved nodes
     for sn in &scored {
