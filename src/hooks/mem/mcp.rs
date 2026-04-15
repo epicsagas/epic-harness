@@ -221,6 +221,14 @@ fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
         })
         .collect();
 
+    if results.is_empty() {
+        return json!({
+            "count": 0,
+            "results": results,
+            "note": "no results — check FTS5 query syntax if using special operators"
+        });
+    }
+
     json!(results)
 }
 
@@ -334,7 +342,7 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
                         "type":        node.frontmatter.node_type,
                         "tags":        node.frontmatter.tags,
                         "importance":  node.frontmatter.importance,
-                        "score":       0.0,
+                        "score":       (edge_weight * 100.0).round() / 100.0,
                         "body":        node.body.chars().take(200).collect::<String>(),
                         "via_graph":   true,
                         "connections": (edge_weight * 100.0).round() / 100.0
