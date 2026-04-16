@@ -18,7 +18,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ("sync",    "Sync team agents to .claude/agents/"),
     ("link",    "Link a team to the current project"),
     ("unlink",  "Remove team agents from current project"),
-    ("delete",  "Permanently delete a team from the global store"),
+    ("delete",  "Remove team from current project (--global to disband from org)"),
     ("history", "List agent history backups"),
     ("help",    "Show this help message"),
 ];

@@ -271,13 +271,15 @@ epic team list --org netflix          # teams in a named org
 epic team show backend                # config, mission, agents
 epic team show backend --playbook     # + full accumulated playbook
 
-# Attach / detach from a project
-epic team sync backend                # copy agents → .claude/agents/backend/
-epic team link backend                # sync + register project in team config
-epic team unlink backend              # alias for delete (remove from current project)
+# Dispatch to project
+epic team sync backend                # dispatch: copy agents → .claude/agents/backend/
+epic team link backend                # dispatch + register project in team config
 
-# Remove
-epic team delete backend              # remove from current project (.claude/agents/backend/)
+# Recall from project
+epic team delete backend              # recall: remove from current project only
+epic team unlink backend              # alias for delete
+
+# Disband (remove from org entirely)
 epic team delete backend --global     # permanently delete from org store + local copy
 
 # History
