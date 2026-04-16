@@ -104,12 +104,11 @@ epic team delete backend --global    # permanently delete from org store + local
 epic team history backend reviewer   # list .history/ backups for an agent
 ```
 
-### Env / flags
+### Flags
 
-| Variable / Flag | Description |
+| Flag | Description |
 |---|---|
-| `HARNESS_ORG` | Default org (overrides "epic"). Set per-shell or in `.envrc`. |
-| `--org <name>` | Override org for any subcommand |
+| `--org <name>` | Target a specific org (default: `"epic"`) |
 | `--playbook` | `show` only: print full accumulated playbook |
 
 ---

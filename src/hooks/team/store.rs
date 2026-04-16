@@ -231,7 +231,7 @@ pub fn list_history(org: &str, team: &str, agent_name: &str) -> Vec<String> {
 // ── Defaults ──────────────────────────────────────────
 
 pub fn default_org() -> String {
-    std::env::var("HARNESS_ORG").unwrap_or_else(|_| "epic".to_string())
+    "epic".to_string()
 }
 
 pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static str)> {

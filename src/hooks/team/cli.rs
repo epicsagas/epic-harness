@@ -188,9 +188,9 @@ fn today_str() -> String {
 // ── cmd_default: interactive design flow ──────────────
 
 fn cmd_default() -> i32 {
-    // 1. Resolve org
-    let org = std::env::var("HARNESS_ORG").unwrap_or_else(|_| "epic".to_string());
-    println!("Org: {}  (set HARNESS_ORG to change)", org);
+    // 1. Resolve org — default "epic", override with --org at any subcommand
+    let org = "epic".to_string();
+    println!("Org: {}  (use --org <name> to target a different org)", org);
     println!();
 
     // 2. Scan project
@@ -659,7 +659,7 @@ fn cmd_delete(args: &[String]) -> i32 {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let local_agents_dir = cwd.join(".claude").join("agents").join(&team);
 
-    // Resolve org: --org flag > frontmatter in any local agent file > HARNESS_ORG env > "epic"
+    // Resolve org: --org flag > frontmatter in any local agent file > "epic"
     let org = flags.get("org").cloned().unwrap_or_else(|| {
         // Try reading org from frontmatter of any synced agent file
         if local_agents_dir.is_dir() {

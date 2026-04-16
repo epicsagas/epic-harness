@@ -315,8 +315,8 @@ without bloating the context window with it.
 
 ```bash
 epic team                          # accumulates in "epic" org (default)
-HARNESS_ORG=netflix epic team      # separate Netflix-style topology
-HARNESS_ORG=client-x epic team     # per-client engagement
+epic team --org netflix            # separate Netflix-style topology
+epic team --org client-x           # per-client engagement
 ```
 
 Same team name in the same org = intentional cross-project sharing.
