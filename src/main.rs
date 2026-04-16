@@ -20,6 +20,10 @@ fn main() {
         let code = hooks::mem::run(&args[1..]);
         std::process::exit(code);
     }
+    if subcmd == "team" {
+        let code = hooks::team::run(&args[1..]);
+        std::process::exit(code);
+    }
 
     // Read stdin once, pass to hook subcommands (skip if TTY — no EOF would arrive)
     let mut stdin_buf = String::new();
@@ -40,7 +44,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" => unreachable!(),
+        "install" | "uninstall" | "mem" | "team" => unreachable!(),
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0
@@ -65,6 +69,7 @@ fn main() {
             eprintln!("  snapshot     Save session state mid-conversation");
             eprintln!("  reflect      Analyze observations and evolve skills (session end)\n");
             eprintln!("USER SUBCOMMANDS:");
+            eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");
