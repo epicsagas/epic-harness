@@ -367,7 +367,7 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 }
 
 /// Batch-read multiple nodes by ID in a single `WHERE id IN (...)` query.
-pub fn read_nodes_conn<'a>(conn: &Connection, ids: &[&'a str]) -> Vec<Node> {
+pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> Vec<Node> {
     if ids.is_empty() {
         return vec![];
     }
@@ -660,7 +660,7 @@ pub fn smart_recall_conn(
     // Gather FTS matches if hint is provided
     let fts_ids: std::collections::HashSet<String> = if let Some(h) = hint {
         if !h.is_empty() {
-            search_nodes_conn(&conn, h, limit * 4)
+            search_nodes_conn(conn, h, limit * 4)
                 .into_iter()
                 .map(|n| n.frontmatter.id.clone())
                 .collect()

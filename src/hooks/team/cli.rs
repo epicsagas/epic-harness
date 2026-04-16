@@ -150,7 +150,7 @@ fn sync_to_project(org: &str, team: &str) -> io::Result<u32> {
     let mission = load_mission(org, team).unwrap_or_default();
 
     let cwd = std::env::current_dir()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     let dest = cwd.join(".claude").join("agents").join(team);
     fs::create_dir_all(&dest)?;
 
@@ -651,16 +651,15 @@ fn cmd_delete(args: &[String]) -> i32 {
     // Resolve org: --org flag > frontmatter in any local agent file > "epic"
     let org = flags.get("org").cloned().unwrap_or_else(|| {
         // Try reading org from frontmatter of any synced agent file
-        if local_agents_dir.is_dir() {
-            if let Ok(entries) = fs::read_dir(&local_agents_dir) {
-                for entry in entries.flatten() {
-                    if entry.path().extension().and_then(|e| e.to_str()) == Some("md") {
-                        if let Ok(content) = fs::read_to_string(entry.path()) {
-                            if let Some(org) = read_org_from_agent_file(&content) {
-                                return org;
-                            }
-                        }
-                    }
+        if local_agents_dir.is_dir()
+            && let Ok(entries) = fs::read_dir(&local_agents_dir)
+        {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|e| e.to_str()) == Some("md")
+                    && let Ok(content) = fs::read_to_string(entry.path())
+                    && let Some(org) = read_org_from_agent_file(&content)
+                {
+                    return org;
                 }
             }
         }
