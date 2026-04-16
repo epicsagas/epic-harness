@@ -116,6 +116,7 @@ pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(Stri
 /// Sorted by weight descending (strongest connections first).
 ///
 /// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
+#[cfg(test)]
 pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];

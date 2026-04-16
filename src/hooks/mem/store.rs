@@ -856,6 +856,7 @@ pub fn touch_nodes_conn(conn: &Connection, ids: &[String]) {
 
 /// Batch-touch multiple nodes (used after smart_recall).
 /// Wraps all updates in a single transaction to avoid N individual round-trips.
+#[allow(dead_code)]
 pub fn touch_nodes(ids: &[String]) {
     if ids.is_empty() {
         return;

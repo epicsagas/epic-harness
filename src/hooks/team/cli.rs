@@ -103,7 +103,6 @@ fn confirm(msg: &str, default: bool) -> bool {
 struct ProjectContext {
     name: String,
     stacks: Vec<String>,
-    readme_excerpt: String,
 }
 
 fn scan_project() -> ProjectContext {
@@ -135,17 +134,7 @@ fn scan_project() -> ProjectContext {
         stacks.push("java".to_string());
     }
 
-    let readme_excerpt = fs::read_to_string(cwd.join("README.md"))
-        .unwrap_or_default()
-        .chars()
-        .take(400)
-        .collect();
-
-    ProjectContext {
-        name,
-        stacks,
-        readme_excerpt,
-    }
+    ProjectContext { name, stacks }
 }
 
 fn recommend_team_type(_ctx: &ProjectContext) -> &'static str {

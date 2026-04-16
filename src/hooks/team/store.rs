@@ -75,6 +75,7 @@ pub fn team_history_dir(org: &str, team: &str) -> PathBuf {
 
 // ── CRUD ──────────────────────────────────────────────
 
+#[allow(dead_code)]
 pub fn list_orgs() -> Vec<String> {
     let base = orgs_base_dir();
     if !base.exists() {
