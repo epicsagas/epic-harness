@@ -274,11 +274,11 @@ epic team show backend --playbook     # + full accumulated playbook
 # Attach / detach from a project
 epic team sync backend                # copy agents → .claude/agents/backend/
 epic team link backend                # sync + register project in team config
-epic team unlink backend              # remove .claude/agents/backend/ (global store untouched)
+epic team unlink backend              # alias for delete (remove from current project)
 
 # Remove
-epic team delete backend              # permanently delete from global store + local copy
-epic team delete backend --keep-local # delete global only, keep .claude/agents/backend/
+epic team delete backend              # remove from current project (.claude/agents/backend/)
+epic team delete backend --global     # permanently delete from org store + local copy
 
 # History
 epic team history backend reviewer    # list .history/ backups for an agent

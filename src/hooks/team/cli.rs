@@ -635,39 +635,10 @@ fn cmd_link(args: &[String]) -> i32 {
 }
 
 // ── cmd_unlink ────────────────────────────────────────
+// Alias for `delete` (without --global) — kept for discoverability
 
 fn cmd_unlink(args: &[String]) -> i32 {
-    let (pos, flags) = parse_flags(args);
-    let team = match pos.first() {
-        Some(t) => t.clone(),
-        None => {
-            eprintln!("error: unlink requires <team>");
-            eprintln!("Usage: epic team unlink <team> [--org <name>]");
-            return 1;
-        }
-    };
-
-    let _org = flags.get("org").cloned().unwrap_or_else(default_org);
-
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let agents_dir = cwd.join(".claude").join("agents").join(&team);
-
-    if !agents_dir.exists() {
-        println!("Nothing to unlink: .claude/agents/{}/ does not exist.", team);
-        return 0;
-    }
-
-    match fs::remove_dir_all(&agents_dir) {
-        Ok(_) => {
-            println!("✓ Removed .claude/agents/{}/", team);
-            println!("  (Team still exists in global store. Run 'epic team link {}' to re-link.)", team);
-            0
-        }
-        Err(e) => {
-            eprintln!("error removing .claude/agents/{}/: {}", team, e);
-            1
-        }
-    }
+    cmd_delete(args)
 }
 
 // ── cmd_delete ────────────────────────────────────────
@@ -678,58 +649,72 @@ fn cmd_delete(args: &[String]) -> i32 {
         Some(t) => t.clone(),
         None => {
             eprintln!("error: delete requires <team>");
-            eprintln!("Usage: epic team delete <team> [--org <name>] [--keep-local]");
+            eprintln!("Usage: epic team delete <team> [--org <name>] [--global]");
             return 1;
         }
     };
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
-    let keep_local = flags.contains_key("keep-local");
+    let global = flags.contains_key("global");
 
-    if !team_exists(&org, &team) {
-        eprintln!("error: team '{}' not found in org '{}'", team, org);
-        return 1;
-    }
-
-    let store_dir = team_store_dir(&org, &team);
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let local_agents_dir = cwd.join(".claude").join("agents").join(&team);
-    let local_exists = local_agents_dir.exists();
 
-    // Show what will be deleted
-    println!("This will permanently delete:");
-    println!("  Global store: {}", store_dir.display());
-    if local_exists && !keep_local {
-        println!("  Local agents: {}", local_agents_dir.display());
-    }
-    println!();
-    println!("  ⚠  This cannot be undone. The .history/ backups will also be removed.");
-    println!();
-
-    if !confirm(&format!("Delete team '{}'?", team), false) {
-        println!("Aborted.");
-        return 0;
-    }
-
-    // Remove global store
-    match fs::remove_dir_all(&store_dir) {
-        Ok(_) => println!("✓ Deleted global store: {}", store_dir.display()),
-        Err(e) => {
-            eprintln!("error removing global store: {}", e);
+    if global {
+        // --global: permanently delete from org store (+ local if present)
+        if !team_exists(&org, &team) {
+            eprintln!("error: team '{}' not found in org '{}'", team, org);
             return 1;
         }
-    }
 
-    // Remove local agents unless --keep-local
-    if local_exists && !keep_local {
+        let store_dir = team_store_dir(&org, &team);
+        println!("This will permanently delete:");
+        println!("  Global store: {}", store_dir.display());
+        if local_agents_dir.exists() {
+            println!("  Local agents: {}", local_agents_dir.display());
+        }
+        println!();
+        println!("  ⚠  This cannot be undone. All agents and .history/ backups will be removed.");
+        println!();
+
+        if !confirm(&format!("Permanently delete team '{}' from org '{}'?", team, org), false) {
+            println!("Aborted.");
+            return 0;
+        }
+
+        match fs::remove_dir_all(&store_dir) {
+            Ok(_) => println!("✓ Deleted global store: {}", store_dir.display()),
+            Err(e) => {
+                eprintln!("error removing global store: {}", e);
+                return 1;
+            }
+        }
+        if local_agents_dir.exists() {
+            match fs::remove_dir_all(&local_agents_dir) {
+                Ok(_) => println!("✓ Removed local agents: .claude/agents/{}/", team),
+                Err(e) => eprintln!("warning: could not remove local agents: {}", e),
+            }
+        }
+        println!();
+        println!("Team '{}' permanently deleted from org '{}'.", team, org);
+    } else {
+        // default: remove from current project only (.claude/agents/{team}/)
+        if !local_agents_dir.exists() {
+            println!("Team '{}' is not linked to this project (.claude/agents/{}/ not found).", team, team);
+            return 0;
+        }
         match fs::remove_dir_all(&local_agents_dir) {
-            Ok(_) => println!("✓ Removed local agents: .claude/agents/{}/", team),
-            Err(e) => eprintln!("warning: could not remove local agents: {}", e),
+            Ok(_) => {
+                println!("✓ Removed .claude/agents/{}/", team);
+                println!("  (Global store untouched. Use 'epic team link {}' to re-attach.)", team);
+            }
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return 1;
+            }
         }
     }
 
-    println!();
-    println!("Team '{}' deleted from org '{}'.", team, org);
     0
 }
 
