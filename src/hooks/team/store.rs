@@ -266,7 +266,9 @@ pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_ty
     )
 }
 
-pub fn inject_team_context(agent_content: &str, team_name: &str, team_type: &str, mission: &str) -> String {
+/// Inject `org` and `team` fields into frontmatter, and replace/append `## Team Context`.
+/// Called at sync time on canonical agent content before writing to .claude/agents/.
+pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team_type: &str, mission: &str) -> String {
     let type_label = match team_type {
         "stream" => "Stream-aligned",
         "platform" => "Platform",
@@ -275,22 +277,59 @@ pub fn inject_team_context(agent_content: &str, team_name: &str, team_type: &str
         _ => team_type,
     };
 
-    let context_section = format!(
-        "## Team Context\n**Team**: {} ({})\n**Mission**: {}\n**Full playbook**: `epic team show {} --playbook`\n",
-        team_name, type_label, mission, team_name
-    );
+    // ── 1. Inject org + team into frontmatter ─────────────────────────────
+    let content = if agent_content.starts_with("---") {
+        // Find closing ---
+        if let Some(end) = agent_content[3..].find("\n---") {
+            let fm_body = &agent_content[3..3 + end];        // between the two ---
+            let after   = &agent_content[3 + end + 4..];    // everything after closing ---
 
-    if agent_content.contains("## Team Context") {
-        // Find the position of "## Team Context" and replace everything from there
-        if let Some(pos) = agent_content.find("## Team Context") {
-            let before = &agent_content[..pos];
-            format!("{}{}", before.trim_end_matches('\n'), format!("\n{}", context_section))
+            // Strip any existing org:/team: lines then append fresh ones
+            let cleaned_fm: String = fm_body
+                .lines()
+                .filter(|l| !l.starts_with("org:") && !l.starts_with("team:"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            format!("---{}\norg: {}\nteam: {}\n---{}", cleaned_fm, org, team_name, after)
         } else {
-            format!("{}\n{}", agent_content.trim_end_matches('\n'), context_section)
+            agent_content.to_string()
         }
     } else {
-        format!("{}\n{}", agent_content.trim_end_matches('\n'), context_section)
+        agent_content.to_string()
+    };
+
+    // ── 2. Inject/replace ## Team Context section ──────────────────────────
+    let context_section = format!(
+        "## Team Context\n**Org**: {}\n**Team**: {} ({})\n**Mission**: {}\n**Full playbook**: `epic team show {} --playbook`\n",
+        org, team_name, type_label, mission, team_name
+    );
+
+    if let Some(pos) = content.find("## Team Context") {
+        let before = &content[..pos];
+        format!("{}\n{}", before.trim_end_matches('\n'), context_section)
+    } else {
+        format!("{}\n{}", content.trim_end_matches('\n'), context_section)
     }
+}
+
+/// Read the `org` field from an agent file's frontmatter.
+/// Returns None if the file has no frontmatter or no `org:` field.
+pub fn read_org_from_agent_file(content: &str) -> Option<String> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let end = content[3..].find("\n---")?;
+    let fm = &content[3..3 + end];
+    for line in fm.lines() {
+        if let Some(val) = line.strip_prefix("org:") {
+            let v = val.trim().to_string();
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(String, String)], project: &str) -> String {

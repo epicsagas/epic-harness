@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use super::store::{
     append_playbook, build_agent_file, build_playbook_section, default_agents_for_type,
     default_org, inject_team_context, list_agents, list_history, list_teams, load_agent,
-    load_mission, load_playbook, load_team_config, save_agent, save_mission, save_team_config,
-    team_agents_dir, team_exists, team_store_dir, TeamConfig,
+    load_mission, load_playbook, load_team_config, read_org_from_agent_file, save_agent,
+    save_mission, save_team_config, team_agents_dir, team_exists, team_store_dir, TeamConfig,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -170,7 +170,7 @@ fn sync_to_project(org: &str, team: &str) -> io::Result<u32> {
 
     for agent_name in &agents {
         if let Some(content) = load_agent(org, team, agent_name) {
-            let injected = inject_team_context(&content, team, &config.team_type, &mission);
+            let injected = inject_team_context(&content, org, team, &config.team_type, &mission);
             let dest_path = dest.join(format!("{}.md", agent_name));
             fs::write(&dest_path, injected)?;
             count += 1;
@@ -654,11 +654,29 @@ fn cmd_delete(args: &[String]) -> i32 {
         }
     };
 
-    let org = flags.get("org").cloned().unwrap_or_else(default_org);
     let global = flags.contains_key("global");
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let local_agents_dir = cwd.join(".claude").join("agents").join(&team);
+
+    // Resolve org: --org flag > frontmatter in any local agent file > HARNESS_ORG env > "epic"
+    let org = flags.get("org").cloned().unwrap_or_else(|| {
+        // Try reading org from frontmatter of any synced agent file
+        if local_agents_dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&local_agents_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().and_then(|e| e.to_str()) == Some("md") {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            if let Some(org) = read_org_from_agent_file(&content) {
+                                return org;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        default_org()
+    });
 
     if global {
         // --global: permanently delete from org store (+ local if present)
