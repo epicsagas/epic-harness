@@ -53,7 +53,7 @@ cargo install --path .
 epic install
 ```
 
-### Rust binary (optional, ~4x faster hooks)
+### Install from binary
 
 ```bash
 # Homebrew (macOS)
@@ -549,7 +549,7 @@ You can still use `.harness/guard-rules.yaml` in the project root if you want to
 
 ## Development
 
-### Rust (primary — ~4x faster)
+### Build
 
 ```bash
 cargo install --path .          # Build + install to ~/.cargo/bin/
