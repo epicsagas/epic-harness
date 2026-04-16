@@ -28,7 +28,7 @@ auto-discovers them.
 
 ```
 ~/.harness/orgs/
-└── {org}/                            # default: "epic"  (HARNESS_ORG env to override)
+└── {org}/                            # default: "epic"  (--org flag to override)
     └── teams/
         └── {team}/
             ├── config.json           # name, org, type, projects[], created, updated
@@ -70,7 +70,7 @@ Launches a 4-phase interactive flow:
 
 ```
 Phase 1 — Resolve context
-  - Org from HARNESS_ORG env | default "epic"
+  - Org from --org flag | default "epic"
   - Scan project: detect stack (Rust/Node/Python/Go/Java), read README excerpt
   - List existing teams in org
 
@@ -174,7 +174,7 @@ their project-local copies. Add to `.gitignore` explicitly if undesired.
 epic team                          # creates in "epic" org
 
 # Model a Netflix-style topology in a separate org
-HARNESS_ORG=netflix epic team      # creates in "netflix" org
+epic team --org netflix            # creates in "netflix" org
 
 # List orgs
 ls ~/.harness/orgs/
