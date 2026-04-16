@@ -3,7 +3,7 @@
 **6 commands. Auto-trigger skills. Self-evolving.**
 
 <p align="center">
-<a href="README.md">English</a> | <a href="docs/ja/README.md">日本語</a> | <a href="docs/ko/README.md">한국어</a> | <a href="docs/de/README.md">Deutsch</a> | <a href="docs/fr/README.md">Français</a> | <a href="docs/zh-CN/README.md">简体中文</a> | <a href="docs/zh-TW/README.md">繁體中文</a> | <a href="docs/pt-BR/README.md">Português</a> | <a href="docs/es/README.md">Español</a> | <a href="docs/hi/README.md">हिन्दी</a>
+<a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
 </p>
 
 <p align="center">
