@@ -116,18 +116,6 @@ pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(Stri
 /// Sorted by weight descending (strongest connections first).
 ///
 /// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
-#[cfg(test)]
-pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
-    if seed_ids.is_empty() {
-        return vec![];
-    }
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    graph_neighbors_conn(&conn, seed_ids)
-}
-
 /// BFS traversal using an existing connection.
 pub fn related_nodes_conn(conn: &Connection, start_id: &str, depth: usize) -> Vec<String> {
     let sql = "
@@ -176,24 +164,18 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::store::{append_edge, Edge};
-    use std::env;
-    use std::sync::Mutex;
+    use super::super::store::{append_edge_conn, init_schema, Edge};
+    use rusqlite::Connection;
 
-    // Serialize env mutation across all tests in this module.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Set HARNESS_ROOT to a per-test temp dir so tests don't pollute the real DB.
-    fn setup_temp_db() -> tempfile::TempDir {
-        let dir = tempfile::TempDir::new().expect("tmp dir");
-        // SAFETY: guarded by ENV_LOCK; no concurrent env reads within this module.
-        unsafe { env::set_var("HARNESS_ROOT", dir.path().to_str().unwrap()) };
-        // Open DB once to initialise schema.
-        let _ = open_db().expect("open_db in setup");
-        dir
+    /// Open a fresh in-memory SQLite DB with the full schema applied.
+    /// Each call returns an independent connection — no shared state, no env var mutation.
+    fn mem_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        conn
     }
 
-    fn insert_edge(id: &str, src: &str, tgt: &str) {
+    fn insert_edge(conn: &Connection, id: &str, src: &str, tgt: &str) {
         let e = Edge {
             id: id.to_string(),
             source: src.to_string(),
@@ -202,22 +184,21 @@ mod tests {
             weight: 1.0,
             ts: "2026-01-01T00:00:00Z".to_string(),
         };
-        append_edge(&e).expect("append_edge");
+        append_edge_conn(conn, &e).expect("append_edge_conn");
     }
 
     /// graph_neighbors returns 1-hop neighbors including backward edges.
     #[test]
     fn graph_neighbors_returns_direct_neighbors() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // A -> B, A -> C, D -> A (backward edge)
-        insert_edge("e1", "A", "B");
-        insert_edge("e2", "A", "C");
-        insert_edge("e3", "D", "A");
+        insert_edge(&conn, "e1", "A", "B");
+        insert_edge(&conn, "e2", "A", "C");
+        insert_edge(&conn, "e3", "D", "A");
 
         let seeds = vec!["A".to_string()];
-        let mut result = graph_neighbors(&seeds);
+        let mut result = graph_neighbors_conn(&conn, &seeds);
         result.sort_by(|a, b| a.0.cmp(&b.0));
 
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
@@ -230,15 +211,14 @@ mod tests {
     /// graph_neighbors excludes all seeds from the result set.
     #[test]
     fn graph_neighbors_excludes_seeds() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // Seed A -> Seed B -> C
-        insert_edge("e1", "A", "B");
-        insert_edge("e2", "B", "C");
+        insert_edge(&conn, "e1", "A", "B");
+        insert_edge(&conn, "e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors(&seeds);
+        let result = graph_neighbors_conn(&conn, &seeds);
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
 
         assert!(ids.contains(&"C"), "C should be reachable from B");
@@ -249,9 +229,8 @@ mod tests {
     /// graph_neighbors with empty seed list returns empty.
     #[test]
     fn graph_neighbors_empty_seeds() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
-        let result = graph_neighbors(&[]);
+        let conn = mem_db();
+        let result = graph_neighbors_conn(&conn, &[]);
         assert!(result.is_empty(), "empty seeds -> empty result");
     }
 
@@ -259,27 +238,26 @@ mod tests {
     /// depth=2 returns 2-hop nodes, and cycles are deduplicated.
     #[test]
     fn related_nodes_recursive_cte() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // Chain: A -> B -> C
-        insert_edge("e1", "A", "B");
-        insert_edge("e2", "B", "C");
+        insert_edge(&conn, "e1", "A", "B");
+        insert_edge(&conn, "e2", "B", "C");
 
         // Depth 1: only B
-        let d1 = related_nodes("A", 1);
+        let d1 = related_nodes_conn(&conn, "A", 1);
         assert!(d1.contains(&"B".to_string()), "depth 1 should reach B");
         assert!(!d1.contains(&"C".to_string()), "depth 1 should NOT reach C");
 
         // Depth 2: B and C
-        let d2 = related_nodes("A", 2);
+        let d2 = related_nodes_conn(&conn, "A", 2);
         assert!(d2.contains(&"B".to_string()), "depth 2 should reach B");
         assert!(d2.contains(&"C".to_string()), "depth 2 should reach C");
         assert!(!d2.contains(&"A".to_string()), "start node must not appear");
 
         // Cycle: C -> A — depth 3 should still deduplicate (no duplicates)
-        insert_edge("e3", "C", "A");
-        let d3 = related_nodes("A", 3);
+        insert_edge(&conn, "e3", "C", "A");
+        let d3 = related_nodes_conn(&conn, "A", 3);
         let unique: HashSet<_> = d3.iter().collect();
         assert_eq!(d3.len(), unique.len(), "no duplicate nodes in cyclic graph");
     }
@@ -287,15 +265,14 @@ mod tests {
     /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
     #[test]
     fn graph_neighbors_connection_count() {
-        let _lock = ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // Both seeds A and B connect to C (default weight 1.0 each → total 2.0).
-        insert_edge("e1", "A", "C");
-        insert_edge("e2", "B", "C");
+        insert_edge(&conn, "e1", "A", "C");
+        insert_edge(&conn, "e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors(&seeds);
+        let result = graph_neighbors_conn(&conn, &seeds);
         let c_weight = result.iter().find(|(id, _)| id == "C").map(|(_, w)| *w);
         assert_eq!(c_weight, Some(2.0), "C connected to both seeds should have total weight 2.0");
     }

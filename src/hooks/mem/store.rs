@@ -138,6 +138,14 @@ pub fn open_db() -> io::Result<Connection> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .map_err(io::Error::other)?;
 
+    init_schema(&conn)?;
+    auto_migrate_legacy(&conn);
+    Ok(conn)
+}
+
+/// Apply the full schema (tables, indexes, triggers) to an open connection.
+/// Exposed for tests that open an in-memory DB and need the same schema.
+pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS nodes (
             id           TEXT PRIMARY KEY,
@@ -216,10 +224,7 @@ pub fn open_db() -> io::Result<Connection> {
     )
     .map_err(io::Error::other)?;
 
-    // Auto-migrate legacy file-based store on first open
-    auto_migrate_legacy(&conn);
-
-    Ok(conn)
+    Ok(())
 }
 
 /// Silently import any legacy `nodes/*.md` + `edges.jsonl` into the DB.
