@@ -99,6 +99,8 @@ epic team show backend --playbook    # also print full playbook
 epic team sync backend               # re-copy agents to .claude/agents/
 epic team link backend               # attach existing team (sync + add to config.projects)
 epic team unlink backend             # remove .claude/agents/backend/ (keeps global store)
+epic team delete backend             # permanently delete from global store + local copy
+epic team delete backend --keep-local  # delete global only, keep .claude/agents/backend/
 epic team history backend reviewer   # list .history/ backups for an agent
 ```
 
@@ -244,4 +246,5 @@ pub struct TeamConfig {
 | `cmd_sync` | Re-sync from global store to project |
 | `cmd_link` | Sync + register project in config |
 | `cmd_unlink` | Remove `.claude/agents/{team}/` from project |
+| `cmd_delete` | Permanently delete team from global store; prompts confirmation; `--keep-local` skips local removal |
 | `cmd_history` | List `.history/` backups for an agent |

@@ -234,8 +234,110 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | `/go` | Build it — auto-plan, TDD subagents, parallel execution |
 | `/check` | Verify — parallel code review + security audit + performance |
 | `/ship` | Ship — PR, CI, merge |
-| `/team` | Design project-specific agent team |
+| `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
+
+## Team (`epic team`)
+
+Teams are **org-level**, not project-bound. Running `/team` in any project enriches a shared pool
+of agent definitions — never silently overwrites them.
+
+### How it works
+
+```
+epic team                      # interactive: scan project → design → write → sync
+         ↓
+~/.harness/orgs/epic/teams/backend/   ← global store (persists across projects)
+         ↓
+epic team sync backend
+         ↓
+{project}/.claude/agents/backend/     ← Claude Code auto-discovers at session start
+├── domain-expert.md                  ← role definition + Team Context injected
+├── reviewer.md
+└── tester.md
+         ↓
+Next session: agents are active — auto-selected by Claude or called explicitly
+```
+
+### CLI reference
+
+```bash
+# Create or update a team (interactive 4-phase flow)
+epic team
+
+# Browse
+epic team list                        # all teams in current org
+epic team list --org netflix          # teams in a named org
+epic team show backend                # config, mission, agents
+epic team show backend --playbook     # + full accumulated playbook
+
+# Attach / detach from a project
+epic team sync backend                # copy agents → .claude/agents/backend/
+epic team link backend                # sync + register project in team config
+epic team unlink backend              # remove .claude/agents/backend/ (global store untouched)
+
+# Remove
+epic team delete backend              # permanently delete from global store + local copy
+epic team delete backend --keep-local # delete global only, keep .claude/agents/backend/
+
+# History
+epic team history backend reviewer    # list .history/ backups for an agent
+```
+
+### Using teams from coding agents
+
+After syncing, agents are available in the next session automatically:
+
+```
+# Claude Code / Cursor / OpenCode / Codex
+@domain-expert implement the payment gateway
+@reviewer check this PR for edge cases
+@tester write integration tests for auth
+
+# Or let the agent auto-select based on task context
+```
+
+Each agent file carries a **Team Context** section injected at sync time:
+
+```markdown
+## Team Context
+**Team**: backend (Stream-aligned)
+**Mission**: Own the API layer end-to-end
+**Full playbook**: `epic team show backend --playbook`
+```
+
+Agents know their team, mission, and how to load the full playbook on demand —
+without bloating the context window with it.
+
+### Multi-org
+
+```bash
+epic team                          # accumulates in "epic" org (default)
+HARNESS_ORG=netflix epic team      # separate Netflix-style topology
+HARNESS_ORG=client-x epic team     # per-client engagement
+```
+
+Same team name in the same org = intentional cross-project sharing.
+`epic/teams/backend` accumulates knowledge from every project that creates or links it.
+
+### Team types
+
+| Type | Keyword | Default agents |
+|------|---------|---------------|
+| Stream-aligned | `stream` | domain-expert, reviewer, tester |
+| Platform | `platform` | api-designer, infra-specialist, dx-agent |
+| Enabling | `enabling` | specialist |
+| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
+
+### Merge strategy — no silent overwrites
+
+| Object | Rule |
+|--------|------|
+| Agent — new | Auto-add |
+| Agent — unchanged | Skip |
+| Agent — changed | **Prompt** (default: keep existing). On replace → backed up to `.history/` |
+| `playbook.md` | Always **append** — never truncated |
+| `mission.md` — changed | **Prompt** (default: keep existing) |
 
 ## Auto Skills (Ring 2)
 
@@ -423,13 +525,22 @@ Project-specific data lives in your home directory. This survives project deleti
 ├── evolved/          # Auto-evolved skills
 ├── evolved_backup/   # Best checkpoint (for stagnation rollback)
 ├── dispatch/         # Skill dispatch logs (JSONL)
-├── team/             # /team generated agents and skills
+├── team/             # legacy (superseded by ~/.harness/orgs/)
 ├── evolution.jsonl   # Full evolution history
 └── metrics.json      # Aggregate stats + skill attribution
 
 ~/.harness/
 ├── memory.db         # SQLite knowledge graph (nodes + edges + FTS5)
-└── graph.json        # Cached graph (for web UI)
+├── graph.json        # Cached graph (for web UI)
+└── orgs/             # epic team global store
+    └── {org}/
+        └── teams/
+            └── {team}/
+                ├── config.json
+                ├── mission.md
+                ├── playbook.md
+                ├── agents/
+                └── .history/
 ```
 
 You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
