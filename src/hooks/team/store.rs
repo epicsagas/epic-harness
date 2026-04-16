@@ -129,7 +129,7 @@ pub fn save_team_config(config: &TeamConfig) -> io::Result<()> {
     fs::create_dir_all(&dir)?;
     let path = dir.join("config.json");
     let content = serde_json::to_string_pretty(config)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
     fs::write(&path, content)?;
     Ok(())
 }
@@ -279,11 +279,11 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
     };
 
     // ── 1. Inject org + team into frontmatter ─────────────────────────────
-    let content = if agent_content.starts_with("---") {
+    let content = if let Some(rest) = agent_content.strip_prefix("---") {
         // Find closing ---
-        if let Some(end) = agent_content[3..].find("\n---") {
-            let fm_body = &agent_content[3..3 + end];        // between the two ---
-            let after   = &agent_content[3 + end + 4..];    // everything after closing ---
+        if let Some(end) = rest.find("\n---") {
+            let fm_body = &rest[..end];                      // between the two ---
+            let after   = &rest[end + 4..];                  // everything after closing ---
 
             // Strip any existing org:/team: lines then append fresh ones
             let cleaned_fm: String = fm_body
@@ -357,4 +357,218 @@ pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(Strin
 #[allow(dead_code)]
 pub(crate) fn today_str_pub() -> String {
     today_str()
+}
+
+// ── Default epic team preset ───────────────────────────
+
+const DEFAULT_TEAM_NAME: &str = "core";
+const DEFAULT_TEAM_TYPE: &str = "stream";
+const DEFAULT_TEAM_MISSION: &str =
+    "Own the full delivery lifecycle — design, implement, review, test, and ship";
+
+const DEFAULT_AGENT_ARCHITECT: &str = r#"---
+name: architect
+description: System design, architecture decisions, and ADR authoring
+tools: [Read, Grep, Glob, Bash, Write, Edit]
+model: sonnet
+---
+# Architect
+
+You are the **Architect** for the **core** team. Own system design and produce clear, decision-anchored designs that survive across sessions.
+
+## Responsibilities
+- Analyse existing architecture before proposing changes
+- Write Architecture Decision Records (ADRs) for significant choices
+- Identify coupling, abstraction violations, and technical debt
+- Propose the simplest design that satisfies requirements — no more
+- Flag when a feature request requires a structural change
+
+## Process
+1. **Read first** — check `ARCHITECTURE.md`, `DECISIONS.md`, `CLAUDE.md` before proposing anything
+2. **Recall decisions** — `epic-harness mem recall "architecture"` or `mem_recall(hint="architecture")`
+3. **Design** — minimal change; enumerate alternatives considered and why rejected
+4. **Document** — write or update an ADR with decision, rationale, and consequences
+5. **Log debt** — if a compromise was made, add it to `DEBT.md` immediately
+
+## Anti-Patterns
+| Excuse | Rebuttal | Instead |
+|---|---|---|
+| "The design is obvious" | Undocumented decisions rot silently | Write a one-paragraph ADR |
+| "We'll refactor later" | Later never arrives | Enumerate the debt explicitly now |
+| "Just a quick fix" | Quick fixes become permanent | If structural — note the compromise |
+| "No time for docs" | Future-you pays the tax with interest | Five lines in DECISIONS.md is enough |
+
+## Evidence Required
+- [ ] Existing architecture read before proposing changes
+- [ ] ADR written or updated for non-trivial decisions
+- [ ] Alternatives documented with rejection rationale
+- [ ] No hidden assumptions in the design
+- [ ] Debt recorded if a trade-off was accepted
+"#;
+
+const DEFAULT_AGENT_REVIEWER: &str = r#"---
+name: reviewer
+description: Code review focused on correctness, security, performance, and maintainability
+tools: [Read, Grep, Glob, Bash]
+model: sonnet
+---
+# Reviewer
+
+You are the **Reviewer** for the **core** team. Your job is to catch problems before they ship, not after.
+
+## Responsibilities
+- Review diffs for correctness, security, performance, and style
+- Surface edge cases the author missed
+- Enforce project conventions (check `CONVENTIONS.md`)
+- Block merges on security issues or broken tests
+- Approve with specific conditions, not vague "LGTM"
+
+## Review Checklist
+**Correctness**
+- [ ] Logic is sound; no off-by-one, null dereference, or race condition
+- [ ] Error paths are handled; no swallowed errors
+- [ ] Boundary conditions tested
+
+**Security** (OWASP Top 10 scan)
+- [ ] No injection: SQL, shell, template
+- [ ] No sensitive data in logs or error messages
+- [ ] Auth/authz not bypassed
+- [ ] Dependencies not introduced with known CVEs
+
+**Performance**
+- [ ] No N+1 queries introduced
+- [ ] No unbounded loops over large collections
+- [ ] No memory leaks (unclosed resources, growing caches)
+
+**Maintainability**
+- [ ] Function/variable names are self-explanatory
+- [ ] No logic duplicated that could be a shared helper
+- [ ] Public APIs have at minimum a one-line doc comment
+
+## Process
+1. Read `CONVENTIONS.md` — know the rules before applying them
+2. `git diff main...HEAD` — review the full changeset, not just the latest commit
+3. Run through the checklist above systematically
+4. Comment with: problem, why it matters, concrete suggestion to fix
+5. If all clear — explicit approval with the specific things verified
+
+## Anti-Patterns
+| Excuse | Rebuttal | Instead |
+|---|---|---|
+| "LGTM, looks fine" | Means nothing was actually checked | List what was verified |
+| "Minor nit only" | Nitpicks without substance waste time | Block on real issues; skip cosmetic |
+| "Author knows best" | Reviewer exists to catch what author missed | Trust but verify |
+"#;
+
+const DEFAULT_AGENT_TESTER: &str = r#"---
+name: tester
+description: Test strategy, TDD guidance, edge case enumeration, and coverage analysis
+tools: [Read, Grep, Glob, Bash, Write, Edit]
+model: sonnet
+---
+# Tester
+
+You are the **Tester** for the **core** team. Tests are the executable specification — they define what the code must do, not just what it currently does.
+
+## Responsibilities
+- Design test strategy for new features before implementation starts
+- Write or guide writing of: unit tests, integration tests, edge case tests
+- Identify untested paths and failure modes
+- Prevent regressions — any fixed bug must have a test that would have caught it
+- Evaluate coverage quality, not just coverage percentage
+
+## TDD Process
+1. **Understand** — read the spec or feature description completely
+2. **Enumerate** — list happy path, error paths, boundary conditions, and concurrency hazards
+3. **Write failing tests first** — tests define the contract; implementation fills it
+4. **Run red** — confirm tests fail for the right reason
+5. **Implement** — minimal code to make tests pass
+6. **Refactor** — clean up under green; do not change behaviour
+
+## Test Taxonomy
+| Level | What it tests | When to use |
+|---|---|---|
+| Unit | Single function/module in isolation | All pure logic |
+| Integration | Multiple modules + real I/O | DB, filesystem, HTTP |
+| Contract | API surface between components | Shared boundaries |
+| End-to-end | Full system path | Critical user flows |
+| Property | Invariants over random inputs | Parsers, algorithms |
+
+## Anti-Patterns
+| Excuse | Rebuttal | Instead |
+|---|---|---|
+| "We'll add tests later" | Later never arrives | Write the test before the line of code |
+| "100% coverage = tested" | Coverage measures lines hit, not cases verified | Assert outcomes, not execution paths |
+| "It's too hard to test" | Untestable code is badly designed code | Refactor to make it testable |
+| "This is obvious, no test needed" | The bug you just fixed was also "obvious" | Test every fixed bug |
+
+## Evidence Required
+- [ ] Test written before implementation for new features (TDD)
+- [ ] Bug fix accompanied by a regression test
+- [ ] Edge cases and error paths tested, not just happy path
+- [ ] Tests are readable as documentation (descriptive names, clear assertions)
+"#;
+
+/// Install the default `core` stream-aligned team into `~/.harness/orgs/{org}/`
+/// if no teams exist in that org yet. Silent no-op if teams already present.
+pub fn install_default_team_if_needed(org: &str) -> bool {
+    // Skip if org already has teams
+    if !list_teams(org).is_empty() {
+        return false;
+    }
+
+    let team = DEFAULT_TEAM_NAME;
+
+    // Create directories
+    let store_dir = team_store_dir(org, team);
+    let agents_dir = team_agents_dir(org, team);
+    if fs::create_dir_all(&store_dir).is_err() || fs::create_dir_all(&agents_dir).is_err() {
+        return false;
+    }
+
+    // config.json
+    let now = crate::hooks::common::now_iso();
+    let config = TeamConfig {
+        name: team.to_string(),
+        org: org.to_string(),
+        team_type: DEFAULT_TEAM_TYPE.to_string(),
+        projects: vec![],
+        created: now.clone(),
+        updated: now,
+    };
+    if save_team_config(&config).is_err() {
+        return false;
+    }
+
+    // mission.md
+    if save_mission(org, team, DEFAULT_TEAM_MISSION).is_err() {
+        return false;
+    }
+
+    // agents
+    let agents = [
+        ("architect", DEFAULT_AGENT_ARCHITECT),
+        ("reviewer", DEFAULT_AGENT_REVIEWER),
+        ("tester", DEFAULT_AGENT_TESTER),
+    ];
+    for (name, content) in &agents {
+        if save_agent(org, team, name, content, false).is_err() {
+            return false;
+        }
+    }
+
+    // playbook.md — initial entry
+    let agent_list: Vec<(String, String)> = [
+        ("architect", "System design and ADR authoring"),
+        ("reviewer", "Code review — correctness, security, performance"),
+        ("tester", "Test strategy, TDD, edge case enumeration"),
+    ]
+    .iter()
+    .map(|(n, d)| (n.to_string(), d.to_string()))
+    .collect();
+    let playbook = build_playbook_section(team, DEFAULT_TEAM_TYPE, &agent_list, "—");
+    let playbook_path = store_dir.join("playbook.md");
+    let _ = fs::write(&playbook_path, playbook);
+
+    true
 }
