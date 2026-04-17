@@ -316,11 +316,11 @@ fn cmd_default(org: &str) -> i32 {
         .map(|(n, d)| (n.to_string(), d.to_string()))
         .collect();
 
-    if team_exists(&org, &team_name) {
+    if team_exists(org, &team_name) {
         // Existing team — update path
 
         // a. Check mission
-        let old_mission = load_mission(&org, &team_name).unwrap_or_default();
+        let old_mission = load_mission(org, &team_name).unwrap_or_default();
         let old_trimmed = old_mission.trim();
         let new_trimmed = mission.trim();
         if old_trimmed != new_trimmed {
@@ -328,7 +328,7 @@ fn cmd_default(org: &str) -> i32 {
             println!("  OLD: {}", old_trimmed);
             println!("  NEW: {}", new_trimmed);
             if confirm("Replace mission?", false) {
-                if let Err(e) = save_mission(&org, &team_name, &mission) {
+                if let Err(e) = save_mission(org, &team_name, &mission) {
                     eprintln!("error saving mission: {}", e);
                     return 1;
                 }
@@ -340,10 +340,10 @@ fn cmd_default(org: &str) -> i32 {
         // b. For each proposed agent
         for (agent_name, agent_desc) in &agents_with_names {
             let new_content = build_agent_file(agent_name, agent_desc, &team_name, &team_type);
-            match load_agent(&org, &team_name, agent_name) {
+            match load_agent(org, &team_name, agent_name) {
                 None => {
                     // New agent
-                    if let Err(e) = save_agent(&org, &team_name, agent_name, &new_content, false) {
+                    if let Err(e) = save_agent(org, &team_name, agent_name, &new_content, false) {
                         eprintln!("error saving agent '{}': {}", agent_name, e);
                         return 1;
                     }
@@ -360,7 +360,7 @@ fn cmd_default(org: &str) -> i32 {
                             existing_content.len()
                         );
                         if confirm(&format!("Replace '{}'?", agent_name), false) {
-                            if let Err(e) = save_agent(&org, &team_name, agent_name, &new_content, true) {
+                            if let Err(e) = save_agent(org, &team_name, agent_name, &new_content, true) {
                                 eprintln!("error saving agent '{}': {}", agent_name, e);
                                 return 1;
                             }
@@ -380,14 +380,14 @@ fn cmd_default(org: &str) -> i32 {
             &agents_with_names,
             &ctx.name,
         );
-        if let Err(e) = append_playbook(&org, &team_name, &playbook_section, &ctx.name, &today_str()) {
+        if let Err(e) = append_playbook(org, &team_name, &playbook_section, &ctx.name, &today_str()) {
             eprintln!("error updating playbook: {}", e);
             return 1;
         }
         println!("+ Playbook updated");
 
         // d. Update config
-        if let Some(mut config) = load_team_config(&org, &team_name) {
+        if let Some(mut config) = load_team_config(org, &team_name) {
             if !config.projects.contains(&ctx.name) {
                 config.projects.push(ctx.name.clone());
             }
@@ -401,12 +401,12 @@ fn cmd_default(org: &str) -> i32 {
         // New team
 
         // Create directories
-        let store_dir = team_store_dir(&org, &team_name);
+        let store_dir = team_store_dir(org, &team_name);
         if let Err(e) = fs::create_dir_all(&store_dir) {
             eprintln!("error creating team directory: {}", e);
             return 1;
         }
-        if let Err(e) = fs::create_dir_all(team_agents_dir(&org, &team_name)) {
+        if let Err(e) = fs::create_dir_all(team_agents_dir(org, &team_name)) {
             eprintln!("error creating agents directory: {}", e);
             return 1;
         }
@@ -428,7 +428,7 @@ fn cmd_default(org: &str) -> i32 {
         println!("+ Created config.json");
 
         // c. Save mission
-        if let Err(e) = save_mission(&org, &team_name, &mission) {
+        if let Err(e) = save_mission(org, &team_name, &mission) {
             eprintln!("error saving mission: {}", e);
             return 1;
         }
@@ -437,7 +437,7 @@ fn cmd_default(org: &str) -> i32 {
         // d. Create agents
         for (agent_name, agent_desc) in &agents_with_names {
             let content = build_agent_file(agent_name, agent_desc, &team_name, &team_type);
-            if let Err(e) = save_agent(&org, &team_name, agent_name, &content, false) {
+            if let Err(e) = save_agent(org, &team_name, agent_name, &content, false) {
                 eprintln!("error saving agent '{}': {}", agent_name, e);
                 return 1;
             }
@@ -467,7 +467,7 @@ fn cmd_default(org: &str) -> i32 {
 
     // 10. Sync phase
     if confirm(&format!("Sync agents to ./.claude/agents/{}/? ", team_name), true) {
-        match sync_to_project(&org, &team_name) {
+        match sync_to_project(org, &team_name) {
             Ok(count) => println!("✓ Synced {} agent(s) to .claude/agents/{}/", count, team_name),
             Err(e) => {
                 eprintln!("error syncing: {}", e);
