@@ -34,6 +34,17 @@ pub(crate) fn home_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
+/// Produce a YAML double-quoted scalar (with surrounding quotes) safe for frontmatter embedding.
+/// Handles newlines, Unicode line/paragraph separators, backslashes, and double-quotes.
+fn yaml_quote(s: &str) -> String {
+    let escaped = s
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ") // incl. Unicode LINE/PARAGRAPH SEPARATOR
+        .replace('\0', "");
+    format!("\"{}\"", escaped)
+}
+
 fn to_title_case(s: &str) -> String {
     s.split('-')
         .map(|word| {
@@ -242,13 +253,14 @@ pub fn save_agent(org: &str, team: &str, agent_name: &str, content: &str, backup
         let history_dir = team_history_dir(org, team);
         fs::create_dir_all(&history_dir)?;
         let iso = crate::hooks::common::now_iso();
-        let timestamp = iso[..19].replace(':', "-"); // "2026-04-17T10-30-45"
+        let timestamp = iso.get(..19).unwrap_or(&iso).replace(':', "-"); // "2026-04-17T10-30-45"
         let backup_name = format!("{}-{}.md", agent_name, timestamp);
         let backup_path = history_dir.join(&backup_name);
         fs::copy(&agent_path, &backup_path)?;
     }
 
-    let tmp = agent_path.with_extension("md.tmp");
+    // Include PID to avoid collision when two processes write the same agent concurrently
+    let tmp = agents_dir.join(format!("{}.{}.tmp", agent_name, std::process::id()));
     fs::write(&tmp, content)?;
     fs::rename(&tmp, &agent_path)?;
     Ok(())
@@ -306,10 +318,18 @@ pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static s
 }
 
 pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_type: &str) -> String {
+    // YAML frontmatter values use double-quoted scalars to prevent injection via
+    // colons, hashes, and Unicode line separators (U+2028/U+2029) — not just \n/\r.
+    let role_q = yaml_quote(role);
+    let desc_q = yaml_quote(description);
     let title = to_title_case(role);
     let tools = tools_for_role(role);
+    // Body (after ---) is Markdown; strip only control chars that break rendering.
+    let desc_body = description
+        .replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ")
+        .replace('\0', "");
     format!(
-        "---\nname: {role}\ndescription: {description}\ntools: {tools}\nmodel: sonnet\n---\n# {title}\n\nYou are the **{title}** for the **{team_name}** team.\n\n{description}\n"
+        "---\nname: {role_q}\ndescription: {desc_q}\ntools: {tools}\nmodel: sonnet\n---\n# {title}\n\nYou are the **{title}** for the **{team_name}** team.\n\n{desc_body}\n"
     )
 }
 

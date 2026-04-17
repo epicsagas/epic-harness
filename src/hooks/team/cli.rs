@@ -9,8 +9,8 @@ use super::store::{
     append_playbook, build_agent_file, build_playbook_section, default_agents_for_type,
     default_org, home_dir, inject_team_context, list_agents, list_history, list_orgs, list_teams,
     load_agent, load_mission, load_playbook, load_team_config, read_org_from_agent_file,
-    save_agent, save_mission, save_team_config, team_agents_dir, team_exists, team_store_dir,
-    today_str, TeamConfig,
+    sanitize_mission, save_agent, save_mission, save_team_config, team_agents_dir, team_exists,
+    team_store_dir, today_str, TeamConfig,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -165,8 +165,12 @@ fn scan_project() -> ProjectContext {
     ProjectContext { name, stacks }
 }
 
-fn recommend_team_type(_ctx: &ProjectContext) -> &'static str {
-    "stream"
+fn recommend_team_type(ctx: &ProjectContext) -> &'static str {
+    // Heuristic: infra-heavy stacks without web/scripting → platform; otherwise stream
+    // Note: scan_project detects rust/go/java/node/python but not ruby — keep in sync.
+    let has_infra = ctx.stacks.iter().any(|s| matches!(s.as_str(), "rust" | "go" | "java"));
+    let has_web = ctx.stacks.iter().any(|s| matches!(s.as_str(), "node" | "python"));
+    if has_infra && !has_web { "platform" } else { "stream" }
 }
 
 // ── Sync helper ───────────────────────────────────────
@@ -197,13 +201,13 @@ fn register_project_link(org: &str, team: &str) {
         return;
     }
 
-    if let Some(mut config) = load_team_config(org, team) {
-        if !config.projects.contains(&project_name) {
-            config.projects.push(project_name.clone());
-            config.updated = crate::hooks::common::now_iso();
-            if let Err(e) = save_team_config(&config) {
-                eprintln!("warning: could not update team config: {}", e);
-            }
+    if let Some(mut config) = load_team_config(org, team)
+        && !config.projects.contains(&project_name)
+    {
+        config.projects.push(project_name.clone());
+        config.updated = crate::hooks::common::now_iso();
+        if let Err(e) = save_team_config(&config) {
+            eprintln!("warning: could not update team config: {}", e);
         }
     }
 }
@@ -239,6 +243,10 @@ fn validate_org_name(org: &str) -> io::Result<()> {
 /// Returns the agents dir for a tool if that tool appears to be installed globally.
 fn installed_tool_agents_dir(tool: &str) -> Option<PathBuf> {
     let home = home_dir();
+    // home_dir() falls back to PathBuf::from(".") when HOME is unset — not an empty string.
+    if home == std::path::Path::new(".") {
+        return None;
+    }
     let parent = match tool {
         "codex"    => home.join(".codex"),
         "gemini"   => home.join(".gemini"),
@@ -328,6 +336,28 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
                 eprintln!("[harness] warn: could not create {}: {}", tool_team_dir.display(), e);
                 continue;
             }
+            // Symlink escape guard — same defense as the local .claude/agents/ path.
+            // NOTE: TOCTOU gap identical to the local path: create_dir_all runs before
+            // canonicalize, so a symlink at tool_team_dir could create content at the
+            // symlink target before the check fires. Acceptable for a single-user CLI.
+            let canon_agents = match agents_dir.canonicalize() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[harness] warn: agents dir unavailable for {tool}: {e}");
+                    continue;
+                }
+            };
+            let canon_team = match tool_team_dir.canonicalize() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[harness] warn: cannot resolve {}: {}", tool_team_dir.display(), e);
+                    continue;
+                }
+            };
+            if !canon_team.starts_with(&canon_agents) {
+                eprintln!("[harness] warn: team path escapes agents dir for {tool}, skipping");
+                continue;
+            }
             for agent_name in &agents {
                 if let Some(content) = load_agent(org, team, agent_name) {
                     let injected = inject_team_context(&content, org, team, &config.team_type, &mission);
@@ -335,9 +365,9 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
                     let dest_path = tool_team_dir.join(format!("{}.md", agent_name));
                     let existing = fs::read_to_string(&dest_path).unwrap_or_default();
                     if existing != transformed {
-                        if let Err(e) = fs::write(&dest_path, &transformed) {
+                        fs::write(&dest_path, &transformed).unwrap_or_else(|e| {
                             eprintln!("[harness] warn: could not write {}: {}", dest_path.display(), e);
-                        }
+                        });
                     }
                 }
             }
@@ -382,9 +412,9 @@ fn cmd_default(org: &str, args: &[String]) -> i32 {
         }
 
         let mission = match flags.get("mission").cloned() {
-            Some(m) if !m.is_empty() && m.len() <= 200 => m,
-            Some(m) if m.len() > 200 => {
-                eprintln!("error: --mission too long (max 200 chars, got {})", m.len());
+            Some(m) if !m.is_empty() && m.chars().count() <= 200 => m,
+            Some(m) if m.chars().count() > 200 => {
+                eprintln!("error: --mission too long (max 200 chars, got {})", m.chars().count());
                 return 1;
             }
             _ => {
@@ -446,8 +476,8 @@ fn cmd_default(org: &str, args: &[String]) -> i32 {
         let input = prompt("Mission (one-line domain ownership): ");
         if input.is_empty() {
             println!("Mission cannot be empty.");
-        } else if input.len() > 200 {
-            println!("Mission too long ({} chars, max 200).", input.len());
+        } else if input.chars().count() > 200 {
+            println!("Mission too long ({} chars, max 200).", input.chars().count());
         } else {
             break input;
         }
@@ -480,6 +510,8 @@ fn cmd_default_write(
     mission: &str,
     auto_sync: bool,
 ) -> i32 {
+    let mission_clean = sanitize_mission(mission);
+    let mission = mission_clean.as_str();
     let proposed_agents = default_agents_for_type(team_type);
     let agents_with_names: Vec<(String, String)> = proposed_agents
         .iter()
@@ -905,12 +937,9 @@ fn cmd_link(args: &[String]) -> i32 {
 }
 
 fn cmd_link_interactive(org_filter: Option<&str>) -> i32 {
-    // Fix B-3: org_filter가 Some일 때 validate_org_name 호출
-    if let Some(filter) = org_filter {
-        if let Err(e) = validate_org_name(filter) {
-            eprintln!("error: {}", e);
-            return 1;
-        }
+    if let Some(filter) = org_filter && let Err(e) = validate_org_name(filter) {
+        eprintln!("error: {}", e);
+        return 1;
     }
     // If a specific org is requested, read only that org (avoids N+1 when org is known)
     let entries: Vec<(String, String)> = if let Some(filter) = org_filter {
@@ -962,9 +991,13 @@ fn cmd_link_interactive(org_filter: Option<&str>) -> i32 {
 }
 
 // ── cmd_unlink ────────────────────────────────────────
-// Alias for `delete` (without --global) — kept for discoverability
+// Local-only alias for `delete` — kept for discoverability
 
 fn cmd_unlink(args: &[String]) -> i32 {
+    if args.iter().any(|a| a == "--global") {
+        eprintln!("error: --global is not valid for 'unlink'. Use 'epic team delete --global' to permanently remove from org.");
+        return 1;
+    }
     cmd_delete(args)
 }
 
@@ -1068,12 +1101,10 @@ fn cmd_delete(args: &[String]) -> i32 {
                     .ok()
                     .and_then(|p| p.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()))
                     .unwrap_or_default();
-                if !project_name.is_empty() {
-                    if let Some(mut config) = load_team_config(&org, &team) {
-                        config.projects.retain(|p| p != &project_name);
-                        config.updated = crate::hooks::common::now_iso();
-                        let _ = save_team_config(&config);
-                    }
+                if !project_name.is_empty() && let Some(mut config) = load_team_config(&org, &team) {
+                    config.projects.retain(|p| p != &project_name);
+                    config.updated = crate::hooks::common::now_iso();
+                    let _ = save_team_config(&config);
                 }
             }
             Err(e) => {
