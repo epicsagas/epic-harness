@@ -213,8 +213,8 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
     fs::create_dir_all(&dir)?;
     let path = dir.join("playbook.md");
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let safe_project = project.replace("-->", "-- >").replace("<!--", "<! --");
-    let safe_date = date.replace("-->", "-- >").replace("<!--", "<! --");
+    let safe_project = project.replace("-->", "-- >").replace("<!--", "<! --").replace("--!>", "--! >");
+    let safe_date = date.replace("-->", "-- >").replace("<!--", "<! --").replace("--!>", "--! >");
     let header = if !project.is_empty() || !date.is_empty() {
         format!("<!-- project: {} | date: {} -->\n", safe_project, safe_date)
     } else {
@@ -437,16 +437,39 @@ pub(crate) fn strip_yaml_quotes(s: &str) -> &str {
     }
 }
 
-/// Read the `org` field from an agent file's YAML frontmatter.
-/// Returns `None` if the file has no frontmatter or no `org:` field.
-pub fn read_org_from_agent_file(content: &str) -> Option<String> {
+/// Unescape a YAML double-quoted scalar for terminal display.
+/// Handles only the two sequences that `yaml_quote` produces for printable input:
+/// `\\` → `\` and `\"` → `"`.  Intended for display-only paths (e.g. `epic team show`).
+pub(crate) fn yaml_unescape_display(s: &str) -> String {
+    let inner = strip_yaml_quotes(s);
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                Some(other) => { out.push('\\'); out.push(other); }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Read a named field from an agent file's YAML frontmatter.
+/// `prefix` must include the trailing colon, e.g. `"org:"`.
+/// Returns `None` if the file has no frontmatter or the field is absent/empty.
+fn read_frontmatter_field(content: &str, prefix: &str) -> Option<String> {
     if !content.starts_with("---") {
         return None;
     }
     let end = content[3..].find("\n---")?;
     let fm = &content[3..3 + end];
     for line in fm.lines() {
-        if let Some(val) = line.strip_prefix("org:") {
+        if let Some(val) = line.strip_prefix(prefix) {
             let v = strip_yaml_quotes(val.trim()).to_string();
             if !v.is_empty() {
                 return Some(v);
@@ -456,24 +479,17 @@ pub fn read_org_from_agent_file(content: &str) -> Option<String> {
     None
 }
 
+/// Read the `org` field from an agent file's YAML frontmatter.
+/// Returns `None` if the file has no frontmatter or no `org:` field.
+pub fn read_org_from_agent_file(content: &str) -> Option<String> {
+    read_frontmatter_field(content, "org:")
+}
+
 /// Read the `team` field from an agent file's YAML frontmatter.
 /// Returns `None` if the file has no frontmatter or no `team:` field.
-#[allow(dead_code)]
-pub fn read_team_from_agent_file(content: &str) -> Option<String> {
-    if !content.starts_with("---") {
-        return None;
-    }
-    let end = content[3..].find("\n---")?;
-    let fm = &content[3..3 + end];
-    for line in fm.lines() {
-        if let Some(val) = line.strip_prefix("team:") {
-            let v = strip_yaml_quotes(val.trim()).to_string();
-            if !v.is_empty() {
-                return Some(v);
-            }
-        }
-    }
-    None
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn read_team_from_agent_file(content: &str) -> Option<String> {
+    read_frontmatter_field(content, "team:")
 }
 
 pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(String, String)], project: &str) -> String {
@@ -919,6 +935,42 @@ mod tests {
             read_team_from_agent_file(&injected),
             Some("my-team".to_string()),
             "team field must survive inject→read roundtrip"
+        );
+    }
+
+    #[test]
+    fn test_yaml_unescape_display() {
+        // basic quote stripping
+        assert_eq!(yaml_unescape_display("\"hello\""), "hello");
+        // backslash-quote → quote
+        assert_eq!(yaml_unescape_display("\"say \\\"hi\\\"\""), "say \"hi\"");
+        // double-backslash → single backslash
+        assert_eq!(yaml_unescape_display("\"a\\\\b\""), "a\\b");
+        // mixed
+        assert_eq!(yaml_unescape_display("\"a\\\\b \\\"c\\\"\""), "a\\b \"c\"");
+        // unquoted string passes through (no outer quotes to strip)
+        assert_eq!(yaml_unescape_display("plain"), "plain");
+        // unknown escape sequence preserved (e.g. \t is not produced by yaml_quote for names,
+        // but if it appeared we keep it rather than silently drop)
+        assert_eq!(yaml_unescape_display("\"a\\tb\""), "a\\tb");
+        // empty quoted
+        assert_eq!(yaml_unescape_display("\"\""), "");
+    }
+
+    #[test]
+    fn test_append_playbook_escapes_bogus_comment_terminator() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        // --!> is a bogus HTML5 comment terminator
+        let malicious_project = "foo --!> bar";
+        append_playbook("testorg4", "delta", "## section", malicious_project, "2026-01-01").unwrap();
+        let content = load_playbook("testorg4", "delta");
+        assert!(
+            content.contains("foo --! > bar"),
+            "--!> must be escaped to '--! >' in project name: {content}"
         );
     }
 

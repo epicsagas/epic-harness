@@ -9,7 +9,7 @@ use super::store::{
     append_playbook, build_agent_file, build_playbook_section, default_agents_for_type,
     default_org, home_dir, inject_team_context, list_agents, list_history, list_orgs, list_teams,
     load_agent, load_mission, load_playbook, load_team_config, read_org_from_agent_file,
-    sanitize_mission, save_agent, save_mission, save_team_config, strip_yaml_quotes,
+    sanitize_mission, save_agent, save_mission, save_team_config, yaml_unescape_display,
     team_agents_dir, team_exists, team_store_dir, today_str, TeamConfig,
 };
 
@@ -759,7 +759,7 @@ fn cmd_show(args: &[String]) -> i32 {
             .and_then(|content| {
                 content.lines()
                     .find(|line| line.trim_start().starts_with("description:"))
-                    .map(|line| strip_yaml_quotes(line.trim_start_matches("description:").trim()).to_string())
+                    .map(|line| yaml_unescape_display(line.trim_start_matches("description:").trim()))
             })
             .unwrap_or_default();
         if desc.is_empty() {
