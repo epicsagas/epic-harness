@@ -34,10 +34,12 @@ pub(crate) fn home_dir() -> PathBuf {
     PathBuf::from(".")
 }
 
-/// Produce a YAML double-quoted scalar (with surrounding quotes) safe for frontmatter embedding.
-/// Single-pass: handles `\\`, `"`, newlines + U+2028/U+2029 (→ space), `\t`, null bytes,
-/// and all remaining C0 control chars (U+0001-U+001F) via `\xHH` YAML escape.
+/// Produce a YAML 1.2 double-quoted scalar (with surrounding quotes) safe for frontmatter.
+/// Single-pass: `\\`→`\\\\`, `"`→`\\"`, newlines+U+2028/U+2029→space, `\t`→`\\t`,
+/// null bytes stripped, remaining C0 chars (U+0001–U+001F) → `\\xHH` (YAML 1.2 §6.8).
+/// NOTE: `\\xHH` requires a YAML 1.2 parser; YAML 1.1 parsers may not recognise it.
 fn yaml_quote(s: &str) -> String {
+    use std::fmt::Write as _;
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
@@ -47,7 +49,7 @@ fn yaml_quote(s: &str) -> String {
             '\n' | '\r' | '\u{2028}' | '\u{2029}' => out.push(' '),
             '\t' => out.push_str("\\t"),
             '\0' => {} // strip null bytes
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02X}", c as u32)),
+            c if (c as u32) < 0x20 => write!(out, "\\x{:02X}", c as u32).unwrap(),
             c => out.push(c),
         }
     }
@@ -243,7 +245,14 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
                 .filter(|name| name.ends_with(".md"))
                 .filter_map(|name| name.strip_suffix(".md").map(str::to_string))
                 // Allowlist: only [a-zA-Z0-9_-] — rejects path separators, device names, homoglyphs
-                .filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                .filter(|name| {
+                    let valid = !name.is_empty()
+                        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+                    if !valid {
+                        eprintln!("[harness] warn: skipping agent file with invalid name '{name}'");
+                    }
+                    valid
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -411,6 +420,15 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
 
 /// Read the `org` field from an agent file's frontmatter.
 /// Returns None if the file has no frontmatter or no `org:` field.
+/// Strip YAML double-quote wrapping (written by `yaml_quote`) from a scalar value.
+fn yaml_unquote(s: &str) -> &str {
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
+}
+
 pub fn read_org_from_agent_file(content: &str) -> Option<String> {
     if !content.starts_with("---") {
         return None;
@@ -419,7 +437,7 @@ pub fn read_org_from_agent_file(content: &str) -> Option<String> {
     let fm = &content[3..3 + end];
     for line in fm.lines() {
         if let Some(val) = line.strip_prefix("org:") {
-            let v = val.trim().to_string();
+            let v = yaml_unquote(val.trim()).to_string();
             if !v.is_empty() {
                 return Some(v);
             }
@@ -444,7 +462,8 @@ pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(Strin
 
     format!(
         "## {} Team Playbook\n**Type**: {}  **Project**: {}\n### Agent Roster\n{}\n### Coordination\n{}\n",
-        team_name, team_type, project, agent_roster, coordination_notes
+        strip_line_breaks(team_name), strip_line_breaks(team_type), strip_line_breaks(project),
+        agent_roster, coordination_notes
     )
 }
 
@@ -838,5 +857,20 @@ mod tests {
         // C0 boundary: U+001F (last C0) → \x1F, U+0020 (space) passes through
         assert_eq!(yaml_quote("a\x1fb"), "\"a\\x1Fb\"");
         assert_eq!(yaml_quote("a b"), "\"a b\"");
+        // mixed: C0 + backslash — backslash arm runs in char loop, no interaction
+        assert_eq!(yaml_quote("\x01\\"), "\"\\x01\\\\\"");
+    }
+
+    #[test]
+    fn test_yaml_unquote_roundtrip() {
+        // quoted string → unquote returns inner value
+        assert_eq!(yaml_unquote("\"my-org\""), "my-org");
+        assert_eq!(yaml_unquote("\"epic\""), "epic");
+        // unquoted string passes through unchanged
+        assert_eq!(yaml_unquote("plain"), "plain");
+        // empty quoted string
+        assert_eq!(yaml_unquote("\"\""), "");
+        // single char not treated as quoted (needs both open and close)
+        assert_eq!(yaml_unquote("\""), "\"");
     }
 }
