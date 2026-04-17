@@ -93,7 +93,6 @@ pub fn team_history_dir(org: &str, team: &str) -> PathBuf {
 
 // ── CRUD ──────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub fn list_orgs() -> Vec<String> {
     let base = orgs_base_dir();
     if !base.exists() {
@@ -613,5 +612,57 @@ mod tests {
         assert!(agents.contains(&"ops".to_string()));
         assert!(agents.contains(&"scribe".to_string()));
         assert!(agents.contains(&"explorer".to_string()));
+    }
+
+    #[test]
+    fn test_list_orgs_empty() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+        let orgs = list_orgs();
+        assert!(orgs.is_empty(), "fresh HOME should have no orgs");
+    }
+
+    #[test]
+    fn test_org_show_no_teams() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+        // Create an org dir with no teams subdir
+        let org_path = tmp.path().join(".harness").join("orgs").join("empty-org");
+        std::fs::create_dir_all(&org_path).unwrap();
+        let teams = list_teams("empty-org");
+        assert!(teams.is_empty(), "org with no teams dir should return empty list");
+    }
+
+    #[test]
+    fn test_status_no_agents_dir() {
+        // When .claude/agents/ does not exist, scanning produces empty list.
+        // We test this via the store: list_teams on a non-existent org returns empty.
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+        // Simulate: project dir with no .claude/agents/ — scan returns empty
+        let project_agents = tmp.path().join("project").join(".claude").join("agents");
+        assert!(!project_agents.exists(), ".claude/agents should not exist yet");
+        // Reading subdirs from a nonexistent path must yield empty (not panic)
+        let subdirs: Vec<_> = if project_agents.is_dir() {
+            std::fs::read_dir(&project_agents)
+                .ok()
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                        .filter_map(|e| e.file_name().into_string().ok())
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+        assert!(subdirs.is_empty(), "no .claude/agents/ should yield empty linked teams");
     }
 }

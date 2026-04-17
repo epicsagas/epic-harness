@@ -7,14 +7,16 @@ use std::path::PathBuf;
 
 use super::store::{
     append_playbook, build_agent_file, build_playbook_section, default_agents_for_type,
-    default_org, home_dir, inject_team_context, list_agents, list_history, list_teams, load_agent,
-    load_mission, load_playbook, load_team_config, read_org_from_agent_file, save_agent,
-    save_mission, save_team_config, team_agents_dir, team_exists, team_store_dir, TeamConfig,
+    default_org, home_dir, inject_team_context, list_agents, list_history, list_orgs, list_teams,
+    load_agent, load_mission, load_playbook, load_team_config, read_org_from_agent_file,
+    save_agent, save_mission, save_team_config, team_agents_dir, team_exists, team_store_dir,
+    TeamConfig,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
     ("list",    "List all teams in an org"),
     ("show",    "Show team details"),
+    ("status",  "Show teams linked to the current project"),
     ("sync",    "Sync team agents to .claude/agents/ (--global for ~/.claude/agents/)"),
     ("link",    "Link a team to the current project"),
     ("unlink",  "Remove team agents from current project"),
@@ -29,12 +31,13 @@ pub fn dispatch(args: &[String]) -> i32 {
 
     let sub = match args.first().map(|s| s.as_str()) {
         Some(s) if !s.starts_with("--") => s,
-        _ => return cmd_default(&org),
+        _ => return cmd_default(&org, args),
     };
 
     match sub {
         "list"    => cmd_list(&args[1..]),
         "show"    => cmd_show(&args[1..]),
+        "status"  => cmd_status(&args[1..]),
         "sync"    => cmd_sync(&args[1..]),
         "link"    => cmd_link(&args[1..]),
         "unlink"  => cmd_unlink(&args[1..]),
@@ -71,13 +74,25 @@ fn parse_flags(args: &[String]) -> (Vec<String>, HashMap<String, String>) {
     let mut flags: HashMap<String, String> = HashMap::new();
     let mut i = 0;
     while i < args.len() {
-        if args[i].starts_with("--") {
-            let key = args[i].trim_start_matches('-').to_string();
-            let val = args.get(i + 1).cloned().unwrap_or_default();
-            flags.insert(key, val);
-            i += 2;
+        let arg = &args[i];
+        if let Some(kv) = arg.strip_prefix("--") {
+            // --key=value form
+            if let Some((k, v)) = kv.split_once('=') {
+                flags.insert(k.to_string(), v.to_string());
+                i += 1;
+            } else {
+                // --key [value] — only consume next token as value if it's not a flag
+                let next_is_flag = args.get(i + 1).map(|n| n.starts_with("--")).unwrap_or(true);
+                if next_is_flag {
+                    flags.insert(kv.to_string(), String::new());
+                    i += 1;
+                } else {
+                    flags.insert(kv.to_string(), args[i + 1].clone());
+                    i += 2;
+                }
+            }
         } else {
-            positional.push(args[i].clone());
+            positional.push(arg.clone());
             i += 1;
         }
     }
@@ -261,28 +276,12 @@ fn today_str() -> String {
 
 // ── cmd_default: interactive design flow ──────────────
 
-fn cmd_default(org: &str) -> i32 {
-    println!("Org: {}  (use --org <name> to target a different org)", org);
-    println!();
+fn cmd_default(org: &str, args: &[String]) -> i32 {
+    let (_, flags) = parse_flags(args);
+    let yes = flags.contains_key("yes");
 
-    // 2. Scan project
     let ctx = scan_project();
-    println!("Project: {}", ctx.name);
-    if ctx.stacks.is_empty() {
-        println!("Stack: (none detected)");
-    } else {
-        println!("Stack: {}", ctx.stacks.join(", "));
-    }
-    println!();
 
-    // 3. List existing teams
-    let existing_teams = list_teams(org);
-    if !existing_teams.is_empty() {
-        println!("Existing teams in '{}': {}", org, existing_teams.join(", "));
-        println!();
-    }
-
-    // 4. Prompt team name
     let suggested_name: String = ctx
         .name
         .to_lowercase()
@@ -291,49 +290,89 @@ fn cmd_default(org: &str) -> i32 {
         .collect::<String>()
         .trim_matches('-')
         .to_string();
-    let team_name_input = prompt(&format!("Team name [{}]: ", suggested_name));
-    let team_name = if team_name_input.is_empty() {
-        suggested_name.clone()
-    } else {
-        team_name_input
-    };
 
+    let valid_types = ["stream", "platform", "enabling", "subsystem"];
+    let suggested_type = recommend_team_type(&ctx);
+
+    if yes {
+        // ── Non-interactive path ──────────────────────────
+        let team_name = flags.get("name").cloned().unwrap_or_else(|| suggested_name.clone());
+        if let Err(e) = validate_team_name(&team_name) {
+            eprintln!("error: {}", e);
+            return 1;
+        }
+
+        let team_type = flags.get("type").cloned().unwrap_or_else(|| suggested_type.to_string());
+        if !valid_types.contains(&team_type.as_str()) {
+            eprintln!("error: invalid --type '{}'. Must be one of: stream, platform, enabling, subsystem", team_type);
+            return 1;
+        }
+
+        let mission = match flags.get("mission").cloned() {
+            Some(m) if !m.is_empty() => m,
+            _ => {
+                eprintln!("error: --mission is required with --yes");
+                eprintln!("Usage: epic team --yes --name <name> --type <type> --mission \"<mission>\"");
+                return 1;
+            }
+        };
+
+        println!("Org: {}", org);
+        println!("Project: {}", ctx.name);
+        println!("Team: {} ({}) — {}", team_name, team_type, mission);
+
+        let proposed_agents = default_agents_for_type(&team_type);
+        println!("Agents: {}", proposed_agents.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "));
+
+        return cmd_default_write(org, &ctx, &team_name, &team_type, &mission, true);
+    }
+
+    // ── Interactive path ──────────────────────────────
+    println!("Org: {}  (use --org <name> to target a different org)", org);
+    println!();
+
+    println!("Project: {}", ctx.name);
+    if ctx.stacks.is_empty() {
+        println!("Stack: (none detected)");
+    } else {
+        println!("Stack: {}", ctx.stacks.join(", "));
+    }
+    println!();
+
+    let existing_teams = list_teams(org);
+    if !existing_teams.is_empty() {
+        println!("Existing teams in '{}': {}", org, existing_teams.join(", "));
+        println!();
+    }
+
+    // Team name
+    let team_name_input = prompt(&format!("Team name [{}]: ", suggested_name));
+    let team_name = if team_name_input.is_empty() { suggested_name.clone() } else { team_name_input };
     if let Err(e) = validate_team_name(&team_name) {
         eprintln!("error: {}", e);
         return 1;
     }
 
-    // 5. Prompt team type
-    let suggested_type = recommend_team_type(&ctx);
-    let valid_types = ["stream", "platform", "enabling", "subsystem"];
+    // Team type
     let team_type = loop {
         let input = prompt(&format!(
             "Team type (stream/platform/enabling/subsystem) [{}]: ",
             suggested_type
         ));
-        let t = if input.is_empty() {
-            suggested_type.to_string()
-        } else {
-            input
-        };
-        if valid_types.contains(&t.as_str()) {
-            break t;
-        }
+        let t = if input.is_empty() { suggested_type.to_string() } else { input };
+        if valid_types.contains(&t.as_str()) { break t; }
         println!("Invalid type '{}'. Must be one of: stream, platform, enabling, subsystem", t);
     };
 
-    // 6. Prompt mission
+    // Mission
     let mission = loop {
         let input = prompt("Mission (one-line domain ownership): ");
-        if !input.is_empty() {
-            break input;
-        }
+        if !input.is_empty() { break input; }
         println!("Mission cannot be empty.");
     };
 
     println!();
 
-    // 7. Show proposed agents
     let proposed_agents = default_agents_for_type(&team_type);
     println!("Proposed agents:");
     for (name, desc) in &proposed_agents {
@@ -342,47 +381,60 @@ fn cmd_default(org: &str) -> i32 {
     println!("  (based on {} template)", team_type);
     println!();
 
-    // 8. Confirm
     if !confirm("Proceed?", true) {
         println!("Aborted.");
         return 0;
     }
     println!();
 
-    // 9. Write phase
+    cmd_default_write(org, &ctx, &team_name, &team_type, &mission, false)
+}
+
+fn cmd_default_write(
+    org: &str,
+    ctx: &ProjectContext,
+    team_name: &str,
+    team_type: &str,
+    mission: &str,
+    auto_sync: bool,
+) -> i32 {
+    let proposed_agents = default_agents_for_type(team_type);
     let agents_with_names: Vec<(String, String)> = proposed_agents
         .iter()
         .map(|(n, d)| (n.to_string(), d.to_string()))
         .collect();
 
-    if team_exists(org, &team_name) {
-        // Existing team — update path
-
-        // a. Check mission
-        let old_mission = load_mission(org, &team_name).unwrap_or_default();
+    if team_exists(org, team_name) {
+        let old_mission = load_mission(org, team_name).unwrap_or_default();
         let old_trimmed = old_mission.trim();
         let new_trimmed = mission.trim();
         if old_trimmed != new_trimmed {
-            println!("Mission changed:");
-            println!("  OLD: {}", old_trimmed);
-            println!("  NEW: {}", new_trimmed);
-            if confirm("Replace mission?", false) {
-                if let Err(e) = save_mission(org, &team_name, &mission) {
+            if auto_sync {
+                if let Err(e) = save_mission(org, team_name, mission) {
                     eprintln!("error saving mission: {}", e);
                     return 1;
                 }
+                println!("+ Mission updated");
             } else {
-                println!("  → keeping existing mission");
+                println!("Mission changed:");
+                println!("  OLD: {}", old_trimmed);
+                println!("  NEW: {}", new_trimmed);
+                if confirm("Replace mission?", false) {
+                    if let Err(e) = save_mission(org, team_name, mission) {
+                        eprintln!("error saving mission: {}", e);
+                        return 1;
+                    }
+                } else {
+                    println!("  → keeping existing mission");
+                }
             }
         }
 
-        // b. For each proposed agent
         for (agent_name, agent_desc) in &agents_with_names {
-            let new_content = build_agent_file(agent_name, agent_desc, &team_name, &team_type);
-            match load_agent(org, &team_name, agent_name) {
+            let new_content = build_agent_file(agent_name, agent_desc, team_name, team_type);
+            match load_agent(org, team_name, agent_name) {
                 None => {
-                    // New agent
-                    if let Err(e) = save_agent(org, &team_name, agent_name, &new_content, false) {
+                    if let Err(e) = save_agent(org, team_name, agent_name, &new_content, false) {
                         eprintln!("error saving agent '{}': {}", agent_name, e);
                         return 1;
                     }
@@ -391,15 +443,16 @@ fn cmd_default(org: &str) -> i32 {
                 Some(existing_content) => {
                     if existing_content.trim() == new_content.trim() {
                         println!("  (no change) {}", agent_name);
+                    } else if auto_sync {
+                        if let Err(e) = save_agent(org, team_name, agent_name, &new_content, true) {
+                            eprintln!("error saving agent '{}': {}", agent_name, e);
+                            return 1;
+                        }
+                        println!("+ Updated agent: {}", agent_name);
                     } else {
-                        println!("Agent '{}' has changed.", agent_name);
-                        println!(
-                            "  (new version has {} chars, old had {} chars)",
-                            new_content.len(),
-                            existing_content.len()
-                        );
+                        println!("Agent '{}' has changed ({} → {} chars).", agent_name, existing_content.len(), new_content.len());
                         if confirm(&format!("Replace '{}'?", agent_name), false) {
-                            if let Err(e) = save_agent(org, &team_name, agent_name, &new_content, true) {
+                            if let Err(e) = save_agent(org, team_name, agent_name, &new_content, true) {
                                 eprintln!("error saving agent '{}': {}", agent_name, e);
                                 return 1;
                             }
@@ -412,21 +465,14 @@ fn cmd_default(org: &str) -> i32 {
             }
         }
 
-        // c. Append playbook section
-        let playbook_section = build_playbook_section(
-            &team_name,
-            &team_type,
-            &agents_with_names,
-            &ctx.name,
-        );
-        if let Err(e) = append_playbook(org, &team_name, &playbook_section, &ctx.name, &today_str()) {
+        let playbook_section = build_playbook_section(team_name, team_type, &agents_with_names, &ctx.name);
+        if let Err(e) = append_playbook(org, team_name, &playbook_section, &ctx.name, &today_str()) {
             eprintln!("error updating playbook: {}", e);
             return 1;
         }
         println!("+ Playbook updated");
 
-        // d. Update config
-        if let Some(mut config) = load_team_config(org, &team_name) {
+        if let Some(mut config) = load_team_config(org, team_name) {
             if !config.projects.contains(&ctx.name) {
                 config.projects.push(ctx.name.clone());
             }
@@ -437,25 +483,21 @@ fn cmd_default(org: &str) -> i32 {
             }
         }
     } else {
-        // New team
-
-        // Create directories
-        let store_dir = team_store_dir(org, &team_name);
+        let store_dir = team_store_dir(org, team_name);
         if let Err(e) = fs::create_dir_all(&store_dir) {
             eprintln!("error creating team directory: {}", e);
             return 1;
         }
-        if let Err(e) = fs::create_dir_all(team_agents_dir(org, &team_name)) {
+        if let Err(e) = fs::create_dir_all(team_agents_dir(org, team_name)) {
             eprintln!("error creating agents directory: {}", e);
             return 1;
         }
 
-        // b. Save config
         let now = crate::hooks::common::now_iso();
         let config = TeamConfig {
-            name: team_name.clone(),
+            name: team_name.to_string(),
             org: org.to_string(),
-            team_type: team_type.clone(),
+            team_type: team_type.to_string(),
             projects: vec![ctx.name.clone()],
             created: now.clone(),
             updated: now,
@@ -466,30 +508,22 @@ fn cmd_default(org: &str) -> i32 {
         }
         println!("+ Created config.json");
 
-        // c. Save mission
-        if let Err(e) = save_mission(org, &team_name, &mission) {
+        if let Err(e) = save_mission(org, team_name, mission) {
             eprintln!("error saving mission: {}", e);
             return 1;
         }
         println!("+ Created mission.md");
 
-        // d. Create agents
         for (agent_name, agent_desc) in &agents_with_names {
-            let content = build_agent_file(agent_name, agent_desc, &team_name, &team_type);
-            if let Err(e) = save_agent(org, &team_name, agent_name, &content, false) {
+            let content = build_agent_file(agent_name, agent_desc, team_name, team_type);
+            if let Err(e) = save_agent(org, team_name, agent_name, &content, false) {
                 eprintln!("error saving agent '{}': {}", agent_name, e);
                 return 1;
             }
             println!("+ Added agent: {}", agent_name);
         }
 
-        // e. Create playbook
-        let playbook_content = build_playbook_section(
-            &team_name,
-            &team_type,
-            &agents_with_names,
-            &ctx.name,
-        );
+        let playbook_content = build_playbook_section(team_name, team_type, &agents_with_names, &ctx.name);
         let playbook_path = store_dir.join("playbook.md");
         if let Err(e) = fs::write(&playbook_path, &playbook_content) {
             eprintln!("error creating playbook: {}", e);
@@ -504,14 +538,11 @@ fn cmd_default(org: &str) -> i32 {
 
     println!();
 
-    // 10. Sync phase
-    if confirm(&format!("Sync agents to ./.claude/agents/{}/? ", team_name), true) {
-        match sync_to_project(org, &team_name) {
+    let do_sync = auto_sync || confirm(&format!("Sync agents to ./.claude/agents/{}/? ", team_name), true);
+    if do_sync {
+        match sync_to_project(org, team_name) {
             Ok(count) => println!("✓ Synced {} agent(s) to .claude/agents/{}/", count, team_name),
-            Err(e) => {
-                eprintln!("error syncing: {}", e);
-                return 1;
-            }
+            Err(e) => { eprintln!("error syncing: {}", e); return 1; }
         }
     } else {
         println!("  Run 'epic team sync {}' to sync later", team_name);
@@ -672,21 +703,59 @@ fn cmd_sync(args: &[String]) -> i32 {
 
 fn cmd_link(args: &[String]) -> i32 {
     let (pos, flags) = parse_flags(args);
-    let team = match pos.first() {
-        Some(t) => t.clone(),
-        None => {
-            eprintln!("error: link requires <team>");
-            eprintln!("Usage: epic team link <team> [--org <name>]");
-            return 1;
-        }
-    };
+
+    // If no team name provided, show interactive picker
+    if pos.is_empty() {
+        return cmd_link_interactive();
+    }
+
+    let team = pos[0].clone();
 
     if let Err(e) = validate_team_name(&team) {
         eprintln!("error: {}", e);
         return 1;
     }
 
-    let org = flags.get("org").cloned().unwrap_or_else(default_org);
+    // Resolve org: --org flag takes priority, otherwise search all orgs
+    let org = if let Some(explicit_org) = flags.get("org") {
+        explicit_org.clone()
+    } else {
+        let orgs = list_orgs();
+        let matches: Vec<String> = orgs
+            .into_iter()
+            .filter(|o| team_exists(o, &team))
+            .collect();
+
+        match matches.len() {
+            0 => {
+                eprintln!("error: team '{}' not found in any org. Run 'epic org list' to browse.", team);
+                return 1;
+            }
+            1 => {
+                println!("(using org: {})", matches[0]);
+                matches.into_iter().next().unwrap()
+            }
+            _ => {
+                println!("Team '{}' found in multiple orgs:", team);
+                for (i, o) in matches.iter().enumerate() {
+                    println!("  {}) {}", i + 1, o);
+                }
+                let input = prompt("Select org [1]: ");
+                let idx: usize = if input.is_empty() {
+                    1
+                } else {
+                    match input.parse::<usize>() {
+                        Ok(n) if n >= 1 && n <= matches.len() => n,
+                        _ => {
+                            eprintln!("error: invalid selection");
+                            return 1;
+                        }
+                    }
+                };
+                matches.into_iter().nth(idx - 1).unwrap()
+            }
+        }
+    };
 
     if !team_exists(&org, &team) {
         eprintln!("error: team '{}' not found in org '{}'", team, org);
@@ -729,6 +798,49 @@ fn cmd_link(args: &[String]) -> i32 {
 
     println!("Team '{}' linked to project '{}'", team, project_name);
     0
+}
+
+fn cmd_link_interactive() -> i32 {
+    let orgs = list_orgs();
+    if orgs.is_empty() {
+        eprintln!("No orgs found. Run 'epic team' to create a team.");
+        return 1;
+    }
+
+    // Build numbered list of all org/team pairs
+    let mut entries: Vec<(String, String)> = vec![];
+    for org in &orgs {
+        for team in list_teams(org) {
+            entries.push((org.clone(), team));
+        }
+    }
+
+    if entries.is_empty() {
+        eprintln!("No teams found in any org. Run 'epic team' to create a team.");
+        return 1;
+    }
+
+    println!("Available teams:");
+    for (i, (org, team)) in entries.iter().enumerate() {
+        println!("  {}) {}/{}", i + 1, org, team);
+    }
+
+    let input = prompt("Select team [1]: ");
+    let idx: usize = if input.is_empty() {
+        1
+    } else {
+        match input.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= entries.len() => n,
+            _ => {
+                eprintln!("error: invalid selection");
+                return 1;
+            }
+        }
+    };
+
+    let (org, team) = entries.into_iter().nth(idx - 1).unwrap();
+    let link_args: Vec<String> = vec![team, "--org".to_string(), org];
+    cmd_link(&link_args)
 }
 
 // ── cmd_unlink ────────────────────────────────────────
@@ -880,6 +992,212 @@ fn cmd_history(args: &[String]) -> i32 {
     println!("History for agent '{}' in team '{}':", agent, team);
     for entry in &history {
         println!("  {}", entry);
+    }
+    0
+}
+
+// ── cmd_status ────────────────────────────────────────
+
+fn cmd_status(args: &[String]) -> i32 {
+    let (_, flags) = parse_flags(args);
+    let _ = flags; // reserved for --json later
+
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let project_name = cwd
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let agents_base = cwd.join(".claude").join("agents");
+
+    if !agents_base.is_dir() {
+        println!("Project: {}", project_name);
+        println!("No teams linked to this project.");
+        println!("Run 'epic org list' to browse available teams.");
+        return 0;
+    }
+
+    // Collect team subdirs
+    let mut team_dirs: Vec<String> = fs::read_dir(&agents_base)
+        .ok()
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    team_dirs.sort();
+
+    if team_dirs.is_empty() {
+        println!("Project: {}", project_name);
+        println!("No teams linked to this project.");
+        println!("Run 'epic org list' to browse available teams.");
+        return 0;
+    }
+
+    println!("Project: {}", project_name);
+    println!("Linked teams ({}):", team_dirs.len());
+
+    for team in &team_dirs {
+        let team_dir = agents_base.join(team);
+
+        // Determine org from frontmatter of any agent .md file
+        let org = fs::read_dir(&team_dir)
+            .ok()
+            .and_then(|entries| {
+                entries
+                    .filter_map(|e| e.ok())
+                    .find(|e| {
+                        e.path().extension().and_then(|x| x.to_str()) == Some("md")
+                    })
+                    .and_then(|e| fs::read_to_string(e.path()).ok())
+                    .and_then(|content| read_org_from_agent_file(&content))
+            })
+            .unwrap_or_else(|| "(unknown)".to_string());
+
+        // Cross-reference org store for type and mission
+        let (team_type, mission_first_line) = if org != "(unknown)" {
+            let tc = load_team_config(&org, team);
+            let t = tc.as_ref().map(|c| c.team_type.as_str()).unwrap_or("unknown").to_string();
+            let m = load_mission(&org, team)
+                .unwrap_or_default()
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            (t, m)
+        } else {
+            ("unknown".to_string(), String::new())
+        };
+
+        // List agents in the local dir
+        let agents: Vec<String> = fs::read_dir(&team_dir)
+            .ok()
+            .map(|entries| {
+                let mut names: Vec<String> = entries
+                    .filter_map(|e| e.ok())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .filter(|n| n.ends_with(".md"))
+                    .map(|n| n.trim_end_matches(".md").to_string())
+                    .collect();
+                names.sort();
+                names
+            })
+            .unwrap_or_default();
+
+        let mission_display = if mission_first_line.is_empty() {
+            String::new()
+        } else {
+            format!("   {}", mission_first_line)
+        };
+
+        println!(
+            "  {:<12} ({}, org: {}){}\n             agents: {}",
+            team,
+            team_type,
+            org,
+            mission_display,
+            if agents.is_empty() { "(none)".to_string() } else { agents.join(", ") }
+        );
+    }
+
+    println!();
+    println!("Run 'epic team link <team>' to hire more teams.");
+    0
+}
+
+// ── org subcommand dispatch ───────────────────────────
+
+pub fn dispatch_org(args: &[String]) -> i32 {
+    let sub = match args.first().map(|s| s.as_str()) {
+        Some(s) if !s.starts_with("--") => s,
+        _ => return cmd_org_list(),
+    };
+    match sub {
+        "list" => cmd_org_list(),
+        "show" => cmd_org_show(&args[1..]),
+        "help" | "--help" | "-h" => {
+            print_org_help();
+            0
+        }
+        _ => {
+            eprintln!("error: unknown org subcommand '{}'\nRun 'epic org help'.", sub);
+            1
+        }
+    }
+}
+
+fn print_org_help() {
+    println!("epic org — Browse org team libraries\n");
+    println!("USAGE:");
+    println!("  epic org <SUBCOMMAND>\n");
+    println!("SUBCOMMANDS:");
+    println!("  list           List all orgs and their teams (default)");
+    println!("  show <org>     Show teams in a specific org");
+    println!("  help           Show this help message");
+}
+
+fn cmd_org_list() -> i32 {
+    let orgs = list_orgs();
+    if orgs.is_empty() {
+        println!("No orgs found. Run 'epic team' to create a team.");
+        return 0;
+    }
+
+    println!("Available orgs:");
+    for org in &orgs {
+        let teams = list_teams(org);
+        let count = teams.len();
+        let team_word = if count == 1 { "team" } else { "teams" };
+        let names = if teams.is_empty() {
+            "(none)".to_string()
+        } else {
+            teams.join(", ")
+        };
+        println!("  {:<12} {} {}: {}", org, count, team_word, names);
+    }
+    0
+}
+
+fn cmd_org_show(args: &[String]) -> i32 {
+    let (pos, _) = parse_flags(args);
+    let org = match pos.first() {
+        Some(o) => o.clone(),
+        None => {
+            eprintln!("error: show requires <org>");
+            eprintln!("Usage: epic org show <org>");
+            return 1;
+        }
+    };
+
+    let teams = list_teams(&org);
+    println!("Org: {}", org);
+    if teams.is_empty() {
+        println!("Teams (0): (none)");
+        return 0;
+    }
+
+    println!("Teams ({}):", teams.len());
+    for team in &teams {
+        let (team_type, mission_first_line) = {
+            let tc = load_team_config(&org, team);
+            let t = tc.as_ref().map(|c| c.team_type.as_str()).unwrap_or("unknown").to_string();
+            let m = load_mission(&org, team)
+                .unwrap_or_default()
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string();
+            (t, m)
+        };
+        println!(
+            "  {:<16} ({:<10}) {}",
+            team,
+            team_type,
+            mission_first_line
+        );
     }
     0
 }
