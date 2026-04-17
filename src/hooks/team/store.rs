@@ -35,15 +35,24 @@ pub(crate) fn home_dir() -> PathBuf {
 }
 
 /// Produce a YAML double-quoted scalar (with surrounding quotes) safe for frontmatter embedding.
-/// Handles newlines, Unicode line/paragraph separators, backslashes, and double-quotes.
+/// Single-pass: handles `\\`, `"`, newlines + U+2028/U+2029 (→ space), `\t`, null bytes,
+/// and all remaining C0 control chars (U+0001-U+001F) via `\xHH` YAML escape.
 fn yaml_quote(s: &str) -> String {
-    let escaped = s
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ") // incl. Unicode LINE/PARAGRAPH SEPARATOR
-        .replace('\t', "\\t") // tab is legal in YAML double-quoted scalars but escaping prevents
-        .replace('\0', ""); //   downstream parsers treating it as whitespace delimiter
-    format!("\"{}\"", escaped)
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' | '\r' | '\u{2028}' | '\u{2029}' => out.push(' '),
+            '\t' => out.push_str("\\t"),
+            '\0' => {} // strip null bytes
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02X}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn to_title_case(s: &str) -> String {
@@ -233,8 +242,8 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
                 .filter_map(|e| e.file_name().into_string().ok())
                 .filter(|name| name.ends_with(".md"))
                 .filter_map(|name| name.strip_suffix(".md").map(str::to_string))
-                // Reject names with path components to prevent traversal in sync dest paths
-                .filter(|name| !name.contains('/') && !name.contains('\\') && !name.contains(".."))
+                // Allowlist: only [a-zA-Z0-9_-] — rejects path separators, device names, homoglyphs
+                .filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
                 .collect()
         })
         .unwrap_or_default();
@@ -242,12 +251,25 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
     agents
 }
 
+/// Validate that an agent name contains only `[a-zA-Z0-9_-]` — no path separators.
+fn validate_agent_name(name: &str) -> io::Result<()> {
+    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid agent name '{name}': only [a-zA-Z0-9_-] allowed"),
+        ));
+    }
+    Ok(())
+}
+
 pub fn load_agent(org: &str, team: &str, agent_name: &str) -> Option<String> {
+    validate_agent_name(agent_name).ok()?;
     let path = team_agents_dir(org, team).join(format!("{}.md", agent_name));
     fs::read_to_string(&path).ok()
 }
 
 pub fn save_agent(org: &str, team: &str, agent_name: &str, content: &str, backup: bool) -> io::Result<()> {
+    validate_agent_name(agent_name)?;
     let agents_dir = team_agents_dir(org, team);
     fs::create_dir_all(&agents_dir)?;
     let agent_path = agents_dir.join(format!("{}.md", agent_name));
@@ -320,7 +342,7 @@ pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static s
     }
 }
 
-/// Strip control characters that break Markdown rendering (not full YAML escaping).
+/// Strip line-break characters and null bytes that break Markdown rendering (not full YAML escaping).
 fn strip_line_breaks(s: &str) -> String {
     s.replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ")
         .replace('\0', "")
@@ -376,7 +398,7 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
     // ── 2. Inject/replace ## Team Context section ──────────────────────────
     let context_section = format!(
         "## Team Context\n**Org**: {}\n**Team**: {} ({})\n**Mission**: {}\n**Full playbook**: `epic team show {} --playbook`\n",
-        org, team_name, type_label, mission, team_name
+        strip_line_breaks(org), strip_line_breaks(team_name), type_label, mission, strip_line_breaks(team_name)
     );
 
     if let Some(pos) = content.find("## Team Context") {
@@ -417,7 +439,7 @@ pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(Strin
 
     let mut agent_roster = String::new();
     for (name, desc) in agents {
-        agent_roster.push_str(&format!("- **{}**: {}\n", name, desc));
+        agent_roster.push_str(&format!("- **{}**: {}\n", name, strip_line_breaks(desc)));
     }
 
     format!(
@@ -808,5 +830,13 @@ mod tests {
         assert_eq!(yaml_quote("# comment"), "\"# comment\"");
         // empty string
         assert_eq!(yaml_quote(""), "\"\"");
+        // chained: backslash followed by 't' must not become \t escape sequence
+        assert_eq!(yaml_quote("a\\tb"), "\"a\\\\tb\"");
+        // C0 control chars (U+0001, U+000B vertical-tab) → \xHH
+        assert_eq!(yaml_quote("a\x01b"), "\"a\\x01b\"");
+        assert_eq!(yaml_quote("a\x0Bb"), "\"a\\x0Bb\"");
+        // C0 boundary: U+001F (last C0) → \x1F, U+0020 (space) passes through
+        assert_eq!(yaml_quote("a\x1fb"), "\"a\\x1Fb\"");
+        assert_eq!(yaml_quote("a b"), "\"a b\"");
     }
 }
