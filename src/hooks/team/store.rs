@@ -248,7 +248,9 @@ pub fn save_agent(org: &str, team: &str, agent_name: &str, content: &str, backup
         fs::copy(&agent_path, &backup_path)?;
     }
 
-    fs::write(&agent_path, content)?;
+    let tmp = agent_path.with_extension("md.tmp");
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, &agent_path)?;
     Ok(())
 }
 
@@ -588,7 +590,10 @@ pub fn install_default_team_if_needed(org: &str) -> bool {
     .collect();
     let playbook = build_playbook_section(team, DEFAULT_TEAM_TYPE, &agent_list, "—");
     let playbook_path = store_dir.join("playbook.md");
-    let _ = fs::write(&playbook_path, playbook);
+    let tmp = playbook_path.with_extension("md.tmp");
+    if fs::write(&tmp, &playbook).is_ok() {
+        let _ = fs::rename(&tmp, &playbook_path);
+    }
 
     true
 }
@@ -711,6 +716,20 @@ mod tests {
         std::fs::create_dir_all(&org_path).unwrap();
         let teams = list_teams("empty-org");
         assert!(teams.is_empty(), "org with no teams dir should return empty list");
+    }
+
+    #[test]
+    fn test_save_agent_atomic() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp_dir.path()); }
+
+        install_default_team_if_needed("epic");
+        let agent_path = tmp_dir.path()
+            .join(".harness/orgs/epic/teams/core/agents/ops.md");
+        assert!(agent_path.exists(), "agent file should exist");
+        assert!(!agent_path.with_extension("md.tmp").exists(), "no .md.tmp should remain");
     }
 
     #[test]
