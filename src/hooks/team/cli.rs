@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::store::{
     append_playbook, build_agent_file, build_playbook_section, default_agents_for_type,
-    default_org, inject_team_context, list_agents, list_history, list_teams, load_agent,
+    default_org, home_dir, inject_team_context, list_agents, list_history, list_teams, load_agent,
     load_mission, load_playbook, load_team_config, read_org_from_agent_file, save_agent,
     save_mission, save_team_config, team_agents_dir, team_exists, team_store_dir, TeamConfig,
 };
@@ -15,7 +15,7 @@ use super::store::{
 const SUBCOMMANDS: &[(&str, &str)] = &[
     ("list",    "List all teams in an org"),
     ("show",    "Show team details"),
-    ("sync",    "Sync team agents to .claude/agents/"),
+    ("sync",    "Sync team agents to .claude/agents/ (--global for ~/.claude/agents/)"),
     ("link",    "Link a team to the current project"),
     ("unlink",  "Remove team agents from current project"),
     ("delete",  "Remove team from current project (--global to disband from org)"),
@@ -24,9 +24,12 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
 ];
 
 pub fn dispatch(args: &[String]) -> i32 {
+    let (_, flags) = parse_flags(args);
+    let org = flags.get("org").cloned().unwrap_or_else(default_org);
+
     let sub = match args.first().map(|s| s.as_str()) {
-        Some(s) => s,
-        None => return cmd_default(),
+        Some(s) if !s.starts_with("--") => s,
+        _ => return cmd_default(&org),
     };
 
     match sub {
@@ -144,15 +147,58 @@ fn recommend_team_type(_ctx: &ProjectContext) -> &'static str {
 // ── Sync helper ───────────────────────────────────────
 
 fn sync_to_project(org: &str, team: &str) -> io::Result<u32> {
+    sync_to_dest(org, team, false)
+}
+
+fn validate_team_name(team: &str) -> io::Result<()> {
+    let valid = !team.is_empty()
+        && team.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
+        && team.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid team name '{}': only [a-zA-Z0-9_-] allowed, must start with alphanumeric", team),
+        ))
+    }
+}
+
+fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
+    validate_team_name(team)?;
+
     let config = load_team_config(org, team)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("Team '{}' not found in org '{}'", team, org)))?;
 
     let mission = load_mission(org, team).unwrap_or_default();
 
-    let cwd = std::env::current_dir()
-        .map_err(io::Error::other)?;
-    let dest = cwd.join(".claude").join("agents").join(team);
-    fs::create_dir_all(&dest)?;
+    let dest = if global {
+        let base = home_dir().join(".claude").join("agents");
+        // Create and canonicalize base BEFORE creating team subdir (TOCTOU defense)
+        fs::create_dir_all(&base)
+            .map_err(|e| io::Error::new(e.kind(), format!("failed to create {}: {}", base.display(), e)))?;
+        let canon_base = base.canonicalize().map_err(io::Error::other)?;
+        let candidate = canon_base.join(team);
+        // If team subdir already exists, verify it's not a symlink escaping base
+        if candidate.exists() {
+            let canon_candidate = candidate.canonicalize().map_err(io::Error::other)?;
+            if !canon_candidate.starts_with(&canon_base) {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("resolved path '{}' is outside ~/.claude/agents — aborting", canon_candidate.display()),
+                ));
+            }
+        }
+        fs::create_dir_all(&candidate)
+            .map_err(|e| io::Error::new(e.kind(), format!("failed to create {}: {}", candidate.display(), e)))?;
+        candidate
+    } else {
+        let cwd = std::env::current_dir().map_err(io::Error::other)?;
+        let d = cwd.join(".claude").join("agents").join(team);
+        fs::create_dir_all(&d)
+            .map_err(|e| io::Error::new(e.kind(), format!("failed to create {}: {}", d.display(), e)))?;
+        d
+    };
 
     let agents = list_agents(org, team);
     let mut count = 0u32;
@@ -176,9 +222,7 @@ fn today_str() -> String {
 
 // ── cmd_default: interactive design flow ──────────────
 
-fn cmd_default() -> i32 {
-    // 1. Resolve org — default "epic", override with --org at any subcommand
-    let org = "epic".to_string();
+fn cmd_default(org: &str) -> i32 {
     println!("Org: {}  (use --org <name> to target a different org)", org);
     println!();
 
@@ -193,7 +237,7 @@ fn cmd_default() -> i32 {
     println!();
 
     // 3. List existing teams
-    let existing_teams = list_teams(&org);
+    let existing_teams = list_teams(org);
     if !existing_teams.is_empty() {
         println!("Existing teams in '{}': {}", org, existing_teams.join(", "));
         println!();
@@ -215,8 +259,8 @@ fn cmd_default() -> i32 {
         team_name_input
     };
 
-    if team_name.is_empty() {
-        eprintln!("error: team name cannot be empty");
+    if let Err(e) = validate_team_name(&team_name) {
+        eprintln!("error: {}", e);
         return 1;
     }
 
@@ -371,7 +415,7 @@ fn cmd_default() -> i32 {
         let now = crate::hooks::common::now_iso();
         let config = TeamConfig {
             name: team_name.clone(),
-            org: org.clone(),
+            org: org.to_string(),
             team_type: team_type.clone(),
             projects: vec![ctx.name.clone()],
             created: now.clone(),
@@ -479,6 +523,11 @@ fn cmd_show(args: &[String]) -> i32 {
         }
     };
 
+    if let Err(e) = validate_team_name(&team) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
     let show_playbook = flags.contains_key("playbook");
 
@@ -541,21 +590,36 @@ fn cmd_sync(args: &[String]) -> i32 {
         Some(t) => t.clone(),
         None => {
             eprintln!("error: sync requires <team>");
-            eprintln!("Usage: epic team sync <team> [--org <name>]");
+            eprintln!("Usage: epic team sync <team> [--org <name>] [--global]");
             return 1;
         }
     };
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
+    let global = flags.contains_key("global");
+
+    if let Err(e) = validate_team_name(&team) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     if !team_exists(&org, &team) {
         eprintln!("error: team '{}' not found in org '{}'", team, org);
         return 1;
     }
 
-    match sync_to_project(&org, &team) {
+    let result = sync_to_dest(&org, &team, global);
+
+    match result {
         Ok(count) => {
-            println!("✓ Synced {} agent(s) to .claude/agents/{}/", count, team);
+            let dest = if global {
+                home_dir().join(".claude").join("agents").join(&team)
+            } else {
+                std::env::current_dir()
+                    .unwrap_or_else(|_| PathBuf::from("."))
+                    .join(".claude").join("agents").join(&team)
+            };
+            println!("✓ Synced {} agent(s) to {}/", count, dest.display());
             0
         }
         Err(e) => {
@@ -577,6 +641,11 @@ fn cmd_link(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    if let Err(e) = validate_team_name(&team) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
 
@@ -642,6 +711,11 @@ fn cmd_delete(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    if let Err(e) = validate_team_name(&team) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let global = flags.contains_key("global");
 
@@ -745,6 +819,11 @@ fn cmd_history(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    if let Err(e) = validate_team_name(&team) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
 

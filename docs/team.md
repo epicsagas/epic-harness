@@ -97,6 +97,7 @@ epic team list --org netflix         # list teams in named org
 epic team show backend               # config + agents + mission
 epic team show backend --playbook    # also print full playbook
 epic team sync backend               # re-copy agents to .claude/agents/
+epic team sync backend --global     # sync to ~/.claude/agents/ (global, all projects)
 epic team link backend               # attach existing team (sync + add to config.projects)
 epic team unlink backend             # remove .claude/agents/backend/ (keeps global store)
 epic team delete backend             # remove from current project (.claude/agents/backend/)
@@ -110,6 +111,7 @@ epic team history backend reviewer   # list .history/ backups for an agent
 |---|---|
 | `--org <name>` | Target a specific org (default: `"epic"`) |
 | `--playbook` | `show` only: print full accumulated playbook |
+| `--global` | `sync` only: install agents to `~/.claude/agents/` instead of project-local `.claude/agents/` |
 
 ---
 

@@ -1333,6 +1333,11 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         }
     }
 
+    // Seed the default epic org/team on first install (idempotent)
+    if !dry_run {
+        crate::hooks::team::store::install_default_team_if_needed("epic");
+    }
+
     0
 }
 
