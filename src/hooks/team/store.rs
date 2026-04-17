@@ -221,8 +221,9 @@ pub fn save_agent(org: &str, team: &str, agent_name: &str, content: &str, backup
     if backup && agent_path.exists() {
         let history_dir = team_history_dir(org, team);
         fs::create_dir_all(&history_dir)?;
-        let date = &crate::hooks::common::now_iso()[..10];
-        let backup_name = format!("{}-{}.md", agent_name, date);
+        let iso = crate::hooks::common::now_iso();
+        let timestamp = iso[..19].replace(':', "-"); // "2026-04-17T10-30-45"
+        let backup_name = format!("{}-{}.md", agent_name, timestamp);
         let backup_path = history_dir.join(&backup_name);
         fs::copy(&agent_path, &backup_path)?;
     }

@@ -75,6 +75,10 @@ fn parse_flags(args: &[String]) -> (Vec<String>, HashMap<String, String>) {
     let mut i = 0;
     while i < args.len() {
         let arg = &args[i];
+        if arg == "--" {
+            positional.extend_from_slice(&args[i + 1..]);
+            break;
+        }
         if let Some(kv) = arg.strip_prefix("--") {
             // --key=value form
             if let Some((k, v)) = kv.split_once('=') {
@@ -175,6 +179,20 @@ fn validate_team_name(team: &str) -> io::Result<()> {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("invalid team name '{}': only [a-zA-Z0-9_-] allowed, must start with alphanumeric", team),
+        ))
+    }
+}
+
+fn validate_org_name(org: &str) -> io::Result<()> {
+    let valid = !org.is_empty()
+        && org.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
+        && org.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if valid {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid org name '{}': only [a-zA-Z0-9_-] allowed, must start with alphanumeric", org),
         ))
     }
 }
@@ -309,7 +327,11 @@ fn cmd_default(org: &str, args: &[String]) -> i32 {
         }
 
         let mission = match flags.get("mission").cloned() {
-            Some(m) if !m.is_empty() => m,
+            Some(m) if !m.is_empty() && m.len() <= 200 => m,
+            Some(m) if m.len() > 200 => {
+                eprintln!("error: --mission too long (max 200 chars, got {})", m.len());
+                return 1;
+            }
             _ => {
                 eprintln!("error: --mission is required with --yes");
                 eprintln!("Usage: epic team --yes --name <name> --type <type> --mission \"<mission>\"");
@@ -557,6 +579,11 @@ fn cmd_list(args: &[String]) -> i32 {
     let (_, flags) = parse_flags(args);
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
 
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     let teams = list_teams(&org);
     if teams.is_empty() {
         println!("No teams found in org '{}'.", org);
@@ -599,6 +626,12 @@ fn cmd_show(args: &[String]) -> i32 {
     }
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
+
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     let show_playbook = flags.contains_key("playbook");
 
     if !team_exists(&org, &team) {
@@ -673,6 +706,11 @@ fn cmd_sync(args: &[String]) -> i32 {
         return 1;
     }
 
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     if !team_exists(&org, &team) {
         eprintln!("error: team '{}' not found in org '{}'", team, org);
         return 1;
@@ -706,7 +744,8 @@ fn cmd_link(args: &[String]) -> i32 {
 
     // If no team name provided, show interactive picker
     if pos.is_empty() {
-        return cmd_link_interactive();
+        let org_filter = flags.get("org").map(|s| s.as_str());
+        return cmd_link_interactive(org_filter);
     }
 
     let team = pos[0].clone();
@@ -718,6 +757,10 @@ fn cmd_link(args: &[String]) -> i32 {
 
     // Resolve org: --org flag takes priority, otherwise search all orgs
     let org = if let Some(explicit_org) = flags.get("org") {
+        if let Err(e) = validate_org_name(explicit_org) {
+            eprintln!("error: {}", e);
+            return 1;
+        }
         explicit_org.clone()
     } else {
         let orgs = list_orgs();
@@ -757,6 +800,11 @@ fn cmd_link(args: &[String]) -> i32 {
         }
     };
 
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     if !team_exists(&org, &team) {
         eprintln!("error: team '{}' not found in org '{}'", team, org);
         eprintln!("Run 'epic team list' to see available teams.");
@@ -782,34 +830,40 @@ fn cmd_link(args: &[String]) -> i32 {
         .unwrap_or("unknown")
         .to_string();
 
-    if let Some(mut config) = load_team_config(&org, &team) {
-        if !config.projects.contains(&project_name) {
-            config.projects.push(project_name.clone());
-            config.updated = crate::hooks::common::now_iso();
-            if let Err(e) = save_team_config(&config) {
-                eprintln!("error updating team config: {}", e);
-                return 1;
+    match load_team_config(&org, &team) {
+        Some(mut config) => {
+            if !config.projects.contains(&project_name) {
+                config.projects.push(project_name.clone());
+                config.updated = crate::hooks::common::now_iso();
+                if let Err(e) = save_team_config(&config) {
+                    eprintln!("error updating team config: {}", e);
+                    return 1;
+                }
+                println!("+ Added project '{}' to team config", project_name);
+            } else {
+                println!("  (project '{}' already linked)", project_name);
             }
-            println!("+ Added project '{}' to team config", project_name);
-        } else {
-            println!("  (project '{}' already linked)", project_name);
         }
+        None => eprintln!("warning: could not load team config — project registration skipped"),
     }
 
     println!("Team '{}' linked to project '{}'", team, project_name);
     0
 }
 
-fn cmd_link_interactive() -> i32 {
+fn cmd_link_interactive(org_filter: Option<&str>) -> i32 {
     let orgs = list_orgs();
     if orgs.is_empty() {
         eprintln!("No orgs found. Run 'epic team' to create a team.");
         return 1;
     }
 
-    // Build numbered list of all org/team pairs
+    // Build numbered list of all org/team pairs (filtered by org if provided)
     let mut entries: Vec<(String, String)> = vec![];
     for org in &orgs {
+        if org_filter.is_some_and(|filter| org.as_str() != filter) {
+            continue;
+        }
         for team in list_teams(org) {
             entries.push((org.clone(), team));
         }
@@ -883,6 +937,7 @@ fn cmd_delete(args: &[String]) -> i32 {
                 if entry.path().extension().and_then(|e| e.to_str()) == Some("md")
                     && let Ok(content) = fs::read_to_string(entry.path())
                     && let Some(org) = read_org_from_agent_file(&content)
+                    && validate_org_name(&org).is_ok()
                 {
                     return org;
                 }
@@ -890,6 +945,11 @@ fn cmd_delete(args: &[String]) -> i32 {
         }
         default_org()
     });
+
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     if global {
         // --global: permanently delete from org store (+ local if present)
@@ -978,6 +1038,11 @@ fn cmd_history(args: &[String]) -> i32 {
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
 
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+
     if !team_exists(&org, &team) {
         eprintln!("error: team '{}' not found in org '{}'", team, org);
         return 1;
@@ -1043,19 +1108,36 @@ fn cmd_status(args: &[String]) -> i32 {
     for team in &team_dirs {
         let team_dir = agents_base.join(team);
 
-        // Determine org from frontmatter of any agent .md file
-        let org = fs::read_dir(&team_dir)
-            .ok()
-            .and_then(|entries| {
-                entries
-                    .filter_map(|e| e.ok())
-                    .find(|e| {
-                        e.path().extension().and_then(|x| x.to_str()) == Some("md")
-                    })
-                    .and_then(|e| fs::read_to_string(e.path()).ok())
-                    .and_then(|content| read_org_from_agent_file(&content))
-            })
-            .unwrap_or_else(|| "(unknown)".to_string());
+        // Single pass: collect all .md entries, read first for org, list all for agents
+        let (org, agents) = {
+            let entries: Vec<_> = fs::read_dir(&team_dir)
+                .ok()
+                .map(|e| {
+                    e.filter_map(|x| x.ok())
+                        .filter(|x| {
+                            x.path().extension().and_then(|ext| ext.to_str()) == Some("md")
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // B5: validate org from frontmatter; treat invalid as "(unknown)"
+            let org = entries
+                .first()
+                .and_then(|e| fs::read_to_string(e.path()).ok())
+                .and_then(|content| read_org_from_agent_file(&content))
+                .and_then(|o| if validate_org_name(&o).is_ok() { Some(o) } else { None })
+                .unwrap_or_else(|| "(unknown)".to_string());
+
+            let mut names: Vec<String> = entries
+                .iter()
+                .filter_map(|e| e.file_name().into_string().ok())
+                .map(|n| n.trim_end_matches(".md").to_string())
+                .collect();
+            names.sort();
+
+            (org, names)
+        };
 
         // Cross-reference org store for type and mission
         let (team_type, mission_first_line) = if org != "(unknown)" {
@@ -1071,21 +1153,6 @@ fn cmd_status(args: &[String]) -> i32 {
         } else {
             ("unknown".to_string(), String::new())
         };
-
-        // List agents in the local dir
-        let agents: Vec<String> = fs::read_dir(&team_dir)
-            .ok()
-            .map(|entries| {
-                let mut names: Vec<String> = entries
-                    .filter_map(|e| e.ok())
-                    .filter_map(|e| e.file_name().into_string().ok())
-                    .filter(|n| n.ends_with(".md"))
-                    .map(|n| n.trim_end_matches(".md").to_string())
-                    .collect();
-                names.sort();
-                names
-            })
-            .unwrap_or_default();
 
         let mission_display = if mission_first_line.is_empty() {
             String::new()
@@ -1148,6 +1215,7 @@ fn cmd_org_list() -> i32 {
 
     println!("Available orgs:");
     for org in &orgs {
+        // One read_dir per org is the minimum required (no caching needed for interactive CLI).
         let teams = list_teams(org);
         let count = teams.len();
         let team_word = if count == 1 { "team" } else { "teams" };
@@ -1171,6 +1239,11 @@ fn cmd_org_show(args: &[String]) -> i32 {
             return 1;
         }
     };
+
+    if let Err(e) = validate_org_name(&org) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
 
     let teams = list_teams(&org);
     println!("Org: {}", org);
@@ -1200,4 +1273,64 @@ fn cmd_org_show(args: &[String]) -> i32 {
         );
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn to_args(s: &[&str]) -> Vec<String> {
+        s.iter().map(|x| x.to_string()).collect()
+    }
+
+    // ── parse_flags tests (C1) ────────────────────────────
+
+    #[test]
+    fn test_parse_flags_boolean() {
+        let args = to_args(&["--yes", "--name", "foo"]);
+        let (pos, flags) = parse_flags(&args);
+        assert_eq!(flags["yes"], "");
+        assert_eq!(flags["name"], "foo");
+        assert!(pos.is_empty());
+    }
+
+    #[test]
+    fn test_parse_flags_key_value_equals() {
+        let args = to_args(&["--format=json", "--limit=5"]);
+        let (_, flags) = parse_flags(&args);
+        assert_eq!(flags["format"], "json");
+        assert_eq!(flags["limit"], "5");
+    }
+
+    #[test]
+    fn test_parse_flags_double_dash_separator() {
+        let args = to_args(&["--org", "epic", "--", "extra", "args"]);
+        let (pos, flags) = parse_flags(&args);
+        assert_eq!(flags["org"], "epic");
+        assert_eq!(pos, vec!["extra", "args"]);
+    }
+
+    #[test]
+    fn test_parse_flags_positional_mixed() {
+        let args = to_args(&["show", "--org", "epic", "myteam"]);
+        let (pos, flags) = parse_flags(&args);
+        assert_eq!(pos, vec!["show", "myteam"]);
+        assert_eq!(flags["org"], "epic");
+    }
+
+    // ── validate_org_name tests (C2) ──────────────────────
+
+    #[test]
+    fn test_validate_org_name_valid() {
+        assert!(validate_org_name("epic").is_ok());
+        assert!(validate_org_name("my-org").is_ok());
+        assert!(validate_org_name("Org_2").is_ok());
+    }
+
+    #[test]
+    fn test_validate_org_name_path_traversal() {
+        assert!(validate_org_name("../../etc").is_err());
+        assert!(validate_org_name("../secret").is_err());
+        assert!(validate_org_name("").is_err());
+    }
 }
