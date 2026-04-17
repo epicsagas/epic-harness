@@ -213,8 +213,8 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
     fs::create_dir_all(&dir)?;
     let path = dir.join("playbook.md");
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let safe_project = project.replace("-->", "-- >");
-    let safe_date = date.replace("-->", "-- >");
+    let safe_project = project.replace("-->", "-- >").replace("<!--", "<! --");
+    let safe_date = date.replace("-->", "-- >").replace("<!--", "<! --");
     let header = if !project.is_empty() || !date.is_empty() {
         format!("<!-- project: {} | date: {} -->\n", safe_project, safe_date)
     } else {
@@ -249,7 +249,12 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
                     let valid = !name.is_empty()
                         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
                     if !valid {
-                        eprintln!("[harness] warn: skipping agent file with invalid name '{name}'");
+                        // Sanitize before printing: replace non-printable/control chars to
+                        // prevent ANSI injection via crafted filenames.
+                        let safe: String = name.chars()
+                            .map(|c| if c.is_ascii_graphic() || c == ' ' { c } else { '?' })
+                            .collect();
+                        eprintln!("[harness] warn: skipping agent file with invalid name '{safe}'");
                     }
                     valid
                 })
@@ -418,10 +423,13 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
     }
 }
 
-/// Read the `org` field from an agent file's frontmatter.
-/// Returns None if the file has no frontmatter or no `org:` field.
-/// Strip YAML double-quote wrapping (written by `yaml_quote`) from a scalar value.
-fn yaml_unquote(s: &str) -> &str {
+/// Strip surrounding YAML double-quotes from a scalar written by `yaml_quote`.
+///
+/// Narrow contract: only removes the outer `"…"` wrapper; does **not** unescape
+/// `\\`, `\"`, or `\xHH` sequences.  Safe for org/team names (allowlist
+/// `[a-zA-Z0-9_-]`) because `yaml_quote` never emits escape sequences for those
+/// characters.  Not a general YAML 1.2 unescaper.
+pub(crate) fn strip_yaml_quotes(s: &str) -> &str {
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
         &s[1..s.len() - 1]
     } else {
@@ -429,6 +437,8 @@ fn yaml_unquote(s: &str) -> &str {
     }
 }
 
+/// Read the `org` field from an agent file's YAML frontmatter.
+/// Returns `None` if the file has no frontmatter or no `org:` field.
 pub fn read_org_from_agent_file(content: &str) -> Option<String> {
     if !content.starts_with("---") {
         return None;
@@ -437,7 +447,27 @@ pub fn read_org_from_agent_file(content: &str) -> Option<String> {
     let fm = &content[3..3 + end];
     for line in fm.lines() {
         if let Some(val) = line.strip_prefix("org:") {
-            let v = yaml_unquote(val.trim()).to_string();
+            let v = strip_yaml_quotes(val.trim()).to_string();
+            if !v.is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// Read the `team` field from an agent file's YAML frontmatter.
+/// Returns `None` if the file has no frontmatter or no `team:` field.
+#[allow(dead_code)]
+pub fn read_team_from_agent_file(content: &str) -> Option<String> {
+    if !content.starts_with("---") {
+        return None;
+    }
+    let end = content[3..].find("\n---")?;
+    let fm = &content[3..3 + end];
+    for line in fm.lines() {
+        if let Some(val) = line.strip_prefix("team:") {
+            let v = strip_yaml_quotes(val.trim()).to_string();
             if !v.is_empty() {
                 return Some(v);
             }
@@ -862,15 +892,49 @@ mod tests {
     }
 
     #[test]
-    fn test_yaml_unquote_roundtrip() {
-        // quoted string → unquote returns inner value
-        assert_eq!(yaml_unquote("\"my-org\""), "my-org");
-        assert_eq!(yaml_unquote("\"epic\""), "epic");
+    fn test_strip_yaml_quotes() {
+        // quoted string → strip returns inner value
+        assert_eq!(strip_yaml_quotes("\"my-org\""), "my-org");
+        assert_eq!(strip_yaml_quotes("\"epic\""), "epic");
         // unquoted string passes through unchanged
-        assert_eq!(yaml_unquote("plain"), "plain");
+        assert_eq!(strip_yaml_quotes("plain"), "plain");
         // empty quoted string
-        assert_eq!(yaml_unquote("\"\""), "");
-        // single char not treated as quoted (needs both open and close)
-        assert_eq!(yaml_unquote("\""), "\"");
+        assert_eq!(strip_yaml_quotes("\"\""), "");
+        // single char: not treated as quoted (needs both open and close quote)
+        assert_eq!(strip_yaml_quotes("\""), "\"");
+    }
+
+    #[test]
+    fn test_inject_team_context_roundtrip() {
+        let base = "---\nname: \"test-agent\"\ndescription: \"Test agent\"\ntools: [Read]\nmodel: sonnet\n---\n# Test\n";
+        let injected = inject_team_context(base, "my-org", "my-team", "stream", "Do things");
+        // org roundtrip
+        assert_eq!(
+            read_org_from_agent_file(&injected),
+            Some("my-org".to_string()),
+            "org field must survive inject→read roundtrip"
+        );
+        // team roundtrip
+        assert_eq!(
+            read_team_from_agent_file(&injected),
+            Some("my-team".to_string()),
+            "team field must survive inject→read roundtrip"
+        );
+    }
+
+    #[test]
+    fn test_append_playbook_escapes_html_open_comment() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        let malicious_project = "foo <!-- bar";
+        append_playbook("testorg3", "gamma", "## section", malicious_project, "2026-01-01").unwrap();
+        let content = load_playbook("testorg3", "gamma");
+        assert!(
+            content.contains("foo <! -- bar"),
+            "injected <!-- must be escaped to '<! --' in project name: {content}"
+        );
     }
 }
