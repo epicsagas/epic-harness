@@ -31,7 +31,13 @@ pub fn dispatch(args: &[String]) -> i32 {
 
     let sub = match args.first().map(|s| s.as_str()) {
         Some(s) if !s.starts_with("--") => s,
-        _ => return cmd_default(&org, args),
+        _ => {
+            if let Err(e) = validate_org_name(&org) {
+                eprintln!("error: {}", e);
+                return 1;
+            }
+            return cmd_default(&org, args);
+        }
     };
 
     match sub {
@@ -389,8 +395,13 @@ fn cmd_default(org: &str, args: &[String]) -> i32 {
     // Mission
     let mission = loop {
         let input = prompt("Mission (one-line domain ownership): ");
-        if !input.is_empty() { break input; }
-        println!("Mission cannot be empty.");
+        if input.is_empty() {
+            println!("Mission cannot be empty.");
+        } else if input.len() > 200 {
+            println!("Mission too long ({} chars, max 200).", input.len());
+        } else {
+            break input;
+        }
     };
 
     println!();
@@ -934,7 +945,8 @@ fn cmd_delete(args: &[String]) -> i32 {
             && let Ok(entries) = fs::read_dir(&local_agents_dir)
         {
             for entry in entries.flatten() {
-                if entry.path().extension().and_then(|e| e.to_str()) == Some("md")
+                if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+                    && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
                     && let Ok(content) = fs::read_to_string(entry.path())
                     && let Some(org) = read_org_from_agent_file(&content)
                     && validate_org_name(&org).is_ok()
@@ -1035,6 +1047,10 @@ fn cmd_history(args: &[String]) -> i32 {
         eprintln!("error: {}", e);
         return 1;
     }
+    if let Err(e) = validate_team_name(&agent) {
+        eprintln!("error: invalid agent name '{}': {}", agent, e);
+        return 1;
+    }
 
     let org = flags.get("org").cloned().unwrap_or_else(default_org);
 
@@ -1115,18 +1131,21 @@ fn cmd_status(args: &[String]) -> i32 {
                 .map(|e| {
                     e.filter_map(|x| x.ok())
                         .filter(|x| {
-                            x.path().extension().and_then(|ext| ext.to_str()) == Some("md")
+                            x.file_type().map(|t| t.is_file()).unwrap_or(false)
+                                && x.path().extension().and_then(|ext| ext.to_str()) == Some("md")
                         })
                         .collect()
                 })
                 .unwrap_or_default();
 
-            // B5: validate org from frontmatter; treat invalid as "(unknown)"
+            // Try each .md file until one yields a valid org field
             let org = entries
-                .first()
-                .and_then(|e| fs::read_to_string(e.path()).ok())
-                .and_then(|content| read_org_from_agent_file(&content))
-                .and_then(|o| if validate_org_name(&o).is_ok() { Some(o) } else { None })
+                .iter()
+                .find_map(|e| {
+                    let content = fs::read_to_string(e.path()).ok()?;
+                    let o = read_org_from_agent_file(&content)?;
+                    validate_org_name(&o).ok().map(|_| o)
+                })
                 .unwrap_or_else(|| "(unknown)".to_string());
 
             let mut names: Vec<String> = entries
