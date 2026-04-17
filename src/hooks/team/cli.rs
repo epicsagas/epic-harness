@@ -863,22 +863,26 @@ fn cmd_link(args: &[String]) -> i32 {
 }
 
 fn cmd_link_interactive(org_filter: Option<&str>) -> i32 {
-    let orgs = list_orgs();
-    if orgs.is_empty() {
-        eprintln!("No orgs found. Run 'epic team' to create a team.");
-        return 1;
-    }
-
-    // Build numbered list of all org/team pairs (filtered by org if provided)
-    let mut entries: Vec<(String, String)> = vec![];
-    for org in &orgs {
-        if org_filter.is_some_and(|filter| org.as_str() != filter) {
-            continue;
+    // If a specific org is requested, read only that org (avoids N+1 when org is known)
+    let entries: Vec<(String, String)> = if let Some(filter) = org_filter {
+        list_teams(filter)
+            .into_iter()
+            .map(|team| (filter.to_string(), team))
+            .collect()
+    } else {
+        let orgs = list_orgs();
+        if orgs.is_empty() {
+            eprintln!("No orgs found. Run 'epic team' to create a team.");
+            return 1;
         }
-        for team in list_teams(org) {
-            entries.push((org.clone(), team));
-        }
-    }
+        orgs.iter()
+            .flat_map(|org| {
+                list_teams(org)
+                    .into_iter()
+                    .map(|team| (org.clone(), team))
+            })
+            .collect()
+    };
 
     if entries.is_empty() {
         eprintln!("No teams found in any org. Run 'epic team' to create a team.");
