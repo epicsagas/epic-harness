@@ -175,6 +175,27 @@ fn sync_to_project(org: &str, team: &str) -> io::Result<u32> {
     sync_to_dest(org, team, false)
 }
 
+/// Register the current working directory's project name in the team's config.json.
+/// Silent no-op if already registered or config is unavailable.
+fn register_project_link(org: &str, team: &str) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let project_name = cwd
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    if let Some(mut config) = load_team_config(org, team) {
+        if !config.projects.contains(&project_name) {
+            config.projects.push(project_name.clone());
+            config.updated = crate::hooks::common::now_iso();
+            if let Err(e) = save_team_config(&config) {
+                eprintln!("warning: could not update team config: {}", e);
+            }
+        }
+    }
+}
+
 fn validate_team_name(team: &str) -> io::Result<()> {
     let valid = !team.is_empty()
         && team.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
@@ -574,7 +595,10 @@ fn cmd_default_write(
     let do_sync = auto_sync || confirm(&format!("Sync agents to ./.claude/agents/{}/? ", team_name), true);
     if do_sync {
         match sync_to_project(org, team_name) {
-            Ok(count) => println!("✓ Synced {} agent(s) to .claude/agents/{}/", count, team_name),
+            Ok(count) => {
+                println!("✓ Synced {} agent(s) to .claude/agents/{}/", count, team_name);
+                register_project_link(org, team_name);
+            }
             Err(e) => { eprintln!("error syncing: {}", e); return 1; }
         }
     } else {
@@ -739,6 +763,9 @@ fn cmd_sync(args: &[String]) -> i32 {
                     .join(".claude").join("agents").join(&team)
             };
             println!("✓ Synced {} agent(s) to {}/", count, dest.display());
+            if !global {
+                register_project_link(&org, &team);
+            }
             0
         }
         Err(e) => {
@@ -834,30 +861,13 @@ fn cmd_link(args: &[String]) -> i32 {
     }
 
     // Add current project to team config
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let project_name = cwd
+    let project_name = std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
         .to_string();
-
-    match load_team_config(&org, &team) {
-        Some(mut config) => {
-            if !config.projects.contains(&project_name) {
-                config.projects.push(project_name.clone());
-                config.updated = crate::hooks::common::now_iso();
-                if let Err(e) = save_team_config(&config) {
-                    eprintln!("error updating team config: {}", e);
-                    return 1;
-                }
-                println!("+ Added project '{}' to team config", project_name);
-            } else {
-                println!("  (project '{}' already linked)", project_name);
-            }
-        }
-        None => eprintln!("warning: could not load team config — project registration skipped"),
-    }
-
+    register_project_link(&org, &team);
     println!("Team '{}' linked to project '{}'", team, project_name);
     0
 }
