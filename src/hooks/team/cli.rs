@@ -350,7 +350,7 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
             let canon_team = match tool_team_dir.canonicalize() {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("[harness] warn: cannot resolve {}: {}", tool_team_dir.display(), e);
+                    eprintln!("[harness] warn: cannot resolve team dir for {tool}: {e}");
                     continue;
                 }
             };

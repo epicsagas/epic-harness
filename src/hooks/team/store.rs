@@ -41,7 +41,8 @@ fn yaml_quote(s: &str) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ") // incl. Unicode LINE/PARAGRAPH SEPARATOR
-        .replace('\0', "");
+        .replace('\t', "\\t") // tab is legal in YAML double-quoted scalars but escaping prevents
+        .replace('\0', ""); //   downstream parsers treating it as whitespace delimiter
     format!("\"{}\"", escaped)
 }
 
@@ -231,7 +232,9 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
                 .filter_map(|e| e.ok())
                 .filter_map(|e| e.file_name().into_string().ok())
                 .filter(|name| name.ends_with(".md"))
-                .map(|name| name.trim_end_matches(".md").to_string())
+                .filter_map(|name| name.strip_suffix(".md").map(str::to_string))
+                // Reject names with path components to prevent traversal in sync dest paths
+                .filter(|name| !name.contains('/') && !name.contains('\\') && !name.contains(".."))
                 .collect()
         })
         .unwrap_or_default();
@@ -317,17 +320,20 @@ pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static s
     }
 }
 
+/// Strip control characters that break Markdown rendering (not full YAML escaping).
+fn strip_line_breaks(s: &str) -> String {
+    s.replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ")
+        .replace('\0', "")
+}
+
 pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_type: &str) -> String {
-    // YAML frontmatter values use double-quoted scalars to prevent injection via
-    // colons, hashes, and Unicode line separators (U+2028/U+2029) — not just \n/\r.
+    // YAML frontmatter uses double-quoted scalars to prevent injection via colons, hashes,
+    // and Unicode line separators. `tools` is always a static string from tools_for_role().
     let role_q = yaml_quote(role);
     let desc_q = yaml_quote(description);
     let title = to_title_case(role);
     let tools = tools_for_role(role);
-    // Body (after ---) is Markdown; strip only control chars that break rendering.
-    let desc_body = description
-        .replace(['\n', '\r', '\u{2028}', '\u{2029}'], " ")
-        .replace('\0', "");
+    let desc_body = strip_line_breaks(description); // Markdown body — no YAML quoting needed
     format!(
         "---\nname: {role_q}\ndescription: {desc_q}\ntools: {tools}\nmodel: sonnet\n---\n# {title}\n\nYou are the **{title}** for the **{team_name}** team.\n\n{desc_body}\n"
     )
@@ -359,7 +365,7 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            format!("---{}\norg: {}\nteam: {}\n---{}", cleaned_fm, org, team_name, after)
+            format!("---{}\norg: {}\nteam: {}\n---{}", cleaned_fm, yaml_quote(org), yaml_quote(team_name), after)
         } else {
             agent_content.to_string()
         }
@@ -779,5 +785,28 @@ mod tests {
             vec![]
         };
         assert!(subdirs.is_empty(), "no .claude/agents/ should yield empty linked teams");
+    }
+
+    #[test]
+    fn test_yaml_quote_escapes() {
+        // backslash
+        assert_eq!(yaml_quote("a\\b"), "\"a\\\\b\"");
+        // double-quote
+        assert_eq!(yaml_quote("say \"hi\""), "\"say \\\"hi\\\"\"");
+        // newline and carriage return → space
+        assert_eq!(yaml_quote("line1\nline2"), "\"line1 line2\"");
+        assert_eq!(yaml_quote("a\rb"), "\"a b\"");
+        // Unicode line/paragraph separators → space
+        assert_eq!(yaml_quote("a\u{2028}b"), "\"a b\"");
+        assert_eq!(yaml_quote("a\u{2029}b"), "\"a b\"");
+        // tab → escaped
+        assert_eq!(yaml_quote("a\tb"), "\"a\\tb\"");
+        // null byte removed
+        assert_eq!(yaml_quote("a\0b"), "\"ab\"");
+        // colon and hash pass through safely (quoted scalar)
+        assert_eq!(yaml_quote("key: value"), "\"key: value\"");
+        assert_eq!(yaml_quote("# comment"), "\"# comment\"");
+        // empty string
+        assert_eq!(yaml_quote(""), "\"\"");
     }
 }
