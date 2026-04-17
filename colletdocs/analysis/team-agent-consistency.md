@@ -108,8 +108,9 @@
   "tools: [Read, Edit, Write, Bash, Grep, Glob]"
   → "tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]"
   ```
-- 팀 에이전트에 `model: sonnet` 줄이 추가로 있어 순서가 다름 → 매칭 실패 가능
-- **영향**: Gemini에서 팀 에이전트가 인식 불가
+- `transform_agent()`의 문자열 치환 자체는 `model: sonnet` 줄 위치와 무관하게 정상 동작함 (substring 검색)
+- 실제 원인은 **C-2와 동일**: `sync_to_dest()`가 `transform_agent()`를 아예 호출하지 않기 때문
+- **영향**: Gemini에서 팀 에이전트 tools 필드가 변환되지 않아 인식 불가 (근본 원인은 C-2)
 
 #### M-4. default 팀 에이전트 (ops/scribe/explorer)와 정적 에이전트 (builder/auditor/planner/reviewer) 역할 중복 누락
 - 정적 에이전트: builder, auditor, planner, reviewer

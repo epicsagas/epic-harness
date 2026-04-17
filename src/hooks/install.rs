@@ -172,7 +172,7 @@ fn strip_frontmatter(md: &str) -> &str {
 }
 
 /// Transform a canonical agent for a specific tool.
-fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
+pub fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
     match tool {
         "codex" => {
             let addendum = match name {

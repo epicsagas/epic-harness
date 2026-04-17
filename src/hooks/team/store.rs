@@ -52,6 +52,23 @@ fn today_str() -> String {
     iso[..10].to_string()
 }
 
+fn tools_for_role(role: &str) -> &'static str {
+    match role {
+        r if r.contains("audit")
+            || r.contains("review")
+            || r.contains("explor")
+            || r.contains("scan")
+            || r.contains("analyz") =>
+        {
+            "[Read, Grep, Glob, Bash]"
+        }
+        r if r.contains("plan") || r.contains("architect") || r.contains("design") => {
+            "[Read, Grep, Glob]"
+        }
+        _ => "[Read, Edit, Write, Bash, Grep, Glob]",
+    }
+}
+
 // ── Path helpers ───────────────────────────────────────
 
 pub fn orgs_base_dir() -> PathBuf {
@@ -268,8 +285,9 @@ pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static s
 
 pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_type: &str) -> String {
     let title = to_title_case(role);
+    let tools = tools_for_role(role);
     format!(
-        "---\nname: {role}\ndescription: {description}\ntools: [Read, Edit, Write, Bash, Grep, Glob]\nmodel: sonnet\n---\n# {title}\n\nYou are the **{title}** for the **{team_name}** team.\n\n{description}\n"
+        "---\nname: {role}\ndescription: {description}\ntools: {tools}\nmodel: sonnet\n---\n# {title}\n\nYou are the **{title}** for the **{team_name}** team.\n\n{description}\n"
     )
 }
 

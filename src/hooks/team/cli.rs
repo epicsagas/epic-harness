@@ -164,6 +164,23 @@ fn validate_team_name(team: &str) -> io::Result<()> {
     }
 }
 
+/// Returns the agents dir for a tool if that tool appears to be installed globally.
+fn installed_tool_agents_dir(tool: &str) -> Option<PathBuf> {
+    let home = home_dir();
+    let parent = match tool {
+        "codex"    => home.join(".codex"),
+        "gemini"   => home.join(".gemini"),
+        "cursor"   => home.join(".cursor"),
+        "opencode" => home.join(".config").join("opencode"),
+        _ => return None,
+    };
+    if parent.exists() {
+        Some(parent.join("agents"))
+    } else {
+        None
+    }
+}
+
 fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
     validate_team_name(team)?;
 
@@ -209,6 +226,28 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
             let dest_path = dest.join(format!("{}.md", agent_name));
             fs::write(&dest_path, injected)?;
             count += 1;
+        }
+    }
+
+    // Also sync to other installed tools with tool-specific transforms
+    let other_tools = ["codex", "gemini", "cursor", "opencode"];
+    for tool in &other_tools {
+        if let Some(agents_dir) = installed_tool_agents_dir(tool) {
+            let tool_team_dir = agents_dir.join(team);
+            if let Err(e) = fs::create_dir_all(&tool_team_dir) {
+                eprintln!("[harness] warn: could not create {}: {}", tool_team_dir.display(), e);
+                continue;
+            }
+            for agent_name in &agents {
+                if let Some(content) = load_agent(org, team, agent_name) {
+                    let injected = inject_team_context(&content, org, team, &config.team_type, &mission);
+                    let transformed = crate::hooks::install::transform_agent(tool, agent_name, &injected);
+                    let dest_path = tool_team_dir.join(format!("{}.md", agent_name));
+                    if let Err(e) = fs::write(&dest_path, &transformed) {
+                        eprintln!("[harness] warn: could not write {}: {}", dest_path.display(), e);
+                    }
+                }
+            }
         }
     }
 
