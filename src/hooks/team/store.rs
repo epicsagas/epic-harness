@@ -47,9 +47,21 @@ fn to_title_case(s: &str) -> String {
         .join(" ")
 }
 
-fn today_str() -> String {
+#[allow(dead_code)]
+pub(crate) fn today_str() -> String {
     let iso = crate::hooks::common::now_iso();
     iso[..10].to_string()
+}
+
+/// Remove characters and sequences that could corrupt YAML frontmatter or inject
+/// content into it. Specifically strips null bytes and lines beginning with `---`.
+pub(crate) fn sanitize_mission(mission: &str) -> String {
+    mission
+        .replace('\0', "")
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("---"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn tools_for_role(role: &str) -> &'static str {
@@ -147,7 +159,9 @@ pub fn save_team_config(config: &TeamConfig) -> io::Result<()> {
     let path = dir.join("config.json");
     let content = serde_json::to_string_pretty(config)
         .map_err(io::Error::other)?;
-    fs::write(&path, content)?;
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, &content)?;
+    fs::rename(&tmp, &path)?;
     Ok(())
 }
 
@@ -160,7 +174,9 @@ pub fn save_mission(org: &str, team: &str, content: &str) -> io::Result<()> {
     let dir = team_store_dir(org, team);
     fs::create_dir_all(&dir)?;
     let path = dir.join("mission.md");
-    fs::write(&path, content)?;
+    let tmp = path.with_extension("md.tmp");
+    fs::write(&tmp, content)?;
+    fs::rename(&tmp, &path)?;
     Ok(())
 }
 
@@ -174,8 +190,10 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
     fs::create_dir_all(&dir)?;
     let path = dir.join("playbook.md");
     let existing = fs::read_to_string(&path).unwrap_or_default();
+    let safe_project = project.replace("-->", "-- >");
+    let safe_date = date.replace("-->", "-- >");
     let header = if !project.is_empty() || !date.is_empty() {
-        format!("<!-- project: {} | date: {} -->\n", project, date)
+        format!("<!-- project: {} | date: {} -->\n", safe_project, safe_date)
     } else {
         String::new()
     };
@@ -184,7 +202,9 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
     } else {
         format!("{}\n\n---\n\n{}{}", existing, header, section)
     };
-    fs::write(&path, new_content)?;
+    let tmp = path.with_extension("md.tmp");
+    fs::write(&tmp, &new_content)?;
+    fs::rename(&tmp, &path)?;
     Ok(())
 }
 
@@ -294,6 +314,7 @@ pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_ty
 /// Inject `org` and `team` fields into frontmatter, and replace/append `## Team Context`.
 /// Called at sync time on canonical agent content before writing to .claude/agents/.
 pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team_type: &str, mission: &str) -> String {
+    let mission = &sanitize_mission(mission);
     let type_label = match team_type {
         "stream" => "Stream-aligned",
         "platform" => "Platform",
@@ -375,12 +396,6 @@ pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(Strin
         "## {} Team Playbook\n**Type**: {}  **Project**: {}\n### Agent Roster\n{}\n### Coordination\n{}\n",
         team_name, team_type, project, agent_roster, coordination_notes
     )
-}
-
-// Keep today_str accessible within tests
-#[allow(dead_code)]
-pub(crate) fn today_str_pub() -> String {
-    today_str()
 }
 
 // ── Default epic team preset ───────────────────────────
@@ -586,6 +601,66 @@ mod tests {
 
     // Serialize tests that mutate the process-wide HOME env var.
     static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn test_save_team_config_atomic() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        let config = TeamConfig {
+            name: "alpha".to_string(),
+            org: "testorg".to_string(),
+            team_type: "stream".to_string(),
+            projects: vec![],
+            created: "2026-01-01T00:00:00Z".to_string(),
+            updated: "2026-01-01T00:00:00Z".to_string(),
+        };
+        save_team_config(&config).unwrap();
+
+        // Final file must exist
+        let final_path = team_store_dir("testorg", "alpha").join("config.json");
+        assert!(final_path.exists(), "config.json should exist after save");
+
+        // No leftover .tmp file
+        let tmp_path = final_path.with_extension("json.tmp");
+        assert!(!tmp_path.exists(), "no .tmp file should remain after atomic write");
+    }
+
+    #[test]
+    fn test_sanitize_mission_strips_frontmatter_separator() {
+        let dirty = "line1\n---\nmalicious: injected";
+        let clean = sanitize_mission(dirty);
+        assert!(!clean.contains("\n---"), "sanitized mission must not contain frontmatter separator");
+        assert!(clean.contains("line1"), "legitimate content must be preserved");
+        // null byte should also be removed
+        let with_null = "hello\0world";
+        let clean_null = sanitize_mission(with_null);
+        assert!(!clean_null.contains('\0'), "null bytes must be stripped");
+    }
+
+    #[test]
+    fn test_append_playbook_escapes_html_comment() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        // project name containing --> would break HTML comment
+        let malicious_project = "foo --> <script>";
+        append_playbook("testorg2", "beta", "## section", malicious_project, "2026-01-01").unwrap();
+
+        let content = load_playbook("testorg2", "beta");
+        // After escaping, "foo --> <script>" becomes "foo -- > <script>".
+        // The only "-->" in the output should be the legitimate comment-closing marker.
+        // Count occurrences: exactly one "-->" (the closing marker), and it must
+        // not appear inside the project-name portion of the comment.
+        assert!(
+            content.contains("foo -- > <script>"),
+            "injected --> must be escaped to '-- >' in project name: {content}"
+        );
+    }
 
     #[test]
     fn test_install_default_team_idempotent() {

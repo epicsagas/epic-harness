@@ -942,8 +942,15 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
     let entries = match fs::read_dir(&cache_base) {
         Ok(e) => e,
         Err(_) => {
-            eprintln!("[harness] plugin cache not found — skipping sync");
-            return;
+            return; // Claude Code not installed — skip silently
+        }
+    };
+
+    // symlink 탈출 방어: cache_base를 한 번 canonicalize (루프 밖)
+    let cache_base_canon = match cache_base.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return; // Claude Code not installed — skip silently
         }
     };
 
@@ -974,6 +981,18 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
     for entry in entries.flatten() {
         let version_dir = entry.path();
         if !version_dir.is_dir() {
+            continue;
+        }
+        // symlink 탈출 방어: version_dir를 canonicalize 후 cache_base 내부인지 검증
+        let version_dir = match version_dir.canonicalize() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if !version_dir.starts_with(&cache_base_canon) {
+            eprintln!(
+                "[harness] skipping suspicious cache entry: {}",
+                version_dir.display()
+            );
             continue;
         }
         for (rel, content) in files {
@@ -1915,5 +1934,32 @@ mod tests {
         // Old hooksConfig key gone (replaced, not merged within hooksConfig).
         assert!(v["hooksConfig"]["old"].is_null());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── sync_plugin_cache ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sync_plugin_cache_no_panic_on_missing_dir() {
+        // HOME을 존재하지 않는 임시 경로로 설정 → cache_base 없음 → silent return
+        let fake_home = std::env::temp_dir()
+            .join(format!("epic_test_no_cache_{}", rand_suffix()));
+        // 디렉토리를 만들지 않아야 함 — cache_base read_dir 실패해야 함
+        let home_str = fake_home.to_string_lossy().to_string();
+        // dry_run=true 로 호출 — 패닉 없이 즉시 반환되어야 함
+        sync_plugin_cache(&home_str, true);
+        // 여기까지 도달하면 성공
+    }
+
+    #[test]
+    fn test_sync_plugin_cache_no_panic_on_empty_cache_dir() {
+        // cache_base 디렉토리는 존재하지만 version 서브디렉토리가 없는 경우
+        let base_dir = tmp_dir();
+        let cache_base = base_dir
+            .join(".claude/plugins/cache/epicsagas/epic");
+        fs::create_dir_all(&cache_base).unwrap();
+        let home_str = base_dir.to_string_lossy().to_string();
+        // 패닉 없이 종료되어야 함
+        sync_plugin_cache(&home_str, true);
+        let _ = fs::remove_dir_all(base_dir);
     }
 }
