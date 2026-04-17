@@ -15,6 +15,16 @@ static SKILL_TDD: &str = include_str!("../../skills/tdd/SKILL.md");
 static SKILL_VERIFY: &str = include_str!("../../skills/verify/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
 
+// ── Canonical commands (Claude Code plugin cache sync) ───────────────────────
+static CMD_CHECK: &str  = include_str!("../../commands/check.md");
+static CMD_EVOLVE: &str = include_str!("../../commands/evolve.md");
+static CMD_GO: &str     = include_str!("../../commands/go.md");
+static CMD_SHIP: &str   = include_str!("../../commands/ship.md");
+static CMD_SPEC: &str   = include_str!("../../commands/spec.md");
+static CMD_TEAM: &str   = include_str!("../../commands/team.md");
+
+static SKILL_DISPATCH: &str = include_str!("../../skills/_dispatch/SKILL.md");
+
 static AGENT_AUDITOR: &str = include_str!("../../agents/auditor.md");
 static AGENT_BUILDER: &str = include_str!("../../agents/builder.md");
 static AGENT_PLANNER: &str = include_str!("../../agents/planner.md");
@@ -920,6 +930,68 @@ fn make_executable(path: &Path) {
 
 // ── MCP injection ─────────────────────────────────────────────────────────────
 
+/// Syncs canonical commands/skills/agents into every discovered Claude Code
+/// plugin cache directory (`~/.claude/plugins/cache/epicsagas/epic/*/`).
+///
+/// Called on `epic install claude` so the locally-installed binary always
+/// keeps the cache in sync without waiting for an npm publish.
+fn sync_plugin_cache(home: &str, dry_run: bool) {
+    let cache_base = std::path::Path::new(home)
+        .join(".claude/plugins/cache/epicsagas/epic");
+
+    let entries = match fs::read_dir(&cache_base) {
+        Ok(e) => e,
+        Err(_) => {
+            eprintln!("[harness] plugin cache not found — skipping sync");
+            return;
+        }
+    };
+
+    let files: &[(&str, &str)] = &[
+        ("commands/check.md",          CMD_CHECK),
+        ("commands/evolve.md",         CMD_EVOLVE),
+        ("commands/go.md",             CMD_GO),
+        ("commands/ship.md",           CMD_SHIP),
+        ("commands/spec.md",           CMD_SPEC),
+        ("commands/team.md",           CMD_TEAM),
+        ("skills/_dispatch/SKILL.md",  SKILL_DISPATCH),
+        ("skills/commit/SKILL.md",     SKILL_COMMIT),
+        ("skills/context/SKILL.md",    SKILL_CONTEXT),
+        ("skills/debug/SKILL.md",      SKILL_DEBUG),
+        ("skills/document/SKILL.md",   SKILL_DOCUMENT),
+        ("skills/perf/SKILL.md",       SKILL_PERF),
+        ("skills/secure/SKILL.md",     SKILL_SECURE),
+        ("skills/simplify/SKILL.md",   SKILL_SIMPLIFY),
+        ("skills/tdd/SKILL.md",        SKILL_TDD),
+        ("skills/verify/SKILL.md",     SKILL_VERIFY),
+        ("agents/auditor.md",          AGENT_AUDITOR),
+        ("agents/builder.md",          AGENT_BUILDER),
+        ("agents/planner.md",          AGENT_PLANNER),
+        ("agents/reviewer.md",         AGENT_REVIEWER),
+    ];
+
+    let mut synced = 0u32;
+    for entry in entries.flatten() {
+        let version_dir = entry.path();
+        if !version_dir.is_dir() {
+            continue;
+        }
+        for (rel, content) in files {
+            let dest = version_dir.join(rel);
+            let status = write_or_sync(&dest, content, dry_run);
+            if matches!(status, FileStatus::Updated | FileStatus::Added) {
+                synced += 1;
+            }
+        }
+    }
+
+    if dry_run {
+        eprintln!("[harness] dry-run: would sync plugin cache files");
+    } else {
+        eprintln!("[harness] plugin cache synced ({synced} files updated)");
+    }
+}
+
 /// Injects `mcpServers.harness-mem` into `~/.claude.json`.
 /// Claude Code uses this file (not ~/.claude/settings.json) for global app state including MCP.
 fn inject_mcp_claude() {
@@ -1330,6 +1402,17 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
                 eprintln!();
                 eprintln!("[harness] Then restart Codex for the change to take effect.");
             }
+        }
+    }
+
+    // Sync plugin cache for Claude Code (keeps commands/skills/agents up-to-date
+    // without requiring an npm publish for every change).
+    if tool == "claude" {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !dry_run {
+            sync_plugin_cache(&home, dry_run);
+        } else {
+            eprintln!("[harness] dry-run: would sync ~/.claude/plugins/cache/epicsagas/epic/*/");
         }
     }
 

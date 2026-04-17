@@ -115,6 +115,8 @@ epic install gemini --dry-run
 
 Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
 
+> **Claude Code note**: `epic install claude` also syncs commands/skills/agents directly into `~/.claude/plugins/cache/epicsagas/epic/*/`, so local binary changes take effect immediately without a new npm release.
+
 ## Unified Memory
 
 All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). No Node.js or external runtime required.
