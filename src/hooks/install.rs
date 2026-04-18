@@ -15,6 +15,16 @@ static SKILL_TDD: &str = include_str!("../../skills/tdd/SKILL.md");
 static SKILL_VERIFY: &str = include_str!("../../skills/verify/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
 
+// ── Canonical commands (Claude Code plugin cache sync) ───────────────────────
+static CMD_CHECK: &str  = include_str!("../../commands/check.md");
+static CMD_EVOLVE: &str = include_str!("../../commands/evolve.md");
+static CMD_GO: &str     = include_str!("../../commands/go.md");
+static CMD_SHIP: &str   = include_str!("../../commands/ship.md");
+static CMD_SPEC: &str   = include_str!("../../commands/spec.md");
+static CMD_TEAM: &str   = include_str!("../../commands/team.md");
+
+static SKILL_DISPATCH: &str = include_str!("../../skills/_dispatch/SKILL.md");
+
 static AGENT_AUDITOR: &str = include_str!("../../agents/auditor.md");
 static AGENT_BUILDER: &str = include_str!("../../agents/builder.md");
 static AGENT_PLANNER: &str = include_str!("../../agents/planner.md");
@@ -172,7 +182,7 @@ fn strip_frontmatter(md: &str) -> &str {
 }
 
 /// Transform a canonical agent for a specific tool.
-fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
+pub fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
     match tool {
         "codex" => {
             let addendum = match name {
@@ -920,6 +930,87 @@ fn make_executable(path: &Path) {
 
 // ── MCP injection ─────────────────────────────────────────────────────────────
 
+/// Syncs canonical commands/skills/agents into every discovered Claude Code
+/// plugin cache directory (`~/.claude/plugins/cache/epicsagas/epic/*/`).
+///
+/// Called on `epic install claude` so the locally-installed binary always
+/// keeps the cache in sync without waiting for an npm publish.
+fn sync_plugin_cache(home: &str, dry_run: bool) {
+    let cache_base = std::path::Path::new(home)
+        .join(".claude/plugins/cache/epicsagas/epic");
+
+    let entries = match fs::read_dir(&cache_base) {
+        Ok(e) => e,
+        Err(_) => {
+            return; // Claude Code not installed — skip silently
+        }
+    };
+
+    // symlink 탈출 방어: cache_base를 한 번 canonicalize (루프 밖)
+    let cache_base_canon = match cache_base.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return; // Claude Code not installed — skip silently
+        }
+    };
+
+    let files: &[(&str, &str)] = &[
+        ("commands/check.md",          CMD_CHECK),
+        ("commands/evolve.md",         CMD_EVOLVE),
+        ("commands/go.md",             CMD_GO),
+        ("commands/ship.md",           CMD_SHIP),
+        ("commands/spec.md",           CMD_SPEC),
+        ("commands/team.md",           CMD_TEAM),
+        ("skills/_dispatch/SKILL.md",  SKILL_DISPATCH),
+        ("skills/commit/SKILL.md",     SKILL_COMMIT),
+        ("skills/context/SKILL.md",    SKILL_CONTEXT),
+        ("skills/debug/SKILL.md",      SKILL_DEBUG),
+        ("skills/document/SKILL.md",   SKILL_DOCUMENT),
+        ("skills/perf/SKILL.md",       SKILL_PERF),
+        ("skills/secure/SKILL.md",     SKILL_SECURE),
+        ("skills/simplify/SKILL.md",   SKILL_SIMPLIFY),
+        ("skills/tdd/SKILL.md",        SKILL_TDD),
+        ("skills/verify/SKILL.md",     SKILL_VERIFY),
+        ("agents/auditor.md",          AGENT_AUDITOR),
+        ("agents/builder.md",          AGENT_BUILDER),
+        ("agents/planner.md",          AGENT_PLANNER),
+        ("agents/reviewer.md",         AGENT_REVIEWER),
+    ];
+
+    let mut synced = 0u32;
+    for entry in entries.flatten() {
+        let version_dir = entry.path();
+        if !version_dir.is_dir() {
+            continue;
+        }
+        // symlink 탈출 방어: version_dir를 canonicalize 후 cache_base 내부인지 검증
+        let version_dir = match version_dir.canonicalize() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if !version_dir.starts_with(&cache_base_canon) {
+            eprintln!(
+                "[harness] skipping suspicious cache entry: {}",
+                version_dir.display()
+            );
+            continue;
+        }
+        for (rel, content) in files {
+            let dest = version_dir.join(rel);
+            let status = write_or_sync(&dest, content, dry_run);
+            if matches!(status, FileStatus::Updated | FileStatus::Added) {
+                synced += 1;
+            }
+        }
+    }
+
+    if dry_run {
+        eprintln!("[harness] dry-run: would sync plugin cache files");
+    } else {
+        eprintln!("[harness] plugin cache synced ({synced} files updated)");
+    }
+}
+
 /// Injects `mcpServers.harness-mem` into `~/.claude.json`.
 /// Claude Code uses this file (not ~/.claude/settings.json) for global app state including MCP.
 fn inject_mcp_claude() {
@@ -1331,6 +1422,22 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
                 eprintln!("[harness] Then restart Codex for the change to take effect.");
             }
         }
+    }
+
+    // Sync plugin cache for Claude Code (keeps commands/skills/agents up-to-date
+    // without requiring an npm publish for every change).
+    if tool == "claude" {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !dry_run {
+            sync_plugin_cache(&home, dry_run);
+        } else {
+            eprintln!("[harness] dry-run: would sync ~/.claude/plugins/cache/epicsagas/epic/*/");
+        }
+    }
+
+    // Seed the default epic org/team on first install (idempotent)
+    if !dry_run {
+        crate::hooks::team::store::install_default_team_if_needed("epic");
     }
 
     0
@@ -1827,5 +1934,32 @@ mod tests {
         // Old hooksConfig key gone (replaced, not merged within hooksConfig).
         assert!(v["hooksConfig"]["old"].is_null());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── sync_plugin_cache ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sync_plugin_cache_no_panic_on_missing_dir() {
+        // HOME을 존재하지 않는 임시 경로로 설정 → cache_base 없음 → silent return
+        let fake_home = std::env::temp_dir()
+            .join(format!("epic_test_no_cache_{}", rand_suffix()));
+        // 디렉토리를 만들지 않아야 함 — cache_base read_dir 실패해야 함
+        let home_str = fake_home.to_string_lossy().to_string();
+        // dry_run=true 로 호출 — 패닉 없이 즉시 반환되어야 함
+        sync_plugin_cache(&home_str, true);
+        // 여기까지 도달하면 성공
+    }
+
+    #[test]
+    fn test_sync_plugin_cache_no_panic_on_empty_cache_dir() {
+        // cache_base 디렉토리는 존재하지만 version 서브디렉토리가 없는 경우
+        let base_dir = tmp_dir();
+        let cache_base = base_dir
+            .join(".claude/plugins/cache/epicsagas/epic");
+        fs::create_dir_all(&cache_base).unwrap();
+        let home_str = base_dir.to_string_lossy().to_string();
+        // 패닉 없이 종료되어야 함
+        sync_plugin_cache(&home_str, true);
+        let _ = fs::remove_dir_all(base_dir);
     }
 }

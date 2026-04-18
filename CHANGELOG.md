@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Progress bar**: TTY shows animated `[====>   ] N/M filename`; non-TTY shows one-line summary per tool
 
 ### Changed
+- **`epic install claude` plugin cache sync**: now overwrites `~/.claude/plugins/cache/epicsagas/epic/*/` with the commands/skills/agents embedded in the binary — local changes take effect immediately without waiting for an npm publish
 - **Codex skills path**: now installs to `~/.agents/skills/` (official Codex discovery path; was `~/.codex/skills/` which is not scanned)
 - **Codex commands**: renamed `commands/` → `prompts/` → `~/.codex/prompts/`; invoke as `/prompts:check` etc.
 - **Codex hooks**: require `features.codex_hooks = true` in `~/.codex/config.toml` (off by default); install now writes this config and warns if an existing config lacks the flag

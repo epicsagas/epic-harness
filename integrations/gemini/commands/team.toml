@@ -1,16 +1,30 @@
-description = "Design a project-specific agent team - analyze codebase and generate custom agents + skills"
+description = "Design or update an org-level agent team — cross-project, append-merge"
 prompt = """
-CRITICAL: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+This command is a thin wrapper around the `epic team` CLI.
 
-1. Read project metadata (GEMINI.md, README, build files).
-2. Explore directory structure.
-3. Identify tech stack, modules, test framework, and deploy method.
+Run in terminal:
+```
+epic team
+```
 
-Choose an architecture pattern (Pipeline, Fan-out/Fan-in, Expert Pool, Producer-Reviewer, Supervisor).
-Recommend team composition (3-6 agents max). Show user and get approval.
+`epic team` handles the full interactive flow:
+- Resolves org (`HARNESS_ORG` env → prompt → default `"epic"`)
+- Scans the project (tech stack, domain boundaries, key modules)
+- Recommends team type and agent composition
+- Shows diff if team already exists in `~/.harness/orgs/`
+- Applies merge strategy (no silent overwrites)
+- Copies agents to `.claude/agents/{team}/` with `## Team Context` injected
 
-Create files in `$HARNESS_DIR/team/` (agents, skills, playbook.md).
-Each agent file should have frontmatter (name, description, tools, model) and detailed instructions.
+For the full spec see `docs/research/team-spec.md`.
 
-Add a pointer in `$HARNESS_DIR/memory/team.md` so `/go` knows to use this team.
+Other subcommands:
+```
+epic team list                     # list teams in current org
+epic team show {team}              # config + agents + mission
+epic team show {team} --playbook   # full accumulated playbook
+epic team sync {team}              # re-copy agents to .claude/agents/
+epic team link {team}              # attach existing team (skip design)
+epic team unlink {team}            # remove .claude/agents/{team}/
+epic team history {team} {agent}   # show .history/ entries
+```
 """

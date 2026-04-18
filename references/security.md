@@ -58,3 +58,54 @@
 - [ ] External URL inputs validated and restricted
 - [ ] Internal network access blocked from user-supplied URLs
 - [ ] DNS rebinding protections in place
+
+---
+
+## LLM / Agent File Security
+
+Patterns specific to agent `.md` files that are ingested by LLMs as instructions.
+
+### Unicode Prompt Injection
+Invisible Unicode codepoints can be embedded in text to inject hidden instructions into LLM context.
+
+**Blocked ranges (applied on both write and display paths):**
+| Range | Block | Risk |
+|---|---|---|
+| U+0001–U+001F (excl. tab) | C0 controls | Encoded as `\xHH` in YAML |
+| U+007F | DEL | Stripped |
+| U+0080–U+009F | C1 controls (incl. CSI U+009B) | Stripped — ANSI injection via terminal |
+| U+E0000–U+E007F | Unicode Tags block (Plane 14) | Stripped — primary LLM injection vector |
+| U+E0080–U+E00FF | Reserved (Plane 14) | Stripped — contiguous with Tags block |
+| U+E0100–U+E01EF | Variation Selectors Supplement | Stripped — secondary injection vector |
+
+**Implementation (`src/hooks/team/store.rs`):**
+- `yaml_quote` — write path for YAML frontmatter (strips C1 + Plane-14)
+- `strip_line_breaks` — write path for Markdown body (strips Plane-14)
+- `sanitize_mission` — write path for mission files (strips Plane-14 + `---` separators)
+- `yaml_unescape_display` — display path (strips C0/DEL/C1/Plane-14)
+
+### YAML Frontmatter Injection
+Agent files use YAML frontmatter (`---`) for metadata. Malicious input can break out of the frontmatter block.
+
+**Mitigations:**
+- All frontmatter values written via `yaml_quote` (double-quoted scalars)
+- `sanitize_mission` strips lines starting with `---` to prevent block-close injection
+- Null bytes stripped before line splitting
+
+### HTML Comment Injection
+Playbook files use HTML comments for metadata (`<!-- project: … -->`).
+
+**Mitigations in `append_playbook`:**
+- `-->` → `-- >` (comment close)
+- `<!--` → `<! --` (comment open)
+- `--!>` → `--! >` (HTML5 bogus comment terminator)
+
+### Path Traversal via Agent Names
+Agent files are stored as `{name}.md`. A crafted name like `../../etc/passwd` could escape the agents directory.
+
+**Mitigation:** `validate_agent_name` enforces allowlist `[a-zA-Z0-9_-]` — rejects `/`, `.`, spaces, homoglyphs, and device names. Applied in both `load_agent` and `save_agent`.
+
+### ANSI Injection via Filenames
+Invalid agent filenames printed in warnings could contain ANSI escape sequences that hijack the terminal.
+
+**Mitigation:** `list_agents` sanitizes filenames with `is_ascii_graphic() || c == ' '` before printing.

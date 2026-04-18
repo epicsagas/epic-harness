@@ -39,32 +39,37 @@ Ring 3 — 進化（自己改善）
 
 ## インストール
 
-```bash
-# Claude Code プラグインCLI
-claude plugins marketplace add epicsagas/plugins
-claude plugins install epic@epicsagas
-
-# または手動で
-git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
+```
+# Claude Code プラグイン（推奨）
+/plugin marketplace add epicsagas/plugins
+/plugin install epic@epicsagas
 ```
 
-### Rustバイナリ（オプション、フックが約4倍高速）
+```bash
+# またはソースから
+git clone https://github.com/epicsagas/epic-harness.git
+cd epic-harness
+cargo install --path .
+epic install
+```
+
+### バイナリからインストール
 
 ```bash
 # Homebrew (macOS)
 brew install epicsagas/tap/epic-harness
 
-
 # crates.ioから
 cargo install epic-harness
-# またはcargo-binstallで（ビルド済み、より高速）
+
+# ビルド済みバイナリ（高速、コンパイル不要）
 cargo binstall epic-harness
 
 # ソースから
 cargo install --path .
 ```
 
-バイナリはフックによって自動検出されます。
+バイナリはフックによって自動検出されます。存在しない場合はNode.jsにフォールバックします。
 
 ## マルチツールサポート
 
@@ -80,11 +85,11 @@ epic-harnessはClaude Codeと6つの追加AIコーディングツールで動作
 | **Cline** | ✓ フル⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` に `codex_hooks = true` が必要; PostToolUseはBashのみインターセプト  
-² `PreToolUse` 相当機能なし — guardは `BeforeModel` レベルで実行  
-³ Cursor 1.7+ が必要  
-⁴ JSプラグイン: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
-⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel フックスクリプト  
+¹ `~/.codex/config.toml` に `codex_hooks = true` が必要; PostToolUseはBashのみインターセプト
+² `PreToolUse` 相当機能なし — guardは `BeforeModel` レベルで実行
+³ Cursor 1.7+ が必要
+⁴ JSプラグイン: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel フックスクリプト
 ⁶ フックシステムなし — コンベンションを `.aider/CONVENTIONS.md` + `.aider.conf.yml` で注入
 
 ### 他のツールにインストール
@@ -108,31 +113,66 @@ epic install cursor --local
 epic install gemini --dry-run
 ```
 
+ツールディレクトリの統合ファイル（`hooks.json`、コマンド、エージェント、スキル、ルールなど）はバイナリから**同期**されます：不足または古いファイルが書き込まれます。`GEMINI.md` および `AGENTS.md` は存在しない場合のみ作成されます。
+
 ## 統合メモリ
 
-すべてのエージェントは `~/.harness/memory/` にある単一のナレッジグラフを共有します。
+すべてのエージェントは `~/.harness/memory.db`（SQLite + FTS5）に保存された単一のナレッジグラフを共有します。Node.jsや外部ランタイムは不要です。
 
-```bash
-# 決定事項を追加
-harness mem add "authはJWTではなくセッションクッキーを使用する"
+### スマートリコール
 
-# セマンティック検索
-harness mem query "認証方式"
+メモリ取得は最新N件のダンプではなく**複合スコアリング**を使用します：
 
-# 全文検索
-harness mem search "JWT"
-
-# D3.jsナレッジグラフのWeb UIを起動 (http://localhost:7700)
-harness mem serve
-
-# Claude Code用MCPサーバーを登録（5つのネイティブツール: mem_add, mem_query, mem_search, mem_related, mem_context）
-harness mem mcp-install
-
-# 既存のプロジェクト別メモリを移行
-harness mem migrate --all
+```
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-エージェントはPostToolUseフックを通じてアーキテクチャの決定事項を自動記録します。セッション開始時に関連するメモリがコンテキストに注入されます。
+- **重要度** ノードタイプ別に自動設定：decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
+- **アクセス追跡**：頻繁にリコールされるメモリは自然に上位に浮かぶ
+- **緩やかな減衰**：未使用のメモリは時間とともに重要度が低下（30日ごとに10%、最低0.05）
+- **グラフ拡張**：リコールは1ホップのエッジを辿り関連コンテキストを表面化
+
+### CLI
+
+```bash
+# スマートリコール — 現在のタスクに関連性でランク付け
+harness mem recall "auth refactor" --project my-project
+
+# メモリノードを追加（重要度はタイプ別に自動設定、または明示的に指定）
+harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+
+# フィルタークエリ（重要度 + アクセス数を含む）
+harness mem query --type decision --project my-project
+
+# 全文検索（重要度順にランク付け）
+harness mem search "JWT"
+
+# スマートコンテキスト（重要度加重、最新順でない）
+harness mem context --project my-project
+
+# ナレッジグラフのWeb UI
+harness mem serve          # → http://localhost:7700
+
+# Claude CodeにMCPサーバーとして登録（Node.js不要）
+harness mem mcp-install
+
+# すべてのノードをMarkdownにエクスポート（Gitバックアップ用）
+harness mem export --out ./docs/memory
+```
+
+### MCPツール（6個）
+
+MCPサーバーとして登録（`harness mem mcp-install`）すると、エージェントがこれらのツールを直接呼び出せます：
+
+| ツール | 目的 |
+|------|---------|
+| `mem_recall` | **主要。** ヒント + プロジェクト + グラフ近傍を使ったスマートコンテキストリコール |
+| `mem_add` | タイプ別自動重要度でノードを追加（または明示的に0.0–1.0） |
+| `mem_search` | FTS5キーワード検索、重要度順にランク付け |
+| `mem_query` | タグ/タイプ/プロジェクトでフィルタリング |
+| `mem_context` | プロジェクトスコープのスマートリコール（ヒントなし） |
+| `mem_related` | ノードIDからのBFSグラフ探索 |
 
 ### ナレッジグラフの仕組み
 
@@ -144,21 +184,32 @@ harness mem migrate --all
 PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
                                                    ↓
 SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
-                                                   ↓
-SessionStart hook → resume (context injection) → next session gets hints
+                                                   ↓  （重要度はタイプ別に設定）
+SessionStart hook → resume (smart recall) → 次のセッションに関連性ランク付きヒントを提供
+                              ↓
+                    decay_importance() → 未使用ノードは徐々にフェード
 ```
 
 **ノードタイプ (7):**
 
-| タイプ | 作成元 | 内容 |
-|------|-----------|---------|
-| `session` | Auto (reflect) | セッション成功率、平均スコア、トレンド |
-| `error` | Auto (reflect) | 繰り返しエラーパターン (≥3回連続の同一エラー) |
-| `pattern` | Auto (reflect) | 弱いツール、スラッシング、fix-then-breakサイクル |
-| `concept` | 手動 / MCP | アーキテクチャ概念、技術的知識 |
-| `decision` | 手動 / MCP | ADR、設計上の決定 |
-| `project` | 手動 / MCP | プロジェクトメタデータ |
-| `resolution` | 手動 / MCP | エラー解決レシピ |
+| タイプ | 作成元 | デフォルト重要度 |
+|------|-----------|-------------------|
+| `decision` | 手動 / MCP | 0.9 |
+| `resolution` | 手動 / MCP | 0.8 |
+| `concept` | 手動 / MCP | 0.7 |
+| `project` | 手動 / MCP | 0.7 |
+| `pattern` | Auto (reflect) | 0.5 |
+| `error` | Auto (reflect) | 0.4 |
+| `session` | Auto (reflect) | 0.2 |
+
+**メモリライフサイクル:**
+
+| イベント | 発生すること |
+|-------|-------------|
+| 検索/リコール/コンテキストでノードをリコール | `access_count++`, `accessed_at` 更新 |
+| 30日以上アクセスなし | 重要度を10%減衰（最低0.05） |
+| 180日以上アクセスなし | `stale` タグ、リコールから除外 |
+| `pinned` タグのノード | 減衰免疫 |
 
 **自動蓄積の条件:**
 
@@ -183,8 +234,111 @@ SessionStart hook → resume (context injection) → next session gets hints
 | `/go` | 構築実行 — 自動計画、TDDサブエージェント、並列実行 |
 | `/check` | 検証 — コードレビュー + セキュリティ監査 + パフォーマンスチェックを並列実行 |
 | `/ship` | リリース — PR作成、CI実行、マージ |
-| `/team` | プロジェクト固有のエージェントチームを設計 |
+| `/team` | プロジェクト横断のorg-levelエージェントチームを作成・同期 |
 | `/evolve` | 手動進化トリガー / ステータス確認 / ロールバック |
+
+## チーム (`epic team`)
+
+チームは**org-level**であり、プロジェクトに依存しません。任意のプロジェクトで `/team` を実行すると、共有エージェント定義のプールが豊かになります — 決してサイレントに上書きしません。
+
+### 動作の仕組み
+
+```
+epic team                      # インタラクティブ: プロジェクトスキャン → 設計 → 書き込み → 同期
+         ↓
+~/.harness/orgs/epic/teams/backend/   ← グローバルストア（プロジェクト間で永続）
+         ↓
+epic team sync backend
+         ↓
+{project}/.claude/agents/backend/     ← Claude Codeがセッション開始時に自動検出
+├── domain-expert.md                  ← ロール定義 + チームコンテキスト注入
+├── reviewer.md
+└── tester.md
+         ↓
+次のセッション: エージェントがアクティブ — Claudeが自動選択または明示的に呼び出し
+```
+
+### CLIリファレンス
+
+```bash
+# チームを作成または更新（インタラクティブ4フェーズフロー）
+epic team
+
+# ブラウズ
+epic team list                        # 現在のorgの全チーム
+epic team list --org netflix          # 指定orgのチーム
+epic team show backend                # 設定、ミッション、エージェント
+epic team show backend --playbook     # + 完全な蓄積プレイブック
+
+# プロジェクトにディスパッチ
+epic team sync backend                # ディスパッチ: エージェントをコピー → .claude/agents/backend/
+epic team link backend                # ディスパッチ + チーム設定にプロジェクトを登録
+
+# プロジェクトからリコール
+epic team delete backend              # リコール: 現在のプロジェクトからのみ削除
+epic team unlink backend              # deleteの別名
+
+# 解散（orgから完全に削除）
+epic team delete backend --global     # orgストア + ローカルコピーを永久削除
+
+# 履歴
+epic team history backend reviewer    # エージェントの.history/バックアップを一覧
+```
+
+### コーディングエージェントからのチーム使用
+
+同期後、次のセッションからエージェントが自動的に利用可能になります：
+
+```
+# Claude Code / Cursor / OpenCode / Codex
+@domain-expert 決済ゲートウェイを実装してください
+@reviewer このPRのエッジケースを確認してください
+@tester authの統合テストを書いてください
+
+# またはエージェントがタスクコンテキストに基づいて自動選択
+```
+
+各エージェントファイルには同期時に注入された**チームコンテキスト**セクションが含まれます：
+
+```markdown
+## Team Context
+**Team**: backend (Stream-aligned)
+**Mission**: Own the API layer end-to-end
+**Full playbook**: `epic team show backend --playbook`
+```
+
+エージェントはチーム、ミッション、完全なプレイブックをオンデマンドでロードする方法を知っています —
+コンテキストウィンドウを膨らませることなく。
+
+### マルチorg
+
+```bash
+epic team                          # "epic" orgに蓄積（デフォルト）
+epic team --org netflix            # 別のNetflixスタイルトポロジー
+epic team --org client-x           # クライアント別エンゲージメント
+```
+
+同じorgの同じチーム名 = 意図的なクロスプロジェクト共有。
+`epic/teams/backend` はそれを作成またはリンクするすべてのプロジェクトから知識を蓄積します。
+
+### チームタイプ
+
+| タイプ | キーワード | デフォルトエージェント |
+|------|---------|---------------|
+| Stream-aligned | `stream` | domain-expert, reviewer, tester |
+| Platform | `platform` | api-designer, infra-specialist, dx-agent |
+| Enabling | `enabling` | specialist |
+| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
+
+### マージ戦略 — サイレント上書きなし
+
+| オブジェクト | ルール |
+|--------|------|
+| エージェント — 新規 | 自動追加 |
+| エージェント — 変更なし | スキップ |
+| エージェント — 変更あり | **プロンプト**（デフォルト: 既存を維持）。置換時 → `.history/` にバックアップ |
+| `playbook.md` | 常に**追記** — 切り詰めなし |
+| `mission.md` — 変更あり | **プロンプト**（デフォルト: 既存を維持） |
 
 ## 自動スキル（Ring 2）
 
@@ -203,7 +357,7 @@ SessionStart hook → resume (context injection) → next session gets hints
 
 ## フック（Ring 0）
 
-不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されています。
+不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されており、バイナリがない場合はNode.jsにフォールバックします。
 
 ```
 epic resume | guard | polish | observe | snapshot | reflect
@@ -214,8 +368,8 @@ epic resume | guard | polish | observe | snapshot | reflect
 | **resume** | セッション開始時 | コンテキスト復元、メモリ読み込み、スタック検出 |
 | **guard** | Bash実行前 | mainへのforce-push、rm -rf /、本番DBのDROPをブロック |
 | **polish** | 編集後 | 自動フォーマット（Biome/Prettier/ruff/gofmt）+ 型チェック |
-| **observe** | 全ツール使用時 | `.harness/obs/` にログ記録（進化用） |
-| **snapshot** | コンパクト前 | `.harness/sessions/` に状態を保存 |
+| **observe** | 全ツール使用時 | `~/.harness/projects/{slug}/obs/` にログ記録（進化用） |
+| **snapshot** | コンパクト前 | `~/.harness/projects/{slug}/sessions/` に状態を保存 |
 | **reflect** | セッション終了時 | 失敗を分析、進化スキルをシード、ゲート |
 
 ## 評価システム（Ring 3コア）
@@ -271,14 +425,14 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ```
 Observe（PostToolUse — 3軸スコアリング）
-    ↓ .harness/obs/session_{id}.jsonl
+    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
 Analyze（SessionEnd）
     ↓ SessionAnalysis: ツール別、拡張子別、スコア分布
     ↓ Patterns: repeated_same_error, fix_then_break, long_debug_loop, thrashing
 Seed（4経路: パターン / 弱いツール / 弱いファイルタイプ / 高頻度エラー）
-    ↓ .harness/evolved/{skill}/SKILL.md
+    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
 Gate（フォーマットチェック、重複排除、上限10、停滞チェック）
-    ↓ .harness/evolved_backup/（最良チェックポイント）
+    ↓ ~/.harness/projects/{slug}/evolved_backup/（最良チェックポイント）
 Reload（次セッション — resume.tsがメトリクスを報告 + 進化スキルを読み込み）
 ```
 
@@ -310,7 +464,7 @@ Reload（次セッション — resume.tsがメトリクスを報告 + 進化ス
 
 ## カスタムガードルール
 
-`.harness/guard-rules.yaml` でプロジェクト固有の安全ルールを追加できます：
+プロジェクトルートの `.harness/guard-rules.yaml` でプロジェクト固有の安全ルールを追加できます：
 
 ```yaml
 blocked:
@@ -320,18 +474,18 @@ warned:
   - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
 
-ルールは組み込みガード（mainへのforce-push、rm -rf /、本番DBのDROP）とマージされます。
+ルールは組み込みガード（mainへのforce-push、rm -rf /、本番DBのDROP）とマージされます。このファイルをgitに含めることでチームと安全ルールを共有できます。
 
 ## クロスプロジェクト学習
 
 プロジェクト間で失敗パターンを共有するオプトイン機能：
 
 ```bash
-touch .harness/.cross-project-enabled  # オプトイン
+touch ~/.harness/projects/{slug}/.cross-project-enabled  # オプトイン
 ```
 
 有効化すると：
-- セッション終了時に匿名化されたパターンを `~/.harness-global/patterns.jsonl` にエクスポート
+- セッション終了時に匿名化されたパターンを `~/.harness/global_patterns.jsonl` にエクスポート
 - セッション開始時に他プロジェクトの弱点からのヒントを表示
 - `/evolve cross-project` で集約パターンを確認可能
 
@@ -360,29 +514,41 @@ polishフック（自動フォーマット + 型チェック）の結果は観�
 
 これにより、polishフックからのエラーであっても、「編集 → 型エラー → 編集 → 型エラー」のスラッシングパターンが検出されます。
 
-## プロジェクトデータ（`.harness/`）
+## プロジェクトデータ（`~/.harness/projects/{slug}/`）
 
-epic harnessはプロジェクトに `.harness/` ディレクトリを作成します：
+プロジェクト固有のデータはホームディレクトリに保存されます。プロジェクト削除後も残り、gitの履歴を汚染しません。
 
 ```
-.harness/
+~/.harness/projects/{slug}/
 ├── memory/           # プロジェクトパターンとルール（永続）
 ├── sessions/         # セッションスナップショット（復元用）
 ├── obs/              # ツール使用観測ログ（JSONL、セッション別）
 ├── evolved/          # 自動進化スキル
 ├── evolved_backup/   # 最良チェックポイント（停滞ロールバック用）
 ├── dispatch/         # スキルディスパッチログ（JSONL）
-├── team/             # /team で生成されたエージェントとスキル
+├── team/             # legacy (superseded by ~/.harness/orgs/)
 ├── evolution.jsonl   # 完全な進化履歴
-├── metrics.json      # 集約統計 + スキル帰属
-└── guard-rules.yaml  # カスタムガードルール（オプション）
+└── metrics.json      # 集約統計 + スキル帰属
+
+~/.harness/
+├── memory.db         # SQLiteナレッジグラフ (nodes + edges + FTS5)
+├── graph.json        # キャッシュされたグラフ (Web UI用)
+└── orgs/             # epic team グローバルストア
+    └── {org}/
+        └── teams/
+            └── {team}/
+                ├── config.json
+                ├── mission.md
+                ├── playbook.md
+                ├── agents/
+                └── .history/
 ```
 
-`.harness/` を `.gitignore` に追加するか、コミットするかはお任せします。
+プロジェクトルートの `.harness/guard-rules.yaml` でチームと安全ルールを共有することもできます。
 
 ## 開発
 
-### Rust（メイン — 約4倍高速）
+### ビルド
 
 ```bash
 cargo install --path .          # ビルド + ~/.cargo/bin/ にインストール
@@ -401,7 +567,7 @@ cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # プラグインバイナ�
 ### テスト
 
 ```bash
-cargo test       # 98件のRustユニットテスト
+cargo test       # Rustユニット + 統合テスト
 ```
 
 ## 謝辞
