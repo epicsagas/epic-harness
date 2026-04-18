@@ -3,7 +3,7 @@
 **6 commands. Auto-trigger skills. Self-evolving.**
 
 <p align="center">
-<a href="README.md">English</a> | <a href="docs/ja/README.md">日本語</a> | <a href="docs/ko/README.md">한국어</a> | <a href="docs/de/README.md">Deutsch</a> | <a href="docs/fr/README.md">Français</a> | <a href="docs/zh-CN/README.md">简体中文</a> | <a href="docs/zh-TW/README.md">繁體中文</a> | <a href="docs/pt-BR/README.md">Português</a> | <a href="docs/es/README.md">Español</a> | <a href="docs/hi/README.md">हिन्दी</a>
+<a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
 </p>
 
 <p align="center">
@@ -53,7 +53,7 @@ cargo install --path .
 epic install
 ```
 
-### Rust binary (optional, ~4x faster hooks)
+### Install from binary
 
 ```bash
 # Homebrew (macOS)
@@ -114,6 +114,8 @@ epic install gemini --dry-run
 ```
 
 Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
+
+> **Claude Code note**: `epic install claude` also syncs commands/skills/agents directly into `~/.claude/plugins/cache/epicsagas/epic/*/`, so local binary changes take effect immediately without a new npm release.
 
 ## Unified Memory
 
@@ -234,8 +236,112 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | `/go` | Build it — auto-plan, TDD subagents, parallel execution |
 | `/check` | Verify — parallel code review + security audit + performance |
 | `/ship` | Ship — PR, CI, merge |
-| `/team` | Design project-specific agent team |
+| `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
+
+## Team (`epic team`)
+
+Teams are **org-level**, not project-bound. Running `/team` in any project enriches a shared pool
+of agent definitions — never silently overwrites them.
+
+### How it works
+
+```
+epic team                      # interactive: scan project → design → write → sync
+         ↓
+~/.harness/orgs/epic/teams/backend/   ← global store (persists across projects)
+         ↓
+epic team sync backend
+         ↓
+{project}/.claude/agents/backend/     ← Claude Code auto-discovers at session start
+├── domain-expert.md                  ← role definition + Team Context injected
+├── reviewer.md
+└── tester.md
+         ↓
+Next session: agents are active — auto-selected by Claude or called explicitly
+```
+
+### CLI reference
+
+```bash
+# Create or update a team (interactive 4-phase flow)
+epic team
+
+# Browse
+epic team list                        # all teams in current org
+epic team list --org netflix          # teams in a named org
+epic team show backend                # config, mission, agents
+epic team show backend --playbook     # + full accumulated playbook
+
+# Dispatch to project
+epic team sync backend                # dispatch: copy agents → .claude/agents/backend/
+epic team link backend                # dispatch + register project in team config
+
+# Recall from project
+epic team delete backend              # recall: remove from current project only
+epic team unlink backend              # alias for delete
+
+# Disband (remove from org entirely)
+epic team delete backend --global     # permanently delete from org store + local copy
+
+# History
+epic team history backend reviewer    # list .history/ backups for an agent
+```
+
+### Using teams from coding agents
+
+After syncing, agents are available in the next session automatically:
+
+```
+# Claude Code / Cursor / OpenCode / Codex
+@domain-expert implement the payment gateway
+@reviewer check this PR for edge cases
+@tester write integration tests for auth
+
+# Or let the agent auto-select based on task context
+```
+
+Each agent file carries a **Team Context** section injected at sync time:
+
+```markdown
+## Team Context
+**Team**: backend (Stream-aligned)
+**Mission**: Own the API layer end-to-end
+**Full playbook**: `epic team show backend --playbook`
+```
+
+Agents know their team, mission, and how to load the full playbook on demand —
+without bloating the context window with it.
+
+### Multi-org
+
+```bash
+epic team                          # accumulates in "epic" org (default)
+epic team --org netflix            # separate Netflix-style topology
+epic team --org client-x           # per-client engagement
+```
+
+Same team name in the same org = intentional cross-project sharing.
+`epic/teams/backend` accumulates knowledge from every project that creates or links it.
+
+### Team types
+
+| Type | Keyword | Default agents |
+|------|---------|---------------|
+| Stream-aligned | `stream` | domain-expert, reviewer, tester |
+| Platform | `platform` | api-designer, infra-specialist, dx-agent |
+| Enabling | `enabling` | specialist |
+| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
+
+### Merge strategy — no silent overwrites
+
+| Object | Rule |
+|--------|------|
+| Agent — new | Auto-add |
+| Agent — unchanged | Skip |
+| Agent — changed | **Prompt** (default: keep existing). On replace → backed up to `.history/` |
+| `playbook.md` | Always **append** — never truncated |
+| `mission.md` — changed | **Prompt** (default: keep existing) |
 
 ## Auto Skills (Ring 2)
 
@@ -423,20 +529,29 @@ Project-specific data lives in your home directory. This survives project deleti
 ├── evolved/          # Auto-evolved skills
 ├── evolved_backup/   # Best checkpoint (for stagnation rollback)
 ├── dispatch/         # Skill dispatch logs (JSONL)
-├── team/             # /team generated agents and skills
+├── team/             # legacy (superseded by ~/.harness/orgs/)
 ├── evolution.jsonl   # Full evolution history
 └── metrics.json      # Aggregate stats + skill attribution
 
 ~/.harness/
 ├── memory.db         # SQLite knowledge graph (nodes + edges + FTS5)
-└── graph.json        # Cached graph (for web UI)
+├── graph.json        # Cached graph (for web UI)
+└── orgs/             # epic team global store
+    └── {org}/
+        └── teams/
+            └── {team}/
+                ├── config.json
+                ├── mission.md
+                ├── playbook.md
+                ├── agents/
+                └── .history/
 ```
 
 You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
 
 ## Development
 
-### Rust (primary — ~4x faster)
+### Build
 
 ```bash
 cargo install --path .          # Build + install to ~/.cargo/bin/

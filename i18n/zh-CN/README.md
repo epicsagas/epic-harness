@@ -39,32 +39,37 @@ Ring 3 — 进化（自我改进）
 
 ## 安装
 
-```bash
-# Claude Code 插件市场
-claude plugins marketplace add epicsagas/plugins
-claude plugins install epic@epicsagas
-
-# 或手动安装
-git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
+```
+# Claude Code 插件（推荐）
+/plugin marketplace add epicsagas/plugins
+/plugin install epic@epicsagas
 ```
 
-### Rust 二进制（可选，钩子速度约快 4 倍）
+```bash
+# 或从源码安装
+git clone https://github.com/epicsagas/epic-harness.git
+cd epic-harness
+cargo install --path .
+epic install
+```
+
+### 从二进制安装
 
 ```bash
 # Homebrew (macOS)
 brew install epicsagas/tap/epic-harness
 
-
 # 从 crates.io 安装
 cargo install epic-harness
-# 或使用 cargo-binstall（预编译二进制，更快）
+
+# 预编译二进制（更快，无需编译）
 cargo binstall epic-harness
 
 # 从源码安装
 cargo install --path .
 ```
 
-钩子会自动检测该二进制文件。
+钩子会自动检测该二进制文件。如果不存在，钩子会回退到 Node.js。
 
 ## 多工具支持
 
@@ -80,11 +85,11 @@ epic-harness 支持 Claude Code 以及另外 6 款 AI 编程工具。所有工�
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ 需在 `~/.codex/config.toml` 中设置 `codex_hooks = true`；PostToolUse 仅拦截 Bash  
-² 无 `PreToolUse` 等效项 — guard 在 `BeforeModel` 级别运行  
-³ 需要 Cursor 1.7+  
-⁴ JS 插件：`session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
-⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel 钩子脚本  
+¹ 需在 `~/.codex/config.toml` 中设置 `codex_hooks = true`；PostToolUse 仅拦截 Bash
+² 无 `PreToolUse` 等效项 — guard 在 `BeforeModel` 级别运行
+³ 需要 Cursor 1.7+
+⁴ JS 插件：`session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`
+⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel 钩子脚本
 ⁶ 无钩子系统 — 约定通过 `.aider/CONVENTIONS.md` + `.aider.conf.yml` 注入
 
 ### 为其他工具安装
@@ -108,31 +113,66 @@ epic install cursor --local
 epic install gemini --dry-run
 ```
 
+工具目录中的集成文件（`hooks.json`、命令、代理、技能、规则等）会从二进制文件**同步**：缺失或过时的文件会被写入。`GEMINI.md` 和 `AGENTS.md` 仅在不存在时创建。
+
 ## 统一记忆
 
-所有代理共享 `~/.harness/memory/` 下的单一知识图谱。
+所有代理共享存储在 `~/.harness/memory.db`（SQLite + FTS5）中的单一知识图谱。无需 Node.js 或外部运行时。
 
-```bash
-# 添加决策记录
-harness mem add "auth 使用 Session Cookie 而非 JWT"
+### 智能召回
 
-# 语义搜索
-harness mem query "认证方式"
+内存检索使用**复合评分**而非简单转储最新 N 条记录：
 
-# 全文搜索
-harness mem search "JWT"
-
-# 启动 D3.js 知识图谱 Web UI（http://localhost:7700）
-harness mem serve
-
-# 为 Claude Code 注册 MCP 服务器（5 个原生工具：mem_add、mem_query、mem_search、mem_related、mem_context）
-harness mem mcp-install
-
-# 迁移现有的各项目记忆
-harness mem migrate --all
+```
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-代理通过 PostToolUse 钩子自动记录架构决策。会话开始时，相关记忆会被注入到上下文中。
+- **重要性**按节点类型自动设置：decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
+- **访问追踪**：频繁召回的记忆会自然浮到顶部
+- **渐进衰减**：未使用的记忆会随时间降低重要性（每 30 天 10%，最低 0.05）
+- **图谱增强**：召回跟随 1 跳边来呈现相关上下文
+
+### CLI
+
+```bash
+# 智能召回 — 为当前任务按相关性排序
+harness mem recall "auth refactor" --project my-project
+
+# 添加记忆节点（重要性按类型自动设置，或显式指定）
+harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+
+# 过滤查询（包含重要性 + 访问次数）
+harness mem query --type decision --project my-project
+
+# 全文搜索（按重要性排序）
+harness mem search "JWT"
+
+# 智能上下文（重要性加权，而非仅最新）
+harness mem context --project my-project
+
+# 知识图谱 Web UI
+harness mem serve          # → http://localhost:7700
+
+# 在 Claude Code 中注册为 MCP 服务器（无需 Node.js）
+harness mem mcp-install
+
+# 将所有节点导出为 Markdown 供 Git 备份
+harness mem export --out ./docs/memory
+```
+
+### MCP 工具（6 个）
+
+注册为 MCP 服务器（`harness mem mcp-install`）后，代理可以直接调用这些工具：
+
+| 工具 | 用途 |
+|------|---------|
+| `mem_recall` | **主要。** 带提示 + 项目 + 图谱邻居的智能上下文召回 |
+| `mem_add` | 按类型添加自动重要性节点（或显式 0.0–1.0） |
+| `mem_search` | FTS5 关键词搜索，按重要性排序 |
+| `mem_query` | 按标签/类型/项目过滤 |
+| `mem_context` | 项目范围智能召回（无提示） |
+| `mem_related` | 从节点 ID 进行 BFS 图谱遍历 |
 
 ### 知识图谱的工作原理
 
@@ -144,21 +184,32 @@ harness mem migrate --all
 PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
                                                    ↓
 SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
-                                                   ↓
-SessionStart hook → resume (context injection) → next session gets hints
+                                                   ↓  （重要性按类型设置）
+SessionStart hook → resume (smart recall) → 下次会话获得相关性排序提示
+                              ↓
+                    decay_importance() → 未使用节点逐渐淡出
 ```
 
 **节点类型 (7)：**
 
-| 类型 | 创建方式 | 内容 |
-|------|-----------|---------|
-| `session` | 自动 (reflect) | 会话成功率、平均分数、趋势 |
-| `error` | 自动 (reflect) | 重复错误模式（≥3 次连续相同错误） |
-| `pattern` | 自动 (reflect) | 弱工具、thrashing、fix-then-break 循环 |
-| `concept` | 手动 / MCP | 架构概念、技术知识 |
-| `decision` | 手动 / MCP | ADR、设计决策 |
-| `project` | 手动 / MCP | 项目元数据 |
-| `resolution` | 手动 / MCP | 错误解决方案 |
+| 类型 | 创建方式 | 默认重要性 |
+|------|-----------|-------------------|
+| `decision` | 手动 / MCP | 0.9 |
+| `resolution` | 手动 / MCP | 0.8 |
+| `concept` | 手动 / MCP | 0.7 |
+| `project` | 手动 / MCP | 0.7 |
+| `pattern` | 自动 (reflect) | 0.5 |
+| `error` | 自动 (reflect) | 0.4 |
+| `session` | 自动 (reflect) | 0.2 |
+
+**记忆生命周期：**
+
+| 事件 | 发生的事情 |
+|-------|-------------|
+| 通过搜索/召回/上下文召回节点 | `access_count++`，`accessed_at` 更新 |
+| 30 天以上未访问 | 重要性衰减 10%（最低 0.05） |
+| 180 天以上未访问 | 标记为 `stale`，从召回中排除 |
+| 标记为 `pinned` 的节点 | 免于衰减 |
 
 **自动积累条件：**
 
@@ -183,8 +234,111 @@ SessionStart hook → resume (context injection) → next session gets hints
 | `/go` | 开始构建 — 自动规划、TDD 子代理、并行执行 |
 | `/check` | 验证 — 并行代码审查 + 安全审计 + 性能检查 |
 | `/ship` | 发布 — PR、CI、合并 |
-| `/team` | 设计项目专属的代理团队 |
+| `/team` | 跨项目创建和同步组织级代理团队 |
 | `/evolve` | 手动触发进化 / 查看状态 / 回滚 |
+
+## 团队 (`epic team`)
+
+团队是**组织级别**的，不绑定到具体项目。在任何项目中运行 `/team` 都会丰富共享代理定义池——绝不会静默覆盖。
+
+### 工作原理
+
+```
+epic team                      # 交互式：扫描项目 → 设计 → 写入 → 同步
+         ↓
+~/.harness/orgs/epic/teams/backend/   ← 全局存储（跨项目持久化）
+         ↓
+epic team sync backend
+         ↓
+{project}/.claude/agents/backend/     ← Claude Code 在会话开始时自动发现
+├── domain-expert.md                  ← 角色定义 + 注入团队上下文
+├── reviewer.md
+└── tester.md
+         ↓
+下次会话：代理激活 — 由 Claude 自动选择或显式调用
+```
+
+### CLI 参考
+
+```bash
+# 创建或更新团队（交互式 4 阶段流程）
+epic team
+
+# 浏览
+epic team list                        # 当前组织的所有团队
+epic team list --org netflix          # 指定组织的团队
+epic team show backend                # 配置、使命、代理
+epic team show backend --playbook     # + 完整累积的剧本
+
+# 分派到项目
+epic team sync backend                # 分派：复制代理 → .claude/agents/backend/
+epic team link backend                # 分派 + 在团队配置中注册项目
+
+# 从项目召回
+epic team delete backend              # 召回：仅从当前项目移除
+epic team unlink backend              # delete 的别名
+
+# 解散（从组织完全移除）
+epic team delete backend --global     # 从组织存储 + 本地副本永久删除
+
+# 历史
+epic team history backend reviewer    # 列出代理的 .history/ 备份
+```
+
+### 在编程代理中使用团队
+
+同步后，代理在下次会话中自动可用：
+
+```
+# Claude Code / Cursor / OpenCode / Codex
+@domain-expert 实现支付网关
+@reviewer 检查此 PR 的边界情况
+@tester 为 auth 编写集成测试
+
+# 或让代理根据任务上下文自动选择
+```
+
+每个代理文件携带同步时注入的**团队上下文**部分：
+
+```markdown
+## Team Context
+**Team**: backend (Stream-aligned)
+**Mission**: Own the API layer end-to-end
+**Full playbook**: `epic team show backend --playbook`
+```
+
+代理知道其团队、使命以及如何按需加载完整剧本——
+而不会用它膨胀上下文窗口。
+
+### 多组织
+
+```bash
+epic team                          # 在 "epic" 组织中积累（默认）
+epic team --org netflix            # 单独的 Netflix 风格拓扑
+epic team --org client-x           # 按客户划分的项目
+```
+
+同一组织中相同的团队名称 = 有意的跨项目共享。
+`epic/teams/backend` 从每个创建或关联它的项目中积累知识。
+
+### 团队类型
+
+| 类型 | 关键词 | 默认代理 |
+|------|---------|---------------|
+| Stream-aligned | `stream` | domain-expert, reviewer, tester |
+| Platform | `platform` | api-designer, infra-specialist, dx-agent |
+| Enabling | `enabling` | specialist |
+| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
+
+### 合并策略 — 无静默覆盖
+
+| 对象 | 规则 |
+|--------|------|
+| 代理 — 新增 | 自动添加 |
+| 代理 — 未变更 | 跳过 |
+| 代理 — 已变更 | **提示**（默认：保留现有）。替换时 → 备份到 `.history/` |
+| `playbook.md` | 始终**追加** — 从不截断 |
+| `mission.md` — 已变更 | **提示**（默认：保留现有） |
 
 ## 自动技能（Ring 2）
 
@@ -203,7 +357,7 @@ SessionStart hook → resume (context injection) → next session gets hints
 
 ## 钩子（Ring 0）
 
-静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现。
+静默运行，无需用户操作。以**单一 Rust 二进制文件**（`epic-harness`）加子命令的形式实现。如果二进制文件不存在，钩子会回退到 Node.js。
 
 ```
 epic resume | guard | polish | observe | snapshot | reflect
@@ -214,8 +368,8 @@ epic resume | guard | polish | observe | snapshot | reflect
 | **resume** | 会话开始时 | 恢复上下文、加载记忆、检测技术栈 |
 | **guard** | Bash 执行前 | 拦截 force-push-to-main、rm -rf /、DROP prod |
 | **polish** | 编辑完成后 | 自动格式化（Biome/Prettier/ruff/gofmt）+ 类型检查 |
-| **observe** | 每次工具使用 | 记录到 `.harness/obs/` 供进化使用 |
-| **snapshot** | 压缩前 | 保存状态到 `.harness/sessions/` |
+| **observe** | 每次工具使用 | 记录到 `~/.harness/projects/{slug}/obs/` 供进化使用 |
+| **snapshot** | 压缩前 | 保存状态到 `~/.harness/projects/{slug}/sessions/` |
 | **reflect** | 会话结束时 | 分析失败、生成进化技能、门控 |
 
 ## 评估系统（Ring 3 核心）
@@ -271,14 +425,14 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ```
 观测（PostToolUse — 3 维评分）
-    ↓ .harness/obs/session_{id}.jsonl
+    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
 分析（SessionEnd）
     ↓ SessionAnalysis：按工具、按扩展名、分数分布
     ↓ 模式：repeated_same_error、fix_then_break、long_debug_loop、thrashing
 生成（4 条路径：模式 / 弱工具 / 弱文件类型 / 高频错误）
-    ↓ .harness/evolved/{skill}/SKILL.md
+    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
 门控（格式检查、去重、上限 10 个、停滞检查）
-    ↓ .harness/evolved_backup/（最佳检查点）
+    ↓ ~/.harness/projects/{slug}/evolved_backup/（最佳检查点）
 重新加载（下次会话 — resume.ts 报告指标 + 加载进化技能）
 ```
 
@@ -310,7 +464,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ## 自定义防护规则
 
-通过 `.harness/guard-rules.yaml` 添加项目专属的安全规则：
+通过项目根目录的 `.harness/guard-rules.yaml` 添加项目专属的安全规则：
 
 ```yaml
 blocked:
@@ -320,18 +474,18 @@ warned:
   - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
 
-规则与内置防护（force-push-to-main、rm -rf /、DROP prod）合并生效。
+规则与内置防护（force-push-to-main、rm -rf /、DROP prod）合并生效。将此文件纳入 git 可与团队共享安全规则。
 
 ## 跨项目学习
 
 选择加入，在项目间共享失败模式：
 
 ```bash
-touch .harness/.cross-project-enabled  # 选择加入
+touch ~/.harness/projects/{slug}/.cross-project-enabled  # 选择加入
 ```
 
 启用后：
-- 会话结束时将匿名化的模式导出到 `~/.harness-global/patterns.jsonl`
+- 会话结束时将匿名化的模式导出到 `~/.harness/global_patterns.jsonl`
 - 会话开始时显示来自其他项目薄弱环节的提示
 - 使用 `/evolve cross-project` 查看聚合模式
 
@@ -360,29 +514,41 @@ polish 钩子（自动格式化 + 类型检查）的结果会回馈到观测管�
 
 这意味着即使错误来自 polish 钩子而非手动命令，"编辑 → 类型错误 → 编辑 → 类型错误"的反复模式也能被检测到。
 
-## 项目数据（`.harness/`）
+## 项目数据（`~/.harness/projects/{slug}/`）
 
-epic harness 会在你的项目中创建 `.harness/` 目录：
+项目专属数据存储在你的主目录中。项目删除后仍然保留，且不会污染 git 历史。
 
 ```
-.harness/
+~/.harness/projects/{slug}/
 ├── memory/           # 项目模式和规则（持久化）
 ├── sessions/         # 会话快照（用于恢复）
 ├── obs/              # 工具使用观测日志（JSONL，按会话）
 ├── evolved/          # 自动进化的技能
 ├── evolved_backup/   # 最佳检查点（用于停滞回滚）
 ├── dispatch/         # 技能调度日志（JSONL）
-├── team/             # /team 生成的代理和技能
+├── team/             # legacy（已由 ~/.harness/orgs/ 取代）
 ├── evolution.jsonl   # 完整进化历史
-├── metrics.json      # 聚合统计 + 技能归因
-└── guard-rules.yaml  # 自定义防护规则（可选）
+└── metrics.json      # 聚合统计 + 技能归因
+
+~/.harness/
+├── memory.db         # SQLite 知识图谱（nodes + edges + FTS5）
+├── graph.json        # 缓存的图谱（供 Web UI 使用）
+└── orgs/             # epic team 全局存储
+    └── {org}/
+        └── teams/
+            └── {team}/
+                ├── config.json
+                ├── mission.md
+                ├── playbook.md
+                ├── agents/
+                └── .history/
 ```
 
-将 `.harness/` 加入 `.gitignore` 或提交到仓库 — 由你决定。
+你仍然可以在项目根目录使用 `.harness/guard-rules.yaml` 与团队共享安全规则。
 
 ## 开发
 
-### Rust（主要 — 约快 4 倍）
+### 构建
 
 ```bash
 cargo install --path .          # 构建 + 安装到 ~/.cargo/bin/
@@ -401,7 +567,7 @@ cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # 更新插件二进制
 ### 测试
 
 ```bash
-cargo test       # 98 个 Rust 单元测试
+cargo test       # Rust 单元 + 集成测试
 ```
 
 ## 致谢

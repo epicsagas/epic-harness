@@ -138,6 +138,14 @@ pub fn open_db() -> io::Result<Connection> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .map_err(io::Error::other)?;
 
+    init_schema(&conn)?;
+    auto_migrate_legacy(&conn);
+    Ok(conn)
+}
+
+/// Apply the full schema (tables, indexes, triggers) to an open connection.
+/// Exposed for tests that open an in-memory DB and need the same schema.
+pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS nodes (
             id           TEXT PRIMARY KEY,
@@ -216,10 +224,7 @@ pub fn open_db() -> io::Result<Connection> {
     )
     .map_err(io::Error::other)?;
 
-    // Auto-migrate legacy file-based store on first open
-    auto_migrate_legacy(&conn);
-
-    Ok(conn)
+    Ok(())
 }
 
 /// Silently import any legacy `nodes/*.md` + `edges.jsonl` into the DB.
@@ -421,16 +426,17 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     Ok(())
 }
 
-pub fn read_edges() -> Vec<Edge> {
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
+
+/// Read all edges using an existing connection (no LIMIT — callers should paginate for large graphs).
+pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
     let mut stmt = match conn.prepare(
         "SELECT id, source, target, relation, weight, ts FROM edges",
     ) {
         Ok(s) => s,
-        Err(_) => return vec![],
+        Err(e) => {
+            eprintln!("[mem/store] read_edges_conn: prepare failed: {e}");
+            return vec![];
+        }
     };
     stmt.query_map([], |row| {
         Ok(Edge {
@@ -444,6 +450,17 @@ pub fn read_edges() -> Vec<Edge> {
     })
     .map(|rows| rows.filter_map(|r| r.ok()).collect())
     .unwrap_or_default()
+}
+
+#[allow(dead_code)] // used by integration tests (tests/mem_test.rs)
+pub fn read_edges() -> Vec<Edge> {
+    match open_db() {
+        Ok(conn) => read_edges_conn(&conn),
+        Err(e) => {
+            eprintln!("[mem/store] read_edges: open_db failed: {e}");
+            vec![]
+        }
+    }
 }
 
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
