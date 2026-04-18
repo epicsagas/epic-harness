@@ -427,15 +427,25 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
 }
 
 pub fn read_edges() -> Vec<Edge> {
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
+    match open_db() {
+        Ok(conn) => read_edges_conn(&conn),
+        Err(e) => {
+            eprintln!("[mem/store] read_edges: open_db failed: {e}");
+            vec![]
+        }
+    }
+}
+
+/// Read all edges using an existing connection (no LIMIT — callers should paginate for large graphs).
+pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
     let mut stmt = match conn.prepare(
         "SELECT id, source, target, relation, weight, ts FROM edges",
     ) {
         Ok(s) => s,
-        Err(_) => return vec![],
+        Err(e) => {
+            eprintln!("[mem/store] read_edges_conn: prepare failed: {e}");
+            return vec![];
+        }
     };
     stmt.query_map([], |row| {
         Ok(Edge {

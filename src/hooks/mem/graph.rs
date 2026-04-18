@@ -6,7 +6,7 @@ use std::io;
 
 use rusqlite::{Connection, params_from_iter};
 
-use super::store::{atomic_write, graph_path, list_node_ids, open_db, read_edges, read_node};
+use super::store::{atomic_write, graph_path, list_node_ids, open_db, read_edges_conn, read_nodes_conn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
@@ -32,11 +32,13 @@ pub struct Graph {
 }
 
 /// Build a `Graph` value from the current DB state (shared by `rebuild_graph` and `rebuild_graph_json`).
+/// Opens a single DB connection and reuses it for both node and edge queries (no N+1 open_db calls).
 fn build_graph() -> io::Result<Graph> {
     let ids = list_node_ids()?;
-    let nodes = ids
-        .iter()
-        .filter_map(|id| read_node(id).ok())
+    let conn = open_db()?;
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let nodes = read_nodes_conn(&conn, &id_refs)
+        .into_iter()
         .map(|node| GraphNode {
             id: node.frontmatter.id,
             title: node.frontmatter.title,
@@ -44,7 +46,7 @@ fn build_graph() -> io::Result<Graph> {
             tags: node.frontmatter.tags,
         })
         .collect();
-    let edges = read_edges()
+    let edges = read_edges_conn(&conn)
         .into_iter()
         .map(|e| GraphEdge {
             source: e.source,
@@ -71,8 +73,20 @@ pub fn rebuild_graph_json() -> io::Result<String> {
 
 /// Get 1-hop neighbors using an existing connection.
 /// Returns `(neighbor_id, total_weight)` sorted by weight descending.
+/// Maximum seeds accepted per call — keeps `WHERE IN (?, ...)` well below
+/// SQLite's `SQLITE_LIMIT_VARIABLE_NUMBER` default of 999 (2 copies are bound).
+const MAX_SEED_IDS: usize = 100;
+
 pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
+        return vec![];
+    }
+    if seed_ids.len() > MAX_SEED_IDS {
+        eprintln!(
+            "[mem/graph] graph_neighbors_conn: seed_ids.len()={} exceeds MAX_SEED_IDS={}, returning empty",
+            seed_ids.len(),
+            MAX_SEED_IDS
+        );
         return vec![];
     }
 
@@ -109,22 +123,6 @@ pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(Stri
     let mut result: Vec<(String, f64)> = weights.into_iter().collect();
     result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     result
-}
-
-/// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
-/// Returns `(neighbor_id, total_weight)` — sum of edge weights to any seed node.
-/// Sorted by weight descending (strongest connections first).
-///
-/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
-pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
-    if seed_ids.is_empty() {
-        return vec![];
-    }
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    graph_neighbors_conn(&conn, seed_ids)
 }
 
 /// BFS traversal using an existing connection.
@@ -167,7 +165,10 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let conn = match open_db() {
         Ok(c) => c,
-        Err(_) => return vec![],
+        Err(e) => {
+            eprintln!("[mem/graph] related_nodes: open_db failed: {e}");
+            return vec![];
+        }
     };
     related_nodes_conn(&conn, start_id, depth)
 }
