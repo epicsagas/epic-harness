@@ -112,21 +112,6 @@ pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(Stri
 }
 
 /// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
-/// Returns `(neighbor_id, total_weight)` — sum of edge weights to any seed node.
-/// Sorted by weight descending (strongest connections first).
-///
-/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
-pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
-    if seed_ids.is_empty() {
-        return vec![];
-    }
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    graph_neighbors_conn(&conn, seed_ids)
-}
-
 /// BFS traversal using an existing connection.
 ///
 /// `depth` is accepted for API compatibility but is not used as a hop limit.
@@ -213,7 +198,8 @@ mod tests {
         insert_edge("e3", "D", "A");
 
         let seeds = vec!["A".to_string()];
-        let mut result = graph_neighbors(&seeds);
+        let conn = open_db().expect("open_db");
+        let mut result = graph_neighbors_conn(&conn, &seeds);
         result.sort_by(|a, b| a.0.cmp(&b.0));
 
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
@@ -234,7 +220,8 @@ mod tests {
         insert_edge("e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors(&seeds);
+        let conn = open_db().expect("open_db");
+        let result = graph_neighbors_conn(&conn, &seeds);
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
 
         assert!(ids.contains(&"C"), "C should be reachable from B");
@@ -247,7 +234,8 @@ mod tests {
     fn graph_neighbors_empty_seeds() {
         let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
-        let result = graph_neighbors(&[]);
+        let conn = open_db().expect("open_db");
+        let result = graph_neighbors_conn(&conn, &[]);
         assert!(result.is_empty(), "empty seeds -> empty result");
     }
 
@@ -288,7 +276,8 @@ mod tests {
         insert_edge("e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors(&seeds);
+        let conn = open_db().expect("open_db");
+        let result = graph_neighbors_conn(&conn, &seeds);
         let c_weight = result.iter().find(|(id, _)| id == "C").map(|(_, w)| *w);
         assert_eq!(c_weight, Some(2.0), "C connected to both seeds should have total weight 2.0");
     }

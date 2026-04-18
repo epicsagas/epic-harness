@@ -367,7 +367,7 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 }
 
 /// Batch-read multiple nodes by ID in a single `WHERE id IN (...)` query.
-pub fn read_nodes_conn<'a>(conn: &Connection, ids: &[&'a str]) -> Vec<Node> {
+pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> Vec<Node> {
     if ids.is_empty() {
         return vec![];
     }
@@ -667,7 +667,7 @@ pub fn smart_recall_conn(
     // Gather FTS matches if hint is provided
     let fts_ids: std::collections::HashSet<String> = if let Some(h) = hint {
         if !h.is_empty() {
-            search_nodes_conn(&conn, h, limit * 4)
+            search_nodes_conn(conn, h, limit * 4)
                 .into_iter()
                 .map(|n| n.frontmatter.id.clone())
                 .collect()
@@ -865,18 +865,6 @@ pub fn touch_nodes_conn(conn: &Connection, ids: &[String]) {
     let _ = conn.execute_batch("RELEASE touch_batch");
 }
 
-/// Batch-touch multiple nodes (used after smart_recall).
-/// Wraps all updates in a single transaction to avoid N individual round-trips.
-pub fn touch_nodes(ids: &[String]) {
-    if ids.is_empty() {
-        return;
-    }
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return,
-    };
-    touch_nodes_conn(&conn, ids);
-}
 
 /// Gradually decay importance for nodes not accessed in `days`.
 /// Instead of binary stale tagging, reduces importance by `factor` (e.g., 0.9 = 10% decay).
