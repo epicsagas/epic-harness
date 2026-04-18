@@ -128,29 +128,27 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
 }
 
 /// BFS traversal using an existing connection.
-pub fn related_nodes_conn(conn: &Connection, start_id: &str, depth: usize) -> Vec<String> {
+///
+/// `depth` is accepted for API compatibility but is not used as a hop limit.
+/// The single-column `UNION` CTE deduplicates on `node_id` alone, so each node
+/// enters the working set at most once. This prevents re-expansion of visited
+/// nodes in cyclic or dense graphs. Results are capped at 500.
+pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> Vec<String> {
     let sql = "
-        WITH RECURSIVE bfs(node_id, depth) AS (
-            SELECT target, 1 FROM edges WHERE source = ?1
-            UNION
-            SELECT source, 1 FROM edges WHERE target = ?1
-            UNION
-            SELECT e.target, bfs.depth + 1
-              FROM edges e JOIN bfs ON e.source = bfs.node_id
-             WHERE bfs.depth < ?2
-            UNION
-            SELECT e.source, bfs.depth + 1
-              FROM edges e JOIN bfs ON e.target = bfs.node_id
-             WHERE bfs.depth < ?2
+        WITH RECURSIVE bfs(node_id) AS (
+            SELECT target FROM edges WHERE source = ?1
+            UNION SELECT source FROM edges WHERE target = ?1
+            UNION SELECT e.target FROM edges e JOIN bfs ON e.source = bfs.node_id WHERE e.target != ?1
+            UNION SELECT e.source FROM edges e JOIN bfs ON e.target = bfs.node_id WHERE e.source != ?1
         )
-        SELECT DISTINCT node_id FROM bfs WHERE node_id != ?1
+        SELECT node_id FROM bfs
         LIMIT 500
     ";
 
     conn.prepare(sql)
         .and_then(|mut stmt| {
             stmt.query_map(
-                rusqlite::params![start_id, depth as i64],
+                rusqlite::params![start_id],
                 |row| row.get::<_, String>(0),
             )
             .map(|rows| rows.flatten().collect())
@@ -158,12 +156,14 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, depth: usize) -> Ve
         .unwrap_or_default()
 }
 
-/// BFS traversal from `start_id` up to `depth` hops via a SQL recursive CTE.
+/// BFS traversal from `start_id` to all reachable nodes via a SQL recursive CTE.
 ///
 /// Uses `idx_edges_source` / `idx_edges_target` on each recursive step so only
 /// reachable edges are touched — O(reachable_edges) instead of O(E) total.
-/// UNION (not UNION ALL) deduplicates visited nodes, preventing re-visits in
-/// cyclic graphs. Results are capped at 500.
+/// Single-column `UNION` deduplicates on `node_id` alone, so each node enters
+/// the working set exactly once — preventing re-expansion in cyclic or dense
+/// graphs. The `depth` argument is kept for API compatibility but is ignored;
+/// traversal reaches all reachable nodes up to the LIMIT 500 safety cap.
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let conn = match open_db() {
         Ok(c) => c,
@@ -177,15 +177,12 @@ mod tests {
     use super::*;
     use super::super::store::{append_edge, Edge};
     use std::env;
-    use std::sync::Mutex;
-
-    // Serialize env mutation across all tests in this module.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Set HARNESS_ROOT to a per-test temp dir so tests don't pollute the real DB.
+    /// Caller MUST hold `super::super::TEST_ENV_LOCK` for the duration of the test.
     fn setup_temp_db() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().expect("tmp dir");
-        // SAFETY: guarded by ENV_LOCK; no concurrent env reads within this module.
+        // SAFETY: guarded by the process-wide TEST_ENV_LOCK held by each caller.
         unsafe { env::set_var("HARNESS_ROOT", dir.path().to_str().unwrap()) };
         // Open DB once to initialise schema.
         let _ = open_db().expect("open_db in setup");
@@ -207,7 +204,7 @@ mod tests {
     /// graph_neighbors returns 1-hop neighbors including backward edges.
     #[test]
     fn graph_neighbors_returns_direct_neighbors() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // A -> B, A -> C, D -> A (backward edge)
@@ -229,7 +226,7 @@ mod tests {
     /// graph_neighbors excludes all seeds from the result set.
     #[test]
     fn graph_neighbors_excludes_seeds() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // Seed A -> Seed B -> C
@@ -248,45 +245,42 @@ mod tests {
     /// graph_neighbors with empty seed list returns empty.
     #[test]
     fn graph_neighbors_empty_seeds() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
         let result = graph_neighbors(&[]);
         assert!(result.is_empty(), "empty seeds -> empty result");
     }
 
-    /// related_nodes uses recursive CTE: depth=1 returns direct neighbors only,
-    /// depth=2 returns 2-hop nodes, and cycles are deduplicated.
+    /// related_nodes uses a single-column recursive CTE that traverses all
+    /// reachable nodes. Each node appears at most once (UNION deduplicates on
+    /// node_id alone). Cycles must not produce duplicate results.
     #[test]
     fn related_nodes_recursive_cte() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // Chain: A -> B -> C
         insert_edge("e1", "A", "B");
         insert_edge("e2", "B", "C");
 
-        // Depth 1: only B
-        let d1 = related_nodes("A", 1);
-        assert!(d1.contains(&"B".to_string()), "depth 1 should reach B");
-        assert!(!d1.contains(&"C".to_string()), "depth 1 should NOT reach C");
+        // All reachable nodes from A should include B and C; start node excluded.
+        let result = related_nodes("A", 2);
+        assert!(result.contains(&"B".to_string()), "should reach B");
+        assert!(result.contains(&"C".to_string()), "should reach C (2-hop)");
+        assert!(!result.contains(&"A".to_string()), "start node must not appear");
 
-        // Depth 2: B and C
-        let d2 = related_nodes("A", 2);
-        assert!(d2.contains(&"B".to_string()), "depth 2 should reach B");
-        assert!(d2.contains(&"C".to_string()), "depth 2 should reach C");
-        assert!(!d2.contains(&"A".to_string()), "start node must not appear");
-
-        // Cycle: C -> A — depth 3 should still deduplicate (no duplicates)
+        // Cycle: C -> A — results must still be deduplicated (no duplicates).
         insert_edge("e3", "C", "A");
-        let d3 = related_nodes("A", 3);
-        let unique: HashSet<_> = d3.iter().collect();
-        assert_eq!(d3.len(), unique.len(), "no duplicate nodes in cyclic graph");
+        let cyclic = related_nodes("A", 3);
+        let unique: HashSet<_> = cyclic.iter().collect();
+        assert_eq!(cyclic.len(), unique.len(), "no duplicate nodes in cyclic graph");
+        assert!(!cyclic.contains(&"A".to_string()), "start node must not appear even in cycle");
     }
 
     /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
     #[test]
     fn graph_neighbors_connection_count() {
-        let _lock = ENV_LOCK.lock().unwrap();
+        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
         let _dir = setup_temp_db();
 
         // Both seeds A and B connect to C (default weight 1.0 each → total 2.0).

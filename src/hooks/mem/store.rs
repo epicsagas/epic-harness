@@ -540,17 +540,24 @@ pub fn remove_from_index(node_id: &str) -> io::Result<()> {
 /// for O(log N) lookup.  Used to prevent duplicate writes when multiple callers
 /// (observe hook + skills + direct MCP) fire for the same event.
 fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hours: u64) -> Option<String> {
-    // window_hours is u64 — no SQL injection risk; bind parameter not supported
-    // inside datetime() modifier strings in SQLite.
-    let sql = format!(
-        "SELECT id FROM nodes
-         WHERE title = ?1
-           AND updated > datetime('now', '-{window_hours} hours')
-         ORDER BY updated DESC
-         LIMIT 1"
-    );
-    conn.query_row(&sql, params![title], |row| row.get::<_, String>(0))
-        .ok()
+    let cutoff_secs = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(window_hours * 3600);
+    let cutoff = {
+        let s = cutoff_secs;
+        let (y, m, d) = days_to_ymd(s / 86400);
+        let hh = (s / 3600) % 24;
+        let mm = (s / 60) % 60;
+        let ss = s % 60;
+        format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    };
+    conn.query_row(
+        "SELECT id FROM nodes WHERE title = ?1 AND updated > ?2 ORDER BY updated DESC LIMIT 1",
+        params![title, cutoff],
+        |row| row.get::<_, String>(0),
+    ).ok()
 }
 
 /// Write-with-dedup: opens a single connection, checks for a duplicate, and
@@ -733,9 +740,13 @@ pub fn smart_recall_conn(
              WHERE source IN ({ph}) AND target IN ({ph}) GROUP BY target"
         );
         if let Ok(mut stmt) = conn.prepare(&sql) {
-            let params: Vec<&dyn rusqlite::ToSql> =
-                ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect::<Vec<_>>()
-                    .into_iter().cycle().take(ids.len() * 4).collect();
+            let base: Vec<&dyn rusqlite::ToSql> =
+                ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let params: Vec<&dyn rusqlite::ToSql> = base.iter().copied()
+                .chain(base.iter().copied())
+                .chain(base.iter().copied())
+                .chain(base.iter().copied())
+                .collect();
             let weight_map: std::collections::HashMap<String, f64> = stmt
                 .query_map(params.as_slice(), |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
@@ -847,11 +858,11 @@ pub fn touch_nodes_conn(conn: &Connection, ids: &[String]) {
     if ids.is_empty() {
         return;
     }
-    let _ = conn.execute_batch("BEGIN");
+    let _ = conn.execute_batch("SAVEPOINT touch_batch");
     for id in ids {
         touch_node_conn(conn, id);
     }
-    let _ = conn.execute_batch("COMMIT");
+    let _ = conn.execute_batch("RELEASE touch_batch");
 }
 
 /// Batch-touch multiple nodes (used after smart_recall).
@@ -1096,6 +1107,23 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn make_node(id: &str, title: &str, node_type: &str, tags: &[&str], importance: Option<f64>) -> Node {
+        let ts = "2024-01-01T00:00:00Z".to_string();
+        Node {
+            frontmatter: NodeFrontmatter {
+                id: id.to_string(),
+                node_type: node_type.to_string(),
+                title: title.to_string(),
+                tags: tags.iter().map(|s| s.to_string()).collect(),
+                importance: importance.unwrap_or_else(|| importance_for_type(node_type)),
+                created: ts.clone(),
+                updated: ts.clone(),
+                ..Default::default()
+            },
+            body: format!("body of {title}"),
+        }
+    }
+
     // ── Fix 1: query_nodes SQL injection ──────────────────
     #[test]
     fn test_query_nodes_sql_injection_tag_does_not_panic() {
@@ -1200,5 +1228,69 @@ mod tests {
         // Total = 10957 + 60 = 11017
         let expected: u64 = 11017 * 86400;
         assert_eq!(parse_iso_to_secs("2000-03-01T00:00:00Z"), expected);
+    }
+
+    /// Open an isolated in-memory SQLite DB with the full harness schema applied.
+    fn open_mem_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS nodes (
+                id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '', projects TEXT NOT NULL DEFAULT '',
+                agents TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL,
+                body TEXT NOT NULL DEFAULT '', importance REAL NOT NULL DEFAULT 0.5,
+                access_count INTEGER NOT NULL DEFAULT 0, accessed_at TEXT NOT NULL DEFAULT ''
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts
+                USING fts5(title, body, tags, content=nodes, content_rowid=rowid);
+            CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+                INSERT INTO nodes_fts(rowid, title, body, tags)
+                VALUES (new.rowid, new.title, new.body, new.tags);
+            END;
+            CREATE TABLE IF NOT EXISTS edges (
+                id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL,
+                relation TEXT NOT NULL DEFAULT 'related', weight REAL NOT NULL DEFAULT 1.0,
+                ts TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
+            CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
+            CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
+            CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);",
+        ).expect("schema");
+        conn
+    }
+
+    // ── Fix 4: graph-boost lifts connected node ────────────
+    #[test]
+    fn smart_recall_graph_boost_lifts_connected_node() {
+        let conn = open_mem_db();
+
+        let id_a = "aaaaaaaa-0000-4000-8000-000000000001";
+        let id_b = "aaaaaaaa-0000-4000-8000-000000000002";
+        let id_e = "eeeeeeee-0000-4000-8000-000000000001";
+
+        let n1 = make_node(id_a, "Alpha Node", "concept", &[], Some(0.8));
+        let n2 = make_node(id_b, "Beta Node",  "concept", &[], Some(0.4));
+        write_node_conn(&conn, &n1).unwrap();
+        write_node_conn(&conn, &n2).unwrap();
+
+        let edge = Edge {
+            id: id_e.to_string(),
+            source: id_a.to_string(),
+            target: id_b.to_string(),
+            relation: "related".to_string(),
+            weight: 5.0,
+            ts: now_iso(),
+        };
+        append_edge_conn(&conn, &edge).unwrap();
+
+        let results = smart_recall_conn(&conn, None, None, 10);
+        let ids: Vec<&str> = results.iter().map(|sn| sn.node.frontmatter.id.as_str()).collect();
+        assert!(ids.contains(&id_a), "boost-a must appear");
+        assert!(ids.contains(&id_b), "boost-b must appear");
+
+        for sn in &results {
+            assert!(sn.score > 0.0, "score must be positive: {}", sn.node.frontmatter.id);
+        }
     }
 }

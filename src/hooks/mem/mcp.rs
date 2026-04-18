@@ -221,7 +221,12 @@ fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
         })
         .collect();
 
-    json!(results)
+    let count = results.len();
+    let mut resp = json!({ "count": count, "results": results });
+    if count == 0 {
+        resp["note"] = json!("no results — check FTS5 query syntax if using special operators");
+    }
+    resp
 }
 
 fn tool_mem_related(conn: &Connection, args: &Value) -> Value {
@@ -334,7 +339,7 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
                         "type":        node.frontmatter.node_type,
                         "tags":        node.frontmatter.tags,
                         "importance":  node.frontmatter.importance,
-                        "score":       0.0,
+                        "score":       (edge_weight * 100.0).round() / 100.0,
                         "body":        node.body.chars().take(200).collect::<String>(),
                         "via_graph":   true,
                         "connections": (edge_weight * 100.0).round() / 100.0
