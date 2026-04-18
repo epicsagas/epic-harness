@@ -327,7 +327,10 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
         }
     }
 
-    // Also sync to other installed tools with tool-specific transforms
+    // Also sync to other installed tools with tool-specific transforms.
+    // This writes agent files to ~/.codex/agents/, ~/.gemini/agents/, etc.
+    // when those directories exist.  Print a notice for each tool synced so
+    // the user can see which tools were updated.
     let other_tools = ["codex", "gemini", "cursor", "opencode"];
     for tool in &other_tools {
         if let Some(agents_dir) = installed_tool_agents_dir(tool) {
@@ -358,14 +361,18 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
                 eprintln!("[harness] warn: team path escapes agents dir for {tool}, skipping");
                 continue;
             }
+            eprintln!("[harness] syncing team '{team}' to {tool} ({})", tool_team_dir.display());
             for agent_name in &agents {
                 if let Some(content) = load_agent(org, team, agent_name) {
-                    let injected = inject_team_context(&content, org, team, &config.team_type, &mission);
-                    let transformed = crate::hooks::install::transform_agent(tool, agent_name, &injected);
+                    // transform_agent first (tool-specific pattern replacements run on
+                    // the canonical content before inject_team_context adds org/team
+                    // frontmatter fields that could interfere with substring matching).
+                    let transformed = crate::hooks::install::transform_agent(tool, agent_name, &content);
+                    let injected = inject_team_context(&transformed, org, team, &config.team_type, &mission);
                     let dest_path = tool_team_dir.join(format!("{}.md", agent_name));
                     let existing = fs::read_to_string(&dest_path).unwrap_or_default();
-                    if existing != transformed {
-                        fs::write(&dest_path, &transformed).unwrap_or_else(|e| {
+                    if existing != injected {
+                        fs::write(&dest_path, &injected).unwrap_or_else(|e| {
                             eprintln!("[harness] warn: could not write {}: {}", dest_path.display(), e);
                         });
                     }

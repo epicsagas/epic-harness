@@ -99,6 +99,8 @@ pub(crate) fn sanitize_mission(mission: &str) -> String {
 
 fn tools_for_role(role: &str) -> &'static str {
     match role {
+        // Read-only roles: reviewer explicitly listed to prevent substring ambiguity
+        "reviewer" => "[Read, Grep, Glob, Bash]",
         r if r.contains("audit")
             || r.contains("review")
             || r.contains("explor")
@@ -177,7 +179,8 @@ pub fn list_teams(org: &str) -> Vec<String> {
 }
 
 pub fn team_exists(org: &str, team: &str) -> bool {
-    team_store_dir(org, team).is_dir()
+    let dir = team_store_dir(org, team);
+    dir.is_dir() && dir.join("config.json").exists()
 }
 
 pub fn load_team_config(org: &str, team: &str) -> Option<TeamConfig> {

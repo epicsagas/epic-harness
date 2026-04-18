@@ -146,14 +146,15 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
 
-    // Check conventional commit format
-    if let Some(msg) = check_conventional_commit(cmd) {
+    // Check built-in blocked rules first — safety-critical, must run before CC check
+    // so a dangerous command appended after a CC-invalid message cannot bypass the block.
+    if let Some(msg) = check_blocked(cmd) {
         hint("guard", &format!("BLOCKED: {msg}"));
         return 2;
     }
 
-    // Check built-in blocked rules
-    if let Some(msg) = check_blocked(cmd) {
+    // Check conventional commit format
+    if let Some(msg) = check_conventional_commit(cmd) {
         hint("guard", &format!("BLOCKED: {msg}"));
         return 2;
     }

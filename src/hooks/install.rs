@@ -53,7 +53,7 @@ static CANONICAL_AGENTS: &[(&str, &str)] = &[
 
 static MEM_SECTION_COMMIT: &str = "";
 static MEM_SECTION_CONTEXT: &str = r#"
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
 "#;
 static MEM_SECTION_DEBUG: &str = "";
 static MEM_SECTION_DOCUMENT: &str = r#"
@@ -1033,9 +1033,14 @@ fn inject_mcp_claude() {
         return;
     }
 
+    // On Linux, current_exe() may return a path ending in " (deleted)" when the
+    // binary has been replaced since startup.  Verify the path exists before
+    // embedding it in ~/.claude.json; fall back to the binary name on the PATH.
     let binary = std::env::current_exe()
+        .ok()
+        .filter(|p| p.exists())
         .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "epic-harness".to_string());
+        .unwrap_or_else(|| "epic".to_string());
 
     json["mcpServers"]["harness-mem"] = serde_json::json!({
         "command": binary,
@@ -1161,10 +1166,13 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 
     let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
-    // Use the current running binary path for reliability; fall back to bare name
+    // Use the current running binary path for reliability; fall back to bare name.
+    // Guard against Linux " (deleted)" paths when the binary was replaced at runtime.
     let binary = std::env::current_exe()
+        .ok()
+        .filter(|p| p.exists())
         .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| "epic-harness".to_string());
+        .unwrap_or_else(|| "epic".to_string());
 
     // opencode uses { "mcp": { "name": { type, command[] } } }
     // Others use { "mcpServers": { "name": { command, args[] } } }
@@ -1428,15 +1436,13 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     // without requiring an npm publish for every change).
     if tool == "claude" {
         let home = std::env::var("HOME").unwrap_or_default();
-        if !dry_run {
-            sync_plugin_cache(&home, dry_run);
-        } else {
-            eprintln!("[harness] dry-run: would sync ~/.claude/plugins/cache/epicsagas/epic/*/");
-        }
+        sync_plugin_cache(&home, dry_run);
     }
 
-    // Seed the default epic org/team on first install (idempotent)
-    if !dry_run {
+    // Seed the default epic org/team on first install (idempotent).
+    // Restricted to `epic install claude` — other tools should not implicitly
+    // create org state in ~/.harness/orgs/.
+    if !dry_run && tool == "claude" {
         crate::hooks::team::store::install_default_team_if_needed("epic");
     }
 
