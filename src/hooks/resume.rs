@@ -180,11 +180,14 @@ pub fn run(_input: &HookInput) -> i32 {
 
     }
 
-    // Seed the default epic org/team whenever orgs dir is empty (idempotent)
-    if crate::hooks::team::store::install_default_team_if_needed("epic") {
+    // Seed the default org/team whenever orgs dir is empty (idempotent)
+    let default_org = crate::hooks::team::store::default_org();
+    if crate::hooks::team::store::install_default_team_if_needed(&default_org) {
         hint(
             "resume",
-            "Default team 'core' created in org 'epic' — run 'epic team sync core' to activate",
+            &format!(
+                "Default team 'core' created in org '{default_org}' — run 'epic team sync core' to activate"
+            ),
         );
     }
 

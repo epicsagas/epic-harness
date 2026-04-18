@@ -73,7 +73,6 @@ fn to_title_case(s: &str) -> String {
         .join(" ")
 }
 
-#[allow(dead_code)]
 pub(crate) fn today_str() -> String {
     let iso = crate::hooks::common::now_iso();
     iso[..10].to_string()
@@ -341,7 +340,7 @@ pub fn list_history(org: &str, team: &str, agent_name: &str) -> Vec<String> {
 // ── Defaults ──────────────────────────────────────────
 
 pub fn default_org() -> String {
-    "epic".to_string()
+    std::env::var("EPIC_ORG").unwrap_or_else(|_| "epic".to_string())
 }
 
 pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static str)> {

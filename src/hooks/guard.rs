@@ -35,15 +35,27 @@ static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// Extract the commit message from a `git commit -m "..."` command.
 /// Handles single quotes, double quotes, and HEREDOC `$(cat <<'EOF' ... EOF)` patterns.
 fn extract_commit_message(cmd: &str) -> Option<String> {
+    // Normalize CRLF → LF so HEREDOC parsing works on Windows or git CRLF output.
+    let normalized;
+    let cmd = if cmd.contains('\r') {
+        normalized = cmd.replace("\r\n", "\n").replace('\r', "\n");
+        normalized.as_str()
+    } else {
+        cmd
+    };
+
     // HEREDOC: find delimiter after <<, then find that delimiter on its own line
     static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
     });
-    if let Some(caps) = HEREDOC_START.captures(cmd) {
-        let delim = &caps[1];
-        // Find content between delimiter declaration and closing delimiter
-        if let Some(start_pos) = cmd.find(&format!("{delim}\n")) {
-            let body_start = start_pos + delim.len() + 1;
+    if let Some(m) = HEREDOC_START.find(cmd) {
+        let caps = HEREDOC_START.captures(cmd).unwrap();
+        let delim = caps[1].to_string();
+        // Body starts on the line after the HEREDOC declaration line.
+        // Use the regex match end to find the newline that closes the declaration.
+        let after_match = &cmd[m.end()..];
+        if let Some(nl) = after_match.find('\n') {
+            let body_start = m.end() + nl + 1;
             if let Some(end_pos) = cmd[body_start..].find(&format!("\n{delim}")) {
                 return Some(cmd[body_start..body_start + end_pos].trim().to_string());
             }
@@ -322,6 +334,19 @@ mod tests {
     fn cc_valid_heredoc() {
         let cmd = "git commit -m \"$(cat <<'EOF'\nfeat(mem): add search\nEOF\n)\"";
         assert!(check_conventional_commit(cmd).is_none());
+    }
+
+    #[test]
+    fn cc_valid_heredoc_crlf() {
+        // Windows CRLF line endings must not break HEREDOC parsing
+        let cmd = "git commit -m \"$(cat <<'EOF'\r\nfeat(guard): fix crlf\r\nEOF\r\n)\"";
+        assert!(check_conventional_commit(cmd).is_none());
+    }
+
+    #[test]
+    fn cc_invalid_heredoc_crlf() {
+        let cmd = "git commit -m \"$(cat <<'EOF'\r\nadded stuff\r\nEOF\r\n)\"";
+        assert!(check_conventional_commit(cmd).is_some());
     }
 
     #[test]
