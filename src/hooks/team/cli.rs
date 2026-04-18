@@ -201,7 +201,7 @@ fn register_project_link(org: &str, team: &str) {
         && !config.projects.contains(&project_path)
     {
         // Purge stale entries (directories no longer on disk) while we have the config open.
-        config.projects.retain(|p| std::path::Path::new(p).is_dir() || !std::path::Path::new(p).is_absolute());
+        retain_live_projects(&mut config.projects);
         config.projects.push(project_path);
         config.updated = crate::hooks::common::now_iso();
         if let Err(e) = save_team_config(&config) {
@@ -232,6 +232,16 @@ fn display_projects(projects: &[String]) -> String {
         })
         .collect();
     if visible.is_empty() { "(none)".to_string() } else { visible.join(", ") }
+}
+
+/// Purge stale entries from a projects list in-place.
+/// Keeps entries that are either (a) absolute paths still present on disk, or
+/// (b) legacy relative (basename-only) entries that cannot be validated by presence.
+fn retain_live_projects(projects: &mut Vec<String>) {
+    projects.retain(|p| {
+        let path = std::path::Path::new(p);
+        !path.is_absolute() || path.is_dir()
+    });
 }
 
 fn validate_identifier(kind: &str, value: &str) -> io::Result<()> {
@@ -616,7 +626,7 @@ fn cmd_default_write(
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_default();
             if !cwd_path.is_empty() && !config.projects.contains(&cwd_path) {
-                config.projects.retain(|p| std::path::Path::new(p).is_dir() || !std::path::Path::new(p).is_absolute());
+                retain_live_projects(&mut config.projects);
                 config.projects.push(cwd_path);
             }
             config.updated = crate::hooks::common::now_iso();
@@ -1133,9 +1143,8 @@ fn cmd_delete(args: &[String]) -> i32 {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default();
                 if !cwd_path.is_empty() && let Some(mut config) = load_team_config(&org, &team) {
-                    config.projects.retain(|p| {
-                        p != &cwd_path && (std::path::Path::new(p).is_dir() || !std::path::Path::new(p).is_absolute())
-                    });
+                    retain_live_projects(&mut config.projects);
+                    config.projects.retain(|p| p != &cwd_path);
                     config.updated = crate::hooks::common::now_iso();
                     let _ = save_team_config(&config);
                 }

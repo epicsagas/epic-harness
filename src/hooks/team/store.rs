@@ -197,6 +197,12 @@ pub fn save_team_config(config: &TeamConfig) -> io::Result<()> {
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &content)?;
     fs::rename(&tmp, &path)?;
+    // Restrict to owner-only: config.json stores full absolute paths.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
     Ok(())
 }
 
@@ -247,7 +253,7 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
                 "playbook would exceed {} bytes (current: {}, append: {}); use 'epic team show --playbook' to review and trim",
                 PLAYBOOK_MAX_BYTES,
                 existing.len(),
-                header.len() + section.len(),
+                new_content.len() - existing.len(),
             ),
         ));
     }
@@ -1093,6 +1099,7 @@ mod tests {
     fn test_append_playbook_rejects_oversized_content() {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
         unsafe { env::set_var("HOME", tmp.path()); }
 
         // Section just over the 1 MiB limit
@@ -1111,12 +1118,42 @@ mod tests {
     fn test_append_playbook_accepts_content_at_limit() {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
         unsafe { env::set_var("HOME", tmp.path()); }
 
-        // Section exactly at the limit should succeed
+        // Section exactly at the limit should succeed (empty project/date → no header)
         let at_limit = "y".repeat(PLAYBOOK_MAX_BYTES);
         append_playbook("testorg6", "zeta", &at_limit, "", "").unwrap();
         let content = load_playbook("testorg6", "zeta");
         assert_eq!(content.len(), PLAYBOOK_MAX_BYTES);
+    }
+
+    #[test]
+    fn test_append_playbook_rejects_cumulative_overflow() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        // Pre-fill playbook to PLAYBOOK_MAX_BYTES - 6 bytes.
+        // Adding the 7-byte separator "\n\n---\n\n" makes new_content.len() == PLAYBOOK_MAX_BYTES + 1.
+        let initial = "z".repeat(PLAYBOOK_MAX_BYTES - 6);
+        let playbook_dir = team_store_dir("testorg7", "eta");
+        std::fs::create_dir_all(&playbook_dir).unwrap();
+        std::fs::write(playbook_dir.join("playbook.md"), &initial).unwrap();
+
+        let err = append_playbook("testorg7", "eta", "", "", "").unwrap_err();
+        assert!(
+            err.to_string().contains("exceed"),
+            "expected size-limit error for cumulative overflow, got: {err}"
+        );
+
+        // File must be unchanged (atomic write aborted before rename)
+        let content = load_playbook("testorg7", "eta");
+        assert_eq!(
+            content.len(),
+            PLAYBOOK_MAX_BYTES - 6,
+            "playbook must not be modified after rejected cumulative append"
+        );
     }
 }
