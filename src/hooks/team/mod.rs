@@ -3,6 +3,12 @@
 pub mod cli;
 pub mod store;
 
+/// Process-wide mutex that serializes tests mutating the HOME environment variable.
+/// Both `cli::tests` and `store::tests` must hold this lock while changing HOME so
+/// that concurrent test threads do not see each other's temporary directories.
+#[cfg(test)]
+pub(crate) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn run(args: &[String]) -> i32 {
     // args[0] is "team", args[1..] are subcommand + flags
     let sub_args = if args.len() > 1 { &args[1..] } else { &[] };

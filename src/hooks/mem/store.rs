@@ -426,16 +426,6 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
-pub fn read_edges() -> Vec<Edge> {
-    match open_db() {
-        Ok(conn) => read_edges_conn(&conn),
-        Err(e) => {
-            eprintln!("[mem/store] read_edges: open_db failed: {e}");
-            vec![]
-        }
-    }
-}
 
 /// Read all edges using an existing connection (no LIMIT — callers should paginate for large graphs).
 pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
@@ -460,6 +450,17 @@ pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
     })
     .map(|rows| rows.filter_map(|r| r.ok()).collect())
     .unwrap_or_default()
+}
+
+#[allow(dead_code)] // used by integration tests (tests/mem_test.rs)
+pub fn read_edges() -> Vec<Edge> {
+    match open_db() {
+        Ok(conn) => read_edges_conn(&conn),
+        Err(e) => {
+            eprintln!("[mem/store] read_edges: open_db failed: {e}");
+            vec![]
+        }
+    }
 }
 
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {

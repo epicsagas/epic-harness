@@ -378,6 +378,15 @@ fn strip_line_breaks(s: &str) -> String {
         .collect()
 }
 
+/// Enforce `[a-zA-Z0-9_-]` allowlist for org/team names used in Markdown body.
+/// Callers upstream use `validate_org_name`/`validate_team_name` — this is a
+/// second-layer defence for direct calls to `inject_team_context`.
+fn sanitize_name(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect()
+}
+
 pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_type: &str) -> String {
     // YAML frontmatter uses double-quoted scalars to prevent injection via colons, hashes,
     // and Unicode line separators. `tools` is always a static string from tools_for_role().
@@ -394,13 +403,18 @@ pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_ty
 /// Inject `org` and `team` fields into frontmatter, and replace/append `## Team Context`.
 /// Called at sync time on canonical agent content before writing to .claude/agents/.
 pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team_type: &str, mission: &str) -> String {
-    let mission = &sanitize_mission(mission);
+    let mission_clean = strip_line_breaks(&sanitize_mission(mission));
+    let type_label_clean: String;
     let type_label = match team_type {
         "stream" => "Stream-aligned",
         "platform" => "Platform",
         "enabling" => "Enabling",
         "subsystem" => "Subsystem",
-        _ => team_type,
+        other => {
+            // Fallback: strip line breaks to prevent Markdown heading injection.
+            type_label_clean = strip_line_breaks(other);
+            &type_label_clean
+        }
     };
 
     // ── 1. Inject org + team into frontmatter ─────────────────────────────
@@ -426,9 +440,11 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
     };
 
     // ── 2. Inject/replace ## Team Context section ──────────────────────────
+    let safe_org = sanitize_name(org);
+    let safe_team = sanitize_name(team_name);
     let context_section = format!(
         "## Team Context\n**Org**: {}\n**Team**: {} ({})\n**Mission**: {}\n**Full playbook**: `epic team show {} --playbook`\n",
-        strip_line_breaks(org), strip_line_breaks(team_name), type_label, mission, strip_line_breaks(team_name)
+        safe_org, safe_team, type_label, mission_clean, safe_team
     );
 
     if let Some(pos) = content.find("## Team Context") {
@@ -733,8 +749,8 @@ pub fn install_default_team_if_needed(org: &str) -> bool {
     let playbook = build_playbook_section(team, DEFAULT_TEAM_TYPE, &agent_list, "—");
     let playbook_path = store_dir.join("playbook.md");
     let tmp = playbook_path.with_extension("md.tmp");
-    if fs::write(&tmp, &playbook).is_ok() {
-        let _ = fs::rename(&tmp, &playbook_path);
+    if fs::write(&tmp, &playbook).is_err() || fs::rename(&tmp, &playbook_path).is_err() {
+        return false;
     }
 
     true
@@ -744,10 +760,10 @@ pub fn install_default_team_if_needed(org: &str) -> bool {
 mod tests {
     use super::*;
     use std::env;
-    use std::sync::Mutex;
 
     // Serialize tests that mutate the process-wide HOME env var.
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
+    // Shared with cli::tests via super::super::HOME_LOCK (declared in mod.rs).
+    use super::super::HOME_LOCK;
 
     #[test]
     fn test_save_team_config_atomic() {

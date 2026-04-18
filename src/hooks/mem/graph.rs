@@ -81,14 +81,16 @@ pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(Stri
     if seed_ids.is_empty() {
         return vec![];
     }
-    if seed_ids.len() > MAX_SEED_IDS {
+    let seed_ids = if seed_ids.len() > MAX_SEED_IDS {
         eprintln!(
-            "[mem/graph] graph_neighbors_conn: seed_ids.len()={} exceeds MAX_SEED_IDS={}, returning empty",
+            "[mem/graph] graph_neighbors_conn: seed_ids.len()={} exceeds MAX_SEED_IDS={}, truncating",
             seed_ids.len(),
             MAX_SEED_IDS
         );
-        return vec![];
-    }
+        &seed_ids[..MAX_SEED_IDS]
+    } else {
+        seed_ids
+    };
 
     let ph: String = seed_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     // Sum weights per neighbor from both forward and backward edges.

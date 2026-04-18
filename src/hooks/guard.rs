@@ -48,14 +48,13 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
     });
-    if let Some(m) = HEREDOC_START.find(cmd) {
-        let caps = HEREDOC_START.captures(cmd).unwrap();
+    if let Some(caps) = HEREDOC_START.captures(cmd) {
         let delim = caps[1].to_string();
+        let match_end = caps.get(0).unwrap().end();
         // Body starts on the line after the HEREDOC declaration line.
-        // Use the regex match end to find the newline that closes the declaration.
-        let after_match = &cmd[m.end()..];
+        let after_match = &cmd[match_end..];
         if let Some(nl) = after_match.find('\n') {
-            let body_start = m.end() + nl + 1;
+            let body_start = match_end + nl + 1;
             if let Some(end_pos) = cmd[body_start..].find(&format!("\n{delim}")) {
                 return Some(cmd[body_start..body_start + end_pos].trim().to_string());
             }
