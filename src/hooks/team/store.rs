@@ -220,6 +220,9 @@ pub fn load_playbook(org: &str, team: &str) -> String {
     fs::read_to_string(&path).unwrap_or_default()
 }
 
+/// Playbook files are append-only; cap at 1 MiB to prevent unbounded growth.
+const PLAYBOOK_MAX_BYTES: usize = 1024 * 1024;
+
 pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date: &str) -> io::Result<()> {
     let dir = team_store_dir(org, team);
     fs::create_dir_all(&dir)?;
@@ -237,6 +240,17 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
     } else {
         format!("{}\n\n---\n\n{}{}", existing, header, section)
     };
+    if new_content.len() > PLAYBOOK_MAX_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "playbook would exceed {} bytes (current: {}, append: {}); use 'epic team show --playbook' to review and trim",
+                PLAYBOOK_MAX_BYTES,
+                existing.len(),
+                header.len() + section.len(),
+            ),
+        ));
+    }
     let tmp = path.with_extension("md.tmp");
     fs::write(&tmp, &new_content)?;
     fs::rename(&tmp, &path)?;
@@ -1073,5 +1087,36 @@ mod tests {
             content.contains("foo <! -- bar"),
             "injected <!-- must be escaped to '<! --' in project name: {content}"
         );
+    }
+
+    #[test]
+    fn test_append_playbook_rejects_oversized_content() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        // Section just over the 1 MiB limit
+        let big_section = "x".repeat(PLAYBOOK_MAX_BYTES + 1);
+        let err = append_playbook("testorg5", "epsilon", &big_section, "", "").unwrap_err();
+        assert!(
+            err.to_string().contains("exceed"),
+            "expected size-limit error, got: {err}"
+        );
+        // Playbook file must not have been created (atomic write aborted before rename)
+        let path = team_store_dir("testorg5", "epsilon").join("playbook.md");
+        assert!(!path.exists(), "playbook must not exist after rejected append");
+    }
+
+    #[test]
+    fn test_append_playbook_accepts_content_at_limit() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        // Section exactly at the limit should succeed
+        let at_limit = "y".repeat(PLAYBOOK_MAX_BYTES);
+        append_playbook("testorg6", "zeta", &at_limit, "", "").unwrap();
+        let content = load_playbook("testorg6", "zeta");
+        assert_eq!(content.len(), PLAYBOOK_MAX_BYTES);
     }
 }

@@ -179,10 +179,10 @@ fn sync_to_project(org: &str, team: &str) -> io::Result<u32> {
     sync_to_dest(org, team, false)
 }
 
-/// Register the current working directory's project name in the team's config.json.
+/// Register the current working directory's full path in the team's config.json.
+/// Stores the absolute path so stale entries can be detected when the directory is gone.
 /// Silent no-op if already registered or config is unavailable.
 fn register_project_link(org: &str, team: &str) {
-    // Fix W-1: cwd 실패 시 "unknown" 등록 없이 즉시 반환
     let cwd = match std::env::current_dir() {
         Ok(p) => p,
         Err(e) => {
@@ -190,21 +190,19 @@ fn register_project_link(org: &str, team: &str) {
             return;
         }
     };
-    let project_name = cwd
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_default()
-        .to_string();
-
-    // cwd가 루트 등으로 file_name()이 None인 경우 등록 건너뜀
-    if project_name.is_empty() {
+    // Canonicalize so symlink targets are compared consistently.
+    let cwd = cwd.canonicalize().unwrap_or(cwd);
+    let project_path = cwd.to_string_lossy().to_string();
+    if project_path.is_empty() {
         return;
     }
 
     if let Some(mut config) = load_team_config(org, team)
-        && !config.projects.contains(&project_name)
+        && !config.projects.contains(&project_path)
     {
-        config.projects.push(project_name.clone());
+        // Purge stale entries (directories no longer on disk) while we have the config open.
+        config.projects.retain(|p| std::path::Path::new(p).is_dir() || !std::path::Path::new(p).is_absolute());
+        config.projects.push(project_path);
         config.updated = crate::hooks::common::now_iso();
         if let Err(e) = save_team_config(&config) {
             eprintln!("warning: could not update team config: {}", e);
@@ -212,32 +210,50 @@ fn register_project_link(org: &str, team: &str) {
     }
 }
 
-fn validate_team_name(team: &str) -> io::Result<()> {
-    let valid = !team.is_empty()
-        && team.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
-        && team.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+/// Format `config.projects` for display: filter stale absolute paths, show basenames.
+/// Non-absolute entries (legacy dirname-only format) are shown as-is.
+fn display_projects(projects: &[String]) -> String {
+    let visible: Vec<String> = projects
+        .iter()
+        .filter(|p| {
+            let path = std::path::Path::new(p.as_str());
+            !path.is_absolute() || path.is_dir()
+        })
+        .map(|p| {
+            let path = std::path::Path::new(p.as_str());
+            if path.is_absolute() {
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or(p.as_str())
+                    .to_string()
+            } else {
+                p.clone()
+            }
+        })
+        .collect();
+    if visible.is_empty() { "(none)".to_string() } else { visible.join(", ") }
+}
+
+fn validate_identifier(kind: &str, value: &str) -> io::Result<()> {
+    let valid = !value.is_empty()
+        && value.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
+        && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if valid {
         Ok(())
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("invalid team name '{}': only [a-zA-Z0-9_-] allowed, must start with alphanumeric", team),
+            format!("invalid {} name '{}': only [a-zA-Z0-9_-] allowed, must start with alphanumeric", kind, value),
         ))
     }
 }
 
+fn validate_team_name(team: &str) -> io::Result<()> {
+    validate_identifier("team", team)
+}
+
 fn validate_org_name(org: &str) -> io::Result<()> {
-    let valid = !org.is_empty()
-        && org.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
-        && org.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
-    if valid {
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("invalid org name '{}': only [a-zA-Z0-9_-] allowed, must start with alphanumeric", org),
-        ))
-    }
+    validate_identifier("org", org)
 }
 
 /// Returns the agents dir for a tool if that tool appears to be installed globally.
@@ -594,8 +610,14 @@ fn cmd_default_write(
         println!("+ Playbook updated");
 
         if let Some(mut config) = load_team_config(org, team_name) {
-            if !config.projects.contains(&ctx.name) {
-                config.projects.push(ctx.name.clone());
+            let cwd_path = std::env::current_dir()
+                .ok()
+                .and_then(|p| p.canonicalize().ok().or(Some(p)))
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !cwd_path.is_empty() && !config.projects.contains(&cwd_path) {
+                config.projects.retain(|p| std::path::Path::new(p).is_dir() || !std::path::Path::new(p).is_absolute());
+                config.projects.push(cwd_path);
             }
             config.updated = crate::hooks::common::now_iso();
             if let Err(e) = save_team_config(&config) {
@@ -614,12 +636,17 @@ fn cmd_default_write(
             return 1;
         }
 
+        let cwd_path = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.canonicalize().ok().or(Some(p)))
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| ctx.name.clone());
         let now = crate::hooks::common::now_iso();
         let config = TeamConfig {
             name: team_name.to_string(),
             org: org.to_string(),
             team_type: team_type.to_string(),
-            projects: vec![ctx.name.clone()],
+            projects: vec![cwd_path],
             created: now.clone(),
             updated: now,
         };
@@ -697,12 +724,7 @@ fn cmd_list(args: &[String]) -> i32 {
     for team in &teams {
         match load_team_config(&org, team) {
             Some(config) => {
-                let projects_str = if config.projects.is_empty() {
-                    "(none)".to_string()
-                } else {
-                    config.projects.join(", ")
-                };
-                println!("  {:<16} ({:<10}) projects: {}", team, config.team_type, projects_str);
+                println!("  {:<16} ({:<10}) projects: {}", team, config.team_type, display_projects(&config.projects));
             }
             None => {
                 // config.json 읽기 실패 — 팀 이름만 표시
@@ -753,7 +775,7 @@ fn cmd_show(args: &[String]) -> i32 {
     if let Some(ref c) = config {
         println!("Org:  {}", c.org);
         println!("Type: {}", c.team_type);
-        println!("Projects: {}", if c.projects.is_empty() { "(none)".to_string() } else { c.projects.join(", ") });
+        println!("Projects: {}", display_projects(&c.projects));
         println!("Created: {}", c.created);
         println!("Updated: {}", c.updated);
     }
@@ -1104,13 +1126,16 @@ fn cmd_delete(args: &[String]) -> i32 {
             Ok(_) => {
                 println!("✓ Removed .claude/agents/{}/", team);
                 println!("  (Global store untouched. Use 'epic team link {}' to re-attach.)", team);
-                // Fix B-2: 프로젝트 등록 해제 — projects 배열에서 현재 프로젝트 제거
-                let project_name = std::env::current_dir()
+                // Deregister project: remove current cwd path from projects list, also purge stale entries.
+                let cwd_path = std::env::current_dir()
                     .ok()
-                    .and_then(|p| p.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()))
+                    .and_then(|p| p.canonicalize().ok().or(Some(p)))
+                    .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default();
-                if !project_name.is_empty() && let Some(mut config) = load_team_config(&org, &team) {
-                    config.projects.retain(|p| p != &project_name);
+                if !cwd_path.is_empty() && let Some(mut config) = load_team_config(&org, &team) {
+                    config.projects.retain(|p| {
+                        p != &cwd_path && (std::path::Path::new(p).is_dir() || !std::path::Path::new(p).is_absolute())
+                    });
                     config.updated = crate::hooks::common::now_iso();
                     let _ = save_team_config(&config);
                 }
