@@ -6,7 +6,7 @@ use std::io;
 
 use rusqlite::{Connection, params_from_iter};
 
-use super::store::{atomic_write, graph_path, list_node_ids, open_db, read_edges, read_node};
+use super::store::{atomic_write, graph_path, list_node_ids, open_db, read_edges_conn, read_nodes_conn};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
@@ -32,11 +32,13 @@ pub struct Graph {
 }
 
 /// Build a `Graph` value from the current DB state (shared by `rebuild_graph` and `rebuild_graph_json`).
+/// Opens a single DB connection and reuses it for both node and edge queries (no N+1 open_db calls).
 fn build_graph() -> io::Result<Graph> {
     let ids = list_node_ids()?;
-    let nodes = ids
-        .iter()
-        .filter_map(|id| read_node(id).ok())
+    let conn = open_db()?;
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let nodes = read_nodes_conn(&conn, &id_refs)
+        .into_iter()
         .map(|node| GraphNode {
             id: node.frontmatter.id,
             title: node.frontmatter.title,
@@ -44,7 +46,7 @@ fn build_graph() -> io::Result<Graph> {
             tags: node.frontmatter.tags,
         })
         .collect();
-    let edges = read_edges()
+    let edges = read_edges_conn(&conn)
         .into_iter()
         .map(|e| GraphEdge {
             source: e.source,
@@ -71,10 +73,24 @@ pub fn rebuild_graph_json() -> io::Result<String> {
 
 /// Get 1-hop neighbors using an existing connection.
 /// Returns `(neighbor_id, total_weight)` sorted by weight descending.
+/// Maximum seeds accepted per call — keeps `WHERE IN (?, ...)` well below
+/// SQLite's `SQLITE_LIMIT_VARIABLE_NUMBER` default of 999 (2 copies are bound).
+const MAX_SEED_IDS: usize = 100;
+
 pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
     }
+    let seed_ids = if seed_ids.len() > MAX_SEED_IDS {
+        eprintln!(
+            "[mem/graph] graph_neighbors_conn: seed_ids.len()={} exceeds MAX_SEED_IDS={}, truncating",
+            seed_ids.len(),
+            MAX_SEED_IDS
+        );
+        &seed_ids[..MAX_SEED_IDS]
+    } else {
+        seed_ids
+    };
 
     let ph: String = seed_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     // Sum weights per neighbor from both forward and backward edges.
@@ -109,22 +125,6 @@ pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(Stri
     let mut result: Vec<(String, f64)> = weights.into_iter().collect();
     result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     result
-}
-
-/// Get 1-hop neighbors for multiple seed nodes, excluding the seeds themselves.
-/// Returns `(neighbor_id, total_weight)` — sum of edge weights to any seed node.
-/// Sorted by weight descending (strongest connections first).
-///
-/// Uses targeted `idx_edges_source` / `idx_edges_target` index lookups — O(log N + degree).
-pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
-    if seed_ids.is_empty() {
-        return vec![];
-    }
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    graph_neighbors_conn(&conn, seed_ids)
 }
 
 /// BFS traversal using an existing connection.
@@ -167,7 +167,10 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
 pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
     let conn = match open_db() {
         Ok(c) => c,
-        Err(_) => return vec![],
+        Err(e) => {
+            eprintln!("[mem/graph] related_nodes: open_db failed: {e}");
+            return vec![];
+        }
     };
     related_nodes_conn(&conn, start_id, depth)
 }
@@ -175,21 +178,18 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::store::{append_edge, Edge};
-    use std::env;
+    use super::super::store::{append_edge_conn, init_schema, Edge};
+    use rusqlite::Connection;
 
-    /// Set HARNESS_ROOT to a per-test temp dir so tests don't pollute the real DB.
-    /// Caller MUST hold `super::super::TEST_ENV_LOCK` for the duration of the test.
-    fn setup_temp_db() -> tempfile::TempDir {
-        let dir = tempfile::TempDir::new().expect("tmp dir");
-        // SAFETY: guarded by the process-wide TEST_ENV_LOCK held by each caller.
-        unsafe { env::set_var("HARNESS_ROOT", dir.path().to_str().unwrap()) };
-        // Open DB once to initialise schema.
-        let _ = open_db().expect("open_db in setup");
-        dir
+    /// Open a fresh in-memory SQLite DB with the full schema applied.
+    /// Each call returns an independent connection — no shared state, no env var mutation.
+    fn mem_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        conn
     }
 
-    fn insert_edge(id: &str, src: &str, tgt: &str) {
+    fn insert_edge(conn: &Connection, id: &str, src: &str, tgt: &str) {
         let e = Edge {
             id: id.to_string(),
             source: src.to_string(),
@@ -198,22 +198,21 @@ mod tests {
             weight: 1.0,
             ts: "2026-01-01T00:00:00Z".to_string(),
         };
-        append_edge(&e).expect("append_edge");
+        append_edge_conn(conn, &e).expect("append_edge_conn");
     }
 
     /// graph_neighbors returns 1-hop neighbors including backward edges.
     #[test]
     fn graph_neighbors_returns_direct_neighbors() {
-        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // A -> B, A -> C, D -> A (backward edge)
-        insert_edge("e1", "A", "B");
-        insert_edge("e2", "A", "C");
-        insert_edge("e3", "D", "A");
+        insert_edge(&conn, "e1", "A", "B");
+        insert_edge(&conn, "e2", "A", "C");
+        insert_edge(&conn, "e3", "D", "A");
 
         let seeds = vec!["A".to_string()];
-        let mut result = graph_neighbors(&seeds);
+        let mut result = graph_neighbors_conn(&conn, &seeds);
         result.sort_by(|a, b| a.0.cmp(&b.0));
 
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
@@ -226,15 +225,14 @@ mod tests {
     /// graph_neighbors excludes all seeds from the result set.
     #[test]
     fn graph_neighbors_excludes_seeds() {
-        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // Seed A -> Seed B -> C
-        insert_edge("e1", "A", "B");
-        insert_edge("e2", "B", "C");
+        insert_edge(&conn, "e1", "A", "B");
+        insert_edge(&conn, "e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors(&seeds);
+        let result = graph_neighbors_conn(&conn, &seeds);
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
 
         assert!(ids.contains(&"C"), "C should be reachable from B");
@@ -245,9 +243,8 @@ mod tests {
     /// graph_neighbors with empty seed list returns empty.
     #[test]
     fn graph_neighbors_empty_seeds() {
-        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
-        let result = graph_neighbors(&[]);
+        let conn = mem_db();
+        let result = graph_neighbors_conn(&conn, &[]);
         assert!(result.is_empty(), "empty seeds -> empty result");
     }
 
@@ -256,22 +253,21 @@ mod tests {
     /// node_id alone). Cycles must not produce duplicate results.
     #[test]
     fn related_nodes_recursive_cte() {
-        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // Chain: A -> B -> C
-        insert_edge("e1", "A", "B");
-        insert_edge("e2", "B", "C");
+        insert_edge(&conn, "e1", "A", "B");
+        insert_edge(&conn, "e2", "B", "C");
 
         // All reachable nodes from A should include B and C; start node excluded.
-        let result = related_nodes("A", 2);
+        let result = related_nodes_conn(&conn, "A", 2);
         assert!(result.contains(&"B".to_string()), "should reach B");
         assert!(result.contains(&"C".to_string()), "should reach C (2-hop)");
         assert!(!result.contains(&"A".to_string()), "start node must not appear");
 
         // Cycle: C -> A — results must still be deduplicated (no duplicates).
-        insert_edge("e3", "C", "A");
-        let cyclic = related_nodes("A", 3);
+        insert_edge(&conn, "e3", "C", "A");
+        let cyclic = related_nodes_conn(&conn, "A", 3);
         let unique: HashSet<_> = cyclic.iter().collect();
         assert_eq!(cyclic.len(), unique.len(), "no duplicate nodes in cyclic graph");
         assert!(!cyclic.contains(&"A".to_string()), "start node must not appear even in cycle");
@@ -280,15 +276,14 @@ mod tests {
     /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
     #[test]
     fn graph_neighbors_connection_count() {
-        let _lock = super::super::TEST_ENV_LOCK.lock().unwrap();
-        let _dir = setup_temp_db();
+        let conn = mem_db();
 
         // Both seeds A and B connect to C (default weight 1.0 each → total 2.0).
-        insert_edge("e1", "A", "C");
-        insert_edge("e2", "B", "C");
+        insert_edge(&conn, "e1", "A", "C");
+        insert_edge(&conn, "e2", "B", "C");
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors(&seeds);
+        let result = graph_neighbors_conn(&conn, &seeds);
         let c_weight = result.iter().find(|(id, _)| id == "C").map(|(_, w)| *w);
         assert_eq!(c_weight, Some(2.0), "C connected to both seeds should have total weight 2.0");
     }

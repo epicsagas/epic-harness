@@ -1,70 +1,34 @@
 ---
-description: "Design a project-specific agent team — analyze codebase and generate custom agents + skills"
+description: "Design or update an org-level agent team — cross-project, append-merge"
 ---
 
-# /team — Design Your Agent Team
+# /team — Agent Team Design
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+This command is a thin wrapper around the `epic team` CLI.
 
-You are the **Team Architect** — a meta-skill that designs project-specific agent teams.
-
-## Process
-
-### Phase 1: Project Scan
-1. Read AGENTS.md, README, package.json / pyproject.toml / go.mod
-2. Explore directory structure (max 3 levels deep)
-3. Identify: tech stack, key modules, test framework, deploy method
-
-### Phase 2: Team Design
-Choose the best architecture pattern:
-
-| Pattern | When |
-|---------|------|
-| **Pipeline** | Sequential dependent tasks (build → test → deploy) |
-| **Fan-out/Fan-in** | Parallel independent tasks (review + test + lint) |
-| **Expert Pool** | Context-dependent selective invocation |
-| **Producer-Reviewer** | Generate then quality-check |
-| **Supervisor** | Central agent with dynamic task distribution |
-
-Recommend team composition (3-6 agents max). Show user and get approval.
-
-### Phase 3: Generate
-Create files in `$HARNESS_DIR/team/`:
-
+**Run in terminal:**
 ```
-$HARNESS_DIR/team/
-├── agents/
-│   ├── <role-1>.md      # Agent definition (frontmatter + instructions)
-│   ├── <role-2>.md
-│   └── ...
-├── skills/
-│   ├── <domain>/SKILL.md  # Project-specific skills
-│   └── ...
-└── playbook.md            # Orchestration rules: who does what, when
+epic team
 ```
 
-Each agent file:
-```markdown
----
-name: <role>
-description: <one line>
-tools: [Read, Edit, Write, Bash, Grep, Glob]
-model: <model>
----
-# <Role Name>
-<detailed instructions for this agent>
+`epic team` handles the full interactive flow:
+- Resolves org (`HARNESS_ORG` env → prompt → default `"epic"`)
+- Scans the project (tech stack, domain boundaries, key modules)
+- Recommends team type and agent composition
+- Shows diff if team already exists in `~/.harness/orgs/`
+- Applies merge strategy (no silent overwrites)
+- Copies agents to `.claude/agents/{team}/` with `## Team Context` injected
+
+For the full spec see `docs/research/team-spec.md`.
+
+## Other subcommands
+
 ```
-
-### Phase 4: Connect
-Add a pointer in `$HARNESS_DIR/memory/team.md` so `/go` knows to use this team.
-
-## Constraints
-- Max 6 agents (more = diminishing returns)
-- Every agent must have a clear, non-overlapping responsibility
-- Skills should reference `references/` checklists, not reinvent them
-- Generate a `playbook.md` that `/go` can follow
-
-## Red Flags
-- Creating agents without clear boundaries
-- More than 6 agents (coordination overhead > benefit)
-- Agents that duplicate built-in skills (tdd, debug, secure, etc.)
+epic team list                     # list teams in current org
+epic team show {team}              # config + agents + mission
+epic team show {team} --playbook   # full accumulated playbook
+epic team sync {team}              # re-copy agents to .claude/agents/
+epic team link {team}              # attach existing team (skip design)
+epic team unlink {team}            # remove .claude/agents/{team}/
+epic team history {team} {agent}   # show .history/ entries
+```

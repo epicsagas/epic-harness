@@ -35,15 +35,26 @@ static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// Extract the commit message from a `git commit -m "..."` command.
 /// Handles single quotes, double quotes, and HEREDOC `$(cat <<'EOF' ... EOF)` patterns.
 fn extract_commit_message(cmd: &str) -> Option<String> {
+    // Normalize CRLF → LF so HEREDOC parsing works on Windows or git CRLF output.
+    let normalized;
+    let cmd = if cmd.contains('\r') {
+        normalized = cmd.replace("\r\n", "\n").replace('\r', "\n");
+        normalized.as_str()
+    } else {
+        cmd
+    };
+
     // HEREDOC: find delimiter after <<, then find that delimiter on its own line
     static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
     });
     if let Some(caps) = HEREDOC_START.captures(cmd) {
-        let delim = &caps[1];
-        // Find content between delimiter declaration and closing delimiter
-        if let Some(start_pos) = cmd.find(&format!("{delim}\n")) {
-            let body_start = start_pos + delim.len() + 1;
+        let delim = caps[1].to_string();
+        let match_end = caps.get(0).unwrap().end();
+        // Body starts on the line after the HEREDOC declaration line.
+        let after_match = &cmd[match_end..];
+        if let Some(nl) = after_match.find('\n') {
+            let body_start = match_end + nl + 1;
             if let Some(end_pos) = cmd[body_start..].find(&format!("\n{delim}")) {
                 return Some(cmd[body_start..body_start + end_pos].trim().to_string());
             }
@@ -146,14 +157,15 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
 
-    // Check conventional commit format
-    if let Some(msg) = check_conventional_commit(cmd) {
+    // Check built-in blocked rules first — safety-critical, must run before CC check
+    // so a dangerous command appended after a CC-invalid message cannot bypass the block.
+    if let Some(msg) = check_blocked(cmd) {
         hint("guard", &format!("BLOCKED: {msg}"));
         return 2;
     }
 
-    // Check built-in blocked rules
-    if let Some(msg) = check_blocked(cmd) {
+    // Check conventional commit format
+    if let Some(msg) = check_conventional_commit(cmd) {
         hint("guard", &format!("BLOCKED: {msg}"));
         return 2;
     }
@@ -321,6 +333,19 @@ mod tests {
     fn cc_valid_heredoc() {
         let cmd = "git commit -m \"$(cat <<'EOF'\nfeat(mem): add search\nEOF\n)\"";
         assert!(check_conventional_commit(cmd).is_none());
+    }
+
+    #[test]
+    fn cc_valid_heredoc_crlf() {
+        // Windows CRLF line endings must not break HEREDOC parsing
+        let cmd = "git commit -m \"$(cat <<'EOF'\r\nfeat(guard): fix crlf\r\nEOF\r\n)\"";
+        assert!(check_conventional_commit(cmd).is_none());
+    }
+
+    #[test]
+    fn cc_invalid_heredoc_crlf() {
+        let cmd = "git commit -m \"$(cat <<'EOF'\r\nadded stuff\r\nEOF\r\n)\"";
+        assert!(check_conventional_commit(cmd).is_some());
     }
 
     #[test]

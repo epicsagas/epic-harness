@@ -39,130 +39,181 @@ Ring 3 — Évolution (auto-amélioration)
 
 ## Installation
 
-```bash
-# Marketplace du plugin Claude Code
-claude plugins marketplace add epicsagas/plugins
-claude plugins install epic@epicsagas
-
-# Ou manuellement
-git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
+```
+# Plugin Claude Code (recommandé)
+/plugin marketplace add epicsagas/plugins
+/plugin install epic@epicsagas
 ```
 
-### Binaire Rust (optionnel, hooks ~4x plus rapides)
+```bash
+# Ou depuis les sources
+git clone https://github.com/epicsagas/epic-harness.git
+cd epic-harness
+cargo install --path .
+epic install
+```
+
+### Installer depuis le binaire
 
 ```bash
 # Homebrew (macOS)
 brew install epicsagas/tap/epic-harness
 
-
 # Depuis crates.io
 cargo install epic-harness
-# ou avec cargo-binstall (pré-compilé, plus rapide)
+
+# Binaire pré-compilé (plus rapide, sans compilation)
 cargo binstall epic-harness
 
 # Depuis les sources
 cargo install --path .
 ```
 
-Le binaire est automatiquement détecté par les hooks.
+Le binaire est automatiquement détecté par les hooks. S'il est absent, les hooks reviennent à Node.js.
 
 ## Support multi-outils
 
 epic-harness fonctionne avec Claude Code et 6 autres outils de codage IA. Tous les outils partagent le même répertoire de données `~/.harness/projects/{slug}/`.
 
-| Tool | Ring 0 Hooks | Commands/Prompts | Skills | Agents |
+| Outil | Ring 0 Hooks | Commandes/Prompts | Compétences | Agents |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
-| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
-| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
-| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
-| **Cline** | ✓ Full⁵ | — | — | — |
+| **Claude Code** | ✓ Complet | ✓ 6 commandes | ✓ 8 compétences | ✓ 4 |
+| **Codex CLI** | ✓ Complet¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
+| **Gemini CLI** | ✓ Partiel² | ✓ 6 commandes | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Complet³ | ✓ 6 commandes | ✓ via règles | ✓ 4 |
+| **OpenCode** | ✓ Partiel⁴ | ✓ 6 commandes | — | ✓ 4 |
+| **Cline** | ✓ Complet⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ Requires `codex_hooks = true` in `~/.codex/config.toml`; PostToolUse intercepts Bash only  
-² No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
-³ Requires Cursor 1.7+  
-⁴ JS plugin: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
-⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel hook scripts  
-⁶ No hook system — conventions injected via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
+¹ Nécessite `codex_hooks = true` dans `~/.codex/config.toml` ; PostToolUse intercepte uniquement Bash
+² Pas d'équivalent `PreToolUse` — guard s'exécute au niveau `BeforeModel`
+³ Nécessite Cursor 1.7+
+⁴ Plugin JS : `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`
+⁵ Scripts de hook PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel
+⁶ Pas de système de hooks — conventions injectées via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
 
 ### Installer pour d'autres outils
 
 ```bash
-# Menu interactif
+# Menu interactif (sélectionner les outils à installer)
 epic install
 
 # Installation directe
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
 epic install gemini       # Gemini CLI  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install cursor       # Cursor      → ~/.cursor/ (nécessite Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 
-# Installer localement au projet
+# Installation locale au projet
 epic install cursor --local
 
 # Aperçu sans effectuer de changements
 epic install gemini --dry-run
 ```
 
+Les fichiers d'intégration dans le répertoire de l'outil (`hooks.json`, commandes, agents, compétences, règles…) sont **synchronisés** depuis le binaire : les fichiers manquants ou obsolètes sont écrits. `GEMINI.md` et `AGENTS.md` ne sont créés que s'ils sont absents.
+
 ## Mémoire unifiée
 
-Tous les agents partagent un graphe de connaissances unique sous `~/.harness/memory/`.
+Tous les agents partagent un graphe de connaissances unique stocké dans `~/.harness/memory.db` (SQLite + FTS5). Aucun Node.js ni runtime externe requis.
 
-```bash
-# Ajouter une décision
-harness mem add "auth utilise des cookies de session plutôt que JWT"
+### Rappel intelligent
 
-# Recherche sémantique
-harness mem query "approche d'authentification"
+La récupération de mémoire utilise un **score composite** plutôt que de déverser les N dernières entrées :
 
-# Recherche plein texte
-harness mem search "JWT"
-
-# Lancer l'interface Web du graphe de connaissances D3.js (http://localhost:7700)
-harness mem serve
-
-# Enregistrer le serveur MCP pour Claude Code (5 outils natifs : mem_add, mem_query, mem_search, mem_related, mem_context)
-harness mem mcp-install
-
-# Migrer les mémoires existantes par projet
-harness mem migrate --all
+```
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-Les agents enregistrent automatiquement les décisions architecturales via les hooks PostToolUse. Au démarrage de la session, les mémoires pertinentes sont injectées dans le contexte.
+- **Importance** définie automatiquement par type de nœud : decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
+- **Suivi des accès** : les mémoires fréquemment rappelées remontent naturellement
+- **Décroissance progressive** : les mémoires inutilisées perdent en importance au fil du temps (10% tous les 30 jours, plancher 0.05)
+- **Augmentation du graphe** : le rappel suit les arêtes à 1 saut pour faire émerger le contexte connexe
 
-### Comment fonctionne le Graphe de Connaissances
+### CLI
+
+```bash
+# Rappel intelligent — classé par pertinence pour votre tâche actuelle
+harness mem recall "auth refactor" --project my-project
+
+# Ajouter un nœud de mémoire (importance auto par type, ou explicite)
+harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+
+# Requête filtrée (inclut importance + access_count)
+harness mem query --type decision --project my-project
+
+# Recherche plein texte (classée par importance)
+harness mem search "JWT"
+
+# Contexte intelligent (pondéré par importance, pas seulement le plus récent)
+harness mem context --project my-project
+
+# Interface Web du graphe de connaissances
+harness mem serve          # → http://localhost:7700
+
+# Enregistrer comme serveur MCP dans Claude Code (sans Node.js)
+harness mem mcp-install
+
+# Exporter tous les nœuds en Markdown pour sauvegarde Git
+harness mem export --out ./docs/memory
+```
+
+### Outils MCP (6)
+
+Lorsqu'enregistré comme serveur MCP (`harness mem mcp-install`), les agents peuvent appeler directement ces outils :
+
+| Outil | Objectif |
+|------|---------|
+| `mem_recall` | **Principal.** Rappel contextuel intelligent avec hint + projet + voisins du graphe |
+| `mem_add` | Ajouter un nœud avec importance auto par type (ou explicite 0.0–1.0) |
+| `mem_search` | Recherche FTS5, résultats classés par importance |
+| `mem_query` | Filtrer par tag/type/projet |
+| `mem_context` | Rappel intelligent limité au projet (sans hint) |
+| `mem_related` | Traversée BFS du graphe depuis un ID de nœud |
+
+### Comment fonctionne le graphe de connaissances
 
 Le graphe s'accumule automatiquement à partir du travail normal de session — aucune saisie manuelle nécessaire.
 
 **Flux de données :**
 
 ```
-PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
-                                                   ↓
-SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
-                                                   ↓
-SessionStart hook → resume (context injection) → next session gets hints
+PostToolUse hook → observe (notation sur 3 axes) → obs/*.jsonl
+                                                         ↓
+SessionEnd hook → reflect (détection de patterns) → nœuds + arêtes memory.db
+                                                         ↓  (importance définie par type)
+SessionStart hook → resume (rappel intelligent) → la prochaine session reçoit des hints classés par pertinence
+                              ↓
+                    decay_importance() → les nœuds inutilisés s'estompent progressivement
 ```
 
-**Types de noeuds (7) :**
+**Types de nœuds (7) :**
 
-| Type | Créé par | Contenu |
-|------|-----------|---------|
-| `session` | Auto (reflect) | Taux de réussite de la session, score moyen, tendance |
-| `error` | Auto (reflect) | Schémas d'erreurs répétées (≥3 erreurs identiques consécutives) |
-| `pattern` | Auto (reflect) | Outils faibles, thrashing, cycles fix-then-break |
-| `concept` | Manuel / MCP | Concepts d'architecture, connaissances techniques |
-| `decision` | Manuel / MCP | ADRs, décisions de conception |
-| `project` | Manuel / MCP | Métadonnées du projet |
-| `resolution` | Manuel / MCP | Recettes de résolution d'erreurs |
+| Type | Créé par | Importance par défaut |
+|------|-----------|-------------------|
+| `decision` | Manuel / MCP | 0.9 |
+| `resolution` | Manuel / MCP | 0.8 |
+| `concept` | Manuel / MCP | 0.7 |
+| `project` | Manuel / MCP | 0.7 |
+| `pattern` | Auto (reflect) | 0.5 |
+| `error` | Auto (reflect) | 0.4 |
+| `session` | Auto (reflect) | 0.2 |
+
+**Cycle de vie de la mémoire :**
+
+| Événement | Ce qui se passe |
+|-------|-------------|
+| Nœud rappelé via search/recall/context | `access_count++`, `accessed_at` mis à jour |
+| 30+ jours sans accès | importance décroît de 10% (plancher 0.05) |
+| 180+ jours sans accès | tagué `stale`, exclu du rappel |
+| Nœud tagué `pinned` | immunisé contre la décroissance |
 
 **Conditions d'accumulation automatique :**
 
-| Condition | Noeud créé |
+| Condition | Nœud créé |
 |-----------|-------------|
 | Chaque fin de session | `session` (toujours) |
 | Même erreur ≥3 fois de suite | `error` (repeated_same_error) |
@@ -171,7 +222,7 @@ SessionStart hook → resume (context injection) → next session gets hints
 | Taux de réussite du type de fichier <50% (min. 3 observations) | `pattern` (weak_filetype) |
 | Cycles de succès Edit → erreur Bash | `pattern` (fix_then_break) |
 
-> **Note :** Les sessions propres (sans erreurs) ne produisent que des noeuds `session`. Le graphe s'enrichit après 2–3 sessions de développement réelles avec des échecs de build, des échecs de tests ou des cycles de débogage.
+> **Note :** Les sessions propres (sans erreurs) ne produisent que des nœuds `session`. Le graphe s'enrichit après 2–3 sessions de développement réelles avec des échecs de build, des échecs de tests ou des cycles de débogage.
 
 Les mémoires existantes basées sur des fichiers (`nodes/*.md`, `edges.jsonl`) sont automatiquement migrées vers SQLite lors de la première exécution.
 
@@ -183,8 +234,111 @@ Les mémoires existantes basées sur des fichiers (`nodes/*.md`, `edges.jsonl`) 
 | `/go` | Construire — planification auto, sous-agents TDD, exécution parallèle |
 | `/check` | Vérifier — revue de code parallèle + audit de sécurité + performance |
 | `/ship` | Livrer — PR, CI, merge |
-| `/team` | Concevoir une équipe d'agents spécifique au projet |
+| `/team` | Créer et synchroniser des équipes d'agents au niveau de l'organisation entre les projets |
 | `/evolve` | Déclenchement manuel de l'évolution / statut / rollback |
+
+## Équipes (`epic team`)
+
+Les équipes sont **au niveau de l'organisation**, pas liées à un projet. L'exécution de `/team` dans n'importe quel projet enrichit un pool partagé de définitions d'agents — sans jamais écraser silencieusement.
+
+### Comment ça fonctionne
+
+```
+epic team                      # interactif : scanner le projet → concevoir → écrire → synchroniser
+         ↓
+~/.harness/orgs/epic/teams/backend/   ← magasin global (persiste entre les projets)
+         ↓
+epic team sync backend
+         ↓
+{project}/.claude/agents/backend/     ← Claude Code découvre automatiquement au démarrage de session
+├── domain-expert.md                  ← définition de rôle + contexte d'équipe injecté
+├── reviewer.md
+└── tester.md
+         ↓
+Session suivante : agents actifs — sélectionnés automatiquement par Claude ou appelés explicitement
+```
+
+### Référence CLI
+
+```bash
+# Créer ou mettre à jour une équipe (flux interactif en 4 phases)
+epic team
+
+# Parcourir
+epic team list                        # toutes les équipes dans l'org actuelle
+epic team list --org netflix          # équipes dans un org nommé
+epic team show backend                # config, mission, agents
+epic team show backend --playbook     # + playbook accumulé complet
+
+# Déployer vers un projet
+epic team sync backend                # déployer : copier les agents → .claude/agents/backend/
+epic team link backend                # déployer + enregistrer le projet dans la config de l'équipe
+
+# Rappeler depuis un projet
+epic team delete backend              # rappeler : retirer du projet actuel uniquement
+epic team unlink backend              # alias pour delete
+
+# Dissoudre (retirer complètement de l'org)
+epic team delete backend --global     # supprimer définitivement du magasin org + copie locale
+
+# Historique
+epic team history backend reviewer    # lister les sauvegardes .history/ pour un agent
+```
+
+### Utiliser les équipes depuis les agents de codage
+
+Après synchronisation, les agents sont disponibles automatiquement dans la session suivante :
+
+```
+# Claude Code / Cursor / OpenCode / Codex
+@domain-expert implémenter la passerelle de paiement
+@reviewer vérifier ce PR pour les cas limites
+@tester écrire des tests d'intégration pour auth
+
+# Ou laisser l'agent sélectionner automatiquement selon le contexte de la tâche
+```
+
+Chaque fichier d'agent porte une section **Contexte d'équipe** injectée à la synchronisation :
+
+```markdown
+## Team Context
+**Team**: backend (Stream-aligned)
+**Mission**: Own the API layer end-to-end
+**Full playbook**: `epic team show backend --playbook`
+```
+
+Les agents connaissent leur équipe, mission, et comment charger le playbook complet à la demande —
+sans surcharger la fenêtre de contexte.
+
+### Multi-org
+
+```bash
+epic team                          # accumule dans l'org "epic" (par défaut)
+epic team --org netflix            # topologie Netflix séparée
+epic team --org client-x           # engagement par client
+```
+
+Même nom d'équipe dans le même org = partage intentionnel entre projets.
+`epic/teams/backend` accumule les connaissances de chaque projet qui le crée ou le lie.
+
+### Types d'équipes
+
+| Type | Mot-clé | Agents par défaut |
+|------|---------|---------------|
+| Stream-aligned | `stream` | domain-expert, reviewer, tester |
+| Platform | `platform` | api-designer, infra-specialist, dx-agent |
+| Enabling | `enabling` | specialist |
+| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
+
+### Stratégie de fusion — pas d'écrasement silencieux
+
+| Objet | Règle |
+|--------|------|
+| Agent — nouveau | Ajout automatique |
+| Agent — inchangé | Ignoré |
+| Agent — modifié | **Invite** (par défaut : conserver l'existant). En cas de remplacement → sauvegardé dans `.history/` |
+| `playbook.md` | Toujours **ajouté** — jamais tronqué |
+| `mission.md` — modifié | **Invite** (par défaut : conserver l'existant) |
 
 ## Compétences automatiques (Ring 2)
 
@@ -203,7 +357,7 @@ Les compétences se déclenchent automatiquement en fonction du contexte. Vous n
 
 ## Hooks (Ring 0)
 
-S'exécutent de manière invisible. Aucune action utilisateur requise. Implémentés sous forme d'un **unique binaire Rust** (`epic-harness`) avec des sous-commandes.
+S'exécutent de manière invisible. Aucune action utilisateur requise. Implémentés sous forme d'un **unique binaire Rust** (`epic-harness`) avec des sous-commandes, avec repli sur Node.js si le binaire est absent.
 
 ```
 epic resume | guard | polish | observe | snapshot | reflect
@@ -214,8 +368,8 @@ epic resume | guard | polish | observe | snapshot | reflect
 | **resume** | Début de session | Restaurer le contexte, charger la mémoire, détecter la stack |
 | **guard** | Avant Bash | Bloquer force-push-to-main, rm -rf /, DROP prod |
 | **polish** | Après Edit | Formatage auto (Biome/Prettier/ruff/gofmt) + vérification de types |
-| **observe** | Chaque utilisation d'outil | Journaliser dans `.harness/obs/` pour l'évolution |
-| **snapshot** | Avant compactage | Sauvegarder l'état dans `.harness/sessions/` |
+| **observe** | Chaque utilisation d'outil | Journaliser dans `~/.harness/projects/{slug}/obs/` pour l'évolution |
+| **snapshot** | Avant compactage | Sauvegarder l'état dans `~/.harness/projects/{slug}/sessions/` |
 | **reflect** | Fin de session | Analyser les échecs, générer des compétences évoluées, contrôle |
 
 ## Système d'évaluation (noyau du Ring 3)
@@ -271,14 +425,14 @@ Tous les seuils sont des constantes configurables dans `src/hooks/common.rs` :
 
 ```
 Observer (PostToolUse — notation sur 3 axes)
-    ↓ .harness/obs/session_{id}.jsonl
+    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
 Analyser (SessionEnd)
     ↓ SessionAnalysis : par outil, par extension, distribution des scores
     ↓ Patterns : repeated_same_error, fix_then_break, long_debug_loop, thrashing
 Générer (4 voies : pattern / outil faible / type de fichier faible / erreur haute fréquence)
-    ↓ .harness/evolved/{skill}/SKILL.md
+    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
 Contrôler (vérification de format, déduplication, limite de 10, vérification de stagnation)
-    ↓ .harness/evolved_backup/ (meilleur point de contrôle)
+    ↓ ~/.harness/projects/{slug}/evolved_backup/ (meilleur point de contrôle)
 Recharger (session suivante — resume.ts rapporte les métriques + charge les compétences évoluées)
 ```
 
@@ -310,7 +464,7 @@ Chaque session écrit dans son propre fichier d'observation (`session_{date}_{pi
 
 ## Règles de garde personnalisées
 
-Ajoutez des règles de sécurité spécifiques au projet via `.harness/guard-rules.yaml` :
+Ajoutez des règles de sécurité spécifiques au projet via `.harness/guard-rules.yaml` à la racine du projet :
 
 ```yaml
 blocked:
@@ -320,18 +474,18 @@ warned:
   - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
 
-Les règles fusionnent avec les gardes intégrées (force-push-to-main, rm -rf /, DROP prod).
+Les règles fusionnent avec les gardes intégrées (force-push-to-main, rm -rf /, DROP prod). Conserver ce fichier dans git permet de partager les règles de sécurité avec votre équipe.
 
 ## Apprentissage inter-projets
 
 Activez le partage de patterns d'échec entre projets :
 
 ```bash
-touch .harness/.cross-project-enabled  # opt-in
+touch ~/.harness/projects/{slug}/.cross-project-enabled  # opt-in
 ```
 
 Lorsqu'activé :
-- La fin de session exporte des patterns anonymisés vers `~/.harness-global/patterns.jsonl`
+- La fin de session exporte des patterns anonymisés vers `~/.harness/global_patterns.jsonl`
 - Le début de session affiche des indices provenant des faiblesses d'autres projets
 - Utilisez `/evolve cross-project` pour voir les patterns agrégés
 
@@ -360,29 +514,41 @@ Le hook polish (formatage auto + vérification de types) réinjecte ses résulta
 
 Cela signifie que les patterns de thrashing « édition → erreur de type → édition → erreur de type » sont détectés même lorsque les erreurs proviennent du hook polish et non de commandes manuelles.
 
-## Données du projet (`.harness/`)
+## Données du projet (`~/.harness/projects/{slug}/`)
 
-epic harness crée un répertoire `.harness/` dans votre projet :
+Les données spécifiques au projet résident dans votre répertoire home. Elles survivent à la suppression du projet et ne polluent pas l'historique git.
 
 ```
-.harness/
+~/.harness/projects/{slug}/
 ├── memory/           # Patterns et règles du projet (persistant)
 ├── sessions/         # Instantanés de session (pour la restauration)
 ├── obs/              # Journaux d'observation d'utilisation des outils (JSONL, par session)
 ├── evolved/          # Compétences auto-évoluées
 ├── evolved_backup/   # Meilleur point de contrôle (pour rollback en cas de stagnation)
 ├── dispatch/         # Journaux de dispatch des compétences (JSONL)
-├── team/             # Agents et compétences générés par /team
+├── team/             # legacy (remplacé par ~/.harness/orgs/)
 ├── evolution.jsonl   # Historique complet de l'évolution
-├── metrics.json      # Statistiques agrégées + attribution des compétences
-└── guard-rules.yaml  # Règles de garde personnalisées (optionnel)
+└── metrics.json      # Statistiques agrégées + attribution des compétences
+
+~/.harness/
+├── memory.db         # Graphe de connaissances SQLite (nœuds + arêtes + FTS5)
+├── graph.json        # Graphe mis en cache (pour l'interface Web)
+└── orgs/             # Magasin global epic team
+    └── {org}/
+        └── teams/
+            └── {team}/
+                ├── config.json
+                ├── mission.md
+                ├── playbook.md
+                ├── agents/
+                └── .history/
 ```
 
-Ajoutez `.harness/` à `.gitignore` ou committez-le — c'est votre choix.
+Vous pouvez toujours utiliser `.harness/guard-rules.yaml` à la racine du projet pour partager des règles de sécurité avec votre équipe.
 
 ## Développement
 
-### Rust (principal — ~4x plus rapide)
+### Build
 
 ```bash
 cargo install --path .          # Compiler + installer dans ~/.cargo/bin/
@@ -401,7 +567,7 @@ Chaque hook dans `hooks.json` cherche le binaire Rust à deux emplacements :
 ### Tests
 
 ```bash
-cargo test       # 98 tests unitaires Rust
+cargo test       # Tests unitaires + d'intégration Rust
 ```
 
 ## Remerciements
