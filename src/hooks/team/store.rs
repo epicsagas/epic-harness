@@ -248,8 +248,7 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
         format!("{}\n\n---\n\n{}{}", existing, header, section)
     };
     if new_content.len() > PLAYBOOK_MAX_BYTES {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
+        return Err(io::Error::other(
             format!(
                 "playbook would exceed {} bytes (current: {}, append: {}); use 'epic team show --playbook' to review and trim",
                 PLAYBOOK_MAX_BYTES,
