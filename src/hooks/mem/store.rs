@@ -426,6 +426,7 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn read_edges() -> Vec<Edge> {
     match open_db() {
         Ok(conn) => read_edges_conn(&conn),

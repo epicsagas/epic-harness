@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **aider integration**: `.aider.conf.yml` + `.aider/CONVENTIONS.md` — no hook system, conventions auto-loaded via `read:` config
 - **Interactive install menu**: `epic-harness install` (no args) shows numbered checklist; select by number (e.g. `1,3`) or `a` for all
 - **Progress bar**: TTY shows animated `[====>   ] N/M filename`; non-TTY shows one-line summary per tool
+- **`epic team` / `epic org`**: org-level agent team management — persistent team definitions that accumulate knowledge across projects
+  - 9 CLI subcommands: `list`, `show`, `status`, `sync`, `link`, `unlink`, `delete`, `history`, `help`
+  - Interactive team designer with auto stack detection (Rust/Node/Python/Go/Java)
+  - Agent CRUD with mission, playbook (append-only), and history backup
+  - Cross-tool sync: copies agents to `.claude/agents/{team}/` per project; `--global` for `~/.claude/agents/`
+  - Project linking: `epic team link` binds team to current project; `status` shows linked teams
+  - Security: path traversal prevention (`[a-zA-Z0-9_-]` allowlist), YAML injection defense (`yaml_quote`), Unicode prompt injection stripping (Plane-14, C0/C1 controls), HTML comment sanitization, ANSI escape filtering
+  - Org browsing: `epic org` to browse team libraries across organizations
 
 ### Changed
 - **`epic install claude` plugin cache sync**: now overwrites `~/.claude/plugins/cache/epicsagas/epic/*/` with the commands/skills/agents embedded in the binary — local changes take effect immediately without waiting for an npm publish
