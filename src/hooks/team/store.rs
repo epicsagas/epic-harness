@@ -196,13 +196,14 @@ pub fn save_team_config(config: &TeamConfig) -> io::Result<()> {
         .map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &content)?;
-    fs::rename(&tmp, &path)?;
-    // Restrict to owner-only: config.json stores full absolute paths.
+    // Restrict to owner-only before rename so the file is never world-readable,
+    // even transiently. config.json stores full absolute paths.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
     }
+    fs::rename(&tmp, &path)?;
     Ok(())
 }
 
@@ -1155,5 +1156,29 @@ mod tests {
             PLAYBOOK_MAX_BYTES - 6,
             "playbook must not be modified after rejected cumulative append"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_save_team_config_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe { env::set_var("HOME", tmp.path()); }
+
+        let config = TeamConfig {
+            name: "permbeta".to_string(),
+            org: "permorg".to_string(),
+            team_type: "stream".to_string(),
+            projects: vec![],
+            created: "2026-01-01T00:00:00Z".to_string(),
+            updated: "2026-01-01T00:00:00Z".to_string(),
+        };
+        save_team_config(&config).unwrap();
+
+        let path = team_store_dir("permorg", "permbeta").join("config.json");
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "config.json must be owner-read/write only");
     }
 }

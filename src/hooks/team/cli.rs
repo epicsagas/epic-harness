@@ -1700,4 +1700,22 @@ mod tests {
         assert_eq!(&s[4..5], "-");
         assert_eq!(&s[7..8], "-");
     }
+
+    #[test]
+    fn test_retain_live_projects() {
+        let tmp = tempfile::tempdir().unwrap();
+        let live_dir = tmp.path().join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+
+        let live = live_dir.to_str().unwrap().to_string();
+        let stale = tmp.path().join("gone").to_str().unwrap().to_string();
+        let relative = "basename-only".to_string();
+
+        let mut projects = vec![live.clone(), stale.clone(), relative.clone()];
+        retain_live_projects(&mut projects);
+
+        assert!(projects.contains(&live), "live absolute dir must be kept");
+        assert!(!projects.contains(&stale), "stale absolute path must be removed");
+        assert!(projects.contains(&relative), "relative (legacy) entry must be kept");
+    }
 }
