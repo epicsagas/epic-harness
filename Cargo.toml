@@ -1,6 +1,6 @@
 [package]
 name = "epic-harness"
-version = "0.2.1-dev"
+version = "0.2.1"
 edition = "2024"
 description = "6 commands · auto skills · self-evolving Claude Code harness"
 license = "Apache-2.0"
@@ -58,6 +58,11 @@ strip = true
 [profile.dev]
 opt-level = 0
 debug = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
 
 [profile.release.package."*"]
 opt-level = 3

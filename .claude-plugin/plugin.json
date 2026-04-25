@@ -1,6 +1,6 @@
 {
   "name": "epic",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "6 commands, auto-trigger skills, self-evolving agent harness. Less to remember, more automation.",
   "author": {
     "name": "epicsagas",
