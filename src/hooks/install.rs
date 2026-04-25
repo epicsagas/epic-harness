@@ -596,6 +596,14 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
     ]
 );
 
+static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
+    "claude",
+    [(
+        ".claude/settings.json",
+        include_str!("../../hooks/hooks.json")
+    ),]
+);
+
 // ── Tool config ───────────────────────────────────────────────────────────────
 
 struct ToolConfig {
@@ -711,13 +719,13 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             preserve_files: &[".aider.conf.yml"],
             executable_files: &[],
         }),
-        // Claude Code: no files to copy — only MCP injection via inject_mcp_claude().
+        // Claude Code: install hooks into ~/.claude/settings.json + MCP injection via inject_mcp_claude().
         "claude" => Some(ToolConfig {
             global_dir: PathBuf::from(&home),
             local_dir: cwd.clone(),
             root_files: &[],
-            files: &[],
-            note: Some("Registers harness-mem MCP server in ~/.claude.json."),
+            files: CLAUDE_FILES,
+            note: Some("Installs hooks in ~/.claude/settings.json and registers harness-mem MCP server in ~/.claude.json."),
             alt_dir: None,
             alt_prefix: "",
             preserve_files: &[],
@@ -1482,7 +1490,7 @@ pub fn run(args: &[String]) -> i32 {
         }
 
         Some("--list" | "list") => {
-            println!("Available integrations: codex, gemini, cursor, opencode, cline, aider");
+            println!("Available integrations: claude, codex, gemini, cursor, opencode, cline, aider");
             0
         }
 
@@ -1641,7 +1649,7 @@ pub fn run_uninstall(args: &[String]) -> i32 {
             exit
         }
         Some("--list" | "list") => {
-            println!("Available integrations: codex, gemini, cursor, opencode, cline, aider");
+            println!("Available integrations: claude, codex, gemini, cursor, opencode, cline, aider");
             0
         }
         Some(tool) => uninstall_tool(tool, local, dry_run),
@@ -1913,6 +1921,12 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_canonical_files_claude_empty() {
+        let files = generate_canonical_files("claude");
+        assert!(files.is_empty());
+    }
+
+    #[test]
     fn test_generate_canonical_files_aider_empty() {
         let files = generate_canonical_files("aider");
         assert!(files.is_empty());
@@ -1939,6 +1953,26 @@ mod tests {
         assert_eq!(v["hooksConfig"]["new"], true);
         // Old hooksConfig key gone (replaced, not merged within hooksConfig).
         assert!(v["hooksConfig"]["old"].is_null());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_write_or_sync_merges_claude_hooks() {
+        let dir = tmp_dir();
+        let dest = dir.join("settings.json");
+        fs::write(
+            &dest,
+            r#"{"theme":"dark","hooks":{"SessionStart":[{"matcher":"*","hooks":[]}]}}"#,
+        )
+        .unwrap();
+        let new_content = r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[]}]}}"#;
+        let status = write_or_sync(&dest, new_content, false);
+        assert!(matches!(status, FileStatus::Updated));
+        let written = fs::read_to_string(&dest).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(v["theme"], "dark");
+        assert!(v["hooks"]["PreToolUse"].is_array());
+        assert!(v["hooks"]["SessionStart"].is_null());
         let _ = fs::remove_dir_all(dir);
     }
 
