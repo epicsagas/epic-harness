@@ -5,7 +5,10 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1] — 2026-04-25
+## [0.2.1] — 2026-04-25 [YANKED]
+
+> **YANKED**: This release wrote Claude hook commands containing `${CLAUDE_PLUGIN_ROOT}` into global `~/.claude/settings.json`.  
+> That variable is only available in plugin-scoped hooks, causing runtime hook errors in global settings.
 
 ### Fixed
 - **`epic install claude` now installs hooks**: Claude integration now syncs hook definitions into `~/.claude/settings.json` (from embedded `hooks/hooks.json`) instead of reporting zero installable files, so PreToolUse/PostToolUse/Session hooks are actually applied after install.
