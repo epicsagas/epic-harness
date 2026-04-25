@@ -936,6 +936,45 @@ fn make_executable(path: &Path) {
     }
 }
 
+/// Claude global settings hooks do not run in a plugin context, so
+/// `${CLAUDE_PLUGIN_ROOT}` is unavailable there.
+fn sanitize_claude_global_hooks(content: &str) -> String {
+    let mut json: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return content.to_string(),
+    };
+
+    let Some(hooks) = json.get_mut("hooks").and_then(|v| v.as_object_mut()) else {
+        return content.to_string();
+    };
+
+    let prefix = "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || ";
+    for entries in hooks.values_mut() {
+        let Some(entries_arr) = entries.as_array_mut() else {
+            continue;
+        };
+        for entry in entries_arr {
+            let Some(cmd_hooks) = entry.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
+                continue;
+            };
+            for cmd_hook in cmd_hooks {
+                let Some(cmd) = cmd_hook.get_mut("command").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                let next = if cmd.contains("${CLAUDE_PLUGIN_ROOT}/hooks/setup.sh") {
+                    // Keep SessionStart valid without plugin context.
+                    ":"
+                } else {
+                    cmd.strip_prefix(prefix).unwrap_or(cmd)
+                };
+                cmd_hook["command"] = serde_json::Value::String(next.to_string());
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&json).unwrap_or_else(|_| content.to_string())
+}
+
 // ── MCP injection ─────────────────────────────────────────────────────────────
 
 /// Syncs canonical commands/skills/agents into every discovered Claude Code
@@ -1367,6 +1406,14 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let mut progress = Progress::new(tool, total_files, dry_run);
 
     for (rel, content) in cfg.files {
+        let effective_content;
+        let content = if tool == "claude" && *rel == ".claude/settings.json" {
+            effective_content = sanitize_claude_global_hooks(content);
+            effective_content.as_str()
+        } else {
+            content
+        };
+
         let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
             if let Some(alt) = &alt_target {
                 alt.join(rel)
@@ -1974,6 +2021,37 @@ mod tests {
         assert!(v["hooks"]["PreToolUse"].is_array());
         assert!(v["hooks"]["SessionStart"].is_null());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_sanitize_claude_global_hooks_removes_plugin_root_refs() {
+        let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
+        assert!(!out.contains("${CLAUDE_PLUGIN_ROOT}"));
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let hooks = json["hooks"].as_object().unwrap();
+        let mut found_path_fallback = false;
+        for entries in hooks.values() {
+            if let Some(entries_arr) = entries.as_array() {
+                for entry in entries_arr {
+                    if let Some(cmd_hooks) = entry["hooks"].as_array() {
+                        for cmd_hook in cmd_hooks {
+                            if let Some(cmd) = cmd_hook["command"].as_str() {
+                                if cmd.contains("command -v epic-harness") {
+                                    found_path_fallback = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(found_path_fallback);
+    }
+
+    #[test]
+    fn test_sanitize_claude_global_hooks_replaces_setup_hook_with_noop() {
+        let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
+        assert!(out.contains("\"command\": \":\""));
     }
 
     // ── sync_plugin_cache ─────────────────────────────────────────────────────
