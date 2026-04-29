@@ -2,6 +2,7 @@ use std::fs;
 
 use super::common::*;
 use super::mem::store;
+use super::telemetry::Telemetry;
 
 const BANNER: &[&str] = &[
     "",
@@ -393,6 +394,9 @@ pub fn run(_input: &HookInput) -> i32 {
     for h in get_cross_project_hints() {
         hint("resume", &h);
     }
+
+    // 9. Telemetry — session_started event (consent already ensured in main.rs)
+    Telemetry::init().track_session_started();
 
     0
 }

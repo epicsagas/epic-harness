@@ -61,10 +61,16 @@ jobs:
 
       - name: Build (native)
         if: "!matrix.cross"
+        env:
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          SENTRY_DSN_EPIC_HARNESS: ${{ secrets.SENTRY_DSN_EPIC_HARNESS }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build (cross)
         if: matrix.cross
+        env:
+          POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
+          SENTRY_DSN_EPIC_HARNESS: ${{ secrets.SENTRY_DSN_EPIC_HARNESS }}
         run: cross build --release --target ${{ matrix.target }}
 
       - name: Package (Unix)
