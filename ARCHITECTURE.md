@@ -39,6 +39,14 @@ Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills �
 | Ring 1 → Ring 2 | /go → tdd, verify | Skills auto-trigger during command execution |
 | Ring 0 → Ring 1 | resume → /go | Session restore provides context for commands |
 
+### Ring 1: Isolation Strategy
+
+Commands use **conditional worktree isolation** to prevent conflicts:
+
+- **`/go`**: Detects file-level conflicts in parallel tasks. Uses `isolation: "worktree"` (Claude Code Agent tool) when tasks modify overlapping files. Otherwise executes in main working tree.
+- **`/ship`**: Launches isolated pre-flight test in a clean worktree before creating PR. Simulates CI conditions locally to catch build/test failures before remote execution.
+- **`/check`**: No isolation needed — read-only analysis with no code modification.
+
 ### Why 4 Rings?
 
 **Fewer rings**: Automation and manual control get tangled — unpredictable behavior.

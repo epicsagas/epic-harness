@@ -31,9 +31,9 @@ The Rust binary handles all hooks. If you also want to install for other tools (
 
    ```
    /spec   # describe what you want to build
-   /go     # let it build
+   /go     # let it build (uses worktree isolation for parallel conflicting tasks)
    /check  # parallel review + security + perf audit
-   /ship   # PR + CI + merge
+   /ship   # isolated pre-flight test → PR + CI + merge
    ```
 
 3. **Skills trigger themselves.** When you touch auth code, the `secure` skill activates. When tests fail, `debug` kicks in. You don't call them.

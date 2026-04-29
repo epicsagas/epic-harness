@@ -234,9 +234,9 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | Command | What it does |
 |---------|-------------|
 | `/spec` | Define what to build — clarify requirements, produce a spec |
-| `/go` | Build it — auto-plan, TDD subagents, parallel execution |
+| `/go` | Build it — auto-plan, TDD subagents, parallel execution with worktree isolation for conflicting tasks |
 | `/check` | Verify — parallel code review + security audit + performance |
-| `/ship` | Ship — PR, CI, merge |
+| `/ship` | Ship — isolated pre-flight test, then PR, CI, merge |
 | `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
 
