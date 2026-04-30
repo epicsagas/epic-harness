@@ -31,10 +31,14 @@ fn get_next_sequence_id(session_file: &std::path::Path) -> u64 {
 }
 
 fn get_last_action(session_file: &std::path::Path) -> Option<String> {
-    let data = std::fs::read(session_file).ok()?;
-    let len = data.len();
-    let start = len.saturating_sub(1024);
-    let tail = String::from_utf8_lossy(&data[start..]);
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(session_file).ok()?;
+    let file_len = f.seek(SeekFrom::End(0)).ok()?;
+    let start = file_len.saturating_sub(1024);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((file_len - start) as usize + 1);
+    f.read_to_end(&mut buf).ok()?;
+    let tail = String::from_utf8_lossy(&buf);
     let last_line = tail.lines().rfind(|l| !l.is_empty())?;
     let rec: ObsRecord = serde_json::from_str(last_line).ok()?;
     rec.action
@@ -51,7 +55,7 @@ fn score_bash(output: &str, command: &str) -> ScoreDimensions {
     } else if is_empty {
         quality = 0.7;
     }
-    static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)warning|WARN").unwrap());
+    static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
     static DEPREC_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
     if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
@@ -125,6 +129,10 @@ fn score_read_search(output: &str) -> ScoreDimensions {
 /// Core counter logic — extracted for testability.
 /// Returns `true` if the event should be sent (count was below the cap),
 /// `false` if the cap has been reached. Atomically increments the counter file.
+///
+/// Counter file is per-session (includes PID in the filename via `session_id()`),
+/// so concurrent sessions never share the same counter file. Within a single
+/// session/process, hook invocations are sequential, making this read-write safe.
 fn check_and_increment_counter(counter_file: &std::path::Path) -> bool {
     const MAX_TOOL_ERRORS: u32 = 50;
     let count: u32 = fs::read_to_string(counter_file)
@@ -167,7 +175,7 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
-                s[..s.len().min(200)].to_string()
+                mask_secrets(&s[..s.len().min(200)])
             })
     });
 
@@ -310,6 +318,12 @@ mod tests {
     fn bash_warning_reduces_quality() {
         let dims = score_bash("warning: unused variable", "cargo build");
         assert!(dims.output_quality < 1.0);
+    }
+
+    #[test]
+    fn score_bash_no_warnings_found_not_penalized() {
+        let dims = score_bash("No warnings found", "cargo check");
+        assert_eq!(dims.output_quality, 1.0, "substring 'warning' in negative phrase must not penalize");
     }
 
     #[test]

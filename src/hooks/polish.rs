@@ -7,13 +7,18 @@ use super::telemetry::{FormatterKind, Telemetry};
 /// Execute a program with discrete arguments — no shell involved.
 /// This is the safe replacement for `try_exec` when `file_path` is part of
 /// the argument list, because no shell string interpolation occurs.
+/// Returns `Some(stdout)` only when the process exits successfully (exit code 0).
 fn try_exec_args(prog: &str, args: &[&str], cwd: &Path) -> Option<String> {
-    Command::new(prog)
+    let o = Command::new(prog)
         .args(args)
         .current_dir(cwd)
         .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .ok()?;
+    if o.status.success() {
+        Some(String::from_utf8_lossy(&o.stdout).into_owned())
+    } else {
+        None
+    }
 }
 
 fn feedback_to_observe(
@@ -100,15 +105,16 @@ fn check_ts(file_path: &str, wd: &Path) {
     if !wd.join("tsconfig.json").is_file() {
         return;
     }
-    // The command string here contains no user-controlled data — safe to use
-    // the shell helper for the pipeline (`2>&1 | head -10`).
-    if let Some(out) = try_exec_args(
-        "npx",
-        &["tsc", "--noEmit", "--pretty", "false"],
-        wd,
-    ) {
-        if out.contains("error TS") {
-            let snippet = &out[..out.len().min(500)];
+    let output = Command::new("npx")
+        .args(["tsc", "--noEmit", "--pretty", "false"])
+        .current_dir(wd)
+        .output();
+    if let Ok(o) = output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        let stderr = String::from_utf8_lossy(&o.stderr);
+        let combined = format!("{stdout}{stderr}");
+        if !o.status.success() || combined.contains("error TS") {
+            let snippet = &combined[..combined.len().min(500)];
             hint("polish", &format!("TS errors:\n{snippet}"));
             feedback_to_observe(file_path, "tsc", false, Some(snippet));
             Telemetry::init().track_polish_failed(FormatterKind::Tsc);
@@ -119,16 +125,20 @@ fn check_ts(file_path: &str, wd: &Path) {
 }
 
 fn format_python(file_path: &str, wd: &Path) {
-    let formatted =
-        try_exec_args("ruff", &["format", file_path], wd).is_some()
-            || try_exec_args("black", &[file_path], wd).is_some();
-    if formatted {
-        let name = Path::new(file_path)
+    let formatter = if try_exec_args("ruff", &["format", file_path], wd).is_some() {
+        Some("ruff")
+    } else if try_exec_args("black", &[file_path], wd).is_some() {
+        Some("black")
+    } else {
+        None
+    };
+    if let Some(name) = formatter {
+        let fname = Path::new(file_path)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-        hint("polish", &format!("Formatted: {name}"));
-        feedback_to_observe(file_path, "ruff/black", true, None);
+        hint("polish", &format!("Formatted: {fname}"));
+        feedback_to_observe(file_path, name, true, None);
     }
 }
 
@@ -223,5 +233,20 @@ mod tests {
             Some(path_with_spaces),
             "Argument was not passed verbatim to the child process"
         );
+    }
+
+    #[test]
+    fn try_exec_args_returns_none_on_nonzero_exit() {
+        // `false` command always exits with code 1
+        let dir = tempdir().unwrap();
+        let result = try_exec_args("false", &[], dir.path());
+        assert!(result.is_none(), "non-zero exit must return None");
+    }
+
+    #[test]
+    fn try_exec_args_returns_some_on_success() {
+        let dir = tempdir().unwrap();
+        let result = try_exec_args("true", &[], dir.path());
+        assert!(result.is_some(), "zero exit must return Some");
     }
 }

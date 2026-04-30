@@ -612,6 +612,13 @@ fn sentry_dsn() -> Option<&'static str> {
     option_env!("SENTRY_DSN_EPIC_HARNESS").filter(|k| !k.is_empty())
 }
 
+fn json_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
 fn sentry_send(message: &str, failure_class: &str, command: &str, version: &str) {
     let Some(dsn) = sentry_dsn() else { return };
 
@@ -627,13 +634,17 @@ fn sentry_send(message: &str, failure_class: &str, command: &str, version: &str)
         .unwrap_or_default()
         .as_secs();
 
+    let message = json_escape(message);
+    let failure_class = json_escape(failure_class);
+    let command = json_escape(command);
+    let version_escaped = json_escape(version);
     let envelope = format!(
         "{{}}\n{{\"type\":\"event\"}}\n{{\
             \"event_id\":\"{event_id}\",\
             \"timestamp\":{ts},\
             \"level\":\"error\",\
             \"message\":\"{message}\",\
-            \"release\":\"{version}\",\
+            \"release\":\"{version_escaped}\",\
             \"tags\":{{\
                 \"failure_class\":\"{failure_class}\",\
                 \"command\":\"{command}\"\
@@ -961,6 +972,15 @@ mod tests {
             os: "linux",
         };
         assert!(t.is_enabled());
+    }
+
+    #[test]
+    fn json_escape_handles_quotes_and_backslash() {
+        assert_eq!(json_escape(r#"say "hello""#), r#"say \"hello\""#);
+        assert_eq!(json_escape("back\\slash"), r#"back\\slash"#);
+        assert_eq!(json_escape("new\nline"), r#"new\nline"#);
+        assert_eq!(json_escape("carriage\rreturn"), r#"carriage\rreturn"#);
+        assert_eq!(json_escape("plain text"), "plain text");
     }
 
     #[test]
