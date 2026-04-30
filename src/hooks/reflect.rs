@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use super::common::*;
 use super::mem::store;
 use super::telemetry::{SessionTrend, Telemetry};
+
+static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 // ── Phase 1: Session Analysis ───────────────────────
 
@@ -1184,7 +1187,7 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    Telemetry::init().track_session_ended(
+    TELEMETRY.track_session_ended(
         analysis.success_rate,
         safe_avg_score(analysis.avg_score),
         analysis.total_observations,

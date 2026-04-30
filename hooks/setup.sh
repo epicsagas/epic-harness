@@ -42,6 +42,7 @@ fi
 if test -n "$EH"; then
   WEBUI_PORT="${HARNESS_WEBUI_PORT:-7700}"
   if ! [[ "$WEBUI_PORT" =~ ^[0-9]+$ ]] || [ "$WEBUI_PORT" -lt 1 ] || [ "$WEBUI_PORT" -gt 65535 ]; then
+    echo "[epic] Invalid HARNESS_WEBUI_PORT value, using default 7700" >&2
     WEBUI_PORT=7700
   fi
 

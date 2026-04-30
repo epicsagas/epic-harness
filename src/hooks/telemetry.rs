@@ -283,7 +283,7 @@ pub fn read_consent_raw() -> Option<ConsentLevel> {
 }
 
 pub fn read_consent() -> ConsentLevel {
-    read_consent_raw().unwrap_or(ConsentLevel::On)
+    read_consent_raw().unwrap_or(ConsentLevel::Off)
 }
 
 pub fn write_consent(level: ConsentLevel) {
@@ -315,15 +315,20 @@ pub fn ensure_consent_or_set_default() {
 
 fn is_valid_uuid(s: &str) -> bool {
     // xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
-    let parts: Vec<&str> = s.split('-').collect();
-    parts.len() == 5
-        && parts[0].len() == 8
-        && parts[1].len() == 4
-        && parts[2].len() == 4
-        && parts[3].len() == 4
-        && parts[4].len() == 12
+    let mut parts = s.splitn(6, '-');
+    let p0 = parts.next().unwrap_or("");
+    let p1 = parts.next().unwrap_or("");
+    let p2 = parts.next().unwrap_or("");
+    let p3 = parts.next().unwrap_or("");
+    let p4 = parts.next().unwrap_or("");
+    parts.next().is_none()
+        && p0.len() == 8
+        && p1.len() == 4
+        && p2.len() == 4
+        && p3.len() == 4
+        && p4.len() == 12
         && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
-        && parts[2].starts_with('4')
+        && p2.starts_with('4')
 }
 
 fn load_or_create_install_id() -> String {
@@ -408,22 +413,26 @@ pub fn prompt_consent_interactive() -> ConsentLevel {
 pub struct Telemetry {
     consent: ConsentLevel,
     distinct_id: String,
-    version: &'static str,
-    os: &'static str,
+    base_props: String,
 }
 
 impl Telemetry {
     pub fn init() -> Self {
+        ensure_consent_or_set_default();
         let consent = read_consent();
         let distinct_id = match consent {
             ConsentLevel::On => load_or_create_install_id(),
             ConsentLevel::Off => String::new(),
         };
+        let base_props = format!(
+            r#""product":"epic-harness","product_version":"{}","os":"{}","telemetry_schema":"v1""#,
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+        );
         Self {
             consent,
             distinct_id,
-            version: env!("CARGO_PKG_VERSION"),
-            os: std::env::consts::OS,
+            base_props,
         }
     }
 
@@ -431,15 +440,9 @@ impl Telemetry {
         self.consent == ConsentLevel::On
     }
 
-    fn base_props(&self) -> String {
-        format!(
-            r#""product":"epic-harness","product_version":"{}","os":"{}","telemetry_schema":"v1""#,
-            self.version, self.os
-        )
-    }
-
-    /// Track a PostHog event. Extra props must be pre-serialised JSON key-value pairs.
-    pub fn track(&self, event: &str, extra: &str) {
+    /// Track a PostHog event. `extra` must be pre-serialised JSON key-value pairs
+    /// using only enum-gated values — no free strings, no user input.
+    pub(crate) fn track(&self, event: &str, extra: &str) {
         if !self.is_enabled() {
             return;
         }
@@ -450,15 +453,15 @@ impl Telemetry {
                 r#"{{"event":"{}","distinct_id":"{}","properties":{{{}}}}}"#,
                 event_escaped,
                 distinct_id_escaped,
-                self.base_props()
+                self.base_props,
             )
         } else {
             format!(
                 r#"{{"event":"{}","distinct_id":"{}","properties":{{{},{}}}}}"#,
                 event_escaped,
                 distinct_id_escaped,
-                self.base_props(),
-                extra
+                self.base_props,
+                extra,
             )
         };
         posthog_send(&payload);
@@ -470,7 +473,7 @@ impl Telemetry {
             return;
         }
         let cmd_tag = command.map(|c| c.as_str()).unwrap_or("none");
-        sentry_send(message, failure_class.as_str(), cmd_tag, self.version);
+        sentry_send(message, failure_class.as_str(), cmd_tag, env!("CARGO_PKG_VERSION"));
     }
 }
 
@@ -601,10 +604,10 @@ fn posthog_key() -> Option<&'static str> {
 fn posthog_send(payload: &str) {
     let Some(key) = posthog_key() else { return };
 
-    // Wrap in PostHog batch envelope
     let body = format!(
         r#"{{"api_key":"{}","batch":[{}]}}"#,
-        key, payload
+        json_escape(key),
+        payload
     );
     http_post_tls(POSTHOG_HOST, POSTHOG_PORT, "/batch/", &body);
 }
@@ -616,10 +619,21 @@ fn sentry_dsn() -> Option<&'static str> {
 }
 
 fn json_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 fn sentry_send(message: &str, failure_class: &str, command: &str, version: &str) {
@@ -955,26 +969,34 @@ mod tests {
         assert!(!is_valid_uuid("1234-5678"));
     }
 
+    fn make_telemetry(consent: ConsentLevel) -> Telemetry {
+        let base_props = format!(
+            r#""product":"epic-harness","product_version":"{}","os":"{}","telemetry_schema":"v1""#,
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+        );
+        Telemetry {
+            consent,
+            distinct_id: if consent == ConsentLevel::On { "test-id".into() } else { String::new() },
+            base_props,
+        }
+    }
+
     #[test]
     fn consent_off_disables_telemetry() {
-        let t = Telemetry {
-            consent: ConsentLevel::Off,
-            distinct_id: String::new(),
-            version: "0.0.0",
-            os: "linux",
-        };
-        assert!(!t.is_enabled());
+        assert!(!make_telemetry(ConsentLevel::Off).is_enabled());
     }
 
     #[test]
     fn consent_on_enables_telemetry() {
-        let t = Telemetry {
-            consent: ConsentLevel::On,
-            distinct_id: "test-id".into(),
-            version: "0.0.0",
-            os: "linux",
-        };
-        assert!(t.is_enabled());
+        assert!(make_telemetry(ConsentLevel::On).is_enabled());
+    }
+
+    #[test]
+    fn read_consent_defaults_to_off_when_unset() {
+        // read_consent() must be conservative — no file means no consent.
+        // ensure_consent_or_set_default() is responsible for setting On.
+        assert_eq!(read_consent_raw().unwrap_or(ConsentLevel::Off), ConsentLevel::Off);
     }
 
     #[test]
@@ -987,16 +1009,17 @@ mod tests {
     }
 
     #[test]
+    fn json_escape_handles_control_chars() {
+        assert_eq!(json_escape("\t"), "\\t");
+        assert_eq!(json_escape("\0"), "\\u0000");
+        assert_eq!(json_escape("\x01"), "\\u0001");
+        assert_eq!(json_escape("\x1f"), "\\u001f");
+    }
+
+    #[test]
     fn base_props_contains_product() {
-        let t = Telemetry {
-            consent: ConsentLevel::On,
-            distinct_id: "x".into(),
-            version: "1.2.3",
-            os: "darwin",
-        };
-        let props = t.base_props();
-        assert!(props.contains(r#""product":"epic-harness""#));
-        assert!(props.contains(r#""product_version":"1.2.3""#));
-        assert!(props.contains(r#""telemetry_schema":"v1""#));
+        let t = make_telemetry(ConsentLevel::On);
+        assert!(t.base_props.contains(r#""product":"epic-harness""#));
+        assert!(t.base_props.contains(r#""telemetry_schema":"v1""#));
     }
 }

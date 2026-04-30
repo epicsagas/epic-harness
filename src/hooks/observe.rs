@@ -5,6 +5,8 @@ use std::sync::LazyLock;
 use super::common::*;
 use super::telemetry::{FailureClass, ToolCategory, Telemetry};
 
+static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
+
 static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
 static MASK_SK: LazyLock<Regex> =
@@ -274,7 +276,7 @@ pub fn run(input: &HookInput) -> i32 {
     if let Some(failure_cat) = &record.failure_category {
         let tool_cat = &record.tool_category;
         if should_sample_tool_error() {
-            Telemetry::init().track_tool_error(
+            TELEMETRY.track_tool_error(
                 tool_cat.parse().unwrap_or(ToolCategory::Other),
                 failure_cat.parse().unwrap_or(FailureClass::Unknown),
             );
