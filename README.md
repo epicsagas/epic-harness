@@ -240,6 +240,22 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
 
+### Loop flow
+
+```
+/spec ──→ /go ──→ /check ──→ /ship
+  │                              │
+  │ (3+ requirements,            │ (loop complete)
+  │  no team linked)             ↓
+  └──→ /team              /evolve
+       (set up agents            (analyze session,
+        before /go)               improve skills)
+```
+
+`/team` and `/evolve` are optional but recommended at these points:
+- **After `/spec`**: if the spec has 3 or more requirements and no team is linked, `/spec` will prompt you to consider `/team` before starting `/go`.
+- **After `/ship`**: `/ship` prompts you to run `/evolve` to turn this session's observations into better skills for the next cycle.
+
 ## Team (`epic team`)
 
 Teams are **org-level**, not project-bound. Running `/team` in any project enriches a shared pool
