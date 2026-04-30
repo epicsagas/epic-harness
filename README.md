@@ -247,9 +247,9 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
   │                              │
   │ (3+ requirements,            │ (loop complete)
   │  no team linked)             ↓
-  └──→ /team              /evolve
-       (set up agents            (analyze session,
-        before /go)               improve skills)
+  └──→ /team (optional)   /evolve (optional)
+       (set up agents      (after /ship,
+        before /go)         improve skills)
 ```
 
 `/team` and `/evolve` are optional but recommended at these points:

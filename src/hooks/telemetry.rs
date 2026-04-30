@@ -283,7 +283,7 @@ pub fn read_consent_raw() -> Option<ConsentLevel> {
 }
 
 pub fn read_consent() -> ConsentLevel {
-    read_consent_raw().unwrap_or(ConsentLevel::Off)
+    read_consent_raw().unwrap_or(ConsentLevel::On)
 }
 
 pub fn write_consent(level: ConsentLevel) {
@@ -306,7 +306,8 @@ pub fn write_consent(level: ConsentLevel) {
 pub fn ensure_consent_or_set_default() {
     if read_consent_raw().is_none() {
         write_consent(ConsentLevel::On);
-        eprintln!("[harness] Telemetry enabled (anonymous install ID).");
+        eprintln!("[harness] Anonymous telemetry is enabled by default.");
+        eprintln!("[harness] No personally identifiable information is collected.");
         eprintln!("[harness] To opt out: epic-harness telemetry off");
         eprintln!("[harness] Details: https://github.com/epicsagas/epic-harness#telemetry");
     }
@@ -442,18 +443,20 @@ impl Telemetry {
         if !self.is_enabled() {
             return;
         }
+        let event_escaped = json_escape(event);
+        let distinct_id_escaped = json_escape(&self.distinct_id);
         let payload = if extra.is_empty() {
             format!(
                 r#"{{"event":"{}","distinct_id":"{}","properties":{{{}}}}}"#,
-                event,
-                self.distinct_id,
+                event_escaped,
+                distinct_id_escaped,
                 self.base_props()
             )
         } else {
             format!(
                 r#"{{"event":"{}","distinct_id":"{}","properties":{{{},{}}}}}"#,
-                event,
-                self.distinct_id,
+                event_escaped,
+                distinct_id_escaped,
                 self.base_props(),
                 extra
             )
