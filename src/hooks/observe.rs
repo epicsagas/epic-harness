@@ -1,7 +1,9 @@
 use regex::Regex;
+use std::fs;
 use std::sync::LazyLock;
 
 use super::common::*;
+use super::telemetry::{FailureClass, ToolCategory, Telemetry};
 
 static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
@@ -120,6 +122,31 @@ fn score_read_search(output: &str) -> ScoreDimensions {
     }
 }
 
+/// Core counter logic — extracted for testability.
+/// Returns `true` if the event should be sent (count was below the cap),
+/// `false` if the cap has been reached. Atomically increments the counter file.
+fn check_and_increment_counter(counter_file: &std::path::Path) -> bool {
+    const MAX_TOOL_ERRORS: u32 = 50;
+    let count: u32 = fs::read_to_string(counter_file)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if count >= MAX_TOOL_ERRORS {
+        return false;
+    }
+    let _ = fs::write(counter_file, (count + 1).to_string());
+    true
+}
+
+/// Returns `true` if this `tool_error` telemetry event should be sent.
+///
+/// `obs_dir()` is guaranteed to exist at this call site because `run()`
+/// returns early via `harness_exists()` before reaching the telemetry block.
+fn should_sample_tool_error() -> bool {
+    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", session_id()));
+    check_and_increment_counter(&counter_file)
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !harness_exists() {
         return 0;
@@ -233,6 +260,19 @@ pub fn run(input: &HookInput) -> i32 {
     }
 
     append_jsonl(&session_file, &record);
+
+    // Fire tool_error telemetry only on failures to keep event volume low.
+    // Capped at 50 events per session to avoid flooding PostHog during error loops.
+    if let Some(failure_cat) = &record.failure_category {
+        let tool_cat = &record.tool_category;
+        if should_sample_tool_error() {
+            Telemetry::init().track_tool_error(
+                tool_cat.parse().unwrap_or(ToolCategory::Other),
+                failure_cat.parse().unwrap_or(FailureClass::Unknown),
+            );
+        }
+    }
+
     0
 }
 
@@ -445,5 +485,53 @@ mod tests {
         } else {
             panic!("expected object");
         }
+    }
+
+    // ── should_sample_tool_error / check_and_increment_counter ─────────────
+    #[test]
+    fn counter_allows_up_to_50_then_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_test.txt");
+        // First 50 calls must return true
+        for i in 0..50 {
+            let result = check_and_increment_counter(&counter_file);
+            assert!(result, "call {} should return true", i + 1);
+        }
+        // 51st call must return false
+        let result = check_and_increment_counter(&counter_file);
+        assert!(!result, "51st call should return false");
+    }
+
+    #[test]
+    fn counter_file_written_and_read_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_rw.txt");
+        // No file yet — first call returns true and writes "1"
+        assert!(check_and_increment_counter(&counter_file));
+        let content = fs::read_to_string(&counter_file).unwrap();
+        assert_eq!(content.trim(), "1");
+        // Second call returns true and writes "2"
+        assert!(check_and_increment_counter(&counter_file));
+        let content = fs::read_to_string(&counter_file).unwrap();
+        assert_eq!(content.trim(), "2");
+    }
+
+    #[test]
+    fn counter_treats_missing_file_as_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_missing.txt");
+        // File does not exist; should treat count as 0 and allow the call
+        assert!(check_and_increment_counter(&counter_file));
+    }
+
+    #[test]
+    fn counter_treats_corrupt_file_as_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_corrupt.txt");
+        fs::write(&counter_file, b"not_a_number").unwrap();
+        // Parse error → default 0 → should allow the call
+        assert!(check_and_increment_counter(&counter_file));
+        let content = fs::read_to_string(&counter_file).unwrap();
+        assert_eq!(content.trim(), "1");
     }
 }

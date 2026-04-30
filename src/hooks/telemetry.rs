@@ -86,6 +86,130 @@ impl FailureClass {
             Self::Unknown => "unknown",
         }
     }
+
+}
+
+impl std::str::FromStr for FailureClass {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "user_abort" => Self::UserAbort,
+            "claude_api_error" => Self::ClaudeApiError,
+            "tool_permission_denied" => Self::ToolPermissionDenied,
+            "hook_failed" => Self::HookFailed,
+            "git_conflict" => Self::GitConflict,
+            "timeout_exceeded" => Self::TimeoutExceeded,
+            _ => Self::Unknown,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum RuleKind {
+    Builtin,
+    ConventionalCommit,
+    Custom,
+}
+
+impl RuleKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Builtin => "builtin",
+            Self::ConventionalCommit => "conventional_commit",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FormatterKind {
+    Tsc,
+    Biome,
+    Prettier,
+    Ruff,
+    Gofmt,
+}
+
+impl FormatterKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Tsc => "tsc",
+            Self::Biome => "biome",
+            Self::Prettier => "prettier",
+            Self::Ruff => "ruff",
+            Self::Gofmt => "gofmt",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ToolCategory {
+    Bash,
+    Edit,
+    Write,
+    Read,
+    Glob,
+    Grep,
+    Other,
+}
+
+impl ToolCategory {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Bash => "bash",
+            Self::Edit => "edit",
+            Self::Write => "write",
+            Self::Read => "read",
+            Self::Glob => "glob",
+            Self::Grep => "grep",
+            Self::Other => "other",
+        }
+    }
+
+}
+
+impl std::str::FromStr for ToolCategory {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "bash" => Self::Bash,
+            "edit" => Self::Edit,
+            "write" => Self::Write,
+            "read" => Self::Read,
+            "glob" => Self::Glob,
+            "grep" => Self::Grep,
+            _ => Self::Other,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SessionTrend {
+    Improving,
+    Stable,
+    Declining,
+}
+
+impl SessionTrend {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Improving => "improving",
+            Self::Stable => "stable",
+            Self::Declining => "declining",
+        }
+    }
+
+}
+
+impl std::str::FromStr for SessionTrend {
+    type Err = std::convert::Infallible;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "improving" => Self::Improving,
+            "declining" => Self::Declining,
+            _ => Self::Stable,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -188,11 +312,24 @@ pub fn ensure_consent_or_set_default() {
     }
 }
 
+fn is_valid_uuid(s: &str) -> bool {
+    // xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && parts[0].len() == 8
+        && parts[1].len() == 4
+        && parts[2].len() == 4
+        && parts[3].len() == 4
+        && parts[4].len() == 12
+        && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+        && parts[2].starts_with('4')
+}
+
 fn load_or_create_install_id() -> String {
     let path = install_id_file();
     if let Ok(s) = fs::read_to_string(&path) {
         let trimmed = s.trim().to_string();
-        if !trimmed.is_empty() {
+        if is_valid_uuid(&trimmed) {
             return trimmed;
         }
     }
@@ -397,6 +534,56 @@ impl Telemetry {
         );
         self.capture_error("hook_failed", FailureClass::HookFailed, command);
     }
+
+    /// guard hook: a Bash command was blocked.
+    pub fn track_hook_blocked(&self, rule: RuleKind) {
+        self.track("hook_blocked", &format!(r#""rule":"{}""#, rule.as_str()));
+    }
+
+    /// guard hook: a Bash command triggered a warning.
+    pub fn track_hook_warned(&self, rule: RuleKind) {
+        self.track("hook_warned", &format!(r#""rule":"{}""#, rule.as_str()));
+    }
+
+    /// polish hook: formatter or type-checker failed.
+    pub fn track_polish_failed(&self, formatter: FormatterKind) {
+        self.track("polish_failed", &format!(r#""formatter":"{}""#, formatter.as_str()));
+        self.capture_error("polish_failed", FailureClass::HookFailed, None);
+    }
+
+    /// observe hook: a single tool call ended in error (sampled — only when failure_class is set).
+    pub fn track_tool_error(&self, tool_category: ToolCategory, failure_class: FailureClass) {
+        self.track(
+            "tool_error",
+            &format!(
+                r#""tool_category":"{}","failure_class":"{}""#,
+                tool_category.as_str(),
+                failure_class.as_str(),
+            ),
+        );
+    }
+
+    /// reflect hook (SessionEnd): aggregate session metrics.
+    pub fn track_session_ended(
+        &self,
+        success_rate: f64,
+        avg_score: f64,
+        total_observations: u64,
+        trend: SessionTrend,
+        skills_seeded: u64,
+    ) {
+        self.track(
+            "session_ended",
+            &format!(
+                r#""success_rate_pct":{},"avg_score":{},"observations":{},"trend":"{}","skills_seeded":{}"#,
+                (success_rate * 100.0).round() as u32,
+                avg_score,
+                total_observations,
+                trend.as_str(),
+                skills_seeded,
+            ),
+        );
+    }
 }
 
 // ── PostHog transport (std TcpStream, no external crates) ────────────────────
@@ -429,7 +616,7 @@ fn sentry_send(message: &str, failure_class: &str, command: &str, version: &str)
     let Some(dsn) = sentry_dsn() else { return };
 
     // Parse DSN: https://<key>@<host>/<project_id>
-    let (host, path) = parse_sentry_dsn(&dsn).unwrap_or_default();
+    let (host, path) = parse_sentry_dsn(dsn).unwrap_or_default();
     if host.is_empty() {
         return;
     }
@@ -577,6 +764,84 @@ fn _tcp_unused(_: TcpStream, _: Duration) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
+
+    // ── New enum round-trip tests (TDD: written before implementation) ──
+
+    #[test]
+    fn rule_kind_as_str() {
+        assert_eq!(RuleKind::Builtin.as_str(), "builtin");
+        assert_eq!(RuleKind::ConventionalCommit.as_str(), "conventional_commit");
+        assert_eq!(RuleKind::Custom.as_str(), "custom");
+    }
+
+    #[test]
+    fn formatter_kind_as_str() {
+        assert_eq!(FormatterKind::Tsc.as_str(), "tsc");
+        assert_eq!(FormatterKind::Biome.as_str(), "biome");
+        assert_eq!(FormatterKind::Prettier.as_str(), "prettier");
+        assert_eq!(FormatterKind::Ruff.as_str(), "ruff");
+        assert_eq!(FormatterKind::Gofmt.as_str(), "gofmt");
+    }
+
+    #[test]
+    fn tool_category_from_str_known() {
+        assert!(matches!(ToolCategory::from_str("bash").unwrap(), ToolCategory::Bash));
+        assert!(matches!(ToolCategory::from_str("edit").unwrap(), ToolCategory::Edit));
+        assert!(matches!(ToolCategory::from_str("write").unwrap(), ToolCategory::Write));
+        assert!(matches!(ToolCategory::from_str("read").unwrap(), ToolCategory::Read));
+        assert!(matches!(ToolCategory::from_str("glob").unwrap(), ToolCategory::Glob));
+        assert!(matches!(ToolCategory::from_str("grep").unwrap(), ToolCategory::Grep));
+    }
+
+    #[test]
+    fn tool_category_from_str_unknown() {
+        assert!(matches!(ToolCategory::from_str("unknown_tool").unwrap(), ToolCategory::Other));
+        assert!(matches!(ToolCategory::from_str("").unwrap(), ToolCategory::Other));
+    }
+
+    #[test]
+    fn tool_category_as_str_roundtrip() {
+        assert_eq!(ToolCategory::from_str("bash").unwrap().as_str(), "bash");
+        assert_eq!(ToolCategory::from_str("edit").unwrap().as_str(), "edit");
+        assert_eq!(ToolCategory::Other.as_str(), "other");
+    }
+
+    #[test]
+    fn session_trend_from_str_known() {
+        assert!(matches!(SessionTrend::from_str("improving").unwrap(), SessionTrend::Improving));
+        assert!(matches!(SessionTrend::from_str("declining").unwrap(), SessionTrend::Declining));
+        assert!(matches!(SessionTrend::from_str("stable").unwrap(), SessionTrend::Stable));
+    }
+
+    #[test]
+    fn session_trend_from_str_unknown_defaults_stable() {
+        assert!(matches!(SessionTrend::from_str("whatever").unwrap(), SessionTrend::Stable));
+        assert!(matches!(SessionTrend::from_str("").unwrap(), SessionTrend::Stable));
+    }
+
+    #[test]
+    fn session_trend_as_str_roundtrip() {
+        assert_eq!(SessionTrend::from_str("improving").unwrap().as_str(), "improving");
+        assert_eq!(SessionTrend::from_str("declining").unwrap().as_str(), "declining");
+        assert_eq!(SessionTrend::from_str("stable").unwrap().as_str(), "stable");
+    }
+
+    #[test]
+    fn failure_class_from_str_known() {
+        assert!(matches!(FailureClass::from_str("user_abort").unwrap(), FailureClass::UserAbort));
+        assert!(matches!(FailureClass::from_str("claude_api_error").unwrap(), FailureClass::ClaudeApiError));
+        assert!(matches!(FailureClass::from_str("tool_permission_denied").unwrap(), FailureClass::ToolPermissionDenied));
+        assert!(matches!(FailureClass::from_str("hook_failed").unwrap(), FailureClass::HookFailed));
+        assert!(matches!(FailureClass::from_str("git_conflict").unwrap(), FailureClass::GitConflict));
+        assert!(matches!(FailureClass::from_str("timeout_exceeded").unwrap(), FailureClass::TimeoutExceeded));
+    }
+
+    #[test]
+    fn failure_class_from_str_unknown_defaults_unknown() {
+        assert!(matches!(FailureClass::from_str("not_a_class").unwrap(), FailureClass::Unknown));
+        assert!(matches!(FailureClass::from_str("").unwrap(), FailureClass::Unknown));
+    }
 
     #[test]
     fn uuid_v4_format() {
@@ -645,6 +910,35 @@ mod tests {
     #[test]
     fn parse_sentry_dsn_invalid() {
         assert!(parse_sentry_dsn("not-a-dsn").is_none());
+    }
+
+    #[test]
+    fn is_valid_uuid_accepts_valid_v4() {
+        assert!(is_valid_uuid("550e8400-e29b-4d4a-a716-446655440000"));
+        // generated by new_uuid_v4 — must always pass its own validator
+        let id = new_uuid_v4();
+        assert!(is_valid_uuid(&id), "new_uuid_v4() produced invalid UUID: {id}");
+    }
+
+    #[test]
+    fn is_valid_uuid_rejects_empty_string() {
+        assert!(!is_valid_uuid(""));
+    }
+
+    #[test]
+    fn is_valid_uuid_rejects_injection_string() {
+        assert!(!is_valid_uuid(r#"","injected":"value""#));
+    }
+
+    #[test]
+    fn is_valid_uuid_rejects_uuid_v1() {
+        // UUID v1: third group starts with '1', not '4'
+        assert!(!is_valid_uuid("6ba7b810-9dad-11d1-80b4-00c04fd430c8"));
+    }
+
+    #[test]
+    fn is_valid_uuid_rejects_short_string() {
+        assert!(!is_valid_uuid("1234-5678"));
     }
 
     #[test]

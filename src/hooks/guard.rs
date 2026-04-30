@@ -2,6 +2,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 use super::common::{self, HookInput, hint};
+use super::telemetry::{RuleKind, Telemetry};
 
 struct BuiltinRule {
     pattern: &'static str,
@@ -157,16 +158,22 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
 
+    // Lazy: construct Telemetry (file I/O) only when a block or warn actually fires.
+    let telemetry = std::cell::OnceCell::new();
+    let get_telemetry = || telemetry.get_or_init(Telemetry::init);
+
     // Check built-in blocked rules first — safety-critical, must run before CC check
     // so a dangerous command appended after a CC-invalid message cannot bypass the block.
     if let Some(msg) = check_blocked(cmd) {
         hint("guard", &format!("BLOCKED: {msg}"));
+        get_telemetry().track_hook_blocked(RuleKind::Builtin);
         return 2;
     }
 
     // Check conventional commit format
     if let Some(msg) = check_conventional_commit(cmd) {
         hint("guard", &format!("BLOCKED: {msg}"));
+        get_telemetry().track_hook_blocked(RuleKind::ConventionalCommit);
         return 2;
     }
 
@@ -180,16 +187,19 @@ pub fn run(input: &HookInput) -> i32 {
         for rule in &custom_blocked {
             if rule.pattern.is_match(cmd) {
                 hint("guard", &format!("BLOCKED: {}", rule.msg));
+                get_telemetry().track_hook_blocked(RuleKind::Custom);
                 return 2;
             }
         }
         // Evaluate builtin + custom warned together (same order as TS implementation)
         for msg in check_warned(cmd) {
             hint("guard", &format!("WARNING: {msg}"));
+            get_telemetry().track_hook_warned(RuleKind::Builtin);
         }
         for rule in &custom_warned {
             if rule.pattern.is_match(cmd) {
                 hint("guard", &format!("WARNING: {}", rule.msg));
+                get_telemetry().track_hook_warned(RuleKind::Custom);
             }
         }
         return 0;
@@ -198,6 +208,7 @@ pub fn run(input: &HookInput) -> i32 {
     // No custom rules file — just check builtin warned rules
     for msg in check_warned(cmd) {
         hint("guard", &format!("WARNING: {msg}"));
+        get_telemetry().track_hook_warned(RuleKind::Builtin);
     }
 
     0
@@ -436,6 +447,24 @@ mod tests {
     fn run_safe_returns_0() {
         let input = HookInput {
             tool_input: Some(serde_json::json!({"command": "git status"})),
+            ..Default::default()
+        };
+        assert_eq!(run(&input), 0);
+    }
+
+    /// Verify that a safe command (no block/warn) goes through the entire
+    /// run() without touching telemetry. We confirm this indirectly: the
+    /// OnceCell must still be unset after run() returns 0 for a safe command
+    /// with no warnings. The cell is local to run(), so we validate the
+    /// observable behaviour: run() returns 0 and does not panic even when
+    /// consent/install-id files are absent (because Telemetry::init() is
+    /// never called for purely safe commands with no custom rules file).
+    #[test]
+    fn run_safe_no_warn_no_telemetry_init() {
+        // "npm install" matches none of the builtin blocked/warned rules and
+        // is not a git commit, so the OnceCell must never be initialised.
+        let input = HookInput {
+            tool_input: Some(serde_json::json!({"command": "npm install"})),
             ..Default::default()
         };
         assert_eq!(run(&input), 0);

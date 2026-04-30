@@ -4,6 +4,7 @@ use std::path::Path;
 
 use super::common::*;
 use super::mem::store;
+use super::telemetry::{SessionTrend, Telemetry};
 
 // ── Phase 1: Session Analysis ───────────────────────
 
@@ -388,6 +389,14 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
     }
 
     (false, false, 0)
+}
+
+// ── Helpers ─────────────────────────────────────────
+
+/// Clamp avg_score to a finite f64 so it serialises as a valid JSON number.
+/// NaN and ±Infinity are both invalid JSON; replace them with 0.0.
+fn safe_avg_score(score: f64) -> f64 {
+    if score.is_finite() { score } else { 0.0 }
 }
 
 // ── Phase 4: Skill Seeding ──────────────────────────
@@ -1174,6 +1183,14 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
+    Telemetry::init().track_session_ended(
+        analysis.success_rate,
+        safe_avg_score(analysis.avg_score),
+        analysis.total_observations,
+        metrics.trend.parse().unwrap_or(SessionTrend::Stable),
+        seeded,
+    );
+
     0
 }
 
@@ -1644,5 +1661,30 @@ mod tests {
         let skill = build_failure_skill("type_error", 8);
         assert!(skill.contains("type"));
         assert!(skill.contains("8 occurrences"));
+    }
+
+    #[test]
+    fn safe_avg_score_clamps_nan_to_zero() {
+        assert_eq!(safe_avg_score(f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn safe_avg_score_clamps_pos_inf_to_zero() {
+        assert_eq!(safe_avg_score(f64::INFINITY), 0.0);
+    }
+
+    #[test]
+    fn safe_avg_score_clamps_neg_inf_to_zero() {
+        assert_eq!(safe_avg_score(f64::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn safe_avg_score_passes_through_finite_value() {
+        assert_eq!(safe_avg_score(0.75), 0.75);
+    }
+
+    #[test]
+    fn safe_avg_score_passes_through_zero() {
+        assert_eq!(safe_avg_score(0.0), 0.0);
     }
 }

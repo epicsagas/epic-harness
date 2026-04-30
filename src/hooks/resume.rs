@@ -1,8 +1,62 @@
 use std::fs;
+use std::io::ErrorKind;
+use std::path::Path;
 
 use super::common::*;
 use super::mem::store;
 use super::telemetry::Telemetry;
+
+/// Atomically acquire a session lock file.
+///
+/// Returns `true` when this call created the file (this process owns the lock).
+/// Returns `false` when the file already exists (`AlreadyExists`) or on any
+/// other I/O error (safe fallback — treat as "already running").
+fn acquire_session_lock(lock: &Path) -> bool {
+    let hd = lock.parent().map(|p| p.to_path_buf()).unwrap_or_else(harness_dir);
+    let _ = fs::create_dir_all(&hd);
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(lock)
+    {
+        Ok(_) => true,
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => false,
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Helper: return a unique lock path inside a temp dir for this test.
+    fn temp_lock(dir: &std::path::Path, name: &str) -> PathBuf {
+        dir.join(format!("{name}.lock"))
+    }
+
+    #[test]
+    fn acquire_session_lock_first_call_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = temp_lock(dir.path(), "session_first");
+        assert!(acquire_session_lock(&lock), "first acquire must return true");
+        assert!(lock.exists(), "lock file must be created");
+    }
+
+    #[test]
+    fn acquire_session_lock_second_call_returns_false() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = temp_lock(dir.path(), "session_second");
+
+        // First call: acquires lock.
+        assert!(acquire_session_lock(&lock));
+        // Second call: lock file already exists — must return false (TOCTOU-safe).
+        assert!(
+            !acquire_session_lock(&lock),
+            "second acquire on same lock must return false"
+        );
+    }
+}
 
 const BANNER: &[&str] = &[
     "",
@@ -115,6 +169,15 @@ fn get_cross_project_hints() -> Vec<String> {
 }
 
 pub fn run(_input: &HookInput) -> i32 {
+    // Guard: SessionStart fires multiple times per session in Claude Code.
+    // Use a per-session lock file (keyed by date+pid) to run exactly once.
+    // `acquire_session_lock` uses O_CREAT|O_EXCL — atomically prevents the
+    // TOCTOU race that the old exists()+write() pattern introduced.
+    let lock = harness_dir().join(format!("resume.{}.lock", session_id()));
+    if !acquire_session_lock(&lock) {
+        return 0;
+    }
+
     let wd = cwd();
 
     // Migrate legacy .harness/ from project dir to ~/.harness/projects/{slug}/
