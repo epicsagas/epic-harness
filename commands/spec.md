@@ -58,7 +58,11 @@ goal_slug: {kebab-case-goal-summary}
 {Constraints, dependencies, edge cases}
 ```
 
-After saving, tell the user: **"Spec saved. Run `/go` to start building."**
+After saving:
+1. Count the Requirements (R1, R2, ...). If 3 or more, check team status: `epic team status`.
+   - If no team is linked: suggest **"This spec has N requirements. Consider running `/team` to set up a project-specific agent team before `/go`."**
+   - If a team is already linked: skip this hint.
+2. Tell the user: **"Spec saved. Run `/go` to start building."**
 
 ## Red Flags
 - Writing code before the spec is approved

@@ -89,6 +89,8 @@ If CI fails, diagnose and fix. Do not ask the user to fix CI — handle it.
 - Action needed: <if any>
 ```
 
+After the Ship Report, suggest: **"One loop complete. Run `/evolve` to analyze this session's observations and improve skills for the next cycle."**
+
 ## Red Flags
 - Shipping without a PASS check report
 - PR description that says "various fixes" or "updates"
