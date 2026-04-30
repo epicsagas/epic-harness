@@ -9,16 +9,32 @@ You are starting the **Go** phase — the core execution engine of epic-harness.
 ## Process
 
 ### Step 0: Preflight
-- Run `HARNESS_DIR=$(epic-harness path)` to resolve the data directory.
-- Check if a spec exists (`$HARNESS_DIR/specs/` or recent conversation). If not, run a quick inline spec conversation first.
-- Check if `$HARNESS_DIR/team/` exists — if yes, use project-specific agents.
+
+Run `HARNESS_DIR=$(epic-harness path)` to resolve the data directory.
+
+**Load the spec:**
+1. Find the latest approved spec: `ls -t $HARNESS_DIR/specs/SPEC-*.md | head -1`
+2. Read the file. Confirm its frontmatter has `status: approved`. If not, tell the user to run `/spec` first and stop.
+3. Extract the `goal_slug` from frontmatter — use it as the git branch name: `feature/{goal_slug}`
+4. Extract **Requirements** (R1, R2, ...) and **Acceptance Criteria** (AC1, AC2, ...) — these drive the Task list in Step 1.
+
+If no spec file exists and no spec is visible in the conversation, run a quick inline spec conversation first.
+
+Check if `$HARNESS_DIR/team/` exists — if yes, use project-specific agents.
+
+**Create the feature branch:**
+```bash
+git checkout -b feature/{goal_slug}
+```
 
 ### Step 1: Plan
-Break the work into ordered tasks:
+
+Map each Requirement → one or more Tasks. Every task must reference its source requirement:
+
 ```
-Task 1: [description] — depends on: none — modifies: [file list]
-Task 2: [description] — depends on: Task 1 — modifies: [file list]
-Task 3: [description] — depends on: none (parallel with 1) — modifies: [file list]
+Task 1: [description] — satisfies: R1 — depends on: none — modifies: [file list]
+Task 2: [description] — satisfies: R2 — depends on: Task 1 — modifies: [file list]
+Task 3: [description] — satisfies: R1, R2 (integration test) — depends on: Task 1, 2 — modifies: [file list]
 ```
 
 **Conflict Analysis:**
@@ -31,8 +47,9 @@ Task 3: [description] — depends on: none (parallel with 1) — modifies: [file
 Show the plan with conflict analysis. Get user confirmation (or auto-proceed if user said "just do it").
 
 ### Step 2: Execute
+
 For each task, launch a subagent (Agent tool) with:
-- The task description
+- The task description and which Requirement(s) it satisfies
 - Instruction to follow TDD: write test first → implement → green
 - Instruction to invoke `debug` skill if tests fail
 - Instruction to invoke `verify` skill before reporting done
@@ -49,13 +66,31 @@ For each task, launch a subagent (Agent tool) with:
 | Task A, B parallel | Yes | Overlap exists | ✅ Yes |
 
 ### Step 3: Integrate
+
 After all tasks complete:
 - Run the full test suite
-- Check for integration issues between tasks
+- Verify each Acceptance Criterion (AC1, AC2, ...) is demonstrably met
 - If anything fails, dispatch a subagent to fix it
 
 ### Step 4: Report
-Summarize what was built, what tests pass, and any remaining issues.
+
+```
+## Go Report
+- Spec: SPEC-{timestamp} ({goal_slug})
+- Branch: feature/{goal_slug}
+- Requirements satisfied: R1 ✅, R2 ✅, ...
+- Acceptance criteria verified: AC1 ✅, AC2 ✅, ...
+- Tests: X/Y passing
+- Remaining issues: none / [list]
+```
+
+Tell the user: **"Build complete. Run `/check` to verify before shipping."**
+
+## Output
+
+- Git branch `feature/{goal_slug}` with all changes committed
+- Conventional Commits: `feat:`, `fix:`, `test:` prefixes
+- All Requirements satisfied and Acceptance Criteria verified
 
 ## Skills Auto-Triggered
 - **tdd**: Every subagent follows red-green-refactor
@@ -68,3 +103,4 @@ Summarize what was built, what tests pass, and any remaining issues.
 - Skipping tests "to save time"
 - Not verifying the full suite after integration
 - Implementing everything in a single file
+- Starting without a `status: approved` spec

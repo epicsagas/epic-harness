@@ -23,6 +23,20 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User wants to commit changes | **commit** |
 | Context window > 70% used | **context** |
 
+## Loop Transition Signals
+
+When a phase completes, prompt the user toward the next step. Do NOT auto-proceed — surface the transition explicitly.
+
+| Phase completed | Condition | Prompt to user |
+|----------------|-----------|----------------|
+| `/spec` saved | `status: approved` written | "Spec saved. Run `/go` to start building." |
+| `/go` report done | All tasks complete, tests green | "Build complete. Run `/check` to verify before shipping." |
+| `/check` report done | All PASS + all AC verified | "Check passed. Run `/ship` to create a PR." |
+| `/check` report done | Any FAIL or AC missing | "Fix blockers with `/go`, then re-run `/check`." |
+| `/ship` report done | PR created, CI green | "Shipped. Loop complete." |
+
+These transitions are informational nudges only. The user controls when each phase runs.
+
 ## Priority
 
 1. **User's explicit instructions** — highest priority
