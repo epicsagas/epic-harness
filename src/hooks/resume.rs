@@ -25,39 +25,6 @@ fn acquire_session_lock(lock: &Path) -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    /// Helper: return a unique lock path inside a temp dir for this test.
-    fn temp_lock(dir: &std::path::Path, name: &str) -> PathBuf {
-        dir.join(format!("{name}.lock"))
-    }
-
-    #[test]
-    fn acquire_session_lock_first_call_succeeds() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let lock = temp_lock(dir.path(), "session_first");
-        assert!(acquire_session_lock(&lock), "first acquire must return true");
-        assert!(lock.exists(), "lock file must be created");
-    }
-
-    #[test]
-    fn acquire_session_lock_second_call_returns_false() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let lock = temp_lock(dir.path(), "session_second");
-
-        // First call: acquires lock.
-        assert!(acquire_session_lock(&lock));
-        // Second call: lock file already exists — must return false (TOCTOU-safe).
-        assert!(
-            !acquire_session_lock(&lock),
-            "second acquire on same lock must return false"
-        );
-    }
-}
-
 const BANNER: &[&str] = &[
     "",
     "  ┌─┐┌─┐┬┌─┐   ┬ ┬┌─┐┬─┐┌┐┌┌─┐┌─┐┌─┐",
@@ -462,4 +429,37 @@ pub fn run(_input: &HookInput) -> i32 {
     Telemetry::init().track_session_started();
 
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    /// Helper: return a unique lock path inside a temp dir for this test.
+    fn temp_lock(dir: &std::path::Path, name: &str) -> PathBuf {
+        dir.join(format!("{name}.lock"))
+    }
+
+    #[test]
+    fn acquire_session_lock_first_call_succeeds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = temp_lock(dir.path(), "session_first");
+        assert!(acquire_session_lock(&lock), "first acquire must return true");
+        assert!(lock.exists(), "lock file must be created");
+    }
+
+    #[test]
+    fn acquire_session_lock_second_call_returns_false() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock = temp_lock(dir.path(), "session_second");
+
+        // First call: acquires lock.
+        assert!(acquire_session_lock(&lock));
+        // Second call: lock file already exists — must return false (TOCTOU-safe).
+        assert!(
+            !acquire_session_lock(&lock),
+            "second acquire on same lock must return false"
+        );
+    }
 }
