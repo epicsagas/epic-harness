@@ -1,5 +1,7 @@
-description = "Design or update an org-level agent team — cross-project, append-merge"
-prompt = """
+---
+description: "Design or update an org-level agent team — cross-project, append-merge"
+---
+
 This command is a thin wrapper around the `epic team` CLI.
 
 Run in terminal:
@@ -13,7 +15,7 @@ epic team
 - Recommends team type and agent composition
 - Shows diff if team already exists in `~/.harness/orgs/`
 - Applies merge strategy (no silent overwrites)
-- Copies agents to `.claude/agents/{team}/` with `## Team Context` injected
+- Copies agents to `.gemini/agents/{team}/` with `## Team Context` injected
 
 For the full spec see `docs/research/team-spec.md`.
 
@@ -22,9 +24,8 @@ Other subcommands:
 epic team list                     # list teams in current org
 epic team show {team}              # config + agents + mission
 epic team show {team} --playbook   # full accumulated playbook
-epic team sync {team}              # re-copy agents to .claude/agents/
+epic team sync {team}              # re-copy agents to .gemini/agents/
 epic team link {team}              # attach existing team (skip design)
-epic team unlink {team}            # remove .claude/agents/{team}/
+epic team unlink {team}            # remove .gemini/agents/{team}/
 epic team history {team} {agent}   # show .history/ entries
 ```
-"""

@@ -2,3 +2,8 @@
 # Enable lifecycle hooks (SessionStart, PreToolUse, PostToolUse, Stop).
 # Required for epic-harness guard / observe / reflect / resume to run.
 codex_hooks = true
+
+[mcp_servers.harness-mem]
+type = "local"
+command = "epic-harness"
+args = ["mem", "mcp"]

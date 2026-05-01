@@ -1,5 +1,7 @@
-description = "Build it - plan, execute tasks sequentially with TDD, and verify. The main execution engine."
-prompt = """
+---
+description: "Build it - plan, execute tasks sequentially with TDD, and verify. The main execution engine."
+---
+
 CRITICAL: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
 - Check if a spec exists (`$HARNESS_DIR/specs/` or recent conversation). If not, run a quick inline spec conversation first.
@@ -22,4 +24,3 @@ After all tasks complete:
 - Fix any failures before proceeding
 
 Summarize what was built, what tests pass, and any remaining issues.
-"""

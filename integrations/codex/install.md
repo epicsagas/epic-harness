@@ -29,41 +29,25 @@ cp hooks.json ~/.codex/hooks.json
 cp hooks.json .codex/hooks.json
 ```
 
-### 2. Commands
+### 2. Prompts
 
-Copy the slash commands so Codex can invoke them:
+Copy the prompt definitions so Codex can invoke them:
 
 ```bash
 # Global
-cp -r commands/ ~/.codex/commands/
+cp -r prompts/ ~/.codex/prompts/
 
 # Project-local
-cp -r commands/ .codex/commands/
+cp -r prompts/ .codex/prompts/
 ```
 
 ### 3. Skills
 
-Copy the skill definitions:
-
-```bash
-# Global
-cp -r skills/ ~/.codex/skills/
-
-# Project-local
-cp -r skills/ .codex/skills/
-```
+> **Coming soon** — skill definitions will be added in a future release.
 
 ### 4. Agents
 
-Copy the agent definitions:
-
-```bash
-# Global
-cp -r agents/ ~/.codex/agents/
-
-# Project-local
-cp -r agents/ .codex/agents/
-```
+> **Coming soon** — agent definitions will be added in a future release.
 
 ## Hook Event Mapping
 
@@ -71,8 +55,9 @@ cp -r agents/ .codex/agents/
 |-------------|------------------------|---------|
 | SessionStart | `resume` | Restore session context, load evolved skills |
 | PreToolUse (Bash) | `guard` | Block dangerous commands |
-| PostToolUse (Edit, Write) | `polish` | Auto-format + lint after edits |
-| PostToolUse (*) | `observe` (async) | Record tool results for evolution loop |
+| PostToolUse (Bash) | `observe` | Record Bash tool results for evolution loop |
+| PostToolUse (Edit) | `polish` | Auto-format + typecheck after edits |
+| PostToolUse (Write) | `polish` | Auto-format + typecheck after file writes |
 | Stop | `reflect` | Analyze session, evolve skills |
 
 > Note: Codex has no PreCompact event — `snapshot` is not wired. Session state is preserved via `resume`/`reflect`.

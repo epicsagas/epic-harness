@@ -59,10 +59,16 @@ Rules provide always-on context that loads harness state at session start and ap
 ```bash
 mkdir -p .cursor/rules
 cp integrations/cursor/rules/harness-context.mdc .cursor/rules/
-cp integrations/cursor/rules/harness-skills.mdc .cursor/rules/
 ```
 
 These rules replace the `session-start` hook (which Cursor does not expose) by injecting harness context into every session automatically.
+
+<!-- Coming in a future release:
+```bash
+cp integrations/cursor/rules/harness-skills.mdc .cursor/rules/
+```
+Condensed TDD, secure, verify, simplify, and perf rules will be available as a separate `harness-skills.mdc` rule file in a future release.
+-->
 
 ---
 
@@ -87,16 +93,18 @@ After installation, the following commands are available in Cursor Composer:
 
 ---
 
-## 5. Install Agents (Optional)
+## 5. Install Agents (Future)
 
+> **Note:** Agents will be available in a future release. For now, use the built-in agent capabilities. The `/go` and `/check` commands work without custom agent files by delegating to Cursor's native sub-agent system.
+
+<!-- Coming in a future release:
 Sub-agent definitions for use with Cursor's sub-agent system or manual invocation. Each file includes `model: inherit` so the subagent follows the parent composer model ([Cursor subagents](https://cursor.com/docs/subagents)).
 
 ```bash
 mkdir -p .cursor/agents
 cp integrations/cursor/agents/*.md .cursor/agents/
 ```
-
-These agents are referenced by `/go` and `/check` commands when launching sub-tasks.
+-->
 
 ---
 
@@ -107,7 +115,7 @@ These agents are referenced by `/go` and `/check` commands when launching sub-ta
 ## 6. Verify Installation
 
 ```bash
-ls .cursor/hooks.json .cursor/rules/ .cursor/commands/ .cursor/agents/
+ls .cursor/hooks.json .cursor/rules/ .cursor/commands/
 ```
 
 Start a new Cursor session. The Composer should load harness context from `$HARNESS_DIR/memory/` and report any evolved skills from `$HARNESS_DIR/evolved/`.
@@ -120,8 +128,7 @@ Start a new Cursor session. The Composer should load harness context from `$HARN
 .cursor/
 ├── hooks.json          # Hook event → epic-harness subcommand mapping
 ├── rules/
-│   ├── harness-context.mdc   # Session start context + auto-behaviors
-│   └── harness-skills.mdc    # Condensed TDD, secure, verify, simplify, perf rules
+│   └── harness-context.mdc   # Session start context + auto-behaviors
 ├── commands/
 │   ├── spec.md
 │   ├── go.md
@@ -129,11 +136,7 @@ Start a new Cursor session. The Composer should load harness context from `$HARN
 │   ├── ship.md
 │   ├── evolve.md
 │   └── team.md
-└── agents/
-    ├── builder.md
-    ├── reviewer.md
-    ├── auditor.md
-    └── planner.md
+└── (agents/ coming in a future release)
 ```
 
 ---
@@ -147,7 +150,7 @@ The hooks degrade gracefully — they print a warning and continue. Install the 
 Confirm Cursor version is 1.7 or later. Check `Cursor > Settings > Hooks` to verify hooks are enabled for the project. Open `hooks.json` and confirm it has `"version": 1` and camelCase keys (`preToolUse`, `postToolUse`, `sessionEnd`). Re-run `epic-harness install cursor` after upgrading epic-harness so the file matches the embedded copy.
 
 **Agents not listed**
-Custom agents live under `.cursor/agents/` (project) or `~/.cursor/agents/` (global). They appear when delegating to subagents in supported flows; there is not always a separate “installed agents” list in the UI.
+Agents are not yet available for the Cursor integration. They will be added in a future release. Use the built-in agent capabilities in the meantime.
 
 **Rules not loading**
 Confirm `.mdc` files are in `.cursor/rules/` (not a subdirectory). Restart Cursor to pick up new rule files.

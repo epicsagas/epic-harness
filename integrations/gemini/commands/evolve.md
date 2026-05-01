@@ -1,5 +1,7 @@
-description = "Trigger skill evolution manually - analyze observations, evolve skills, show status, or rollback"
-prompt = """
+---
+description: "Trigger skill evolution manually - analyze observations, evolve skills, show status, or rollback"
+---
+
 CRITICAL: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
 Run evolution now:
@@ -30,4 +32,3 @@ Clear all evolution data:
 1. Remove `$HARNESS_DIR/evolved/`, `$HARNESS_DIR/evolved_backup/`
 2. Clear `metrics.json` and `evolution.jsonl`
 3. Confirm with user first
-"""

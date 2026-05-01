@@ -1,4 +1,7 @@
-prompt = """
+---
+description: "Define what to build — clarify requirements through conversation and produce a spec document"
+---
+
 CRITICAL: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
 - Read existing context (GEMINI.md, README, codebase structure)
@@ -9,4 +12,3 @@ Write a concise spec covering: Goal, Scope, Requirements, Acceptance criteria, a
 
 Show the spec in digestible chunks. Get explicit approval before proceeding.
 Save the spec to `$HARNESS_DIR/specs/SPEC-{timestamp}.md` if the user approves.
-"""

@@ -1,5 +1,7 @@
-description = "Verify everything - sequential code review, security audit, and test run"
-prompt = """
+---
+description: "Verify everything - sequential code review, security audit, and test run"
+---
+
 Identify what changed using `git diff --stat HEAD~1` (or against base branch).
 
 Run 3 sequential checks:
@@ -22,4 +24,3 @@ Combine findings into a single report:
 - **FAIL**: List blockers, offer to fix with `/go`
 
 Avoid skipping security reviews, approving with failing tests, or ignoring performance warnings in hot paths.
-"""

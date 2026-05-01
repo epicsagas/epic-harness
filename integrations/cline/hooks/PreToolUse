@@ -73,9 +73,17 @@ GUARD_STDERR=$(printf '%s' "$HOOK_INPUT" | "$BINARY" guard 2>&1)
 GUARD_EXIT=$?
 
 if [ "$GUARD_EXIT" -eq 2 ]; then
-  # Escape the reason for JSON (replace " with \")
-  REASON=$(printf '%s' "$GUARD_STDERR" | sed 's/"/\\"/g' | tr '\n' ' ')
-  printf '{"cancel":true,"errorMessage":"%s"}' "$REASON"
+  # Safely JSON-encode the reason using jq (preferred) or python3 (fallback)
+  if command -v jq >/dev/null 2>&1; then
+    REASON=$(printf '%s' "$GUARD_STDERR" | jq -Rs .)
+  elif command -v python3 >/dev/null 2>&1; then
+    REASON=$(printf '%s' "$GUARD_STDERR" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().strip()))')
+  else
+    # Last resort: basic escaping (does not handle all edge cases)
+    REASON=$(printf '%s' "$GUARD_STDERR" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')
+    REASON="\"$REASON\""
+  fi
+  printf '{"cancel":true,"errorMessage":%s}' "$REASON"
 else
   printf '{"cancel":false}'
 fi

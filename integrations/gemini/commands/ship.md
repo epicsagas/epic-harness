@@ -1,5 +1,7 @@
-description = "Ship it - create PR, verify CI, merge. End-to-end delivery."
-prompt = """
+---
+description: "Ship it - create PR, verify CI, merge. End-to-end delivery."
+---
+
 Run `/check` internally if not already done. All tests must pass.
 
 - Ensure all changes are committed with meaningful messages
@@ -11,4 +13,3 @@ Create a PR using `gh pr create` with a clear summary, list of changes, test pla
 Verify CI using `gh pr checks --watch`. If CI fails, diagnose and fix.
 
 Provide a Ship Report with PR URL, CI status, merge readiness, and any action needed.
-"""

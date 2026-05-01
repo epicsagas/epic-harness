@@ -1,4 +1,5 @@
 {
+  "version": 1,
   "hooks": {
     "SessionStart": [
       {
@@ -34,6 +35,26 @@
           }
         ],
         "description": "Record Bash tool result for evolution loop (Codex PostToolUse only intercepts Bash)"
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Auto-format + typecheck after edits"
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
+          }
+        ],
+        "description": "Auto-format + typecheck after file writes"
       }
     ],
     "Stop": [

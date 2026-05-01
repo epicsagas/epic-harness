@@ -8,6 +8,7 @@ This project uses epic-harness for AI quality automation.
 - /check — sequential review + audit + tests
 - /ship — PR creation + CI
 - /evolve — skill evolution status
+- /team — design or update an org-level agent team
 
 ### Auto-behaviors
 - Before coding: read `~/.harness/projects/{slug}/memory/` for project context
