@@ -1274,14 +1274,32 @@ const TOOLS: &[(&str, &str)] = &[
 fn interactive_menu() -> Vec<String> {
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
         match super::install_wizard::interactive_select_tools(TOOLS) {
+            // telemetry consent already handled inside interactive_select_tools
             Ok(selected) => selected,
             Err(e) => {
                 eprintln!("[harness] Interactive UI failed ({e}); falling back to text prompt.");
-                interactive_menu_fallback()
+                let selected = interactive_menu_fallback();
+                prompt_and_save_telemetry_consent();
+                selected
             }
         }
     } else {
-        interactive_menu_fallback()
+        let selected = interactive_menu_fallback();
+        prompt_and_save_telemetry_consent();
+        selected
+    }
+}
+
+fn prompt_and_save_telemetry_consent() {
+    let level = super::telemetry::prompt_consent_interactive();
+    super::telemetry::write_consent(level);
+    match level {
+        super::telemetry::ConsentLevel::On => {
+            eprintln!("[harness] Telemetry enabled. To opt out: epic-harness telemetry off");
+        }
+        super::telemetry::ConsentLevel::Off => {
+            eprintln!("[harness] Telemetry disabled. To enable: epic-harness telemetry on");
+        }
     }
 }
 
@@ -2035,10 +2053,10 @@ mod tests {
                 for entry in entries_arr {
                     if let Some(cmd_hooks) = entry["hooks"].as_array() {
                         for cmd_hook in cmd_hooks {
-                            if let Some(cmd) = cmd_hook["command"].as_str() {
-                                if cmd.contains("command -v epic-harness") {
-                                    found_path_fallback = true;
-                                }
+                            if cmd_hook["command"].as_str()
+                                .is_some_and(|cmd| cmd.contains("command -v epic-harness"))
+                            {
+                                found_path_fallback = true;
                             }
                         }
                     }

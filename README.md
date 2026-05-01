@@ -1,6 +1,5 @@
 # epic harness
 
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/epicsaga)
 **6 commands. Auto-trigger skills. Self-evolving.**
 
 <p align="center">
@@ -234,11 +233,27 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | Command | What it does |
 |---------|-------------|
 | `/spec` | Define what to build — clarify requirements, produce a spec |
-| `/go` | Build it — auto-plan, TDD subagents, parallel execution |
+| `/go` | Build it — auto-plan, TDD subagents, parallel execution with worktree isolation for conflicting tasks |
 | `/check` | Verify — parallel code review + security audit + performance |
-| `/ship` | Ship — PR, CI, merge |
+| `/ship` | Ship — isolated pre-flight test, then PR, CI, merge |
 | `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
+
+### Loop flow
+
+```
+/spec ──→ /go ──→ /check ──→ /ship
+  │                              │
+  │ (3+ requirements,            │ (loop complete)
+  │  no team linked)             ↓
+  └──→ /team (optional)   /evolve (optional)
+       (set up agents      (after /ship,
+        before /go)         improve skills)
+```
+
+`/team` and `/evolve` are optional but recommended at these points:
+- **After `/spec`**: if the spec has 3 or more requirements and no team is linked, `/spec` will prompt you to consider `/team` before starting `/go`.
+- **After `/ship`**: `/ship` prompts you to run `/evolve` to turn this session's observations into better skills for the next cycle.
 
 ## Team (`epic team`)
 

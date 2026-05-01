@@ -14,8 +14,23 @@ const DIM: crossterm::style::Color = crossterm::style::Color::DarkGrey;
 const HI: crossterm::style::Color = crossterm::style::Color::Yellow;
 
 /// Interactive multi-select when stdin+stderr are TTYs. On error or non-interactive use, caller may fall back.
+/// After tool selection, prompts for telemetry consent and writes the result.
 pub fn interactive_select_tools(tools: &[(&str, &str)]) -> io::Result<Vec<String>> {
-    run_tui(tools)
+    let selected = run_tui(tools)?;
+    if !selected.is_empty() {
+        // TUI leaves alternate screen — prompt on normal screen
+        let level = super::telemetry::prompt_consent_interactive();
+        super::telemetry::write_consent(level);
+        match level {
+            super::telemetry::ConsentLevel::On => {
+                eprintln!("[harness] Telemetry enabled. To opt out: epic-harness telemetry off");
+            }
+            super::telemetry::ConsentLevel::Off => {
+                eprintln!("[harness] Telemetry disabled. To enable: epic-harness telemetry on");
+            }
+        }
+    }
+    Ok(selected)
 }
 
 fn selected_names(tools: &[(&str, &str)], checked: &[bool]) -> Vec<String> {

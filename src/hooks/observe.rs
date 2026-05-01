@@ -1,7 +1,11 @@
 use regex::Regex;
+use std::fs;
 use std::sync::LazyLock;
 
 use super::common::*;
+use super::telemetry::{FailureClass, ToolCategory, Telemetry};
+
+static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
@@ -29,10 +33,14 @@ fn get_next_sequence_id(session_file: &std::path::Path) -> u64 {
 }
 
 fn get_last_action(session_file: &std::path::Path) -> Option<String> {
-    let data = std::fs::read(session_file).ok()?;
-    let len = data.len();
-    let start = len.saturating_sub(1024);
-    let tail = String::from_utf8_lossy(&data[start..]);
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(session_file).ok()?;
+    let file_len = f.seek(SeekFrom::End(0)).ok()?;
+    let start = file_len.saturating_sub(1024);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((file_len - start) as usize + 1);
+    f.read_to_end(&mut buf).ok()?;
+    let tail = String::from_utf8_lossy(&buf);
     let last_line = tail.lines().rfind(|l| !l.is_empty())?;
     let rec: ObsRecord = serde_json::from_str(last_line).ok()?;
     rec.action
@@ -49,7 +57,7 @@ fn score_bash(output: &str, command: &str) -> ScoreDimensions {
     } else if is_empty {
         quality = 0.7;
     }
-    static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)warning|WARN").unwrap());
+    static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
     static DEPREC_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
     if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
@@ -120,6 +128,35 @@ fn score_read_search(output: &str) -> ScoreDimensions {
     }
 }
 
+/// Core counter logic — extracted for testability.
+/// Returns `true` if the event should be sent (count was below the cap),
+/// `false` if the cap has been reached. Atomically increments the counter file.
+///
+/// Counter file is per-session (includes PID in the filename via `session_id()`),
+/// so concurrent sessions never share the same counter file. Within a single
+/// session/process, hook invocations are sequential, making this read-write safe.
+fn check_and_increment_counter(counter_file: &std::path::Path) -> bool {
+    const MAX_TOOL_ERRORS: u32 = 50;
+    let count: u32 = fs::read_to_string(counter_file)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    if count >= MAX_TOOL_ERRORS {
+        return false;
+    }
+    let _ = fs::write(counter_file, (count + 1).to_string());
+    true
+}
+
+/// Returns `true` if this `tool_error` telemetry event should be sent.
+///
+/// `obs_dir()` is guaranteed to exist at this call site because `run()`
+/// returns early via `harness_exists()` before reaching the telemetry block.
+fn should_sample_tool_error() -> bool {
+    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", session_id()));
+    check_and_increment_counter(&counter_file)
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !harness_exists() {
         return 0;
@@ -140,7 +177,7 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
-                s[..s.len().min(200)].to_string()
+                mask_secrets(&s[..s.len().min(200)])
             })
     });
 
@@ -233,6 +270,19 @@ pub fn run(input: &HookInput) -> i32 {
     }
 
     append_jsonl(&session_file, &record);
+
+    // Fire tool_error telemetry only on failures to keep event volume low.
+    // Capped at 50 events per session to avoid flooding PostHog during error loops.
+    if let Some(failure_cat) = &record.failure_category {
+        let tool_cat = &record.tool_category;
+        if should_sample_tool_error() {
+            TELEMETRY.track_tool_error(
+                tool_cat.parse().unwrap_or(ToolCategory::Other),
+                failure_cat.parse().unwrap_or(FailureClass::Unknown),
+            );
+        }
+    }
+
     0
 }
 
@@ -270,6 +320,12 @@ mod tests {
     fn bash_warning_reduces_quality() {
         let dims = score_bash("warning: unused variable", "cargo build");
         assert!(dims.output_quality < 1.0);
+    }
+
+    #[test]
+    fn score_bash_no_warnings_found_not_penalized() {
+        let dims = score_bash("No warnings found", "cargo check");
+        assert_eq!(dims.output_quality, 1.0, "substring 'warning' in negative phrase must not penalize");
     }
 
     #[test]
@@ -445,5 +501,53 @@ mod tests {
         } else {
             panic!("expected object");
         }
+    }
+
+    // ── should_sample_tool_error / check_and_increment_counter ─────────────
+    #[test]
+    fn counter_allows_up_to_50_then_blocks() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_test.txt");
+        // First 50 calls must return true
+        for i in 0..50 {
+            let result = check_and_increment_counter(&counter_file);
+            assert!(result, "call {} should return true", i + 1);
+        }
+        // 51st call must return false
+        let result = check_and_increment_counter(&counter_file);
+        assert!(!result, "51st call should return false");
+    }
+
+    #[test]
+    fn counter_file_written_and_read_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_rw.txt");
+        // No file yet — first call returns true and writes "1"
+        assert!(check_and_increment_counter(&counter_file));
+        let content = fs::read_to_string(&counter_file).unwrap();
+        assert_eq!(content.trim(), "1");
+        // Second call returns true and writes "2"
+        assert!(check_and_increment_counter(&counter_file));
+        let content = fs::read_to_string(&counter_file).unwrap();
+        assert_eq!(content.trim(), "2");
+    }
+
+    #[test]
+    fn counter_treats_missing_file_as_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_missing.txt");
+        // File does not exist; should treat count as 0 and allow the call
+        assert!(check_and_increment_counter(&counter_file));
+    }
+
+    #[test]
+    fn counter_treats_corrupt_file_as_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let counter_file = dir.path().join("telemetry_error_count_corrupt.txt");
+        fs::write(&counter_file, b"not_a_number").unwrap();
+        // Parse error → default 0 → should allow the call
+        assert!(check_and_increment_counter(&counter_file));
+        let content = fs::read_to_string(&counter_file).unwrap();
+        assert_eq!(content.trim(), "1");
     }
 }

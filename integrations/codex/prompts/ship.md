@@ -9,7 +9,20 @@ You are starting the **Ship** phase — from working code to merged PR.
 ## Process
 
 ### Step 1: Pre-ship verification
-Run `/check` internally if not already done. All tests must pass.
+
+**1a. Isolated Integration Test**
+Use git worktree to verify in a clean environment:
+- Run full build from scratch (`cargo build --release` / `npm run build` / etc.)
+- Run complete test suite
+- Run linter and formatter checks
+- Verify no uncommitted artifacts generated during build
+
+This simulates CI conditions locally and catches issues before PR creation.
+
+**1b. Code Review**
+If isolated test passes, run `/check` on main working tree for final quality review.
+
+**Gate:** If either 1a or 1b fails → STOP. Do not proceed to PR creation.
 
 ### Step 2: Git hygiene
 - Ensure all changes are committed with meaningful messages

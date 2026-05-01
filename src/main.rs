@@ -7,7 +7,7 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
-    // These subcommands read stdin themselves — skip pre-reading.
+    // install / telemetry: skip consent check (they set it).
     if subcmd == "install" {
         let code = hooks::install::run(&args[2..]);
         std::process::exit(code);
@@ -16,6 +16,15 @@ fn main() {
         let code = hooks::install::run_uninstall(&args[2..]);
         std::process::exit(code);
     }
+    if subcmd == "telemetry" {
+        let code = hooks::telemetry::run_cli(&args[2..]);
+        std::process::exit(code);
+    }
+
+    // All other subcommands: auto-enable telemetry on first run (opt-out model).
+    // Prints a one-time notice if consent was not yet set.
+    hooks::telemetry::ensure_consent_or_set_default();
+
     if subcmd == "mem" {
         let code = hooks::mem::run(&args[1..]);
         std::process::exit(code);
@@ -48,7 +57,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" => unreachable!(),
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" => unreachable!(),
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0
@@ -78,6 +87,7 @@ fn main() {
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");
+            eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
             eprintln!("  path         Print the harness data directory");
             eprintln!("  version      Print version\n");
             eprintln!("INSTALL TARGETS:  codex  gemini  cursor  opencode  cline  aider");

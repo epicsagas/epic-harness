@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use super::common::*;
 use super::mem::store;
+use super::telemetry::{SessionTrend, Telemetry};
+
+static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 // ── Phase 1: Session Analysis ───────────────────────
 
@@ -348,11 +352,14 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
 
 fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u64) {
     // Returns (should_rollback, improved, rolled_back_count)
-    if metrics.total_sessions == 0 || metrics.best_score == 0.0 {
+    if metrics.total_sessions == 0 || metrics.best_score.is_none() {
+        // First session or genuinely uninitialized — set best_score and treat as improved.
+        metrics.best_score = Some(current_score);
         return (false, true, 0);
     }
 
-    let improvement = current_score - metrics.best_score;
+    let best = metrics.best_score.unwrap_or(0.0);
+    let improvement = current_score - best;
     if improvement >= IMPROVEMENT_THRESHOLD {
         // Improved! Backup evolved skills
         let evolved = evolved_dir();
@@ -367,8 +374,8 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
     // No improvement
     metrics.stagnation_count += 1;
     if metrics.stagnation_count >= STAGNATION_LIMIT {
-        let degradation = metrics.best_score - current_score;
-        if degradation > 0.05 || metrics.best_score < 0.90 {
+        let degradation = best - current_score;
+        if degradation > 0.05 || metrics.best_score.unwrap_or(0.0) < 0.90 {
             let backup = evolved_backup_dir();
             if backup.is_dir() {
                 let evolved = evolved_dir();
@@ -388,6 +395,14 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
     }
 
     (false, false, 0)
+}
+
+// ── Helpers ─────────────────────────────────────────
+
+/// Clamp avg_score to a finite f64 so it serialises as a valid JSON number.
+/// NaN and ±Infinity are both invalid JSON; replace them with 0.0.
+fn safe_avg_score(score: f64) -> f64 {
+    if score.is_finite() { score } else { 0.0 }
 }
 
 // ── Phase 4: Skill Seeding ──────────────────────────
@@ -559,14 +574,8 @@ fn build_failure_skill(category: &str, count: u64) -> String {
 // ── Phase 5: Trend ──────────────────────────────────
 
 fn compute_trend(history: &[SessionScoreEntry]) -> &'static str {
-    let recent: Vec<_> = history
-        .iter()
-        .rev()
-        .take(5)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
+    let start = history.len().saturating_sub(5);
+    let recent = &history[start..];
     if recent.len() < 2 {
         return "stable";
     }
@@ -762,6 +771,10 @@ fn ingest_to_memory(
     let slug = project_slug();
     let ts = now_iso();
     let dedup_hours = 24u64;
+    // `unchecked_transaction()` is used here because `open_db()` always returns
+    // a fresh connection in autocommit mode (no prior transaction active). Using
+    // the checked variant would be equivalent but adds unnecessary overhead for
+    // this single-writer, fresh-connection pattern.
     let tx = match conn.unchecked_transaction() {
         Ok(t) => t,
         Err(_) => return (0, 0),
@@ -1053,7 +1066,7 @@ pub fn run(_input: &HookInput) -> i32 {
     metrics.last_session = Some(now_iso());
 
     if improved {
-        metrics.best_score = analysis.avg_score;
+        metrics.best_score = Some(analysis.avg_score);
         metrics.best_session = now_iso();
         metrics.stagnation_count = 0;
     }
@@ -1173,6 +1186,14 @@ pub fn run(_input: &HookInput) -> i32 {
             &format!("Memory: +{mem_nodes} nodes, +{mem_edges} edges ingested"),
         );
     }
+
+    TELEMETRY.track_session_ended(
+        analysis.success_rate,
+        safe_avg_score(analysis.avg_score),
+        analysis.total_observations,
+        metrics.trend.parse().unwrap_or(SessionTrend::Stable),
+        seeded,
+    );
 
     0
 }
@@ -1441,7 +1462,7 @@ mod tests {
     fn stagnation_improvement_resets() {
         let mut metrics = default_metrics();
         metrics.total_sessions = 5;
-        metrics.best_score = 0.7;
+        metrics.best_score = Some(0.7);
         metrics.stagnation_count = 2;
         let (rollback, improved, _) = check_stagnation(&mut metrics, 0.8);
         assert!(!rollback);
@@ -1452,12 +1473,37 @@ mod tests {
     fn stagnation_increments_on_no_improvement() {
         let mut metrics = default_metrics();
         metrics.total_sessions = 5;
-        metrics.best_score = 0.8;
+        metrics.best_score = Some(0.8);
         metrics.stagnation_count = 0;
         let (rollback, improved, _) = check_stagnation(&mut metrics, 0.78);
         assert!(!rollback);
         assert!(!improved);
         assert_eq!(metrics.stagnation_count, 1);
+    }
+
+    #[test]
+    fn stagnation_zero_score_is_not_sentinel() {
+        // A genuine all-failure session (score=0.0) must increment stagnation_count,
+        // not be treated as "uninitialized" (the old best_score == 0.0 sentinel bug).
+        let mut metrics = default_metrics();
+        metrics.total_sessions = 3;
+        metrics.best_score = Some(0.0); // best so far is also 0.0 — no improvement
+        metrics.stagnation_count = 0;
+        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.0);
+        assert!(!rollback);
+        assert!(!improved);
+        assert_eq!(metrics.stagnation_count, 1, "stagnation_count must increment for score=0.0");
+    }
+
+    #[test]
+    fn stagnation_first_session_zero_score_initializes_best() {
+        // First session with score=0.0 must set best_score to Some(0.0), not leave it None.
+        let mut metrics = default_metrics();
+        // total_sessions=0 triggers first-session branch regardless of score value.
+        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.0);
+        assert!(!rollback);
+        assert!(improved);
+        assert_eq!(metrics.best_score, Some(0.0));
     }
 
     // ── build_summary ───────────────────────────────
@@ -1644,5 +1690,30 @@ mod tests {
         let skill = build_failure_skill("type_error", 8);
         assert!(skill.contains("type"));
         assert!(skill.contains("8 occurrences"));
+    }
+
+    #[test]
+    fn safe_avg_score_clamps_nan_to_zero() {
+        assert_eq!(safe_avg_score(f64::NAN), 0.0);
+    }
+
+    #[test]
+    fn safe_avg_score_clamps_pos_inf_to_zero() {
+        assert_eq!(safe_avg_score(f64::INFINITY), 0.0);
+    }
+
+    #[test]
+    fn safe_avg_score_clamps_neg_inf_to_zero() {
+        assert_eq!(safe_avg_score(f64::NEG_INFINITY), 0.0);
+    }
+
+    #[test]
+    fn safe_avg_score_passes_through_finite_value() {
+        assert_eq!(safe_avg_score(0.75), 0.75);
+    }
+
+    #[test]
+    fn safe_avg_score_passes_through_zero() {
+        assert_eq!(safe_avg_score(0.0), 0.0);
     }
 }

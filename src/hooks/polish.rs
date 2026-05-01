@@ -2,15 +2,23 @@ use std::path::Path;
 use std::process::Command;
 
 use super::common::*;
+use super::telemetry::{FormatterKind, Telemetry};
 
-fn try_exec(cmd: &str, cwd: &Path) -> Option<String> {
-    Command::new("sh")
-        .arg("-c")
-        .arg(cmd)
+/// Execute a program with discrete arguments — no shell involved.
+/// This is the safe replacement for `try_exec` when `file_path` is part of
+/// the argument list, because no shell string interpolation occurs.
+/// Returns `Some(stdout)` only when the process exits successfully (exit code 0).
+fn try_exec_args(prog: &str, args: &[&str], cwd: &Path) -> Option<String> {
+    let o = Command::new(prog)
+        .args(args)
         .current_dir(cwd)
         .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+        .ok()?;
+    if o.status.success() {
+        Some(String::from_utf8_lossy(&o.stdout).into_owned())
+    } else {
+        None
+    }
 }
 
 fn feedback_to_observe(
@@ -73,7 +81,7 @@ fn format_js(file_path: &str, wd: &Path) {
     let has_prettier = wd.join(".prettierrc").is_file() || wd.join(".prettierrc.json").is_file();
 
     if has_biome {
-        if try_exec(&format!("npx biome format --write \"{file_path}\""), wd).is_some() {
+        if try_exec_args("npx", &["biome", "format", "--write", file_path], wd).is_some() {
             let name = Path::new(file_path)
                 .file_name()
                 .unwrap_or_default()
@@ -82,7 +90,7 @@ fn format_js(file_path: &str, wd: &Path) {
             feedback_to_observe(file_path, "biome", true, None);
         }
     } else if has_prettier
-        && try_exec(&format!("npx prettier --write \"{file_path}\""), wd).is_some()
+        && try_exec_args("npx", &["prettier", "--write", file_path], wd).is_some()
     {
         let name = Path::new(file_path)
             .file_name()
@@ -97,11 +105,19 @@ fn check_ts(file_path: &str, wd: &Path) {
     if !wd.join("tsconfig.json").is_file() {
         return;
     }
-    if let Some(out) = try_exec("npx tsc --noEmit --pretty false 2>&1 | head -10", wd) {
-        if out.contains("error TS") {
-            let snippet = &out[..out.len().min(500)];
+    let output = Command::new("npx")
+        .args(["tsc", "--noEmit", "--pretty", "false"])
+        .current_dir(wd)
+        .output();
+    if let Ok(o) = output {
+        let stdout = String::from_utf8_lossy(&o.stdout);
+        let stderr = String::from_utf8_lossy(&o.stderr);
+        let combined = format!("{stdout}{stderr}");
+        if !o.status.success() || combined.contains("error TS") {
+            let snippet = &combined[..combined.len().min(500)];
             hint("polish", &format!("TS errors:\n{snippet}"));
             feedback_to_observe(file_path, "tsc", false, Some(snippet));
+            Telemetry::init().track_polish_failed(FormatterKind::Tsc);
         } else {
             feedback_to_observe(file_path, "tsc", true, None);
         }
@@ -109,20 +125,25 @@ fn check_ts(file_path: &str, wd: &Path) {
 }
 
 fn format_python(file_path: &str, wd: &Path) {
-    let formatted = try_exec(&format!("ruff format \"{file_path}\" 2>/dev/null"), wd).is_some()
-        || try_exec(&format!("black \"{file_path}\" 2>/dev/null"), wd).is_some();
-    if formatted {
-        let name = Path::new(file_path)
+    let formatter = if try_exec_args("ruff", &["format", file_path], wd).is_some() {
+        Some("ruff")
+    } else if try_exec_args("black", &[file_path], wd).is_some() {
+        Some("black")
+    } else {
+        None
+    };
+    if let Some(name) = formatter {
+        let fname = Path::new(file_path)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-        hint("polish", &format!("Formatted: {name}"));
-        feedback_to_observe(file_path, "ruff/black", true, None);
+        hint("polish", &format!("Formatted: {fname}"));
+        feedback_to_observe(file_path, name, true, None);
     }
 }
 
 fn format_go(file_path: &str, wd: &Path) {
-    if try_exec(&format!("gofmt -w \"{file_path}\""), wd).is_some() {
+    if try_exec_args("gofmt", &["-w", file_path], wd).is_some() {
         let name = Path::new(file_path)
             .file_name()
             .unwrap_or_default()
@@ -164,4 +185,68 @@ pub fn run(input: &HookInput) -> i32 {
     }
 
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    /// Verify that `try_exec_args` does NOT interpret shell metacharacters in
+    /// the path argument.  A path containing `; touch INJECTED` would create
+    /// a sentinel file if passed through `sh -c`; it must not happen here.
+    #[test]
+    fn try_exec_args_no_shell_injection() {
+        let dir = tempdir().unwrap();
+        let sentinel = dir.path().join("INJECTED");
+
+        // Malicious file_path that escapes a double-quoted shell argument and
+        // runs `touch <sentinel>`.
+        let malicious = format!(
+            "foo\"; touch {} ; echo \"",
+            sentinel.to_string_lossy()
+        );
+
+        // "echo" always succeeds; we only care that the shell never ran.
+        let _ = try_exec_args("echo", &[&malicious], dir.path());
+
+        assert!(
+            !sentinel.exists(),
+            "Shell injection detected: sentinel file was created — \
+             file_path was interpreted by a shell"
+        );
+    }
+
+    /// Confirm that the argument is delivered verbatim to the child process,
+    /// including spaces and single-quotes that would confuse a shell parser.
+    #[test]
+    fn try_exec_args_passes_path_as_literal_arg() {
+        let dir = tempdir().unwrap();
+
+        let path_with_spaces = "file with spaces and 'quotes'.js";
+
+        // `printf '%s\n'` echoes each argument back unchanged.
+        let out = try_exec_args("printf", &["%s\n", path_with_spaces], dir.path());
+
+        assert_eq!(
+            out.as_deref().map(str::trim),
+            Some(path_with_spaces),
+            "Argument was not passed verbatim to the child process"
+        );
+    }
+
+    #[test]
+    fn try_exec_args_returns_none_on_nonzero_exit() {
+        // `false` command always exits with code 1
+        let dir = tempdir().unwrap();
+        let result = try_exec_args("false", &[], dir.path());
+        assert!(result.is_none(), "non-zero exit must return None");
+    }
+
+    #[test]
+    fn try_exec_args_returns_some_on_success() {
+        let dir = tempdir().unwrap();
+        let result = try_exec_args("true", &[], dir.path());
+        assert!(result.is_some(), "zero exit must return Some");
+    }
 }

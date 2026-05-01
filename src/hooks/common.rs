@@ -128,7 +128,7 @@ pub struct Metrics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_session: Option<String>,
     pub score_history: Vec<SessionScoreEntry>,
-    pub best_score: f64,
+    pub best_score: Option<f64>,
     pub best_session: String,
     pub trend: String,
     pub stagnation_count: u64,
@@ -640,7 +640,7 @@ pub fn default_metrics() -> Metrics {
         total_evolved_skills: 0,
         last_session: None,
         score_history: vec![],
-        best_score: 0.0,
+        best_score: None,
         best_session: String::new(),
         trend: "stable".into(),
         stagnation_count: 0,
