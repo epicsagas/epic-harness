@@ -454,28 +454,28 @@ static GEMINI_FILES: &[(&str, &str)] = integration_files!(
             include_str!("../../integrations/gemini/GEMINI.md")
         ),
         (
-            "commands/check.toml",
-            include_str!("../../integrations/gemini/commands/check.toml")
+            "commands/check.md",
+            include_str!("../../integrations/gemini/commands/check.md")
         ),
         (
-            "commands/evolve.toml",
-            include_str!("../../integrations/gemini/commands/evolve.toml")
+            "commands/evolve.md",
+            include_str!("../../integrations/gemini/commands/evolve.md")
         ),
         (
-            "commands/go.toml",
-            include_str!("../../integrations/gemini/commands/go.toml")
+            "commands/go.md",
+            include_str!("../../integrations/gemini/commands/go.md")
         ),
         (
-            "commands/ship.toml",
-            include_str!("../../integrations/gemini/commands/ship.toml")
+            "commands/ship.md",
+            include_str!("../../integrations/gemini/commands/ship.md")
         ),
         (
-            "commands/spec.toml",
-            include_str!("../../integrations/gemini/commands/spec.toml")
+            "commands/spec.md",
+            include_str!("../../integrations/gemini/commands/spec.md")
         ),
         (
-            "commands/team.toml",
-            include_str!("../../integrations/gemini/commands/team.toml")
+            "commands/team.md",
+            include_str!("../../integrations/gemini/commands/team.md")
         ),
     ]
 );
