@@ -5,9 +5,6 @@ use std::sync::LazyLock;
 use super::common::*;
 use super::telemetry::{FailureClass, ToolCategory, Telemetry};
 
-/// Toggle GateGuard fact-forcing investigation hints on/off.
-const GATEGUARD_HINTS: bool = true;
-
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 static MASK_BEARER: LazyLock<Regex> =
@@ -168,7 +165,7 @@ fn should_sample_tool_error() -> bool {
 ///
 /// Uses static string slices exclusively to avoid heap allocations for hint text.
 pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
-    if !GATEGUARD_HINTS {
+    if !super::config::CONFIG.hook.gateguard_hints {
         return;
     }
 

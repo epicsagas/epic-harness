@@ -173,13 +173,19 @@ impl HookProfile {
     }
 }
 
-/// Resolve the current hook profile from the `EPIC_HOOK_PROFILE` env var.
+/// Resolve the current hook profile.
+/// Priority: EPIC_HOOK_PROFILE env var > config.toml [hook].profile > default (Standard).
 pub fn current_hook_profile() -> HookProfile {
-    match std::env::var("EPIC_HOOK_PROFILE")
-        .unwrap_or_default()
-        .to_lowercase()
-        .as_str()
-    {
+    // 1. Env var override (highest priority)
+    if let Ok(val) = std::env::var("EPIC_HOOK_PROFILE") {
+        return match val.to_lowercase().as_str() {
+            "minimal" => HookProfile::Minimal,
+            "strict" => HookProfile::Strict,
+            _ => HookProfile::Standard,
+        };
+    }
+    // 2. Config file
+    match super::config::CONFIG.hook.profile.to_lowercase().as_str() {
         "minimal" => HookProfile::Minimal,
         "strict" => HookProfile::Strict,
         _ => HookProfile::Standard,
@@ -204,23 +210,8 @@ impl Default for ScoreDimensions {
 
 // ── Constants ────────────────────────────────────────
 
-pub const SCORE_WEIGHTS: (f64, f64, f64) = (0.5, 0.3, 0.2); // success, quality, cost
-
-pub const STAGNATION_LIMIT: u64 = 3;
-pub const IMPROVEMENT_THRESHOLD: f64 = 0.05;
-pub const MAX_EVOLVED_SKILLS: usize = 10;
-
-pub const REPEATED_ERROR_MIN: u64 = 3;
-pub const FTB_LOOKAHEAD: usize = 3;
-pub const FTB_MIN_CYCLES: u64 = 2;
-pub const DEBUG_LOOP_MIN: u64 = 5;
-pub const THRASH_MIN_EDITS: u64 = 3;
-pub const THRASH_MIN_ERRORS: u64 = 3;
-
-pub const WEAK_TOOL_RATE: f64 = 0.6;
-pub const WEAK_TOOL_MIN_OBS: u64 = 5;
-pub const HIGH_FREQ_ERROR_MIN: u64 = 5;
-
+// Tunable parameters are now in ~/.harness/config.toml (see config.rs).
+// Profile assignments for each hook module:
 pub const PROFILE_GUARD: HookProfile = HookProfile::Minimal;
 pub const PROFILE_OBSERVE: HookProfile = HookProfile::Minimal;
 pub const PROFILE_POLISH: HookProfile = HookProfile::Standard;
@@ -699,9 +690,10 @@ pub fn session_id() -> String {
 }
 
 pub fn compute_score(dims: &ScoreDimensions) -> f64 {
-    let raw = SCORE_WEIGHTS.0 * dims.tool_success
-        + SCORE_WEIGHTS.1 * dims.output_quality
-        + SCORE_WEIGHTS.2 * dims.execution_cost;
+    let w = &super::config::CONFIG.scoring.weights;
+    let raw = w[0] * dims.tool_success
+        + w[1] * dims.output_quality
+        + w[2] * dims.execution_cost;
     (raw * 1000.0).round() / 1000.0
 }
 

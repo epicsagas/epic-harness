@@ -396,7 +396,7 @@ epic resume | guard | polish | observe | snapshot | reflect
 
 ### Hook Profiles
 
-Control which hooks run via `EPIC_HOOK_PROFILE` environment variable:
+Control which hooks run via `~/.harness/config.toml` (or `EPIC_HOOK_PROFILE` env var as override):
 
 | Profile | Level | Active hooks |
 |---------|-------|-------------|
@@ -405,7 +405,12 @@ Control which hooks run via `EPIC_HOOK_PROFILE` environment variable:
 | `strict` | 2 | all hooks + future strict-only checks |
 
 ```bash
-EPIC_HOOK_PROFILE=minimal epic-harness observe  # skip polish/reflect/snapshot overhead
+# Via config file (persistent)
+echo '[hook]
+profile = "minimal"' > ~/.harness/config.toml
+
+# Or via env var (one-shot override)
+EPIC_HOOK_PROFILE=minimal epic-harness observe
 ```
 | **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
 
@@ -633,6 +638,47 @@ Project-specific data lives in your home directory. This survives project deleti
 ```
 
 You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
+
+## Configuration
+
+All tunable parameters are in `~/.harness/config.toml`. If the file is absent, hardcoded defaults are used.
+
+```toml
+# ~/.harness/config.toml
+# Priority: env var (EPIC_HOOK_PROFILE) > this file > hardcoded defaults
+
+[hook]
+# Hook execution profile: "minimal" | "standard" | "strict"
+#   minimal  — guard, observe, resume only
+#   standard — above + polish, reflect, snapshot
+#   strict   — all hooks + future strict-only checks
+profile = "standard"
+
+# Show file-type-aware investigation hints after Edit/Write
+gateguard_hints = true
+
+[scoring]
+# Tool call scoring weights: [success, quality, cost]
+weights = [0.5, 0.3, 0.2]
+
+[evolution]
+max_skills = 10                # Max auto-evolved skills
+stagnation_limit = 3           # Sessions without improvement before rollback
+improvement_threshold = 0.05   # 5% improvement needed per session
+gated_promotion_min = 3        # Min observations before skill promotion
+
+[pattern]
+# Pattern detection thresholds — defaults work well, only adjust for specific needs
+# repeated_error_min = 3       # Same error N+ times → pattern
+# debug_loop_min = 5           # Same file N+ ops → loop
+# graduated_scope_skip = 0.90  # Score ≥ this → skip seeding
+# graduated_scope_moderate = 0.70  # Score ≥ this → moderate seeding
+
+[instinct]
+# confidence_threshold = 0.8   # Min confidence for instinct promotion
+# promotion_min_projects = 2   # Projects needed for global promotion
+# max_instincts = 20           # Max instinct nodes globally
+```
 
 ## Development
 

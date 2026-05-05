@@ -6,22 +6,11 @@ use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
 
 use super::common::*;
+use super::config::CONFIG;
 use super::mem::store;
 use super::telemetry::{SessionTrend, Telemetry};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
-
-// ── Graduated Scope Thresholds ───────────────────────
-const GRADUATED_SCOPE_SKIP: f64 = 0.90;
-const GRADUATED_SCOPE_MODERATE: f64 = 0.70;
-
-// ── Instinct-Based Learning (R12) ───────────────────
-const INSTINCT_CONFIDENCE_THRESHOLD: f64 = 0.8;
-const INSTINCT_PROMOTION_MIN_PROJECTS: usize = 2;
-const INSTINCT_MAX_INSTINCTS: usize = 20;
-
-// ── Gated Promotion (R16) ──────────────────────────
-const GATED_PROMOTION_MIN: u64 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PromotionCounter {
@@ -48,7 +37,7 @@ fn save_promotion_counters(counters: &PromotionCounter) {
 fn check_promotion(name: &str, counters: &mut PromotionCounter) -> bool {
     let count = counters.counts.entry(name.into()).or_insert(0);
     *count += 1;
-    *count >= GATED_PROMOTION_MIN
+    *count >= CONFIG.evolution.gated_promotion_min
 }
 
 // ── R14: Solver-Proposes + Curator Pattern ──────────
@@ -345,7 +334,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 streak_category = curr.failure_category.clone().unwrap_or_default();
                 prev_hash = curr_hash;
             } else {
-                if streak >= REPEATED_ERROR_MIN {
+                if streak >= CONFIG.pattern.repeated_error_min {
                     let hash_note = if !prev_hash.is_empty() {
                         format!(" [hash:{prev_hash}]")
                     } else {
@@ -363,7 +352,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 prev_hash.clear();
             }
         }
-        if streak >= REPEATED_ERROR_MIN {
+        if streak >= CONFIG.pattern.repeated_error_min {
             let hash_note = if !prev_hash.is_empty() {
                 format!(" [hash:{prev_hash}]")
             } else {
@@ -404,7 +393,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                     .unwrap_or(file);
                 for next in scored
                     .iter()
-                    .take((i + FTB_LOOKAHEAD + 1).min(scored.len()))
+                    .take((i + CONFIG.pattern.ftb_lookahead + 1).min(scored.len()))
                     .skip(i + 1)
                 {
                     if next.result.as_deref() == Some("error") && next.tool_category == "bash" {
@@ -419,7 +408,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
         }
         let ftb_entries: Vec<_> = ftb_files
             .iter()
-            .filter(|(_, c)| **c >= FTB_MIN_CYCLES)
+            .filter(|(_, c)| **c >= CONFIG.pattern.ftb_min_cycles)
             .collect();
         if !ftb_entries.is_empty() {
             let files: Vec<String> = ftb_entries.iter().map(|(f, _)| f.to_string()).collect();
@@ -447,7 +436,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             if !file.is_empty() && file == prev_file {
                 run_length += 1;
             } else {
-                if run_length >= DEBUG_LOOP_MIN && !prev_file.is_empty() {
+                if run_length >= CONFIG.pattern.debug_loop_min && !prev_file.is_empty() {
                     let entry = file_runs.entry(prev_file.clone()).or_default();
                     *entry = (*entry).max(run_length);
                 }
@@ -455,7 +444,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 run_length = 1;
             }
         }
-        if run_length >= DEBUG_LOOP_MIN && !prev_file.is_empty() {
+        if run_length >= CONFIG.pattern.debug_loop_min && !prev_file.is_empty() {
             let entry = file_runs.entry(prev_file.clone()).or_default();
             *entry = (*entry).max(run_length);
         }
@@ -496,7 +485,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             }
         }
         for (file, (edits, errors)) in &file_stats {
-            if *edits >= THRASH_MIN_EDITS && *errors >= THRASH_MIN_ERRORS {
+            if *edits >= CONFIG.pattern.thrash_min_edits && *errors >= CONFIG.pattern.thrash_min_errors {
                 let basename = Path::new(file)
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -527,7 +516,7 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
 
     let best = metrics.best_score.unwrap_or(0.0);
     let improvement = current_score - best;
-    if improvement >= IMPROVEMENT_THRESHOLD {
+    if improvement >= CONFIG.evolution.improvement_threshold {
         // Improved! Backup evolved skills
         let evolved = evolved_dir();
         let backup = evolved_backup_dir();
@@ -540,7 +529,7 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
 
     // No improvement
     metrics.stagnation_count += 1;
-    if metrics.stagnation_count >= STAGNATION_LIMIT {
+    if metrics.stagnation_count >= CONFIG.evolution.stagnation_limit {
         let degradation = best - current_score;
         if degradation > 0.05 || metrics.best_score.unwrap_or(0.0) < 0.90 {
             let backup = evolved_backup_dir();
@@ -553,7 +542,8 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
                 hint(
                     "reflect",
                     &format!(
-                        "Stagnation detected ({STAGNATION_LIMIT} sessions). Rolled back evolved skills."
+                        "Stagnation detected ({} sessions). Rolled back evolved skills.",
+                        CONFIG.evolution.stagnation_limit
                     ),
                 );
                 return (true, false, before_count);
@@ -576,9 +566,9 @@ fn safe_avg_score(score: f64) -> f64 {
 
 #[cfg(test)]
 fn seeding_scope(avg_score: f64) -> &'static str {
-    if avg_score >= GRADUATED_SCOPE_SKIP {
+    if avg_score >= CONFIG.pattern.graduated_scope_skip {
         "skip"
-    } else if avg_score >= GRADUATED_SCOPE_MODERATE {
+    } else if avg_score >= CONFIG.pattern.graduated_scope_moderate {
         "moderate"
     } else {
         "full"
@@ -589,12 +579,13 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
     let avg_score = analysis.avg_score;
 
     // Graduated Scope: skip seeding for excellent sessions
-    if avg_score >= GRADUATED_SCOPE_SKIP {
-        hint("reflect", &format!("Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {GRADUATED_SCOPE_SKIP})"));
+    if avg_score >= CONFIG.pattern.graduated_scope_skip {
+        let skip = CONFIG.pattern.graduated_scope_skip;
+        hint("reflect", &format!("Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {skip})"));
         return 0;
     }
 
-    let full_seeding = avg_score < GRADUATED_SCOPE_MODERATE;
+    let full_seeding = avg_score < CONFIG.pattern.graduated_scope_moderate;
     if !full_seeding {
         hint("reflect", &format!("Graduated Scope: moderate seeding (avg_score={avg_score:.3})"));
     }
@@ -602,7 +593,7 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
     let mut counters = load_promotion_counters();
     let mut seeded = 0u64;
     let mut promoted_count = 0u64;
-    let cap = MAX_EVOLVED_SKILLS.saturating_sub(existing.len());
+    let cap = CONFIG.evolution.max_skills.saturating_sub(existing.len());
 
     // Build proposals (solver role)
     let proposals = build_proposals(analysis);
@@ -646,8 +637,9 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
 
     save_promotion_counters(&counters);
     if promoted_count > 0 {
+        let min_obs = CONFIG.evolution.gated_promotion_min;
         hint("reflect", &format!(
-            "Gated Promotion: {promoted_count} skill(s) promoted after {GATED_PROMOTION_MIN}+ observations"
+            "Gated Promotion: {promoted_count} skill(s) promoted after {min_obs}+ observations"
         ));
     }
     seeded
@@ -938,8 +930,8 @@ fn gate_skills() {
     // Enforce cap
     let mut remaining = list_dirs(&evolved);
     remaining.sort();
-    if remaining.len() > MAX_EVOLVED_SKILLS {
-        let excess = &remaining[..remaining.len() - MAX_EVOLVED_SKILLS];
+    if remaining.len() > CONFIG.evolution.max_skills {
+        let excess = &remaining[..remaining.len() - CONFIG.evolution.max_skills];
         for name in excess {
             rm_dir(&evolved.join(name));
         }
@@ -1089,7 +1081,7 @@ fn ingest_to_memory(
     // 8c. Weak tool nodes
     for (cat, stats) in &analysis.per_tool_stats {
         let rate = if stats.total > 0 { stats.successes as f64 / stats.total as f64 } else { 1.0 };
-        if rate >= WEAK_TOOL_RATE || stats.total < WEAK_TOOL_MIN_OBS {
+        if rate >= CONFIG.pattern.weak_tool_rate || stats.total < CONFIG.pattern.weak_tool_min_obs {
             continue;
         }
         let title = format!("{}: weak tool {} ({:.0}%)", slug, cat, rate * 100.0);
@@ -1120,7 +1112,7 @@ fn ingest_to_memory(
 
     // 8d. High-frequency error nodes
     for (category, count) in &analysis.per_error_stats {
-        if *count < HIGH_FREQ_ERROR_MIN {
+        if *count < CONFIG.pattern.high_freq_error_min {
             continue;
         }
         let title = format!("{}: high-freq {} ({}x)", slug, category, count);
@@ -1230,7 +1222,7 @@ fn extract_instincts(observations: &[ObsRecord], analysis: &SessionAnalysis) -> 
         }
     }
 
-    instincts.truncate(INSTINCT_MAX_INSTINCTS);
+    instincts.truncate(CONFIG.instinct.max_instincts);
     instincts
 }
 
@@ -1246,13 +1238,13 @@ fn promote_instincts_to_global(instincts: &[Instinct]) -> u64 {
 
     let mut promoted = 0u64;
     for instinct in instincts {
-        if instinct.confidence < INSTINCT_CONFIDENCE_THRESHOLD {
+        if instinct.confidence < CONFIG.instinct.confidence_threshold {
             continue;
         }
 
         // Only promote instincts seen across multiple projects (or single-project
         // when the threshold is set to 1 for early bootstrapping).
-        if instinct.projects.len() < INSTINCT_PROMOTION_MIN_PROJECTS.min(1) {
+        if instinct.projects.len() < CONFIG.instinct.promotion_min_projects.min(1) {
             continue;
         }
 
@@ -2195,7 +2187,7 @@ mod tests {
             .map(|_| make_obs("Bash", "bash", "success", 0.9, Some("ls")))
             .collect();
         let mut per_tool = HashMap::new();
-        // Create more tool categories than INSTINCT_MAX_INSTINCTS
+        // Create more tool categories than CONFIG.instinct.max_instincts
         for i in 0..30 {
             let cat = format!("tool-{}", i);
             per_tool.insert(
@@ -2218,9 +2210,9 @@ mod tests {
         };
         let instincts = extract_instincts(&obs, &analysis);
         assert!(
-            instincts.len() <= INSTINCT_MAX_INSTINCTS,
-            "should not exceed INSTINCT_MAX_INSTINCTS ({})",
-            INSTINCT_MAX_INSTINCTS
+            instincts.len() <= CONFIG.instinct.max_instincts,
+            "should not exceed max_instincts ({})",
+            CONFIG.instinct.max_instincts
         );
     }
 
@@ -2343,16 +2335,16 @@ mod tests {
     fn check_promotion_requires_min_observations() {
         let mut counters = PromotionCounter::default();
         // Below threshold: should return false each time
-        for _ in 0..GATED_PROMOTION_MIN - 1 {
+        for _ in 0..CONFIG.evolution.gated_promotion_min - 1 {
             assert!(
                 !check_promotion("evo-fix-type-error", &mut counters),
-                "should not be promoted before reaching GATED_PROMOTION_MIN"
+                "should not be promoted before reaching gated_promotion_min"
             );
         }
         // Exactly at threshold: should return true
         assert!(
             check_promotion("evo-fix-type-error", &mut counters),
-            "should be promoted once GATED_PROMOTION_MIN is reached"
+            "should be promoted once gated_promotion_min is reached"
         );
     }
 
