@@ -30,26 +30,50 @@ Identify what changed against the base branch:
 git diff --stat $(git merge-base HEAD main)  # or master / base branch
 ```
 
-### Step 2: Launch 3 parallel agents
+### Step 2: Adaptive expert dispatch
 
-**Agent 1 — Reviewer** (use `agents/reviewer.md`):
-- Code quality, logic correctness, style consistency
-- Look for bugs, race conditions, edge cases
-- Check test coverage for changed code
-- Verify each spec Requirement is addressed in the diff
+First, classify changed files by scope:
+```bash
+git diff --name-only $(git merge-base HEAD main)
+```
 
-**Agent 2 — Auditor** (use `agents/auditor.md`):
-- Security: injection, auth bypass, secret exposure, OWASP Top 10
-- Performance: N+1 queries, memory leaks, unnecessary computation
-- Refer to `references/security.md` and `references/performance.md`
+**Scope detection rules:**
+| Pattern | Scope | Extra checks |
+|---------|-------|-------------|
+| `*.api.*`, `*route*`, `*controller*`, `*handler*` | API | + Contract testing, request validation |
+| `*.tsx`, `*.jsx`, `*.vue`, `*.svelte`, `*.css` | Frontend | + Accessibility, visual regression hints |
+| `*.sql`, `*migration*`, `*schema*` | Database | + Migration safety, rollback plan |
+| `*.rs`, `Cargo.toml`, `*.go`, `go.mod` | Backend | + Build verification, type safety |
+| `*.test.*`, `*.spec.*`, `__tests__/` | Tests | + Coverage delta, flaky test detection |
+| `Dockerfile*`, `*.yml`, `*.yaml`, `Makefile` | Infra | + Config validation, secret detection |
+| `*.md`, `*.txt` | Docs | + Link checking, freshness |
 
-**Agent 3 — Test runner**:
-- Run the full test suite
-- Verify each Acceptance Criterion (AC1, AC2, ...) is demonstrably met
-- Report coverage delta
-- Flag any flaky tests
+**Always run (core 3 agents):**
 
-Launch all three with `run_in_background: true`.
+1. **Reviewer** (use `agents/reviewer.md`):
+   - Code quality, logic correctness, style consistency
+   - Look for bugs, race conditions, edge cases
+   - Check test coverage for changed code
+   - Verify each spec Requirement is addressed in the diff
+
+2. **Auditor** (use `agents/auditor.md`):
+   - Security: injection, auth bypass, secret exposure, OWASP Top 10
+   - Performance: N+1 queries, memory leaks, unnecessary computation
+   - Refer to `references/security.md` and `references/performance.md`
+
+3. **Test runner**:
+   - Run the full test suite
+   - Verify each Acceptance Criterion (AC1, AC2, ...) is demonstrably met
+   - Report coverage delta
+   - Flag any flaky tests
+
+**Conditionally add (scope-based):**
+- **API scope detected**: Add contract check — verify request/response schemas, test edge cases (empty, malformed, oversized inputs)
+- **Frontend scope detected**: Add accessibility check — semantic HTML, ARIA labels, keyboard navigation
+- **Database scope detected**: Add migration check — verify `up` has matching `down`, check for destructive operations (DROP, data loss), suggest transaction wrapping
+- **Infra scope detected**: Add config check — validate YAML/TOML syntax, check for hardcoded secrets, verify environment variable references
+
+Launch all agents with `run_in_background: true`.
 
 ### Step 3: Synthesize
 
@@ -59,6 +83,10 @@ Combine findings into a single report:
 ## Check Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - Branch: {current branch}
+
+### Change Scope
+- Scopes detected: [API, Frontend, Backend, Database, Infra, Docs, Tests]
+- Scope-specific checks: [list what ran]
 
 ### Code Quality: [PASS/WARN/FAIL]
 ### Security: [PASS/WARN/FAIL]

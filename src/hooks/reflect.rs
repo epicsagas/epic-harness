@@ -9,6 +9,10 @@ use super::telemetry::{SessionTrend, Telemetry};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
+// ── Graduated Scope Thresholds ───────────────────────
+const GRADUATED_SCOPE_SKIP: f64 = 0.90;
+const GRADUATED_SCOPE_MODERATE: f64 = 0.70;
+
 // ── Phase 1: Session Analysis ───────────────────────
 
 fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
@@ -407,11 +411,35 @@ fn safe_avg_score(score: f64) -> f64 {
 
 // ── Phase 4: Skill Seeding ──────────────────────────
 
+#[cfg(test)]
+fn seeding_scope(avg_score: f64) -> &'static str {
+    if avg_score >= GRADUATED_SCOPE_SKIP {
+        "skip"
+    } else if avg_score >= GRADUATED_SCOPE_MODERATE {
+        "moderate"
+    } else {
+        "full"
+    }
+}
+
 fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
+    let avg_score = analysis.avg_score;
+
+    // Graduated Scope: skip seeding for excellent sessions
+    if avg_score >= GRADUATED_SCOPE_SKIP {
+        hint("reflect", &format!("Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {GRADUATED_SCOPE_SKIP})"));
+        return 0;
+    }
+
+    let full_seeding = avg_score < GRADUATED_SCOPE_MODERATE;
+    if !full_seeding {
+        hint("reflect", &format!("Graduated Scope: moderate seeding (avg_score={avg_score:.3})"));
+    }
+
     let mut seeded = 0u64;
     let cap = MAX_EVOLVED_SKILLS.saturating_sub(existing.len());
 
-    // 4a. From failure patterns
+    // 4a. From failure patterns (always runs when score < skip threshold)
     for pattern in &analysis.failure_patterns {
         if seeded as usize >= cap {
             break;
@@ -424,7 +452,7 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
         seeded += 1;
     }
 
-    // 4b. From weak tools
+    // 4b. From weak tools (always runs when score < skip threshold)
     for stats in analysis.per_tool_stats.values() {
         if seeded as usize >= cap {
             break;
@@ -445,38 +473,41 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
         seeded += 1;
     }
 
-    // 4c. From weak extensions
-    for (ext, stats) in &analysis.per_ext_stats {
-        if seeded as usize >= cap {
-            break;
+    // 4c & 4d: Only seed from weak extensions and high-freq errors when score is low
+    if full_seeding {
+        // 4c. From weak extensions
+        for (ext, stats) in &analysis.per_ext_stats {
+            if seeded as usize >= cap {
+                break;
+            }
+            if stats.success_rate >= WEAK_EXT_RATE || stats.total < WEAK_EXT_MIN_OBS || ext == "unknown"
+            {
+                continue;
+            }
+            let clean = ext.trim_start_matches('.');
+            let name = format!("evo-{clean}-care");
+            if existing.contains(&name) {
+                continue;
+            }
+            write_skill(&name, &build_ext_skill(ext, stats));
+            seeded += 1;
         }
-        if stats.success_rate >= WEAK_EXT_RATE || stats.total < WEAK_EXT_MIN_OBS || ext == "unknown"
-        {
-            continue;
-        }
-        let clean = ext.trim_start_matches('.');
-        let name = format!("evo-{clean}-care");
-        if existing.contains(&name) {
-            continue;
-        }
-        write_skill(&name, &build_ext_skill(ext, stats));
-        seeded += 1;
-    }
 
-    // 4d. From high-frequency errors
-    for (category, count) in &analysis.per_error_stats {
-        if seeded as usize >= cap {
-            break;
+        // 4d. From high-frequency errors
+        for (category, count) in &analysis.per_error_stats {
+            if seeded as usize >= cap {
+                break;
+            }
+            if *count < HIGH_FREQ_ERROR_MIN {
+                continue;
+            }
+            let name = format!("evo-fix-{}", category.replace('_', "-"));
+            if existing.contains(&name) {
+                continue;
+            }
+            write_skill(&name, &build_failure_skill(category, *count));
+            seeded += 1;
         }
-        if *count < HIGH_FREQ_ERROR_MIN {
-            continue;
-        }
-        let name = format!("evo-fix-{}", category.replace('_', "-"));
-        if existing.contains(&name) {
-            continue;
-        }
-        write_skill(&name, &build_failure_skill(category, *count));
-        seeded += 1;
     }
 
     seeded
@@ -1715,5 +1746,27 @@ mod tests {
     #[test]
     fn safe_avg_score_passes_through_zero() {
         assert_eq!(safe_avg_score(0.0), 0.0);
+    }
+
+    // ── seeding_scope (Graduated Scope) ─────────────
+    #[test]
+    fn seeding_scope_skip_when_excellent() {
+        assert_eq!(seeding_scope(0.90), "skip");
+        assert_eq!(seeding_scope(0.95), "skip");
+        assert_eq!(seeding_scope(1.00), "skip");
+    }
+
+    #[test]
+    fn seeding_scope_moderate_in_middle_range() {
+        assert_eq!(seeding_scope(0.70), "moderate");
+        assert_eq!(seeding_scope(0.80), "moderate");
+        assert_eq!(seeding_scope(0.89), "moderate");
+    }
+
+    #[test]
+    fn seeding_scope_full_when_low_score() {
+        assert_eq!(seeding_scope(0.69), "full");
+        assert_eq!(seeding_scope(0.50), "full");
+        assert_eq!(seeding_scope(0.0), "full");
     }
 }

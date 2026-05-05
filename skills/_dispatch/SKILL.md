@@ -115,3 +115,38 @@ Check `$HARNESS_DIR/evolved/` for project-specific auto-evolved skills. These ar
 - The evolution loop detected a real weakness in past sessions
 - Following the evolved skill's guidance should prevent repeat failures
 - If an evolved skill's advice conflicts with a static skill, **prefer the static skill** — evolved skills supplement, static skills are authoritative
+
+## Psychographic Adaptation
+
+When user preference data is available in harness-mem (psychographic nodes), adapt dispatch behavior:
+
+### 5-Dimension Profile
+
+| Dimension | Values | Effect on dispatch |
+|-----------|--------|-------------------|
+| `scope_appetite` | conservative / moderate / ambitious | conservative: smaller, safer changes. ambitious: larger refactors allowed |
+| `risk_tolerance` | cautious / balanced / bold | cautious: more verification steps. bold: fewer checkpoints |
+| `detail_preference` | brief / standard / thorough | brief: minimal output. thorough: detailed explanations |
+| `autonomy` | guided / collaborative / independent | guided: ask before each step. independent: execute autonomously |
+| `architecture_care` | pragmatic / balanced / principled | pragmatic: working > elegant. principled: patterns > shortcuts |
+
+### How to use
+
+1. At session start, call `mem_query` with type=psychographic to load profile
+2. If no profile exists, use defaults: moderate/balanced/standard/collaborative/balanced
+3. Apply profile dimensions to skill selection and execution parameters:
+
+**scope_appetite=conservative**: Prefer `simplify` skill. Flag changes touching >3 files.
+**risk_tolerance=cautious**: Run `verify` after every skill. Add extra test runs.
+**detail_preference=brief**: Skip explanatory output. Show only results and blockers.
+**autonomy=guided**: Present plan before execution. Ask at each decision point.
+**architecture_care=principled**: Trigger `council` skill for architectural decisions. Enforce pattern compliance.
+
+### Profile storage
+
+Store profiles using `mem_add` with:
+- type: "psychographic"
+- title: "user-profile: {project}"
+- tags: ["psychographic", "profile", project slug]
+- body: YAML-formatted 5-dimension values
+- importance: 0.8 (high — guides all behavior)

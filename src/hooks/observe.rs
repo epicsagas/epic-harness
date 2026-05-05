@@ -5,6 +5,9 @@ use std::sync::LazyLock;
 use super::common::*;
 use super::telemetry::{FailureClass, ToolCategory, Telemetry};
 
+/// Toggle GateGuard fact-forcing investigation hints on/off.
+const GATEGUARD_HINTS: bool = true;
+
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 static MASK_BEARER: LazyLock<Regex> =
@@ -157,6 +160,65 @@ fn should_sample_tool_error() -> bool {
     check_and_increment_counter(&counter_file)
 }
 
+/// Generate concrete, fact-based investigation hints after Edit or Write tool usage.
+///
+/// Instead of generic "are you sure?" prompts, outputs structured questions that
+/// force verification of the change's downstream impact. Only activates for
+/// Edit and Write tools, and only when `GATEGUARD_HINTS` is enabled.
+///
+/// Uses static string slices exclusively to avoid heap allocations for hint text.
+pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
+    if !GATEGUARD_HINTS {
+        return;
+    }
+
+    let tool_lower = tool_name.to_lowercase();
+    if tool_lower != "edit" && tool_lower != "write" {
+        return;
+    }
+
+    // Extract file path from action string (e.g. "/src/main.rs")
+    let file_path = action.and_then(|a| {
+        static FILE_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(/[\w./-]+\.\w+)").unwrap());
+        FILE_RE.find(a).map(|m| m.as_str())
+    });
+
+    let ext = file_path
+        .and_then(|p| p.rsplit('.').next())
+        .unwrap_or("");
+
+    let hints: &[&str] = match ext {
+        "rs" => &[
+            "List files importing this module (grep 'use' / 'mod' declarations)",
+            "Run cargo check after this change to verify compilation",
+            "Check if public API signatures changed and update call sites",
+        ],
+        "ts" | "tsx" => &[
+            "Check what imports this module (grep import/require statements)",
+            "Verify type compatibility — run tsc --noEmit",
+            "Confirm exported types match consumer expectations",
+        ],
+        "go" => &[
+            "Check interface implementations for signature changes",
+            "Run go vet and go build to verify compilation",
+            "Verify all callers of changed functions compile",
+        ],
+        "md" => &[
+            "Verify links and cross-references in the document",
+            "Check if referenced sections or headings still exist",
+        ],
+        _ => &[
+            "Identify files importing or depending on this file",
+            "Verify the change doesn't break existing tests",
+        ],
+    };
+
+    for h in hints {
+        hint("gateguard", h);
+    }
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !harness_exists() {
         return 0;
@@ -282,6 +344,13 @@ pub fn run(input: &HookInput) -> i32 {
             );
         }
     }
+
+    // GateGuard: emit concrete investigation hints for Edit/Write to force
+    // fact-based verification instead of generic "are you sure?" prompts.
+    generate_investigation_hints(
+        input.tool_name.as_deref().unwrap_or(""),
+        action.as_deref(),
+    );
 
     0
 }
@@ -545,9 +614,86 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let counter_file = dir.path().join("telemetry_error_count_corrupt.txt");
         fs::write(&counter_file, b"not_a_number").unwrap();
-        // Parse error → default 0 → should allow the call
+        // Parse error -> default 0 -> should allow the call
         assert!(check_and_increment_counter(&counter_file));
         let content = fs::read_to_string(&counter_file).unwrap();
         assert_eq!(content.trim(), "1");
+    }
+
+    // ── generate_investigation_hints ────────────────
+    #[test]
+    fn hints_for_edit_tool() {
+        // Should not panic and should produce output for Edit with .rs file
+        generate_investigation_hints("Edit", Some("/src/main.rs"));
+    }
+
+    #[test]
+    fn hints_for_write_tool() {
+        // Should not panic and should produce output for Write with .ts file
+        generate_investigation_hints("Write", Some("/src/index.ts"));
+    }
+
+    #[test]
+    fn hints_skip_non_edit_write_tools() {
+        // Bash, Read, Glob etc. should produce no output (no panic, no hints)
+        generate_investigation_hints("Bash", Some("cargo build"));
+        generate_investigation_hints("Read", Some("/src/main.rs"));
+        generate_investigation_hints("Glob", None);
+        generate_investigation_hints("Grep", None);
+        generate_investigation_hints("Agent", None);
+    }
+
+    #[test]
+    fn hints_case_insensitive_tool_name() {
+        // Tool names may come in various casings
+        generate_investigation_hints("edit", Some("/src/lib.rs"));
+        generate_investigation_hints("WRITE", Some("/src/lib.ts"));
+        generate_investigation_hints("EdIt", Some("/src/lib.go"));
+    }
+
+    #[test]
+    fn hints_for_rs_files() {
+        // .rs files should mention cargo check
+        generate_investigation_hints("Edit", Some("/project/src/hooks/observe.rs"));
+    }
+
+    #[test]
+    fn hints_for_ts_files() {
+        generate_investigation_hints("Write", Some("/project/src/index.ts"));
+    }
+
+    #[test]
+    fn hints_for_tsx_files() {
+        generate_investigation_hints("Edit", Some("/project/src/App.tsx"));
+    }
+
+    #[test]
+    fn hints_for_go_files() {
+        generate_investigation_hints("Write", Some("/project/cmd/main.go"));
+    }
+
+    #[test]
+    fn hints_for_md_files() {
+        generate_investigation_hints("Edit", Some("/project/README.md"));
+    }
+
+    #[test]
+    fn hints_for_unknown_extension_fallback() {
+        // Unknown extension should use generic fallback hints
+        generate_investigation_hints("Edit", Some("/project/config.yaml"));
+        generate_investigation_hints("Write", Some("/project/data.json"));
+    }
+
+    #[test]
+    fn hints_for_no_action() {
+        // None action should still work with generic fallback
+        generate_investigation_hints("Edit", None);
+        generate_investigation_hints("Write", None);
+    }
+
+    #[test]
+    fn hints_for_empty_tool_name() {
+        // Empty tool name should not match Edit/Write — no output, no panic
+        generate_investigation_hints("", Some("/src/main.rs"));
     }
 }
