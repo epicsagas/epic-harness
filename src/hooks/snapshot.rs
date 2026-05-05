@@ -72,6 +72,9 @@ fn get_obs_summary() -> Option<String> {
 }
 
 pub fn run(input: &HookInput) -> i32 {
+    if !should_run(PROFILE_SNAPSHOT) {
+        return 0;
+    }
     if !harness_exists() {
         return 0;
     }

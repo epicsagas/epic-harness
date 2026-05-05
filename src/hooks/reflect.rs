@@ -23,8 +23,6 @@ const INSTINCT_MAX_INSTINCTS: usize = 20;
 // ── Gated Promotion (R16) ──────────────────────────
 const GATED_PROMOTION_MIN: u64 = 3;
 
-// ── Gated Promotion (R16) ──────────────────────────
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct PromotionCounter {
     /// Map of skill name -> number of sessions that observed this pattern
@@ -653,13 +651,6 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
         ));
     }
     seeded
-}
-
-#[allow(dead_code)] // Kept for backward compatibility; prefer write_skill_with_meta()
-fn write_skill(name: &str, content: &str) {
-    let dir = evolved_dir().join(name);
-    ensure_dir(&dir);
-    let _ = fs::write(dir.join("SKILL.md"), content);
 }
 
 fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f64) {
@@ -1333,6 +1324,9 @@ struct WorkspaceManifest {
 // ── Main Hook ───────────────────────────────────────
 
 pub fn run(_input: &HookInput) -> i32 {
+    if !should_run(PROFILE_REFLECT) {
+        return 0;
+    }
     if !harness_exists() {
         return 0;
     }

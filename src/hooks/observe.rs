@@ -220,6 +220,9 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
 }
 
 pub fn run(input: &HookInput) -> i32 {
+    if !should_run(PROFILE_OBSERVE) {
+        return 0;
+    }
     if !harness_exists() {
         return 0;
     }

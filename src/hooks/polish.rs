@@ -154,6 +154,10 @@ fn format_go(file_path: &str, wd: &Path) {
 }
 
 pub fn run(input: &HookInput) -> i32 {
+    if !should_run(PROFILE_POLISH) {
+        return 0;
+    }
+
     let file_path = input
         .tool_input
         .as_ref()

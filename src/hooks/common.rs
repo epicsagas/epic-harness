@@ -219,8 +219,6 @@ pub const THRASH_MIN_ERRORS: u64 = 3;
 
 pub const WEAK_TOOL_RATE: f64 = 0.6;
 pub const WEAK_TOOL_MIN_OBS: u64 = 5;
-pub const WEAK_EXT_RATE: f64 = 0.5;
-pub const WEAK_EXT_MIN_OBS: u64 = 3;
 pub const HIGH_FREQ_ERROR_MIN: u64 = 5;
 
 pub const PROFILE_GUARD: HookProfile = HookProfile::Minimal;
@@ -228,6 +226,7 @@ pub const PROFILE_OBSERVE: HookProfile = HookProfile::Minimal;
 pub const PROFILE_POLISH: HookProfile = HookProfile::Standard;
 pub const PROFILE_REFLECT: HookProfile = HookProfile::Standard;
 pub const PROFILE_SNAPSHOT: HookProfile = HookProfile::Standard;
+pub const PROFILE_RESUME: HookProfile = HookProfile::Minimal;
 
 // ── Paths ────────────────────────────────────────────
 
@@ -1102,17 +1101,15 @@ warned:
     }
 
     #[test]
-    fn current_hook_profile_default_standard() {
-        // Clear env to ensure default is Standard
-        // SAFETY: Test-only; single-threaded test modifying a benign env var.
-        unsafe { std::env::remove_var("EPIC_HOOK_PROFILE") };
-        assert_eq!(current_hook_profile(), HookProfile::Standard);
-    }
-
-    #[test]
-    fn current_hook_profile_env_parsing() {
-        // SAFETY: Test-only; single-threaded test modifying a benign env var.
+    fn hook_profile_all_cases() {
+        // SAFETY: All env-var mutations are serialized within this single test
+        // to avoid cross-test race conditions on EPIC_HOOK_PROFILE.
         unsafe {
+            // Default: no env → Standard
+            std::env::remove_var("EPIC_HOOK_PROFILE");
+            assert_eq!(current_hook_profile(), HookProfile::Standard);
+
+            // Env parsing
             std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
             assert_eq!(current_hook_profile(), HookProfile::Minimal);
             std::env::set_var("EPIC_HOOK_PROFILE", "STRICT");
@@ -1121,49 +1118,32 @@ warned:
             assert_eq!(current_hook_profile(), HookProfile::Standard);
             std::env::set_var("EPIC_HOOK_PROFILE", "unknown");
             assert_eq!(current_hook_profile(), HookProfile::Standard);
-            // Clean up
-            std::env::remove_var("EPIC_HOOK_PROFILE");
-        }
-    }
 
-    #[test]
-    fn should_run_minimal_hook_runs_in_all_profiles() {
-        // SAFETY: Test-only; single-threaded test modifying a benign env var.
-        unsafe {
+            // should_run: Minimal hooks run in all profiles
             std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
             assert!(should_run(HookProfile::Minimal));
             std::env::set_var("EPIC_HOOK_PROFILE", "standard");
             assert!(should_run(HookProfile::Minimal));
             std::env::set_var("EPIC_HOOK_PROFILE", "strict");
             assert!(should_run(HookProfile::Minimal));
-            std::env::remove_var("EPIC_HOOK_PROFILE");
-        }
-    }
 
-    #[test]
-    fn should_run_strict_hook_only_in_strict() {
-        // SAFETY: Test-only; single-threaded test modifying a benign env var.
-        unsafe {
+            // should_run: Strict hooks only in strict
             std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
             assert!(!should_run(HookProfile::Strict));
             std::env::set_var("EPIC_HOOK_PROFILE", "standard");
             assert!(!should_run(HookProfile::Strict));
             std::env::set_var("EPIC_HOOK_PROFILE", "strict");
             assert!(should_run(HookProfile::Strict));
-            std::env::remove_var("EPIC_HOOK_PROFILE");
-        }
-    }
 
-    #[test]
-    fn should_run_standard_hook_skipped_in_minimal() {
-        // SAFETY: Test-only; single-threaded test modifying a benign env var.
-        unsafe {
+            // should_run: Standard hooks skipped in minimal
             std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
             assert!(!should_run(HookProfile::Standard));
             std::env::set_var("EPIC_HOOK_PROFILE", "standard");
             assert!(should_run(HookProfile::Standard));
             std::env::set_var("EPIC_HOOK_PROFILE", "strict");
             assert!(should_run(HookProfile::Standard));
+
+            // Clean up
             std::env::remove_var("EPIC_HOOK_PROFILE");
         }
     }
@@ -1175,5 +1155,6 @@ warned:
         assert_eq!(PROFILE_POLISH, HookProfile::Standard);
         assert_eq!(PROFILE_REFLECT, HookProfile::Standard);
         assert_eq!(PROFILE_SNAPSHOT, HookProfile::Standard);
+        assert_eq!(PROFILE_RESUME, HookProfile::Minimal);
     }
 }
