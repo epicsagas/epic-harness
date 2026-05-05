@@ -5,6 +5,10 @@ description: "Pre-completion verification. Use before marking any task done, bef
 
 # Verify — Pre-Completion Check
 
+## Iron Law
+
+NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE. "I tested it" without output is an unverified claim.
+
 ## When to Trigger
 - Before a `/go` subagent reports "done"
 - Before `/ship` creates a PR
