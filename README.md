@@ -21,6 +21,61 @@ A Claude Code plugin that **replaces 30+ commands with 6**, **auto-triggers skil
   <img src="./assets/features.jpg" alt="epic harness features" width="100%" />
 </p>
 
+## Install
+
+> **First time?** Read the [Quick Start Guide (5 min)](QUICKSTART.md).
+
+```bash
+# Claude Code
+/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+
+# Any other tool
+cargo install epic-harness && epic install
+```
+
+| Environment | Method |
+|-------------|--------|
+| **Claude Code** | Plugin marketplace (above) |
+| **macOS** | `brew install epicsagas/tap/epic-harness` |
+| **Any (with Rust)** | `cargo install epic-harness` |
+| **From source** | `git clone` + `cargo install --path .` |
+
+Prerequisites: **Git**. Source/binary installs also need the [Rust toolchain](https://rustup.rs). Pre-built binaries need [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
+
+### `epic install` — setup wizard
+
+After installing the binary, run `epic install` (or `epic install claude`) to:
+
+1. Create `~/.harness/` directory structure
+2. Sync commands, skills, and agents to the tool's config directory
+3. Register the MCP server (harness-mem) for Claude Code
+4. Create `~/.harness/config.toml` with defaults if absent
+
+On Claude Code, `hooks/setup.sh` auto-runs on session start and installs the binary if missing. No manual step needed after the initial clone.
+
+### Other tools
+
+```bash
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install              # Interactive menu
+```
+
+Integration files are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
+
+### Verify
+
+```bash
+epic --version              # Binary installed
+ls ~/.harness/              # Data directory exists
+```
+
+Inside a Claude Code session: `/evolve status`
+
 ## Architecture: 4-Ring Model
 
 ```
@@ -37,199 +92,6 @@ Ring 3 — Evolve (self-improving)
   Observe tool usage → analyze failures → auto-generate skills → gate → reload
 ```
 
-## Install
-
-```
-# Claude Code plugin (recommended)
-/plugin marketplace add epicsagas/plugins
-/plugin install epic@epicsagas
-```
-
-```bash
-# Or from source
-git clone https://github.com/epicsagas/epic-harness.git
-cd epic-harness
-cargo install --path .
-epic install
-```
-
-### Install from binary
-
-```bash
-# Homebrew (macOS)
-brew install epicsagas/tap/epic-harness
-
-# From crates.io
-cargo install epic-harness
-
-# Pre-built binary (faster, no compile)
-cargo binstall epic-harness
-
-# From source
-cargo install --path .
-```
-
-The binary is automatically detected by hooks. If absent, hooks fall back to Node.js.
-
-## Multi-Tool Support
-
-epic-harness works with Claude Code and 6 additional AI coding tools. All tools share the same `~/.harness/projects/{slug}/` data directory.
-
-| Tool | Ring 0 Hooks | Commands/Prompts | Skills | Agents |
-|------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
-| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
-| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
-| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
-| **Cline** | ✓ Full⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
-
-¹ Requires `codex_hooks = true` in `~/.codex/config.toml`; PostToolUse intercepts Bash only  
-² No `PreToolUse` equivalent — guard runs at `BeforeModel` level  
-³ Requires Cursor 1.7+  
-⁴ JS plugin: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`  
-⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel hook scripts  
-⁶ No hook system — conventions injected via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
-
-### Install for other tools
-
-```bash
-# Interactive menu (select which tools to install)
-epic install
-
-# Direct install
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
-epic install opencode     # OpenCode    → ~/.config/opencode/
-epic install cline        # Cline       → ~/Documents/Cline/Rules/
-epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-
-# Project-local install
-epic install cursor --local
-
-# Preview without changes
-epic install gemini --dry-run
-```
-
-Integration files in the tool directory (`hooks.json`, commands, agents, skills, rules, …) are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
-
-> **Claude Code note**: `epic install claude` also syncs commands/skills/agents directly into `~/.claude/plugins/cache/epicsagas/epic/*/`, so local binary changes take effect immediately without a new npm release.
-
-## Unified Memory
-
-All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). No Node.js or external runtime required.
-
-### Smart Recall
-
-Memory retrieval uses **composite scoring** instead of dumping the latest N entries:
-
-```
-score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
-```
-
-- **Importance** auto-set by node type: decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
-- **Access tracking**: frequently recalled memories naturally float to the top
-- **Gradual decay**: unused memories lose importance over time (10% per 30 days, floor 0.05)
-- **Graph augmentation**: recall follows 1-hop edges to surface related context
-
-### CLI
-
-```bash
-# Smart recall — relevance-ranked for your current task
-harness mem recall "auth refactor" --project my-project
-
-# Add a memory node (importance auto-set by type, or explicit)
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
-
-# Filter query (includes importance + access_count)
-harness mem query --type decision --project my-project
-
-# Full-text search (ranked by importance)
-harness mem search "JWT"
-
-# Smart context (importance-weighted, not just latest)
-harness mem context --project my-project
-
-# Knowledge graph web UI
-harness mem serve          # → http://localhost:7700
-
-# Register as MCP server in Claude Code (no Node.js needed)
-harness mem mcp-install
-
-# Export all nodes to Markdown for Git backup
-harness mem export --out ./docs/memory
-```
-
-### MCP Tools (6)
-
-When registered as an MCP server (`harness mem mcp-install`), agents can call these tools directly:
-
-| Tool | Purpose |
-|------|---------|
-| `mem_recall` | **Primary.** Smart contextual recall with hint + project + graph neighbors |
-| `mem_add` | Add node with auto-importance by type (or explicit 0.0–1.0) |
-| `mem_search` | FTS5 keyword search, results ranked by importance |
-| `mem_query` | Filter by tag/type/project |
-| `mem_context` | Project-scoped smart recall (no hint) |
-| `mem_related` | BFS graph traversal from a node ID |
-
-### How the Knowledge Graph Works
-
-The graph auto-accumulates from normal session work — no manual input needed.
-
-**Data flow:**
-
-```
-PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
-                                                   ↓
-SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
-                                                   ↓  (importance set by type)
-SessionStart hook → resume (smart recall) → next session gets relevance-ranked hints
-                              ↓
-                    decay_importance() → unused nodes gradually fade
-```
-
-**Node types (7):**
-
-| Type | Created by | Default Importance |
-|------|-----------|-------------------|
-| `decision` | Manual / MCP | 0.9 |
-| `resolution` | Manual / MCP | 0.8 |
-| `concept` | Manual / MCP | 0.7 |
-| `project` | Manual / MCP | 0.7 |
-| `pattern` | Auto (reflect) | 0.5 |
-| `error` | Auto (reflect) | 0.4 |
-| `session` | Auto (reflect) | 0.2 |
-| `psychographic` | Manual / MCP | 0.8 |
-| `instinct` | Auto (reflect) | 0.7 |
-
-**Memory lifecycle:**
-
-| Event | What happens |
-|-------|-------------|
-| Node recalled via search/recall/context | `access_count++`, `accessed_at` updated |
-| 30+ days without access | importance decayed by 10% (floor 0.05) |
-| 180+ days without access | tagged `stale`, excluded from recall |
-| Node tagged `pinned` | immune to decay |
-
-**Auto-accumulation conditions:**
-
-| Condition | Node created |
-|-----------|-------------|
-| Every session end | `session` (always) |
-| Same error ≥3 times in a row | `error` (repeated_same_error) |
-| Edit→Error alternating | `pattern` (thrashing) |
-| Tool success rate <60% (min 5 obs) | `pattern` (weak_tool) |
-| File type success rate <50% (min 3 obs) | `pattern` (weak_filetype) |
-| Edit success → Bash error cycles | `pattern` (fix_then_break) |
-
-> **Note:** Clean sessions (no errors) only produce `session` nodes. The graph becomes rich after 2–3 real development sessions with build failures, test failures, or debugging cycles.
-
-Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically migrated to SQLite on first run.
-
 ## Commands
 
 | Command | What it does |
@@ -241,129 +103,20 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
 
-### Loop flow
-
 ```
 /spec ──→ /go ──→ /check ──→ /ship
   │                              │
   │ (3+ requirements,            │ (loop complete)
   │  no team linked)             ↓
   └──→ /team (optional)   /evolve (optional)
-       (set up agents      (after /ship,
-        before /go)         improve skills)
 ```
 
-`/team` and `/evolve` are optional but recommended at these points:
-- **After `/spec`**: if the spec has 3 or more requirements and no team is linked, `/spec` will prompt you to consider `/team` before starting `/go`.
-- **After `/ship`**: `/ship` prompts you to run `/evolve` to turn this session's observations into better skills for the next cycle.
-
-## Team (`epic team`)
-
-Teams are **org-level**, not project-bound. Running `/team` in any project enriches a shared pool
-of agent definitions — never silently overwrites them.
-
-### How it works
-
-```
-epic team                      # interactive: scan project → design → write → sync
-         ↓
-~/.harness/orgs/epic/teams/backend/   ← global store (persists across projects)
-         ↓
-epic team sync backend
-         ↓
-{project}/.claude/agents/backend/     ← Claude Code auto-discovers at session start
-├── domain-expert.md                  ← role definition + Team Context injected
-├── reviewer.md
-└── tester.md
-         ↓
-Next session: agents are active — auto-selected by Claude or called explicitly
-```
-
-### CLI reference
-
-```bash
-# Create or update a team (interactive 4-phase flow)
-epic team
-
-# Browse
-epic team list                        # all teams in current org
-epic team list --org netflix          # teams in a named org
-epic team show backend                # config, mission, agents
-epic team show backend --playbook     # + full accumulated playbook
-
-# Dispatch to project
-epic team sync backend                # dispatch: copy agents → .claude/agents/backend/
-epic team link backend                # dispatch + register project in team config
-
-# Recall from project
-epic team delete backend              # recall: remove from current project only
-epic team unlink backend              # alias for delete
-
-# Disband (remove from org entirely)
-epic team delete backend --global     # permanently delete from org store + local copy
-
-# History
-epic team history backend reviewer    # list .history/ backups for an agent
-```
-
-### Using teams from coding agents
-
-After syncing, agents are available in the next session automatically:
-
-```
-# Claude Code / Cursor / OpenCode / Codex
-@domain-expert implement the payment gateway
-@reviewer check this PR for edge cases
-@tester write integration tests for auth
-
-# Or let the agent auto-select based on task context
-```
-
-Each agent file carries a **Team Context** section injected at sync time:
-
-```markdown
-## Team Context
-**Team**: backend (Stream-aligned)
-**Mission**: Own the API layer end-to-end
-**Full playbook**: `epic team show backend --playbook`
-```
-
-Agents know their team, mission, and how to load the full playbook on demand —
-without bloating the context window with it.
-
-### Multi-org
-
-```bash
-epic team                          # accumulates in "epic" org (default)
-epic team --org netflix            # separate Netflix-style topology
-epic team --org client-x           # per-client engagement
-```
-
-Same team name in the same org = intentional cross-project sharing.
-`epic/teams/backend` accumulates knowledge from every project that creates or links it.
-
-### Team types
-
-| Type | Keyword | Default agents |
-|------|---------|---------------|
-| Stream-aligned | `stream` | domain-expert, reviewer, tester |
-| Platform | `platform` | api-designer, infra-specialist, dx-agent |
-| Enabling | `enabling` | specialist |
-| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
-
-### Merge strategy — no silent overwrites
-
-| Object | Rule |
-|--------|------|
-| Agent — new | Auto-add |
-| Agent — unchanged | Skip |
-| Agent — changed | **Prompt** (default: keep existing). On replace → backed up to `.history/` |
-| `playbook.md` | Always **append** — never truncated |
-| `mission.md` — changed | **Prompt** (default: keep existing) |
+- **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
+- **After `/ship`**: suggests `/evolve` to turn observations into better skills.
 
 ## Auto Skills (Ring 2)
 
-Skills trigger automatically based on context. You don't need to invoke them.
+Skills trigger automatically. You don't invoke them.
 
 | Skill | Triggers when |
 |-------|--------------|
@@ -380,345 +133,303 @@ Skills trigger automatically based on context. You don't need to invoke them.
 
 ## Hooks (Ring 0)
 
-Run invisibly. No user action needed. Implemented as a **single Rust binary** (`epic-harness`) with subcommands, falling back to Node.js if the binary is not available.
-
-```
-epic resume | guard | polish | observe | snapshot | reflect
-```
+Run invisibly. Single Rust binary (`epic-harness`) with subcommands.
 
 | Hook | When | Does |
 |------|------|------|
 | **resume** | Session start | Restore context, load memory, detect stack |
 | **guard** | Before Bash | Block force-push-to-main, rm -rf /, DROP prod |
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
-| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution + GateGuard hints on Edit/Write |
+| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution + GateGuard hints |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
 | **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
 
+Polish feeds back into observe: format failure → `lint_fail`, TypeScript error → `build_fail`. Edit→Error thrashing gets detected even when errors come from polish.
+
+Each session writes its own `session_{date}_{pid}_{random}.jsonl` — multiple sessions on the same project won't corrupt each other's data.
+
 ### Hook Profiles
 
-Control which hooks run via `~/.harness/config.toml` (or `EPIC_HOOK_PROFILE` env var as override):
+Via `~/.harness/config.toml` or `EPIC_HOOK_PROFILE` env var:
 
-| Profile | Level | Active hooks |
-|---------|-------|-------------|
-| `minimal` | 0 | guard, observe, resume |
-| `standard` (default) | 1 | above + polish, reflect, snapshot |
-| `strict` | 2 | all hooks + future strict-only checks |
+| Profile | Active hooks |
+|---------|-------------|
+| `minimal` | guard, observe, resume |
+| `standard` (default) | above + polish, reflect, snapshot |
+| `strict` | all hooks + future strict-only checks |
+
+### Custom Guard Rules
+
+Add project-specific rules via `.harness/guard-rules.yaml` in your project root:
+
+```yaml
+blocked:
+  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
+warned:
+  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
+```
+
+## Team (`epic team`)
+
+Teams are **org-level**, not project-bound. Running `/team` in any project enriches a shared pool of agent definitions — never silently overwrites.
 
 ```bash
-# Via config file (persistent)
-echo '[hook]
-profile = "minimal"' > ~/.harness/config.toml
-
-# Or via env var (one-shot override)
-EPIC_HOOK_PROFILE=minimal epic-harness observe
+epic team                              # Interactive: scan → design → write → sync
+epic team sync backend                 # Dispatch agents → .claude/agents/backend/
+epic team link backend                 # Dispatch + register project in team config
+epic team list                         # All teams in current org
+epic team list --org netflix           # Teams in a named org
+epic team show backend --playbook      # Config + full playbook
+epic team delete backend               # Recall from current project only
+epic team delete backend --global      # Permanently delete from org store
 ```
 
-## Eval System (Ring 3 Core)
+After syncing, agents are available in the next session: `@domain-expert`, `@reviewer`, `@tester`, etc.
 
-Fuses A-Evolve's benchmark patterns into Claude Code's hook system.
+| Type | Keyword | Default agents |
+|------|---------|---------------|
+| Stream-aligned | `stream` | domain-expert, reviewer, tester |
+| Platform | `platform` | api-designer, infra-specialist, dx-agent |
+| Enabling | `enabling` | specialist |
+| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
 
-### Multi-Dimensional Scoring
+Multi-org: `epic team --org netflix` — separate topology per org.
 
-Every tool call is scored on 3 axes. Weights are configurable via `SCORE_WEIGHTS` in `src/hooks/common.rs`:
+Merge strategy: changed agents prompt (default: keep existing, backup to `.history/`). Playbook always appends.
 
-```
-composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
-           (default: 0.5)                          (default: 0.3)                             (default: 0.2)
-```
+## Multi-Tool Support
 
-| Dimension | What it measures | Per-tool criteria |
-|-----------|-----------------|-------------------|
-| `tool_success` | Did it work? (0/1) | 9-category failure classification |
-| `output_quality` | Output quality signals (0.0-1.0) | Bash: warnings, empty output. Edit: re-edit detection |
-| `execution_cost` | Efficiency proxy (0.0-1.0) | Output size, silent-success command whitelist |
+All tools share the same `~/.harness/projects/{slug}/` data directory.
 
-### Failure Classification (9 categories)
+| Tool | Ring 0 Hooks | Commands | Skills | Agents |
+|------|-------------|----------|--------|--------|
+| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
+| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 | ✓ 4 |
+| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
+| **Cline** | ✓ Full⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-`type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
+¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Guard at `BeforeModel` level · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
-### Pattern Detection (4 types)
+## Unified Memory
 
-All thresholds are configurable constants in `src/hooks/common.rs`:
-
-| Pattern | Detects | Constant | Default |
-|---------|---------|----------|---------|
-| `repeated_same_error` | Same error N+ times in a row | `REPEATED_ERROR_MIN` | 3 |
-| `fix_then_break` | Edit succeeds → build/test fails | `FTB_LOOKAHEAD` / `FTB_MIN_CYCLES` | 3 / 2 |
-| `long_debug_loop` | Stuck on same file N+ operations | `DEBUG_LOOP_MIN` | 5 |
-| `thrashing` | Edit↔Error alternating on same file | `THRASH_MIN_EDITS` / `THRASH_MIN_ERRORS` | 3 / 3 |
-
-### Graduated Scope
-
-Seeding intensity adapts to session performance:
-
-| Composite Score | Seeding | Behavior |
-|----------------|---------|----------|
-| ≥ 0.90 | Skip | No skill generation needed |
-| ≥ 0.70 | Moderate | Only weak-tool proposals |
-| < 0.70 | Full | All proposal types generated |
-
-### Solver-Curator Pipeline
-
-Skill creation is split into independent stages with feedback masking:
-
-1. **Solver** (`build_proposals`) — generates improvement proposals from patterns
-2. **Curator** (`curate_proposal`) — evaluates each proposal independently (Accept/Merge/Skip)
-
-The curator cannot see the solver's context, preventing bias from proposal origin.
-
-### Gated Promotion
-
-Skills are not promoted on first success. A skill must be observed across `GATED_PROMOTION_MIN` (default: 3) sessions before creation. Promotion counters persist in `evolved/promotion_counters.json`.
-
-### Instinct Learning
-
-High-success patterns are extracted and promoted across projects:
+All agents share a knowledge graph in `~/.harness/memory.db` (SQLite + FTS5). No external runtime.
 
 ```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → promote_instincts_to_global() when observed in ≥ 2 projects
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-Instincts are stored as `instinct` type nodes in harness-mem (importance=0.7).
+### CLI
 
-### Workspace Contract
+```bash
+harness mem recall "auth refactor" --project my-project   # Smart recall
+harness mem add --title "JWT rotation" --type decision    # Add node
+harness mem search "JWT"                                  # FTS5 search
+harness mem query --type decision --project my-project    # Filter
+harness mem context --project my-project                  # Project context
+harness mem serve                                         # Web UI → :7700
+harness mem mcp-install                                   # Register MCP server
+harness mem export --out ./docs/memory                    # Export to Markdown
+```
 
-Evolved skills follow a standardized file structure:
+### MCP Tools (6)
+
+| Tool | Purpose |
+|------|---------|
+| `mem_recall` | Smart contextual recall with hint + project + graph neighbors |
+| `mem_add` | Add node with auto-importance by type (or explicit 0.0–1.0) |
+| `mem_search` | FTS5 keyword search, ranked by importance |
+| `mem_query` | Filter by tag/type/project |
+| `mem_context` | Project-scoped smart recall (no hint) |
+| `mem_related` | BFS graph traversal from a node ID |
+
+### Node Types
+
+| Type | Created by | Importance |
+|------|-----------|------------|
+| `decision` | Manual / MCP | 0.9 |
+| `resolution` | Manual / MCP | 0.8 |
+| `concept` | Manual / MCP | 0.7 |
+| `project` | Manual / MCP | 0.7 |
+| `instinct` | Auto (reflect) | 0.7 |
+| `pattern` | Auto (reflect) | 0.5 |
+| `error` | Auto (reflect) | 0.4 |
+| `session` | Auto (reflect) | 0.2 |
+
+Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ days → tagged `stale`, excluded from recall. `pinned` tag prevents decay.
+
+## Evolve (Ring 3)
+
+Fuses A-Evolve benchmark patterns into Claude Code's hook system.
+
+### Scoring
+
+Every tool call scored on 3 axes (weights configurable via `src/hooks/common.rs`):
 
 ```
-evolved/
-├── manifest.json              ← skill registry + aggregate stats
-└── {skill-name}/
-    ├── SKILL.md               ← skill content
-    └── meta.json              ← origin, confidence, project, timestamps
+composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
 ```
 
-### Skill Seeding Thresholds
+Failure classification (9 types): `type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
 
-| Trigger | Config Field | Default |
-|---------|-------------|---------|
-| Weak tool (low success rate) | `pattern.weak_tool_rate` / `pattern.weak_tool_min_obs` | 0.6 / 5 |
-| Weak file type (low success rate) | `pattern.weak_ext_rate` / `pattern.weak_ext_min_obs` | 0.5 / 3 |
-| High-frequency error | `pattern.high_freq_error_min` | 5 |
+### Pattern Detection
 
-### Stagnation Gating
-
-- `evolution.stagnation_limit` (default: 3) sessions without improvement → auto-rollback evolved skills to best checkpoint
-- `evolution.improvement_threshold` (default: 5%)
-- Trend tracking: `improving` / `stable` / `declining` via linear regression
-- Static skills always take priority over evolved skills on conflict
+| Pattern | Detects | Default threshold |
+|---------|---------|-------------------|
+| `repeated_same_error` | Same error N+ times | 3 |
+| `fix_then_break` | Edit success → build/test fails | 3 lookback, 2 cycles |
+| `long_debug_loop` | Stuck on same file | 5 operations |
+| `thrashing` | Edit↔Error alternating | 3 edits, 3 errors |
 
 ### Evolution Flow
 
 ```
-Observe (PostToolUse — 3-axis scoring + GateGuard hints)
-    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
+Observe (PostToolUse — 3-axis scoring)
+    ↓ obs/session_{id}.jsonl
 Analyze (SessionEnd)
-    ↓ SessionAnalysis: per-tool, per-ext, score distribution
-    ↓ Patterns: repeated_same_error, fix_then_break, long_debug_loop, thrashing
-Propose (Solver — build_proposals, graduated by score)
-    ↓ SkillProposal[] with confidence + origin
-Curate (curate_proposal — Accept/Merge/Skip, feedback masked)
-    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md + meta.json
-Gate (format check, dedup, cap of 10, gated promotion ≥ 3 sessions, stagnation check)
-    ↓ ~/.harness/projects/{slug}/evolved_backup/ (best checkpoint)
-Instinct (extract high-success patterns → promote to global memory)
-    ↓ memory.db instinct nodes (cross-project)
-Reload (next session — resume reports metrics + loads evolved skills)
+    ↓ per-tool, per-ext scores + patterns
+Propose (Solver — graduated by score: ≥0.90 skip, ≥0.70 moderate, <0.70 full)
+    ↓ SkillProposal[] with confidence
+Curate (Accept/Merge/Skip, feedback masked from solver)
+    ↓ evolved/{skill}/SKILL.md + meta.json
+Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
+    ↓ evolved_backup/ (best checkpoint)
+Instinct (high-success patterns → cross-project memory.db nodes)
+    ↓
+Reload (next session — resume loads evolved skills)
 ```
 
+Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences).
+
+Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
+
 ```bash
-/evolve              # Run evolution now
+/evolve              # Run now
 /evolve status       # Dashboard: scores, trends, patterns, skills
-/evolve history      # Long-term analysis: full history, skill effectiveness, dispatch stats
+/evolve history      # Full history + skill effectiveness
 /evolve cross-project # Cross-project pattern analysis
 /evolve rollback     # Restore previous best
 /evolve reset        # Clear all evolution data
 ```
 
-## Cold-Start Presets
+### Skill Effectiveness
 
-No need to wait 5 sessions for useful evolved skills. On first session, epic harness detects your stack and applies preset skills automatically:
+Every evolved skill tracked with A/B attribution:
 
-| Stack | Preset Skills |
-|-------|--------------|
+```
+/evolve history → Skill Effectiveness
+
+| Skill              | With | Without | Delta |
+|--------------------|------|---------|-------|
+| evo-ts-care        | 0.87 | 0.72    | +15%  |
+| evo-bash-discipline| 0.65 | 0.68    | -3%   |
+```
+
+Positive delta = effective. Negative = consider removing via `/evolve rollback`.
+
+### Cold-Start Presets
+
+On first session, stack-appropriate preset skills auto-apply:
+
+| Stack | Presets |
+|-------|---------|
 | Node.js/TypeScript | `evo-ts-care`, `evo-fix-build-fail` |
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
 
-Presets are supplements — they get replaced by real evolved skills as data accumulates.
+### Instinct Learning
 
-### Persuasion Principles in Skill Design
+High-success patterns extracted and promoted across projects:
 
-All Iron Laws and skill directives apply persuasion psychology deliberately:
-- **Authority**: Iron Laws use absolute language backed by evidence
-- **Commitment**: Anti-Rationalization tables create commitment to the process
-- **Social Proof**: Evidence Required checklists reinforce collective standards
-
-Liking and Reciprocity are **intentionally excluded** — skills should persuade through sound reasoning, not social pressure.
-
-See `references/persuasion-principles.md` for the full design rationale.
-
-## Concurrent Session Safety
-
-Each session writes to its own observation file (`session_{date}_{pid}_{random}.jsonl`). Multiple Claude Code sessions on the same project won't corrupt each other's data. The reflect hook merges all same-day files for analysis.
-
-## Custom Guard Rules
-
-Add project-specific safety rules via `.harness/guard-rules.yaml` in your project root:
-
-```yaml
-blocked:
-  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
-  - pattern: terraform\s+destroy | msg: Terraform destroy blocked
-warned:
-  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
-
-Rules merge with built-in guards (force-push-to-main, rm -rf /, DROP prod). Keeping this file in git allows sharing safety rules with your team.
+observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
+    → promote to global when observed in ≥ 2 projects
+```
 
 ## Cross-Project Learning
 
 Opt-in to share failure patterns across projects:
 
 ```bash
-touch ~/.harness/projects/{slug}/.cross-project-enabled  # opt-in
+touch ~/.harness/projects/{slug}/.cross-project-enabled
 ```
 
-When enabled:
-- Session end exports anonymized patterns to `~/.harness/global_patterns.jsonl`
-- Session start shows hints from other projects' weak areas
-- Use `/evolve cross-project` to see aggregate patterns
+Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl`. Session start → shows hints from other projects' weak areas.
 
-## Skill Effectiveness Tracking
+## Project Data
 
-Every evolved skill is tracked with A/B attribution scores:
+All data lives in `~/.harness/` (home directory), not in your project root. Survives project deletion, doesn't pollute git history.
 
 ```
-/evolve history → Skill Effectiveness section
-
-| Skill              | Sessions | Score With | Score Without | Delta  |
-|--------------------|----------|------------|---------------|--------|
-| evo-ts-care        | 8        | 0.87       | 0.72          | +15%   |
-| evo-bash-discipline| 3        | 0.65       | 0.68          | -3%    |
-```
-
-Positive delta = skill helps. Negative delta = consider removing via `/evolve rollback`.
-
-## Polish → Observe Feedback
-
-The polish hook (auto-format + typecheck) feeds results back into the observation pipeline:
-
-- Format failure → recorded as `lint_fail`
-- TypeScript error → recorded as `build_fail`
-- Successes → recorded with full scores
-
-This means "edit → type error → edit → type error" thrashing patterns get detected even when the errors come from the polish hook, not manual commands.
-
-## Project Data (`~/.harness/projects/{slug}/`)
-
-Project-specific data lives in your home directory. This survives project deletion and doesn't pollute your git history.
-
-```
-~/.harness/projects/{slug}/
-├── memory/           # Project patterns and rules (persistent)
-├── sessions/         # Session snapshots (for resume)
-├── obs/              # Tool usage observation logs (JSONL, per-session)
-├── evolved/          # Auto-evolved skills (SKILL.md + meta.json per skill)
-│   ├── manifest.json # Skill registry + aggregate stats
-│   └── {skill}/      # SKILL.md + meta.json (origin, confidence, project)
-├── evolved_backup/   # Best checkpoint (for stagnation rollback)
-├── dispatch/         # Skill dispatch logs (JSONL)
-├── team/             # legacy (superseded by ~/.harness/orgs/)
-├── evolution.jsonl   # Full evolution history
-└── metrics.json      # Aggregate stats + skill attribution
-
 ~/.harness/
-├── memory.db         # SQLite knowledge graph (nodes + edges + FTS5)
-├── graph.json        # Cached graph (for web UI)
-└── orgs/             # epic team global store
-    └── {org}/
-        └── teams/
-            └── {team}/
-                ├── config.json
-                ├── mission.md
-                ├── playbook.md
-                ├── agents/
-                └── .history/
+├── memory.db                  # SQLite knowledge graph (nodes + edges + FTS5)
+├── graph.json                 # Cached graph (for web UI)
+├── config.toml                # User configuration
+├── global_patterns.jsonl      # Cross-project patterns (opt-in)
+├── orgs/                      # Team global store
+│   └── {org}/teams/{team}/
+│       ├── config.json, mission.md, playbook.md, agents/, .history/
+└── projects/{slug}/
+    ├── memory/                # Project patterns and rules
+    ├── sessions/              # Session snapshots (for resume)
+    ├── obs/                   # Tool usage observation logs (JSONL)
+    ├── evolved/               # Auto-evolved skills
+    │   ├── manifest.json
+    │   └── {skill}/SKILL.md + meta.json
+    ├── evolved_backup/        # Best checkpoint (for rollback)
+    ├── dispatch/              # Skill dispatch logs
+    ├── evolution.jsonl        # Full evolution history
+    └── metrics.json           # Aggregate stats + skill attribution
 ```
 
-You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
+Share safety rules with your team: `.harness/guard-rules.yaml` in the project root (committed to git).
 
 ## Configuration
 
-All tunable parameters are in `~/.harness/config.toml`. If the file is absent, hardcoded defaults are used.
+All tunable parameters in `~/.harness/config.toml`. Absent = hardcoded defaults.
 
 ```toml
-# ~/.harness/config.toml
-# Priority: env var (EPIC_HOOK_PROFILE) > this file > hardcoded defaults
+# Priority: env var (EPIC_HOOK_PROFILE) > this file > defaults
 
 [hook]
-# Hook execution profile: "minimal" | "standard" | "strict"
-#   minimal  — guard, observe, resume only
-#   standard — above + polish, reflect, snapshot
-#   strict   — all hooks + future strict-only checks
-profile = "standard"
-
-# Show file-type-aware investigation hints after Edit/Write
+profile = "standard"         # "minimal" | "standard" | "strict"
 gateguard_hints = true
 
 [scoring]
-# Tool call scoring weights: [success, quality, cost]
-weights = [0.5, 0.3, 0.2]
+weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
 
 [evolution]
-max_skills = 10                # Max auto-evolved skills
-stagnation_limit = 3           # Sessions without improvement before rollback
-improvement_threshold = 0.05   # 5% improvement needed per session
-gated_promotion_min = 3        # Min observations before skill promotion
+max_skills = 10
+stagnation_limit = 3
+improvement_threshold = 0.05
+gated_promotion_min = 3
 
 [pattern]
-# Pattern detection thresholds — defaults work well, only adjust for specific needs
-# repeated_error_min = 3       # Same error N+ times → pattern
-# debug_loop_min = 5           # Same file N+ ops → loop
-# graduated_scope_skip = 0.90  # Score ≥ this → skip seeding
-# graduated_scope_moderate = 0.70  # Score ≥ this → moderate seeding
+# repeated_error_min = 3
+# debug_loop_min = 5
+# graduated_scope_skip = 0.90
+# graduated_scope_moderate = 0.70
 
 [instinct]
-# confidence_threshold = 0.8   # Min confidence for instinct promotion
-# promotion_min_projects = 2   # Projects needed for global promotion
-# max_instincts = 20           # Max instinct nodes globally
+# confidence_threshold = 0.8
+# promotion_min_projects = 2
+# max_instincts = 20
 ```
 
 ## Development
 
-### Build
-
 ```bash
-cargo install --path .          # Build + install to ~/.cargo/bin/
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Update plugin binary
+cargo install --path .                                        # Build + install
+cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Update plugin binary
+cargo test                                                    # Tests
 ```
 
-### How hooks are dispatched
-
-Each hook in `hooks.json` looks for the Rust binary in two places:
-
-```
-1. Plugin local: hooks/bin/epic-harness
-2. PATH:         ~/.cargo/bin/epic-harness (via cargo install)
-```
-
-### Tests
-
-```bash
-cargo test       # Rust unit + integration tests
-```
+Hooks look for the binary in two places: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
 
 ## Acknowledgments
-
-epic harness was inspired by and built upon ideas from the following projects:
 
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Automated evolution and benchmark patterns
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code agent skill system

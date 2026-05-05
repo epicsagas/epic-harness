@@ -6,6 +6,7 @@
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) installed
 - Git
+- [Rust toolchain](https://rustup.rs) (for source/binary install — plugin marketplace doesn't need this)
 
 ## Install
 
