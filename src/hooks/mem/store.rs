@@ -43,6 +43,7 @@ pub fn importance_for_type(node_type: &str) -> f64 {
         "decision"     => 0.9,
         "resolution"   => 0.8,
         "psychographic" => 0.8,
+        "instinct"     => 0.7,
         "concept"      => 0.7,
         "project"      => 0.7,
         "pattern"      => 0.5,
