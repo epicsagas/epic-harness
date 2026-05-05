@@ -1,0 +1,79 @@
+---
+name: agent-introspection
+description: "Use when the agent is stuck in a loop, repeated failures occur, or context seems overwhelming — triggers on 3+ consecutive failures, circular retry patterns, and unproductive debugging sessions."
+---
+
+# Agent Introspection — Systematic Self-Diagnosis
+
+## Iron Law
+NO UNSUPPORTED SELF-HEALING CLAIMS. Only assert recovery actions you can actually perform with available tools.
+
+## When to Trigger
+- 3+ consecutive failures on the same task
+- Repeating the same approach with different parameters (loop detection)
+- Context window exceeds 70% without resolution
+- Error messages repeat with no progress
+- User explicitly says "you're stuck" or "try a different approach"
+
+## Process
+
+### 1. Failure Capture
+Stop immediately and record:
+- **Error type**: syntax_error / type_error / test_fail / lint_fail / build_fail / runtime_error / permission_denied / not_found
+- **Last 3 tool calls**: what was attempted and what failed
+- **Context pressure**: approximate context usage percentage
+- **What changed**: what was the last successful state
+
+### 2. Root Cause Diagnosis
+Match against known patterns:
+
+| Pattern | Symptoms | Root Cause |
+|---------|----------|------------|
+| **Loop trap** | Same error 3+ times | Wrong approach, not wrong parameters |
+| **Context overflow** | Increasingly confused responses | Too much information, need compaction |
+| **Environment drift** | "Works locally" failures | Missing env var, different tool version |
+| **Cascade failure** | Fix A breaks B | Underlying assumption is wrong |
+| **Tool mismatch** | Wrong tool for the job | Need a different approach entirely |
+
+### 3. Controlled Recovery
+Execute ONLY the smallest safe action:
+- **Loop trap** → Abandon current approach entirely. Try a fundamentally different strategy.
+- **Context overflow** → Run `/compact` or summarize current state, then continue.
+- **Environment drift** → Verify environment with explicit checks (`which`, `--version`).
+- **Cascade failure** → Revert to last known good state. Re-analyze assumptions.
+- **Tool mismatch** → Switch tools. If `Edit` fails 3 times, try `Write`. If `Bash` fails, try `Read` first.
+
+### 4. Introspection Report
+Generate a structured report:
+```markdown
+## Introspection Report
+- **Failure type**: [type]
+- **Root cause**: [diagnosis]
+- **Recovery action**: [what was done]
+- **Confidence**: [high/medium/low]
+- **Next step**: [what to do if this happens again]
+```
+
+Save to harness-mem:
+```
+mem_add(
+  title: "Self-diagnosis: {error_type} in {file}",
+  type: "error",
+  body: "Pattern: ...\nRoot cause: ...\nRecovery: ...\n"
+)
+```
+
+## Anti-Rationalization
+
+| Excuse | Rebuttal |
+|--------|----------|
+| "One more try might work" | 3 failures means the approach is wrong, not unlucky. |
+| "I just need to tweak the parameters" | Tweaking a failing approach is not debugging. Step back and reassess. |
+| "I can fix this myself" | Asking for help is not weakness. Escalation saves everyone time. |
+| "The error is clear, I know the fix" | You said that 3 times already. Prove it with a different approach. |
+
+## Red Flags
+- Trying the same command more than 3 times with minor variations
+- Claiming "fixed!" without running the actual test
+- Not recording the failure pattern in harness-mem
+- Continuing after 70% context usage without compacting

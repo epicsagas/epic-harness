@@ -1,6 +1,6 @@
 ---
 name: perf
-description: "Performance review. Use when writing loops, database queries, rendering logic, or data processing. Detect N+1, leaks, unnecessary computation."
+description: "Use when writing loops, database queries, rendering logic, or data processing — triggers on loop constructs, query builders, list rendering, and batch operations."
 ---
 
 # Perf — Performance Review
@@ -15,38 +15,37 @@ description: "Performance review. Use when writing loops, database queries, rend
 ## Checklist
 
 ### Database
-- [ ] No N+1 queries (use JOIN, eager loading, or batch)
-- [ ] Indexes exist for frequently queried columns
-- [ ] Pagination for large result sets
-- [ ] Connection pooling configured
+- [ ] No N+1 queries (use JOIN, eager loading, or batch) — N+1 queries cause latency to scale linearly with row count, turning a 1ms query into seconds under load.
+- [ ] Indexes exist for frequently queried columns — without indexes, the database performs full table scans, collapsing read throughput.
+- [ ] Pagination for large result sets — fetching all rows at once exhausts memory and increases response time for every consumer.
+- [ ] Connection pooling configured — opening a new connection per request adds network round-trip overhead and can exhaust database connection limits.
 
 ### Memory
-- [ ] No unbounded arrays or caches growing indefinitely
-- [ ] Event listeners properly removed / unsubscribed
-- [ ] Large objects released after use
-- [ ] Streams used for large file processing (not loading entire file)
+- [ ] No unbounded arrays or caches growing indefinitely — unbounded growth causes gradual memory exhaustion and eventual OOM kills with no warning.
+- [ ] Event listeners properly removed / unsubscribed — leaked listeners hold references to their context, preventing garbage collection of entire object graphs.
+- [ ] Large objects released after use — holding references to large payloads keeps them in the heap, increasing GC pressure and pause times.
+- [ ] Streams used for large file processing (not loading entire file) — loading a multi-GB file into RAM blocks other allocations and risks crashing the process.
 
 ### Computation
-- [ ] Expensive calculations memoized where appropriate
-- [ ] No redundant re-renders (React: useMemo, useCallback)
-- [ ] Async operations don't block the main thread
-- [ ] Debounce/throttle on frequent events (scroll, input)
+- [ ] Expensive calculations memoized where appropriate — recomputing pure results on every call wastes CPU cycles that compound in hot paths.
+- [ ] No redundant re-renders (React: useMemo, useCallback) — unnecessary re-renders cascade through the component tree, causing layout thrash and dropped frames.
+- [ ] Async operations don't block the main thread — blocking the main thread stalls all concurrent requests, degrading throughput for every user.
+- [ ] Debounce/throttle on frequent events (scroll, input) — unthrottled handlers fire hundreds of times per second, overwhelming the event loop.
 
 ### Network
-- [ ] Responses compressed (gzip/brotli)
-- [ ] Static assets cached with proper headers
-- [ ] No unnecessary API calls (cache, dedupe)
+- [ ] Responses compressed (gzip/brotli) — uncompressed JSON/HTML can be 5-10x larger, wasting bandwidth and increasing time-to-first-byte.
+- [ ] Static assets cached with proper headers — missing cache headers force the browser to re-download unchanged assets on every page load.
+- [ ] No unnecessary API calls (cache, dedupe) — duplicate requests waste server resources and increase latency for legitimate traffic.
 
 See `references/performance.md` for the full checklist.
 
 ## Anti-Rationalization
 
-| Excuse | Rebuttal | What to do instead |
-|--------|----------|-------------------|
-| "Premature optimization" | Knuth meant micro-opts, not O(n²) queries. N+1 is never premature. | Fix algorithmic issues now. Micro-opt later with profiling data. |
-| "We don't have enough traffic yet" | When traffic arrives, you won't have time to fix. | Build for 10x current scale. It's cheaper now than under load. |
-| "The ORM handles it" | ORMs generate N+1 by default. Check the query log. | Always inspect generated SQL. Use eager loading explicitly. |
-| "We'll cache it later" | Caching hides the problem and adds invalidation complexity. | Fix the query first. Cache only what's still slow after optimization. |
+| Excuse | Rebuttal |
+|--------|----------|
+| "Premature optimization is the root of all evil" | Knuth said "about 97% of the time" — the other 3% matters. N+1 queries are never premature. |
+| "It works fine on my machine" | Your machine is not production. Profile under realistic conditions. |
+| "We can optimize later" | Performance debt is invisible until it's catastrophic. Measure now. |
 
 ## Evidence Required
 

@@ -1,6 +1,6 @@
 ---
 name: _dispatch
-description: "Core engine. Active at all times. Reads context and auto-invokes the right skill before any response."
+description: "Core engine. Active at all times. Reads context and auto-invokes the right skill before any response. Triggers confusion protocol on high-risk ambiguity."
 ---
 
 # Skill Dispatch Engine
@@ -36,6 +36,31 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 | `/ship` report done | PR created, CI green | "Shipped. Loop complete." |
 
 These transitions are informational nudges only. The user controls when each phase runs.
+
+## Confusion Protocol
+
+When you encounter high-risk ambiguity, you MUST stop and present options instead of guessing.
+
+**High-risk ambiguity triggers:**
+- Architecture decisions (choosing between patterns, frameworks, or approaches)
+- Data model changes (schema modifications, new tables, migration strategy)
+- Destructive scope (deleting features, breaking API changes, removing code)
+- Cross-cutting concerns that affect multiple modules
+
+**Protocol:**
+1. STOP — do not proceed with any implementation
+2. STATE — clearly describe the ambiguity in one sentence
+3. OPTIONS — present 2-3 concrete options with trade-offs
+4. ASK — wait for user decision before continuing
+
+**Example:**
+> AMBIGUITY: You asked to "fix the auth flow" but this could mean:
+> A) Fix the token refresh bug in the existing JWT flow (surgical, 30 min)
+> B) Migrate from JWT to session-based auth (architectural, 2 days)
+> C) Add MFA to the existing flow (additive, 1 day)
+> Which approach do you want?
+
+NEVER guess the scope of an ambiguous request. 2 minutes of clarification saves 2 hours of rework.
 
 ## Priority
 

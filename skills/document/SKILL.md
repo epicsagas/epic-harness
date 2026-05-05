@@ -1,6 +1,6 @@
 ---
 name: document
-description: "Auto-documentation. Use when a public API, function, or module is added or changed. Generate/update JSDoc, docstrings, or comments."
+description: "Use when a public API, function, or module is added or changed — triggers on new exports, signature changes, and module-level additions."
 ---
 
 # Document — Auto-Documentation
@@ -17,6 +17,8 @@ description: "Auto-documentation. Use when a public API, function, or module is 
 - New exports? → Add JSDoc/docstring
 - Changed params? → Update existing docs
 - New file? → Add module-level doc comment
+
+**Why:** Undocumented changes are the most common source of onboarding friction. Catching every diff ensures no public surface is left without context.
 
 ### 2. Write docs
 Follow the project's existing doc style. If none exists:
@@ -51,18 +53,22 @@ def my_function(name: str) -> str:
     """
 ```
 
+**Why:** Consistent doc style across the project reduces cognitive load for every reader. Inlining examples prevents the "how do I call this?" round-trip.
+
 ### 3. Don't over-document
 - Skip obvious getters/setters
 - Skip internal/private helpers unless complex
 - Code should be self-documenting first, comments second
 
+**Why:** Noise docs train readers to ignore all comments. Document only where the code cannot speak for itself.
+
 ## Anti-Rationalization
 
 | Excuse | Rebuttal | What to do instead |
 |--------|----------|-------------------|
-| "The code is self-documenting" | Function signatures don't explain _why_ or edge cases. | Document the why, the constraints, and the non-obvious. |
-| "Docs get outdated" | Undocumented code is immediately outdated — 100% wrong by omission. | Put docs near code (JSDoc/docstring). They update with the code. |
-| "I'll document it when the API stabilizes" | By then you'll forget the design rationale. | Document now. Update is cheaper than reconstructing intent. |
+| "The code is self-documenting" | Good naming helps readers, but doesn't explain intent, constraints, or edge cases. | Document the why, the constraints, and the non-obvious. |
+| "I'll document it later" | Later never comes. If it's worth exporting, it's worth documenting now. | Document as you write. Updating is cheaper than reconstructing intent. |
+| "Docs go stale anyway" | Stale docs are better than no docs. They at least signal intent. Keep them in sync with code changes. | Put docs near code (JSDoc/docstring). They update with the code. |
 
 ## Evidence Required
 
