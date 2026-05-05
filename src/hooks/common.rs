@@ -152,6 +152,52 @@ pub struct EvolutionRecord {
     pub analysis_summary: String,
 }
 
+// ── Hook Profile ─────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum HookProfile {
+    Minimal,
+    #[default]
+    Standard,
+    Strict,
+}
+
+impl HookProfile {
+    /// Numeric level for comparison: Minimal=0, Standard=1, Strict=2.
+    pub fn level(&self) -> u8 {
+        match self {
+            HookProfile::Minimal => 0,
+            HookProfile::Standard => 1,
+            HookProfile::Strict => 2,
+        }
+    }
+}
+
+/// Resolve the current hook profile.
+/// Priority: EPIC_HOOK_PROFILE env var > config.toml [hook].profile > default (Standard).
+pub fn current_hook_profile() -> HookProfile {
+    // 1. Env var override (highest priority)
+    if let Ok(val) = std::env::var("EPIC_HOOK_PROFILE") {
+        return match val.to_lowercase().as_str() {
+            "minimal" => HookProfile::Minimal,
+            "strict" => HookProfile::Strict,
+            _ => HookProfile::Standard,
+        };
+    }
+    // 2. Config file
+    match super::config::CONFIG.hook.profile.to_lowercase().as_str() {
+        "minimal" => HookProfile::Minimal,
+        "strict" => HookProfile::Strict,
+        _ => HookProfile::Standard,
+    }
+}
+
+/// Returns true if a hook with the given minimum profile should execute
+/// under the current profile setting.
+pub fn should_run(min_profile: HookProfile) -> bool {
+    current_hook_profile().level() >= min_profile.level()
+}
+
 impl Default for ScoreDimensions {
     fn default() -> Self {
         Self {
@@ -164,24 +210,14 @@ impl Default for ScoreDimensions {
 
 // ── Constants ────────────────────────────────────────
 
-pub const SCORE_WEIGHTS: (f64, f64, f64) = (0.5, 0.3, 0.2); // success, quality, cost
-
-pub const STAGNATION_LIMIT: u64 = 3;
-pub const IMPROVEMENT_THRESHOLD: f64 = 0.05;
-pub const MAX_EVOLVED_SKILLS: usize = 10;
-
-pub const REPEATED_ERROR_MIN: u64 = 3;
-pub const FTB_LOOKAHEAD: usize = 3;
-pub const FTB_MIN_CYCLES: u64 = 2;
-pub const DEBUG_LOOP_MIN: u64 = 5;
-pub const THRASH_MIN_EDITS: u64 = 3;
-pub const THRASH_MIN_ERRORS: u64 = 3;
-
-pub const WEAK_TOOL_RATE: f64 = 0.6;
-pub const WEAK_TOOL_MIN_OBS: u64 = 5;
-pub const WEAK_EXT_RATE: f64 = 0.5;
-pub const WEAK_EXT_MIN_OBS: u64 = 3;
-pub const HIGH_FREQ_ERROR_MIN: u64 = 5;
+// Tunable parameters are now in ~/.harness/config.toml (see config.rs).
+// Profile assignments for each hook module:
+pub const PROFILE_GUARD: HookProfile = HookProfile::Minimal;
+pub const PROFILE_OBSERVE: HookProfile = HookProfile::Minimal;
+pub const PROFILE_POLISH: HookProfile = HookProfile::Standard;
+pub const PROFILE_REFLECT: HookProfile = HookProfile::Standard;
+pub const PROFILE_SNAPSHOT: HookProfile = HookProfile::Standard;
+pub const PROFILE_RESUME: HookProfile = HookProfile::Minimal;
 
 // ── Paths ────────────────────────────────────────────
 
@@ -654,9 +690,10 @@ pub fn session_id() -> String {
 }
 
 pub fn compute_score(dims: &ScoreDimensions) -> f64 {
-    let raw = SCORE_WEIGHTS.0 * dims.tool_success
-        + SCORE_WEIGHTS.1 * dims.output_quality
-        + SCORE_WEIGHTS.2 * dims.execution_cost;
+    let w = &super::config::CONFIG.scoring.weights;
+    let raw = w[0] * dims.tool_success
+        + w[1] * dims.output_quality
+        + w[2] * dims.execution_cost;
     (raw * 1000.0).round() / 1000.0
 }
 
@@ -1041,5 +1078,75 @@ warned:
         assert_eq!(m.avg_success_rate, 0.0);
         assert_eq!(m.stagnation_count, 0);
         assert!(m.score_history.is_empty());
+    }
+
+    // ── HookProfile ─────────────────────────────────
+    #[test]
+    fn hook_profile_default_is_standard() {
+        assert_eq!(HookProfile::default(), HookProfile::Standard);
+    }
+
+    #[test]
+    fn hook_profile_level_ordering() {
+        assert!(HookProfile::Minimal.level() < HookProfile::Standard.level());
+        assert!(HookProfile::Standard.level() < HookProfile::Strict.level());
+    }
+
+    #[test]
+    fn hook_profile_all_cases() {
+        // SAFETY: All env-var mutations are serialized within this single test
+        // to avoid cross-test race conditions on EPIC_HOOK_PROFILE.
+        unsafe {
+            // Default: no env → Standard
+            std::env::remove_var("EPIC_HOOK_PROFILE");
+            assert_eq!(current_hook_profile(), HookProfile::Standard);
+
+            // Env parsing
+            std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
+            assert_eq!(current_hook_profile(), HookProfile::Minimal);
+            std::env::set_var("EPIC_HOOK_PROFILE", "STRICT");
+            assert_eq!(current_hook_profile(), HookProfile::Strict);
+            std::env::set_var("EPIC_HOOK_PROFILE", "Standard");
+            assert_eq!(current_hook_profile(), HookProfile::Standard);
+            std::env::set_var("EPIC_HOOK_PROFILE", "unknown");
+            assert_eq!(current_hook_profile(), HookProfile::Standard);
+
+            // should_run: Minimal hooks run in all profiles
+            std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
+            assert!(should_run(HookProfile::Minimal));
+            std::env::set_var("EPIC_HOOK_PROFILE", "standard");
+            assert!(should_run(HookProfile::Minimal));
+            std::env::set_var("EPIC_HOOK_PROFILE", "strict");
+            assert!(should_run(HookProfile::Minimal));
+
+            // should_run: Strict hooks only in strict
+            std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
+            assert!(!should_run(HookProfile::Strict));
+            std::env::set_var("EPIC_HOOK_PROFILE", "standard");
+            assert!(!should_run(HookProfile::Strict));
+            std::env::set_var("EPIC_HOOK_PROFILE", "strict");
+            assert!(should_run(HookProfile::Strict));
+
+            // should_run: Standard hooks skipped in minimal
+            std::env::set_var("EPIC_HOOK_PROFILE", "minimal");
+            assert!(!should_run(HookProfile::Standard));
+            std::env::set_var("EPIC_HOOK_PROFILE", "standard");
+            assert!(should_run(HookProfile::Standard));
+            std::env::set_var("EPIC_HOOK_PROFILE", "strict");
+            assert!(should_run(HookProfile::Standard));
+
+            // Clean up
+            std::env::remove_var("EPIC_HOOK_PROFILE");
+        }
+    }
+
+    #[test]
+    fn profile_constants_are_correct() {
+        assert_eq!(PROFILE_GUARD, HookProfile::Minimal);
+        assert_eq!(PROFILE_OBSERVE, HookProfile::Minimal);
+        assert_eq!(PROFILE_POLISH, HookProfile::Standard);
+        assert_eq!(PROFILE_REFLECT, HookProfile::Standard);
+        assert_eq!(PROFILE_SNAPSHOT, HookProfile::Standard);
+        assert_eq!(PROFILE_RESUME, HookProfile::Minimal);
     }
 }

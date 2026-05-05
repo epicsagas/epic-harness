@@ -31,7 +31,7 @@ Ring 1 — 6 Commands (you call these)
   /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — Auto Skills (context-triggered)
-  tdd · debug · secure · perf · simplify · document · verify · context
+  tdd · debug · secure · perf · simplify · document · verify · context · council · agent-introspection
 
 Ring 3 — Evolve (self-improving)
   Observe tool usage → analyze failures → auto-generate skills → gate → reload
@@ -203,6 +203,8 @@ SessionStart hook → resume (smart recall) → next session gets relevance-rank
 | `pattern` | Auto (reflect) | 0.5 |
 | `error` | Auto (reflect) | 0.4 |
 | `session` | Auto (reflect) | 0.2 |
+| `psychographic` | Manual / MCP | 0.8 |
+| `instinct` | Auto (reflect) | 0.7 |
 
 **Memory lifecycle:**
 
@@ -233,8 +235,8 @@ Existing file-based memories (`nodes/*.md`, `edges.jsonl`) are automatically mig
 | Command | What it does |
 |---------|-------------|
 | `/spec` | Define what to build — clarify requirements, produce a spec |
-| `/go` | Build it — auto-plan, TDD subagents, parallel execution with worktree isolation for conflicting tasks |
-| `/check` | Verify — parallel code review + security audit + performance |
+| `/go` | Build it — auto-plan, TDD subagents, 4-state result model (DONE/CONCERNS/NEEDS_CONTEXT/BLOCKED), parallel execution with worktree isolation |
+| `/check` | Verify — adaptive expert dispatch (scope-based), parallel code review + security audit + performance |
 | `/ship` | Ship — isolated pre-flight test, then PR, CI, merge |
 | `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
@@ -373,6 +375,8 @@ Skills trigger automatically based on context. You don't need to invoke them.
 | **document** | Public API added or changed |
 | **verify** | Before completing /go or /ship |
 | **context** | Context window > 70% used |
+| **council** | Ambiguous architectural or design decisions |
+| **agent-introspection** | Agent self-debugging after repeated failures |
 
 ## Hooks (Ring 0)
 
@@ -387,9 +391,28 @@ epic resume | guard | polish | observe | snapshot | reflect
 | **resume** | Session start | Restore context, load memory, detect stack |
 | **guard** | Before Bash | Block force-push-to-main, rm -rf /, DROP prod |
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
-| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
+| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution + GateGuard hints on Edit/Write |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Session end | Analyze failures, seed evolved skills, gate |
+| **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
+
+### Hook Profiles
+
+Control which hooks run via `~/.harness/config.toml` (or `EPIC_HOOK_PROFILE` env var as override):
+
+| Profile | Level | Active hooks |
+|---------|-------|-------------|
+| `minimal` | 0 | guard, observe, resume |
+| `standard` (default) | 1 | above + polish, reflect, snapshot |
+| `strict` | 2 | all hooks + future strict-only checks |
+
+```bash
+# Via config file (persistent)
+echo '[hook]
+profile = "minimal"' > ~/.harness/config.toml
+
+# Or via env var (one-shot override)
+EPIC_HOOK_PROFILE=minimal epic-harness observe
+```
 
 ## Eval System (Ring 3 Core)
 
@@ -425,12 +448,57 @@ All thresholds are configurable constants in `src/hooks/common.rs`:
 | `long_debug_loop` | Stuck on same file N+ operations | `DEBUG_LOOP_MIN` | 5 |
 | `thrashing` | Edit↔Error alternating on same file | `THRASH_MIN_EDITS` / `THRASH_MIN_ERRORS` | 3 / 3 |
 
+### Graduated Scope
+
+Seeding intensity adapts to session performance:
+
+| Composite Score | Seeding | Behavior |
+|----------------|---------|----------|
+| ≥ 0.90 | Skip | No skill generation needed |
+| ≥ 0.70 | Moderate | Only weak-tool proposals |
+| < 0.70 | Full | All proposal types generated |
+
+### Solver-Curator Pipeline
+
+Skill creation is split into independent stages with feedback masking:
+
+1. **Solver** (`build_proposals`) — generates improvement proposals from patterns
+2. **Curator** (`curate_proposal`) — evaluates each proposal independently (Accept/Merge/Skip)
+
+The curator cannot see the solver's context, preventing bias from proposal origin.
+
+### Gated Promotion
+
+Skills are not promoted on first success. A skill must be observed across `GATED_PROMOTION_MIN` (default: 3) sessions before creation. Promotion counters persist in `evolved/promotion_counters.json`.
+
+### Instinct Learning
+
+High-success patterns are extracted and promoted across projects:
+
+```
+observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
+    → promote_instincts_to_global() when observed in ≥ 2 projects
+```
+
+Instincts are stored as `instinct` type nodes in harness-mem (importance=0.7).
+
+### Workspace Contract
+
+Evolved skills follow a standardized file structure:
+
+```
+evolved/
+├── manifest.json              ← skill registry + aggregate stats
+└── {skill-name}/
+    ├── SKILL.md               ← skill content
+    └── meta.json              ← origin, confidence, project, timestamps
+```
+
 ### Skill Seeding Thresholds
 
 | Trigger | Constant | Default |
 |---------|----------|---------|
 | Weak tool (low success rate) | `WEAK_TOOL_RATE` / `WEAK_TOOL_MIN_OBS` | 0.6 / 5 |
-| Weak file type | `WEAK_EXT_RATE` / `WEAK_EXT_MIN_OBS` | 0.5 / 3 |
 | High-frequency error | `HIGH_FREQ_ERROR_MIN` | 5 |
 
 ### Stagnation Gating
@@ -443,16 +511,20 @@ All thresholds are configurable constants in `src/hooks/common.rs`:
 ### Evolution Flow
 
 ```
-Observe (PostToolUse — 3-axis scoring)
+Observe (PostToolUse — 3-axis scoring + GateGuard hints)
     ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
 Analyze (SessionEnd)
     ↓ SessionAnalysis: per-tool, per-ext, score distribution
     ↓ Patterns: repeated_same_error, fix_then_break, long_debug_loop, thrashing
-Seed (4 paths: pattern / weak tool / weak file type / high-freq error)
-    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
-Gate (format check, dedup, cap of 10, stagnation check)
+Propose (Solver — build_proposals, graduated by score)
+    ↓ SkillProposal[] with confidence + origin
+Curate (curate_proposal — Accept/Merge/Skip, feedback masked)
+    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md + meta.json
+Gate (format check, dedup, cap of 10, gated promotion ≥ 3 sessions, stagnation check)
     ↓ ~/.harness/projects/{slug}/evolved_backup/ (best checkpoint)
-Reload (next session — resume.ts reports metrics + loads evolved skills)
+Instinct (extract high-success patterns → promote to global memory)
+    ↓ memory.db instinct nodes (cross-project)
+Reload (next session — resume reports metrics + loads evolved skills)
 ```
 
 ```bash
@@ -476,6 +548,17 @@ No need to wait 5 sessions for useful evolved skills. On first session, epic har
 | Rust | `evo-rs-care` |
 
 Presets are supplements — they get replaced by real evolved skills as data accumulates.
+
+### Persuasion Principles in Skill Design
+
+All Iron Laws and skill directives apply persuasion psychology deliberately:
+- **Authority**: Iron Laws use absolute language backed by evidence
+- **Commitment**: Anti-Rationalization tables create commitment to the process
+- **Social Proof**: Evidence Required checklists reinforce collective standards
+
+Liking and Reciprocity are **intentionally excluded** — skills should persuade through sound reasoning, not social pressure.
+
+See `references/persuasion-principles.md` for the full design rationale.
 
 ## Concurrent Session Safety
 
@@ -542,7 +625,9 @@ Project-specific data lives in your home directory. This survives project deleti
 ├── memory/           # Project patterns and rules (persistent)
 ├── sessions/         # Session snapshots (for resume)
 ├── obs/              # Tool usage observation logs (JSONL, per-session)
-├── evolved/          # Auto-evolved skills
+├── evolved/          # Auto-evolved skills (SKILL.md + meta.json per skill)
+│   ├── manifest.json # Skill registry + aggregate stats
+│   └── {skill}/      # SKILL.md + meta.json (origin, confidence, project)
 ├── evolved_backup/   # Best checkpoint (for stagnation rollback)
 ├── dispatch/         # Skill dispatch logs (JSONL)
 ├── team/             # legacy (superseded by ~/.harness/orgs/)
@@ -564,6 +649,47 @@ Project-specific data lives in your home directory. This survives project deleti
 ```
 
 You can still use `.harness/guard-rules.yaml` in the project root if you want to share safety rules with your team.
+
+## Configuration
+
+All tunable parameters are in `~/.harness/config.toml`. If the file is absent, hardcoded defaults are used.
+
+```toml
+# ~/.harness/config.toml
+# Priority: env var (EPIC_HOOK_PROFILE) > this file > hardcoded defaults
+
+[hook]
+# Hook execution profile: "minimal" | "standard" | "strict"
+#   minimal  — guard, observe, resume only
+#   standard — above + polish, reflect, snapshot
+#   strict   — all hooks + future strict-only checks
+profile = "standard"
+
+# Show file-type-aware investigation hints after Edit/Write
+gateguard_hints = true
+
+[scoring]
+# Tool call scoring weights: [success, quality, cost]
+weights = [0.5, 0.3, 0.2]
+
+[evolution]
+max_skills = 10                # Max auto-evolved skills
+stagnation_limit = 3           # Sessions without improvement before rollback
+improvement_threshold = 0.05   # 5% improvement needed per session
+gated_promotion_min = 3        # Min observations before skill promotion
+
+[pattern]
+# Pattern detection thresholds — defaults work well, only adjust for specific needs
+# repeated_error_min = 3       # Same error N+ times → pattern
+# debug_loop_min = 5           # Same file N+ ops → loop
+# graduated_scope_skip = 0.90  # Score ≥ this → skip seeding
+# graduated_scope_moderate = 0.70  # Score ≥ this → moderate seeding
+
+[instinct]
+# confidence_threshold = 0.8   # Min confidence for instinct promotion
+# promotion_min_projects = 2   # Projects needed for global promotion
+# max_instincts = 20           # Max instinct nodes globally
+```
 
 ## Development
 

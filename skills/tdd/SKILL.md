@@ -1,45 +1,49 @@
 ---
 name: tdd
-description: "Test-Driven Development. Use when implementing any new feature or fixing a bug. Write test first, then implement, then refactor."
+description: "Use when implementing any new feature or fixing a bug — triggers on code writing, bug fixing, and feature implementation."
 ---
 
 # TDD — Test-Driven Development
+
+## Iron Law
+
+NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST. Violating the letter of this process is violating the spirit of this process.
 
 ## Process
 
 ### Red → Green → Refactor
 
 1. **Red**: Write a failing test that describes the desired behavior
-   - Test name should read like a spec: `it("returns 401 when token is expired")`
-   - Run the test — confirm it fails for the right reason
+   - Test name should read like a spec: `it("returns 401 when token is expired")` (reason: the test name IS your specification — it must communicate intent to future readers)
+   - Run the test — confirm it fails for the right reason (reason: a test that fails for the wrong reason gives false confidence)
 
 2. **Green**: Write the minimum code to make the test pass
-   - Do not write more than needed
-   - Do not optimize yet
-   - Run the test — confirm it passes
+   - Do not write more than needed — because premature optimization is the root of all evil; make it work first
+   - Do not optimize yet — because optimization without a passing test is speculation, not engineering
+   - Run the test — confirm it passes (reason: a passing test is the only proof the code works)
 
 3. **Refactor**: Clean up without changing behavior
-   - Extract duplicates, rename for clarity, simplify
-   - Run tests again — must still pass
+   - Extract duplicates, rename for clarity, simplify — because readability matters more than cleverness
+   - Run tests again — must still pass (reason: refactoring without re-running tests is just renaming bugs)
 
 ### Cycle
-Repeat for each behavior. One test, one behavior, one cycle.
+Repeat for each behavior. One test, one behavior, one cycle — because scope creep in a single test cycle leads to unverified code.
 
 ## When to Trigger
-- `/go` subagents: always
+- `/go` subagents: always — because autonomous agents without TDD produce unverified code
 - New function or method being written
-- Bug fix (write regression test first)
+- Bug fix (write regression test first — because a bug that happened once will happen again without a guard)
 
 ## Anti-Rationalization
 
-| Excuse | Rebuttal | What to do instead |
-|--------|----------|-------------------|
-| "I'll add tests later" | You won't. 95% of "later" tests never get written. | Write the failing test NOW before any implementation. |
-| "This is too simple to test" | Simple code breaks too — especially after refactoring. | If it has a return value or side effect, it's testable. Write one. |
-| "Tests slow me down" | Debugging without tests costs 10x more time. | Time the cycle: test-first is faster by the second iteration. |
-| "I'll just test manually" | Manual tests don't catch regressions. | Automate it once, save hours forever. |
-| "The types guarantee correctness" | Types check shape, not logic. `add(a,b)` can still return `a-b`. | Types + tests together. Neither alone suffices. |
-| "I need to see the API shape first" | Spike freely, then delete and rebuild test-first. | Write a throwaway spike, extract the interface, TDD the real impl. |
+| Excuse | Rebuttal |
+|--------|----------|
+| "This is too simple for tests" | Simple code still breaks. The Beyonce Rule applies: if you liked it, you should have put a test on it. |
+| "I'll write tests after" | That's documentation, not specification. Tests written after confirm what you built; tests written before define what you should build. |
+| "Tests slow me down" | 15 minutes of TDD saves hours of debugging regression bugs later. |
+| "I'll just test manually" | Manual tests don't catch regressions. Automate it once, save hours forever. |
+| "The types guarantee correctness" | Types check shape, not logic. `add(a,b)` can still return `a-b`. |
+| "I need to see the API shape first" | Spike freely, then delete and rebuild test-first. A throwaway spike is research, not implementation. |
 
 ## Evidence Required
 

@@ -40,13 +40,15 @@ fn default_importance() -> f64 {
 /// Default importance by node type.
 pub fn importance_for_type(node_type: &str) -> f64 {
     match node_type {
-        "decision"   => 0.9,
-        "resolution" => 0.8,
-        "concept"    => 0.7,
-        "project"    => 0.7,
-        "pattern"    => 0.5,
-        "error"      => 0.4,
-        "session"    => 0.2,
+        "decision"     => 0.9,
+        "resolution"   => 0.8,
+        "psychographic" => 0.8,
+        "instinct"     => 0.7,
+        "concept"      => 0.7,
+        "project"      => 0.7,
+        "pattern"      => 0.5,
+        "error"        => 0.4,
+        "session"      => 0.2,
         _            => 0.5,
     }
 }

@@ -13,6 +13,8 @@ static SKILL_SECURE: &str = include_str!("../../skills/secure/SKILL.md");
 static SKILL_SIMPLIFY: &str = include_str!("../../skills/simplify/SKILL.md");
 static SKILL_TDD: &str = include_str!("../../skills/tdd/SKILL.md");
 static SKILL_VERIFY: &str = include_str!("../../skills/verify/SKILL.md");
+static SKILL_COUNCIL: &str = include_str!("../../skills/council/SKILL.md");
+static SKILL_AGENT_INTROSPECTION: &str = include_str!("../../skills/agent-introspection/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
 
 // ── Canonical commands (Claude Code plugin cache sync) ───────────────────────
@@ -40,6 +42,8 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("simplify", SKILL_SIMPLIFY),
     ("tdd", SKILL_TDD),
     ("verify", SKILL_VERIFY),
+    ("council", SKILL_COUNCIL),
+    ("agent-introspection", SKILL_AGENT_INTROSPECTION),
 ];
 
 static CANONICAL_AGENTS: &[(&str, &str)] = &[
@@ -1018,6 +1022,8 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
         ("skills/simplify/SKILL.md",   SKILL_SIMPLIFY),
         ("skills/tdd/SKILL.md",        SKILL_TDD),
         ("skills/verify/SKILL.md",     SKILL_VERIFY),
+        ("skills/council/SKILL.md",    SKILL_COUNCIL),
+        ("skills/agent-introspection/SKILL.md", SKILL_AGENT_INTROSPECTION),
         ("agents/auditor.md",          AGENT_AUDITOR),
         ("agents/builder.md",          AGENT_BUILDER),
         ("agents/planner.md",          AGENT_PLANNER),
@@ -1551,6 +1557,7 @@ pub fn run(args: &[String]) -> i32 {
                     exit = code;
                 }
             }
+            ensure_global_config(dry_run);
             exit
         }
 
@@ -1559,7 +1566,37 @@ pub fn run(args: &[String]) -> i32 {
             0
         }
 
-        Some(tool) => install_tool(tool, local, dry_run),
+        Some(tool) => {
+            let code = install_tool(tool, local, dry_run);
+            ensure_global_config(dry_run);
+            code
+        }
+    }
+}
+
+/// Ensure `~/.harness/config.toml` exists. Creates it with the commented default
+/// template if absent. Never overwrites an existing config.
+fn ensure_global_config(dry_run: bool) {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| "/tmp".into());
+    let harness_dir = std::path::Path::new(&home).join(".harness");
+    let config_path = harness_dir.join("config.toml");
+
+    if config_path.exists() {
+        return;
+    }
+    if dry_run {
+        eprintln!(
+            "[harness] Would create {} with default configuration",
+            config_path.display()
+        );
+        return;
+    }
+    let _ = std::fs::create_dir_all(&harness_dir);
+    match std::fs::write(&config_path, super::config::default_config_template()) {
+        Ok(_) => eprintln!("[harness] Created {} with default configuration", config_path.display()),
+        Err(e) => eprintln!("[harness] Warning: could not create {}: {}", config_path.display(), e),
     }
 }
 
@@ -1960,7 +1997,7 @@ mod tests {
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"skills/tdd/SKILL.md"));
         assert!(paths.contains(&"agents/builder.md"));
-        assert_eq!(files.len(), 9 + 4); // 9 skills + 4 agents
+        assert_eq!(files.len(), 11 + 4); // 11 skills + 4 agents
     }
 
     #[test]

@@ -1,7 +1,7 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-use super::common::{self, HookInput, hint};
+use super::common::{self, HookInput, hint, should_run, PROFILE_GUARD};
 use super::telemetry::{RuleKind, Telemetry};
 
 struct BuiltinRule {
@@ -147,6 +147,10 @@ fn check_warned(cmd: &str) -> Vec<&'static str> {
 }
 
 pub fn run(input: &HookInput) -> i32 {
+    if !should_run(PROFILE_GUARD) {
+        return 0;
+    }
+
     let cmd = input
         .tool_input
         .as_ref()

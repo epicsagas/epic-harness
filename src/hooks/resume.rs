@@ -136,6 +136,9 @@ fn get_cross_project_hints() -> Vec<String> {
 }
 
 pub fn run(_input: &HookInput) -> i32 {
+    if !should_run(PROFILE_RESUME) {
+        return 0;
+    }
     // Guard: SessionStart fires multiple times per session in Claude Code.
     // Use a per-session lock file (keyed by date+pid) to run exactly once.
     // `acquire_session_lock` uses O_CREAT|O_EXCL — atomically prevents the

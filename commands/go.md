@@ -65,9 +65,39 @@ For each task, launch a subagent (Agent tool) with:
 | Task A, B parallel | Yes | No overlap | ❌ No |
 | Task A, B parallel | Yes | Overlap exists | ✅ Yes |
 
+### Subagent Result States (Step 2.5)
+
+Every subagent must report one of 4 states on completion:
+
+| State | Meaning | Follow-up |
+|-------|---------|-----------|
+| **DONE** | Task completed, all tests pass, requirements met | Proceed to next task |
+| **DONE_WITH_CONCERNS** | Task completed but has warnings/notes | Review concerns. If non-blocking, proceed. If architectural, escalate. |
+| **NEEDS_CONTEXT** | Cannot proceed without user input or missing information | Prompt user with specific questions. Resume after answer. |
+| **BLOCKED** | External dependency failed or unresolvable error | Log blocker. Attempt alternative approach. If impossible, report in Step 4. |
+
+**Handling rules:**
+- DONE: Merge immediately, no additional review needed.
+- DONE_WITH_CONCERNS: Main agent reviews concerns within 30 seconds. Auto-escalate if concerns mention: security, data loss, breaking changes.
+- NEEDS_CONTEXT: Formulate exactly what information is needed. Present as numbered options when possible. Do NOT guess or assume.
+- BLOCKED: Try one alternative approach. If still blocked, skip task and report in Step 4 with blocker details.
+
+**Subagent output format:**
+```
+## Status: [DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED]
+## Summary: [1-2 sentences]
+## Evidence: [test output, file changes, or specific observations]
+## Concerns: [only for DONE_WITH_CONCERNS — list specific issues]
+## Questions: [only for NEEDS_CONTEXT — specific numbered questions]
+## Blocker: [only for BLOCKED — what failed and what was tried]
+```
+
 ### Step 3: Integrate
 
 After all tasks complete:
+- Categorize each task result by its state (DONE/DONE_WITH_CONCERNS/NEEDS_CONTEXT/BLOCKED)
+- For NEEDS_CONTEXT tasks: resolve before integration
+- For BLOCKED tasks: attempt alternatives, exclude from "satisfied" count in report
 - Run the full test suite
 - Verify each Acceptance Criterion (AC1, AC2, ...) is demonstrably met
 - If anything fails, dispatch a subagent to fix it
@@ -81,6 +111,8 @@ After all tasks complete:
 - Requirements satisfied: R1 ✅, R2 ✅, ...
 - Acceptance criteria verified: AC1 ✅, AC2 ✅, ...
 - Tests: X/Y passing
+- Subagent states: X DONE, Y CONCERNS, Z BLOCKED
+- Concerns resolved: [list] / [unresolved list]
 - Remaining issues: none / [list]
 ```
 

@@ -1,6 +1,6 @@
 ---
 name: _dispatch
-description: "Core engine. Active at all times. Reads context and auto-invokes the right skill before any response."
+description: "Core engine. Active at all times. Reads context and auto-invokes the right skill before any response. Triggers confusion protocol on high-risk ambiguity."
 ---
 
 # Skill Dispatch Engine
@@ -36,6 +36,31 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 | `/ship` report done | PR created, CI green | "Shipped. Loop complete." |
 
 These transitions are informational nudges only. The user controls when each phase runs.
+
+## Confusion Protocol
+
+When you encounter high-risk ambiguity, you MUST stop and present options instead of guessing.
+
+**High-risk ambiguity triggers:**
+- Architecture decisions (choosing between patterns, frameworks, or approaches)
+- Data model changes (schema modifications, new tables, migration strategy)
+- Destructive scope (deleting features, breaking API changes, removing code)
+- Cross-cutting concerns that affect multiple modules
+
+**Protocol:**
+1. STOP — do not proceed with any implementation
+2. STATE — clearly describe the ambiguity in one sentence
+3. OPTIONS — present 2-3 concrete options with trade-offs
+4. ASK — wait for user decision before continuing
+
+**Example:**
+> AMBIGUITY: You asked to "fix the auth flow" but this could mean:
+> A) Fix the token refresh bug in the existing JWT flow (surgical, 30 min)
+> B) Migrate from JWT to session-based auth (architectural, 2 days)
+> C) Add MFA to the existing flow (additive, 1 day)
+> Which approach do you want?
+
+NEVER guess the scope of an ambiguous request. 2 minutes of clarification saves 2 hours of rework.
 
 ## Priority
 
@@ -90,3 +115,38 @@ Check `$HARNESS_DIR/evolved/` for project-specific auto-evolved skills. These ar
 - The evolution loop detected a real weakness in past sessions
 - Following the evolved skill's guidance should prevent repeat failures
 - If an evolved skill's advice conflicts with a static skill, **prefer the static skill** — evolved skills supplement, static skills are authoritative
+
+## Psychographic Adaptation
+
+When user preference data is available in harness-mem (psychographic nodes), adapt dispatch behavior:
+
+### 5-Dimension Profile
+
+| Dimension | Values | Effect on dispatch |
+|-----------|--------|-------------------|
+| `scope_appetite` | conservative / moderate / ambitious | conservative: smaller, safer changes. ambitious: larger refactors allowed |
+| `risk_tolerance` | cautious / balanced / bold | cautious: more verification steps. bold: fewer checkpoints |
+| `detail_preference` | brief / standard / thorough | brief: minimal output. thorough: detailed explanations |
+| `autonomy` | guided / collaborative / independent | guided: ask before each step. independent: execute autonomously |
+| `architecture_care` | pragmatic / balanced / principled | pragmatic: working > elegant. principled: patterns > shortcuts |
+
+### How to use
+
+1. At session start, call `mem_query` with type=psychographic to load profile
+2. If no profile exists, use defaults: moderate/balanced/standard/collaborative/balanced
+3. Apply profile dimensions to skill selection and execution parameters:
+
+**scope_appetite=conservative**: Prefer `simplify` skill. Flag changes touching >3 files.
+**risk_tolerance=cautious**: Run `verify` after every skill. Add extra test runs.
+**detail_preference=brief**: Skip explanatory output. Show only results and blockers.
+**autonomy=guided**: Present plan before execution. Ask at each decision point.
+**architecture_care=principled**: Trigger `council` skill for architectural decisions. Enforce pattern compliance.
+
+### Profile storage
+
+Store profiles using `mem_add` with:
+- type: "psychographic"
+- title: "user-profile: {project}"
+- tags: ["psychographic", "profile", project slug]
+- body: YAML-formatted 5-dimension values
+- importance: 0.8 (high — guides all behavior)

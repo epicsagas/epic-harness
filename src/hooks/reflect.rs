@@ -3,11 +3,167 @@ use std::fs;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use serde::{Deserialize, Serialize};
+
 use super::common::*;
+use super::config::CONFIG;
 use super::mem::store;
 use super::telemetry::{SessionTrend, Telemetry};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PromotionCounter {
+    /// Map of skill name -> number of sessions that observed this pattern
+    counts: HashMap<String, u64>,
+}
+
+fn promotion_file() -> std::path::PathBuf {
+    evolved_dir().join("promotion_counters.json")
+}
+
+fn load_promotion_counters() -> PromotionCounter {
+    read_json(&promotion_file(), PromotionCounter::default())
+}
+
+fn save_promotion_counters(counters: &PromotionCounter) {
+    if let Ok(json) = serde_json::to_string_pretty(counters) {
+        let _ = fs::write(promotion_file(), json);
+    }
+}
+
+/// Check if a skill name has enough support to be promoted.
+/// Increments the counter and returns true if threshold is met.
+fn check_promotion(name: &str, counters: &mut PromotionCounter) -> bool {
+    let count = counters.counts.entry(name.into()).or_insert(0);
+    *count += 1;
+    *count >= CONFIG.evolution.gated_promotion_min
+}
+
+// ── R14: Solver-Proposes + Curator Pattern ──────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum ProposalAction {
+    Accept,
+    Merge,
+    Skip,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SkillProposal {
+    name: String,
+    content: String,
+    origin: String,
+    confidence: f64,
+    rationale: String,
+}
+
+/// Curator: decides whether to accept a proposal based on masked feedback.
+/// The curator only sees pass/fail signals (existing names, confidence thresholds),
+/// not raw observation scores.
+fn curate_proposal(proposal: &SkillProposal, existing: &[String]) -> ProposalAction {
+    // Rule 1: If skill already exists, skip (don't overwrite)
+    if existing.contains(&proposal.name) {
+        return ProposalAction::Skip;
+    }
+
+    // Rule 2: If confidence is too low, skip
+    if proposal.confidence < 0.3 {
+        return ProposalAction::Skip;
+    }
+
+    // Rule 3: If origin is a well-known strong signal, accept directly
+    if proposal.confidence >= 0.7 {
+        return ProposalAction::Accept;
+    }
+
+    // Rule 4: Medium confidence — accept but mark for monitoring
+    ProposalAction::Merge
+}
+
+/// Solver: generates proposals from session analysis.
+/// Replaces direct skill writing with a proposal-first approach.
+fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
+    let mut proposals = Vec::new();
+
+    // Proposals from failure patterns
+    for pattern in &analysis.failure_patterns {
+        let name = format!("evo-{}", pattern.pattern_type);
+        let confidence = (pattern.count as f64 / 10.0).min(1.0);
+        proposals.push(SkillProposal {
+            name,
+            content: build_pattern_skill(pattern),
+            origin: "pattern".into(),
+            confidence,
+            rationale: format!(
+                "{}x {} pattern detected",
+                pattern.count, pattern.pattern_type
+            ),
+        });
+    }
+
+    // Proposals from weak tools
+    for stats in analysis.per_tool_stats.values() {
+        let rate = if stats.total > 0 {
+            stats.successes as f64 / stats.total as f64
+        } else {
+            1.0
+        };
+        if rate >= CONFIG.pattern.weak_tool_rate || (stats.total as u64) < CONFIG.pattern.weak_tool_min_obs {
+            continue;
+        }
+        let name = format!("evo-{}-discipline", stats.tool_category);
+        proposals.push(SkillProposal {
+            name,
+            content: build_tool_skill(stats),
+            origin: "weak_tool".into(),
+            confidence: 1.0 - rate,
+            rationale: format!(
+                "{} tool success rate was {:.0}%",
+                stats.tool_category,
+                rate * 100.0
+            ),
+        });
+    }
+
+    // Proposals from weak extensions (only in full mode - handled by caller)
+    for (ext, stats) in &analysis.per_ext_stats {
+        if stats.success_rate >= CONFIG.pattern.weak_ext_rate || (stats.total as u64) < CONFIG.pattern.weak_ext_min_obs || ext == "unknown" {
+            continue;
+        }
+        let clean = ext.trim_start_matches('.');
+        let name = format!("evo-{clean}-care");
+        proposals.push(SkillProposal {
+            name,
+            content: build_ext_skill(ext, stats),
+            origin: "weak_ext".into(),
+            confidence: 1.0 - stats.success_rate,
+            rationale: format!(
+                "{} files had {:.0}% success rate",
+                ext,
+                stats.success_rate * 100.0
+            ),
+        });
+    }
+
+    // Proposals from high-frequency errors
+    for (category, count) in &analysis.per_error_stats {
+        if *count < CONFIG.pattern.high_freq_error_min {
+            continue;
+        }
+        let name = format!("evo-fix-{}", category.replace('_', "-"));
+        let confidence = (*count as f64 / 20.0).min(1.0);
+        proposals.push(SkillProposal {
+            name,
+            content: build_failure_skill(category, *count),
+            origin: "high_freq_error".into(),
+            confidence,
+            rationale: format!("{}x {} errors detected", count, category),
+        });
+    }
+
+    proposals
+}
 
 // ── Phase 1: Session Analysis ───────────────────────
 
@@ -178,7 +334,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 streak_category = curr.failure_category.clone().unwrap_or_default();
                 prev_hash = curr_hash;
             } else {
-                if streak >= REPEATED_ERROR_MIN {
+                if streak >= CONFIG.pattern.repeated_error_min {
                     let hash_note = if !prev_hash.is_empty() {
                         format!(" [hash:{prev_hash}]")
                     } else {
@@ -196,7 +352,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 prev_hash.clear();
             }
         }
-        if streak >= REPEATED_ERROR_MIN {
+        if streak >= CONFIG.pattern.repeated_error_min {
             let hash_note = if !prev_hash.is_empty() {
                 format!(" [hash:{prev_hash}]")
             } else {
@@ -237,7 +393,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                     .unwrap_or(file);
                 for next in scored
                     .iter()
-                    .take((i + FTB_LOOKAHEAD + 1).min(scored.len()))
+                    .take((i + CONFIG.pattern.ftb_lookahead + 1).min(scored.len()))
                     .skip(i + 1)
                 {
                     if next.result.as_deref() == Some("error") && next.tool_category == "bash" {
@@ -252,7 +408,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
         }
         let ftb_entries: Vec<_> = ftb_files
             .iter()
-            .filter(|(_, c)| **c >= FTB_MIN_CYCLES)
+            .filter(|(_, c)| **c >= CONFIG.pattern.ftb_min_cycles)
             .collect();
         if !ftb_entries.is_empty() {
             let files: Vec<String> = ftb_entries.iter().map(|(f, _)| f.to_string()).collect();
@@ -280,7 +436,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             if !file.is_empty() && file == prev_file {
                 run_length += 1;
             } else {
-                if run_length >= DEBUG_LOOP_MIN && !prev_file.is_empty() {
+                if run_length >= CONFIG.pattern.debug_loop_min && !prev_file.is_empty() {
                     let entry = file_runs.entry(prev_file.clone()).or_default();
                     *entry = (*entry).max(run_length);
                 }
@@ -288,7 +444,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 run_length = 1;
             }
         }
-        if run_length >= DEBUG_LOOP_MIN && !prev_file.is_empty() {
+        if run_length >= CONFIG.pattern.debug_loop_min && !prev_file.is_empty() {
             let entry = file_runs.entry(prev_file.clone()).or_default();
             *entry = (*entry).max(run_length);
         }
@@ -329,7 +485,7 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             }
         }
         for (file, (edits, errors)) in &file_stats {
-            if *edits >= THRASH_MIN_EDITS && *errors >= THRASH_MIN_ERRORS {
+            if *edits >= CONFIG.pattern.thrash_min_edits && *errors >= CONFIG.pattern.thrash_min_errors {
                 let basename = Path::new(file)
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -360,7 +516,7 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
 
     let best = metrics.best_score.unwrap_or(0.0);
     let improvement = current_score - best;
-    if improvement >= IMPROVEMENT_THRESHOLD {
+    if improvement >= CONFIG.evolution.improvement_threshold {
         // Improved! Backup evolved skills
         let evolved = evolved_dir();
         let backup = evolved_backup_dir();
@@ -373,7 +529,7 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
 
     // No improvement
     metrics.stagnation_count += 1;
-    if metrics.stagnation_count >= STAGNATION_LIMIT {
+    if metrics.stagnation_count >= CONFIG.evolution.stagnation_limit {
         let degradation = best - current_score;
         if degradation > 0.05 || metrics.best_score.unwrap_or(0.0) < 0.90 {
             let backup = evolved_backup_dir();
@@ -386,7 +542,8 @@ fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u
                 hint(
                     "reflect",
                     &format!(
-                        "Stagnation detected ({STAGNATION_LIMIT} sessions). Rolled back evolved skills."
+                        "Stagnation detected ({} sessions). Rolled back evolved skills.",
+                        CONFIG.evolution.stagnation_limit
                     ),
                 );
                 return (true, false, before_count);
@@ -407,85 +564,170 @@ fn safe_avg_score(score: f64) -> f64 {
 
 // ── Phase 4: Skill Seeding ──────────────────────────
 
+#[cfg(test)]
+fn seeding_scope(avg_score: f64) -> &'static str {
+    if avg_score >= CONFIG.pattern.graduated_scope_skip {
+        "skip"
+    } else if avg_score >= CONFIG.pattern.graduated_scope_moderate {
+        "moderate"
+    } else {
+        "full"
+    }
+}
+
 fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
+    let avg_score = analysis.avg_score;
+
+    // Graduated Scope: skip seeding for excellent sessions
+    if avg_score >= CONFIG.pattern.graduated_scope_skip {
+        let skip = CONFIG.pattern.graduated_scope_skip;
+        hint("reflect", &format!("Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {skip})"));
+        return 0;
+    }
+
+    let full_seeding = avg_score < CONFIG.pattern.graduated_scope_moderate;
+    if !full_seeding {
+        hint("reflect", &format!("Graduated Scope: moderate seeding (avg_score={avg_score:.3})"));
+    }
+
+    let mut counters = load_promotion_counters();
     let mut seeded = 0u64;
-    let cap = MAX_EVOLVED_SKILLS.saturating_sub(existing.len());
+    let mut promoted_count = 0u64;
+    let cap = CONFIG.evolution.max_skills.saturating_sub(existing.len());
 
-    // 4a. From failure patterns
-    for pattern in &analysis.failure_patterns {
+    // Build proposals (solver role)
+    let proposals = build_proposals(analysis);
+
+    // Curate and write (curator role)
+    for proposal in &proposals {
         if seeded as usize >= cap {
             break;
         }
-        let name = format!("evo-{}", pattern.pattern_type);
-        if existing.contains(&name) {
+        if existing.contains(&proposal.name) {
             continue;
         }
-        write_skill(&name, &build_pattern_skill(pattern));
-        seeded += 1;
-    }
 
-    // 4b. From weak tools
-    for stats in analysis.per_tool_stats.values() {
-        if seeded as usize >= cap {
-            break;
-        }
-        let rate = if stats.total > 0 {
-            stats.successes as f64 / stats.total as f64
-        } else {
-            1.0
-        };
-        if rate >= WEAK_TOOL_RATE || stats.total < WEAK_TOOL_MIN_OBS {
-            continue;
-        }
-        let name = format!("evo-{}-discipline", stats.tool_category);
-        if existing.contains(&name) {
-            continue;
-        }
-        write_skill(&name, &build_tool_skill(stats));
-        seeded += 1;
-    }
-
-    // 4c. From weak extensions
-    for (ext, stats) in &analysis.per_ext_stats {
-        if seeded as usize >= cap {
-            break;
-        }
-        if stats.success_rate >= WEAK_EXT_RATE || stats.total < WEAK_EXT_MIN_OBS || ext == "unknown"
+        // Apply graduated scope: skip weak_ext and high_freq_error in moderate mode
+        if !full_seeding
+            && (proposal.origin == "weak_ext" || proposal.origin == "high_freq_error")
         {
             continue;
         }
-        let clean = ext.trim_start_matches('.');
-        let name = format!("evo-{clean}-care");
-        if existing.contains(&name) {
-            continue;
+
+        // Curate: decide whether to accept
+        let action = curate_proposal(proposal, existing);
+        match action {
+            ProposalAction::Skip => continue,
+            ProposalAction::Merge | ProposalAction::Accept => {
+                // Check gated promotion
+                if !check_promotion(&proposal.name, &mut counters) {
+                    continue;
+                }
+                write_skill_with_meta(
+                    &proposal.name,
+                    &proposal.content,
+                    &proposal.origin,
+                    proposal.confidence,
+                );
+                seeded += 1;
+                promoted_count += 1;
+            }
         }
-        write_skill(&name, &build_ext_skill(ext, stats));
-        seeded += 1;
     }
 
-    // 4d. From high-frequency errors
-    for (category, count) in &analysis.per_error_stats {
-        if seeded as usize >= cap {
-            break;
-        }
-        if *count < HIGH_FREQ_ERROR_MIN {
-            continue;
-        }
-        let name = format!("evo-fix-{}", category.replace('_', "-"));
-        if existing.contains(&name) {
-            continue;
-        }
-        write_skill(&name, &build_failure_skill(category, *count));
-        seeded += 1;
+    save_promotion_counters(&counters);
+    if promoted_count > 0 {
+        let min_obs = CONFIG.evolution.gated_promotion_min;
+        hint("reflect", &format!(
+            "Gated Promotion: {promoted_count} skill(s) promoted after {min_obs}+ observations"
+        ));
     }
-
     seeded
 }
 
-fn write_skill(name: &str, content: &str) {
+fn sanitize_skill_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
+        && !name.starts_with('.')
+        && name.len() < 64
+}
+
+fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f64) {
+    if !sanitize_skill_name(name) {
+        hint("reflect", &format!("Rejected invalid skill name: {name}"));
+        return;
+    }
     let dir = evolved_dir().join(name);
     ensure_dir(&dir);
-    let _ = fs::write(dir.join("SKILL.md"), content);
+
+    let meta = SkillMeta {
+        name: name.into(),
+        origin: origin.into(),
+        confidence,
+        project: project_slug(),
+        created: now_iso(),
+        updated: now_iso(),
+        active: true,
+    };
+    let json = match serde_json::to_string_pretty(&meta) {
+        Ok(j) => j,
+        Err(e) => {
+            hint("reflect", &format!("Failed to serialize meta.json for {name}: {e}"));
+            return;
+        }
+    };
+    if let Err(e) = fs::write(dir.join("meta.json"), json) {
+        hint("reflect", &format!("Failed to write meta.json for {name}: {e}"));
+        return;
+    }
+    if let Err(e) = fs::write(dir.join("SKILL.md"), content) {
+        hint("reflect", &format!("Failed to write SKILL.md for {name}: {e}"));
+        // Clean up orphaned meta.json
+        let _ = fs::remove_file(dir.join("meta.json"));
+    }
+}
+
+fn write_workspace_manifest() {
+    let evolved = evolved_dir();
+    if !evolved.is_dir() {
+        return;
+    }
+
+    let dirs = list_dirs(&evolved);
+    let mut skills = Vec::new();
+
+    for name in &dirs {
+        let skill_file = evolved.join(name).join("SKILL.md");
+        let meta_file = evolved.join(name).join("meta.json");
+
+        let active = skill_file.is_file();
+        let meta: SkillMeta = if meta_file.is_file() {
+            read_json(&meta_file, SkillMeta::default())
+        } else {
+            SkillMeta {
+                name: name.clone(),
+                origin: "unknown".into(),
+                confidence: 0.5,
+                project: project_slug(),
+                created: now_iso(),
+                updated: now_iso(),
+                active,
+            }
+        };
+        skills.push(SkillMeta { active, ..meta });
+    }
+
+    let manifest = WorkspaceManifest {
+        version: "1.0".into(),
+        updated: now_iso(),
+        skills,
+    };
+
+    if let Ok(json) = serde_json::to_string_pretty(&manifest) {
+        let _ = fs::write(evolved.join("manifest.json"), json);
+    }
 }
 
 fn build_pattern_skill(p: &DetectedPattern) -> String {
@@ -713,8 +955,8 @@ fn gate_skills() {
     // Enforce cap
     let mut remaining = list_dirs(&evolved);
     remaining.sort();
-    if remaining.len() > MAX_EVOLVED_SKILLS {
-        let excess = &remaining[..remaining.len() - MAX_EVOLVED_SKILLS];
+    if remaining.len() > CONFIG.evolution.max_skills {
+        let excess = &remaining[..remaining.len() - CONFIG.evolution.max_skills];
         for name in excess {
             rm_dir(&evolved.join(name));
         }
@@ -864,7 +1106,7 @@ fn ingest_to_memory(
     // 8c. Weak tool nodes
     for (cat, stats) in &analysis.per_tool_stats {
         let rate = if stats.total > 0 { stats.successes as f64 / stats.total as f64 } else { 1.0 };
-        if rate >= WEAK_TOOL_RATE || stats.total < WEAK_TOOL_MIN_OBS {
+        if rate >= CONFIG.pattern.weak_tool_rate || stats.total < CONFIG.pattern.weak_tool_min_obs {
             continue;
         }
         let title = format!("{}: weak tool {} ({:.0}%)", slug, cat, rate * 100.0);
@@ -895,7 +1137,7 @@ fn ingest_to_memory(
 
     // 8d. High-frequency error nodes
     for (category, count) in &analysis.per_error_stats {
-        if *count < HIGH_FREQ_ERROR_MIN {
+        if *count < CONFIG.pattern.high_freq_error_min {
             continue;
         }
         let title = format!("{}: high-freq {} ({}x)", slug, category, count);
@@ -947,9 +1189,161 @@ fn ingest_to_memory(
     (nodes_created, edges_created)
 }
 
+// ── Phase 8.5: Instinct Extraction & Promotion (R12) ─
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct Instinct {
+    trigger: String,
+    confidence: f64,
+    domain: String,
+    scope: String,
+    observation_count: u64,
+    success_count: u64,
+    projects: Vec<String>,
+}
+
+fn extract_instincts(observations: &[ObsRecord], analysis: &SessionAnalysis) -> Vec<Instinct> {
+    // Only extract from sessions with enough observations
+    if observations.len() < 10 || analysis.avg_score < 0.5 {
+        return vec![];
+    }
+
+    // Extract per-tool-category instincts
+    let mut instincts = Vec::new();
+    for (tool_cat, stats) in &analysis.per_tool_stats {
+        if stats.total < 3 {
+            continue;
+        }
+        let rate = stats.successes as f64 / stats.total as f64;
+        if rate >= 0.8 {
+            instincts.push(Instinct {
+                trigger: format!("high-success-{}", tool_cat),
+                confidence: rate,
+                domain: "tool-usage".into(),
+                scope: "local".into(),
+                observation_count: stats.total,
+                success_count: stats.successes,
+                projects: vec![project_slug()],
+            });
+        }
+    }
+
+    // Extract per-file-extension instincts
+    for (ext, stats) in &analysis.per_ext_stats {
+        if stats.total < 3 {
+            continue;
+        }
+        let rate = stats.success_rate;
+        if rate >= 0.8 {
+            instincts.push(Instinct {
+                trigger: format!("high-success-{}", ext.trim_start_matches('.')),
+                confidence: rate,
+                domain: ext.trim_start_matches('.').into(),
+                scope: "local".into(),
+                observation_count: stats.total,
+                success_count: stats.total - stats.errors,
+                projects: vec![project_slug()],
+            });
+        }
+    }
+
+    instincts.truncate(CONFIG.instinct.max_instincts);
+    instincts
+}
+
+fn promote_instincts_to_global(instincts: &[Instinct]) -> u64 {
+    let conn = match store::open_db() {
+        Ok(c) => c,
+        Err(_) => return 0,
+    };
+    let tx = match conn.unchecked_transaction() {
+        Ok(t) => t,
+        Err(_) => return 0,
+    };
+
+    let mut promoted = 0u64;
+    for instinct in instincts {
+        if instinct.confidence < CONFIG.instinct.confidence_threshold {
+            continue;
+        }
+
+        // Only promote instincts seen across multiple projects (or single-project
+        // when the threshold is set to 1 for early bootstrapping).
+        if instinct.projects.len() < CONFIG.instinct.promotion_min_projects {
+            continue;
+        }
+
+        let title = format!("instinct: {} ({})", instinct.trigger, instinct.domain);
+        let body = format!(
+            "**Trigger**: {}\n**Confidence**: {:.2}\n**Domain**: {}\n**Scope**: {}\n**Observations**: {} ({} successful)\n**Projects**: {}",
+            instinct.trigger,
+            instinct.confidence,
+            instinct.domain,
+            instinct.scope,
+            instinct.observation_count,
+            instinct.success_count,
+            instinct.projects.join(", "),
+        );
+
+        let node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: store::new_uuid(),
+                node_type: "instinct".into(),
+                title,
+                tags: vec![
+                    "auto".into(),
+                    "instinct".into(),
+                    instinct.domain.clone(),
+                ],
+                projects: instinct.projects.clone(),
+                agents: vec![],
+                created: now_iso(),
+                updated: now_iso(),
+                importance: store::importance_for_type("instinct"),
+                access_count: 0,
+                accessed_at: String::new(),
+            },
+            body,
+        };
+
+        // Use dedup to avoid duplicate instincts (7-day window)
+        if let Ok((_, is_new)) = store::write_node_dedup_conn(&tx, &node, 168)
+            && is_new
+        {
+            promoted += 1;
+        }
+    }
+
+    let _ = tx.commit();
+    promoted
+}
+
+// ── Phase 9: Workspace Contract (R13) ────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct SkillMeta {
+    name: String,
+    origin: String, // "pattern", "weak_tool", "weak_ext", "high_freq_error"
+    confidence: f64,
+    project: String,
+    created: String,
+    updated: String,
+    active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct WorkspaceManifest {
+    version: String,
+    updated: String,
+    skills: Vec<SkillMeta>,
+}
+
 // ── Main Hook ───────────────────────────────────────
 
 pub fn run(_input: &HookInput) -> i32 {
+    if !should_run(PROFILE_REFLECT) {
+        return 0;
+    }
     if !harness_exists() {
         return 0;
     }
@@ -1005,6 +1399,17 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 8. Memory auto-ingest (knowledge graph)
     let (mem_nodes, mem_edges) = ingest_to_memory(&analysis, &analysis.failure_patterns);
+
+    // 8.5. Instinct extraction and promotion
+    let instincts = extract_instincts(&observations, &analysis);
+    let instincts_promoted = if !instincts.is_empty() {
+        promote_instincts_to_global(&instincts)
+    } else {
+        0
+    };
+    if instincts_promoted > 0 {
+        hint("reflect", &format!("Instinct: promoted {instincts_promoted} new instinct(s)"));
+    }
 
     // 9. Evolution record
     let record = EvolutionRecord {
@@ -1075,6 +1480,9 @@ pub fn run(_input: &HookInput) -> i32 {
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }
+
+    // 11.5. Workspace manifest
+    write_workspace_manifest();
 
     // 12. Report
     hint(
@@ -1715,5 +2123,455 @@ mod tests {
     #[test]
     fn safe_avg_score_passes_through_zero() {
         assert_eq!(safe_avg_score(0.0), 0.0);
+    }
+
+    // ── seeding_scope (Graduated Scope) ─────────────
+    #[test]
+    fn seeding_scope_skip_when_excellent() {
+        assert_eq!(seeding_scope(0.90), "skip");
+        assert_eq!(seeding_scope(0.95), "skip");
+        assert_eq!(seeding_scope(1.00), "skip");
+    }
+
+    #[test]
+    fn seeding_scope_moderate_in_middle_range() {
+        assert_eq!(seeding_scope(0.70), "moderate");
+        assert_eq!(seeding_scope(0.80), "moderate");
+        assert_eq!(seeding_scope(0.89), "moderate");
+    }
+
+    #[test]
+    fn seeding_scope_full_when_low_score() {
+        assert_eq!(seeding_scope(0.69), "full");
+        assert_eq!(seeding_scope(0.50), "full");
+        assert_eq!(seeding_scope(0.0), "full");
+    }
+
+    // ── extract_instincts (R12) ──────────────────────
+    #[test]
+    fn extract_instincts_returns_empty_for_few_observations() {
+        let obs: Vec<ObsRecord> = (0..5)
+            .map(|_| make_obs("Bash", "bash", "success", 0.9, Some("ls")))
+            .collect();
+        let analysis = SessionAnalysis {
+            total_observations: 5,
+            avg_score: 0.9,
+            ..Default::default()
+        };
+        let instincts = extract_instincts(&obs, &analysis);
+        assert!(instincts.is_empty(), "fewer than 10 observations should yield no instincts");
+    }
+
+    #[test]
+    fn extract_instincts_returns_empty_for_low_score() {
+        let obs: Vec<ObsRecord> = (0..15)
+            .map(|_| make_obs("Bash", "bash", "success", 0.3, Some("ls")))
+            .collect();
+        let analysis = SessionAnalysis {
+            total_observations: 15,
+            avg_score: 0.3,
+            ..Default::default()
+        };
+        let instincts = extract_instincts(&obs, &analysis);
+        assert!(instincts.is_empty(), "avg_score < 0.5 should yield no instincts");
+    }
+
+    #[test]
+    fn extract_instincts_finds_high_success_tools() {
+        let obs: Vec<ObsRecord> = (0..15)
+            .map(|_| make_obs("Bash", "bash", "success", 0.9, Some("ls")))
+            .collect();
+        let mut per_tool = HashMap::new();
+        per_tool.insert(
+            "bash".into(),
+            ToolStats {
+                tool_category: "bash".into(),
+                total: 15,
+                successes: 15,
+                errors: 0,
+                avg_score: 0.9,
+                failure_categories: HashMap::new(),
+            },
+        );
+        let analysis = SessionAnalysis {
+            total_observations: 15,
+            avg_score: 0.9,
+            per_tool_stats: per_tool,
+            ..Default::default()
+        };
+        let instincts = extract_instincts(&obs, &analysis);
+        assert!(
+            instincts.iter().any(|i| i.trigger == "high-success-bash"),
+            "should find high-success-bash instinct"
+        );
+    }
+
+    #[test]
+    fn extract_instincts_respects_max_limit() {
+        let obs: Vec<ObsRecord> = (0..15)
+            .map(|_| make_obs("Bash", "bash", "success", 0.9, Some("ls")))
+            .collect();
+        let mut per_tool = HashMap::new();
+        // Create more tool categories than CONFIG.instinct.max_instincts
+        for i in 0..30 {
+            let cat = format!("tool-{}", i);
+            per_tool.insert(
+                cat.clone(),
+                ToolStats {
+                    tool_category: cat,
+                    total: 5,
+                    successes: 5,
+                    errors: 0,
+                    avg_score: 0.9,
+                    failure_categories: HashMap::new(),
+                },
+            );
+        }
+        let analysis = SessionAnalysis {
+            total_observations: 150,
+            avg_score: 0.9,
+            per_tool_stats: per_tool,
+            ..Default::default()
+        };
+        let instincts = extract_instincts(&obs, &analysis);
+        assert!(
+            instincts.len() <= CONFIG.instinct.max_instincts,
+            "should not exceed max_instincts ({})",
+            CONFIG.instinct.max_instincts
+        );
+    }
+
+    // ── Workspace Contract (R13) ──────────────────────
+    #[test]
+    fn workspace_manifest_has_version() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let evolved = tmp.path().join("evolved");
+        ensure_dir(&evolved);
+
+        // Create a skill directory with SKILL.md
+        let skill_dir = evolved.join("evo-test-skill");
+        ensure_dir(&skill_dir);
+        let _ = fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: test\n---\n\n# Test skill content that is long enough to pass gate\n",
+        );
+
+        // Write manifest
+        let dirs = list_dirs(&evolved);
+        let mut skills = Vec::new();
+        for name in &dirs {
+            let active = evolved.join(name).join("SKILL.md").is_file();
+            skills.push(SkillMeta {
+                name: name.clone(),
+                origin: "pattern".into(),
+                confidence: 0.5,
+                project: "test-project".into(),
+                created: "2026-01-01T00:00:00Z".into(),
+                updated: "2026-01-01T00:00:00Z".into(),
+                active,
+            });
+        }
+        let manifest = WorkspaceManifest {
+            version: "1.0".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+            skills,
+        };
+        let json = serde_json::to_string_pretty(&manifest).expect("serialize manifest");
+        let manifest_path = evolved.join("manifest.json");
+        let _ = fs::write(&manifest_path, &json);
+
+        // Verify
+        let content = fs::read_to_string(&manifest_path).expect("read manifest");
+        let parsed: WorkspaceManifest = serde_json::from_str(&content).expect("parse manifest");
+        assert_eq!(parsed.version, "1.0");
+        assert_eq!(parsed.skills.len(), 1);
+        assert_eq!(parsed.skills[0].name, "evo-test-skill");
+        assert!(parsed.skills[0].active);
+    }
+
+    #[test]
+    fn skill_meta_serializes_correctly() {
+        let meta = SkillMeta {
+            name: "evo-test".into(),
+            origin: "pattern".into(),
+            confidence: 0.75,
+            project: "my-project".into(),
+            created: "2026-01-01T00:00:00Z".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+            active: true,
+        };
+        let json = serde_json::to_string_pretty(&meta).expect("serialize");
+        let roundtrip: SkillMeta = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(roundtrip.name, "evo-test");
+        assert_eq!(roundtrip.origin, "pattern");
+        assert!((roundtrip.confidence - 0.75).abs() < f64::EPSILON);
+        assert_eq!(roundtrip.project, "my-project");
+        assert!(roundtrip.active);
+    }
+
+    #[test]
+    fn write_skill_with_meta_creates_both_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+
+        // Override evolved_dir by writing directly to tmp path
+        let skill_dir = tmp.path().join("evo-test-skill");
+        ensure_dir(&skill_dir);
+        let _ = fs::write(skill_dir.join("SKILL.md"), "---\nname: test\n---\n\n# Content\n");
+
+        let meta = SkillMeta {
+            name: "evo-test-skill".into(),
+            origin: "weak_tool".into(),
+            confidence: 0.6,
+            project: "test-project".into(),
+            created: "2026-01-01T00:00:00Z".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+            active: true,
+        };
+        let json = serde_json::to_string_pretty(&meta).expect("serialize meta");
+        let _ = fs::write(skill_dir.join("meta.json"), &json);
+
+        // Verify both files exist
+        assert!(skill_dir.join("SKILL.md").is_file(), "SKILL.md must exist");
+        assert!(skill_dir.join("meta.json").is_file(), "meta.json must exist");
+
+        // Verify meta.json content
+        let meta_content = fs::read_to_string(skill_dir.join("meta.json")).expect("read meta");
+        let parsed: SkillMeta = serde_json::from_str(&meta_content).expect("parse meta");
+        assert_eq!(parsed.name, "evo-test-skill");
+        assert_eq!(parsed.origin, "weak_tool");
+        assert!((parsed.confidence - 0.6).abs() < f64::EPSILON);
+        assert!(parsed.active);
+    }
+
+    // ── Gated Promotion (R16) ──────────────────────
+    #[test]
+    fn check_promotion_increments() {
+        let mut counters = PromotionCounter::default();
+        assert!(!check_promotion("evo-test", &mut counters));
+        assert_eq!(counters.counts["evo-test"], 1);
+        assert!(!check_promotion("evo-test", &mut counters));
+        assert_eq!(counters.counts["evo-test"], 2);
+        assert!(check_promotion("evo-test", &mut counters));
+        assert_eq!(counters.counts["evo-test"], 3);
+    }
+
+    #[test]
+    fn check_promotion_requires_min_observations() {
+        let mut counters = PromotionCounter::default();
+        // Below threshold: should return false each time
+        for _ in 0..CONFIG.evolution.gated_promotion_min - 1 {
+            assert!(
+                !check_promotion("evo-fix-type-error", &mut counters),
+                "should not be promoted before reaching gated_promotion_min"
+            );
+        }
+        // Exactly at threshold: should return true
+        assert!(
+            check_promotion("evo-fix-type-error", &mut counters),
+            "should be promoted once gated_promotion_min is reached"
+        );
+    }
+
+    #[test]
+    fn promotion_counter_persists() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("promotion_counters.json");
+
+        let counters = PromotionCounter {
+            counts: {
+                let mut m = HashMap::new();
+                m.insert("evo-test".into(), 3);
+                m.insert("evo-other".into(), 1);
+                m
+            },
+        };
+        let json = serde_json::to_string_pretty(&counters).expect("serialize");
+        let _ = fs::write(&path, &json);
+
+        let content = fs::read_to_string(&path).expect("read");
+        let loaded: PromotionCounter = serde_json::from_str(&content).expect("deserialize");
+        assert_eq!(loaded.counts["evo-test"], 3);
+        assert_eq!(loaded.counts["evo-other"], 1);
+    }
+
+    #[test]
+    fn gated_promotion_prevents_single_success() {
+        let mut counters = PromotionCounter::default();
+        // A single observation must NOT be promoted
+        let promoted = check_promotion("evo-once-seen", &mut counters);
+        assert!(
+            !promoted,
+            "skill seen only once must not be promoted (count={})",
+            counters.counts.get("evo-once-seen").unwrap_or(&0)
+        );
+        assert_eq!(counters.counts["evo-once-seen"], 1);
+    }
+
+    // ── R14: Solver-Proposes + Curator Pattern ──────
+    #[test]
+    fn curate_proposal_skips_existing() {
+        let proposal = SkillProposal {
+            name: "evo-test".into(),
+            content: "content".into(),
+            origin: "pattern".into(),
+            confidence: 0.8,
+            rationale: "test".into(),
+        };
+        let existing = vec!["evo-test".into()];
+        assert!(matches!(
+            curate_proposal(&proposal, &existing),
+            ProposalAction::Skip
+        ));
+    }
+
+    #[test]
+    fn curate_proposal_skips_low_confidence() {
+        let proposal = SkillProposal {
+            name: "evo-new".into(),
+            content: "content".into(),
+            origin: "pattern".into(),
+            confidence: 0.2,
+            rationale: "test".into(),
+        };
+        assert!(matches!(
+            curate_proposal(&proposal, &[]),
+            ProposalAction::Skip
+        ));
+    }
+
+    #[test]
+    fn curate_proposal_accepts_high_confidence() {
+        let proposal = SkillProposal {
+            name: "evo-new".into(),
+            content: "content".into(),
+            origin: "pattern".into(),
+            confidence: 0.7,
+            rationale: "test".into(),
+        };
+        assert!(matches!(
+            curate_proposal(&proposal, &[]),
+            ProposalAction::Accept
+        ));
+    }
+
+    #[test]
+    fn curate_proposal_merges_medium_confidence() {
+        let proposal = SkillProposal {
+            name: "evo-new".into(),
+            content: "content".into(),
+            origin: "pattern".into(),
+            confidence: 0.5,
+            rationale: "test".into(),
+        };
+        assert!(matches!(
+            curate_proposal(&proposal, &[]),
+            ProposalAction::Merge
+        ));
+    }
+
+    #[test]
+    fn build_proposals_from_failure_patterns() {
+        let analysis = SessionAnalysis {
+            failure_patterns: vec![DetectedPattern {
+                pattern_type: "repeated_same_error".into(),
+                description: "test".into(),
+                count: 5,
+                involved_files: vec![],
+                suggested_remediation: "stop".into(),
+            }],
+            ..Default::default()
+        };
+        let proposals = build_proposals(&analysis);
+        assert!(
+            proposals
+                .iter()
+                .any(|p| p.name == "evo-repeated_same_error"),
+            "should contain proposal from failure pattern"
+        );
+    }
+
+    #[test]
+    fn build_proposals_respects_thresholds() {
+        // Tool with 60% success rate (>= 0.6 threshold) should be excluded
+        let mut per_tool = HashMap::new();
+        per_tool.insert(
+            "bash".into(),
+            ToolStats {
+                tool_category: "bash".into(),
+                total: 10,
+                successes: 6,
+                errors: 4,
+                avg_score: 0.6,
+                failure_categories: HashMap::new(),
+            },
+        );
+        let analysis = SessionAnalysis {
+            per_tool_stats: per_tool,
+            ..Default::default()
+        };
+        let proposals = build_proposals(&analysis);
+        assert!(
+            !proposals.iter().any(|p| p.origin == "weak_tool"),
+            "tools with rate >= 0.6 should not generate proposals"
+        );
+    }
+
+    // ── sanitize_skill_name (path traversal prevention) ──
+    #[test]
+    fn sanitize_skill_name_rejects_traversal() {
+        assert!(!sanitize_skill_name("../etc/passwd"), "path traversal with .. must be rejected");
+        assert!(!sanitize_skill_name("foo/../../../etc"), "path traversal with / must be rejected");
+        assert!(!sanitize_skill_name("foo\\bar"), "backslash must be rejected");
+        assert!(!sanitize_skill_name(".."), "bare .. must be rejected");
+        assert!(!sanitize_skill_name(".hidden"), "dot-prefixed name must be rejected");
+        assert!(!sanitize_skill_name(""), "empty name must be rejected");
+        let long_name = "x".repeat(64);
+        assert!(!sanitize_skill_name(&long_name), "name >= 64 chars must be rejected");
+    }
+
+    #[test]
+    fn sanitize_skill_name_accepts_valid_names() {
+        assert!(sanitize_skill_name("evo-ts-care"), "evo-ts-care should be valid");
+        assert!(sanitize_skill_name("evo-fix-syntax-error"), "evo-fix-syntax-error should be valid");
+        assert!(sanitize_skill_name("evo-bash-discipline"), "evo-bash-discipline should be valid");
+        assert!(sanitize_skill_name("evo-repeated_same_error"), "name with underscores should be valid");
+        assert!(sanitize_skill_name("a"), "single char name should be valid");
+    }
+
+    // ── instinct promotion gate (no .min(1) bypass) ──
+    #[test]
+    fn instinct_promotion_requires_multi_project_by_config() {
+        // With default config (promotion_min_projects=2), a single-project instinct
+        // must NOT pass the gate. Only instincts from >= 2 projects should be promoted.
+        let instinct_one_project = Instinct {
+            trigger: "high-success-bash".into(),
+            confidence: 0.9,
+            domain: "tool-usage".into(),
+            scope: "local".into(),
+            observation_count: 20,
+            success_count: 18,
+            projects: vec!["project-a".into()],
+        };
+        // The gate checks: projects.len() < promotion_min_projects
+        // With default config (2), one project should fail the gate
+        assert!(
+            instinct_one_project.projects.len() < CONFIG.instinct.promotion_min_projects,
+            "single-project instinct must fail the promotion gate with default config (min=2)"
+        );
+
+        let instinct_two_projects = Instinct {
+            trigger: "high-success-bash".into(),
+            confidence: 0.9,
+            domain: "tool-usage".into(),
+            scope: "local".into(),
+            observation_count: 20,
+            success_count: 18,
+            projects: vec!["project-a".into(), "project-b".into()],
+        };
+        assert!(
+            instinct_two_projects.projects.len() >= CONFIG.instinct.promotion_min_projects,
+            "two-project instinct must pass the promotion gate with default config (min=2)"
+        );
     }
 }

@@ -1,4 +1,5 @@
 pub mod common;
+pub mod config;
 pub mod guard;
 mod install_wizard;
 pub mod install;

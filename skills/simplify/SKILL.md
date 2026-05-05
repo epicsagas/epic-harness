@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: "Code simplification. Use when a file exceeds 200 lines, has high complexity, or contains duplication. Extract, rename, reduce."
+description: "Use when a file exceeds 200 lines, has high complexity, or contains duplication — triggers on large files, deep nesting, and copy-pasted code."
 ---
 
 # Simplify — Code Simplification
@@ -18,24 +18,34 @@ description: "Code simplification. Use when a file exceeds 200 lines, has high c
 - Line count, function count, nesting depth
 - Identify the longest/most complex function
 
+**Why**: You cannot improve what you cannot quantify. Baseline metrics prove simplification actually happened and prevent subjective "it feels cleaner" claims.
+
 ### 2. Extract
 - **Extract function**: Turn a code block into a named function
 - **Extract constant**: Replace magic numbers/strings
 - **Extract module**: Split large files by responsibility
+
+**Why**: Named abstractions replace "what does this block do?" with "what does this function promise?" — reducing cognitive load per reading unit.
 
 ### 3. Rename
 - Variables: describe what it holds, not how it's computed
 - Functions: describe what it does, not how
 - Files: match the primary export/class
 
+**Why**: Precise names eliminate the need for comments and make wrong code look wrong. A reader should understand intent from names alone.
+
 ### 4. Reduce
 - Remove dead code (unused imports, unreachable branches)
 - Replace imperative loops with declarative (map, filter, reduce)
 - Merge duplicate logic into shared utility
 
+**Why**: Every line of code is a line someone must read, understand, and maintain. Fewer lines with the same behavior means lower lifetime cost.
+
 ### 5. Verify
 - All tests still pass after simplification
 - No behavior changes — only structural improvements
+
+**Why**: Simplification that breaks behavior is not simplification — it is a regression. Tests are the safety net that makes structural changes safe.
 
 ## Constraints
 - One simplification at a time — verify between each
@@ -45,10 +55,9 @@ description: "Code simplification. Use when a file exceeds 200 lines, has high c
 
 | Excuse | Rebuttal | What to do instead |
 |--------|----------|-------------------|
-| "It works, don't touch it" | Working and maintainable are different. Tech debt compounds. | Simplify with tests as safety net. If tests pass, ship it. |
-| "It's not that complex" | If you need to re-read it twice, it's too complex. | Apply the 30-second rule: can a new dev understand this in 30s? |
-| "Refactoring is risky" | Not refactoring is riskier — bugs hide in complexity. | One small simplification at a time, verified by tests. |
-| "We'll clean it up in the rewrite" | Rewrites get cancelled. Improve incrementally. | Simplify one function per session. Compound improvements. |
+| "We might need this later" | YAGNI. Code you don't need is code you maintain for free. Add it when you need it. | Delete it. When the need arises, write it with current context — not stale assumptions. |
+| "This abstraction makes it more flexible" | Flexibility without a concrete use case is complexity. Simple code is flexible code. | Abstract only after you see the second use case. Two concrete examples beat one imagined future. |
+| "It's already working, don't touch it" | Chesterton's Fence: understand why it exists first. But if it's needlessly complex, simplify it. | Understand it, write tests for it, then simplify it. Working code that nobody can read is a ticking bomb. |
 
 ## Evidence Required
 
