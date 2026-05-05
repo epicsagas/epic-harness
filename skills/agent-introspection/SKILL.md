@@ -65,12 +65,20 @@ mem_add(
 
 ## Anti-Rationalization
 
-| Excuse | Rebuttal |
-|--------|----------|
-| "One more try might work" | 3 failures means the approach is wrong, not unlucky. |
-| "I just need to tweak the parameters" | Tweaking a failing approach is not debugging. Step back and reassess. |
-| "I can fix this myself" | Asking for help is not weakness. Escalation saves everyone time. |
-| "The error is clear, I know the fix" | You said that 3 times already. Prove it with a different approach. |
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|-------------------|
+| "One more try might work" | 3 failures means the approach is wrong, not unlucky. | Stop and run the full 4-step introspection process. |
+| "I just need to tweak the parameters" | Tweaking a failing approach is not debugging. Step back and reassess. | Abandon the current approach and try a fundamentally different strategy. |
+| "I can fix this myself" | Asking for help is not weakness. Escalation saves everyone time. | Escalate to the user with a clear summary of what was tried and what failed. |
+| "The error is clear, I know the fix" | You said that 3 times already. Prove it with a different approach. | Run the introspection report and verify the fix with a test before claiming success. |
+
+## Evidence Required
+
+- [ ] Failure type classified correctly
+- [ ] Root cause matched to known pattern
+- [ ] Recovery action is the smallest safe action
+- [ ] Introspection report generated
+- [ ] Failure pattern recorded in harness-mem
 
 ## Red Flags
 - Trying the same command more than 3 times with minor variations

@@ -393,6 +393,7 @@ epic resume | guard | polish | observe | snapshot | reflect
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution + GateGuard hints on Edit/Write |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
+| **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
 
 ### Hook Profiles
 
@@ -412,7 +413,6 @@ profile = "minimal"' > ~/.harness/config.toml
 # Or via env var (one-shot override)
 EPIC_HOOK_PROFILE=minimal epic-harness observe
 ```
-| **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
 
 ## Eval System (Ring 3 Core)
 
@@ -548,6 +548,17 @@ No need to wait 5 sessions for useful evolved skills. On first session, epic har
 | Rust | `evo-rs-care` |
 
 Presets are supplements — they get replaced by real evolved skills as data accumulates.
+
+### Persuasion Principles in Skill Design
+
+All Iron Laws and skill directives apply persuasion psychology deliberately:
+- **Authority**: Iron Laws use absolute language backed by evidence
+- **Commitment**: Anti-Rationalization tables create commitment to the process
+- **Social Proof**: Evidence Required checklists reinforce collective standards
+
+Liking and Reciprocity are **intentionally excluded** — skills should persuade through sound reasoning, not social pressure.
+
+See `references/persuasion-principles.md` for the full design rationale.
 
 ## Concurrent Session Safety
 

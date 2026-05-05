@@ -61,12 +61,20 @@ mem_add(
 
 ## Anti-Rationalization
 
-| Excuse | Rebuttal |
-|--------|----------|
-| "I already know the answer" | Your gut feeling is not analysis. Council surfaces blind spots. |
-| "This is too slow for a simple decision" | 5 minutes of council prevents weeks of regret. |
-| "The team already agreed" | Groupthink is not consensus. Diverse perspectives prevent disasters. |
-| "I don't need 4 voices for this" | Even simple decisions benefit from the Skeptic and Critic. |
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|-------------------|
+| "I already know the answer" | Your gut feeling is not analysis. Council surfaces blind spots. | Run Council anyway — you'll learn something. |
+| "This is too slow for a simple decision" | 5 minutes of council prevents weeks of regret. | Set a 5-minute timer and run the full process. |
+| "The team already agreed" | Groupthink is not consensus. Diverse perspectives prevent disasters. | Summon all 4 voices — especially the Skeptic and Critic. |
+| "I don't need 4 voices for this" | Even simple decisions benefit from the Skeptic and Critic. | Run all 4 voices. Skipping voices skips insight. |
+
+## Evidence Required
+
+- [ ] All 4 voices were summoned and reported back
+- [ ] Areas of agreement and disagreement are listed
+- [ ] A recommended option with key trade-off is presented
+- [ ] Decision recorded in harness-mem with rationale
+- [ ] No voice received the full conversation history
 
 ## Red Flags
 - Skipping the Council for "obvious" decisions

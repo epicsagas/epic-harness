@@ -84,6 +84,12 @@ pub struct PatternConfig {
     /// Minimum tool observations before weak_tool detection triggers.
     pub weak_tool_min_obs: u64,
 
+    /// File-extension success rate below this → weak_ext pattern.
+    pub weak_ext_rate: f64,
+
+    /// Minimum file-extension observations before weak_ext detection triggers.
+    pub weak_ext_min_obs: u64,
+
     /// Error appearing this many times → high-frequency error seeding.
     pub high_freq_error_min: u64,
 
@@ -149,6 +155,8 @@ impl Default for PatternConfig {
             thrash_min_errors: 3,
             weak_tool_rate: 0.6,
             weak_tool_min_obs: 5,
+            weak_ext_rate: 0.5,
+            weak_ext_min_obs: 3,
             high_freq_error_min: 5,
             graduated_scope_skip: 0.90,
             graduated_scope_moderate: 0.70,
@@ -326,6 +334,8 @@ mod tests {
         assert_eq!(c.evolution.gated_promotion_min, 3);
         assert_eq!(c.pattern.repeated_error_min, 3);
         assert_eq!(c.pattern.graduated_scope_skip, 0.90);
+        assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
+        assert_eq!(c.pattern.weak_ext_min_obs, 3);
         assert_eq!(c.instinct.confidence_threshold, 0.8);
     }
 

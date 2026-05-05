@@ -109,7 +109,7 @@ fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
         } else {
             1.0
         };
-        if rate >= 0.6 || stats.total < 5 {
+        if rate >= CONFIG.pattern.weak_tool_rate || (stats.total as u64) < CONFIG.pattern.weak_tool_min_obs {
             continue;
         }
         let name = format!("evo-{}-discipline", stats.tool_category);
@@ -128,7 +128,7 @@ fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
 
     // Proposals from weak extensions (only in full mode - handled by caller)
     for (ext, stats) in &analysis.per_ext_stats {
-        if stats.success_rate >= 0.5 || stats.total < 3 || ext == "unknown" {
+        if stats.success_rate >= CONFIG.pattern.weak_ext_rate || (stats.total as u64) < CONFIG.pattern.weak_ext_min_obs || ext == "unknown" {
             continue;
         }
         let clean = ext.trim_start_matches('.');
@@ -148,7 +148,7 @@ fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
 
     // Proposals from high-frequency errors
     for (category, count) in &analysis.per_error_stats {
-        if *count < 5 {
+        if *count < CONFIG.pattern.high_freq_error_min {
             continue;
         }
         let name = format!("evo-fix-{}", category.replace('_', "-"));
@@ -645,10 +645,22 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
     seeded
 }
 
+fn sanitize_skill_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && !name.contains("..")
+        && !name.starts_with('.')
+        && name.len() < 64
+}
+
 fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f64) {
+    if !sanitize_skill_name(name) {
+        hint("reflect", &format!("Rejected invalid skill name: {name}"));
+        return;
+    }
     let dir = evolved_dir().join(name);
     ensure_dir(&dir);
-    let _ = fs::write(dir.join("SKILL.md"), content);
 
     let meta = SkillMeta {
         name: name.into(),
@@ -659,8 +671,21 @@ fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f6
         updated: now_iso(),
         active: true,
     };
-    if let Ok(json) = serde_json::to_string_pretty(&meta) {
-        let _ = fs::write(dir.join("meta.json"), json);
+    let json = match serde_json::to_string_pretty(&meta) {
+        Ok(j) => j,
+        Err(e) => {
+            hint("reflect", &format!("Failed to serialize meta.json for {name}: {e}"));
+            return;
+        }
+    };
+    if let Err(e) = fs::write(dir.join("meta.json"), json) {
+        hint("reflect", &format!("Failed to write meta.json for {name}: {e}"));
+        return;
+    }
+    if let Err(e) = fs::write(dir.join("SKILL.md"), content) {
+        hint("reflect", &format!("Failed to write SKILL.md for {name}: {e}"));
+        // Clean up orphaned meta.json
+        let _ = fs::remove_file(dir.join("meta.json"));
     }
 }
 
@@ -1244,7 +1269,7 @@ fn promote_instincts_to_global(instincts: &[Instinct]) -> u64 {
 
         // Only promote instincts seen across multiple projects (or single-project
         // when the threshold is set to 1 for early bootstrapping).
-        if instinct.projects.len() < CONFIG.instinct.promotion_min_projects.min(1) {
+        if instinct.projects.len() < CONFIG.instinct.promotion_min_projects {
             continue;
         }
 
@@ -2489,6 +2514,64 @@ mod tests {
         assert!(
             !proposals.iter().any(|p| p.origin == "weak_tool"),
             "tools with rate >= 0.6 should not generate proposals"
+        );
+    }
+
+    // ── sanitize_skill_name (path traversal prevention) ──
+    #[test]
+    fn sanitize_skill_name_rejects_traversal() {
+        assert!(!sanitize_skill_name("../etc/passwd"), "path traversal with .. must be rejected");
+        assert!(!sanitize_skill_name("foo/../../../etc"), "path traversal with / must be rejected");
+        assert!(!sanitize_skill_name("foo\\bar"), "backslash must be rejected");
+        assert!(!sanitize_skill_name(".."), "bare .. must be rejected");
+        assert!(!sanitize_skill_name(".hidden"), "dot-prefixed name must be rejected");
+        assert!(!sanitize_skill_name(""), "empty name must be rejected");
+        let long_name = "x".repeat(64);
+        assert!(!sanitize_skill_name(&long_name), "name >= 64 chars must be rejected");
+    }
+
+    #[test]
+    fn sanitize_skill_name_accepts_valid_names() {
+        assert!(sanitize_skill_name("evo-ts-care"), "evo-ts-care should be valid");
+        assert!(sanitize_skill_name("evo-fix-syntax-error"), "evo-fix-syntax-error should be valid");
+        assert!(sanitize_skill_name("evo-bash-discipline"), "evo-bash-discipline should be valid");
+        assert!(sanitize_skill_name("evo-repeated_same_error"), "name with underscores should be valid");
+        assert!(sanitize_skill_name("a"), "single char name should be valid");
+    }
+
+    // ── instinct promotion gate (no .min(1) bypass) ──
+    #[test]
+    fn instinct_promotion_requires_multi_project_by_config() {
+        // With default config (promotion_min_projects=2), a single-project instinct
+        // must NOT pass the gate. Only instincts from >= 2 projects should be promoted.
+        let instinct_one_project = Instinct {
+            trigger: "high-success-bash".into(),
+            confidence: 0.9,
+            domain: "tool-usage".into(),
+            scope: "local".into(),
+            observation_count: 20,
+            success_count: 18,
+            projects: vec!["project-a".into()],
+        };
+        // The gate checks: projects.len() < promotion_min_projects
+        // With default config (2), one project should fail the gate
+        assert!(
+            instinct_one_project.projects.len() < CONFIG.instinct.promotion_min_projects,
+            "single-project instinct must fail the promotion gate with default config (min=2)"
+        );
+
+        let instinct_two_projects = Instinct {
+            trigger: "high-success-bash".into(),
+            confidence: 0.9,
+            domain: "tool-usage".into(),
+            scope: "local".into(),
+            observation_count: 20,
+            success_count: 18,
+            projects: vec!["project-a".into(), "project-b".into()],
+        };
+        assert!(
+            instinct_two_projects.projects.len() >= CONFIG.instinct.promotion_min_projects,
+            "two-project instinct must pass the promotion gate with default config (min=2)"
         );
     }
 }
