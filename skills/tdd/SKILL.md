@@ -36,14 +36,14 @@ Repeat for each behavior. One test, one behavior, one cycle — because scope cr
 
 ## Anti-Rationalization
 
-| Excuse | Rebuttal |
-|--------|----------|
-| "This is too simple for tests" | Simple code still breaks. The Beyonce Rule applies: if you liked it, you should have put a test on it. |
-| "I'll write tests after" | That's documentation, not specification. Tests written after confirm what you built; tests written before define what you should build. |
-| "Tests slow me down" | 15 minutes of TDD saves hours of debugging regression bugs later. |
-| "I'll just test manually" | Manual tests don't catch regressions. Automate it once, save hours forever. |
-| "The types guarantee correctness" | Types check shape, not logic. `add(a,b)` can still return `a-b`. |
-| "I need to see the API shape first" | Spike freely, then delete and rebuild test-first. A throwaway spike is research, not implementation. |
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|--------------------|
+| "This is too simple for tests" | Simple code still breaks. The Beyonce Rule applies: if you liked it, you should have put a test on it. | Write the test anyway — it takes 30 seconds and catches edge cases. |
+| "I'll write tests after" | That's documentation, not specification. Tests written after confirm what you built; tests written before define what you should build. | Write the test first. If you can't describe the behavior, you don't understand the requirement. |
+| "Tests slow me down" | 15 minutes of TDD saves hours of debugging regression bugs later. | Time the cycle — Red-Green-Refactor is usually faster than debug-after-deploy. |
+| "I'll just test manually" | Manual tests don't catch regressions. Automate it once, save hours forever. | Write an automated test that runs on every commit. |
+| "The types guarantee correctness" | Types check shape, not logic. `add(a,b)` can still return `a-b`. | Write a test that verifies the actual business rule, not just the type signature. |
+| "I need to see the API shape first" | Spike freely, then delete and rebuild test-first. A throwaway spike is research, not implementation. | Spike, discard, then TDD the real implementation from what you learned. |
 
 ## Evidence Required
 

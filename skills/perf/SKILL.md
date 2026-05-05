@@ -41,11 +41,11 @@ See `references/performance.md` for the full checklist.
 
 ## Anti-Rationalization
 
-| Excuse | Rebuttal |
-|--------|----------|
-| "Premature optimization is the root of all evil" | Knuth said "about 97% of the time" — the other 3% matters. N+1 queries are never premature. |
-| "It works fine on my machine" | Your machine is not production. Profile under realistic conditions. |
-| "We can optimize later" | Performance debt is invisible until it's catastrophic. Measure now. |
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|--------------------|
+| "Premature optimization is the root of all evil" | Knuth said "about 97% of the time" — the other 3% matters. N+1 queries are never premature. | Check for N+1 queries and missing indexes before merging. |
+| "It works fine on my machine" | Your machine is not production. Profile under realistic conditions. | Run the perf checklist against realistic data volumes. |
+| "We can optimize later" | Performance debt is invisible until it's catastrophic. Measure now. | Add a benchmark or load test for the critical path today. |
 
 ## Evidence Required
 

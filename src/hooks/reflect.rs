@@ -910,7 +910,7 @@ fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) {
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
         .iter()
-        .filter(|(_, s)| s.total >= 5 && (s.successes as f64 / s.total as f64) < 0.6)
+        .filter(|(_, s)| (s.total as u64) >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
         .map(|(cat, _)| cat.clone())
         .collect();
 
@@ -1498,7 +1498,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
         .iter()
-        .filter(|(_, s)| s.total >= 5 && (s.successes as f64 / s.total as f64) < 0.6)
+        .filter(|(_, s)| (s.total as u64) >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
         .map(|(cat, s)| {
             format!(
                 "{cat} {}%",
@@ -1513,7 +1513,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let weak_exts: Vec<String> = analysis
         .per_ext_stats
         .iter()
-        .filter(|(_, s)| s.total >= 3 && s.success_rate < 0.5)
+        .filter(|(_, s)| (s.total as u64) >= CONFIG.pattern.weak_ext_min_obs && s.success_rate < CONFIG.pattern.weak_ext_rate)
         .map(|(ext, s)| format!("{ext} {}%", (s.success_rate * 100.0) as u32))
         .collect();
     if !weak_exts.is_empty() {

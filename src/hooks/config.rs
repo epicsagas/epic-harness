@@ -292,6 +292,10 @@ gated_promotion_min = 3
 # weak_tool_rate = 0.6
 # weak_tool_min_obs = 5
 
+# File-extension success rate below this threshold → weak_ext pattern
+# weak_ext_rate = 0.5
+# weak_ext_min_obs = 3
+
 # Error appearing this many times in a session → high-frequency error seeding
 # high_freq_error_min = 5
 

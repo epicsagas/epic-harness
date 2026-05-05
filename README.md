@@ -496,15 +496,16 @@ evolved/
 
 ### Skill Seeding Thresholds
 
-| Trigger | Constant | Default |
-|---------|----------|---------|
-| Weak tool (low success rate) | `WEAK_TOOL_RATE` / `WEAK_TOOL_MIN_OBS` | 0.6 / 5 |
-| High-frequency error | `HIGH_FREQ_ERROR_MIN` | 5 |
+| Trigger | Config Field | Default |
+|---------|-------------|---------|
+| Weak tool (low success rate) | `pattern.weak_tool_rate` / `pattern.weak_tool_min_obs` | 0.6 / 5 |
+| Weak file type (low success rate) | `pattern.weak_ext_rate` / `pattern.weak_ext_min_obs` | 0.5 / 3 |
+| High-frequency error | `pattern.high_freq_error_min` | 5 |
 
 ### Stagnation Gating
 
-- `STAGNATION_LIMIT` (default: 3) sessions without improvement → auto-rollback evolved skills to best checkpoint
-- `IMPROVEMENT_THRESHOLD` (default: 5%)
+- `evolution.stagnation_limit` (default: 3) sessions without improvement → auto-rollback evolved skills to best checkpoint
+- `evolution.improvement_threshold` (default: 5%)
 - Trend tracking: `improving` / `stable` / `declining` via linear regression
 - Static skills always take priority over evolved skills on conflict
 
