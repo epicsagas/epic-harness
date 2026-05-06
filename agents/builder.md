@@ -31,5 +31,5 @@ You implement a single, well-defined task.
 
 - Do NOT modify files outside your task scope
 - Do NOT skip the test-first step
-- If you hit an error you can't resolve in 3 attempts, report it — don't loop
+- If you hit an error you can't resolve in 3 attempts, invoke the **agent-introspection** skill — classify the failure, diagnose root cause, switch approach, then continue
 - If the task is ambiguous, report back rather than guessing
