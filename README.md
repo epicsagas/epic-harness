@@ -189,32 +189,28 @@ State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives c
 
 ```mermaid
 flowchart TD
-    subgraph manual["  manual entry  "]
-        direction LR
+    subgraph orbit["  /orbit  (wraps entire pipeline)  "]
+        direction TD
         D(["/discover\noptional"]):::manual
         S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
         G(["/go"]):::auto
         C(["/check"]):::auto
         SH(["/ship"]):::auto
         EV(["/evolve"]):::auto
+
+        D -->|frame problem| S
+        S -->|spec approved| G
         G --> C
         C -->|PASS| SH
         C -->|"FAIL ×3 → pause"| G
         SH --> EV
     end
 
-    S -->|"orbit go"| G
-
     classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
     classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Purple** — manual entry: `/discover` (optional) → `/spec`. **Green** — autonomous after spec approval: go → check → ship → evolve.
+**Purple** — human steps: `/discover` (optional) + `/spec` approval. **Green** — autonomous: go → check → ship → evolve.
 
 - **Before `/spec`**: if the problem is vague, use `/discover` to frame it first.
 - **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
