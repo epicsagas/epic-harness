@@ -198,8 +198,11 @@ flowchart TD
         SH(["/ship"]):::auto
         EV(["/evolve"]):::auto
 
+        CL["Council\n4-voice auto-spec"]:::auto
+
         D -->|frame problem| S
         S -->|spec approved| G
+        CL -->|spec approved| G
         G --> C
         C -->|PASS| SH
         C -->|"FAIL ×3 → pause"| G
@@ -210,7 +213,7 @@ flowchart TD
     classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Purple** — human steps: `/discover` (optional) + `/spec` approval. **Green** — autonomous: go → check → ship → evolve.
+**Purple** — manual entry: `/discover` (optional) → `/spec`. **Green** — council auto-spec or autonomous execution after approval: go → check → ship → evolve.
 
 - **Before `/spec`**: if the problem is vague, use `/discover` to frame it first.
 - **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.

@@ -198,8 +198,11 @@ flowchart TD
         SH(["/ship"]):::auto
         EV(["/evolve"]):::auto
 
+        CL["Council\n4-voice 자동 스펙"]:::auto
+
         D -->|문제 정의| S
         S -->|스펙 승인| G
+        CL -->|스펙 승인| G
         G --> C
         C -->|PASS| SH
         C -->|"FAIL ×3 → 일시정지"| G
@@ -210,7 +213,7 @@ flowchart TD
     classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**보라색** — 수동 단계: `/discover` (선택사항) + `/spec` 승인. **초록색** — 스펙 승인 후 자율 실행: go → check → ship → evolve.
+**보라색** — 수동 단계: `/discover` (선택사항) → `/spec`. **초록색** — council 자동 스펙 또는 스펙 승인 후 자율 실행: go → check → ship → evolve.
 
 - **`/spec` 전에**: 문제가 불분명하면 `/discover`로 먼저 정의하세요.
 - **`/spec` 후에**: 요구사항이 3개 이상이고 팀이 없으면 `/spec`이 `/team`을 제안합니다.
