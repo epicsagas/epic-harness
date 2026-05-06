@@ -1,8 +1,8 @@
 # epic harness
 
-> A self-evolving AI coding agent harness — 7 commands, auto-trigger skills, learns from your failures.
+> A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.
 
-**7 commands. Auto-trigger skills. Self-evolving.**
+**8 commands. Auto-trigger skills. Self-evolving.**
 
 <p align="center">
 <a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
@@ -16,7 +16,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-A Claude Code plugin that **replaces 30+ commands with 7**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns. Less surface area to memorize. More intelligence per keystroke.
+A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns. Less surface area to memorize. More intelligence per keystroke.
 
 <p align="center">
   <img src="./assets/features.jpg" alt="epic harness features" width="100%" />
@@ -107,19 +107,39 @@ $ /ship
 | `/ship` | Ship — isolated pre-flight test, then PR, CI, merge |
 | `/team` | Create and sync org-level agent teams across projects |
 | `/evolve` | Manual evolution trigger / status / rollback |
+| `/orbit` | **Autonomous pipeline** — runs spec → go → check → ship in one shot. Choose interactive or council mode. |
 
+### Manual Pipeline
+
+```mermaid
+flowchart LR
+    subgraph orbit["⬤  /orbit  (autonomous wrapper)"]
+        direction LR
+        D(["/discover\n(optional)"]):::manual
+        S(["/spec"]):::manual
+        G(["/go"]):::auto
+        C(["/check"]):::auto
+        SH(["/ship"]):::auto
+        EV(["/evolve\n(optional)"]):::manual
+
+        D -->|frame problem| S
+        S -->|"orbit go"| G
+        G --> C
+        C -->|PASS| SH
+        C -->|FAIL x3 → pause| G
+        SH --> EV
+    end
+
+    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
-/discover ──→ /spec ──→ /go ──→ /check ──→ /ship
-   │                                           │
-   │ (optional — for vague or                  │ (loop complete)
-   │  unfocused problems)                      ↓
-   │                                    /evolve (optional)
-   └──→ /team (optional, when 3+ requirements)
-```
+
+**Green nodes** run autonomously inside `/orbit`. **Purple nodes** require human interaction — `/discover` and `/spec` are optional entry points; `/evolve` is a post-ship suggestion.
 
 - **Before `/spec`**: if the problem is vague or unfocused, use `/discover` to frame it first.
 - **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
 - **After `/ship`**: suggests `/evolve` to turn observations into better skills.
+- **`/orbit`**: wraps the pipeline end-to-end. Choose **interactive** (you run `/discover` → `/spec`, then say "orbit go") or **council** (4-voice council auto-generates the spec, you only approve).
 
 ## Auto Skills (Ring 2)
 
@@ -141,18 +161,37 @@ Skills trigger automatically. You don't invoke them.
 
 ## Architecture: 4-Ring Model
 
-```
-Ring 0 — Autopilot (hooks, invisible)
-  Session restore, auto-format, guard rails, observation logging
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
 
-Ring 1 — 7 Commands (you call these)
-  /discover  /spec  /go  /check  /ship  /team  /evolve
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
 
-Ring 2 — Auto Skills (context-triggered)
-  tdd · debug · discover · secure · perf · simplify · document · verify · context · council · agent-introspection
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
 
-Ring 3 — Evolve (self-improving)
-  Observe tool usage → analyze failures → auto-generate skills → gate → reload
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
 ```
 
 ## Hooks (Ring 0)
@@ -227,11 +266,11 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 7 commands | ✓ 11 skills | ✓ 4 |
-| **Codex CLI** | ✓ Full¹ | ✓ 7 prompts | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ Partial² | ✓ 7 commands | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Full³ | ✓ 7 commands | ✓ via rules | ✓ 4 |
-| **OpenCode** | ✓ Partial⁴ | ✓ 7 commands | — | ✓ 4 |
+| **Claude Code** | ✓ Full | ✓ 8 commands (incl. /orbit) | ✓ 11 skills | ✓ 4 |
+| **Codex CLI** | ✓ Full¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Gemini CLI** | ✓ Partial² | ✓ 8 commands (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Full³ | ✓ 8 commands (incl. /orbit) | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Partial⁴ | ✓ 8 commands (incl. /orbit) | — | ✓ 4 |
 | **Cline** | ✓ Full⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 

@@ -8,7 +8,7 @@ While other harnesses expand breadth with 20-37 commands, epic-harness takes a d
 
 ### Core Principles
 
-1. **Minimal Surface Area**: 30+ commands compressed to 7. The rest are auto-triggered (Ring 2) or learned from observation (Ring 3).
+1. **Minimal Surface Area**: 30+ commands compressed to 8. The rest are auto-triggered (Ring 2) or learned from observation (Ring 3).
 2. **Observability**: Every tool call is quantitatively scored on 3 axes. Decisions are data-driven, not gut-driven.
 3. **Safe Evolution**: Evolved skills must survive gating (validation + cap + stagnation rollback). Static skills always take priority.
 4. **Zero Dependencies**: Only Node.js built-in modules. No install burden.
@@ -16,16 +16,43 @@ While other harnesses expand breadth with 20-37 commands, epic-harness takes a d
 ## 4-Ring Model
 
 ```mermaid
-graph LR
-    R0["Ring 0<br/>Autopilot<br/><i>6 hooks</i>"] --> R1["Ring 1<br/>Commands<br/><i>7 commands</i>"]
-    R1 --> R2["Ring 2<br/>Auto Skills<br/><i>11 skills</i>"]
-    R0 -->|observe| R3["Ring 3<br/>Evolution<br/><i>self-improving</i>"]
-    R3 -.->|evolved skills| R2
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (user-invoked)"]
+        direction TB
+        subgraph orbit["  /orbit  (autonomous)"]
+            direction LR
+            c1("/discover\noptional") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+            c4 -->|"FAIL → retry"| c3
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolution"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger"| R2
+    R0 -->|"resume context"| R1
 ```
 
 ```
 Ring 0 (Invisible)     resume · guard · polish · observe · snapshot · reflect
-Ring 1 (User-Invoked)  /discover → /spec → /go → /check → /ship    /team  /evolve
+Ring 1 (User-Invoked)  /discover → /spec → /go → /check → /ship  ← wrapped by /orbit
+                       /team  /evolve
 Ring 2 (Auto-Trigger)  tdd · debug · discover · secure · perf · simplify · document · verify · context · council · agent-introspection
 Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills → gate → reload
 ```
@@ -38,6 +65,39 @@ Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills �
 | Ring 3 → Ring 2 | evolved → dispatch | Evolved skills join auto-skills in the next session |
 | Ring 1 → Ring 2 | /go → tdd, verify | Skills auto-trigger during command execution |
 | Ring 0 → Ring 1 | resume → /go | Session restore provides context for commands |
+
+### Ring 1: /orbit — Autonomous Pipeline
+
+`/orbit` wraps the Ring 1 manual pipeline into a single autonomous execution. It does not add new capabilities — it orchestrates existing commands.
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"Mode?"}
+    MODE -->|"1 · Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["Load approved spec"]
+    COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate spec"] --> APPROVE{"Approve?"}:::human
+    APPROVE -->|yes| SPEC_LOAD
+    APPROVE -->|modify| GEN
+    APPROVE -->|reject| ABORT(["Abort"])
+    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    RETRY -->|yes| GO
+    RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
+    PAUSE -->|continue| GO
+    PAUSE -->|abort| ABORT
+    SHIP --> DONE(["Orbit Complete\nconsolidated report"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+Human checkpoints (purple): mode selection, spec approval, 3× check failure pause.
+Autonomous phases (green): go, check, ship — run without user intervention.
+
+State tracked in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`.
 
 ### Ring 1: Isolation Strategy
 
@@ -270,11 +330,13 @@ Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node 
 
 ```
 epic-harness/
-├── commands/          # Ring 1: 6 slash commands
+├── commands/          # Ring 1: 8 slash commands
+│   ├── discover.md
 │   ├── spec.md
 │   ├── go.md
 │   ├── check.md
 │   ├── ship.md
+│   ├── orbit.md       ← autonomous pipeline wrapper
 │   ├── team.md
 │   └── evolve.md
 ├── skills/            # Ring 2: 8 auto skills + dispatch
@@ -297,10 +359,10 @@ epic-harness/
 │   ├── bin/
 │   │   └── epic-harness  ← Rust single binary
 ├── integrations/      # Per-tool integration files
-│   ├── codex/         # hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
-│   ├── gemini/        # settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)
-│   ├── cursor/        # hooks.json, commands/(6), agents/(4)
-│   ├── opencode/      # commands/(6), agents/(4), plugins/epic-harness.js
+│   ├── codex/         # hooks.json, config.toml, prompts/(8), skills/(7), agents/(4)
+│   ├── gemini/        # settings.json, GEMINI.md, commands/(8), skills/(7), agents/(4)
+│   ├── cursor/        # hooks.json, commands/(8), agents/(4)
+│   ├── opencode/      # commands/(8), agents/(4), plugins/epic-harness.js
 │   ├── cline/         # hooks/(5 scripts), rules/epic-harness.md
 │   └── aider/         # .aider.conf.yml, .aider/CONVENTIONS.md
 ├── references/        # Checklists

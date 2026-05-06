@@ -1,6 +1,6 @@
 # epic harness
 
-**7개의 명령어. 자동 트리거 스킬. 자기 진화형.**
+**8개의 명령어. 자율 파이프라인. 자동 트리거 스킬. 자기 진화형.**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -15,7 +15,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-**30개 이상의 명령어를 7개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다. 외울 것은 적게, 키 입력당 지능은 더 높게.
+**30개 이상의 명령어를 8개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다. 외울 것은 적게, 키 입력당 지능은 더 높게.
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness 기능" width="100%" />
@@ -23,18 +23,38 @@
 
 ## 아키텍처: 4-Ring 모델
 
-```
-Ring 0 — 오토파일럿 (훅, 투명하게 동작)
-  세션 복원, 자동 포맷, 가드레일, 관측 로깅
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — 오토파일럿 (투명하게 동작)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
 
-Ring 1 — 7개 명령어 (직접 호출)
-  /discover /spec  /go  /check  /ship  /team  /evolve
+    subgraph R1["Ring 1 — 명령어 (직접 호출)"]
+        direction TB
+        subgraph orbit["  /orbit  (자율 파이프라인)"]
+            direction LR
+            c1("/discover\n선택") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+            c4 -->|"FAIL → 재시도"| c3
+        end
+        c6("/team")
+        c7("/evolve")
+    end
 
-Ring 2 — 자동 스킬 (컨텍스트 기반 트리거)
-  tdd · debug · secure · perf · simplify · document · verify · context
+    subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
 
-Ring 3 — 진화 (자기 개선)
-  도구 사용 관측 → 실패 분석 → 스킬 자동 생성 → 게이트 → 리로드
+    subgraph R3["Ring 3 — 진화 (자기 개선)"]
+        direction LR
+        e1(관측) --> e2(분석) --> e3(시드) --> e4(게이트) --> e5(리로드)
+    end
+
+    R0 -->|"모든 도구 호출 관측"| R3
+    R3 -.->|"진화 스킬"| R2
+    R1 -->|"자동 트리거"| R2
+    R0 -->|"세션 복원"| R1
 ```
 
 ## 설치
@@ -77,11 +97,11 @@ epic-harness는 Claude Code와 6개의 추가 AI 코딩 도구에서 동작합�
 
 | 도구 | Ring 0 훅 | 명령어/프롬프트 | 스킬 | 에이전트 |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ 전체 | ✓ 7개 명령어 | ✓ 11개 스킬 | ✓ 4개 |
-| **Codex CLI** | ✓ 전체¹ | ✓ 7개 프롬프트 | ✓ 7개 (`~/.agents/skills/`) | ✓ 4개 |
-| **Gemini CLI** | ✓ 부분²  | ✓ 7개 명령어 | ✓ 7개 | ✓ 4개 |
-| **Cursor** | ✓ 전체³ | ✓ 7개 명령어 | ✓ 규칙 경유 | ✓ 4개 |
-| **OpenCode** | ✓ 부분⁴ | ✓ 7개 명령어 | — | ✓ 4개 |
+| **Claude Code** | ✓ 전체 | ✓ 8개 명령어 (/orbit 포함) | ✓ 11개 스킬 | ✓ 4개 |
+| **Codex CLI** | ✓ 전체¹ | ✓ 8개 프롬프트 (/orbit 포함) | ✓ 7개 (`~/.agents/skills/`) | ✓ 4개 |
+| **Gemini CLI** | ✓ 부분²  | ✓ 8개 명령어 (/orbit 포함) | ✓ 7개 | ✓ 4개 |
+| **Cursor** | ✓ 전체³ | ✓ 8개 명령어 (/orbit 포함) | ✓ 규칙 경유 | ✓ 4개 |
+| **OpenCode** | ✓ 부분⁴ | ✓ 8개 명령어 (/orbit 포함) | — | ✓ 4개 |
 | **Cline** | ✓ 전체⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -230,12 +250,43 @@ SessionStart hook → resume (smart recall) → 다음 세션에서 관련성 �
 
 | 명령어 | 기능 |
 |---------|-------------|
+| `/discover` | 문제를 먼저 정의 — 5 Whys, JTBD, 소크라테스식 질문 (선택사항) |
 | `/spec` | 무엇을 만들지 정의 — 요구사항 명확화, 스펙 작성 |
 | `/go` | 빌드 실행 — 자동 계획, TDD 서브에이전트, 병렬 실행 |
 | `/check` | 검증 — 병렬 코드 리뷰 + 보안 감사 + 성능 점검 |
 | `/ship` | 배포 — PR, CI, 머지 |
 | `/team` | 프로젝트 간 조직 수준 에이전트 팀 생성 및 동기화 |
 | `/evolve` | 수동 진화 트리거 / 상태 확인 / 롤백 |
+| `/orbit` | **자율 파이프라인** — spec → go → check → ship을 한 번에. 인터랙티브 또는 council 모드 선택. |
+
+### /orbit — 자율 파이프라인
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"모드 선택"}
+    MODE -->|"1 · 인터랙티브"| WAIT["사용자가\n/discover → /spec 실행\n후 'orbit go'"]:::human
+    MODE -->|"2 · Council 자동 스펙"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["승인된 스펙 로드"]
+    COUNCIL --> SYNTH["종합"] --> GEN["스펙 자동 생성"] --> APPROVE{"승인?"}:::human
+    APPROVE -->|예| SPEC_LOAD
+    APPROVE -->|수정| GEN
+    APPROVE -->|거절| ABORT(["중단"])
+    SPEC_LOAD --> GO["Go\n계획 → TDD → 통합"]:::auto
+    GO --> CHECK["Check\n리뷰 + 감사 + 테스트"]:::auto
+    CHECK -->|"PASS"| SHIP["Ship\n격리 테스트 → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"재시도 < 3?"}
+    RETRY -->|예| GO
+    RETRY -->|아니오| PAUSE["일시정지\n사용자 결정"]:::human
+    PAUSE -->|계속| GO
+    PAUSE -->|중단| ABORT
+    SHIP --> DONE(["Orbit 완료\n통합 리포트"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**보라색 노드**: 사람 개입 필요 (모드 선택, 스펙 승인, 3회 실패 시 일시정지)  
+**초록색 노드**: 자율 실행 — go, check, ship은 사람 개입 없이 진행
 
 ## 팀 (`epic team`)
 

@@ -30,6 +30,7 @@ The Rust binary handles all hooks. If you also want to install for other tools (
 
 2. **Try a command:**
 
+   **Manual pipeline** — step through each phase yourself:
    ```
    /discover   # explore and define the problem (optional — for vague or unfocused requests)
    /spec       # describe what you want to build
@@ -38,6 +39,15 @@ The Rust binary handles all hooks. If you also want to install for other tools (
    /check      # parallel review + security + perf audit
    /ship       # isolated pre-flight test → PR + CI + merge
                # → on completion, suggests /evolve to improve skills for the next cycle
+   ```
+
+   **Or use `/orbit`** — runs spec → go → check → ship autonomously in one command:
+   ```
+   /orbit
+   # Choose mode:
+   #   1. Interactive  — you run /discover + /spec, then say "orbit go"
+   #   2. Council auto-spec — 4-voice council generates spec, you approve
+   # After spec approval: fully autonomous until PR is merged
    ```
 
 3. **Skills trigger themselves.** When you touch auth code, the `secure` skill activates. When tests fail, `debug` kicks in. You don't call them.
