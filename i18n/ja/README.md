@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
@@ -77,7 +77,7 @@ epic-harnessはClaude Codeと6つの追加AIコーディングツールで動作
 
 | ツール | Ring 0 フック | コマンド/プロンプト | スキル | エージェント |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ フル | ✓ 6コマンド | ✓ 8スキル | ✓ 4 |
+| **Claude Code** | ✓ フル | ✓ 6コマンド | ✓ 10スキル | ✓ 4 |
 | **Codex CLI** | ✓ フル¹ | ✓ 6プロンプト | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
 | **Gemini CLI** | ✓ 部分²  | ✓ 6コマンド | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ フル³ | ✓ 6コマンド | ✓ ルール経由 | ✓ 4 |
@@ -136,34 +136,34 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 
 ```bash
 # スマートリコール — 現在のタスクに関連性でランク付け
-harness mem recall "auth refactor" --project my-project
+epic mem recall "auth refactor" --project my-project
 
 # メモリノードを追加（重要度はタイプ別に自動設定、または明示的に指定）
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
 
 # フィルタークエリ（重要度 + アクセス数を含む）
-harness mem query --type decision --project my-project
+epic mem query --type decision --project my-project
 
 # 全文検索（重要度順にランク付け）
-harness mem search "JWT"
+epic mem search "JWT"
 
 # スマートコンテキスト（重要度加重、最新順でない）
-harness mem context --project my-project
+epic mem context --project my-project
 
 # ナレッジグラフのWeb UI
-harness mem serve          # → http://localhost:7700
+epic mem serve          # → http://localhost:7700
 
 # Claude CodeにMCPサーバーとして登録（Node.js不要）
-harness mem mcp-install
+epic mem mcp-install
 
 # すべてのノードをMarkdownにエクスポート（Gitバックアップ用）
-harness mem export --out ./docs/memory
+epic mem export --out ./docs/memory
 ```
 
 ### MCPツール（6個）
 
-MCPサーバーとして登録（`harness mem mcp-install`）すると、エージェントがこれらのツールを直接呼び出せます：
+MCPサーバーとして登録（`epic mem mcp-install`）すると、エージェントがこれらのツールを直接呼び出せます：
 
 | ツール | 目的 |
 |------|---------|
@@ -378,7 +378,7 @@ A-EvolveのベンチマークパターンをClaude Codeのフックシステム�
 
 ### 多次元スコアリング
 
-すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `src/hooks/common.rs`の `SCORE_WEIGHTS` で設定可能です：
+すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `~/.harness/config.toml`の `SCORE_WEIGHTS` で設定可能です：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -397,7 +397,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### パターン検出（4タイプ）
 
-すべての閾値は `src/hooks/common.rs`の設定可能な定数です：
+すべての閾値は `~/.harness/config.toml`の設定可能な定数です：
 
 | パターン | 検出内容 | 定数 | デフォルト |
 |---------|---------|----------|---------|

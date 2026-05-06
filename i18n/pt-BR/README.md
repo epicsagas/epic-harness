@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
@@ -77,7 +77,7 @@ epic-harness funciona com Claude Code e 6 ferramentas adicionais de programaçã
 
 | Ferramenta | Ring 0 Hooks | Comandos/Prompts | Skills | Agentes |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ Completo | ✓ 6 comandos | ✓ 8 skills | ✓ 4 |
+| **Claude Code** | ✓ Completo | ✓ 6 comandos | ✓ 10 skills | ✓ 4 |
 | **Codex CLI** | ✓ Completo¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
 | **Gemini CLI** | ✓ Parcial² | ✓ 6 comandos | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ Completo³ | ✓ 6 comandos | ✓ via regras | ✓ 4 |
@@ -136,34 +136,34 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 
 ```bash
 # Recuperação inteligente — classificada por relevância para sua tarefa atual
-harness mem recall "auth refactor" --project my-project
+epic mem recall "auth refactor" --project my-project
 
 # Adicionar um nó de memória (importância auto por tipo, ou explícita)
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
 
 # Consulta filtrada (inclui importância + access_count)
-harness mem query --type decision --project my-project
+epic mem query --type decision --project my-project
 
 # Busca de texto completo (classificada por importância)
-harness mem search "JWT"
+epic mem search "JWT"
 
 # Contexto inteligente (ponderado por importância, não apenas o mais recente)
-harness mem context --project my-project
+epic mem context --project my-project
 
 # Interface Web do grafo de conhecimento
-harness mem serve          # → http://localhost:7700
+epic mem serve          # → http://localhost:7700
 
 # Registrar como servidor MCP no Claude Code (sem Node.js)
-harness mem mcp-install
+epic mem mcp-install
 
 # Exportar todos os nós para Markdown para backup no Git
-harness mem export --out ./docs/memory
+epic mem export --out ./docs/memory
 ```
 
 ### Ferramentas MCP (6)
 
-Quando registrado como servidor MCP (`harness mem mcp-install`), agentes podem chamar diretamente essas ferramentas:
+Quando registrado como servidor MCP (`epic mem mcp-install`), agentes podem chamar diretamente essas ferramentas:
 
 | Ferramenta | Propósito |
 |------|---------|
@@ -378,7 +378,7 @@ Integra os padrões de benchmark do A-Evolve ao sistema de hooks do Claude Code.
 
 ### Pontuação Multidimensional
 
-Cada chamada de ferramenta é avaliada em 3 eixos. Os pesos são configuráveis via `SCORE_WEIGHTS` em `src/hooks/common.rs`:
+Cada chamada de ferramenta é avaliada em 3 eixos. Os pesos são configuráveis via `SCORE_WEIGHTS` em `~/.harness/config.toml`:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -397,7 +397,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### Detecção de Padrões (4 tipos)
 
-Todos os limites são constantes configuráveis em `src/hooks/common.rs`:
+Todos os limites são constantes configuráveis em `~/.harness/config.toml`:
 
 | Padrão | Detecta | Constante | Padrão |
 |--------|---------|-----------|--------|

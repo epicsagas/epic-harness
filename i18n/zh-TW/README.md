@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
@@ -77,7 +77,7 @@ epic-harness 支援 Claude Code 以及另外 6 款 AI 程式設計工具。所�
 
 | 工具 | Ring 0 Hooks | 指令/提示詞 | 技能 | 代理 |
 |------|-------------|------------|------|------|
-| **Claude Code** | ✓ 完整 | ✓ 6 個指令 | ✓ 8 個技能 | ✓ 4 |
+| **Claude Code** | ✓ 完整 | ✓ 6 個指令 | ✓ 10 個技能 | ✓ 4 |
 | **Codex CLI** | ✓ 完整¹ | ✓ 6 個提示詞 | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
 | **Gemini CLI** | ✓ 部分² | ✓ 6 個指令 | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ 完整³ | ✓ 6 個指令 | ✓ 透過規則 | ✓ 4 |
@@ -136,34 +136,34 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 
 ```bash
 # 智慧召回 — 為當前任務按相關性排序
-harness mem recall "auth refactor" --project my-project
+epic mem recall "auth refactor" --project my-project
 
 # 新增記憶節點（重要性按類型自動設定，或明確指定）
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
 
 # 篩選查詢（包含重要性 + 存取次數）
-harness mem query --type decision --project my-project
+epic mem query --type decision --project my-project
 
 # 全文搜尋（按重要性排序）
-harness mem search "JWT"
+epic mem search "JWT"
 
 # 智慧上下文（重要性加權，而非僅最新）
-harness mem context --project my-project
+epic mem context --project my-project
 
 # 知識圖譜 Web UI
-harness mem serve          # → http://localhost:7700
+epic mem serve          # → http://localhost:7700
 
 # 在 Claude Code 中註冊為 MCP 伺服器（無需 Node.js）
-harness mem mcp-install
+epic mem mcp-install
 
 # 將所有節點匯出為 Markdown 供 Git 備份
-harness mem export --out ./docs/memory
+epic mem export --out ./docs/memory
 ```
 
 ### MCP 工具（6 個）
 
-註冊為 MCP 伺服器（`harness mem mcp-install`）後，代理可以直接呼叫這些工具：
+註冊為 MCP 伺服器（`epic mem mcp-install`）後，代理可以直接呼叫這些工具：
 
 | 工具 | 用途 |
 |------|---------|
@@ -378,7 +378,7 @@ epic resume | guard | polish | observe | snapshot | reflect
 
 ### 多維度評分
 
-每次工具呼叫依 3 個軸向評分。權重可透過 `src/hooks/common.rs`中的 `SCORE_WEIGHTS` 設定：
+每次工具呼叫依 3 個軸向評分。權重可透過 `~/.harness/config.toml`中的 `SCORE_WEIGHTS` 設定：
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -397,7 +397,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 模式偵測（4 種類型）
 
-所有閾值皆為 `src/hooks/common.rs`中的可設定常數：
+所有閾值皆為 `~/.harness/config.toml`中的可設定常數：
 
 | 模式 | 偵測內容 | 常數 | 預設值 |
 |---------|---------|----------|---------|

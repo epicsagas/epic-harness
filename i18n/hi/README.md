@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
@@ -77,7 +77,7 @@ epic-harness Claude Code और 6 अतिरिक्त AI कोडिंग
 
 | टूल | Ring 0 Hooks | कमांड/प्रॉम्प्ट | स्किल्स | एजेंट्स |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 6 कमांड | ✓ 8 स्किल्स | ✓ 4 |
+| **Claude Code** | ✓ पूर्ण | ✓ 6 कमांड | ✓ 10 स्किल्स | ✓ 4 |
 | **Codex CLI** | ✓ पूर्ण¹ | ✓ 6 प्रॉम्प्ट | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
 | **Gemini CLI** | ✓ आंशिक² | ✓ 6 कमांड | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ पूर्ण³ | ✓ 6 कमांड | ✓ नियमों के माध्यम से | ✓ 4 |
@@ -136,34 +136,34 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 
 ```bash
 # स्मार्ट रिकॉल — आपके वर्तमान कार्य के लिए प्रासंगिकता-रैंक
-harness mem recall "auth refactor" --project my-project
+epic mem recall "auth refactor" --project my-project
 
 # मेमोरी नोड जोड़ें (महत्व प्रकार द्वारा स्वतः, या स्पष्ट)
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
 
 # फ़िल्टर क्वेरी (महत्व + access_count सहित)
-harness mem query --type decision --project my-project
+epic mem query --type decision --project my-project
 
 # फ़ुल-टेक्स्ट खोज (महत्व द्वारा रैंक)
-harness mem search "JWT"
+epic mem search "JWT"
 
 # स्मार्ट कॉन्टेक्स्ट (महत्व-भारित, केवल नवीनतम नहीं)
-harness mem context --project my-project
+epic mem context --project my-project
 
 # नॉलेज ग्राफ़ वेब UI
-harness mem serve          # → http://localhost:7700
+epic mem serve          # → http://localhost:7700
 
 # Claude Code में MCP सर्वर के रूप में पंजीकृत करें (Node.js आवश्यक नहीं)
-harness mem mcp-install
+epic mem mcp-install
 
 # Git बैकअप के लिए सभी नोड्स को Markdown में निर्यात करें
-harness mem export --out ./docs/memory
+epic mem export --out ./docs/memory
 ```
 
 ### MCP टूल्स (6)
 
-MCP सर्वर के रूप में पंजीकृत होने पर (`harness mem mcp-install`), एजेंट इन टूल्स को सीधे कॉल कर सकते हैं:
+MCP सर्वर के रूप में पंजीकृत होने पर (`epic mem mcp-install`), एजेंट इन टूल्स को सीधे कॉल कर सकते हैं:
 
 | टूल | उद्देश्य |
 |------|---------|
@@ -378,7 +378,7 @@ A-Evolve के बेंचमार्क पैटर्न को Claude Cod
 
 ### बहु-आयामी स्कोरिंग
 
-प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `src/hooks/common.rs` में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
+प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `~/.harness/config.toml` में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -397,7 +397,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### पैटर्न डिटेक्शन (4 प्रकार)
 
-सभी थ्रेशोल्ड `src/hooks/common.rs` में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
+सभी थ्रेशोल्ड `~/.harness/config.toml` में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
 
 | पैटर्न | क्या पहचानता है | कॉन्स्टेंट | डिफ़ॉल्ट |
 |---------|---------|----------|---------|

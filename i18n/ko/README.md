@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
@@ -77,7 +77,7 @@ epic-harness는 Claude Code와 6개의 추가 AI 코딩 도구에서 동작합�
 
 | 도구 | Ring 0 훅 | 명령어/프롬프트 | 스킬 | 에이전트 |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ 전체 | ✓ 6개 명령어 | ✓ 8개 스킬 | ✓ 4개 |
+| **Claude Code** | ✓ 전체 | ✓ 6개 명령어 | ✓ 10개 스킬 | ✓ 4개 |
 | **Codex CLI** | ✓ 전체¹ | ✓ 6개 프롬프트 | ✓ 7개 (`~/.agents/skills/`) | ✓ 4개 |
 | **Gemini CLI** | ✓ 부분²  | ✓ 6개 명령어 | ✓ 7개 | ✓ 4개 |
 | **Cursor** | ✓ 전체³ | ✓ 6개 명령어 | ✓ 규칙 경유 | ✓ 4개 |
@@ -136,34 +136,34 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 
 ```bash
 # 스마트 리콜 — 현재 작업에 맞게 관련성 순위 정렬
-harness mem recall "auth refactor" --project my-project
+epic mem recall "auth refactor" --project my-project
 
 # 메모리 노드 추가 (중요도는 유형별 자동 설정, 또는 명시적 지정)
-harness mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-harness mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
+epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
+epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
 
 # 필터 쿼리 (중요도 + 접근 횟수 포함)
-harness mem query --type decision --project my-project
+epic mem query --type decision --project my-project
 
 # 전체 텍스트 검색 (중요도 순 정렬)
-harness mem search "JWT"
+epic mem search "JWT"
 
 # 스마트 컨텍스트 (중요도 가중, 최신순 아님)
-harness mem context --project my-project
+epic mem context --project my-project
 
 # 지식 그래프 웹 UI
-harness mem serve          # → http://localhost:7700
+epic mem serve          # → http://localhost:7700
 
 # Claude Code에 MCP 서버로 등록 (Node.js 불필요)
-harness mem mcp-install
+epic mem mcp-install
 
 # 모든 노드를 Markdown으로 내보내기 (Git 백업용)
-harness mem export --out ./docs/memory
+epic mem export --out ./docs/memory
 ```
 
 ### MCP 도구 (6개)
 
-MCP 서버로 등록 시(`harness mem mcp-install`), 에이전트가 이 도구들을 직접 호출할 수 있습니다:
+MCP 서버로 등록 시(`epic mem mcp-install`), 에이전트가 이 도구들을 직접 호출할 수 있습니다:
 
 | 도구 | 목적 |
 |------|---------|
@@ -378,7 +378,7 @@ A-Evolve의 벤치마크 패턴을 Claude Code 훅 시스템에 통합합니다.
 
 ### 다차원 스코어링
 
-모든 도구 호출은 3개 축으로 평가됩니다. 가중치는 `src/hooks/common.rs`의 `SCORE_WEIGHTS`로 설정 가능합니다:
+모든 도구 호출은 3개 축으로 평가됩니다. 가중치는 `~/.harness/config.toml`의 `SCORE_WEIGHTS`로 설정 가능합니다:
 
 ```
 composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
@@ -397,7 +397,7 @@ composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × out
 
 ### 패턴 감지 (4가지 유형)
 
-모든 임계값은 `src/hooks/common.rs`에서 설정 가능합니다:
+모든 임계값은 `~/.harness/config.toml`에서 설정 가능합니다:
 
 | 패턴 | 감지 대상 | 상수 | 기본값 |
 |---------|---------|----------|---------|
