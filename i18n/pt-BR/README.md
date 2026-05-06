@@ -1,6 +1,8 @@
 # epic harness
 
-**7 comandos. Skills de acionamento automático. Auto-evolutivo.**
+> Um arnês de agente de codificação IA auto-evolutivo — 8 comandos, 1 pipeline autônomo, habilidades de ativação automática, aprende com seus erros.
+
+**8 comandos. Habilidades de ativação automática. Auto-evolutivo.**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -9,580 +11,553 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Rust-1.82+-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
-  <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
-  <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-Um plugin para Claude Code que **substitui mais de 30 comandos por apenas 7**, **aciona skills automaticamente** com base no que você está fazendo e **evolui novas skills** a partir dos seus próprios padrões de falha. Menos superfície para memorizar. Mais inteligência por tecla pressionada.
+Um plugin do Claude Code que **substitui mais de 30 comandos por 8**, **ativa habilidades automaticamente** com base no que você está fazendo, e **evolui novas habilidades** a partir dos seus próprios padrões de falha. Menos superfície para memorizar. Mais inteligência por tecla pressionada.
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="funcionalidades do epic harness" width="100%" />
+  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
 </p>
-
-## Arquitetura: Modelo de 4 Anéis
-
-```
-Ring 0 — Autopilot (hooks, invisível)
-  Restauração de sessão, auto-formatação, barreiras de segurança, registro de observações
-
-Ring 1 — 7 Comandos (você os invoca)
-  /spec  /go  /check  /ship  /team  /evolve
-
-Ring 2 — Auto Skills (acionadas por contexto)
-  tdd · debug · secure · perf · simplify · document · verify · context
-
-Ring 3 — Evolve (auto-aprimoramento)
-  Observa uso de ferramentas → analisa falhas → gera skills automaticamente → validação → recarga
-```
 
 ## Instalação
 
-```
-# Plugin Claude Code (recomendado)
-/plugin marketplace add epicsagas/plugins
-/plugin install epic@epicsagas
-```
+> **Primeira vez?** Leia o [Guia de Início Rápido (5 min)](../../QUICKSTART.md).
 
 ```bash
-# Ou a partir do código-fonte
-git clone https://github.com/epicsagas/epic-harness.git
-cd epic-harness
-cargo install --path .
-epic install
+# Claude Code
+/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+
+# Qualquer outra ferramenta
+cargo install epic-harness && epic install
 ```
 
-### Instalar a partir do binário
+| Ambiente | Método |
+|----------|--------|
+| **Claude Code** | Marketplace de plugins (acima) |
+| **macOS** | `brew install epicsagas/tap/epic-harness` |
+| **Qualquer (com Rust)** | `cargo install epic-harness` |
+| **A partir do código-fonte** | `git clone` + `cargo install --path .` |
+
+Pré-requisitos: **Git**. Instalações a partir do código-fonte ou binário também precisam do [conjunto de ferramentas Rust](https://rustup.rs).
+
+### `epic install` — assistente de configuração
+
+Após instalar o binário, execute `epic install` (ou `epic install claude`) para:
+
+1. Criar a estrutura de diretórios `~/.harness/`
+2. Sincronizar comandos, habilidades e agentes para o diretório de configuração da ferramenta
+3. Registrar o servidor MCP (harness-mem) para o Claude Code
+4. Criar `~/.harness/config.toml` com valores padrão se ausente
+
+No Claude Code, `hooks/setup.sh` é executado automaticamente no início da sessão e instala o binário se estiver ausente. Nenhuma etapa manual é necessária após o clone inicial.
+
+### Outras ferramentas
 
 ```bash
-# Homebrew (macOS)
-brew install epicsagas/tap/epic-harness
-
-# Via crates.io
-cargo install epic-harness
-
-# Binário pré-compilado (mais rápido, sem compilar)
-cargo binstall epic-harness
-
-# A partir do código-fonte
-cargo install --path .
-```
-
-O binário é detectado automaticamente pelos hooks. Se ausente, os hooks recorrem ao Node.js.
-
-## Suporte a Múltiplas Ferramentas
-
-epic-harness funciona com Claude Code e 6 ferramentas adicionais de programação com IA. Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projects/{slug}/`.
-
-| Ferramenta | Ring 0 Hooks | Comandos/Prompts | Skills | Agentes |
-|------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ Completo | ✓ 7 comandos | ✓ 11 skills | ✓ 4 |
-| **Codex CLI** | ✓ Completo¹ | ✓ 7 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
-| **Gemini CLI** | ✓ Parcial² | ✓ 7 comandos | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Completo³ | ✓ 7 comandos | ✓ via regras | ✓ 4 |
-| **OpenCode** | ✓ Parcial⁴ | ✓ 7 comandos | — | ✓ 4 |
-| **Cline** | ✓ Completo⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
-
-¹ Requer `codex_hooks = true` em `~/.codex/config.toml`; PostToolUse intercepta somente Bash
-² Sem equivalente `PreToolUse` — guard corre no nível `BeforeModel`
-³ Requer Cursor 1.7+
-⁴ Plugin JS: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`
-⁵ Scripts de hook PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel
-⁶ Sem sistema de hooks — convenções injetadas via `.aider/CONVENTIONS.md` + `.aider.conf.yml`
-
-### Instalar para outras ferramentas
-
-```bash
-# Menu interativo (selecionar ferramentas a instalar)
-epic install
-
-# Instalação direta
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
 epic install gemini       # Gemini CLI  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/ (requer Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-
-# Instalação local no projeto
-epic install cursor --local
-
-# Visualizar sem realizar alterações
-epic install gemini --dry-run
+epic install              # Menu interativo
 ```
 
-Os arquivos de integração no diretório da ferramenta (`hooks.json`, comandos, agentes, skills, regras, …) são **sincronizados** a partir do binário: arquivos ausentes ou desatualizados são escritos. `GEMINI.md` e `AGENTS.md` são criados apenas quando ausentes.
+Os arquivos de integração são **sincronizados** a partir do binário: arquivos ausentes ou desatualizados são escritos. `GEMINI.md` e `AGENTS.md` são criados apenas quando ausentes.
 
-## Memória Unificada
-
-Todos os agentes compartilham um único grafo de conhecimento armazenado em `~/.harness/memory.db` (SQLite + FTS5). Nenhum Node.js ou runtime externo necessário.
-
-### Recuperação Inteligente
-
-A recuperação de memória usa **pontuação composta** em vez de simplesmente despejar as últimas N entradas:
-
-```
-score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
-```
-
-- **Importância** configurada automaticamente por tipo de nó: decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
-- **Rastreamento de acesso**: memórias frequentemente recuperadas sobem naturalmente
-- **Decaimento gradual**: memórias sem uso perdem importância ao longo do tempo (10% a cada 30 dias, piso 0.05)
-- **Aumento do grafo**: a recuperação segue arestas de 1 salto para trazer contexto relacionado
-
-### CLI
+### Verificação
 
 ```bash
-# Recuperação inteligente — classificada por relevância para sua tarefa atual
-epic mem recall "auth refactor" --project my-project
-
-# Adicionar um nó de memória (importância auto por tipo, ou explícita)
-epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
-
-# Consulta filtrada (inclui importância + access_count)
-epic mem query --type decision --project my-project
-
-# Busca de texto completo (classificada por importância)
-epic mem search "JWT"
-
-# Contexto inteligente (ponderado por importância, não apenas o mais recente)
-epic mem context --project my-project
-
-# Interface Web do grafo de conhecimento
-epic mem serve          # → http://localhost:7700
-
-# Registrar como servidor MCP no Claude Code (sem Node.js)
-epic mem mcp-install
-
-# Exportar todos os nós para Markdown para backup no Git
-epic mem export --out ./docs/memory
+epic --version              # Binário instalado
+ls ~/.harness/              # Diretório de dados existe
 ```
 
-### Ferramentas MCP (6)
+Dentro de uma sessão do Claude Code: `/evolve status`
 
-Quando registrado como servidor MCP (`epic mem mcp-install`), agentes podem chamar diretamente essas ferramentas:
+### Demonstração Rápida
 
-| Ferramenta | Propósito |
-|------|---------|
-| `mem_recall` | **Principal.** Recuperação contextual inteligente com hint + projeto + vizinhos do grafo |
-| `mem_add` | Adicionar nó com auto-importância por tipo (ou explícita 0.0–1.0) |
-| `mem_search` | Busca FTS5, resultados classificados por importância |
-| `mem_query` | Filtrar por tag/tipo/projeto |
-| `mem_context` | Recuperação inteligente com escopo de projeto (sem hint) |
-| `mem_related` | Travessia BFS do grafo a partir de um ID de nó |
-
-### Como o Grafo de Conhecimento Funciona
-
-O grafo se acumula automaticamente a partir do trabalho normal de sessão — nenhuma entrada manual necessária.
-
-**Fluxo de dados:**
-
-```
-PostToolUse hook → observe (pontuação em 3 eixos) → obs/*.jsonl
-                                                          ↓
-SessionEnd hook → reflect (detecção de padrões) → nós + arestas memory.db
-                                                          ↓  (importância definida por tipo)
-SessionStart hook → resume (recuperação inteligente) → próxima sessão recebe hints classificados por relevância
-                              ↓
-                    decay_importance() → nós sem uso desvanecem gradualmente
+**Um comando, pipeline completo:**
+```bash
+$ /orbit
+# Escolha o modo:
+#   1. Interativo  — você executa /discover + /spec, depois "orbit go"
+#   2. Conselho    — o conselho de 4 vozes gera a especificação, você aprova
+→ spec aprovada → go (TDD) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-**Tipos de nós (7):**
+**Ou avance passo a passo manualmente:**
+```bash
+$ /spec "Add JWT auth to the login API"
+  → Esclarece requisitos → produz SPEC-*.md
 
-| Tipo | Criado por | Importância padrão |
-|------|-----------|-------------------|
-| `decision` | Manual / MCP | 0.9 |
-| `resolution` | Manual / MCP | 0.8 |
-| `concept` | Manual / MCP | 0.7 |
-| `project` | Manual / MCP | 0.7 |
-| `pattern` | Auto (reflect) | 0.5 |
-| `error` | Auto (reflect) | 0.4 |
-| `session` | Auto (reflect) | 0.2 |
+$ /go
+  → Planeja automaticamente → subagentes TDD → DONE (4 min)
 
-**Ciclo de vida da memória:**
+$ /check
+  → Revisão de código + auditoria de segurança + testes em paralelo → PASS
 
-| Evento | O que acontece |
-|-------|-------------|
-| Nó recuperado via busca/recall/contexto | `access_count++`, `accessed_at` atualizado |
-| 30+ dias sem acesso | importância decai 10% (piso 0.05) |
-| 180+ dias sem acesso | marcado como `stale`, excluído da recuperação |
-| Nó marcado como `pinned` | imune ao decaimento |
+$ /ship
+  → Cria PR → CI verde → mesclado
+```
 
-**Condições de acumulação automática:**
+## Arquitetura: Modelo de 4 Anéis
 
-| Condição | Nó criado |
-|-----------|-------------|
-| Cada fim de sessão | `session` (sempre) |
-| Mesmo erro ≥3 vezes seguidas | `error` (repeated_same_error) |
-| Edit→Error alternando | `pattern` (thrashing) |
-| Taxa de sucesso da ferramenta <60% (mín. 5 observações) | `pattern` (weak_tool) |
-| Taxa de sucesso do tipo de arquivo <50% (mín. 3 observações) | `pattern` (weak_filetype) |
-| Ciclos de sucesso em Edit → erro em Bash | `pattern` (fix_then_break) |
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
 
-> **Nota:** Sessões limpas (sem erros) produzem apenas nós `session`. O grafo se enriquece após 2–3 sessões reais de desenvolvimento com falhas de build, falhas de testes ou ciclos de depuração.
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
 
-Memórias existentes baseadas em arquivos (`nodes/*.md`, `edges.jsonl`) são automaticamente migradas para SQLite na primeira execução.
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
+```
+
+## /orbit — Pipeline Autônomo
+
+`/orbit` encapsula todo o pipeline manual em uma única execução autônoma.
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"Modo?"}
+    MODE -->|"1 · Interactive"| WAIT["Usuário executa\n/discover → /spec\ndepois 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["Conselho de 4 Vozes\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["Carregar especificação aprovada"]
+    COUNCIL --> SYNTH["Sintetizar"] --> GEN["Gerar especificação"] --> APPROVE{"Aprovar?"}:::human
+    APPROVE -->|yes| SPEC_LOAD
+    APPROVE -->|modify| GEN
+    APPROVE -->|reject| ABORT(["Abortar"])
+    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    RETRY -->|yes| GO
+    RETRY -->|no| PAUSE["Pausa\nusuário decide"]:::human
+    PAUSE -->|continue| GO
+    PAUSE -->|abort| ABORT
+    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit Completo\nrelatório consolidado"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**Nós roxos** — pontos de controle humanos: seleção de modo, aprovação de especificação, pausa por 3 falhas de check.
+**Nós verdes** — autônomos: go, check, ship, evolve executam sem intervenção do usuário.
+
+Estado persistido em `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobrevive à compactação de contexto.
 
 ## Comandos
 
 | Comando | O que faz |
 |---------|-----------|
-| `/spec` | Define o que construir — esclarece requisitos, produz uma especificação |
-| `/go` | Constrói — planejamento automático, subagentes TDD, execução paralela |
-| `/check` | Verifica — revisão de código + auditoria de segurança + performance em paralelo |
-| `/ship` | Entrega — PR, CI, merge |
+| `/discover` | Explorar e definir o problema antes de especificar uma solução — 5 Porquês, JTBD, questionamento socrático |
+| `/spec` | Definir o que construir — esclarecer requisitos, produzir uma especificação |
+| `/go` | Construir — planejamento automático, subagentes TDD, modelo de resultado de 4 estados (DONE/CONCERNS/NEEDS_CONTEXT/BLOCKED), execução paralela com isolamento de worktree |
+| `/check` | Verificar — despacho de especialistas adaptativo (baseado em escopo), revisão de código + auditoria de segurança + desempenho em paralelo |
+| `/ship` | Publicar — teste de pré-voo isolado, depois PR, CI, mesclagem |
 | `/team` | Criar e sincronizar equipes de agentes em nível de organização entre projetos |
-| `/evolve` | Acionamento manual de evolução / status / rollback |
+| `/evolve` | Gatilho manual de evolução / status / rollback |
+| `/orbit` | **Pipeline autônomo** — executa spec → go → check → ship de uma vez. Escolha o modo interativo ou de conselho. |
 
-## Equipes (`epic team`)
+### Visão Geral do Pipeline
 
-As equipes são de **nível de organização**, não vinculadas a um projeto. Executar `/team` em qualquer projeto enriquece um pool compartilhado de definições de agentes — nunca sobrescreve silenciosamente.
+```mermaid
+flowchart TD
+    subgraph manual["  entrada manual  "]
+        direction LR
+        D(["/discover\noptional"]):::manual
+        S(["/spec"]):::manual
+        D --> S
+    end
 
-### Como funciona
+    subgraph auto["  /orbit  autonomous  "]
+        direction TD
+        G(["/go"]):::auto
+        C(["/check"]):::auto
+        SH(["/ship"]):::auto
+        EV(["/evolve"]):::auto
+        G --> C
+        C -->|PASS| SH
+        C -->|"FAIL ×3 → pause"| G
+        SH --> EV
+    end
 
-```
-epic team                      # interativo: escanear projeto → projetar → escrever → sincronizar
-         ↓
-~/.harness/orgs/epic/teams/backend/   ← armazenamento global (persiste entre projetos)
-         ↓
-epic team sync backend
-         ↓
-{project}/.claude/agents/backend/     ← Claude Code descobre automaticamente ao iniciar sessão
-├── domain-expert.md                  ← definição de papel + contexto de equipe injetado
-├── reviewer.md
-└── tester.md
-         ↓
-Próxima sessão: agentes ativos — selecionados automaticamente por Claude ou chamados explicitamente
-```
+    S -->|"orbit go"| G
 
-### Referência CLI
-
-```bash
-# Criar ou atualizar uma equipe (fluxo interativo de 4 fases)
-epic team
-
-# Explorar
-epic team list                        # todas as equipes na org atual
-epic team list --org netflix          # equipes em uma org com nome
-epic team show backend                # config, missão, agentes
-epic team show backend --playbook     # + playbook acumulado completo
-
-# Implantar no projeto
-epic team sync backend                # implantar: copiar agentes → .claude/agents/backend/
-epic team link backend                # implantar + registrar projeto na config da equipe
-
-# Retirar do projeto
-epic team delete backend              # retirar: remover apenas do projeto atual
-epic team unlink backend              # alias para delete
-
-# Dissolver (remover completamente da org)
-epic team delete backend --global     # excluir permanentemente do armazenamento da org + cópia local
-
-# Histórico
-epic team history backend reviewer    # listar backups .history/ para um agente
+    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-### Usar equipes a partir de agentes de codificação
+**Roxo** — entrada manual: `/discover` (opcional) → `/spec`. **Verde** — autônomo após aprovação da especificação: go → check → ship → evolve.
 
-Após sincronizar, os agentes estão disponíveis automaticamente na próxima sessão:
+- **Antes de `/spec`**: se o problema for vago, use `/discover` para enquadrá-lo primeiro.
+- **Após `/spec`**: se houver 3+ requisitos e nenhuma equipe vinculada, `/spec` sugere `/team` antes de `/go`.
+- **`/orbit`**: encapsula o pipeline completo. Escolha **interativo** (você executa `/discover` → `/spec`, depois "orbit go") ou **conselho** (o conselho de 4 vozes gera automaticamente a especificação, você só aprova).
 
-```
-# Claude Code / Cursor / OpenCode / Codex
-@domain-expert implementar o gateway de pagamento
-@reviewer verificar este PR para casos extremos
-@tester escrever testes de integração para auth
+## Habilidades Automáticas (Ring 2)
 
-# Ou deixar o agente selecionar automaticamente com base no contexto da tarefa
-```
+As habilidades são ativadas automaticamente. Você não as invoca.
 
-Cada arquivo de agente carrega uma seção de **Contexto de equipe** injetada na sincronização:
-
-```markdown
-## Team Context
-**Team**: backend (Stream-aligned)
-**Mission**: Own the API layer end-to-end
-**Full playbook**: `epic team show backend --playbook`
-```
-
-Os agentes conhecem sua equipe, missão e como carregar o playbook completo sob demanda —
-sem inflar a janela de contexto com ele.
-
-### Multi-org
-
-```bash
-epic team                          # acumula na org "epic" (padrão)
-epic team --org netflix            # topologia Netflix separada
-epic team --org client-x           # por cliente
-```
-
-Mesmo nome de equipe na mesma org = compartilhamento intencional entre projetos.
-`epic/teams/backend` acumula conhecimento de cada projeto que o cria ou vincula.
-
-### Tipos de equipe
-
-| Tipo | Palavra-chave | Agentes padrão |
-|------|---------|---------------|
-| Stream-aligned | `stream` | domain-expert, reviewer, tester |
-| Platform | `platform` | api-designer, infra-specialist, dx-agent |
-| Enabling | `enabling` | specialist |
-| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
-
-### Estratégia de mesclagem — sem sobrescritas silenciosas
-
-| Objeto | Regra |
-|--------|------|
-| Agente — novo | Adicionar automaticamente |
-| Agente — sem alterações | Pular |
-| Agente — alterado | **Solicitar** (padrão: manter existente). Ao substituir → salvo em `.history/` |
-| `playbook.md` | Sempre **anexar** — nunca truncado |
-| `mission.md` — alterado | **Solicitar** (padrão: manter existente) |
-
-## Auto Skills (Ring 2)
-
-As skills são acionadas automaticamente com base no contexto. Você não precisa invocá-las.
-
-| Skill | Aciona quando |
-|-------|---------------|
+| Habilidade | Ativa quando |
+|------------|-------------|
 | **tdd** | Implementação de nova funcionalidade |
-| **debug** | Falha em teste ou erro |
-| **secure** | Código de autenticação/BD/API/secrets é alterado |
-| **perf** | Loops, queries, código de renderização |
-| **simplify** | Arquivo com mais de 200 linhas ou alta complexidade |
-| **document** | API pública adicionada ou alterada |
+| **debug** | Falha de teste ou erro |
+| **discover** | Solicitação vaga, solução sem problema ou reclamação sem foco |
+| **secure** | Código de Auth/DB/API/secrets modificado |
+| **perf** | Loops, consultas, código de renderização |
+| **simplify** | Arquivo > 200 linhas ou alta complexidade |
+| **document** | API pública adicionada ou modificada |
 | **verify** | Antes de completar /go ou /ship |
-| **context** | Janela de contexto > 70% utilizada |
+| **context** | Janela de contexto > 70% usada |
+| **council** | Decisões arquiteturais ou de design ambíguas |
+| **agent-introspection** | Autodepuração do agente após falhas repetidas |
 
 ## Hooks (Ring 0)
 
-Executam de forma invisível. Nenhuma ação do usuário é necessária. Implementados como um **único binário Rust** (`epic-harness`) com subcomandos, com fallback para Node.js se o binário estiver ausente.
-
-```
-epic resume | guard | polish | observe | snapshot | reflect
-```
+Executados de forma invisível. Binário único em Rust (`epic-harness`) com subcomandos.
 
 | Hook | Quando | O que faz |
 |------|--------|-----------|
-| **resume** | Início da sessão | Restaura contexto, carrega memória, detecta stack |
-| **guard** | Antes do Bash | Bloqueia force-push-to-main, rm -rf /, DROP prod |
-| **polish** | Após Edit | Auto-formatação (Biome/Prettier/ruff/gofmt) + verificação de tipos |
-| **observe** | A cada uso de ferramenta | Registra em `~/.harness/projects/{slug}/obs/` para evolução |
-| **snapshot** | Antes de compactar | Salva estado em `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fim da sessão | Analisa falhas, semeia skills evoluídas, validação |
+| **resume** | Início de sessão | Restaurar contexto, carregar memória, detectar stack |
+| **guard** | Antes de Bash | Bloquear force-push-to-main, rm -rf /, DROP prod |
+| **polish** | Após Edit | Autoformatar (Biome/Prettier/ruff/gofmt) + verificação de tipos |
+| **observe** | Cada uso de ferramenta | Registrar em `~/.harness/projects/{slug}/obs/` para evolução + dicas de GateGuard |
+| **snapshot** | Antes de compactar | Salvar estado em `~/.harness/projects/{slug}/sessions/` |
+| **reflect** | Fim de sessão | Analisar falhas, semear habilidades evoluídas, portão, extrair instintos |
 
-## Sistema de Avaliação (Núcleo do Ring 3)
+Polish retroalimenta em observe: falha de formato → `lint_fail`, erro de TypeScript → `build_fail`. O thrashing Edit→Error é detectado mesmo quando os erros vêm de polish.
 
-Integra os padrões de benchmark do A-Evolve ao sistema de hooks do Claude Code.
+Cada sessão escreve seu próprio `session_{date}_{pid}_{random}.jsonl` — múltiplas sessões no mesmo projeto não corrompem os dados umas das outras.
 
-### Pontuação Multidimensional
+### Perfis de Hook
 
-Cada chamada de ferramenta é avaliada em 3 eixos. Os pesos são configuráveis via `SCORE_WEIGHTS` em `~/.harness/config.toml`:
+Via `~/.harness/config.toml` ou variável de ambiente `EPIC_HOOK_PROFILE`:
+
+| Perfil | Hooks ativos |
+|--------|-------------|
+| `minimal` | guard, observe, resume |
+| `standard` (padrão) | os anteriores + polish, reflect, snapshot |
+| `strict` | todos os hooks + futuras verificações apenas de strict |
+
+### Regras de Guard Personalizadas
+
+Adicione regras específicas do projeto via `.harness/guard-rules.yaml` na raiz do seu projeto:
+
+```yaml
+blocked:
+  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
+warned:
+  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
+```
+
+## Equipe (`epic team`)
+
+As equipes são de **nível de organização**, não vinculadas ao projeto. Executar `/team` em qualquer projeto enriquece um pool compartilhado de definições de agentes — nunca sobrescreve silenciosamente.
+
+```bash
+epic team                              # Interativo: escanear → projetar → escrever → sincronizar
+epic team sync backend                 # Despachar agentes → .claude/agents/backend/
+epic team link backend                 # Despachar + registrar projeto na configuração da equipe
+epic team list                         # Todas as equipes na organização atual
+epic team list --org netflix           # Equipes em uma organização nomeada
+epic team show backend --playbook      # Configuração + playbook completo
+epic team delete backend               # Retirar apenas do projeto atual
+epic team delete backend --global      # Excluir permanentemente do repositório da organização
+```
+
+Após sincronizar, os agentes estão disponíveis na próxima sessão: `@domain-expert`, `@reviewer`, `@tester`, etc.
+
+| Tipo | Palavra-chave | Agentes padrão |
+|------|--------------|----------------|
+| Alinhado ao fluxo | `stream` | domain-expert, reviewer, tester |
+| Plataforma | `platform` | api-designer, infra-specialist, dx-agent |
+| Habilitador | `enabling` | specialist |
+| Subsistema complicado | `subsystem` | domain-specialist, integration-tester |
+
+Multi-organização: `epic team --org netflix` — topologia separada por organização.
+
+Estratégia de mesclagem: agentes alterados solicitam confirmação (padrão: manter existente, backup em `.history/`). O playbook sempre é acrescentado.
+
+## Suporte Multi-Ferramenta
+
+Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projects/{slug}/`.
+
+| Ferramenta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
+|------------|-------------|----------|-------------|---------|
+| **Claude Code** | ✓ Completo | ✓ 8 comandos (incl. /orbit) | ✓ 11 habilidades | ✓ 4 |
+| **Codex CLI** | ✓ Completo¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Gemini CLI** | ✓ Parcial² | ✓ 8 comandos (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Completo³ | ✓ 8 comandos (incl. /orbit) | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Parcial⁴ | ✓ 8 comandos (incl. /orbit) | — | ✓ 4 |
+| **Cline** | ✓ Completo⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ `codex_hooks = true` em `~/.codex/config.toml` · ² Guard no nível `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Apenas convenções
+
+## Memória Unificada — WIP
+
+> **Status: Em Desenvolvimento.** Ainda não totalmente funcional. Comandos CLI, ferramentas MCP e interface web estão em andamento.
+
+Todos os agentes compartilham um grafo de conhecimento em `~/.harness/memory.db` (SQLite com busca de texto completo). Sem runtime externo.
 
 ```
-composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
-           (padrão: 0.5)                          (padrão: 0.3)                             (padrão: 0.2)
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-| Dimensão | O que mede | Critérios por ferramenta |
-|----------|-----------|--------------------------|
-| `tool_success` | Funcionou? (0/1) | Classificação de falhas em 9 categorias |
-| `output_quality` | Sinais de qualidade da saída (0.0-1.0) | Bash: avisos, saída vazia. Edit: detecção de reedição |
-| `execution_cost` | Proxy de eficiência (0.0-1.0) | Tamanho da saída, whitelist de comandos silenciosos |
+### CLI
 
-### Classificação de Falhas (9 categorias)
+```bash
+epic mem recall "auth refactor" --project my-project   # Recuperação inteligente
+epic mem add --title "JWT rotation" --type decision    # Adicionar nó
+epic mem search "JWT"                                  # Busca FTS5
+epic mem query --type decision --project my-project    # Filtrar
+epic mem context --project my-project                  # Contexto do projeto
+epic mem serve                                         # Interface web → :7700
+epic mem mcp-install                                   # Registrar servidor MCP
+epic mem export --out ./docs/memory                    # Exportar para Markdown
+```
 
-`type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
+### Ferramentas MCP (6)
 
-### Detecção de Padrões (4 tipos)
+| Ferramenta | Propósito |
+|------------|----------|
+| `mem_recall` | Recuperação contextual inteligente com hint + project + vizinhos do grafo |
+| `mem_add` | Adicionar nó com importância automática por tipo (ou explícita 0.0–1.0) |
+| `mem_search` | Busca por palavra-chave (texto completo), classificada por importância |
+| `mem_query` | Filtrar por tag/tipo/projeto |
+| `mem_context` | Recuperação inteligente com escopo de projeto (sem hint) |
+| `mem_related` | Traversal do grafo a partir de um ID de nó (encontra conhecimento conectado) |
 
-Todos os limites são constantes configuráveis em `~/.harness/config.toml`:
+### Tipos de Nó
 
-| Padrão | Detecta | Constante | Padrão |
-|--------|---------|-----------|--------|
-| `repeated_same_error` | Mesmo erro N+ vezes consecutivas | `REPEATED_ERROR_MIN` | 3 |
-| `fix_then_break` | Edição bem-sucedida → build/teste falha | `FTB_LOOKAHEAD` / `FTB_MIN_CYCLES` | 3 / 2 |
-| `long_debug_loop` | Preso no mesmo arquivo por N+ operações | `DEBUG_LOOP_MIN` | 5 |
-| `thrashing` | Alternância Edição↔Erro no mesmo arquivo | `THRASH_MIN_EDITS` / `THRASH_MIN_ERRORS` | 3 / 3 |
+| Tipo | Criado por | Importância |
+|------|-----------|-------------|
+| `decision` | Manual / MCP | 0.9 |
+| `resolution` | Manual / MCP | 0.8 |
+| `concept` | Manual / MCP | 0.7 |
+| `project` | Manual / MCP | 0.7 |
+| `instinct` | Auto (reflect) | 0.7 |
+| `pattern` | Auto (reflect) | 0.5 |
+| `error` | Auto (reflect) | 0.4 |
+| `session` | Auto (reflect) | 0.2 |
 
-### Limites de Semeadura de Skills
+Ciclo de vida: mais de 30 dias sem acesso → 10% de decaimento de importância (mínimo 0.05). Mais de 180 dias → marcado como `stale`, excluído da recuperação. A tag `pinned` evita o decaimento.
 
-| Gatilho | Constante | Padrão |
-|---------|-----------|--------|
-| Ferramenta fraca (baixa taxa de sucesso) | `WEAK_TOOL_RATE` / `WEAK_TOOL_MIN_OBS` | 0.6 / 5 |
-| Tipo de arquivo fraco | `WEAK_EXT_RATE` / `WEAK_EXT_MIN_OBS` | 0.5 / 3 |
-| Erro de alta frequência | `HIGH_FREQ_ERROR_MIN` | 5 |
+## Evolve (Ring 3)
 
-### Controle de Estagnação
+Funde os padrões de evolução automatizada do [A-Evolve](https://github.com/A-EVO-Lab/a-evolve) no sistema de hooks do Claude Code.
 
-- `STAGNATION_LIMIT` (padrão: 3) sessões sem melhoria → rollback automático das skills evoluídas para o melhor checkpoint
-- `IMPROVEMENT_THRESHOLD` (padrão: 5%)
-- Rastreamento de tendência: `improving` / `stable` / `declining` via regressão linear
-- Skills estáticas sempre têm prioridade sobre skills evoluídas em caso de conflito
+### Pontuação
+
+Cada chamada de ferramenta é pontuada em 3 eixos (pesos configuráveis via `~/.harness/config.toml`):
+
+```
+composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
+```
+
+Classificação de falhas (9 tipos): `type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
+
+### Detecção de Padrões
+
+| Padrão | Detecta | Limiar padrão |
+|--------|---------|--------------|
+| `repeated_same_error` | Mesmo erro N+ vezes | 3 |
+| `fix_then_break` | Sucesso de edição → falhas de build/teste | 3 lookahead, 2 ciclos |
+| `long_debug_loop` | Preso no mesmo arquivo | 5 operações |
+| `thrashing` | Alternância Edit↔Error | 3 edições, 3 erros |
 
 ### Fluxo de Evolução
 
 ```
 Observe (PostToolUse — pontuação em 3 eixos)
-    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
+    ↓ obs/session_{id}.jsonl
 Analyze (SessionEnd)
-    ↓ SessionAnalysis: por ferramenta, por extensão, distribuição de pontuação
-    ↓ Padrões: repeated_same_error, fix_then_break, long_debug_loop, thrashing
-Seed (4 caminhos: padrão / ferramenta fraca / tipo de arquivo fraco / erro frequente)
-    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
-Gate (verificação de formato, dedup, limite de 10, verificação de estagnação)
-    ↓ ~/.harness/projects/{slug}/evolved_backup/ (melhor checkpoint)
-Reload (próxima sessão — resume.ts reporta métricas + carrega skills evoluídas)
+    ↓ pontuações por ferramenta, por extensão + padrões
+Propose (Solver — graduado por pontuação: ≥0.90 pular, ≥0.70 moderado, <0.70 completo)
+    ↓ SkillProposal[] com confiança
+Curate (Aceitar/Mesclar/Pular, feedback mascarado do solver)
+    ↓ evolved/{skill}/SKILL.md + meta.json
+Gate (verificação de formato, dedup, limite 10, promoção com portão ≥ 3 sessões)
+    ↓ evolved_backup/ (melhor checkpoint)
+Instinct (padrões de alto sucesso → nós cross-project memory.db)
+    ↓
+Reload (próxima sessão — resume carrega habilidades evoluídas)
 ```
 
+Semeadura de habilidades: ferramenta fraca (sucesso <60%, mín. 5 obs), tipo de arquivo fraco (sucesso <50%, mín. 3 obs), erro de alta frequência (5+ ocorrências).
+
+Estagnação: 3 sessões sem melhora de 5% → rollback automático para o melhor checkpoint.
+
 ```bash
-/evolve              # Executar evolução agora
-/evolve status       # Painel: pontuações, tendências, padrões, skills
-/evolve history      # Análise de longo prazo: histórico completo, eficácia das skills, estatísticas de dispatch
+/evolve              # Executar agora
+/evolve status       # Painel: pontuações, tendências, padrões, habilidades
+/evolve history      # Histórico completo + efetividade de habilidades
 /evolve cross-project # Análise de padrões entre projetos
-/evolve rollback     # Restaurar melhor estado anterior
+/evolve rollback     # Restaurar o melhor anterior
 /evolve reset        # Limpar todos os dados de evolução
 ```
 
-## Presets de Início Rápido
+### Efetividade de Habilidades
 
-Não é necessário esperar 5 sessões para obter skills evoluídas úteis. Na primeira sessão, o epic harness detecta sua stack e aplica skills predefinidas automaticamente:
+Cada habilidade evoluída é rastreada com atribuição A/B:
 
-| Stack | Skills Predefinidas |
-|-------|---------------------|
+```
+/evolve history → Skill Effectiveness
+
+| Skill              | With | Without | Delta |
+|--------------------|------|---------|-------|
+| evo-ts-care        | 0.87 | 0.72    | +15%  |
+| evo-bash-discipline| 0.65 | 0.68    | -3%   |
+```
+
+Delta positivo = efetivo. Negativo = considere remover via `/evolve rollback`.
+
+### Presets de Início a Frio
+
+Na primeira sessão, presets de habilidades apropriados para o stack são aplicados automaticamente:
+
+| Stack | Presets |
+|-------|---------|
 | Node.js/TypeScript | `evo-ts-care`, `evo-fix-build-fail` |
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
 
-Os presets são suplementares — são substituídos por skills realmente evoluídas conforme os dados se acumulam.
+### Aprendizado de Instintos
 
-## Segurança em Sessões Concorrentes
+Padrões de alto sucesso são extraídos e promovidos entre projetos:
 
-Cada sessão grava em seu próprio arquivo de observação (`session_{date}_{pid}_{random}.jsonl`). Múltiplas sessões do Claude Code no mesmo projeto não corrompem os dados umas das outras. O hook reflect mescla todos os arquivos do mesmo dia para análise.
-
-## Regras de Proteção Personalizadas
-
-Adicione regras de segurança específicas do projeto via `.harness/guard-rules.yaml` na raiz do projeto:
-
-```yaml
-blocked:
-  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
-  - pattern: terraform\s+destroy | msg: Terraform destroy blocked
-warned:
-  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
-
-As regras são combinadas com as proteções integradas (force-push-to-main, rm -rf /, DROP prod). Manter este arquivo no git permite compartilhar regras de segurança com sua equipe.
+observe (100% confirmado) → extract_instincts() → instinct node (confiança ≥ 0.8)
+    → promover para global quando observado em ≥ 2 projetos
+```
 
 ## Aprendizado Entre Projetos
 
-Opte por compartilhar padrões de falha entre projetos:
+Ative para compartilhar padrões de falha entre projetos:
 
 ```bash
-touch ~/.harness/projects/{slug}/.cross-project-enabled  # ativar
+touch ~/.harness/projects/{slug}/.cross-project-enabled
 ```
 
-Quando ativado:
-- No fim da sessão, padrões anonimizados são exportados para `~/.harness/global_patterns.jsonl`
-- No início da sessão, dicas de áreas fracas de outros projetos são exibidas
-- Use `/evolve cross-project` para ver padrões agregados
+Fim de sessão → exporta padrões anonimizados para `~/.harness/global_patterns.jsonl`. Início de sessão → mostra dicas das áreas fracas de outros projetos.
 
-## Rastreamento de Eficácia das Skills
+## Dados do Projeto
 
-Cada skill evoluída é rastreada com pontuações de atribuição A/B:
+Todos os dados vivem em `~/.harness/` (diretório home), não na raiz do seu projeto. Sobrevive à exclusão do projeto, não polui o histórico do git.
 
 ```
-/evolve history → Seção de Eficácia das Skills
-
-| Skill              | Sessões  | Pontuação Com | Pontuação Sem | Delta  |
-|--------------------|----------|---------------|---------------|--------|
-| evo-ts-care        | 8        | 0.87          | 0.72          | +15%   |
-| evo-bash-discipline| 3        | 0.65          | 0.68          | -3%    |
-```
-
-Delta positivo = a skill ajuda. Delta negativo = considere remover via `/evolve rollback`.
-
-## Feedback Polish → Observe
-
-O hook polish (auto-formatação + verificação de tipos) alimenta os resultados de volta no pipeline de observação:
-
-- Falha de formatação → registrada como `lint_fail`
-- Erro de TypeScript → registrado como `build_fail`
-- Sucessos → registrados com pontuações completas
-
-Isso significa que padrões de thrashing "editar → erro de tipo → editar → erro de tipo" são detectados mesmo quando os erros vêm do hook polish, não de comandos manuais.
-
-## Dados do Projeto (`~/.harness/projects/{slug}/`)
-
-Dados específicos do projeto ficam no seu diretório home. Sobrevivem à exclusão do projeto e não poluem o histórico git.
-
-```
-~/.harness/projects/{slug}/
-├── memory/           # Padrões e regras do projeto (persistente)
-├── sessions/         # Snapshots de sessão (para restauração)
-├── obs/              # Logs de observação de uso de ferramentas (JSONL, por sessão)
-├── evolved/          # Skills auto-evoluídas
-├── evolved_backup/   # Melhor checkpoint (para rollback de estagnação)
-├── dispatch/         # Logs de dispatch de skills (JSONL)
-├── team/             # legacy (substituído por ~/.harness/orgs/)
-├── evolution.jsonl   # Histórico completo de evolução
-└── metrics.json      # Estatísticas agregadas + atribuição de skills
-
 ~/.harness/
-├── memory.db         # Grafo de conhecimento SQLite (nós + arestas + FTS5)
-├── graph.json        # Grafo em cache (para a interface Web)
-└── orgs/             # Armazenamento global epic team
-    └── {org}/
-        └── teams/
-            └── {team}/
-                ├── config.json
-                ├── mission.md
-                ├── playbook.md
-                ├── agents/
-                └── .history/
+├── memory.db                  # Grafo de conhecimento SQLite (nós + arestas + FTS5)
+├── graph.json                 # Grafo em cache (para interface web)
+├── config.toml                # Configuração do usuário
+├── global_patterns.jsonl      # Padrões entre projetos (opt-in)
+├── orgs/                      # Repositório global da equipe
+│   └── {org}/teams/{team}/
+│       ├── config.json, mission.md, playbook.md, agents/, .history/
+└── projects/{slug}/
+    ├── memory/                # Padrões e regras do projeto
+    ├── sessions/              # Snapshots de sessão (para resume)
+    ├── obs/                   # Registros de observação de uso de ferramentas (JSONL)
+    ├── evolved/               # Habilidades auto-evoluídas
+    │   ├── manifest.json
+    │   └── {skill}/SKILL.md + meta.json
+    ├── evolved_backup/        # Melhor checkpoint (para rollback)
+    ├── dispatch/              # Registros de despacho de habilidades
+    ├── evolution.jsonl        # Histórico completo de evolução
+    └── metrics.json           # Estatísticas agregadas + atribuição de habilidades
 ```
 
-Você ainda pode usar `.harness/guard-rules.yaml` na raiz do projeto para compartilhar regras de segurança com sua equipe.
+Compartilhe regras de segurança com sua equipe: `.harness/guard-rules.yaml` na raiz do projeto (comprometido no git).
+
+## Configuração
+
+Todos os parâmetros ajustáveis em `~/.harness/config.toml`. Ausente = padrões no código.
+
+```toml
+# Prioridade: variável de ambiente (EPIC_HOOK_PROFILE) > este arquivo > padrões
+
+[hook]
+profile = "standard"         # "minimal" | "standard" | "strict"
+gateguard_hints = true
+
+[scoring]
+weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
+
+[evolution]
+max_skills = 10
+stagnation_limit = 3
+improvement_threshold = 0.05
+gated_promotion_min = 3
+
+[pattern]
+# repeated_error_min = 3
+# debug_loop_min = 5
+# graduated_scope_skip = 0.90
+# graduated_scope_moderate = 0.70
+
+[instinct]
+# confidence_threshold = 0.8
+# promotion_min_projects = 2
+# max_instincts = 20
+# min_observations = 10
+# min_avg_score = 0.5
+```
 
 ## Desenvolvimento
 
-### Build
-
 ```bash
-cargo install --path .          # Compilar + instalar em ~/.cargo/bin/
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # Atualizar binário do plugin
+cargo install --path .                                        # Compilar + instalar
+cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Atualizar binário do plugin
+cargo test                                                    # Testes
 ```
 
-### Como os hooks são despachados
+Os hooks procuram o binário em dois lugares: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
 
-Cada hook em `hooks.json` procura o binário Rust em dois locais:
+## Links
 
-```
-1. Local do plugin: hooks/bin/epic-harness
-2. PATH:            ~/.cargo/bin/epic-harness (via cargo install)
-```
-
-### Testes
-
-```bash
-cargo test       # Testes unitários + de integração Rust
-```
+- [Changelog](../../CHANGELOG.md) — histórico de versões
+- [Contributing](../../CONTRIBUTING.md) — como contribuir
+- [Security](../../SECURITY.md) — reportar vulnerabilidades
+- [Issues](https://github.com/epicsagas/epic-harness/issues) — relatórios de bugs e solicitações de funcionalidades
 
 ## Agradecimentos
 
-O epic harness foi inspirado e construído com base em ideias dos seguintes projetos:
-
-- [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Evolução automatizada e padrões de benchmark
-- [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de skills para agentes do Claude Code
-- [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Padrões abrangentes para Claude Code
+- [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Padrões de evolução automatizada e benchmarks
+- [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de habilidades de agente do Claude Code
+- [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Padrões abrangentes do Claude Code
 - [gstack](https://github.com/garrytan/gstack) — Referência de arquitetura de plugins
-- [harness](https://github.com/revfactory/harness) — Padrões de infraestrutura de hooks e harness
+- [harness](https://github.com/revfactory/harness) — Padrões de infraestrutura de hooks e arnês
 - [serena](https://github.com/oraios/serena) — Design de agentes autônomos
 - [SuperClaude Framework](https://github.com/SuperClaude-Org/SuperClaude_Framework) — Arquitetura de framework multi-comando
 - [superpowers](https://github.com/obra/superpowers) — Padrões de extensão do Claude Code
 
 ## Licença
 
-[Apache 2.0](LICENSE)
+[Apache 2.0](../../LICENSE)

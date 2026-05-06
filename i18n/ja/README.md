@@ -1,6 +1,8 @@
 # epic harness
 
-**7つのコマンド。自動トリガースキル。自己進化。**
+> 自己進化するAIコーディングエージェントハーネス — 8つのコマンド、1つの自律パイプライン、自動トリガースキル、失敗から学習します。
+
+**8つのコマンド。自動トリガースキル。自己進化。**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -9,319 +11,287 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Rust-1.82+-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
-  <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
-  <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-Claude Codeプラグインで、**30以上のコマンドを7つに集約**し、作業内容に応じて**スキルを自動トリガー**し、失敗パターンから**新しいスキルを自己進化**させます。覚えるべきコマンドが少なく、キーストロークあたりのインテリジェンスが向上します。
+Claude Codeプラグインで、**30以上のコマンドを8つに置き換え**、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。覚えるべき操作が少なく、キーストローク当たりの知性が高まります。
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
 </p>
 
-## アーキテクチャ：4リングモデル
-
-```
-Ring 0 — オートパイロット（フック、不可視）
-  セッション復元、自動フォーマット、ガードレール、観測ログ
-
-Ring 1 — 7つのコマンド（ユーザーが呼び出す）
-  /spec  /go  /check  /ship  /team  /evolve
-
-Ring 2 — 自動スキル（コンテキストトリガー）
-  tdd · debug · secure · perf · simplify · document · verify · context
-
-Ring 3 — 進化（自己改善）
-  ツール使用を観測 → 失敗を分析 → スキルを自動生成 → ゲート → リロード
-```
-
 ## インストール
 
-```
-# Claude Code プラグイン（推奨）
-/plugin marketplace add epicsagas/plugins
-/plugin install epic@epicsagas
-```
+> **初めての方は** [クイックスタートガイド（5分）](../../QUICKSTART.md)をお読みください。
 
 ```bash
-# またはソースから
-git clone https://github.com/epicsagas/epic-harness.git
-cd epic-harness
-cargo install --path .
-epic install
+# Claude Code
+/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+
+# その他のツール
+cargo install epic-harness && epic install
 ```
 
-### バイナリからインストール
+| 環境 | 方法 |
+|-------------|--------|
+| **Claude Code** | プラグインマーケットプレイス（上記） |
+| **macOS** | `brew install epicsagas/tap/epic-harness` |
+| **任意（Rustあり）** | `cargo install epic-harness` |
+| **ソースから** | `git clone` + `cargo install --path .` |
+
+前提条件: **Git**。ソース/バイナリインストールには [Rustツールチェーン](https://rustup.rs) も必要です。
+
+### `epic install` — セットアップウィザード
+
+バイナリをインストールした後、`epic install`（または `epic install claude`）を実行して:
+
+1. `~/.harness/` ディレクトリ構造を作成
+2. コマンド、スキル、エージェントをツールの設定ディレクトリに同期
+3. Claude CodeにMCPサーバー（harness-mem）を登録
+4. 不在の場合、デフォルト設定で `~/.harness/config.toml` を作成
+
+Claude Codeでは、`hooks/setup.sh` がセッション開始時に自動実行され、バイナリが欠落している場合はインストールされます。初回クローン後に手動の手順は不要です。
+
+### その他のツール
 
 ```bash
-# Homebrew (macOS)
-brew install epicsagas/tap/epic-harness
-
-# crates.ioから
-cargo install epic-harness
-
-# ビルド済みバイナリ（高速、コンパイル不要）
-cargo binstall epic-harness
-
-# ソースから
-cargo install --path .
-```
-
-バイナリはフックによって自動検出されます。存在しない場合はNode.jsにフォールバックします。
-
-## マルチツールサポート
-
-epic-harnessはClaude Codeと6つの追加AIコーディングツールで動作します。すべてのツールは同じ `~/.harness/projects/{slug}/` データディレクトリを共有します。
-
-| ツール | Ring 0 フック | コマンド/プロンプト | スキル | エージェント |
-|------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ フル | ✓ 7コマンド | ✓ 11スキル | ✓ 4 |
-| **Codex CLI** | ✓ フル¹ | ✓ 7プロンプト | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
-| **Gemini CLI** | ✓ 部分²  | ✓ 7コマンド | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ フル³ | ✓ 7コマンド | ✓ ルール経由 | ✓ 4 |
-| **OpenCode** | ✓ 部分⁴ | ✓ 7コマンド | — | ✓ 4 |
-| **Cline** | ✓ フル⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
-
-¹ `~/.codex/config.toml` に `codex_hooks = true` が必要; PostToolUseはBashのみインターセプト
-² `PreToolUse` 相当機能なし — guardは `BeforeModel` レベルで実行
-³ Cursor 1.7+ が必要
-⁴ JSプラグイン: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`
-⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel フックスクリプト
-⁶ フックシステムなし — コンベンションを `.aider/CONVENTIONS.md` + `.aider.conf.yml` で注入
-
-### 他のツールにインストール
-
-```bash
-# インタラクティブメニュー（インストールするツールを選択）
-epic install
-
-# 直接インストール
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
 epic install gemini       # Gemini CLI  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/（Cursor 1.7+ 必要）
+epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+が必要)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-
-# プロジェクトローカルにインストール
-epic install cursor --local
-
-# 変更なしでプレビュー
-epic install gemini --dry-run
+epic install              # インタラクティブメニュー
 ```
 
-ツールディレクトリの統合ファイル（`hooks.json`、コマンド、エージェント、スキル、ルールなど）はバイナリから**同期**されます：不足または古いファイルが書き込まれます。`GEMINI.md` および `AGENTS.md` は存在しない場合のみ作成されます。
+統合ファイルはバイナリから**同期**されます：欠落または古いファイルが書き込まれます。`GEMINI.md` と `AGENTS.md` は不在の場合のみ作成されます。
 
-## 統合メモリ
-
-すべてのエージェントは `~/.harness/memory.db`（SQLite + FTS5）に保存された単一のナレッジグラフを共有します。Node.jsや外部ランタイムは不要です。
-
-### スマートリコール
-
-メモリ取得は最新N件のダンプではなく**複合スコアリング**を使用します：
-
-```
-score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
-```
-
-- **重要度** ノードタイプ別に自動設定：decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
-- **アクセス追跡**：頻繁にリコールされるメモリは自然に上位に浮かぶ
-- **緩やかな減衰**：未使用のメモリは時間とともに重要度が低下（30日ごとに10%、最低0.05）
-- **グラフ拡張**：リコールは1ホップのエッジを辿り関連コンテキストを表面化
-
-### CLI
+### 確認
 
 ```bash
-# スマートリコール — 現在のタスクに関連性でランク付け
-epic mem recall "auth refactor" --project my-project
-
-# メモリノードを追加（重要度はタイプ別に自動設定、または明示的に指定）
-epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
-
-# フィルタークエリ（重要度 + アクセス数を含む）
-epic mem query --type decision --project my-project
-
-# 全文検索（重要度順にランク付け）
-epic mem search "JWT"
-
-# スマートコンテキスト（重要度加重、最新順でない）
-epic mem context --project my-project
-
-# ナレッジグラフのWeb UI
-epic mem serve          # → http://localhost:7700
-
-# Claude CodeにMCPサーバーとして登録（Node.js不要）
-epic mem mcp-install
-
-# すべてのノードをMarkdownにエクスポート（Gitバックアップ用）
-epic mem export --out ./docs/memory
+epic --version              # バイナリがインストールされている
+ls ~/.harness/              # データディレクトリが存在する
 ```
 
-### MCPツール（6個）
+Claude Codeセッション内: `/evolve status`
 
-MCPサーバーとして登録（`epic mem mcp-install`）すると、エージェントがこれらのツールを直接呼び出せます：
+### クイックデモ
 
-| ツール | 目的 |
-|------|---------|
-| `mem_recall` | **主要。** ヒント + プロジェクト + グラフ近傍を使ったスマートコンテキストリコール |
-| `mem_add` | タイプ別自動重要度でノードを追加（または明示的に0.0–1.0） |
-| `mem_search` | FTS5キーワード検索、重要度順にランク付け |
-| `mem_query` | タグ/タイプ/プロジェクトでフィルタリング |
-| `mem_context` | プロジェクトスコープのスマートリコール（ヒントなし） |
-| `mem_related` | ノードIDからのBFSグラフ探索 |
-
-### ナレッジグラフの仕組み
-
-グラフは通常のセッション作業から自動的に蓄積されます — 手動入力は不要です。
-
-**データフロー:**
-
-```
-PostToolUse hook → observe (3-axis scoring) → obs/*.jsonl
-                                                   ↓
-SessionEnd hook → reflect (pattern detection) → memory.db nodes + edges
-                                                   ↓  （重要度はタイプ別に設定）
-SessionStart hook → resume (smart recall) → 次のセッションに関連性ランク付きヒントを提供
-                              ↓
-                    decay_importance() → 未使用ノードは徐々にフェード
+**1つのコマンドで完全なパイプライン:**
+```bash
+$ /orbit
+# モードを選択:
+#   1. インタラクティブ  — /discover + /spec を実行してから "orbit go"
+#   2. Council      — 4声コンシルがspecを生成し、あなたが承認
+→ spec承認 → go (TDD) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-**ノードタイプ (7):**
+**または手動でステップを進める:**
+```bash
+$ /spec "ログインAPIにJWT認証を追加"
+  → 要件を明確化 → SPEC-*.md を生成
 
-| タイプ | 作成元 | デフォルト重要度 |
-|------|-----------|-------------------|
-| `decision` | 手動 / MCP | 0.9 |
-| `resolution` | 手動 / MCP | 0.8 |
-| `concept` | 手動 / MCP | 0.7 |
-| `project` | 手動 / MCP | 0.7 |
-| `pattern` | Auto (reflect) | 0.5 |
-| `error` | Auto (reflect) | 0.4 |
-| `session` | Auto (reflect) | 0.2 |
+$ /go
+  → 自動計画 → TDDサブエージェント → 完了（4分）
 
-**メモリライフサイクル:**
+$ /check
+  → 並列コードレビュー + セキュリティ監査 + テスト → PASS
 
-| イベント | 発生すること |
-|-------|-------------|
-| 検索/リコール/コンテキストでノードをリコール | `access_count++`, `accessed_at` 更新 |
-| 30日以上アクセスなし | 重要度を10%減衰（最低0.05） |
-| 180日以上アクセスなし | `stale` タグ、リコールから除外 |
-| `pinned` タグのノード | 減衰免疫 |
+$ /ship
+  → PRを作成 → CI グリーン → マージ
+```
 
-**自動蓄積の条件:**
+## アーキテクチャ: 4-Ring モデル
 
-| 条件 | 作成されるノード |
-|-----------|-------------|
-| 各セッション終了時 | `session` (常時) |
-| 同一エラーが3回以上連続 | `error` (repeated_same_error) |
-| Edit→Errorの交互発生 | `pattern` (thrashing) |
-| ツール成功率 <60% (最低5回の観測) | `pattern` (weak_tool) |
-| ファイルタイプ成功率 <50% (最低3回の観測) | `pattern` (weak_filetype) |
-| Edit成功 → Bashエラーのサイクル | `pattern` (fix_then_break) |
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
 
-> **注意:** クリーンなセッション (エラーなし) は `session` ノードのみを生成します。グラフはビルド失敗、テスト失敗、デバッグサイクルを含む2〜3回の実際の開発セッション後に充実します。
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
 
-既存のファイルベースのメモリ (`nodes/*.md`, `edges.jsonl`) は初回実行時に自動的にSQLiteへ移行されます。
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
+```
+
+## /orbit — 自律パイプライン
+
+`/orbit` は手動パイプライン全体を単一の自律実行にまとめます。
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"Mode?"}
+    MODE -->|"1 · Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["Load approved spec"]
+    COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate spec"] --> APPROVE{"Approve?"}:::human
+    APPROVE -->|yes| SPEC_LOAD
+    APPROVE -->|modify| GEN
+    APPROVE -->|reject| ABORT(["Abort"])
+    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    RETRY -->|yes| GO
+    RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
+    PAUSE -->|continue| GO
+    PAUSE -->|abort| ABORT
+    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit Complete\nconsolidated report"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**紫のノード** — ヒューマンチェックポイント: モード選択、spec承認、3回のチェック失敗時の一時停止。
+**緑のノード** — 自律: go、check、ship、evolveはユーザー介入なしで実行されます。
+
+状態は `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` に保持され、コンテキスト圧縮後も生き残ります。
 
 ## コマンド
 
 | コマンド | 機能 |
 |---------|-------------|
-| `/spec` | 構築対象の定義 — 要件を明確化し、仕様書を生成 |
-| `/go` | 構築実行 — 自動計画、TDDサブエージェント、並列実行 |
-| `/check` | 検証 — コードレビュー + セキュリティ監査 + パフォーマンスチェックを並列実行 |
-| `/ship` | リリース — PR作成、CI実行、マージ |
-| `/team` | プロジェクト横断のorg-levelエージェントチームを作成・同期 |
-| `/evolve` | 手動進化トリガー / ステータス確認 / ロールバック |
+| `/discover` | ソリューションを指定する前に問題を探索して定義する — 5 Whys、JTBD、ソクラテス的質問法 |
+| `/spec` | 構築するものを定義する — 要件を明確化し、specを作成する |
+| `/go` | 構築する — 自動計画、TDDサブエージェント、4状態結果モデル（DONE/CONCERNS/NEEDS_CONTEXT/BLOCKED）、ワークツリー分離による並列実行 |
+| `/check` | 検証する — 適応型エキスパートディスパッチ（スコープベース）、並列コードレビュー + セキュリティ監査 + パフォーマンス |
+| `/ship` | リリースする — 分離されたプレフライトテスト、次にPR、CI、マージ |
+| `/team` | プロジェクト横断でorg レベルのエージェントチームを作成・同期する |
+| `/evolve` | 手動進化トリガー / ステータス / ロールバック |
+| `/orbit` | **自律パイプライン** — spec → go → check → ship を一括実行。インタラクティブモードまたはcouncilモードを選択。 |
 
-## チーム (`epic team`)
+### パイプライン概要
 
-チームは**org-level**であり、プロジェクトに依存しません。任意のプロジェクトで `/team` を実行すると、共有エージェント定義のプールが豊かになります — 決してサイレントに上書きしません。
+```mermaid
+flowchart TD
+    subgraph manual["  manual entry  "]
+        direction LR
+        D(["/discover\noptional"]):::manual
+        S(["/spec"]):::manual
+        D --> S
+    end
 
-### 動作の仕組み
+    subgraph auto["  /orbit  autonomous  "]
+        direction TD
+        G(["/go"]):::auto
+        C(["/check"]):::auto
+        SH(["/ship"]):::auto
+        EV(["/evolve"]):::auto
+        G --> C
+        C -->|PASS| SH
+        C -->|"FAIL ×3 → pause"| G
+        SH --> EV
+    end
 
+    S -->|"orbit go"| G
+
+    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
-epic team                      # インタラクティブ: プロジェクトスキャン → 設計 → 書き込み → 同期
-         ↓
-~/.harness/orgs/epic/teams/backend/   ← グローバルストア（プロジェクト間で永続）
-         ↓
-epic team sync backend
-         ↓
-{project}/.claude/agents/backend/     ← Claude Codeがセッション開始時に自動検出
-├── domain-expert.md                  ← ロール定義 + チームコンテキスト注入
-├── reviewer.md
-└── tester.md
-         ↓
-次のセッション: エージェントがアクティブ — Claudeが自動選択または明示的に呼び出し
+
+**紫** — 手動エントリ: `/discover`（オプション）→ `/spec`。**緑** — spec承認後の自律: go → check → ship → evolve。
+
+- **`/spec` の前に**: 問題が曖昧な場合は、`/discover` を使って先にフレーミングします。
+- **`/spec` の後に**: 3つ以上の要件があり、チームがリンクされていない場合、`/spec` は `/go` の前に `/team` を提案します。
+- **`/orbit`**: 完全なパイプラインをラップします。**インタラクティブ**（`/discover` → `/spec` を実行してから "orbit go"）または **council**（4声コンシルが自動的にspecを生成し、あなたが承認するだけ）を選択します。
+
+## 自動スキル（Ring 2）
+
+スキルは自動的にトリガーされます。手動で呼び出す必要はありません。
+
+| スキル | トリガー条件 |
+|-------|--------------|
+| **tdd** | 新機能の実装 |
+| **debug** | テスト失敗またはエラー |
+| **discover** | 曖昧なリクエスト、問題のないソリューション、または焦点の定まらない不満 |
+| **secure** | 認証/DB/API/シークレットのコードに触れた場合 |
+| **perf** | ループ、クエリ、レンダリングコード |
+| **simplify** | ファイルが200行超または高複雑度 |
+| **document** | パブリックAPIが追加または変更された場合 |
+| **verify** | `/go` または `/ship` 完了前 |
+| **context** | コンテキストウィンドウが70%超 |
+| **council** | 曖昧なアーキテクチャまたは設計の決定 |
+| **agent-introspection** | 繰り返し失敗後のエージェント自己デバッグ |
+
+## フック（Ring 0）
+
+見えない形で実行されます。サブコマンド付きの単一Rustバイナリ（`epic-harness`）。
+
+| フック | タイミング | 機能 |
+|------|------|------|
+| **resume** | セッション開始 | コンテキストの復元、メモリの読み込み、スタックの検出 |
+| **guard** | Bash実行前 | force-push-to-main、rm -rf /、DROP prodをブロック |
+| **polish** | 編集後 | 自動フォーマット（Biome/Prettier/ruff/gofmt）+ 型チェック |
+| **observe** | すべてのツール使用時 | 進化 + GateGuardヒントのために `~/.harness/projects/{slug}/obs/` にログ |
+| **snapshot** | compact前 | `~/.harness/projects/{slug}/sessions/` に状態を保存 |
+| **reflect** | セッション終了 | 失敗を分析し、進化スキルをシード、ゲート、本能を抽出 |
+
+Polishはobserveにフィードバックします: フォーマット失敗 → `lint_fail`、TypeScriptエラー → `build_fail`。polishからエラーが来る場合でも、Edit→Errorスラッシングが検出されます。
+
+各セッションは独自の `session_{date}_{pid}_{random}.jsonl` を書き込みます — 同じプロジェクト上の複数のセッションはお互いのデータを破損しません。
+
+### フックプロファイル
+
+`~/.harness/config.toml` または `EPIC_HOOK_PROFILE` 環境変数経由:
+
+| プロファイル | アクティブなフック |
+|---------|-------------|
+| `minimal` | guard, observe, resume |
+| `standard`（デフォルト） | 上記 + polish, reflect, snapshot |
+| `strict` | すべてのフック + 将来のstrict専用チェック |
+
+### カスタムガードルール
+
+プロジェクトルートの `.harness/guard-rules.yaml` でプロジェクト固有のルールを追加:
+
+```yaml
+blocked:
+  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
+warned:
+  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
 
-### CLIリファレンス
+## チーム（`epic team`）
+
+チームは**org レベル**であり、プロジェクトに縛られません。任意のプロジェクトで `/team` を実行すると、エージェント定義の共有プールが充実します — 黙って上書きすることはありません。
 
 ```bash
-# チームを作成または更新（インタラクティブ4フェーズフロー）
-epic team
-
-# ブラウズ
-epic team list                        # 現在のorgの全チーム
-epic team list --org netflix          # 指定orgのチーム
-epic team show backend                # 設定、ミッション、エージェント
-epic team show backend --playbook     # + 完全な蓄積プレイブック
-
-# プロジェクトにディスパッチ
-epic team sync backend                # ディスパッチ: エージェントをコピー → .claude/agents/backend/
-epic team link backend                # ディスパッチ + チーム設定にプロジェクトを登録
-
-# プロジェクトからリコール
-epic team delete backend              # リコール: 現在のプロジェクトからのみ削除
-epic team unlink backend              # deleteの別名
-
-# 解散（orgから完全に削除）
-epic team delete backend --global     # orgストア + ローカルコピーを永久削除
-
-# 履歴
-epic team history backend reviewer    # エージェントの.history/バックアップを一覧
+epic team                              # インタラクティブ: スキャン → デザイン → 書き込み → 同期
+epic team sync backend                 # エージェントを .claude/agents/backend/ にディスパッチ
+epic team link backend                 # ディスパッチ + チーム設定にプロジェクトを登録
+epic team list                         # 現在のorgのすべてのチーム
+epic team list --org netflix           # 指定のorgのチーム
+epic team show backend --playbook      # 設定 + 完全なプレイブック
+epic team delete backend               # 現在のプロジェクトからのみ削除
+epic team delete backend --global      # orgストアから永久に削除
 ```
 
-### コーディングエージェントからのチーム使用
-
-同期後、次のセッションからエージェントが自動的に利用可能になります：
-
-```
-# Claude Code / Cursor / OpenCode / Codex
-@domain-expert 決済ゲートウェイを実装してください
-@reviewer このPRのエッジケースを確認してください
-@tester authの統合テストを書いてください
-
-# またはエージェントがタスクコンテキストに基づいて自動選択
-```
-
-各エージェントファイルには同期時に注入された**チームコンテキスト**セクションが含まれます：
-
-```markdown
-## Team Context
-**Team**: backend (Stream-aligned)
-**Mission**: Own the API layer end-to-end
-**Full playbook**: `epic team show backend --playbook`
-```
-
-エージェントはチーム、ミッション、完全なプレイブックをオンデマンドでロードする方法を知っています —
-コンテキストウィンドウを膨らませることなく。
-
-### マルチorg
-
-```bash
-epic team                          # "epic" orgに蓄積（デフォルト）
-epic team --org netflix            # 別のNetflixスタイルトポロジー
-epic team --org client-x           # クライアント別エンゲージメント
-```
-
-同じorgの同じチーム名 = 意図的なクロスプロジェクト共有。
-`epic/teams/backend` はそれを作成またはリンクするすべてのプロジェクトから知識を蓄積します。
-
-### チームタイプ
+同期後、エージェントは次のセッションで利用可能になります: `@domain-expert`、`@reviewer`、`@tester` など。
 
 | タイプ | キーワード | デフォルトエージェント |
 |------|---------|---------------|
@@ -330,254 +300,259 @@ epic team --org client-x           # クライアント別エンゲージメン�
 | Enabling | `enabling` | specialist |
 | Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
 
-### マージ戦略 — サイレント上書きなし
+マルチorg: `epic team --org netflix` — orgごとに別のトポロジー。
 
-| オブジェクト | ルール |
-|--------|------|
-| エージェント — 新規 | 自動追加 |
-| エージェント — 変更なし | スキップ |
-| エージェント — 変更あり | **プロンプト**（デフォルト: 既存を維持）。置換時 → `.history/` にバックアップ |
-| `playbook.md` | 常に**追記** — 切り詰めなし |
-| `mission.md` — 変更あり | **プロンプト**（デフォルト: 既存を維持） |
+マージ戦略: 変更されたエージェントはプロンプトを表示（デフォルト: 既存を保持、`.history/` にバックアップ）。プレイブックは常に追記されます。
 
-## 自動スキル（Ring 2）
+## マルチツールサポート
 
-スキルはコンテキストに基づいて自動的にトリガーされます。手動で呼び出す必要はありません。
+すべてのツールが同じ `~/.harness/projects/{slug}/` データディレクトリを共有します。
 
-| スキル | トリガー条件 |
-|-------|--------------|
-| **tdd** | 新機能の実装時 |
-| **debug** | テスト失敗またはエラー発生時 |
-| **secure** | 認証/DB/API/シークレット関連コードの変更時 |
-| **perf** | ループ、クエリ、レンダリングコードの処理時 |
-| **simplify** | ファイルが200行超またはの高複雑度の場合 |
-| **document** | パブリックAPIの追加または変更時 |
-| **verify** | /go または /ship の完了前 |
-| **context** | コンテキストウィンドウの使用率が70%超の場合 |
+| ツール | Ring 0 フック | コマンド | スキル | エージェント |
+|------|-------------|----------|--------|--------|
+| **Claude Code** | ✓ フル | ✓ 8コマンド（/orbitを含む） | ✓ 11スキル | ✓ 4 |
+| **Codex CLI** | ✓ フル¹ | ✓ 8プロンプト（/orbitを含む） | ✓ 7 | ✓ 4 |
+| **Gemini CLI** | ✓ 部分²  | ✓ 8コマンド（/orbitを含む） | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ フル³ | ✓ 8コマンド（/orbitを含む） | ✓ ルール経由 | ✓ 4 |
+| **OpenCode** | ✓ 部分⁴ | ✓ 8コマンド（/orbitを含む） | — | ✓ 4 |
+| **Cline** | ✓ フル⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-## フック（Ring 0）
+¹ `~/.codex/config.toml` で `codex_hooks = true` · ² `BeforeModel` レベルでのガード · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
 
-不可視で実行されます。ユーザーの操作は不要です。**単一のRustバイナリ**（`epic-harness`）のサブコマンドとして実装されており、バイナリがない場合はNode.jsにフォールバックします。
+## 統合メモリ — WIP
+
+> **ステータス: 開発中。** まだ完全には機能していません。CLIコマンド、MCPツール、Web UIは開発中です。
+
+すべてのエージェントが `~/.harness/memory.db`（全文検索付きSQLite）のナレッジグラフを共有します。外部ランタイムは不要です。
 
 ```
-epic resume | guard | polish | observe | snapshot | reflect
+score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-| フック | タイミング | 動作 |
-|------|------|------|
-| **resume** | セッション開始時 | コンテキスト復元、メモリ読み込み、スタック検出 |
-| **guard** | Bash実行前 | mainへのforce-push、rm -rf /、本番DBのDROPをブロック |
-| **polish** | 編集後 | 自動フォーマット（Biome/Prettier/ruff/gofmt）+ 型チェック |
-| **observe** | 全ツール使用時 | `~/.harness/projects/{slug}/obs/` にログ記録（進化用） |
-| **snapshot** | コンパクト前 | `~/.harness/projects/{slug}/sessions/` に状態を保存 |
-| **reflect** | セッション終了時 | 失敗を分析、進化スキルをシード、ゲート |
+### CLI
 
-## 評価システム（Ring 3コア）
-
-A-EvolveのベンチマークパターンをClaude Codeのフックシステムに統合します。
-
-### 多次元スコアリング
-
-すべてのツール呼び出しは3つの軸でスコアリングされます。重みは `~/.harness/config.toml`の `SCORE_WEIGHTS` で設定可能です：
-
-```
-composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
-           (デフォルト: 0.5)                       (デフォルト: 0.3)                          (デフォルト: 0.2)
+```bash
+epic mem recall "auth refactor" --project my-project   # スマートリコール
+epic mem add --title "JWT rotation" --type decision    # ノードを追加
+epic mem search "JWT"                                  # FTS5検索
+epic mem query --type decision --project my-project    # フィルター
+epic mem context --project my-project                  # プロジェクトコンテキスト
+epic mem serve                                         # Web UI → :7700
+epic mem mcp-install                                   # MCPサーバーを登録
+epic mem export --out ./docs/memory                    # Markdownにエクスポート
 ```
 
-| 次元 | 測定内容 | ツール別基準 |
-|-----------|-----------------|-------------------|
-| `tool_success` | 成功したか？（0/1） | 9カテゴリの失敗分類 |
-| `output_quality` | 出力品質シグナル（0.0-1.0） | Bash: 警告、空出力。Edit: 再編集検出 |
-| `execution_cost` | 効率性の指標（0.0-1.0） | 出力サイズ、サイレント成功コマンドのホワイトリスト |
+### MCPツール（6）
 
-### 失敗分類（9カテゴリ）
+| ツール | 目的 |
+|------|---------|
+| `mem_recall` | ヒント + プロジェクト + グラフ隣接ノードによるスマートコンテキストリコール |
+| `mem_add` | タイプ別自動重要度でノードを追加（または明示的な0.0–1.0） |
+| `mem_search` | キーワード検索（全文）、重要度でランク付け |
+| `mem_query` | タグ/タイプ/プロジェクトでフィルター |
+| `mem_context` | プロジェクトスコープのスマートリコール（ヒントなし） |
+| `mem_related` | ノードIDからのグラフトラバーサル（接続された知識を検索） |
 
-`type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
+### ノードタイプ
 
-### パターン検出（4タイプ）
+| タイプ | 作成者 | 重要度 |
+|------|-----------|------------|
+| `decision` | 手動 / MCP | 0.9 |
+| `resolution` | 手動 / MCP | 0.8 |
+| `concept` | 手動 / MCP | 0.7 |
+| `project` | 手動 / MCP | 0.7 |
+| `instinct` | 自動（reflect） | 0.7 |
+| `pattern` | 自動（reflect） | 0.5 |
+| `error` | 自動（reflect） | 0.4 |
+| `session` | 自動（reflect） | 0.2 |
 
-すべての閾値は `~/.harness/config.toml`の設定可能な定数です：
+ライフサイクル: アクセスなしで30日以上 → 重要度が10%低下（最低0.05）。180日以上 → `stale` タグが付き、リコールから除外。`pinned` タグは劣化を防ぎます。
 
-| パターン | 検出内容 | 定数 | デフォルト |
-|---------|---------|----------|---------|
-| `repeated_same_error` | 同一エラーがN回以上連続 | `REPEATED_ERROR_MIN` | 3 |
-| `fix_then_break` | 編集成功 → ビルド/テスト失敗 | `FTB_LOOKAHEAD` / `FTB_MIN_CYCLES` | 3 / 2 |
-| `long_debug_loop` | 同一ファイルでN回以上の操作が停滞 | `DEBUG_LOOP_MIN` | 5 |
-| `thrashing` | 同一ファイルで編集↔エラーが交互に発生 | `THRASH_MIN_EDITS` / `THRASH_MIN_ERRORS` | 3 / 3 |
+## 進化（Ring 3）
 
-### スキルシーディング閾値
+[A-Evolve](https://github.com/A-EVO-Lab/a-evolve) の自動進化パターンをClaude Codeのフックシステムに統合します。
 
-| トリガー | 定数 | デフォルト |
-|---------|----------|---------|
-| 弱いツール（低成功率） | `WEAK_TOOL_RATE` / `WEAK_TOOL_MIN_OBS` | 0.6 / 5 |
-| 弱いファイルタイプ | `WEAK_EXT_RATE` / `WEAK_EXT_MIN_OBS` | 0.5 / 3 |
-| 高頻度エラー | `HIGH_FREQ_ERROR_MIN` | 5 |
+### スコアリング
 
-### 停滞ゲーティング
+すべてのツール呼び出しは3軸でスコアリングされます（`~/.harness/config.toml` で設定可能な重み）:
 
-- `STAGNATION_LIMIT`（デフォルト: 3）セッション連続で改善なし → 進化スキルを最良チェックポイントに自動ロールバック
-- `IMPROVEMENT_THRESHOLD`（デフォルト: 5%）
-- トレンド追跡：線形回帰による `improving` / `stable` / `declining` 判定
-- 競合時は静的スキルが進化スキルより常に優先
+```
+composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
+```
+
+失敗の分類（9種類）: `type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
+
+### パターン検出
+
+| パターン | 検出内容 | デフォルト閾値 |
+|---------|---------|-------------------|
+| `repeated_same_error` | 同じエラーがN回以上 | 3 |
+| `fix_then_break` | 編集成功 → ビルド/テスト失敗 | 3ルックバック、2サイクル |
+| `long_debug_loop` | 同じファイルでスタック | 5回の操作 |
+| `thrashing` | 編集↔エラーの交互発生 | 3回の編集、3回のエラー |
 
 ### 進化フロー
 
 ```
-Observe（PostToolUse — 3軸スコアリング）
-    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
-Analyze（SessionEnd）
-    ↓ SessionAnalysis: ツール別、拡張子別、スコア分布
-    ↓ Patterns: repeated_same_error, fix_then_break, long_debug_loop, thrashing
-Seed（4経路: パターン / 弱いツール / 弱いファイルタイプ / 高頻度エラー）
-    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
-Gate（フォーマットチェック、重複排除、上限10、停滞チェック）
-    ↓ ~/.harness/projects/{slug}/evolved_backup/（最良チェックポイント）
-Reload（次セッション — resume.tsがメトリクスを報告 + 進化スキルを読み込み）
+Observe (PostToolUse — 3-axis scoring)
+    ↓ obs/session_{id}.jsonl
+Analyze (SessionEnd)
+    ↓ per-tool, per-ext scores + patterns
+Propose (Solver — graduated by score: ≥0.90 skip, ≥0.70 moderate, <0.70 full)
+    ↓ SkillProposal[] with confidence
+Curate (Accept/Merge/Skip, feedback masked from solver)
+    ↓ evolved/{skill}/SKILL.md + meta.json
+Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
+    ↓ evolved_backup/ (best checkpoint)
+Instinct (high-success patterns → cross-project memory.db nodes)
+    ↓
+Reload (next session — resume loads evolved skills)
 ```
 
+スキルシーディング: 弱いツール（成功率60%未満、最低5観測）、弱いファイルタイプ（成功率50%未満、最低3観測）、高頻度エラー（5回以上）。
+
+停滞: 5%改善なしで3セッション → ベストチェックポイントに自動ロールバック。
+
 ```bash
-/evolve              # 今すぐ進化を実行
+/evolve              # 今すぐ実行
 /evolve status       # ダッシュボード: スコア、トレンド、パターン、スキル
-/evolve history      # 長期分析: 全履歴、スキル効果、ディスパッチ統計
+/evolve history      # 完全な履歴 + スキル有効性
 /evolve cross-project # クロスプロジェクトパターン分析
-/evolve rollback     # 前回の最良状態を復元
+/evolve rollback     # 以前のベストを復元
 /evolve reset        # すべての進化データをクリア
 ```
 
-## コールドスタートプリセット
+### スキル有効性
 
-有用な進化スキルのために5セッション待つ必要はありません。初回セッション時に、epic harnessがスタックを検出し、プリセットスキルを自動適用します：
+すべての進化スキルはA/Bアトリビューションで追跡されます:
 
-| スタック | プリセットスキル |
-|-------|--------------|
+```
+/evolve history → Skill Effectiveness
+
+| Skill              | With | Without | Delta |
+|--------------------|------|---------|-------|
+| evo-ts-care        | 0.87 | 0.72    | +15%  |
+| evo-bash-discipline| 0.65 | 0.68    | -3%   |
+```
+
+正のデルタ = 有効。負 = `/evolve rollback` による削除を検討。
+
+### コールドスタートプリセット
+
+最初のセッションでは、スタックに適したプリセットスキルが自動適用されます:
+
+| スタック | プリセット |
+|-------|---------|
 | Node.js/TypeScript | `evo-ts-care`, `evo-fix-build-fail` |
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
 
-プリセットは補助的なものであり、データが蓄積されると実際の進化スキルに置き換えられます。
+### 本能学習
 
-## 並行セッション安全性
+高成功率のパターンが抽出され、プロジェクト横断で促進されます:
 
-各セッションは固有の観測ファイル（`session_{date}_{pid}_{random}.jsonl`）に書き込みます。同一プロジェクトでの複数のClaude Codeセッションが互いのデータを破損することはありません。reflectフックは分析のために同日のすべてのファイルをマージします。
-
-## カスタムガードルール
-
-プロジェクトルートの `.harness/guard-rules.yaml` でプロジェクト固有の安全ルールを追加できます：
-
-```yaml
-blocked:
-  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
-  - pattern: terraform\s+destroy | msg: Terraform destroy blocked
-warned:
-  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
-
-ルールは組み込みガード（mainへのforce-push、rm -rf /、本番DBのDROP）とマージされます。このファイルをgitに含めることでチームと安全ルールを共有できます。
+observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
+    → promote to global when observed in ≥ 2 projects
+```
 
 ## クロスプロジェクト学習
 
-プロジェクト間で失敗パターンを共有するオプトイン機能：
+プロジェクト横断で失敗パターンを共有するにはオプトインします:
 
 ```bash
-touch ~/.harness/projects/{slug}/.cross-project-enabled  # オプトイン
+touch ~/.harness/projects/{slug}/.cross-project-enabled
 ```
 
-有効化すると：
-- セッション終了時に匿名化されたパターンを `~/.harness/global_patterns.jsonl` にエクスポート
-- セッション開始時に他プロジェクトの弱点からのヒントを表示
-- `/evolve cross-project` で集約パターンを確認可能
+セッション終了 → 匿名化されたパターンを `~/.harness/global_patterns.jsonl` にエクスポート。セッション開始 → 他のプロジェクトの弱い領域からのヒントを表示。
 
-## スキル効果追跡
+## プロジェクトデータ
 
-すべての進化スキルはA/B帰属スコアで追跡されます：
+すべてのデータはプロジェクトルートではなく `~/.harness/`（ホームディレクトリ）に存在します。プロジェクト削除後も生き残り、gitの履歴を汚染しません。
 
 ```
-/evolve history → スキル効果セクション
-
-| Skill              | Sessions | Score With | Score Without | Delta  |
-|--------------------|----------|------------|---------------|--------|
-| evo-ts-care        | 8        | 0.87       | 0.72          | +15%   |
-| evo-bash-discipline| 3        | 0.65       | 0.68          | -3%    |
-```
-
-正のデルタ = スキルが有効。負のデルタ = `/evolve rollback` での削除を検討。
-
-## Polish → Observe フィードバック
-
-polishフック（自動フォーマット + 型チェック）の結果は観測パイプラインにフィードバックされます：
-
-- フォーマット失敗 → `lint_fail` として記録
-- TypeScriptエラー → `build_fail` として記録
-- 成功 → 完全なスコアで記録
-
-これにより、polishフックからのエラーであっても、「編集 → 型エラー → 編集 → 型エラー」のスラッシングパターンが検出されます。
-
-## プロジェクトデータ（`~/.harness/projects/{slug}/`）
-
-プロジェクト固有のデータはホームディレクトリに保存されます。プロジェクト削除後も残り、gitの履歴を汚染しません。
-
-```
-~/.harness/projects/{slug}/
-├── memory/           # プロジェクトパターンとルール（永続）
-├── sessions/         # セッションスナップショット（復元用）
-├── obs/              # ツール使用観測ログ（JSONL、セッション別）
-├── evolved/          # 自動進化スキル
-├── evolved_backup/   # 最良チェックポイント（停滞ロールバック用）
-├── dispatch/         # スキルディスパッチログ（JSONL）
-├── team/             # legacy (superseded by ~/.harness/orgs/)
-├── evolution.jsonl   # 完全な進化履歴
-└── metrics.json      # 集約統計 + スキル帰属
-
 ~/.harness/
-├── memory.db         # SQLiteナレッジグラフ (nodes + edges + FTS5)
-├── graph.json        # キャッシュされたグラフ (Web UI用)
-└── orgs/             # epic team グローバルストア
-    └── {org}/
-        └── teams/
-            └── {team}/
-                ├── config.json
-                ├── mission.md
-                ├── playbook.md
-                ├── agents/
-                └── .history/
+├── memory.db                  # SQLiteナレッジグラフ（ノード + エッジ + FTS5）
+├── graph.json                 # キャッシュされたグラフ（Web UI用）
+├── config.toml                # ユーザー設定
+├── global_patterns.jsonl      # クロスプロジェクトパターン（オプトイン）
+├── orgs/                      # チームグローバルストア
+│   └── {org}/teams/{team}/
+│       ├── config.json, mission.md, playbook.md, agents/, .history/
+└── projects/{slug}/
+    ├── memory/                # プロジェクトパターンとルール
+    ├── sessions/              # セッションスナップショット（resume用）
+    ├── obs/                   # ツール使用観察ログ（JSONL）
+    ├── evolved/               # 自動進化スキル
+    │   ├── manifest.json
+    │   └── {skill}/SKILL.md + meta.json
+    ├── evolved_backup/        # ベストチェックポイント（ロールバック用）
+    ├── dispatch/              # スキルディスパッチログ
+    ├── evolution.jsonl        # 完全な進化履歴
+    └── metrics.json           # 集計統計 + スキルアトリビューション
 ```
 
-プロジェクトルートの `.harness/guard-rules.yaml` でチームと安全ルールを共有することもできます。
+安全ルールをチームと共有: プロジェクトルートの `.harness/guard-rules.yaml`（gitにコミット）。
+
+## 設定
+
+`~/.harness/config.toml` のすべての調整可能なパラメーター。不在 = ハードコードされたデフォルト。
+
+```toml
+# 優先順位: 環境変数（EPIC_HOOK_PROFILE）> このファイル > デフォルト
+
+[hook]
+profile = "standard"         # "minimal" | "standard" | "strict"
+gateguard_hints = true
+
+[scoring]
+weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
+
+[evolution]
+max_skills = 10
+stagnation_limit = 3
+improvement_threshold = 0.05
+gated_promotion_min = 3
+
+[pattern]
+# repeated_error_min = 3
+# debug_loop_min = 5
+# graduated_scope_skip = 0.90
+# graduated_scope_moderate = 0.70
+
+[instinct]
+# confidence_threshold = 0.8
+# promotion_min_projects = 2
+# max_instincts = 20
+# min_observations = 10
+# min_avg_score = 0.5
+```
 
 ## 開発
 
-### ビルド
-
 ```bash
-cargo install --path .          # ビルド + ~/.cargo/bin/ にインストール
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # プラグインバイナリを更新
+cargo install --path .                                        # ビルド + インストール
+cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # プラグインバイナリを更新
+cargo test                                                    # テスト
 ```
 
-### フックのディスパッチ方法
+フックはバイナリを2か所で探します: `hooks/bin/epic-harness`（プラグインローカル）→ `~/.cargo/bin/epic-harness`（PATH）。
 
-`hooks.json` の各フックは2箇所でRustバイナリを探します：
+## リンク
 
-```
-1. プラグインローカル: hooks/bin/epic-harness
-2. PATH:              ~/.cargo/bin/epic-harness（cargo install経由）
-```
-
-### テスト
-
-```bash
-cargo test       # Rustユニット + 統合テスト
-```
+- [変更履歴](../../CHANGELOG.md) — リリース履歴
+- [コントリビューション](../../CONTRIBUTING.md) — コントリビューション方法
+- [セキュリティ](../../SECURITY.md) — 脆弱性の報告
+- [Issues](https://github.com/epicsagas/epic-harness/issues) — バグレポートと機能リクエスト
 
 ## 謝辞
-
-epic harnessは以下のプロジェクトのアイデアにインスパイアされ、それらを基に構築されました：
 
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自動進化とベンチマークパターン
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Codeエージェントスキルシステム
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 包括的なClaude Codeパターン
-- [gstack](https://github.com/garrytan/gstack) — プラグインアーキテクチャのリファレンス
+- [gstack](https://github.com/garrytan/gstack) — プラグインアーキテクチャの参考
 - [harness](https://github.com/revfactory/harness) — フックとハーネスのインフラパターン
 - [serena](https://github.com/oraios/serena) — 自律エージェント設計
 - [SuperClaude Framework](https://github.com/SuperClaude-Org/SuperClaude_Framework) — マルチコマンドフレームワークアーキテクチャ
@@ -585,4 +560,4 @@ epic harnessは以下のプロジェクトのアイデアにインスパイア�
 
 ## ライセンス
 
-[Apache 2.0](LICENSE)
+[Apache 2.0](../../LICENSE)

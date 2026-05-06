@@ -1,6 +1,8 @@
 # epic harness
 
-**7 कमांड। ऑटो-ट्रिगर स्किल्स। स्वयं-विकसित होने वाला।**
+> एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 8 कमांड, 1 स्वायत्त पाइपलाइन, ऑटो-ट्रिगर स्किल्स, आपकी विफलताओं से सीखता है।
+
+**8 कमांड। ऑटो-ट्रिगर स्किल्स। स्व-विकसित।**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -9,580 +11,553 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Rust-1.82+-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
-  <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
-  <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-एक Claude Code प्लगइन जो **30+ कमांड को 7 से बदल देता है**, आप जो कर रहे हैं उसके आधार पर **स्किल्स स्वचालित रूप से ट्रिगर करता है**, और आपकी विफलता पैटर्न से **नई स्किल्स विकसित करता है**। याद रखने के लिए कम सतह क्षेत्र। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता।
+एक Claude Code प्लगइन जो **30+ कमांड को 8 से बदलता है**, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**। याद रखने के लिए कम सतह। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता।
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
 </p>
 
-## आर्किटेक्चर: 4-रिंग मॉडल
+## इंस्टॉलेशन
 
-```
-Ring 0 — ऑटोपायलट (हुक्स, अदृश्य)
-  सेशन रिस्टोर, ऑटो-फॉर्मेट, गार्ड रेल्स, ऑब्ज़र्वेशन लॉगिंग
-
-Ring 1 — 7 कमांड (आप इन्हें कॉल करते हैं)
-  /spec  /go  /check  /ship  /team  /evolve
-
-Ring 2 — ऑटो स्किल्स (संदर्भ-ट्रिगर)
-  tdd · debug · secure · perf · simplify · document · verify · context
-
-Ring 3 — इवॉल्व (स्वयं-सुधार करने वाला)
-  टूल उपयोग का अवलोकन → विफलताओं का विश्लेषण → स्किल्स का स्वतः निर्माण → गेट → रीलोड
-```
-
-## इंस्टॉल करें
-
-```
-# Claude Code प्लगइन (अनुशंसित)
-/plugin marketplace add epicsagas/plugins
-/plugin install epic@epicsagas
-```
+> **पहली बार?** [त्वरित प्रारंभ गाइड (5 मिनट)](../../QUICKSTART.md) पढ़ें।
 
 ```bash
-# या सोर्स से
-git clone https://github.com/epicsagas/epic-harness.git
-cd epic-harness
-cargo install --path .
-epic install
+# Claude Code
+/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+
+# कोई भी अन्य टूल
+cargo install epic-harness && epic install
 ```
 
-### बाइनरी से इंस्टॉल करें
+| वातावरण | विधि |
+|---------|------|
+| **Claude Code** | प्लगइन मार्केटप्लेस (ऊपर) |
+| **macOS** | `brew install epicsagas/tap/epic-harness` |
+| **कोई भी (Rust के साथ)** | `cargo install epic-harness` |
+| **सोर्स से** | `git clone` + `cargo install --path .` |
+
+पूर्वापेक्षाएं: **Git**। सोर्स/बाइनरी इंस्टॉल के लिए [Rust टूलचेन](https://rustup.rs) भी आवश्यक है।
+
+### `epic install` — सेटअप विज़ार्ड
+
+बाइनरी इंस्टॉल करने के बाद, `epic install` (या `epic install claude`) चलाएं:
+
+1. `~/.harness/` डायरेक्टरी संरचना बनाएं
+2. कमांड, स्किल्स और एजेंट को टूल के कॉन्फिग डायरेक्टरी में सिंक करें
+3. Claude Code के लिए MCP सर्वर (harness-mem) रजिस्टर करें
+4. यदि अनुपस्थित हो तो `~/.harness/config.toml` को डिफ़ॉल्ट के साथ बनाएं
+
+Claude Code में, `hooks/setup.sh` सत्र प्रारंभ पर स्वचालित रूप से चलता है और यदि बाइनरी अनुपस्थित हो तो उसे इंस्टॉल करता है। प्रारंभिक क्लोन के बाद कोई मैन्युअल कदम आवश्यक नहीं।
+
+### अन्य टूल्स
 
 ```bash
-# Homebrew (macOS)
-brew install epicsagas/tap/epic-harness
-
-# crates.io से
-cargo install epic-harness
-
-# पूर्व-निर्मित बाइनरी (तेज़, बिना कम्पाइल)
-cargo binstall epic-harness
-
-# सोर्स से
-cargo install --path .
-```
-
-बाइनरी हुक्स द्वारा स्वचालित रूप से पहचानी जाती है। अनुपस्थित होने पर हुक्स Node.js पर फ़ॉलबैक करते हैं।
-
-## मल्टी-टूल सपोर्ट
-
-epic-harness Claude Code और 7 अतिरिक्त AI कोडिंग टूल्स के साथ काम करता है। सभी टूल्स एक ही `~/.harness/projects/{slug}/` डेटा डायरेक्टरी साझा करते हैं।
-
-| टूल | Ring 0 Hooks | कमांड/प्रॉम्प्ट | स्किल्स | एजेंट्स |
-|------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 7 कमांड | ✓ 11 स्किल्स | ✓ 4 |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 7 प्रॉम्प्ट | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
-| **Gemini CLI** | ✓ आंशिक² | ✓ 7 कमांड | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ पूर्ण³ | ✓ 7 कमांड | ✓ नियमों के माध्यम से | ✓ 4 |
-| **OpenCode** | ✓ आंशिक⁴ | ✓ 7 कमांड | — | ✓ 4 |
-| **Cline** | ✓ पूर्ण⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
-
-¹ `~/.codex/config.toml` में `codex_hooks = true` आवश्यक; PostToolUse केवल Bash को इंटरसेप्ट करता है
-² कोई `PreToolUse` समकक्ष नहीं — guard `BeforeModel` स्तर पर चलता है
-³ Cursor 1.7+ आवश्यक
-⁴ JS प्लगइन: `session.created` / `tool.execute.before` / `tool.execute.after` / `session.idle`
-⁵ PreToolUse / PostToolUse / TaskStart / TaskResume / TaskCancel हुक स्क्रिप्ट
-⁶ कोई हुक सिस्टम नहीं — कन्वेंशन `.aider/CONVENTIONS.md` + `.aider.conf.yml` के माध्यम से इंजेक्ट
-
-### अन्य टूल्स के लिए इंस्टॉल करें
-
-```bash
-# इंटरएक्टिव मेनू (इंस्टॉल करने के लिए टूल्स चुनें)
-epic install
-
-# सीधे इंस्टॉल करें
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
 epic install gemini       # Gemini CLI  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ आवश्यक)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-
-# प्रोजेक्ट-लोकल इंस्टॉल करें
-epic install cursor --local
-
-# बिना बदलाव किए पूर्वावलोकन
-epic install gemini --dry-run
+epic install              # इंटरेक्टिव मेनू
 ```
 
-टूल डायरेक्टरी में इंटीग्रेशन फ़ाइलें (`hooks.json`, कमांड, एजेंट, स्किल्स, नियम, …) बाइनरी से **सिंक** की जाती हैं: गायब या पुरानी फ़ाइलें लिखी जाती हैं। `GEMINI.md` और `AGENTS.md` केवल तभी बनाए जाते हैं जब अनुपस्थित हों।
+इंटीग्रेशन फ़ाइलें बाइनरी से **सिंक** होती हैं: गायब या पुरानी फ़ाइलें लिखी जाती हैं। `GEMINI.md` और `AGENTS.md` केवल तभी बनाए जाते हैं जब अनुपस्थित हों।
 
-## एकीकृत मेमोरी
+### सत्यापन
 
-सभी एजेंट `~/.harness/memory.db` (SQLite + FTS5) में संग्रहीत एक साझा नॉलेज ग्राफ़ उपयोग करते हैं। कोई Node.js या बाहरी रनटाइम आवश्यक नहीं।
+```bash
+epic --version              # बाइनरी इंस्टॉल है
+ls ~/.harness/              # डेटा डायरेक्टरी मौजूद है
+```
 
-### स्मार्ट रिकॉल
+Claude Code सत्र के अंदर: `/evolve status`
 
-मेमोरी पुनर्प्राप्ति नवीनतम N प्रविष्टियों को डंप करने के बजाय **कम्पोज़िट स्कोरिंग** का उपयोग करती है:
+### त्वरित डेमो
+
+**एक कमांड, पूरी पाइपलाइन:**
+```bash
+$ /orbit
+# मोड चुनें:
+#   1. इंटरेक्टिव  — आप /discover + /spec चलाते हैं, फिर "orbit go"
+#   2. काउंसिल    — 4-आवाज़ काउंसिल स्पेसिफिकेशन बनाती है, आप अनुमोदित करते हैं
+→ spec अनुमोदित → go (TDD) → check (PASS) → ship (PR + CI) → evolve
+```
+
+**या मैन्युअल रूप से चरण दर चरण आगे बढ़ें:**
+```bash
+$ /spec "Add JWT auth to the login API"
+  → आवश्यकताओं को स्पष्ट करता है → SPEC-*.md उत्पन्न करता है
+
+$ /go
+  → स्वचालित रूप से योजना बनाता है → TDD सबएजेंट → DONE (4 मिनट)
+
+$ /check
+  → समानांतर कोड रिव्यू + सुरक्षा ऑडिट + परीक्षण → PASS
+
+$ /ship
+  → PR बनाता है → CI हरा → मर्ज
+```
+
+## आर्किटेक्चर: 4-रिंग मॉडल
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
+```
+
+## /orbit — स्वायत्त पाइपलाइन
+
+`/orbit` संपूर्ण मैन्युअल पाइपलाइन को एकल स्वायत्त निष्पादन में लपेटता है।
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"मोड?"}
+    MODE -->|"1 · Interactive"| WAIT["उपयोगकर्ता चलाता है\n/discover → /spec\nफिर 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["4-आवाज़ काउंसिल\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["अनुमोदित स्पेसिफिकेशन लोड करें"]
+    COUNCIL --> SYNTH["संश्लेषण"] --> GEN["स्पेसिफिकेशन बनाएं"] --> APPROVE{"अनुमोदित करें?"}:::human
+    APPROVE -->|yes| SPEC_LOAD
+    APPROVE -->|modify| GEN
+    APPROVE -->|reject| ABORT(["रद्द करें"])
+    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    RETRY -->|yes| GO
+    RETRY -->|no| PAUSE["रुकें\nउपयोगकर्ता निर्णय लेता है"]:::human
+    PAUSE -->|continue| GO
+    PAUSE -->|abort| ABORT
+    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit पूर्ण\nएकत्रित रिपोर्ट"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**बैंगनी नोड** — मानव चेकपॉइंट: मोड चयन, स्पेसिफिकेशन अनुमोदन, 3× check विफलता पर रुकना।
+**हरे नोड** — स्वायत्त: go, check, ship, evolve उपयोगकर्ता हस्तक्षेप के बिना चलते हैं।
+
+`$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` में स्थिति बनी रहती है — संदर्भ कम्पैक्शन के बाद भी जीवित रहती है।
+
+## कमांड
+
+| कमांड | क्या करता है |
+|-------|-------------|
+| `/discover` | समाधान निर्दिष्ट करने से पहले समस्या को खोजें और परिभाषित करें — 5 क्यों, JTBD, सुकराती प्रश्न |
+| `/spec` | क्या बनाना है परिभाषित करें — आवश्यकताओं को स्पष्ट करें, एक स्पेसिफिकेशन बनाएं |
+| `/go` | इसे बनाएं — ऑटो-प्लान, TDD सबएजेंट, 4-स्टेट रिजल्ट मॉडल (DONE/CONCERNS/NEEDS_CONTEXT/BLOCKED), worktree आइसोलेशन के साथ समानांतर निष्पादन |
+| `/check` | सत्यापित करें — अनुकूली विशेषज्ञ डिस्पैच (स्कोप-आधारित), समानांतर कोड रिव्यू + सुरक्षा ऑडिट + प्रदर्शन |
+| `/ship` | प्रकाशित करें — आइसोलेटेड प्री-फ्लाइट परीक्षण, फिर PR, CI, मर्ज |
+| `/team` | प्रोजेक्ट के पार ऑर्ग-स्तरीय एजेंट टीमें बनाएं और सिंक करें |
+| `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर / स्टेटस / rollback |
+| `/orbit` | **स्वायत्त पाइपलाइन** — spec → go → check → ship एक बार में चलाता है। इंटरेक्टिव या काउंसिल मोड चुनें। |
+
+### पाइपलाइन अवलोकन
+
+```mermaid
+flowchart TD
+    subgraph manual["  मैन्युअल प्रवेश  "]
+        direction LR
+        D(["/discover\noptional"]):::manual
+        S(["/spec"]):::manual
+        D --> S
+    end
+
+    subgraph auto["  /orbit  autonomous  "]
+        direction TD
+        G(["/go"]):::auto
+        C(["/check"]):::auto
+        SH(["/ship"]):::auto
+        EV(["/evolve"]):::auto
+        G --> C
+        C -->|PASS| SH
+        C -->|"FAIL ×3 → pause"| G
+        SH --> EV
+    end
+
+    S -->|"orbit go"| G
+
+    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**बैंगनी** — मैन्युअल प्रवेश: `/discover` (वैकल्पिक) → `/spec`। **हरा** — स्पेसिफिकेशन अनुमोदन के बाद स्वायत्त: go → check → ship → evolve।
+
+- **`/spec` से पहले**: यदि समस्या अस्पष्ट है, तो पहले इसे फ्रेम करने के लिए `/discover` का उपयोग करें।
+- **`/spec` के बाद**: यदि 3+ आवश्यकताएं हैं और कोई टीम लिंक नहीं है, तो `/spec` `/go` से पहले `/team` सुझाता है।
+- **`/orbit`**: पूरी पाइपलाइन को लपेटता है। **इंटरेक्टिव** (आप `/discover` → `/spec` चलाते हैं, फिर "orbit go") या **काउंसिल** (4-आवाज़ काउंसिल स्वचालित रूप से स्पेसिफिकेशन बनाती है, आप केवल अनुमोदित करते हैं) चुनें।
+
+## ऑटो स्किल्स (Ring 2)
+
+स्किल्स स्वचालित रूप से ट्रिगर होती हैं। आप उन्हें नहीं बुलाते।
+
+| स्किल | कब ट्रिगर होती है |
+|-------|-----------------|
+| **tdd** | नई फीचर इम्प्लीमेंटेशन |
+| **debug** | टेस्ट विफलता या एरर |
+| **discover** | अस्पष्ट अनुरोध, समस्या के बिना समाधान, या अनफोकस्ड शिकायत |
+| **secure** | Auth/DB/API/secrets कोड में बदलाव |
+| **perf** | लूप, क्वेरी, रेंडरिंग कोड |
+| **simplify** | फ़ाइल > 200 लाइनें या उच्च जटिलता |
+| **document** | सार्वजनिक API जोड़ा या बदला गया |
+| **verify** | /go या /ship पूरा करने से पहले |
+| **context** | संदर्भ विंडो > 70% उपयोग |
+| **council** | अस्पष्ट आर्किटेक्चरल या डिज़ाइन निर्णय |
+| **agent-introspection** | बार-बार विफलताओं के बाद एजेंट सेल्फ-डीबगिंग |
+
+## Hooks (Ring 0)
+
+अदृश्य रूप से चलते हैं। सबकमांड के साथ एकल Rust बाइनरी (`epic-harness`)।
+
+| Hook | कब | क्या करता है |
+|------|-----|------------|
+| **resume** | सत्र प्रारंभ | संदर्भ पुनर्स्थापित करें, मेमोरी लोड करें, स्टैक डिटेक्ट करें |
+| **guard** | Bash से पहले | force-push-to-main, rm -rf /, DROP prod ब्लॉक करें |
+| **polish** | Edit के बाद | ऑटो-फॉर्मेट (Biome/Prettier/ruff/gofmt) + टाइपचेक |
+| **observe** | प्रत्येक टूल उपयोग | `~/.harness/projects/{slug}/obs/` में लॉग करें एवोल्यूशन + GateGuard संकेतों के लिए |
+| **snapshot** | कम्पैक्ट से पहले | `~/.harness/projects/{slug}/sessions/` में स्टेट सेव करें |
+| **reflect** | सत्र समाप्त | विफलताओं का विश्लेषण करें, विकसित स्किल्स सीड करें, गेट करें, इंस्टिंक्ट निकालें |
+
+Polish का observe में फीडबैक: फॉर्मेट विफलता → `lint_fail`, TypeScript एरर → `build_fail`। Edit→Error thrashing तब भी डिटेक्ट होता है जब एरर polish से आते हैं।
+
+प्रत्येक सत्र अपना `session_{date}_{pid}_{random}.jsonl` लिखता है — एक ही प्रोजेक्ट पर कई सत्र एक-दूसरे के डेटा को दूषित नहीं करेंगे।
+
+### Hook प्रोफ़ाइल
+
+`~/.harness/config.toml` या `EPIC_HOOK_PROFILE` env var के माध्यम से:
+
+| प्रोफ़ाइल | सक्रिय hooks |
+|-----------|------------|
+| `minimal` | guard, observe, resume |
+| `standard` (डिफ़ॉल्ट) | उपरोक्त + polish, reflect, snapshot |
+| `strict` | सभी hooks + भविष्य के strict-only चेक |
+
+### कस्टम Guard नियम
+
+अपने प्रोजेक्ट रूट में `.harness/guard-rules.yaml` के माध्यम से प्रोजेक्ट-विशिष्ट नियम जोड़ें:
+
+```yaml
+blocked:
+  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
+warned:
+  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
+```
+
+## टीम (`epic team`)
+
+टीमें **ऑर्ग-स्तरीय** हैं, प्रोजेक्ट से बंधी नहीं। किसी भी प्रोजेक्ट में `/team` चलाने से एजेंट परिभाषाओं का एक साझा पूल समृद्ध होता है — कभी चुपचाप ओवरराइट नहीं होता।
+
+```bash
+epic team                              # इंटरेक्टिव: स्कैन → डिज़ाइन → लिखें → सिंक
+epic team sync backend                 # एजेंट डिस्पैच → .claude/agents/backend/
+epic team link backend                 # डिस्पैच + टीम कॉन्फिग में प्रोजेक्ट रजिस्टर करें
+epic team list                         # वर्तमान ऑर्ग में सभी टीमें
+epic team list --org netflix           # नामित ऑर्ग में टीमें
+epic team show backend --playbook      # कॉन्फिग + पूर्ण playbook
+epic team delete backend               # केवल वर्तमान प्रोजेक्ट से वापस लें
+epic team delete backend --global      # ऑर्ग स्टोर से स्थायी रूप से हटाएं
+```
+
+सिंक करने के बाद, एजेंट अगले सत्र में उपलब्ध होते हैं: `@domain-expert`, `@reviewer`, `@tester`, आदि।
+
+| प्रकार | कीवर्ड | डिफ़ॉल्ट एजेंट |
+|--------|--------|--------------|
+| स्ट्रीम-अलाइन्ड | `stream` | domain-expert, reviewer, tester |
+| प्लेटफ़ॉर्म | `platform` | api-designer, infra-specialist, dx-agent |
+| सक्षम करने वाला | `enabling` | specialist |
+| जटिल सबसिस्टम | `subsystem` | domain-specialist, integration-tester |
+
+मल्टी-ऑर्ग: `epic team --org netflix` — प्रत्येक ऑर्ग के लिए अलग टोपोलॉजी।
+
+मर्ज रणनीति: बदले गए एजेंट पुष्टि मांगते हैं (डिफ़ॉल्ट: मौजूदा रखें, `.history/` में बैकअप)। Playbook हमेशा जोड़ा जाता है।
+
+## मल्टी-टूल समर्थन
+
+सभी टूल एक ही `~/.harness/projects/{slug}/` डेटा डायरेक्टरी साझा करते हैं।
+
+| टूल | Ring 0 Hooks | कमांड | स्किल्स | एजेंट |
+|-----|------------|-------|---------|------|
+| **Claude Code** | ✓ पूर्ण | ✓ 8 कमांड (incl. /orbit) | ✓ 11 स्किल्स | ✓ 4 |
+| **Codex CLI** | ✓ पूर्ण¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Gemini CLI** | ✓ आंशिक² | ✓ 8 कमांड (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ पूर्ण³ | ✓ 8 कमांड (incl. /orbit) | ✓ rules के माध्यम से | ✓ 4 |
+| **OpenCode** | ✓ आंशिक⁴ | ✓ 8 कमांड (incl. /orbit) | — | ✓ 4 |
+| **Cline** | ✓ पूर्ण⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
+
+¹ `~/.codex/config.toml` में `codex_hooks = true` · ² `BeforeModel` स्तर पर Guard · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल कन्वेंशन
+
+## एकीकृत मेमोरी — WIP
+
+> **स्टेटस: विकास में।** अभी पूरी तरह कार्यात्मक नहीं। CLI कमांड, MCP टूल और वेब UI प्रगति में हैं।
+
+सभी एजेंट `~/.harness/memory.db` (SQLite फुल-टेक्स्ट सर्च के साथ) में एक नॉलेज ग्राफ साझा करते हैं। कोई बाहरी रनटाइम नहीं।
 
 ```
 score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ```
 
-- **महत्व** नोड प्रकार द्वारा स्वतः सेट: decision(0.9) > resolution(0.8) > concept(0.7) > pattern(0.5) > error(0.4) > session(0.2)
-- **एक्सेस ट्रैकिंग**: बार-बार रिकॉल की गई मेमोरी स्वाभाविक रूप से ऊपर आती हैं
-- **क्रमिक क्षय**: अप्रयुक्त मेमोरी समय के साथ महत्व खोती हैं (हर 30 दिन में 10%, न्यूनतम 0.05)
-- **ग्राफ़ वृद्धि**: रिकॉल संबंधित संदर्भ लाने के लिए 1-हॉप एज का अनुसरण करता है
-
 ### CLI
 
 ```bash
-# स्मार्ट रिकॉल — आपके वर्तमान कार्य के लिए प्रासंगिकता-रैंक
-epic mem recall "auth refactor" --project my-project
-
-# मेमोरी नोड जोड़ें (महत्व प्रकार द्वारा स्वतः, या स्पष्ट)
-epic mem add --title "JWT rotation strategy" --type decision --tags auth --body "..."
-epic mem add --title "Custom pattern" --type concept --importance 0.8 --body "..."
-
-# फ़िल्टर क्वेरी (महत्व + access_count सहित)
-epic mem query --type decision --project my-project
-
-# फ़ुल-टेक्स्ट खोज (महत्व द्वारा रैंक)
-epic mem search "JWT"
-
-# स्मार्ट कॉन्टेक्स्ट (महत्व-भारित, केवल नवीनतम नहीं)
-epic mem context --project my-project
-
-# नॉलेज ग्राफ़ वेब UI
-epic mem serve          # → http://localhost:7700
-
-# Claude Code में MCP सर्वर के रूप में पंजीकृत करें (Node.js आवश्यक नहीं)
-epic mem mcp-install
-
-# Git बैकअप के लिए सभी नोड्स को Markdown में निर्यात करें
-epic mem export --out ./docs/memory
+epic mem recall "auth refactor" --project my-project   # स्मार्ट रिकॉल
+epic mem add --title "JWT rotation" --type decision    # नोड जोड़ें
+epic mem search "JWT"                                  # FTS5 खोज
+epic mem query --type decision --project my-project    # फ़िल्टर
+epic mem context --project my-project                  # प्रोजेक्ट संदर्भ
+epic mem serve                                         # वेब UI → :7700
+epic mem mcp-install                                   # MCP सर्वर रजिस्टर करें
+epic mem export --out ./docs/memory                    # Markdown में एक्सपोर्ट करें
 ```
 
-### MCP टूल्स (6)
-
-MCP सर्वर के रूप में पंजीकृत होने पर (`epic mem mcp-install`), एजेंट इन टूल्स को सीधे कॉल कर सकते हैं:
+### MCP टूल (6)
 
 | टूल | उद्देश्य |
-|------|---------|
-| `mem_recall` | **प्राथमिक।** hint + project + graph पड़ोसियों के साथ स्मार्ट संदर्भ रिकॉल |
-| `mem_add` | प्रकार द्वारा ऑटो-महत्व के साथ नोड जोड़ें (या स्पष्ट 0.0–1.0) |
-| `mem_search` | FTS5 कीवर्ड खोज, महत्व द्वारा परिणाम रैंक |
-| `mem_query` | टैग/प्रकार/प्रोजेक्ट द्वारा फ़िल्टर करें |
+|-----|---------|
+| `mem_recall` | hint + project + ग्राफ पड़ोसियों के साथ स्मार्ट संदर्भ रिकॉल |
+| `mem_add` | प्रकार के अनुसार ऑटो-महत्व (या स्पष्ट 0.0–1.0) के साथ नोड जोड़ें |
+| `mem_search` | कीवर्ड खोज (फुल-टेक्स्ट), महत्व के अनुसार रैंक |
+| `mem_query` | tag/type/project के अनुसार फ़िल्टर |
 | `mem_context` | प्रोजेक्ट-स्कोप्ड स्मार्ट रिकॉल (कोई hint नहीं) |
-| `mem_related` | नोड ID से BFS ग्राफ़ ट्रैवर्सल |
+| `mem_related` | नोड ID से ग्राफ ट्रैवर्सल (जुड़े ज्ञान खोजता है) |
 
-### नॉलेज ग्राफ़ कैसे काम करता है
+### नोड प्रकार
 
-ग्राफ़ सामान्य सेशन कार्य से स्वचालित रूप से संचित होता है — किसी मैन्युअल इनपुट की आवश्यकता नहीं।
-
-**डेटा प्रवाह:**
-
-```
-PostToolUse hook → observe (3-अक्ष स्कोरिंग) → obs/*.jsonl
-                                                        ↓
-SessionEnd hook → reflect (पैटर्न पहचान) → memory.db नोड्स + एज
-                                                        ↓  (महत्व प्रकार द्वारा सेट)
-SessionStart hook → resume (स्मार्ट रिकॉल) → अगले सेशन को प्रासंगिकता-रैंक hints मिलते हैं
-                              ↓
-                    decay_importance() → अप्रयुक्त नोड्स धीरे-धीरे फीके पड़ते हैं
-```
-
-**नोड प्रकार (7):**
-
-| प्रकार | किसके द्वारा बनाया गया | डिफ़ॉल्ट महत्व |
-|------|-----------|-------------------|
+| प्रकार | किसने बनाया | महत्व |
+|--------|-----------|------|
 | `decision` | मैन्युअल / MCP | 0.9 |
 | `resolution` | मैन्युअल / MCP | 0.8 |
 | `concept` | मैन्युअल / MCP | 0.7 |
 | `project` | मैन्युअल / MCP | 0.7 |
-| `pattern` | Auto (reflect) | 0.5 |
-| `error` | Auto (reflect) | 0.4 |
-| `session` | Auto (reflect) | 0.2 |
+| `instinct` | ऑटो (reflect) | 0.7 |
+| `pattern` | ऑटो (reflect) | 0.5 |
+| `error` | ऑटो (reflect) | 0.4 |
+| `session` | ऑटो (reflect) | 0.2 |
 
-**मेमोरी जीवनचक्र:**
+जीवनचक्र: 30+ दिन बिना पहुंच के → 10% महत्व क्षय (न्यूनतम 0.05)। 180+ दिन → `stale` टैग, रिकॉल से बाहर। `pinned` टैग क्षय रोकता है।
 
-| घटना | क्या होता है |
-|-------|-------------|
-| search/recall/context के माध्यम से नोड रिकॉल | `access_count++`, `accessed_at` अपडेट |
-| 30+ दिन बिना एक्सेस | महत्व 10% क्षय (न्यूनतम 0.05) |
-| 180+ दिन बिना एक्सेस | `stale` टैग, रिकॉल से बाहर |
-| `pinned` टैग वाला नोड | क्षय से प्रतिरक्षित |
+## Evolve (Ring 3)
 
-**स्वचालित संचय की शर्तें:**
+Claude Code के hook सिस्टम में [A-Evolve](https://github.com/A-EVO-Lab/a-evolve) के स्वचालित एवोल्यूशन पैटर्न को फ्यूज़ करता है।
 
-| शर्त | बनाया गया नोड |
-|-----------|-------------|
-| प्रत्येक सेशन समाप्ति | `session` (हमेशा) |
-| समान त्रुटि लगातार ≥3 बार | `error` (repeated_same_error) |
-| Edit→Error बारी-बारी | `pattern` (thrashing) |
-| टूल सफलता दर <60% (न्यूनतम 5 अवलोकन) | `pattern` (weak_tool) |
-| फ़ाइल प्रकार सफलता दर <50% (न्यूनतम 3 अवलोकन) | `pattern` (weak_filetype) |
-| Edit सफलता → Bash त्रुटि चक्र | `pattern` (fix_then_break) |
+### स्कोरिंग
 
-> **नोट:** स्वच्छ सेशन (कोई त्रुटि नहीं) केवल `session` नोड उत्पन्न करते हैं। ग्राफ़ 2–3 वास्तविक विकास सेशन के बाद समृद्ध होता है जिनमें बिल्ड विफलताएँ, टेस्ट विफलताएँ, या डिबगिंग चक्र हों।
-
-मौजूदा फ़ाइल-आधारित मेमोरी (`nodes/*.md`, `edges.jsonl`) पहले रन पर स्वचालित रूप से SQLite में माइग्रेट हो जाती हैं।
-
-## कमांड
-
-| कमांड | यह क्या करता है |
-|---------|-------------|
-| `/spec` | क्या बनाना है परिभाषित करें — आवश्यकताएँ स्पष्ट करें, एक स्पेक तैयार करें |
-| `/go` | बनाएँ — ऑटो-प्लान, TDD सबएजेंट्स, समानांतर निष्पादन |
-| `/check` | सत्यापित करें — समानांतर कोड रिव्यू + सुरक्षा ऑडिट + प्रदर्शन |
-| `/ship` | शिप करें — PR, CI, मर्ज |
-| `/team` | प्रोजेक्ट्स में संगठन-स्तरीय एजेंट टीम बनाएँ और सिंक करें |
-| `/evolve` | मैन्युअल इवोल्यूशन ट्रिगर / स्थिति / रोलबैक |
-
-## टीम (`epic team`)
-
-टीम **org-level** हैं, प्रोजेक्ट-बाउंड नहीं। किसी भी प्रोजेक्ट में `/team` चलाने से साझा एजेंट परिभाषाओं का पूल समृद्ध होता है — कभी चुपचाप ओवरराइट नहीं करता।
-
-### यह कैसे काम करता है
+प्रत्येक टूल कॉल 3 अक्षों पर स्कोर होता है (`~/.harness/config.toml` के माध्यम से कॉन्फिगर योग्य वज़न):
 
 ```
-epic team                      # इंटरएक्टिव: प्रोजेक्ट स्कैन → डिज़ाइन → लिखें → सिंक
-         ↓
-~/.harness/orgs/epic/teams/backend/   ← ग्लोबल स्टोर (प्रोजेक्ट्स में बना रहता है)
-         ↓
-epic team sync backend
-         ↓
-{project}/.claude/agents/backend/     ← Claude Code सेशन स्टार्ट पर ऑटो-डिस्कवर करता है
-├── domain-expert.md                  ← भूमिका परिभाषा + टीम कॉन्टेक्स्ट इंजेक्ट
-├── reviewer.md
-└── tester.md
-         ↓
-अगला सेशन: एजेंट सक्रिय — Claude द्वारा ऑटो-चुने या स्पष्ट रूप से कॉल
+composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
 ```
 
-### CLI संदर्भ
+विफलता वर्गीकरण (9 प्रकार): `type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
 
-```bash
-# टीम बनाएँ या अपडेट करें (इंटरएक्टिव 4-फ़ेज़ फ़्लो)
-epic team
+### पैटर्न डिटेक्शन
 
-# ब्राउज़ करें
-epic team list                        # वर्तमान org की सभी टीम
-epic team list --org netflix          # नामित org की टीम
-epic team show backend                # कॉन्फ़िग, मिशन, एजेंट
-epic team show backend --playbook     # + पूरा संचित प्लेबुक
+| पैटर्न | डिटेक्ट करता है | डिफ़ॉल्ट थ्रेशोल्ड |
+|--------|---------------|-------------------|
+| `repeated_same_error` | वही एरर N+ बार | 3 |
+| `fix_then_break` | Edit सफलता → build/test विफलता | 3 lookback, 2 साइकिल |
+| `long_debug_loop` | उसी फ़ाइल पर अटका | 5 ऑपरेशन |
+| `thrashing` | Edit↔Error बदलाव | 3 edits, 3 errors |
 
-# प्रोजेक्ट में डिस्पैच करें
-epic team sync backend                # डिस्पैच: एजेंट कॉपी करें → .claude/agents/backend/
-epic team link backend                # डिस्पैच + टीम कॉन्फ़िग में प्रोजेक्ट रजिस्टर
-
-# प्रोजेक्ट से रिकॉल करें
-epic team delete backend              # रिकॉल: केवल वर्तमान प्रोजेक्ट से हटाएँ
-epic team unlink backend              # delete का उपनाम
-
-# भंग करें (org से पूरी तरह हटाएँ)
-epic team delete backend --global     # org स्टोर + लोकल कॉपी से स्थायी रूप से हटाएँ
-
-# इतिहास
-epic team history backend reviewer    # एजेंट के .history/ बैकअप सूची
-```
-
-### कोडिंग एजेंट्स से टीम का उपयोग
-
-सिंक के बाद, एजेंट अगले सेशन में स्वचालित रूप से उपलब्ध हैं:
-
-```
-# Claude Code / Cursor / OpenCode / Codex
-@domain-expert पेमेंट गेटवे इम्प्लीमेंट करें
-@reviewer इस PR में एज केसेज़ चेक करें
-@tester auth के लिए इंटीग्रेशन टेस्ट लिखें
-
-# या एजेंट को टास्क कॉन्टेक्स्ट के आधार पर ऑटो-चुनने दें
-```
-
-प्रत्येक एजेंट फ़ाइल में सिंक समय पर इंजेक्ट किया गया **टीम कॉन्टेक्स्ट** सेक्शन होता है:
-
-```markdown
-## Team Context
-**Team**: backend (Stream-aligned)
-**Mission**: Own the API layer end-to-end
-**Full playbook**: `epic team show backend --playbook`
-```
-
-एजेंट अपनी टीम, मिशन और आवश्यकतानुसार पूरा प्लेबुक लोड करने का तरीका जानते हैं —
-कॉन्टेक्स्ट विंडो को इससे बोझिल किए बिना।
-
-### मल्टी-org
-
-```bash
-epic team                          # "epic" org में संचित (डिफ़ॉल्ट)
-epic team --org netflix            # अलग Netflix-शैली टोपोलॉजी
-epic team --org client-x           # प्रति-क्लाइंट एंगेजमेंट
-```
-
-एक ही org में एक ही टीम नाम = जानबूझकर क्रॉस-प्रोजेक्ट शेयरिंग।
-`epic/teams/backend` हर प्रोजेक्ट से ज्ञान संचित करता है जो इसे बनाता या लिंक करता है।
-
-### टीम प्रकार
-
-| प्रकार | कीवर्ड | डिफ़ॉल्ट एजेंट |
-|------|---------|---------------|
-| Stream-aligned | `stream` | domain-expert, reviewer, tester |
-| Platform | `platform` | api-designer, infra-specialist, dx-agent |
-| Enabling | `enabling` | specialist |
-| Complicated Subsystem | `subsystem` | domain-specialist, integration-tester |
-
-### मर्ज रणनीति — कोई चुप्पी से ओवरराइट नहीं
-
-| ऑब्जेक्ट | नियम |
-|--------|------|
-| एजेंट — नया | ऑटो-जोड़ें |
-| एजेंट — अपरिवर्तित | स्किप |
-| एजेंट — बदला | **प्रॉम्प्ट** (डिफ़ॉल्ट: मौजूदा रखें)। बदलने पर → `.history/` में बैकअप |
-| `playbook.md` | हमेशा **अपेंड** — कभी ट्रंकेट नहीं |
-| `mission.md` — बदला | **प्रॉम्प्ट** (डिफ़ॉल्ट: मौजूदा रखें) |
-
-## ऑटो स्किल्स (Ring 2)
-
-स्किल्स संदर्भ के आधार पर स्वचालित रूप से ट्रिगर होती हैं। आपको इन्हें इनवोक करने की आवश्यकता नहीं है।
-
-| स्किल | कब ट्रिगर होती है |
-|-------|--------------|
-| **tdd** | नई फ़ीचर इम्प्लीमेंटेशन |
-| **debug** | टेस्ट विफलता या एरर |
-| **secure** | Auth/DB/API/secrets कोड को छुआ गया |
-| **perf** | लूप्स, क्वेरीज़, रेंडरिंग कोड |
-| **simplify** | फ़ाइल > 200 लाइन या उच्च जटिलता |
-| **document** | पब्लिक API जोड़ा या बदला गया |
-| **verify** | /go या /ship पूरा करने से पहले |
-| **context** | कॉन्टेक्स्ट विंडो > 70% उपयोग |
-
-## हुक्स (Ring 0)
-
-अदृश्य रूप से चलते हैं। किसी उपयोगकर्ता कार्रवाई की आवश्यकता नहीं। एक **सिंगल Rust बाइनरी** (`epic-harness`) के रूप में सबकमांड्स के साथ लागू किए गए, बाइनरी अनुपस्थित होने पर Node.js पर फ़ॉलबैक।
-
-```
-epic resume | guard | polish | observe | snapshot | reflect
-```
-
-| हुक | कब | क्या करता है |
-|------|------|------|
-| **resume** | सेशन शुरू | कॉन्टेक्स्ट रिस्टोर, मेमोरी लोड, स्टैक डिटेक्ट |
-| **guard** | Bash से पहले | force-push-to-main, rm -rf /, DROP prod ब्लॉक करें |
-| **polish** | Edit के बाद | ऑटो-फॉर्मेट (Biome/Prettier/ruff/gofmt) + टाइपचेक |
-| **observe** | हर टूल उपयोग | इवोल्यूशन के लिए `~/.harness/projects/{slug}/obs/` में लॉग |
-| **snapshot** | कॉम्पैक्ट से पहले | `~/.harness/projects/{slug}/sessions/` में स्थिति सेव |
-| **reflect** | सेशन समाप्त | विफलताओं का विश्लेषण, इवॉल्व्ड स्किल्स सीड, गेट |
-
-## इवैल सिस्टम (Ring 3 कोर)
-
-A-Evolve के बेंचमार्क पैटर्न को Claude Code के हुक सिस्टम में फ़्यूज़ करता है।
-
-### बहु-आयामी स्कोरिंग
-
-प्रत्येक टूल कॉल को 3 अक्षों पर स्कोर किया जाता है। वेट `~/.harness/config.toml` में `SCORE_WEIGHTS` के माध्यम से कॉन्फ़िगर करने योग्य हैं:
-
-```
-composite = SCORE_WEIGHTS.success × tool_success + SCORE_WEIGHTS.quality × output_quality + SCORE_WEIGHTS.cost × execution_cost
-           (default: 0.5)                          (default: 0.3)                             (default: 0.2)
-```
-
-| आयाम | क्या मापता है | प्रति-टूल मानदंड |
-|-----------|-----------------|-------------------|
-| `tool_success` | क्या यह काम किया? (0/1) | 9-श्रेणी विफलता वर्गीकरण |
-| `output_quality` | आउटपुट गुणवत्ता संकेत (0.0-1.0) | Bash: चेतावनियाँ, खाली आउटपुट। Edit: री-एडिट डिटेक्शन |
-| `execution_cost` | दक्षता प्रॉक्सी (0.0-1.0) | आउटपुट साइज़, साइलेंट-सक्सेस कमांड व्हाइटलिस्ट |
-
-### विफलता वर्गीकरण (9 श्रेणियाँ)
-
-`type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
-
-### पैटर्न डिटेक्शन (4 प्रकार)
-
-सभी थ्रेशोल्ड `~/.harness/config.toml` में कॉन्फ़िगर करने योग्य कॉन्स्टेंट्स हैं:
-
-| पैटर्न | क्या पहचानता है | कॉन्स्टेंट | डिफ़ॉल्ट |
-|---------|---------|----------|---------|
-| `repeated_same_error` | एक ही एरर N+ बार लगातार | `REPEATED_ERROR_MIN` | 3 |
-| `fix_then_break` | Edit सफल → build/test विफल | `FTB_LOOKAHEAD` / `FTB_MIN_CYCLES` | 3 / 2 |
-| `long_debug_loop` | एक ही फ़ाइल पर N+ ऑपरेशन अटका | `DEBUG_LOOP_MIN` | 5 |
-| `thrashing` | एक ही फ़ाइल पर Edit↔Error बारी-बारी | `THRASH_MIN_EDITS` / `THRASH_MIN_ERRORS` | 3 / 3 |
-
-### स्किल सीडिंग थ्रेशोल्ड
-
-| ट्रिगर | कॉन्स्टेंट | डिफ़ॉल्ट |
-|---------|----------|---------|
-| कमज़ोर टूल (कम सफलता दर) | `WEAK_TOOL_RATE` / `WEAK_TOOL_MIN_OBS` | 0.6 / 5 |
-| कमज़ोर फ़ाइल प्रकार | `WEAK_EXT_RATE` / `WEAK_EXT_MIN_OBS` | 0.5 / 3 |
-| उच्च-आवृत्ति एरर | `HIGH_FREQ_ERROR_MIN` | 5 |
-
-### स्टैग्नेशन गेटिंग
-
-- `STAGNATION_LIMIT` (डिफ़ॉल्ट: 3) सेशन बिना सुधार के → इवॉल्व्ड स्किल्स का सर्वोत्तम चेकपॉइंट पर ऑटो-रोलबैक
-- `IMPROVEMENT_THRESHOLD` (डिफ़ॉल्ट: 5%)
-- ट्रेंड ट्रैकिंग: लीनियर रिग्रेशन के माध्यम से `improving` / `stable` / `declining`
-- टकराव पर स्टैटिक स्किल्स हमेशा इवॉल्व्ड स्किल्स पर प्राथमिकता लेती हैं
-
-### इवोल्यूशन फ़्लो
+### एवोल्यूशन फ्लो
 
 ```
 Observe (PostToolUse — 3-अक्ष स्कोरिंग)
-    ↓ ~/.harness/projects/{slug}/obs/session_{id}.jsonl
+    ↓ obs/session_{id}.jsonl
 Analyze (SessionEnd)
-    ↓ SessionAnalysis: प्रति-टूल, प्रति-ext, स्कोर वितरण
-    ↓ Patterns: repeated_same_error, fix_then_break, long_debug_loop, thrashing
-Seed (4 पथ: pattern / weak tool / weak file type / high-freq error)
-    ↓ ~/.harness/projects/{slug}/evolved/{skill}/SKILL.md
-Gate (फॉर्मेट चेक, डीडुप, 10 की सीमा, स्टैग्नेशन चेक)
-    ↓ ~/.harness/projects/{slug}/evolved_backup/ (सर्वोत्तम चेकपॉइंट)
-Reload (अगला सेशन — resume.ts मेट्रिक्स रिपोर्ट + इवॉल्व्ड स्किल्स लोड करता है)
+    ↓ प्रति-टूल, प्रति-ext स्कोर + पैटर्न
+Propose (Solver — स्कोर द्वारा स्नातक: ≥0.90 छोड़ें, ≥0.70 मध्यम, <0.70 पूर्ण)
+    ↓ SkillProposal[] विश्वास के साथ
+Curate (स्वीकार/मर्ज/छोड़ें, solver से फीडबैक छिपा)
+    ↓ evolved/{skill}/SKILL.md + meta.json
+Gate (फॉर्मेट चेक, dedup, कैप 10, ≥ 3 सत्र गेटेड प्रमोशन)
+    ↓ evolved_backup/ (सर्वश्रेष्ठ चेकपॉइंट)
+Instinct (उच्च-सफलता पैटर्न → cross-project memory.db नोड)
+    ↓
+Reload (अगला सत्र — resume विकसित स्किल्स लोड करता है)
 ```
+
+स्किल सीडिंग: कमज़ोर टूल (सफलता <60%, न्यूनतम 5 obs), कमज़ोर फ़ाइल प्रकार (सफलता <50%, न्यूनतम 3 obs), उच्च-आवृत्ति एरर (5+ घटनाएं)।
+
+स्थिरता: 5% सुधार के बिना 3 सत्र → सर्वश्रेष्ठ चेकपॉइंट पर ऑटो-rollback।
 
 ```bash
-/evolve              # अभी इवोल्यूशन चलाएँ
+/evolve              # अभी चलाएं
 /evolve status       # डैशबोर्ड: स्कोर, ट्रेंड, पैटर्न, स्किल्स
-/evolve history      # दीर्घकालिक विश्लेषण: पूर्ण इतिहास, स्किल प्रभावशीलता, डिस्पैच आँकड़े
+/evolve history      # पूर्ण इतिहास + स्किल प्रभावशीलता
 /evolve cross-project # क्रॉस-प्रोजेक्ट पैटर्न विश्लेषण
-/evolve rollback     # पिछला सर्वोत्तम पुनर्स्थापित करें
-/evolve reset        # सभी इवोल्यूशन डेटा साफ़ करें
+/evolve rollback     # पिछला सर्वश्रेष्ठ पुनर्स्थापित करें
+/evolve reset        # सभी एवोल्यूशन डेटा साफ़ करें
 ```
 
-## कोल्ड-स्टार्ट प्रीसेट्स
+### स्किल प्रभावशीलता
 
-उपयोगी इवॉल्व्ड स्किल्स के लिए 5 सेशन इंतज़ार करने की ज़रूरत नहीं। पहले सेशन पर, epic harness आपके स्टैक का पता लगाता है और प्रीसेट स्किल्स स्वचालित रूप से लागू करता है:
+प्रत्येक विकसित स्किल को A/B एट्रिब्यूशन के साथ ट्रैक किया जाता है:
 
-| स्टैक | प्रीसेट स्किल्स |
-|-------|--------------|
+```
+/evolve history → Skill Effectiveness
+
+| Skill              | With | Without | Delta |
+|--------------------|------|---------|-------|
+| evo-ts-care        | 0.87 | 0.72    | +15%  |
+| evo-bash-discipline| 0.65 | 0.68    | -3%   |
+```
+
+पॉज़िटिव डेल्टा = प्रभावी। नेगेटिव = `/evolve rollback` के माध्यम से हटाने पर विचार करें।
+
+### कोल्ड-स्टार्ट प्रीसेट
+
+पहले सत्र में, स्टैक-उपयुक्त प्रीसेट स्किल्स स्वचालित रूप से लागू होती हैं:
+
+| Stack | Presets |
+|-------|---------|
 | Node.js/TypeScript | `evo-ts-care`, `evo-fix-build-fail` |
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
 
-प्रीसेट्स पूरक हैं — डेटा जमा होने पर वे वास्तविक इवॉल्व्ड स्किल्स से बदल दिए जाते हैं।
+### इंस्टिंक्ट लर्निंग
 
-## समवर्ती सेशन सुरक्षा
+उच्च-सफलता पैटर्न निकाले और प्रोजेक्ट के पार प्रमोट किए जाते हैं:
 
-प्रत्येक सेशन अपनी ऑब्ज़र्वेशन फ़ाइल (`session_{date}_{pid}_{random}.jsonl`) में लिखता है। एक ही प्रोजेक्ट पर कई Claude Code सेशन एक-दूसरे के डेटा को दूषित नहीं करेंगे। reflect हुक विश्लेषण के लिए एक ही दिन की सभी फ़ाइलों को मर्ज करता है।
-
-## कस्टम गार्ड नियम
-
-प्रोजेक्ट रूट में `.harness/guard-rules.yaml` के माध्यम से प्रोजेक्ट-विशिष्ट सुरक्षा नियम जोड़ें:
-
-```yaml
-blocked:
-  - pattern: kubectl\s+delete\s+namespace | msg: Namespace deletion blocked
-  - pattern: terraform\s+destroy | msg: Terraform destroy blocked
-warned:
-  - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
-
-नियम अंतर्निहित गार्ड्स (force-push-to-main, rm -rf /, DROP prod) के साथ मर्ज होते हैं। इस फ़ाइल को git में रखने से अपनी टीम के साथ सुरक्षा नियम साझा करने में मदद मिलती है।
+observe (100% पुष्टि) → extract_instincts() → instinct node (विश्वास ≥ 0.8)
+    → global में प्रमोट करें जब ≥ 2 प्रोजेक्ट में देखा गया हो
+```
 
 ## क्रॉस-प्रोजेक्ट लर्निंग
 
-प्रोजेक्ट्स के बीच विफलता पैटर्न साझा करने के लिए ऑप्ट-इन करें:
+प्रोजेक्ट के पार विफलता पैटर्न साझा करने के लिए ऑप्ट-इन करें:
 
 ```bash
-touch ~/.harness/projects/{slug}/.cross-project-enabled  # ऑप्ट-इन
+touch ~/.harness/projects/{slug}/.cross-project-enabled
 ```
 
-सक्षम होने पर:
-- सेशन समाप्त होने पर गुमनाम पैटर्न `~/.harness/global_patterns.jsonl` में निर्यात होते हैं
-- सेशन शुरू होने पर अन्य प्रोजेक्ट्स के कमज़ोर क्षेत्रों से संकेत दिखाए जाते हैं
-- समग्र पैटर्न देखने के लिए `/evolve cross-project` का उपयोग करें
+सत्र समाप्त → `~/.harness/global_patterns.jsonl` में अनाम पैटर्न एक्सपोर्ट करता है। सत्र प्रारंभ → अन्य प्रोजेक्ट के कमज़ोर क्षेत्रों से संकेत दिखाता है।
 
-## स्किल प्रभावशीलता ट्रैकिंग
+## प्रोजेक्ट डेटा
 
-प्रत्येक इवॉल्व्ड स्किल को A/B एट्रिब्यूशन स्कोर के साथ ट्रैक किया जाता है:
+सभी डेटा `~/.harness/` (होम डायरेक्टरी) में रहता है, आपके प्रोजेक्ट रूट में नहीं। प्रोजेक्ट हटाने के बाद भी जीवित रहता है, git इतिहास को प्रदूषित नहीं करता।
 
 ```
-/evolve history → Skill Effectiveness सेक्शन
-
-| Skill              | Sessions | Score With | Score Without | Delta  |
-|--------------------|----------|------------|---------------|--------|
-| evo-ts-care        | 8        | 0.87       | 0.72          | +15%   |
-| evo-bash-discipline| 3        | 0.65       | 0.68          | -3%    |
-```
-
-सकारात्मक डेल्टा = स्किल मदद करती है। नकारात्मक डेल्टा = `/evolve rollback` के माध्यम से हटाने पर विचार करें।
-
-## Polish → Observe फ़ीडबैक
-
-polish हुक (ऑटो-फॉर्मेट + टाइपचेक) परिणामों को ऑब्ज़र्वेशन पाइपलाइन में वापस फ़ीड करता है:
-
-- फ़ॉर्मेट विफलता → `lint_fail` के रूप में रिकॉर्ड
-- TypeScript एरर → `build_fail` के रूप में रिकॉर्ड
-- सफलताएँ → पूर्ण स्कोर के साथ रिकॉर्ड
-
-इसका मतलब है कि "edit → type error → edit → type error" थ्रैशिंग पैटर्न का पता तब भी लगाया जाता है जब एरर मैन्युअल कमांड से नहीं बल्कि polish हुक से आते हैं।
-
-## प्रोजेक्ट डेटा (`~/.harness/projects/{slug}/`)
-
-प्रोजेक्ट-विशिष्ट डेटा आपके होम डायरेक्टरी में रहता है। यह प्रोजेक्ट डिलीशन के बाद भी बना रहता है और आपकी git हिस्ट्री को दूषित नहीं करता।
-
-```
-~/.harness/projects/{slug}/
-├── memory/           # प्रोजेक्ट पैटर्न और नियम (स्थायी)
-├── sessions/         # सेशन स्नैपशॉट (resume के लिए)
-├── obs/              # टूल उपयोग ऑब्ज़र्वेशन लॉग (JSONL, प्रति-सेशन)
-├── evolved/          # ऑटो-इवॉल्व्ड स्किल्स
-├── evolved_backup/   # सर्वोत्तम चेकपॉइंट (स्टैग्नेशन रोलबैक के लिए)
-├── dispatch/         # स्किल डिस्पैच लॉग (JSONL)
-├── team/             # legacy (superseded by ~/.harness/orgs/)
-├── evolution.jsonl   # पूर्ण इवोल्यूशन इतिहास
-└── metrics.json      # समग्र आँकड़े + स्किल एट्रिब्यूशन
-
 ~/.harness/
-├── memory.db         # SQLite नॉलेज ग्राफ़ (नोड्स + एज + FTS5)
-├── graph.json        # कैश्ड ग्राफ़ (वेब UI के लिए)
-└── orgs/             # epic team ग्लोबल स्टोर
-    └── {org}/
-        └── teams/
-            └── {team}/
-                ├── config.json
-                ├── mission.md
-                ├── playbook.md
-                ├── agents/
-                └── .history/
+├── memory.db                  # SQLite नॉलेज ग्राफ (नोड + एज + FTS5)
+├── graph.json                 # कैश्ड ग्राफ (वेब UI के लिए)
+├── config.toml                # उपयोगकर्ता कॉन्फिगरेशन
+├── global_patterns.jsonl      # क्रॉस-प्रोजेक्ट पैटर्न (opt-in)
+├── orgs/                      # टीम ग्लोबल स्टोर
+│   └── {org}/teams/{team}/
+│       ├── config.json, mission.md, playbook.md, agents/, .history/
+└── projects/{slug}/
+    ├── memory/                # प्रोजेक्ट पैटर्न और नियम
+    ├── sessions/              # सत्र snapshots (resume के लिए)
+    ├── obs/                   # टूल उपयोग अवलोकन लॉग (JSONL)
+    ├── evolved/               # ऑटो-विकसित स्किल्स
+    │   ├── manifest.json
+    │   └── {skill}/SKILL.md + meta.json
+    ├── evolved_backup/        # सर्वश्रेष्ठ चेकपॉइंट (rollback के लिए)
+    ├── dispatch/              # स्किल डिस्पैच लॉग
+    ├── evolution.jsonl        # पूर्ण एवोल्यूशन इतिहास
+    └── metrics.json           # एकत्रित आंकड़े + स्किल एट्रिब्यूशन
 ```
 
-आप अपनी टीम के साथ सुरक्षा नियम साझा करने के लिए प्रोजेक्ट रूट में `.harness/guard-rules.yaml` का उपयोग जारी रख सकते हैं।
+अपनी टीम के साथ सुरक्षा नियम साझा करें: प्रोजेक्ट रूट में `.harness/guard-rules.yaml` (git में कमिट)।
 
-## डेवलपमेंट
+## कॉन्फिगरेशन
 
-### बिल्ड
+`~/.harness/config.toml` में सभी ट्यूनेबल पैरामीटर। अनुपस्थित = हार्डकोडेड डिफ़ॉल्ट।
+
+```toml
+# प्राथमिकता: env var (EPIC_HOOK_PROFILE) > यह फ़ाइल > डिफ़ॉल्ट
+
+[hook]
+profile = "standard"         # "minimal" | "standard" | "strict"
+gateguard_hints = true
+
+[scoring]
+weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
+
+[evolution]
+max_skills = 10
+stagnation_limit = 3
+improvement_threshold = 0.05
+gated_promotion_min = 3
+
+[pattern]
+# repeated_error_min = 3
+# debug_loop_min = 5
+# graduated_scope_skip = 0.90
+# graduated_scope_moderate = 0.70
+
+[instinct]
+# confidence_threshold = 0.8
+# promotion_min_projects = 2
+# max_instincts = 20
+# min_observations = 10
+# min_avg_score = 0.5
+```
+
+## विकास
 
 ```bash
-cargo install --path .          # बिल्ड + ~/.cargo/bin/ में इंस्टॉल
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness  # प्लगइन बाइनरी अपडेट
+cargo install --path .                                        # बिल्ड + इंस्टॉल
+cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # प्लगइन बाइनरी अपडेट करें
+cargo test                                                    # परीक्षण
 ```
 
-### हुक्स कैसे डिस्पैच होते हैं
+Hooks बाइनरी दो जगहों पर देखते हैं: `hooks/bin/epic-harness` (प्लगइन लोकल) → `~/.cargo/bin/epic-harness` (PATH)।
 
-`hooks.json` में प्रत्येक हुक दो स्थानों पर Rust बाइनरी खोजता है:
+## लिंक
 
-```
-1. प्लगइन लोकल: hooks/bin/epic-harness
-2. PATH:         ~/.cargo/bin/epic-harness (cargo install के माध्यम से)
-```
-
-### टेस्ट
-
-```bash
-cargo test       # Rust यूनिट + इंटीग्रेशन टेस्ट
-```
+- [Changelog](../../CHANGELOG.md) — रिलीज़ इतिहास
+- [Contributing](../../CONTRIBUTING.md) — कैसे योगदान करें
+- [Security](../../SECURITY.md) — कमज़ोरियां रिपोर्ट करना
+- [Issues](https://github.com/epicsagas/epic-harness/issues) — बग रिपोर्ट और फीचर अनुरोध
 
 ## आभार
 
-epic harness निम्नलिखित प्रोजेक्ट्स के विचारों से प्रेरित और उन पर निर्मित है:
-
-- [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — स्वचालित इवोल्यूशन और बेंचमार्क पैटर्न
+- [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — स्वचालित एवोल्यूशन और बेंचमार्क पैटर्न
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code एजेंट स्किल सिस्टम
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — व्यापक Claude Code पैटर्न
 - [gstack](https://github.com/garrytan/gstack) — प्लगइन आर्किटेक्चर संदर्भ
-- [harness](https://github.com/revfactory/harness) — हुक और हार्नेस इंफ्रास्ट्रक्चर पैटर्न
+- [harness](https://github.com/revfactory/harness) — Hook और हार्नेस इन्फ्रास्ट्रक्चर पैटर्न
 - [serena](https://github.com/oraios/serena) — स्वायत्त एजेंट डिज़ाइन
 - [SuperClaude Framework](https://github.com/SuperClaude-Org/SuperClaude_Framework) — मल्टी-कमांड फ्रेमवर्क आर्किटेक्चर
 - [superpowers](https://github.com/obra/superpowers) — Claude Code एक्सटेंशन पैटर्न
 
 ## लाइसेंस
 
-[Apache 2.0](LICENSE)
+[Apache 2.0](../../LICENSE)
