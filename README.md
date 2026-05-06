@@ -116,6 +116,7 @@ Inside a Claude Code session: `/evolve status`
 
 | Command | What it does |
 |---------|-------------|
+| `/orbit` | **Full autonomous pipeline**: spec → go → check → ship → evolve in one shot |
 | `/discover` | Frame the problem first — 5 Whys, JTBD, Socratic questioning (max 3 rounds) |
 | `/spec` | Convert requirements into a numbered R + AC document, saved as `SPEC-{timestamp}.md` |
 | `/go` | Auto-plan → TDD subagents → parallel execution with worktree isolation → AC verification |
@@ -123,7 +124,6 @@ Inside a Claude Code session: `/evolve status`
 | `/ship` | Isolated pre-flight test in a clean worktree → PR with full check report → CI watch + auto-fix |
 | `/team` | Browse org libraries, hire existing teams, or design new ones (3–6 agents, synced to `.claude/agents/`) |
 | `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, inspect skill effectiveness, rollback |
-| `/orbit` | **Full autonomous pipeline**: spec → go → check → ship → evolve in one shot |
 
 ### Pipeline
 
