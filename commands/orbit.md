@@ -1,10 +1,10 @@
 ---
-description: "Autonomous pipeline: spec → go → check → ship in one shot. Selects mode automatically — Interactive (vague requirement, user runs /discover+/spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs /evolve on PR+CI success."
+description: "Autonomous pipeline: spec → go → check → ship → evolve in one shot. Selects mode automatically — Interactive (vague requirement, user runs /discover+/spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs /evolve automatically on PR+CI success."
 ---
 
 # /orbit — Complete Orbit
 
-Full autonomous pipeline: spec → go → check → ship in one shot.
+Full autonomous pipeline: spec → go → check → ship → evolve in one shot.
 
 ## Step 0: Preflight
 
