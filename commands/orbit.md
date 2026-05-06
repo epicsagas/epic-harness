@@ -38,15 +38,27 @@ Update this file after every phase transition. It is your checkpoint if context 
 
 ## Step 1: Mode Selection
 
-Assess the user's request and present two options:
+Assess the user's request and present three options:
 
-> **Orbit Mode — how clear is the requirement?**
+> **Orbit Mode — how clear and complex is the requirement?**
 >
-> **1. Interactive discover** — The requirement is ambiguous or unclear. You run `/discover` and `/spec` to define it, then say "orbit go" and I'll take over from there.
+> **1. Interactive discover** — The requirement is ambiguous or vague. You run `/discover` and `/spec` to define it, then say "orbit go" and I'll take over from there.
 >
-> **2. Council auto-spec** — The requirement is clear enough. A 4-voice council (Architect, Skeptic, Pragmatist, Critic) will analyze it, generate a spec automatically, and proceed without waiting for approval.
+> **2. Council auto-spec** — The requirement is clear but complex (architectural decisions, trade-offs, or multiple concerns). A 4-voice council (Architect, Skeptic, Pragmatist, Critic) will analyze it, auto-generate a spec, and proceed.
+>
+> **3. Direct build** — The requirement is clear and simple. I'll write the spec immediately and start building without council or discovery.
 
-Do NOT proceed until the user picks a mode. Record the choice in pipeline state (`"mode": "interactive"` or `"mode": "council"`).
+Do NOT proceed until the user picks a mode. Record the choice in pipeline state (`"mode": "interactive"`, `"mode": "council"`, or `"mode": "direct"`).
+
+---
+
+## Step 2C: Direct Build Mode
+
+Write a spec immediately from the user's request — no council, no discovery:
+
+1. Derive `goal_slug`, Requirements, and Acceptance Criteria directly from the request
+2. Write `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`
+3. Show the spec as an FYI, then **proceed immediately to Step 3**
 
 ---
 

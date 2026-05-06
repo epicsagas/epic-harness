@@ -144,12 +144,13 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    START(["/orbit"]) --> MODE{"requirement\nclear?"}:::human
-    MODE -->|"unclear → Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
-    MODE -->|"clear → Council"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
-    WAIT --> SPEC_LOAD["Load approved spec"]
-    COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate & approve spec"]:::auto
-    GEN --> SPEC_LOAD
+    START(["/orbit"]) --> MODE{"requirement?"}:::human
+    MODE -->|"unclear"| WAIT["Interactive\n/discover → /spec\nthen 'orbit go'"]:::human
+    MODE -->|"clear + complex"| COUNCIL["Council\n4-voice auto-spec"]:::auto
+    MODE -->|"clear + simple"| DIRECT["Direct\nauto-spec"]:::auto
+    WAIT --> SPEC_LOAD["Load spec"]
+    COUNCIL --> SPEC_LOAD
+    DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> CHECK["Check\nreview + audit + test"]:::auto
     CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
@@ -165,8 +166,8 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Purple nodes** — human steps: mode selection (unclear → interactive discover), 3× check failure pause.
-**Green nodes** — council auto-spec runs fully autonomous; interactive mode hands off after spec approval.
+**Purple** — human steps: mode selection (unclear → interactive), 3× check failure pause.
+**Green** — clear + complex → council auto-spec; clear + simple → direct build; both fully autonomous.
 
 State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
 
@@ -197,10 +198,12 @@ flowchart TD
         EV(["/evolve"]):::auto
 
         CL["Council\n4-voice auto-spec"]:::auto
+        DR["Direct\nauto-spec"]:::auto
 
         D -->|frame problem| S
         S -->|spec approved| G
         CL -->|spec approved| G
+        DR -->|spec approved| G
         G --> C
         C -->|PASS| SH
         C -->|"FAIL ×3 → pause"| G

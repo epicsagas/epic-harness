@@ -33,11 +33,13 @@ Single-command spec-to-PR execution with two entry modes.
 
 ```mermaid
 flowchart TD
-    START["/orbit"] --> MODE{"requirement\nclear?"}
-    MODE -->|"unclear → Interactive"| WAIT["User runs /discover → /spec\nthen 'orbit go'"]
-    MODE -->|"clear → Council"| COUNCIL["4-Voice Council\nAuto-generate spec"]
+    START["/orbit"] --> MODE{"requirement?"}
+    MODE -->|"unclear"| WAIT["Interactive\nUser runs /discover → /spec"]
+    MODE -->|"clear + complex"| COUNCIL["Council\n4-Voice Auto-spec"]
+    MODE -->|"clear + simple"| DIRECT["Direct\nAuto-spec"]
     WAIT --> SPEC["Load Approved Spec"]
     COUNCIL --> SPEC
+    DIRECT --> SPEC
     SPEC --> GO["Go Phase\nPlan → Execute → Integrate"]
     GO --> CHECK["Check Phase\nReview + Audit + Test"]
     CHECK -->|"PASS"| SHIP["Ship Phase\nIsolated Test → PR → CI"]
@@ -54,7 +56,7 @@ flowchart TD
 
 **State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — updated after every phase transition, survives context compaction.
 
-**Human checkpoints**: mode selection (interactive only), 3 failed checks (pause).
+**Human checkpoints**: mode selection (interactive only when unclear), 3 failed checks (pause).
 
 **Evolve**: runs automatically after PR created + CI green. Skipped on abort.
 
