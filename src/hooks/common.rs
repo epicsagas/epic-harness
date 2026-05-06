@@ -332,7 +332,7 @@ pub fn cross_project_file() -> PathBuf {
     global_harness_dir().join(".cross-project-enabled")
 }
 
-fn dirs_home() -> PathBuf {
+pub(crate) fn dirs_home() -> PathBuf {
     // Check HOME (Linux/macOS) then USERPROFILE (Windows)
     if let Ok(h) = std::env::var("HOME") {
         return PathBuf::from(h);
@@ -348,6 +348,20 @@ fn dirs_home() -> PathBuf {
     // Fail loudly if home directory cannot be determined.
     // Falling back to /tmp is insecure as it's typically world-readable.
     panic!("[harness] FATAL: Home directory not detected. Please set HOME or USERPROFILE.");
+}
+
+// ── Content Sanitization ─────────────────────────────
+
+/// Strip characters that could be used for prompt injection in generated skill content:
+/// null bytes, C1 controls (U+0080–U+009F), and Plane-14 tag characters (U+E0000–U+E01EF).
+pub fn sanitize_skill_content(s: &str) -> String {
+    s.chars()
+        .filter(|&c| {
+            c != '\0'
+                && !((c as u32) >= 0x80 && (c as u32) <= 0x9F)
+                && !('\u{E0000}'..='\u{E01EF}').contains(&c)
+        })
+        .collect()
 }
 
 // ── Failure Classification ──────────────────────────

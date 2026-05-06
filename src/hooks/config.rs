@@ -3,6 +3,8 @@ use std::sync::LazyLock;
 
 use serde::Deserialize;
 
+use super::common;
+
 // ── Config Types ────────────────────────────────────
 
 #[derive(Debug, Default, Deserialize)]
@@ -112,6 +114,12 @@ pub struct InstinctConfig {
 
     /// Maximum number of instinct nodes stored globally.
     pub max_instincts: usize,
+
+    /// Minimum session observations before instinct extraction runs.
+    pub min_observations: usize,
+
+    /// Minimum session avg_score before instinct extraction runs.
+    pub min_avg_score: f64,
 }
 
 // ── Defaults ────────────────────────────────────────
@@ -170,6 +178,8 @@ impl Default for InstinctConfig {
             confidence_threshold: 0.8,
             promotion_min_projects: 2,
             max_instincts: 20,
+            min_observations: 10,
+            min_avg_score: 0.5,
         }
     }
 }
@@ -178,33 +188,30 @@ impl Default for InstinctConfig {
 
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
 
-fn global_harness_dir() -> PathBuf {
-    dirs_home().join(".harness")
-}
-
-fn dirs_home() -> PathBuf {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+fn harness_dir() -> PathBuf {
+    common::dirs_home().join(".harness")
 }
 
 /// Load config from `~/.harness/config.toml`.
 /// Returns defaults if file is missing or malformed.
 fn load_config() -> HarnessConfig {
-    let path = global_harness_dir().join("config.toml");
+    let path = harness_dir().join("config.toml");
     if !path.is_file() {
         return HarnessConfig::default();
     }
     match std::fs::read_to_string(&path) {
-        Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
-            eprintln!(
-                "[epic-harness] warning: failed to parse {}: {} — using defaults",
-                path.display(),
-                e
-            );
-            HarnessConfig::default()
-        }),
+        Ok(content) => {
+            let cfg = toml::from_str(&content).unwrap_or_else(|e| {
+                eprintln!(
+                    "[epic-harness] warning: failed to parse {}: {} — using defaults",
+                    path.display(),
+                    e
+                );
+                HarnessConfig::default()
+            });
+            validate_config(&cfg);
+            cfg
+        }
         Err(e) => {
             eprintln!(
                 "[epic-harness] warning: failed to read {}: {} — using defaults",
@@ -213,6 +220,23 @@ fn load_config() -> HarnessConfig {
             );
             HarnessConfig::default()
         }
+    }
+}
+
+// ── Validation ───────────────────────────────────────
+
+fn validate_config(cfg: &HarnessConfig) {
+    let w = cfg.scoring.weights;
+    let sum: f64 = w.iter().sum();
+    if w.iter().any(|v| *v < 0.0) || sum.abs() < f64::EPSILON {
+        eprintln!(
+            "[epic-harness] warning: scoring weights contain negative values — using defaults"
+        );
+    } else if (sum - 1.0).abs() > 0.15 {
+        eprintln!(
+            "[epic-harness] warning: scoring weights sum to {:.3} (expected ~1.0) — scores may be unreliable",
+            sum
+        );
     }
 }
 
@@ -419,5 +443,33 @@ max_instincts = 10
         assert!(c.hook.gateguard_hints);
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
+    }
+
+    #[test]
+    fn validate_weights_ok() {
+        let c = HarnessConfig::default();
+        validate_config(&c); // should not panic or warn
+    }
+
+    #[test]
+    fn validate_weights_negative_warns() {
+        let c = HarnessConfig {
+            scoring: ScoringConfig {
+                weights: [-0.5, 0.3, 0.2],
+            },
+            ..Default::default()
+        };
+        validate_config(&c); // warns but does not panic
+    }
+
+    #[test]
+    fn validate_weights_bad_sum_warns() {
+        let c = HarnessConfig {
+            scoring: ScoringConfig {
+                weights: [5.0, 3.0, 2.0],
+            },
+            ..Default::default()
+        };
+        validate_config(&c); // warns but does not panic
     }
 }

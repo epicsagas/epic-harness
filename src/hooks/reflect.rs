@@ -109,7 +109,7 @@ fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
         } else {
             1.0
         };
-        if rate >= CONFIG.pattern.weak_tool_rate || (stats.total as u64) < CONFIG.pattern.weak_tool_min_obs {
+        if rate >= CONFIG.pattern.weak_tool_rate || stats.total < CONFIG.pattern.weak_tool_min_obs {
             continue;
         }
         let name = format!("evo-{}-discipline", stats.tool_category);
@@ -128,7 +128,7 @@ fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
 
     // Proposals from weak extensions (only in full mode - handled by caller)
     for (ext, stats) in &analysis.per_ext_stats {
-        if stats.success_rate >= CONFIG.pattern.weak_ext_rate || (stats.total as u64) < CONFIG.pattern.weak_ext_min_obs || ext == "unknown" {
+        if stats.success_rate >= CONFIG.pattern.weak_ext_rate || stats.total < CONFIG.pattern.weak_ext_min_obs || ext == "unknown" {
             continue;
         }
         let clean = ext.trim_start_matches('.');
@@ -731,7 +731,7 @@ fn write_workspace_manifest() {
 }
 
 fn build_pattern_skill(p: &DetectedPattern) -> String {
-    format!(
+    sanitize_skill_content(&format!(
         "---\nname: {}\ndescription: \"Auto-evolved from {}x {} pattern.\"\n---\n\n# {}\n\n**Detected**: {}\n**Files**: {}\n\n## Remediation\n{}\n\n## Red Flags\n- Retrying the same approach that already failed\n- Not reading the full error context\n- Patching symptoms instead of root cause\n",
         p.pattern_type,
         p.count,
@@ -744,7 +744,7 @@ fn build_pattern_skill(p: &DetectedPattern) -> String {
             p.involved_files.join(", ")
         },
         p.suggested_remediation,
-    )
+    ))
 }
 
 fn build_tool_skill(stats: &ToolStats) -> String {
@@ -762,7 +762,7 @@ fn build_tool_skill(stats: &ToolStats) -> String {
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(
+    sanitize_skill_content(&format!(
         "---\nname: {cat}-discipline\ndescription: \"Auto-evolved. {cat} tool success rate was {rate}%.\"\n---\n\n# {cat} discipline\n\nSuccess rate: {rate}% ({s}/{t})\n\n## Top Failure Types\n{failures}\n\n## Process\n1. Before using {cat}: verify preconditions\n2. Check the expected output format\n3. Validate paths and arguments exist\n4. On failure: read the FULL error, don't retry blindly\n\n## Red Flags\n- {cat} success rate still below 60%\n- Same error type repeating\n",
         cat = stats.tool_category,
         s = stats.successes,
@@ -772,16 +772,16 @@ fn build_tool_skill(stats: &ToolStats) -> String {
         } else {
             failures
         },
-    )
+    ))
 }
 
 fn build_ext_skill(ext: &str, stats: &ExtStats) -> String {
     let rate = (stats.success_rate * 100.0) as u32;
-    format!(
+    sanitize_skill_content(&format!(
         "---\nname: {clean}-care\ndescription: \"Auto-evolved. {ext} files had {rate}% success rate.\"\n---\n\n# {ext} file care\n\nSuccess rate: {rate}% across {t} operations\n\n## Process\n1. Before editing {ext} files: run type-check / lint / build\n2. After editing: immediately verify\n3. If error: read the full diagnostic before re-editing\n\n## Red Flags\n- Editing {ext} files without verifying afterward\n- Ignoring compiler/linter warnings\n",
         clean = ext.trim_start_matches('.'),
         t = stats.total,
-    )
+    ))
 }
 
 fn build_failure_skill(category: &str, count: u64) -> String {
@@ -807,10 +807,10 @@ fn build_failure_skill(category: &str, count: u64) -> String {
         _ => "Read the full error message. Identify root cause. Fix the cause, not the symptom.",
     };
     let display = category.replace('_', " ");
-    format!(
+    sanitize_skill_content(&format!(
         "---\nname: fix-{dash}\ndescription: \"Auto-evolved from {count}x {category} failures.\"\n---\n\n# Fix {display}\n\nDetected {count} occurrences.\n\n## Remediation\n{remediation}\n\n## Process\n1. Stop — do not retry blindly\n2. Read the full error message and stack trace\n3. Form a hypothesis about root cause\n4. Fix the root cause, not the symptom\n5. Verify with a test or build\n\n## Red Flags\n- Retrying the same approach unchanged\n- Patching symptoms instead of root cause\n",
         dash = category.replace('_', "-"),
-    )
+    ))
 }
 
 // ── Phase 5: Trend ──────────────────────────────────
@@ -910,7 +910,7 @@ fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) {
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
         .iter()
-        .filter(|(_, s)| (s.total as u64) >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
+        .filter(|(_, s)| s.total >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
         .map(|(cat, _)| cat.clone())
         .collect();
 
@@ -1203,8 +1203,9 @@ struct Instinct {
 }
 
 fn extract_instincts(observations: &[ObsRecord], analysis: &SessionAnalysis) -> Vec<Instinct> {
-    // Only extract from sessions with enough observations
-    if observations.len() < 10 || analysis.avg_score < 0.5 {
+    if observations.len() < CONFIG.instinct.min_observations
+        || analysis.avg_score < CONFIG.instinct.min_avg_score
+    {
         return vec![];
     }
 
@@ -1215,7 +1216,7 @@ fn extract_instincts(observations: &[ObsRecord], analysis: &SessionAnalysis) -> 
             continue;
         }
         let rate = stats.successes as f64 / stats.total as f64;
-        if rate >= 0.8 {
+        if rate >= CONFIG.instinct.confidence_threshold {
             instincts.push(Instinct {
                 trigger: format!("high-success-{}", tool_cat),
                 confidence: rate,
@@ -1234,7 +1235,7 @@ fn extract_instincts(observations: &[ObsRecord], analysis: &SessionAnalysis) -> 
             continue;
         }
         let rate = stats.success_rate;
-        if rate >= 0.8 {
+        if rate >= CONFIG.instinct.confidence_threshold {
             instincts.push(Instinct {
                 trigger: format!("high-success-{}", ext.trim_start_matches('.')),
                 confidence: rate,
@@ -1391,8 +1392,9 @@ pub fn run(_input: &HookInput) -> i32 {
     // 5. Gate
     gate_skills();
 
-    // 6. Skill attribution
-    update_skill_attribution(&mut metrics, &analysis, &list_dirs(&evolved_dir()));
+    // 6. Skill attribution (reuse listing after gate may have pruned)
+    let evolved_dirs = list_dirs(&evolved_dir());
+    update_skill_attribution(&mut metrics, &analysis, &evolved_dirs);
 
     // 7. Cross-project export
     export_to_global(&analysis, &analysis.failure_patterns);
@@ -1421,7 +1423,7 @@ pub fn run(_input: &HookInput) -> i32 {
         failure_patterns: analysis.failure_patterns.clone(),
         skills_seeded: seeded,
         skills_rolled_back: rolled_back_count,
-        total_evolved: list_dirs(&evolved_dir()).len() as u64,
+        total_evolved: evolved_dirs.len() as u64,
         analysis_summary: build_summary(&analysis),
     };
     append_jsonl(&evolution_file(), &record);
@@ -1498,7 +1500,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
         .iter()
-        .filter(|(_, s)| (s.total as u64) >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
+        .filter(|(_, s)| s.total >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
         .map(|(cat, s)| {
             format!(
                 "{cat} {}%",
@@ -1513,7 +1515,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let weak_exts: Vec<String> = analysis
         .per_ext_stats
         .iter()
-        .filter(|(_, s)| (s.total as u64) >= CONFIG.pattern.weak_ext_min_obs && s.success_rate < CONFIG.pattern.weak_ext_rate)
+        .filter(|(_, s)| s.total >= CONFIG.pattern.weak_ext_min_obs && s.success_rate < CONFIG.pattern.weak_ext_rate)
         .map(|(ext, s)| format!("{ext} {}%", (s.success_rate * 100.0) as u32))
         .collect();
     if !weak_exts.is_empty() {
