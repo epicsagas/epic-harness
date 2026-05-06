@@ -23,6 +23,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User wants to commit changes | **commit** |
 | Context window > 70% used | **context** |
 | User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
+| User shares code for review, mentions code smells, or asks to refactor/analyze | **syntagma** → `analyze_code` + `suggest_refactorings` → feed results into `/orbit` Direct |
 
 ## Loop Transition Signals
 
@@ -48,6 +49,7 @@ When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exist
 
 - **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/check`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
 - **Dispatch skills normally** — tdd, debug, verify, secure, perf, simplify, document, context all fire as usual within each phase
+- **syntagma pre-analysis**: if syntagma `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to Step 2C as spec material — skip mode selection entirely and enter Direct Build
 - **After orbit completes** (`status: complete` or `status: aborted`) — resume normal dispatch behavior
 
 The orbit command is a self-contained pipeline. Interjecting normal transition nudges during orbit would confuse the user.

@@ -54,11 +54,20 @@ Do NOT proceed until the user picks a mode. Record the choice in pipeline state 
 
 ## Step 2C: Direct Build Mode
 
-Write a spec immediately from the user's request — no council, no discovery:
+Write a spec immediately — no council, no discovery.
 
+**If syntagma analysis results are present in context** (from `analyze_code` / `suggest_refactorings`):
+1. Map each detected smell → Requirement (e.g., "God Class detected in `UserService`" → R1: Extract responsibilities into focused classes)
+2. Map each suggested refactoring → Acceptance Criterion (e.g., "Extract Method" → AC1: Each extracted method ≤ 20 lines, single responsibility)
+3. Use the syntagma output as the authoritative source — do NOT re-derive from the raw request
+4. Skip mode selection prompt entirely — enter Direct Build automatically
+
+**Otherwise** (clear + simple request, no syntagma output):
 1. Derive `goal_slug`, Requirements, and Acceptance Criteria directly from the request
-2. Write `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`
-3. Show the spec as an FYI, then **proceed immediately to Step 3**
+
+**Both paths converge here:**
+- Write `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`
+- Show the spec as an FYI, then **proceed immediately to Step 3**
 
 ---
 
