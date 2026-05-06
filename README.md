@@ -19,7 +19,7 @@
 A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns.
 
 <p align="center">
-  <img src="./assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="./assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ---
@@ -124,41 +124,6 @@ Inside a Claude Code session: `/evolve status`
 | `/ship` | Isolated pre-flight test in a clean worktree → PR with full check report → CI watch + auto-fix |
 | `/team` | Browse org libraries, hire existing teams, or design new ones (3–6 agents, synced to `.claude/agents/`) |
 | `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, inspect skill effectiveness, rollback |
-
-### Pipeline
-
-```mermaid
-flowchart TD
-    subgraph orbit["  /orbit  (wraps entire pipeline)  "]
-        direction TD
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-
-        CL["Council\n4-voice auto-spec"]:::auto
-        DR["Direct\nauto-spec"]:::auto
-
-        D -->|frame problem| S
-        S -->|spec approved| G
-        CL -->|spec approved| G
-        DR -->|spec approved| G
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**Purple** — manual entry: `/discover` (optional) → `/spec`. **Green** — autonomous after spec approval: go → check → ship → evolve.
-
-- Before `/spec`: if the problem is vague, use `/discover` to frame it first.
-- After `/spec`: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
 
 ---
 

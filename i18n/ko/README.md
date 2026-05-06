@@ -19,7 +19,7 @@
 **30개 이상의 명령어를 8개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다. 외울 것은 적게, 키 입력당 지능은 더 높게.
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness 기능" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
 </p>
 
 ## 설치
@@ -184,39 +184,7 @@ flowchart TD
 | `/evolve` | 수동 진화 트리거 / 상태 확인 / 롤백 |
 | `/orbit` | **자율 파이프라인** — spec → go → check → ship을 한 번에. 인터랙티브 또는 council 모드 선택. |
 
-### 파이프라인 개요
-
-```mermaid
-flowchart TD
-    subgraph orbit["  /orbit  (전체 파이프라인을 감쌈)  "]
-        direction TD
-        D(["/discover\n선택사항"]):::manual
-        S(["/spec"]):::manual
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-
-        CL["Council\n4-voice 자동 스펙"]:::auto
-
-        D -->|문제 정의| S
-        S -->|스펙 승인| G
-        CL -->|스펙 승인| G
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → 일시정지"| G
-        SH --> EV
-    end
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**보라색** — 수동 단계: `/discover` (선택사항) → `/spec`. **초록색** — council 자동 스펙 또는 스펙 승인 후 자율 실행: go → check → ship → evolve.
-
-- **`/spec` 전에**: 문제가 불분명하면 `/discover`로 먼저 정의하세요.
-- **`/spec` 후에**: 요구사항이 3개 이상이고 팀이 없으면 `/spec`이 `/team`을 제안합니다.
-- **`/orbit`**: 전체 파이프라인을 감쌉니다. **인터랙티브** (`/discover` → `/spec` 직접 실행 후 "orbit go") 또는 **council** (4-voice council이 스펙 자동 생성, 승인만) 선택.
+---
 
 ## 자동 스킬 (Ring 2)
 

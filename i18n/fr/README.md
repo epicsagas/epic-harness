@@ -19,7 +19,7 @@
 Un plugin Claude Code qui **remplace 30+ commandes par 8**, **déclenche automatiquement des compétences** en fonction de ce que vous faites, et **fait évoluer de nouvelles compétences** à partir de vos propres schémas d'échecs. Moins de surface à mémoriser. Plus d'intelligence par frappe de touche.
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## Installation
@@ -185,40 +185,7 @@ L'état est conservé dans `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — su
 | `/evolve` | Déclencheur d'évolution manuel / statut / rollback |
 | `/orbit` | **Pipeline autonome** — exécute spec → go → check → ship en une seule fois. Choisir le mode interactif ou council. |
 
-### Aperçu du pipeline
-
-```mermaid
-flowchart TD
-    subgraph manual["  manual entry  "]
-        direction LR
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**Violet** — entrée manuelle : `/discover` (optionnel) → `/spec`. **Vert** — autonome après approbation de la spec : go → check → ship → evolve.
-
-- **Avant `/spec`** : si le problème est vague, utilisez `/discover` pour le cadrer d'abord.
-- **Après `/spec`** : si 3+ exigences et aucune équipe liée, `/spec` suggère `/team` avant `/go`.
-- **`/orbit`** : enveloppe le pipeline complet. Choisissez **interactif** (vous exécutez `/discover` → `/spec`, puis "orbit go") ou **council** (le council à 4 voix génère automatiquement la spec, vous n'approuvez que).
+---
 
 ## Compétences automatiques (Ring 2)
 

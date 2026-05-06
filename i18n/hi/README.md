@@ -19,7 +19,7 @@
 एक Claude Code प्लगइन जो **30+ कमांड को 8 से बदलता है**, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**। याद रखने के लिए कम सतह। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता।
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## इंस्टॉलेशन
@@ -185,40 +185,7 @@ flowchart TD
 | `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर / स्टेटस / rollback |
 | `/orbit` | **स्वायत्त पाइपलाइन** — spec → go → check → ship एक बार में चलाता है। इंटरेक्टिव या काउंसिल मोड चुनें। |
 
-### पाइपलाइन अवलोकन
-
-```mermaid
-flowchart TD
-    subgraph manual["  मैन्युअल प्रवेश  "]
-        direction LR
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**बैंगनी** — मैन्युअल प्रवेश: `/discover` (वैकल्पिक) → `/spec`। **हरा** — स्पेसिफिकेशन अनुमोदन के बाद स्वायत्त: go → check → ship → evolve।
-
-- **`/spec` से पहले**: यदि समस्या अस्पष्ट है, तो पहले इसे फ्रेम करने के लिए `/discover` का उपयोग करें।
-- **`/spec` के बाद**: यदि 3+ आवश्यकताएं हैं और कोई टीम लिंक नहीं है, तो `/spec` `/go` से पहले `/team` सुझाता है।
-- **`/orbit`**: पूरी पाइपलाइन को लपेटता है। **इंटरेक्टिव** (आप `/discover` → `/spec` चलाते हैं, फिर "orbit go") या **काउंसिल** (4-आवाज़ काउंसिल स्वचालित रूप से स्पेसिफिकेशन बनाती है, आप केवल अनुमोदित करते हैं) चुनें।
+---
 
 ## ऑटो स्किल्स (Ring 2)
 

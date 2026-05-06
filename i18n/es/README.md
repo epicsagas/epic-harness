@@ -19,7 +19,7 @@
 Un plugin de Claude Code que **reemplaza más de 30 comandos con 8**, **activa habilidades automáticamente** según lo que estés haciendo, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo. Menos superficie que memorizar. Más inteligencia por tecla pulsada.
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## Instalación
@@ -185,40 +185,7 @@ Estado persistido en `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobreviv
 | `/evolve` | Disparador manual de evolución / estado / rollback |
 | `/orbit` | **Pipeline autónomo** — ejecuta spec → go → check → ship de una sola vez. Elige el modo interactivo o de consejo. |
 
-### Resumen del Pipeline
-
-```mermaid
-flowchart TD
-    subgraph manual["  entrada manual  "]
-        direction LR
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**Morado** — entrada manual: `/discover` (opcional) → `/spec`. **Verde** — autónomo después de la aprobación de la especificación: go → check → ship → evolve.
-
-- **Antes de `/spec`**: si el problema es vago, usa `/discover` para enmarcarlo primero.
-- **Después de `/spec`**: si hay 3+ requisitos y no hay equipo vinculado, `/spec` sugiere `/team` antes de `/go`.
-- **`/orbit`**: envuelve el pipeline completo. Elige **interactivo** (ejecutas `/discover` → `/spec`, luego "orbit go") o **consejo** (el consejo de 4 voces genera automáticamente la especificación, solo tú apruebas).
+---
 
 ## Habilidades Automáticas (Ring 2)
 

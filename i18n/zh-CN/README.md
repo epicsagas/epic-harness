@@ -19,7 +19,7 @@
 一个 Claude Code 插件，**用 8 条命令替代 30+ 条命令**，**根据你正在做的事情自动触发技能**，并**从你自己的失败模式中进化出新技能**。需要记忆的操作面更小，每次击键的智能含量更高。
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## 安装
@@ -185,40 +185,7 @@ flowchart TD
 | `/evolve` | 手动触发进化 / 查看状态 / 回滚 |
 | `/orbit` | **自主流水线** — 一键执行 spec → go → check → ship。可选交互式或委员会模式。 |
 
-### 流水线概览
-
-```mermaid
-flowchart TD
-    subgraph manual["  手动入口  "]
-        direction LR
-        D(["/discover\n可选"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  自主  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**紫色** — 手动入口：`/discover`（可选）→ `/spec`。**绿色** — 规格审批后自主执行：go → check → ship → evolve。
-
-- **`/spec` 之前**：若问题模糊，先用 `/discover` 进行梳理。
-- **`/spec` 之后**：若有 3 个以上需求且未关联团队，`/spec` 会在 `/go` 之前建议使用 `/team`。
-- **`/orbit`**：封装完整流水线。选择**交互式**（你运行 `/discover` → `/spec`，然后输入 "orbit go"）或**委员会**（4 声部委员会自动生成规格说明，你只需审批）。
+---
 
 ## 自动技能（Ring 2）
 

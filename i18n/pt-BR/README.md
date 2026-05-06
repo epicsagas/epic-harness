@@ -19,7 +19,7 @@
 Um plugin do Claude Code que **substitui mais de 30 comandos por 8**, **ativa habilidades automaticamente** com base no que você está fazendo, e **evolui novas habilidades** a partir dos seus próprios padrões de falha. Menos superfície para memorizar. Mais inteligência por tecla pressionada.
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## Instalação
@@ -185,40 +185,7 @@ Estado persistido em `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobreviv
 | `/evolve` | Gatilho manual de evolução / status / rollback |
 | `/orbit` | **Pipeline autônomo** — executa spec → go → check → ship de uma vez. Escolha o modo interativo ou de conselho. |
 
-### Visão Geral do Pipeline
-
-```mermaid
-flowchart TD
-    subgraph manual["  entrada manual  "]
-        direction LR
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**Roxo** — entrada manual: `/discover` (opcional) → `/spec`. **Verde** — autônomo após aprovação da especificação: go → check → ship → evolve.
-
-- **Antes de `/spec`**: se o problema for vago, use `/discover` para enquadrá-lo primeiro.
-- **Após `/spec`**: se houver 3+ requisitos e nenhuma equipe vinculada, `/spec` sugere `/team` antes de `/go`.
-- **`/orbit`**: encapsula o pipeline completo. Escolha **interativo** (você executa `/discover` → `/spec`, depois "orbit go") ou **conselho** (o conselho de 4 vozes gera automaticamente a especificação, você só aprova).
+---
 
 ## Habilidades Automáticas (Ring 2)
 

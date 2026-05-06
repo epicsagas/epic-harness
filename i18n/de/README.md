@@ -19,7 +19,7 @@
 Ein Claude Code-Plugin, das **30+ Befehle durch 8 ersetzt**, **Skills automatisch auslöst** basierend auf dem, was Sie gerade tun, und **neue Skills entwickelt** aus Ihren eigenen Fehlermustern. Weniger zu merken. Mehr Intelligenz pro Tastendruck.
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## Installation
@@ -185,40 +185,7 @@ Zustand wird in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` gespeichert — �
 | `/evolve` | Manueller Evolutions-Trigger / Status / Rollback |
 | `/orbit` | **Autonome Pipeline** — führt spec → go → check → ship in einem Durchgang aus. Interaktiven oder Council-Modus wählen. |
 
-### Pipeline-Übersicht
-
-```mermaid
-flowchart TD
-    subgraph manual["  manual entry  "]
-        direction LR
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**Lila** — manueller Einstieg: `/discover` (optional) → `/spec`. **Grün** — autonom nach Spec-Genehmigung: go → check → ship → evolve.
-
-- **Vor `/spec`**: Falls das Problem vage ist, verwenden Sie `/discover`, um es zunächst zu rahmen.
-- **Nach `/spec`**: Bei 3+ Anforderungen und keinem verlinkten Team schlägt `/spec` vor, `/team` vor `/go` auszuführen.
-- **`/orbit`**: Bündelt die vollständige Pipeline. Wählen Sie **interaktiv** (Sie führen `/discover` → `/spec` aus, dann "orbit go") oder **council** (4-Stimmen-Council generiert Spec automatisch, Sie genehmigen nur).
+---
 
 ## Auto Skills (Ring 2)
 

@@ -19,7 +19,7 @@
 Claude Codeプラグインで、**30以上のコマンドを8つに置き換え**、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。覚えるべき操作が少なく、キーストローク当たりの知性が高まります。
 
 <p align="center">
-  <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
+  <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ## インストール
@@ -185,40 +185,7 @@ flowchart TD
 | `/evolve` | 手動進化トリガー / ステータス / ロールバック |
 | `/orbit` | **自律パイプライン** — spec → go → check → ship を一括実行。インタラクティブモードまたはcouncilモードを選択。 |
 
-### パイプライン概要
-
-```mermaid
-flowchart TD
-    subgraph manual["  manual entry  "]
-        direction LR
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        D --> S
-    end
-
-    subgraph auto["  /orbit  autonomous  "]
-        direction TD
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    S -->|"orbit go"| G
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**紫** — 手動エントリ: `/discover`（オプション）→ `/spec`。**緑** — spec承認後の自律: go → check → ship → evolve。
-
-- **`/spec` の前に**: 問題が曖昧な場合は、`/discover` を使って先にフレーミングします。
-- **`/spec` の後に**: 3つ以上の要件があり、チームがリンクされていない場合、`/spec` は `/go` の前に `/team` を提案します。
-- **`/orbit`**: 完全なパイプラインをラップします。**インタラクティブ**（`/discover` → `/spec` を実行してから "orbit go"）または **council**（4声コンシルが自動的にspecを生成し、あなたが承認するだけ）を選択します。
+---
 
 ## 自動スキル（Ring 2）
 
