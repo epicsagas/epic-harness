@@ -1,5 +1,5 @@
 ---
-description: "Explore and define the problem before specifying a solution"
+description: "Problem discovery. Use when the user's request is vague, unfocused, or names a solution without a clear problem. Probes with 5 Whys / JTBD / Fishbone / Socratic techniques (max 3 rounds), then frames a structured problem statement before handing off to /spec."
 ---
 
 # /discover — Problem Discovery

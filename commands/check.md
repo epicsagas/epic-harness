@@ -1,5 +1,5 @@
 ---
-description: "Verify everything — parallel code review + security audit + performance analysis"
+description: "Check phase. Run after /go. Launches parallel agents (reviewer + auditor + test runner) and adds scope-based checks (API contract, accessibility, migration safety, infra config) based on changed file types. Outputs PASS/WARN/FAIL per dimension with spec coverage verification."
 ---
 
 # /check — Verify Everything

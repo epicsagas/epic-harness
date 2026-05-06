@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: "Use when implementing any new feature or fixing a bug — triggers on code writing, bug fixing, and feature implementation."
+description: "Test-Driven Development. Triggers on new feature implementation or bug fix. Enforces Red→Green→Refactor: write a failing test first, write minimum code to pass, then clean up. No production code without a failing test. Evidence required: show Red output, Green output, and refactor step."
 ---
 
 # TDD — Test-Driven Development

@@ -1,5 +1,5 @@
 ---
-description: "Ship it — create PR, verify CI, merge. End-to-end delivery."
+description: "Ship phase. Run after /check PASS. Runs isolated integration test in a fresh worktree, creates a PR with full spec + check report in the body, watches CI, and auto-fixes failures. Suggests /evolve on completion."
 ---
 
 # /ship — Ship It

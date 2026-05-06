@@ -1,6 +1,6 @@
 ---
 name: context
-description: "Context window management. Use when context usage exceeds 70%. Summarize, compact, and preserve critical state."
+description: "Context window management. Triggers when context > 70%, conversation has many tool calls, or before starting a large new task. Preserves task state to $HARNESS_DIR/sessions/, generates a compaction summary, and relies on the resume hook to reload snapshot + memory + evolved skills."
 ---
 
 # Context — Context Window Management

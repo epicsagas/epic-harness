@@ -1,5 +1,5 @@
 ---
-description: "Design a project-specific agent team — analyze codebase and generate custom agents + skills"
+description: "Agent team manager. Browse org libraries (epic org list/show), hire existing teams (epic team link), or interactively design a new team (3–6 agents, Pipeline/Fan-out/Expert-Pool/Producer-Reviewer/Supervisor pattern). Syncs agents to .claude/agents/ and registers them for /go to use."
 ---
 
 # /team — Design Your Agent Team

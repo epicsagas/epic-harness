@@ -1,5 +1,5 @@
 ---
-description: "Trigger skill evolution manually — analyze observations, evolve skills, show status, or rollback"
+description: "Evolution engine. Analyzes session observation logs to detect failure patterns and weak tools, then auto-generates targeted skills in $HARNESS_DIR/evolved/. Sub-commands: /evolve (run now), /evolve status (dashboard), /evolve history (trend + skill attribution), /evolve cross-project, /evolve rollback, /evolve reset."
 ---
 
 # /evolve — Manual Evolution Trigger

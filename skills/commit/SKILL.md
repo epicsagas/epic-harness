@@ -1,6 +1,6 @@
 ---
 name: commit
-description: "Conventional Commits. Use when the user wants to commit changes. Auto-generates valid CC 1.0.0 messages."
+description: "Conventional Commits generator. Triggers when user says commit / save / check in. Runs git status + diff + log in parallel, infers type(scope): description in CC 1.0.0 format, stages only relevant files, and executes the commit. Never uses --no-verify."
 ---
 
 # Commit — Conventional Commits Generator

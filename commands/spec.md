@@ -1,5 +1,5 @@
 ---
-description: "Define what to build — clarify requirements through conversation and produce a spec document"
+description: "Spec phase. Run after /discover (or when the problem is already clear). Converts user requirements into a numbered Requirements + Acceptance Criteria document saved as SPEC-{timestamp}.md. Prompts /team suggestion when 3+ requirements are detected."
 ---
 
 # /spec — Define What to Build

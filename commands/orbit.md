@@ -1,5 +1,5 @@
 ---
-description: "Complete orbit — autonomous spec through ship. Choose mode, then hands-off until PR."
+description: "Autonomous pipeline: spec → go → check → ship in one shot. Selects mode automatically — Interactive (vague requirement, user runs /discover+/spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs /evolve on PR+CI success."
 ---
 
 # /orbit — Complete Orbit

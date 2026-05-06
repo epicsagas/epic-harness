@@ -1,5 +1,5 @@
 ---
-description: "Build it — auto-plan, delegate to subagents with TDD, and verify. The main execution engine."
+description: "Go phase. Run after /spec. Reads the approved SPEC file, maps Requirements to tasks, executes via TDD subagents (parallel where safe, worktree-isolated when files overlap), integrates results, and verifies all Acceptance Criteria before handing off to /check."
 ---
 
 # /go — Build It
