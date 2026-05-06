@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 # ── epic-harness demo tape ──────────────────────────────────
 # Usage:
 #   asciinema rec --overwrite demo/demo.cast --command "bash demo/demo-tape.sh"
@@ -7,11 +7,21 @@
 # Prerequisites:
 #   - epic-harness installed (cargo install --path .)
 #   - asciinema installed (brew install asciinema)
+#   - Claude Code CLI installed
 #   - Run from repo root
 
-set -euo pipefail
+set -eo pipefail
 
-# Slow down typing for readability
+# Ensure user environment is loaded (asciinema --command skips login shell)
+if [ -z "${_DEMO_ENV_LOADED:-}" ]; then
+    _DEMO_ENV_LOADED=1
+    export _DEMO_ENV_LOADED
+    : "${ZSH_CUSTOM:=$HOME/.oh-my-zsh/custom}"
+    : "${ZSH_CACHE_DIR:=$HOME/.oh-my-zsh/cache}"
+    export ZSH_CUSTOM ZSH_CACHE_DIR
+    [ -f "$HOME/.zshrc" ] && source "$HOME/.zshrc"
+fi
+
 TYPE_SPEED=0.03
 type_slow() {
     local text="$1"
@@ -31,8 +41,8 @@ section() {
 # ── Intro ──────────────────────────────────────────────
 clear
 echo "╔══════════════════════════════════════════════════╗"
-echo "║          epic-harness  —  demo tape             ║"
-echo "║   6 commands · auto-trigger skills · evolving   ║"
+echo "║          epic-harness  —  demo tape              ║"
+echo "║   6 commands · auto-trigger skills · evolving    ║"
 echo "╚══════════════════════════════════════════════════╝"
 sleep 1.5
 
@@ -95,7 +105,6 @@ sleep 1.5
 # ── 3. Memory Graph ───────────────────────────────────
 section "3. Knowledge graph (link + related)"
 
-# Get the first node ID from query output
 DECISION_ID=$(epic mem query --type decision --project demo-app --limit 1 2>/dev/null | grep -oE '"id":"[^"]+"' | head -1 | cut -d'"' -f4 || echo "demo-1")
 PATTERN_ID=$(epic mem query --type pattern --project demo-app --limit 1 2>/dev/null | grep -oE '"id":"[^"]+"' | head -1 | cut -d'"' -f4 || echo "demo-2")
 
@@ -186,127 +195,47 @@ sleep 0.3
 epic telemetry status 2>/dev/null || echo "  Telemetry is configurable — opt in/out anytime."
 sleep 1
 
-# ── 8. Full workflow: /spec → /go → /check → /ship ───
-section "8. Full workflow — URL shortener (simulated Claude Code session)"
-echo "Below is a real Claude Code session using epic-harness commands."
-echo "Project: Go URL shortener with SQLite backend."
+# ── 8. Full workflow — LIVE Claude Code session ────────
+#
+# Launches Claude Code in examples/terminal-tetris (Python curses TUI game).
+# epic-harness hooks auto-load — /spec /go /check /ship /evolve available.
+#
+# In Claude Code, type:
+#   /spec "Build a TUI Tetris game in Python using curses"
+#   /go
+#   /check
+#   /ship
+#
+section "8. Full workflow — /spec → /go → /check → /ship → /evolve"
+sleep 0.5
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DEMO_DIR="$REPO_ROOT/examples/terminal-tetris"
+
+# Clean slate — remove any previous demo artifacts
+rm -rf "$DEMO_DIR"
+
+# Show empty examples dir
+echo "$ ls examples/"
+ls "$REPO_ROOT/examples/"
 sleep 1.5
 
+# Create project directory and enter it
 echo ""
-echo "──────────────────────────────────────────────────────"
-echo "$ /spec \"Build a URL shortener in Go with SQLite\""
-echo "──────────────────────────────────────────────────────"
-sleep 0.8
-echo ""
-echo "  Analyzing requirements..."
-sleep 0.6
-echo ""
-echo "  ## SPEC-20260506-url-shortener"
-echo ""
-echo "  ### Requirements"
-echo "  R1: HTTP server with POST /shorten and GET /{code} endpoints"
-echo "  R2: SQLite storage with auto-generated 6-char codes"
-echo "  R3: Redirect with 301 status and click counter"
-echo ""
-echo "  ### Acceptance Criteria"
-echo "  AC1: POST /shorten returns {\"code\": \"abc123\", \"url\": \"...\"}"
-echo "  AC2: GET /abc123 redirects to original URL"
-echo "  AC3: Duplicate URLs return the same short code"
-sleep 2
+echo "$ mkdir -p examples/terminal-tetris && cd examples/terminal-tetris"
+mkdir -p "$DEMO_DIR"
+cd "$DEMO_DIR"
+sleep 1
 
+# Launch Claude Code in the empty project dir
+echo "$ claudy zai --yolo"
 echo ""
-echo "──────────────────────────────────────────────────────"
-echo "$ /go"
-echo "──────────────────────────────────────────────────────"
-sleep 0.8
-echo ""
-echo "  Planning 3 tasks from spec..."
-sleep 0.5
-echo "  ├─ Task 1: SQLite schema + repository layer [builder-1]"
-echo "  ├─ Task 2: HTTP handlers + routing           [builder-2]"
-echo "  └─ Task 3: Integration tests                 [builder-3]"
-sleep 0.8
-echo ""
-echo "  [builder-1] TDD: write store_test.go → implement store.go"
-echo "  [builder-1] ✓ DONE — 5/5 tests passing (12s)"
-sleep 0.5
-echo "  [builder-2] TDD: write handler_test.go → implement handler.go"
-echo "  [builder-2] ✓ DONE — 4/4 tests passing (18s)"
-sleep 0.5
-echo "  [builder-3] TDD: write integration_test.go → spin up test server"
-echo "  [builder-3] ✓ DONE — 3/3 tests passing (8s)"
-sleep 0.8
-echo ""
-echo "  Result: DONE — all 12 tests passing"
-sleep 1.5
+sleep 1
 
-echo ""
-echo "──────────────────────────────────────────────────────"
-echo "$ /check"
-echo "──────────────────────────────────────────────────────"
-sleep 0.8
-echo ""
-echo "  Launching 3 parallel agents..."
-sleep 0.5
-echo ""
-echo "  ## Check Report"
-echo "  Spec: SPEC-20260506-url-shortener"
-echo ""
-echo "  ### Code Quality: PASS"
-echo "  ### Security:     PASS (no SQL injection — parameterized queries)"
-echo "  ### Performance:  PASS (indexed lookups, <1ms per redirect)"
-echo "  ### Tests:        12/12 passing"
-echo ""
-echo "  ### Spec Coverage"
-echo "  R1: ✅ store.go + handler.go"
-echo "  R2: ✅ 6-char code generation in store.go:34"
-echo "  R3: ✅ 301 redirect + counter in handler.go:52"
-echo "  AC1: ✅ verified by TestShortenEndpoint"
-echo "  AC2: ✅ verified by TestRedirectEndpoint"
-echo "  AC3: ✅ verified by TestDuplicateURLReturnsSameCode"
-sleep 2
+CLAUDE_CODE_HIDE_ACCOUNT_INFO=1 CLAUDE_HOME="/Users/hackme/workspace" claudy zai --yolo
 
-echo ""
-echo "──────────────────────────────────────────────────────"
-echo "$ /ship"
-echo "──────────────────────────────────────────────────────"
-sleep 0.8
-echo ""
-echo "  Running pre-flight checks..."
-sleep 0.5
-echo "  ✓ cargo test — 12 passed, 0 failed"
-echo "  ✓ cargo clippy — 0 warnings"
-echo "  ✓ No secrets detected (gitleaks)"
-sleep 0.5
-echo ""
-echo "  Creating PR #42: feat(shortener): add URL shortener with SQLite"
-echo "  Pushing to origin/feat/url-shortener..."
-echo "  CI: build ✓ | test ✓ | lint ✓"
-echo "  Merged to main."
-sleep 1.5
-
-echo ""
-echo "──────────────────────────────────────────────────────"
-echo "$ /evolve status"
-echo "──────────────────────────────────────────────────────"
-sleep 0.8
-echo ""
-echo "  ## Evolution Dashboard"
-echo ""
-echo "  Session score: 0.92 (↑ from 0.87)"
-echo "  Trend:         improving (4 sessions)"
-echo ""
-echo "  Evolved skills: 2 active"
-echo "  ├─ evo-go-care       — avg_score: 0.91 (with) vs 0.78 (without) → +13%"
-echo "  └─ evo-fix-build-fail — avg_score: 0.85 (with) vs 0.72 (without) → +13%"
-echo ""
-echo "  Patterns detected this session:"
-echo "  • Bash tool: 95% success (429/452 calls)"
-echo "  • .go files: 97% success (38/39 edits)"
-echo "  • No failure patterns detected"
-sleep 2
-
-# ── Outro ─────────────────────────────────────────────
+# ── Outro (after Claude Code exits) ───────────────────
+cd - > /dev/null
 section "Links"
 echo "  GitHub:   https://github.com/epicsagas/epic-harness"
 echo "  Docs:     QUICKSTART.md"
