@@ -21,6 +21,7 @@ Use these in your Cline chat:
 
 | Command | Purpose |
 |---------|---------|
+| `/discover` | Explore and define the problem before specifying a solution |
 | `/spec` | Define requirements before coding |
 | `/go` | Build with auto-plan + TDD sub-agents |
 | `/check` | Parallel review + security + tests |

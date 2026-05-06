@@ -1,8 +1,8 @@
 # epic harness
 
-> A self-evolving AI coding agent harness — 6 commands, auto-trigger skills, learns from your failures.
+> A self-evolving AI coding agent harness — 7 commands, auto-trigger skills, learns from your failures.
 
-**6 commands. Auto-trigger skills. Self-evolving.**
+**7 commands. Auto-trigger skills. Self-evolving.**
 
 <p align="center">
 <a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
@@ -16,7 +16,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-A Claude Code plugin that **replaces 30+ commands with 6**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns. Less surface area to memorize. More intelligence per keystroke.
+A Claude Code plugin that **replaces 30+ commands with 7**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns. Less surface area to memorize. More intelligence per keystroke.
 
 <p align="center">
   <img src="./assets/features.jpg" alt="epic harness features" width="100%" />
@@ -100,6 +100,7 @@ $ /ship
 
 | Command | What it does |
 |---------|-------------|
+| `/discover` | Explore and define the problem before specifying a solution — 5 Whys, JTBD, Socratic questioning |
 | `/spec` | Define what to build — clarify requirements, produce a spec |
 | `/go` | Build it — auto-plan, TDD subagents, 4-state result model (DONE/CONCERNS/NEEDS_CONTEXT/BLOCKED), parallel execution with worktree isolation |
 | `/check` | Verify — adaptive expert dispatch (scope-based), parallel code review + security audit + performance |
@@ -108,13 +109,15 @@ $ /ship
 | `/evolve` | Manual evolution trigger / status / rollback |
 
 ```
-/spec ──→ /go ──→ /check ──→ /ship
-  │                              │
-  │ (3+ requirements,            │ (loop complete)
-  │  no team linked)             ↓
-  └──→ /team (optional)   /evolve (optional)
+/discover ──→ /spec ──→ /go ──→ /check ──→ /ship
+   │                                           │
+   │ (optional — for vague or                  │ (loop complete)
+   │  unfocused problems)                      ↓
+   │                                    /evolve (optional)
+   └──→ /team (optional, when 3+ requirements)
 ```
 
+- **Before `/spec`**: if the problem is vague or unfocused, use `/discover` to frame it first.
 - **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
 - **After `/ship`**: suggests `/evolve` to turn observations into better skills.
 
@@ -126,6 +129,7 @@ Skills trigger automatically. You don't invoke them.
 |-------|--------------|
 | **tdd** | New feature implementation |
 | **debug** | Test failure or error |
+| **discover** | Vague request, solution without problem, or unfocused complaint |
 | **secure** | Auth/DB/API/secrets code touched |
 | **perf** | Loops, queries, rendering code |
 | **simplify** | File > 200 lines or high complexity |
@@ -141,11 +145,11 @@ Skills trigger automatically. You don't invoke them.
 Ring 0 — Autopilot (hooks, invisible)
   Session restore, auto-format, guard rails, observation logging
 
-Ring 1 — 6 Commands (you call these)
-  /spec  /go  /check  /ship  /team  /evolve
+Ring 1 — 7 Commands (you call these)
+  /discover  /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — Auto Skills (context-triggered)
-  tdd · debug · secure · perf · simplify · document · verify · context · council · agent-introspection
+  tdd · debug · discover · secure · perf · simplify · document · verify · context · council · agent-introspection
 
 Ring 3 — Evolve (self-improving)
   Observe tool usage → analyze failures → auto-generate skills → gate → reload
@@ -223,11 +227,11 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 10 skills | ✓ 4 |
-| **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
-| **OpenCode** | ✓ Partial⁴ | ✓ 6 commands | — | ✓ 4 |
+| **Claude Code** | ✓ Full | ✓ 7 commands | ✓ 11 skills | ✓ 4 |
+| **Codex CLI** | ✓ Full¹ | ✓ 7 prompts | ✓ 7 | ✓ 4 |
+| **Gemini CLI** | ✓ Partial² | ✓ 7 commands | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Full³ | ✓ 7 commands | ✓ via rules | ✓ 4 |
+| **OpenCode** | ✓ Partial⁴ | ✓ 7 commands | — | ✓ 4 |
 | **Cline** | ✓ Full⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 

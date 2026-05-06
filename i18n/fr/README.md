@@ -1,6 +1,6 @@
 # epic harness
 
-**6 commandes. Compétences à déclenchement automatique. Auto-évolutif.**
+**7 commandes. Compétences à déclenchement automatique. Auto-évolutif.**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -15,7 +15,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-Un plugin Claude Code qui **remplace plus de 30 commandes par 6**, **déclenche automatiquement des compétences** en fonction de ce que vous faites, et **fait évoluer de nouvelles compétences** à partir de vos propres schémas d'échec. Moins de surface à mémoriser. Plus d'intelligence par frappe.
+Un plugin Claude Code qui **remplace plus de 30 commandes par 7**, **déclenche automatiquement des compétences** en fonction de ce que vous faites, et **fait évoluer de nouvelles compétences** à partir de vos propres schémas d'échec. Moins de surface à mémoriser. Plus d'intelligence par frappe.
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="fonctionnalités epic harness" width="100%" />
@@ -27,7 +27,7 @@ Un plugin Claude Code qui **remplace plus de 30 commandes par 6**, **déclenche 
 Ring 0 — Pilote automatique (hooks, invisible)
   Restauration de session, formatage auto, garde-fous, journalisation des observations
 
-Ring 1 — 6 commandes (vous les appelez)
+Ring 1 — 7 commandes (vous les appelez)
   /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — Compétences automatiques (déclenchées par le contexte)
@@ -77,11 +77,11 @@ epic-harness fonctionne avec Claude Code et 6 autres outils de codage IA. Tous l
 
 | Outil | Ring 0 Hooks | Commandes/Prompts | Compétences | Agents |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ Complet | ✓ 6 commandes | ✓ 10 compétences | ✓ 4 |
-| **Codex CLI** | ✓ Complet¹ | ✓ 6 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
-| **Gemini CLI** | ✓ Partiel² | ✓ 6 commandes | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Complet³ | ✓ 6 commandes | ✓ via règles | ✓ 4 |
-| **OpenCode** | ✓ Partiel⁴ | ✓ 6 commandes | — | ✓ 4 |
+| **Claude Code** | ✓ Complet | ✓ 7 commandes | ✓ 11 compétences | ✓ 4 |
+| **Codex CLI** | ✓ Complet¹ | ✓ 7 prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
+| **Gemini CLI** | ✓ Partiel² | ✓ 7 commandes | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Complet³ | ✓ 7 commandes | ✓ via règles | ✓ 4 |
+| **OpenCode** | ✓ Partiel⁴ | ✓ 7 commandes | — | ✓ 4 |
 | **Cline** | ✓ Complet⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 

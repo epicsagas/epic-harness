@@ -4,8 +4,8 @@
 
 ## Structure
 
-- `commands/` — 6 slash commands (spec, go, check, ship, team, evolve)
-- `skills/` — 9 auto skills + _dispatch engine
+- `commands/` — 7 slash commands (discover, spec, go, check, ship, team, evolve)
+- `skills/` — 12 auto skills + _dispatch engine
 - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
@@ -13,17 +13,17 @@
 - `presets/` — Cold-start skill templates (embedded in Rust binary at compile time)
 - `references/` — Checklists (security, performance, testing, team-patterns)
 - `integrations/` — Per-tool integration files (6 tools):
-  - `codex/` — hooks.json, config.toml, prompts/(6), skills/(7), agents/(4)
-  - `gemini/` — settings.json, GEMINI.md, commands/(6), skills/(7), agents/(4)
-  - `cursor/` — hooks.json, commands/(6), agents/(4)
-  - `opencode/` — commands/(6), agents/(4), plugins/epic-harness.js
+  - `codex/` — hooks.json, config.toml, prompts/(7), skills/(7), agents/(4)
+  - `gemini/` — settings.json, GEMINI.md, commands/(7), skills/(7), agents/(4)
+  - `cursor/` — hooks.json, commands/(7), agents/(4)
+  - `opencode/` — commands/(7), agents/(4), plugins/epic-harness.js
   - `cline/` — hooks/(5 scripts), rules/epic-harness.md
   - `aider/` — .aider.conf.yml, .aider/CONVENTIONS.md
 
 ## Architecture: 4-Ring Model
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
-- **Ring 1 (Commands)**: 6 user-invoked commands
+- **Ring 1 (Commands)**: 7 user-invoked commands
 - **Ring 2 (Auto Skills)**: Context-triggered skills fire automatically
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
 

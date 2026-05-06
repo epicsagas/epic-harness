@@ -1,6 +1,6 @@
 # epic harness
 
-**6개의 명령어. 자동 트리거 스킬. 자기 진화형.**
+**7개의 명령어. 자동 트리거 스킬. 자기 진화형.**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -15,7 +15,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-**30개 이상의 명령어를 6개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다. 외울 것은 적게, 키 입력당 지능은 더 높게.
+**30개 이상의 명령어를 7개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다. 외울 것은 적게, 키 입력당 지능은 더 높게.
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness 기능" width="100%" />
@@ -27,8 +27,8 @@
 Ring 0 — 오토파일럿 (훅, 투명하게 동작)
   세션 복원, 자동 포맷, 가드레일, 관측 로깅
 
-Ring 1 — 6개 명령어 (직접 호출)
-  /spec  /go  /check  /ship  /team  /evolve
+Ring 1 — 7개 명령어 (직접 호출)
+  /discover /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — 자동 스킬 (컨텍스트 기반 트리거)
   tdd · debug · secure · perf · simplify · document · verify · context
@@ -77,11 +77,11 @@ epic-harness는 Claude Code와 6개의 추가 AI 코딩 도구에서 동작합�
 
 | 도구 | Ring 0 훅 | 명령어/프롬프트 | 스킬 | 에이전트 |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ 전체 | ✓ 6개 명령어 | ✓ 10개 스킬 | ✓ 4개 |
-| **Codex CLI** | ✓ 전체¹ | ✓ 6개 프롬프트 | ✓ 7개 (`~/.agents/skills/`) | ✓ 4개 |
-| **Gemini CLI** | ✓ 부분²  | ✓ 6개 명령어 | ✓ 7개 | ✓ 4개 |
-| **Cursor** | ✓ 전체³ | ✓ 6개 명령어 | ✓ 규칙 경유 | ✓ 4개 |
-| **OpenCode** | ✓ 부분⁴ | ✓ 6개 명령어 | — | ✓ 4개 |
+| **Claude Code** | ✓ 전체 | ✓ 7개 명령어 | ✓ 11개 스킬 | ✓ 4개 |
+| **Codex CLI** | ✓ 전체¹ | ✓ 7개 프롬프트 | ✓ 7개 (`~/.agents/skills/`) | ✓ 4개 |
+| **Gemini CLI** | ✓ 부분²  | ✓ 7개 명령어 | ✓ 7개 | ✓ 4개 |
+| **Cursor** | ✓ 전체³ | ✓ 7개 명령어 | ✓ 규칙 경유 | ✓ 4개 |
+| **OpenCode** | ✓ 부분⁴ | ✓ 7개 명령어 | — | ✓ 4개 |
 | **Cline** | ✓ 전체⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 

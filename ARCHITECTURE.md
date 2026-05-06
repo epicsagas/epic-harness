@@ -4,11 +4,11 @@
 
 epic-harness aims to be a harness that **gets better on its own**, not one that simply does more.
 
-While other harnesses expand breadth with 20-37 commands, epic-harness takes a different approach: 6 commands + auto-triggered skills + self-evolution. **Minimize surface area, maximize depth.**
+While other harnesses expand breadth with 20-37 commands, epic-harness takes a different approach: 7 commands + auto-triggered skills + self-evolution. **Minimize surface area, maximize depth.**
 
 ### Core Principles
 
-1. **Minimal Surface Area**: 30+ commands compressed to 6. The rest are auto-triggered (Ring 2) or learned from observation (Ring 3).
+1. **Minimal Surface Area**: 30+ commands compressed to 7. The rest are auto-triggered (Ring 2) or learned from observation (Ring 3).
 2. **Observability**: Every tool call is quantitatively scored on 3 axes. Decisions are data-driven, not gut-driven.
 3. **Safe Evolution**: Evolved skills must survive gating (validation + cap + stagnation rollback). Static skills always take priority.
 4. **Zero Dependencies**: Only Node.js built-in modules. No install burden.
@@ -17,16 +17,16 @@ While other harnesses expand breadth with 20-37 commands, epic-harness takes a d
 
 ```mermaid
 graph LR
-    R0["Ring 0<br/>Autopilot<br/><i>6 hooks</i>"] --> R1["Ring 1<br/>Commands<br/><i>6 commands</i>"]
-    R1 --> R2["Ring 2<br/>Auto Skills<br/><i>8 skills</i>"]
+    R0["Ring 0<br/>Autopilot<br/><i>6 hooks</i>"] --> R1["Ring 1<br/>Commands<br/><i>7 commands</i>"]
+    R1 --> R2["Ring 2<br/>Auto Skills<br/><i>11 skills</i>"]
     R0 -->|observe| R3["Ring 3<br/>Evolution<br/><i>self-improving</i>"]
     R3 -.->|evolved skills| R2
 ```
 
 ```
 Ring 0 (Invisible)     resume · guard · polish · observe · snapshot · reflect
-Ring 1 (User-Invoked)  /spec → /go → /check → /ship    /team  /evolve
-Ring 2 (Auto-Trigger)  tdd · debug · secure · perf · simplify · document · verify · context
+Ring 1 (User-Invoked)  /discover → /spec → /go → /check → /ship    /team  /evolve
+Ring 2 (Auto-Trigger)  tdd · debug · discover · secure · perf · simplify · document · verify · context · council · agent-introspection
 Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills → gate → reload
 ```
 
@@ -110,7 +110,7 @@ sequenceDiagram
 
 ```
 1. User explicit instruction    → "skip tests" → tdd skipped
-2. Static skills (8)            → tdd, debug, secure, perf, simplify, document, verify, context
+2. Static skills (11)           → tdd, debug, discover, secure, perf, simplify, document, verify, context, council, agent-introspection
 3. Evolved skills               → evo-bash-discipline, evo-fix-type-error, ...
 4. Default behavior             → no skill applied
 ```

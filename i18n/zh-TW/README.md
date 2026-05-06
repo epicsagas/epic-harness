@@ -1,6 +1,6 @@
 # epic harness
 
-**6 個指令。自動觸發技能。自我進化。**
+**7 個指令。自動觸發技能。自我進化。**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -15,7 +15,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-一個 Claude Code 外掛，**用 6 個指令取代 30 多個**，根據你正在做的事情**自動觸發技能**，並從你自身的失敗模式中**進化出新技能**。更少的記憶負擔，每次按鍵都更聰明。
+一個 Claude Code 外掛，**用 7 個指令取代 30 多個**，根據你正在做的事情**自動觸發技能**，並從你自身的失敗模式中**進化出新技能**。更少的記憶負擔，每次按鍵都更聰明。
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness features" width="100%" />
@@ -27,7 +27,7 @@
 Ring 0 — 自動駕駛（hooks，不可見）
   工作階段恢復、自動格式化、安全護欄、觀測記錄
 
-Ring 1 — 6 個指令（由你呼叫）
+Ring 1 — 7 個指令（由你呼叫）
   /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — 自動技能（依情境觸發）
@@ -73,15 +73,15 @@ hooks 會自動偵測二進位檔。若不存在，hooks 會退回到 Node.js。
 
 ## 多工具支援
 
-epic-harness 支援 Claude Code 以及另外 6 款 AI 程式設計工具。所有工具共享同一個 `~/.harness/projects/{slug}/` 資料目錄。
+epic-harness 支援 Claude Code 以及另外 7 款 AI 程式設計工具。所有工具共享同一個 `~/.harness/projects/{slug}/` 資料目錄。
 
 | 工具 | Ring 0 Hooks | 指令/提示詞 | 技能 | 代理 |
 |------|-------------|------------|------|------|
-| **Claude Code** | ✓ 完整 | ✓ 6 個指令 | ✓ 10 個技能 | ✓ 4 |
-| **Codex CLI** | ✓ 完整¹ | ✓ 6 個提示詞 | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
-| **Gemini CLI** | ✓ 部分² | ✓ 6 個指令 | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ 完整³ | ✓ 6 個指令 | ✓ 透過規則 | ✓ 4 |
-| **OpenCode** | ✓ 部分⁴ | ✓ 6 個指令 | — | ✓ 4 |
+| **Claude Code** | ✓ 完整 | ✓ 7 個指令 | ✓ 11 個技能 | ✓ 4 |
+| **Codex CLI** | ✓ 完整¹ | ✓ 7 個提示詞 | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
+| **Gemini CLI** | ✓ 部分² | ✓ 7 個指令 | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ 完整³ | ✓ 7 個指令 | ✓ 透過規則 | ✓ 4 |
+| **OpenCode** | ✓ 部分⁴ | ✓ 7 個指令 | — | ✓ 4 |
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 

@@ -1,6 +1,6 @@
 # epic harness
 
-**6 条命令。自动触发技能。自我进化。**
+**7 条命令。自动触发技能。自我进化。**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -15,7 +15,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-一个 Claude Code 插件，**用 6 条命令替代 30 多条命令**，根据当前操作**自动触发技能**，并从你的失败模式中**自动进化出新技能**。更少的记忆负担，每次按键更高的智能。
+一个 Claude Code 插件，**用 7 条命令替代 30 多条命令**，根据当前操作**自动触发技能**，并从你的失败模式中**自动进化出新技能**。更少的记忆负担，每次按键更高的智能。
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness 功能特性" width="100%" />
@@ -27,7 +27,7 @@
 Ring 0 — 自动驾驶（钩子，不可见）
   会话恢复、自动格式化、安全护栏、观测日志
 
-Ring 1 — 6 条命令（由你调用）
+Ring 1 — 7 条命令（由你调用）
   /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — 自动技能（上下文触发）
@@ -77,11 +77,11 @@ epic-harness 支持 Claude Code 以及另外 6 款 AI 编程工具。所有工�
 
 | 工具 | Ring 0 钩子 | 命令/提示词 | 技能 | 代理 |
 |------|-------------|------------|------|------|
-| **Claude Code** | ✓ 完整 | ✓ 6 条命令 | ✓ 10 个技能 | ✓ 4 |
-| **Codex CLI** | ✓ 完整¹ | ✓ 6 个提示词 | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
-| **Gemini CLI** | ✓ 部分² | ✓ 6 条命令 | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ 完整³ | ✓ 6 条命令 | ✓ 通过规则 | ✓ 4 |
-| **OpenCode** | ✓ 部分⁴ | ✓ 6 条命令 | — | ✓ 4 |
+| **Claude Code** | ✓ 完整 | ✓ 7 条命令 | ✓ 11 个技能 | ✓ 4 |
+| **Codex CLI** | ✓ 完整¹ | ✓ 7 个提示词 | ✓ 7（`~/.agents/skills/`） | ✓ 4 |
+| **Gemini CLI** | ✓ 部分² | ✓ 7 条命令 | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ 完整³ | ✓ 7 条命令 | ✓ 通过规则 | ✓ 4 |
+| **OpenCode** | ✓ 部分⁴ | ✓ 7 条命令 | — | ✓ 4 |
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 

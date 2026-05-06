@@ -31,12 +31,13 @@ The Rust binary handles all hooks. If you also want to install for other tools (
 2. **Try a command:**
 
    ```
-   /spec   # describe what you want to build
-           # → if spec has 3+ requirements and no team linked, suggests /team
-   /go     # let it build (uses worktree isolation for parallel conflicting tasks)
-   /check  # parallel review + security + perf audit
-   /ship   # isolated pre-flight test → PR + CI + merge
-           # → on completion, suggests /evolve to improve skills for the next cycle
+   /discover   # explore and define the problem (optional — for vague or unfocused requests)
+   /spec       # describe what you want to build
+               # → if spec has 3+ requirements and no team linked, suggests /team
+   /go         # let it build (uses worktree isolation for parallel conflicting tasks)
+   /check      # parallel review + security + perf audit
+   /ship       # isolated pre-flight test → PR + CI + merge
+               # → on completion, suggests /evolve to improve skills for the next cycle
    ```
 
 3. **Skills trigger themselves.** When you touch auth code, the `secure` skill activates. When tests fail, `debug` kicks in. You don't call them.

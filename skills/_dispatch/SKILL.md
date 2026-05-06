@@ -22,6 +22,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | Before completing /go or /ship | **verify** |
 | User wants to commit changes | **commit** |
 | Context window > 70% used | **context** |
+| User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
 
 ## Loop Transition Signals
 
@@ -29,6 +30,7 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 
 | Phase completed | Condition | Prompt to user |
 |----------------|-----------|----------------|
+| `/discover` problem framed | `status: framed` written | "Problem defined. Run `/spec` to turn this into a buildable specification." |
 | `/spec` saved | `status: approved` written | "Spec saved. Run `/go` to start building." |
 | `/go` report done | All tasks complete, tests green | "Build complete. Run `/check` to verify before shipping." |
 | `/check` report done | All PASS + all AC verified | "Check passed. Run `/ship` to create a PR." |

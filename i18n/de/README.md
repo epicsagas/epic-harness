@@ -1,6 +1,6 @@
 # epic harness
 
-**6 Befehle. Automatisch ausgelöste Skills. Selbstentwickelnd.**
+**7 Befehle. Automatisch ausgelöste Skills. Selbstentwickelnd.**
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -15,7 +15,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-Ein Claude Code Plugin, das **30+ Befehle durch 6 ersetzt**, **Skills automatisch auslöst** basierend auf dem aktuellen Kontext und **neue Skills entwickelt** aus eigenen Fehlermustern. Weniger Oberfläche zum Merken. Mehr Intelligenz pro Tastendruck.
+Ein Claude Code Plugin, das **30+ Befehle durch 7 ersetzt**, **Skills automatisch auslöst** basierend auf dem aktuellen Kontext und **neue Skills entwickelt** aus eigenen Fehlermustern. Weniger Oberfläche zum Merken. Mehr Intelligenz pro Tastendruck.
 
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness Features" width="100%" />
@@ -27,7 +27,7 @@ Ein Claude Code Plugin, das **30+ Befehle durch 6 ersetzt**, **Skills automatisc
 Ring 0 — Autopilot (Hooks, unsichtbar)
   Sitzungswiederherstellung, Auto-Formatierung, Sicherheitsschranken, Beobachtungsprotokollierung
 
-Ring 1 — 6 Befehle (diese rufst du auf)
+Ring 1 — 7 Befehle (diese rufst du auf)
   /spec  /go  /check  /ship  /team  /evolve
 
 Ring 2 — Auto Skills (kontextgesteuert)
@@ -77,11 +77,11 @@ epic-harness funktioniert mit Claude Code und 6 weiteren KI-Coding-Tools. Alle T
 
 | Tool | Ring 0 Hooks | Befehle/Prompts | Skills | Agents |
 |------|-------------|------------------|--------|--------|
-| **Claude Code** | ✓ Vollständig | ✓ 6 Befehle | ✓ 10 Skills | ✓ 4 |
-| **Codex CLI** | ✓ Vollständig¹ | ✓ 6 Prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
-| **Gemini CLI** | ✓ Teilweise² | ✓ 6 Befehle | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Vollständig³ | ✓ 6 Befehle | ✓ via Regeln | ✓ 4 |
-| **OpenCode** | ✓ Teilweise⁴ | ✓ 6 Befehle | — | ✓ 4 |
+| **Claude Code** | ✓ Vollständig | ✓ 7 Befehle | ✓ 11 Skills | ✓ 4 |
+| **Codex CLI** | ✓ Vollständig¹ | ✓ 7 Prompts | ✓ 7 (`~/.agents/skills/`) | ✓ 4 |
+| **Gemini CLI** | ✓ Teilweise² | ✓ 7 Befehle | ✓ 7 | ✓ 4 |
+| **Cursor** | ✓ Vollständig³ | ✓ 7 Befehle | ✓ via Regeln | ✓ 4 |
+| **OpenCode** | ✓ Teilweise⁴ | ✓ 7 Befehle | — | ✓ 4 |
 | **Cline** | ✓ Vollständig⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
