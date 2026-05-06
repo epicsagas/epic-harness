@@ -81,10 +81,10 @@ fn run_tui(tools: &[(&str, &str)]) -> io::Result<Vec<String>> {
             KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
                 cursor = cursor.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
-                if cursor + 1 < tools.len() {
-                    cursor += 1;
-                }
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J')
+                if cursor + 1 < tools.len() =>
+            {
+                cursor += 1;
             }
             KeyCode::Char(' ') => {
                 checked[cursor] = !checked[cursor];

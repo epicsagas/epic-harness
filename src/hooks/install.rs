@@ -775,11 +775,7 @@ impl Progress {
         }
 
         if self.tty {
-            let filled = if self.total > 0 {
-                (self.current * 20) / self.total
-            } else {
-                20
-            };
+            let filled = (self.current * 20).checked_div(self.total).unwrap_or(20);
             let bar: String = std::iter::repeat_n('=', filled.saturating_sub(1))
                 .chain(if filled > 0 && filled < 20 {
                     std::iter::once('>')

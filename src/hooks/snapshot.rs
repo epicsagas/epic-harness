@@ -55,7 +55,7 @@ fn get_obs_summary() -> Option<String> {
         *error_cats.entry(cat).or_default() += 1;
     }
     let mut top_errors: Vec<_> = error_cats.into_iter().collect();
-    top_errors.sort_by(|a, b| b.1.cmp(&a.1));
+    top_errors.sort_by_key(|b| std::cmp::Reverse(b.1));
     top_errors.truncate(3);
 
     let error_str = if !top_errors.is_empty() {
