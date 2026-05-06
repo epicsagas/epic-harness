@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Session context injection: relevant project memories injected at session start via `resume` hook
   - Migration: `harness mem migrate --all [--dry-run]` converts existing per-project memories to unified store
   - Security: 127.0.0.1 binding, UUID v4 strict path validation, secret masking, sensitive file path filtering
+  - > ⚠️ **This feature is still in development.** Some capabilities described above may not yet be functional.
 - **opencode integration**: JS plugin (`plugins/epic-harness.js`) for session/tool lifecycle hooks, 6 commands, 4 agents → `~/.config/opencode/`
 - **cline integration**: 5 executable hook scripts (PreToolUse/PostToolUse/TaskStart/TaskResume/TaskCancel) → `~/Documents/Cline/Rules/Hooks/`
 - **aider integration**: `.aider.conf.yml` + `.aider/CONVENTIONS.md` — no hook system, conventions auto-loaded via `read:` config

@@ -181,7 +181,9 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 3. **Metrics horizon**: Only the last 50 sessions are retained. Long-term trends require direct analysis of `evolution.jsonl`.
 4. **Single agent**: The evolution loop assumes a single Claude Code session. Concurrent multi-agent execution may cause observation conflicts.
 
-## Unified Memory Layer
+## Unified Memory Layer — WIP
+
+> **Status: In Development.** This section describes the target architecture. Implementation is ongoing in `src/hooks/mem/`. CLI, MCP server, Web UI, and auto-recording are not yet production-ready.
 
 A cross-agent knowledge graph that persists developer decisions, patterns, and context across all supported coding tools.
 
