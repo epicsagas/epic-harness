@@ -36,8 +36,21 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 | `/check` report done | All PASS + all AC verified | "Check passed. Run `/ship` to create a PR." |
 | `/check` report done | Any FAIL or AC missing | "Fix blockers with `/go`, then re-run `/check`." |
 | `/ship` report done | PR created, CI green | "Shipped. Loop complete." |
+| `/orbit` phase done | Pipeline `status: running` | "(orbit) Phase complete. Continuing to next phase..." |
+| `/orbit` check FAIL × 3 | `check_fail_count >= max_retries` | "(orbit) 3 check failures reached. Pausing for your input." |
+| `/orbit` complete | PR created, CI green | "(orbit) Pipeline complete. See consolidated report above." |
 
 These transitions are informational nudges only. The user controls when each phase runs.
+
+## Orbit Mode Override
+
+When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exists with `status: running`):
+
+- **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/check`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
+- **Dispatch skills normally** — tdd, debug, verify, secure, perf, simplify, document, context all fire as usual within each phase
+- **After orbit completes** (`status: complete` or `status: aborted`) — resume normal dispatch behavior
+
+The orbit command is a self-contained pipeline. Interjecting normal transition nudges during orbit would confuse the user.
 
 ## Confusion Protocol
 

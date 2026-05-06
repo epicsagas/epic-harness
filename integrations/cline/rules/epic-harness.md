@@ -28,6 +28,7 @@ Use these in your Cline chat:
 | `/ship` | Create PR, verify CI, merge |
 | `/evolve` | Inspect or trigger skill evolution |
 | `/team` | Generate project-specific agent team |
+| `/orbit` | Autonomous spec→ship pipeline with council or interactive mode |
 
 ## ~/.harness/projects/{slug}/ Directory
 
@@ -58,3 +59,23 @@ Anti-patterns to reject:
 - Wrong type: `feat` for a bug fix, `fix` for a new feature
 - Staging unrelated files
 - Using `--no-verify` to bypass hooks
+
+## Orbit — Autonomous Pipeline
+
+Chains spec → go → check → ship in a single session.
+
+**Two modes:**
+- **Interactive**: User runs `/discover` and `/spec` manually, then says "orbit go" to start autonomous execution
+- **Council auto-spec**: 4-voice council (Architect, Skeptic, Pragmatist, Critic) analyzes the request and generates a spec. User approves or rejects.
+
+**After spec approved**, runs autonomously:
+1. Go: plan tasks, execute with TDD, integrate
+2. Check: code review + security audit + test suite + spec coverage
+3. On FAIL: auto-fix and re-check, max 3 cycles. Pauses for human input if all 3 fail.
+4. Ship: isolated integration test, git hygiene, create PR, watch CI
+
+**State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`
+
+**Human checkpoints:**
+- Spec must be explicitly approved before autonomous execution begins
+- 3 failed check cycles → pause for user decision (continue or abort)

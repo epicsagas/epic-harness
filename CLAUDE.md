@@ -1,10 +1,10 @@
 # epic-harness
 
-7 commands + auto-trigger skills + self-evolving agent harness.
+7 commands + 1 autonomous pipeline + auto-trigger skills + self-evolving agent harness.
 
 ## Structure
 
-- `commands/` — 7 slash commands (discover, spec, go, check, ship, team, evolve)
+- `commands/` — 8 slash commands (discover, spec, go, check, ship, team, evolve, orbit)
 - `skills/` — 12 auto skills + _dispatch engine
 - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
@@ -13,19 +13,52 @@
 - `presets/` — Cold-start skill templates (embedded in Rust binary at compile time)
 - `references/` — Checklists (security, performance, testing, team-patterns)
 - `integrations/` — Per-tool integration files (6 tools):
-  - `codex/` — hooks.json, config.toml, prompts/(7), skills/(7), agents/(4)
-  - `gemini/` — settings.json, GEMINI.md, commands/(7), skills/(7), agents/(4)
-  - `cursor/` — hooks.json, commands/(7), agents/(4)
-  - `opencode/` — commands/(7), agents/(4), plugins/epic-harness.js
+  - `codex/` — hooks.json, config.toml, prompts/(8), skills/(7), agents/(4)
+  - `gemini/` — settings.json, GEMINI.md, commands/(8), skills/(7), agents/(4)
+  - `cursor/` — hooks.json, commands/(8), agents/(4)
+  - `opencode/` — commands/(8), agents/(4), plugins/epic-harness.js
   - `cline/` — hooks/(5 scripts), rules/epic-harness.md
   - `aider/` — .aider.conf.yml, .aider/CONVENTIONS.md
 
 ## Architecture: 4-Ring Model
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
-- **Ring 1 (Commands)**: 7 user-invoked commands
+- **Ring 1 (Commands)**: 8 user-invoked commands (7 manual + 1 autonomous orbit pipeline)
 - **Ring 2 (Auto Skills)**: Context-triggered skills fire automatically
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
+
+## /orbit — Autonomous Pipeline
+
+Single-command spec-to-PR execution with two entry modes.
+
+```mermaid
+flowchart TD
+    START["/orbit"] --> MODE["Mode Selection"]
+    MODE -->|"1. Interactive"| WAIT["User runs /discover → /spec"]
+    MODE -->|"2. Council Auto-Spec"| COUNCIL["4-Voice Council"]
+    WAIT -->|"orbit go"| SPEC["Load Approved Spec"]
+    COUNCIL --> SYNTH["Synthesize"]
+    SYNTH --> GEN["Generate Spec"]
+    GEN --> APPROVE{"User Approves?"}
+    APPROVE -->|Yes| SPEC
+    APPROVE -->|Modify| GEN
+    APPROVE -->|Reject| ABORT["Abort"]
+    SPEC --> GO["Go Phase\nPlan → Execute → Integrate"]
+    GO --> CHECK["Check Phase\nReview + Audit + Test"]
+    CHECK -->|"PASS"| SHIP["Ship Phase\nIsolated Test → PR → CI"]
+    CHECK -->|"WARN"| SHIP
+    CHECK -->|"FAIL"| RETRY{"retry < 3?"}
+    RETRY -->|Yes| FIX["Go Fix\nTarget fixes from action items"]
+    FIX --> CHECK
+    RETRY -->|No| PAUSE["Pause — User decides"]
+    PAUSE -->|continue| FIX
+    PAUSE -->|abort| ABORT2["Abort"]
+    SHIP --> DONE["Orbit Complete\nConsolidated Report"]
+```
+
+**State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — updated after every phase transition, survives context compaction.
+
+**Human checkpoints**: spec approval (mandatory), 3 failed checks (pause).
 
 ## Eval System (Ring 3 Core)
 
@@ -175,6 +208,7 @@ _dispatch skill calls `mem_recall` with current task context before invoking any
 - `evolved_backup/` — Best-state backup (for stagnation rollback)
 - `team/` — /team outputs
 - `dispatch/` — Skill dispatch logs (JSONL)
+- `orbit/` — /orbit pipeline state files (PIPELINE-*.json)
 - `metrics.json` — Aggregate stats (score_history, trend, stagnation_count, skill_attribution)
 - `evolution.jsonl` — Evolution history (SessionAnalysis + patterns)
 - `.cross-project-enabled` — Cross-project learning opt-in marker (optional)
