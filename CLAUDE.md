@@ -121,7 +121,9 @@ Format failure = lint_fail, typecheck failure = build_fail — feeds into patter
 Skill dispatches logged to `~/.harness/projects/{slug}/dispatch/dispatch_YYYYMMDD.jsonl`.
 Analyze via `/evolve history`.
 
-## Unified Memory (harness-mem)
+## Unified Memory (harness-mem) — WIP
+
+> **Status: In Development.** The memory system is under active development. CLI, MCP server, Web UI, and auto-recording pipeline are not yet fully functional. Do not rely on this feature in production.
 
 All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). Registered as MCP server `harness-mem` in Claude Code.
 

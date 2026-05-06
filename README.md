@@ -233,7 +233,9 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 ¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Guard at `BeforeModel` level · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
-## Unified Memory
+## Unified Memory — WIP
+
+> **Status: In Development.** Not yet fully functional. CLI commands, MCP tools, and Web UI are works in progress.
 
 All agents share a knowledge graph in `~/.harness/memory.db` (SQLite with full-text search). No external runtime.
 
