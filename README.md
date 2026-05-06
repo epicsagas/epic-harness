@@ -1,5 +1,7 @@
 # epic harness
 
+> A self-evolving AI coding agent harness — 6 commands, auto-trigger skills, learns from your failures.
+
 **6 commands. Auto-trigger skills. Self-evolving.**
 
 <p align="center">
@@ -9,9 +11,8 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Rust-1.82+-orange.svg" alt="Rust">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
-  <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
-  <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
@@ -40,7 +41,7 @@ cargo install epic-harness && epic install
 | **Any (with Rust)** | `cargo install epic-harness` |
 | **From source** | `git clone` + `cargo install --path .` |
 
-Prerequisites: **Git**. Source/binary installs also need the [Rust toolchain](https://rustup.rs). Pre-built binaries need [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
+Prerequisites: **Git**. Source/binary installs also need the [Rust toolchain](https://rustup.rs).
 
 ### `epic install` — setup wizard
 
@@ -76,20 +77,23 @@ ls ~/.harness/              # Data directory exists
 
 Inside a Claude Code session: `/evolve status`
 
-## Architecture: 4-Ring Model
+### Quick Demo
 
-```
-Ring 0 — Autopilot (hooks, invisible)
-  Session restore, auto-format, guard rails, observation logging
+```bash
+$ epic --version
+epic-harness 0.2.5
 
-Ring 1 — 6 Commands (you call these)
-  /spec  /go  /check  /ship  /team  /evolve
+$ /spec "Add JWT auth to the login API"
+  → Clarifies requirements → produces SPEC-*.md
 
-Ring 2 — Auto Skills (context-triggered)
-  tdd · debug · secure · perf · simplify · document · verify · context · council · agent-introspection
+$ /go
+  → Auto-plans → TDD subagents → DONE (4 min)
 
-Ring 3 — Evolve (self-improving)
-  Observe tool usage → analyze failures → auto-generate skills → gate → reload
+$ /check
+  → Parallel code review + security audit + tests → PASS
+
+$ /ship
+  → Creates PR → CI green → merged
 ```
 
 ## Commands
@@ -130,6 +134,22 @@ Skills trigger automatically. You don't invoke them.
 | **context** | Context window > 70% used |
 | **council** | Ambiguous architectural or design decisions |
 | **agent-introspection** | Agent self-debugging after repeated failures |
+
+## Architecture: 4-Ring Model
+
+```
+Ring 0 — Autopilot (hooks, invisible)
+  Session restore, auto-format, guard rails, observation logging
+
+Ring 1 — 6 Commands (you call these)
+  /spec  /go  /check  /ship  /team  /evolve
+
+Ring 2 — Auto Skills (context-triggered)
+  tdd · debug · secure · perf · simplify · document · verify · context · council · agent-introspection
+
+Ring 3 — Evolve (self-improving)
+  Observe tool usage → analyze failures → auto-generate skills → gate → reload
+```
 
 ## Hooks (Ring 0)
 
@@ -215,7 +235,7 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 ## Unified Memory
 
-All agents share a knowledge graph in `~/.harness/memory.db` (SQLite + FTS5). No external runtime.
+All agents share a knowledge graph in `~/.harness/memory.db` (SQLite with full-text search). No external runtime.
 
 ```
 score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
@@ -224,14 +244,14 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 ### CLI
 
 ```bash
-harness mem recall "auth refactor" --project my-project   # Smart recall
-harness mem add --title "JWT rotation" --type decision    # Add node
-harness mem search "JWT"                                  # FTS5 search
-harness mem query --type decision --project my-project    # Filter
-harness mem context --project my-project                  # Project context
-harness mem serve                                         # Web UI → :7700
-harness mem mcp-install                                   # Register MCP server
-harness mem export --out ./docs/memory                    # Export to Markdown
+epic mem recall "auth refactor" --project my-project   # Smart recall
+epic mem add --title "JWT rotation" --type decision    # Add node
+epic mem search "JWT"                                  # FTS5 search
+epic mem query --type decision --project my-project    # Filter
+epic mem context --project my-project                  # Project context
+epic mem serve                                         # Web UI → :7700
+epic mem mcp-install                                   # Register MCP server
+epic mem export --out ./docs/memory                    # Export to Markdown
 ```
 
 ### MCP Tools (6)
@@ -240,10 +260,10 @@ harness mem export --out ./docs/memory                    # Export to Markdown
 |------|---------|
 | `mem_recall` | Smart contextual recall with hint + project + graph neighbors |
 | `mem_add` | Add node with auto-importance by type (or explicit 0.0–1.0) |
-| `mem_search` | FTS5 keyword search, ranked by importance |
+| `mem_search` | Keyword search (full-text), ranked by importance |
 | `mem_query` | Filter by tag/type/project |
 | `mem_context` | Project-scoped smart recall (no hint) |
-| `mem_related` | BFS graph traversal from a node ID |
+| `mem_related` | Graph traversal from a node ID (finds connected knowledge) |
 
 ### Node Types
 
@@ -262,7 +282,7 @@ Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ d
 
 ## Evolve (Ring 3)
 
-Fuses A-Evolve benchmark patterns into Claude Code's hook system.
+Fuses [A-Evolve](https://github.com/A-EVO-Lab/a-evolve) automated evolution patterns into Claude Code's hook system.
 
 ### Scoring
 
@@ -430,6 +450,13 @@ cargo test                                                    # Tests
 ```
 
 Hooks look for the binary in two places: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
+
+## Links
+
+- [Changelog](CHANGELOG.md) — release history
+- [Contributing](CONTRIBUTING.md) — how to contribute
+- [Security](SECURITY.md) — reporting vulnerabilities
+- [Issues](https://github.com/epicsagas/epic-harness/issues) — bug reports and feature requests
 
 ## Acknowledgments
 

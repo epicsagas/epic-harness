@@ -12,8 +12,10 @@ Thanks for your interest in contributing!
 ## Development
 
 ```bash
-npm install
-npm run build
+cargo build                              # Build the binary
+cargo test                               # Run all tests (314+ unit + 18 integration)
+cargo clippy                             # Lint
+cp target/debug/epic-harness hooks/bin/  # Test as plugin
 ```
 
 ## Commit Convention
@@ -32,7 +34,7 @@ Example: `feat(evolve): add stagnation gating`
 
 - Keep PRs focused — one logical change per PR
 - Update `CHANGELOG.md` for user-facing changes
-- Ensure `npm run build` passes
+- Ensure `cargo test` and `cargo clippy` pass
 - Reference related issues in the description
 
 ## Reporting Issues
