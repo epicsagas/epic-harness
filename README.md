@@ -144,14 +144,12 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    START(["/orbit"]) --> MODE{"Mode?"}
-    MODE -->|"1 · Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
-    MODE -->|"2 · Council auto-spec"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    START(["/orbit"]) --> MODE{"requirement\nclear?"}:::human
+    MODE -->|"unclear → Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
+    MODE -->|"clear → Council"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
     WAIT --> SPEC_LOAD["Load approved spec"]
-    COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate spec"] --> APPROVE{"Approve?"}:::human
-    APPROVE -->|yes| SPEC_LOAD
-    APPROVE -->|modify| GEN
-    APPROVE -->|reject| ABORT(["Abort"])
+    COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate & approve spec"]:::auto
+    GEN --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> CHECK["Check\nreview + audit + test"]:::auto
     CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
@@ -159,7 +157,7 @@ flowchart TD
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
-    PAUSE -->|abort| ABORT
+    PAUSE -->|abort| ABORT(["Abort"])
     SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
     EVOLVE --> DONE(["Orbit Complete\nconsolidated report"]):::auto
 
@@ -167,8 +165,8 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Purple nodes** — human checkpoints: mode selection, spec approval, 3× check failure pause.
-**Green nodes** — autonomous: go, check, ship, evolve run without user intervention.
+**Purple nodes** — human steps: mode selection (unclear → interactive discover), 3× check failure pause.
+**Green nodes** — council auto-spec runs fully autonomous; interactive mode hands off after spec approval.
 
 State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
 

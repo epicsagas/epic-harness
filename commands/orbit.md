@@ -38,13 +38,13 @@ Update this file after every phase transition. It is your checkpoint if context 
 
 ## Step 1: Mode Selection
 
-Present the user with two options and wait for their choice:
+Assess the user's request and present two options:
 
-> **Orbit Mode — how do you want to define the spec?**
+> **Orbit Mode — how clear is the requirement?**
 >
-> **1. Interactive discover** — You run `/discover` and `/spec` yourself. When the spec is approved, say "orbit go" and I'll take over from there.
+> **1. Interactive discover** — The requirement is ambiguous or unclear. You run `/discover` and `/spec` to define it, then say "orbit go" and I'll take over from there.
 >
-> **2. Council auto-spec** — I'll analyze your request with a 4-voice council (Architect, Skeptic, Pragmatist, Critic), generate a spec, and you just approve or reject it.
+> **2. Council auto-spec** — The requirement is clear enough. A 4-voice council (Architect, Skeptic, Pragmatist, Critic) will analyze it, generate a spec automatically, and proceed without waiting for approval.
 
 Do NOT proceed until the user picks a mode. Record the choice in pipeline state (`"mode": "interactive"` or `"mode": "council"`).
 
@@ -92,13 +92,13 @@ After all 4 voices report back:
 2. List areas of **disagreement** (where trade-offs live)
 3. Present the synthesis to the user
 
-### 2B-4: Generate Spec
+### 2B-4: Generate Spec and Proceed
 
-From the synthesis, write a spec file at `$HARNESS_DIR/specs/SPEC-{timestamp}.md`:
+From the synthesis, write a spec file at `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`:
 
 ```yaml
 ---
-status: pending
+status: approved
 created: {ISO-8601 timestamp}
 goal_slug: {kebab-case-goal-summary}
 ---
@@ -125,13 +125,7 @@ goal_slug: {kebab-case-goal-summary}
 {key architectural decisions from council synthesis}
 ```
 
-Present the spec to the user and ask:
-
-> "Spec generated from council analysis. **Approve / Modify / Reject?**"
-
-- **Approve**: Update frontmatter to `status: approved`. Record the decision via `mem_add` (type=decision, importance=0.9). Proceed to **Step 3**.
-- **Modify**: Incorporate changes, re-present.
-- **Reject**: Update pipeline state to `"status": "aborted"`. Report and stop.
+Record the decision via `mem_add` (type=decision, importance=0.9). Show the generated spec to the user as an FYI, then **proceed immediately to Step 3 without waiting for approval**.
 
 ---
 

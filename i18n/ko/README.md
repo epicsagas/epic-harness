@@ -144,14 +144,12 @@ flowchart TB
 
 ```mermaid
 flowchart TD
-    START(["/orbit"]) --> MODE{"모드?"}
-    MODE -->|"1 · 인터랙티브"| WAIT["사용자가\n/discover → /spec 실행\n후 'orbit go'"]:::human
-    MODE -->|"2 · Council 자동 스펙"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    START(["/orbit"]) --> MODE{"요구사항\n명확?"}:::human
+    MODE -->|"불분명 → 인터랙티브"| WAIT["사용자가\n/discover → /spec 실행\n후 'orbit go'"]:::human
+    MODE -->|"명확 → Council"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
     WAIT --> SPEC_LOAD["승인된 스펙 로드"]
-    COUNCIL --> SYNTH["종합"] --> GEN["스펙 자동 생성"] --> APPROVE{"승인?"}:::human
-    APPROVE -->|예| SPEC_LOAD
-    APPROVE -->|수정| GEN
-    APPROVE -->|거절| ABORT(["중단"])
+    COUNCIL --> SYNTH["종합"] --> GEN["스펙 자동 생성 & 승인"]:::auto
+    GEN --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\n계획 → TDD → 통합"]:::auto
     GO --> CHECK["Check\n리뷰 + 감사 + 테스트"]:::auto
     CHECK -->|"PASS / WARN"| SHIP["Ship\n격리 테스트 → PR → CI"]:::auto
@@ -167,8 +165,8 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**보라색 노드** — 사람 체크포인트: 모드 선택, 스펙 승인, 3회 실패 시 일시정지.
-**초록색 노드** — 자율 실행: go, check, ship, evolve는 사람 개입 없이 진행.
+**보라색 노드** — 사람 개입: 모드 선택 (불분명한 경우 인터랙티브), 3회 실패 시 일시정지.
+**초록색 노드** — council 모드는 완전 자율. 인터랙티브 모드는 스펙 승인 후 자율 실행.
 
 상태는 `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`에 저장 — 컨텍스트 압축에도 유지됩니다.
 

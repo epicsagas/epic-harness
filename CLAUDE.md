@@ -33,16 +33,11 @@ Single-command spec-to-PR execution with two entry modes.
 
 ```mermaid
 flowchart TD
-    START["/orbit"] --> MODE["Mode Selection"]
-    MODE -->|"1. Interactive"| WAIT["User runs /discover → /spec"]
-    MODE -->|"2. Council Auto-Spec"| COUNCIL["4-Voice Council"]
-    WAIT -->|"orbit go"| SPEC["Load Approved Spec"]
-    COUNCIL --> SYNTH["Synthesize"]
-    SYNTH --> GEN["Generate Spec"]
-    GEN --> APPROVE{"User Approves?"}
-    APPROVE -->|Yes| SPEC
-    APPROVE -->|Modify| GEN
-    APPROVE -->|Reject| ABORT["Abort"]
+    START["/orbit"] --> MODE{"requirement\nclear?"}
+    MODE -->|"unclear → Interactive"| WAIT["User runs /discover → /spec\nthen 'orbit go'"]
+    MODE -->|"clear → Council"| COUNCIL["4-Voice Council\nAuto-generate spec"]
+    WAIT --> SPEC["Load Approved Spec"]
+    COUNCIL --> SPEC
     SPEC --> GO["Go Phase\nPlan → Execute → Integrate"]
     GO --> CHECK["Check Phase\nReview + Audit + Test"]
     CHECK -->|"PASS"| SHIP["Ship Phase\nIsolated Test → PR → CI"]
@@ -52,14 +47,14 @@ flowchart TD
     FIX --> CHECK
     RETRY -->|No| PAUSE["Pause — User decides"]
     PAUSE -->|continue| FIX
-    PAUSE -->|abort| ABORT2["Abort"]
+    PAUSE -->|abort| ABORT["Abort"]
     SHIP --> EVOLVE["Evolve\nAuto-analyze session"]
     EVOLVE --> DONE["Orbit Complete\nConsolidated Report"]
 ```
 
 **State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — updated after every phase transition, survives context compaction.
 
-**Human checkpoints**: spec approval (mandatory), 3 failed checks (pause).
+**Human checkpoints**: mode selection (interactive only), 3 failed checks (pause).
 
 **Evolve**: runs automatically after PR created + CI green. Skipped on abort.
 
