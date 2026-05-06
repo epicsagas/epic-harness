@@ -79,10 +79,17 @@ Inside a Claude Code session: `/evolve status`
 
 ### Quick Demo
 
+**One command, full pipeline:**
 ```bash
-$ epic --version
-epic-harness 0.2.5
+$ /orbit
+# Choose mode:
+#   1. Interactive  — you run /discover + /spec, then "orbit go"
+#   2. Council      — 4-voice council generates spec, you approve
+→ spec approved → go (TDD) → check (PASS) → ship (PR + CI) → evolve
+```
 
+**Or step through manually:**
+```bash
 $ /spec "Add JWT auth to the login API"
   → Clarifies requirements → produces SPEC-*.md
 
@@ -95,6 +102,40 @@ $ /check
 $ /ship
   → Creates PR → CI green → merged
 ```
+
+## /orbit — Autonomous Pipeline
+
+`/orbit` wraps the entire manual pipeline into a single autonomous execution.
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"Mode?"}
+    MODE -->|"1 · Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["Load approved spec"]
+    COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate spec"] --> APPROVE{"Approve?"}:::human
+    APPROVE -->|yes| SPEC_LOAD
+    APPROVE -->|modify| GEN
+    APPROVE -->|reject| ABORT(["Abort"])
+    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    RETRY -->|yes| GO
+    RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
+    PAUSE -->|continue| GO
+    PAUSE -->|abort| ABORT
+    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit Complete\nconsolidated report"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**Purple nodes** — human checkpoints: mode selection, spec approval, 3× check failure pause.
+**Green nodes** — autonomous: go, check, ship, evolve run without user intervention.
+
+State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
 
 ## Commands
 
@@ -109,7 +150,7 @@ $ /ship
 | `/evolve` | Manual evolution trigger / status / rollback |
 | `/orbit` | **Autonomous pipeline** — runs spec → go → check → ship in one shot. Choose interactive or council mode. |
 
-### Manual Pipeline
+### Pipeline Overview
 
 ```mermaid
 flowchart LR
@@ -120,13 +161,13 @@ flowchart LR
         G(["/go"]):::auto
         C(["/check"]):::auto
         SH(["/ship"]):::auto
-        EV(["/evolve\n(optional)"]):::manual
+        EV(["/evolve\n(auto)"]):::auto
 
         D -->|frame problem| S
         S -->|"orbit go"| G
         G --> C
         C -->|PASS| SH
-        C -->|FAIL x3 → pause| G
+        C -->|"FAIL x3\n→ pause"| G
         SH --> EV
     end
 
@@ -134,12 +175,11 @@ flowchart LR
     classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Green nodes** run autonomously inside `/orbit`. **Purple nodes** require human interaction — `/discover` and `/spec` are optional entry points; `/evolve` is a post-ship suggestion.
+**Green nodes** run autonomously inside `/orbit`. **Purple nodes** require human interaction — `/discover` and `/spec` are entry points; everything after spec approval is hands-off.
 
-- **Before `/spec`**: if the problem is vague or unfocused, use `/discover` to frame it first.
+- **Before `/spec`**: if the problem is vague, use `/discover` to frame it first.
 - **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
-- **After `/ship`**: suggests `/evolve` to turn observations into better skills.
-- **`/orbit`**: wraps the pipeline end-to-end. Choose **interactive** (you run `/discover` → `/spec`, then say "orbit go") or **council** (4-voice council auto-generates the spec, you only approve).
+- **`/orbit`**: wraps the full pipeline. Choose **interactive** (you run `/discover` → `/spec`, then "orbit go") or **council** (4-voice council auto-generates spec, you only approve).
 
 ## Auto Skills (Ring 2)
 

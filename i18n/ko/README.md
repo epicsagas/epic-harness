@@ -17,6 +17,38 @@
 
 **30개 이상의 명령어를 8개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다. 외울 것은 적게, 키 입력당 지능은 더 높게.
 
+## /orbit — 자율 파이프라인
+
+명령어 하나로 스펙부터 PR까지. 자동이 수동을 감쌉니다.
+
+```mermaid
+flowchart TD
+    START(["/orbit"]) --> MODE{"모드 선택"}
+    MODE -->|"1 · 인터랙티브"| WAIT["사용자가\n/discover → /spec 실행\n후 'orbit go'"]:::human
+    MODE -->|"2 · Council 자동 스펙"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    WAIT --> SPEC_LOAD["승인된 스펙 로드"]
+    COUNCIL --> SYNTH["종합"] --> GEN["스펙 자동 생성"] --> APPROVE{"승인?"}:::human
+    APPROVE -->|예| SPEC_LOAD
+    APPROVE -->|수정| GEN
+    APPROVE -->|거절| ABORT(["중단"])
+    SPEC_LOAD --> GO["Go\n계획 → TDD → 통합"]:::auto
+    GO --> CHECK["Check\n리뷰 + 감사 + 테스트"]:::auto
+    CHECK -->|"PASS"| SHIP["Ship\n격리 테스트 → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"재시도 < 3?"}
+    RETRY -->|예| GO
+    RETRY -->|아니오| PAUSE["일시정지\n사용자 결정"]:::human
+    PAUSE -->|계속| GO
+    PAUSE -->|중단| ABORT
+    SHIP --> EVOLVE["Evolve\n세션 자동 분석"]:::auto
+    EVOLVE --> DONE(["Orbit 완료\n통합 리포트"]):::auto
+
+    classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
+```
+
+**보라색** — 사람 체크포인트 (모드 선택, 스펙 승인, 3회 실패 시 일시정지)  
+**초록색** — 자율 실행 (go → check → ship → evolve)
+
 <p align="center">
   <img src="../../assets/features.jpg" alt="epic harness 기능" width="100%" />
 </p>
