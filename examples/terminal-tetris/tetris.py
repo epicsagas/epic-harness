@@ -4,7 +4,7 @@ import curses
 import time
 
 from board import Board, ROWS, COLS
-from pieces import PIECE_COLORS, init_colors
+from pieces import PIECE_COLORS, PIECES, init_colors
 from score import ScoreManager
 
 BLOCK = "[]"
@@ -29,6 +29,7 @@ class TetrisGame:
         self.last_drop = time.time()
         self.flash_rows = []
         self.flash_until = 0.0
+        self._high_score = self.score.load_high_score()
 
         stdscr.nodelay(True)
         stdscr.timeout(50)
@@ -43,6 +44,7 @@ class TetrisGame:
             self._draw()
         self._draw_game_over()
         self.score.save_high_score()
+        self._high_score = max(self._high_score, self.score.score)
 
     def _handle_input(self):
         key = self.stdscr.getch()
@@ -115,14 +117,20 @@ class TetrisGame:
                 cell = self.board.grid[r][c]
                 if cell is not None:
                     if r in self.flash_rows:
-                        self.stdscr.addstr(board_y + r, board_x + c * 2, BLOCK, curses.A_REVERSE)
+                        self.stdscr.addstr(
+                            board_y + r, board_x + c * 2, BLOCK, curses.A_REVERSE
+                        )
                     else:
-                        self.stdscr.addstr(board_y + r, board_x + c * 2, BLOCK, _color_of(cell))
+                        self.stdscr.addstr(
+                            board_y + r, board_x + c * 2, BLOCK, _color_of(cell)
+                        )
 
         # Current piece
         for r, c in self.board.get_current_cells():
             if 0 <= r < ROWS and 0 <= c < COLS:
-                self.stdscr.addstr(board_y + r, board_x + c * 2, BLOCK, _color_of(self.board.current))
+                self.stdscr.addstr(
+                    board_y + r, board_x + c * 2, BLOCK, _color_of(self.board.current)
+                )
 
         # Sidebar
         self._draw_sidebar(sidebar_x, board_y)
@@ -132,12 +140,11 @@ class TetrisGame:
         self.stdscr.addstr(y, x, f"Score: {self.score.score}")
         self.stdscr.addstr(y + 1, x, f"Level: {self.score.level}")
         self.stdscr.addstr(y + 2, x, f"Lines: {self.score.lines_cleared}")
-        self.stdscr.addstr(y + 3, x, f"Hi: {self.score.load_high_score()}")
+        self.stdscr.addstr(y + 3, x, f"Hi: {self._high_score}")
 
         # Next piece preview
         self.stdscr.addstr(y + 5, x, "Next:")
         next_name = self.board.next_piece
-        from pieces import PIECES
         cells = PIECES[next_name][0]
         for r, c in cells:
             self.stdscr.addstr(y + 7 + r, x + c * 2, BLOCK, _color_of(next_name))
