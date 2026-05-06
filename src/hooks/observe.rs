@@ -3,13 +3,14 @@ use std::fs;
 use std::sync::LazyLock;
 
 use super::common::*;
-use super::telemetry::{FailureClass, Telemetry, ToolCategory};
+use super::telemetry::{FailureClass, ToolCategory, Telemetry};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
-static MASK_SK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
+static MASK_SK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
 static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret)[=:]\s*\S+").unwrap()
 });
@@ -56,8 +57,7 @@ fn score_bash(output: &str, command: &str) -> ScoreDimensions {
     } else if is_empty {
         quality = 0.7;
     }
-    static WARN_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
+    static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
     static DEPREC_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
     if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
@@ -171,7 +171,7 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
 
 /// Testable variant that accepts an explicit orchestrator directory.
 fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> Option<String> {
-    if !is_orchestration_enabled() {
+    if std::env::var("EPIC_ORCHESTRATION").as_deref() != Ok("enabled") {
         return None;
     }
 
@@ -196,19 +196,12 @@ fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> O
                     .filter(|p| !p.is_empty())
                     .filter_map(|p| p.parse().ok())
                     .collect();
-                if digits.len() < 6 {
-                    return None;
-                }
-                let (y, mo, d, h, mi, s_) = (
-                    digits[0], digits[1], digits[2], digits[3], digits[4], digits[5],
-                );
+                if digits.len() < 6 { return None; }
+                let (y, mo, d, h, mi, s_) = (digits[0], digits[1], digits[2], digits[3], digits[4], digits[5]);
                 // Simple UTC epoch approximation (no leap seconds, good enough for timeout)
-                let month_days: u64 = if mo <= 2 {
-                    (mo + 9) * 153 + 2
-                } else {
-                    (mo - 3) * 153 + 2
-                } / 5;
-                let days: u64 = y * 365 + (y / 4) - (y / 100) + (y / 400) + month_days + d - 719469;
+                let days: u64 = y * 365 + (y / 4) - (y / 100) + (y / 400)
+                    + if mo <= 2 { (mo + 9) * 153 + 2 } else { (mo - 3) * 153 + 2 } / 5
+                    + d - 719469;
                 Some(days * 86400 + h * 3600 + mi * 60 + s_)
             })
         })
@@ -255,7 +248,9 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
         FILE_RE.find(a).map(|m| m.as_str())
     });
 
-    let ext = file_path.and_then(|p| p.rsplit('.').next()).unwrap_or("");
+    let ext = file_path
+        .and_then(|p| p.rsplit('.').next())
+        .unwrap_or("");
 
     let hints: &[&str] = match ext {
         "rs" => &[
@@ -330,7 +325,6 @@ pub fn run(input: &HookInput) -> i32 {
         error_snippet: None,
         file_ext,
         sequence_id: Some(seq_id),
-        pipeline_id: detect_active_orbit_id(),
     };
 
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
@@ -420,13 +414,20 @@ pub fn run(input: &HookInput) -> i32 {
 
     // GateGuard: emit concrete investigation hints for Edit/Write to force
     // fact-based verification instead of generic "are you sure?" prompts.
-    generate_investigation_hints(input.tool_name.as_deref().unwrap_or(""), action.as_deref());
+    generate_investigation_hints(
+        input.tool_name.as_deref().unwrap_or(""),
+        action.as_deref(),
+    );
 
     // Agent timeout detection: when EPIC_ORCHESTRATION is enabled and the
     // current tool is an Agent call, check if the agent has exceeded the
     // timeout threshold. This is gated by the env var so it adds zero
     // latency to non-orchestration sessions.
-    let tool_name_lower = input.tool_name.as_deref().unwrap_or("").to_lowercase();
+    let tool_name_lower = input
+        .tool_name
+        .as_deref()
+        .unwrap_or("")
+        .to_lowercase();
     if tool_name_lower == "agent"
         && let Some(agent_id) = input
             .tool_input
@@ -444,7 +445,6 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     // ── score_bash ──────────────────────────────────
     #[test]
@@ -481,10 +481,7 @@ mod tests {
     #[test]
     fn score_bash_no_warnings_found_not_penalized() {
         let dims = score_bash("No warnings found", "cargo check");
-        assert_eq!(
-            dims.output_quality, 1.0,
-            "substring 'warning' in negative phrase must not penalize"
-        );
+        assert_eq!(dims.output_quality, 1.0, "substring 'warning' in negative phrase must not penalize");
     }
 
     #[test]
@@ -603,24 +600,15 @@ mod tests {
     fn test_mask_bearer_token() {
         let input = r#"curl -H "Authorization: Bearer sk-abc123XYZ" failed"#;
         let output = mask_secrets(input);
-        assert!(
-            !output.contains("sk-abc123XYZ"),
-            "Bearer token must be redacted"
-        );
-        assert!(
-            output.contains("Bearer <REDACTED>"),
-            "must have redacted placeholder"
-        );
+        assert!(!output.contains("sk-abc123XYZ"), "Bearer token must be redacted");
+        assert!(output.contains("Bearer <REDACTED>"), "must have redacted placeholder");
     }
 
     #[test]
     fn test_mask_sk_key() {
         let input = "Error: invalid key sk-proj-abcDEF12345678 supplied";
         let output = mask_secrets(input);
-        assert!(
-            !output.contains("sk-proj-abcDEF12345678"),
-            "sk- key must be redacted"
-        );
+        assert!(!output.contains("sk-proj-abcDEF12345678"), "sk- key must be redacted");
         assert!(output.contains("sk-<REDACTED>"), "must have sk-<REDACTED>");
     }
 
@@ -628,14 +616,8 @@ mod tests {
     fn test_mask_password_equals() {
         let input = "connection failed: password=s3cr3tP@ss! reason=timeout";
         let output = mask_secrets(input);
-        assert!(
-            !output.contains("s3cr3tP@ss!"),
-            "password value must be redacted"
-        );
-        assert!(
-            output.contains("<REDACTED>"),
-            "must have redacted placeholder"
-        );
+        assert!(!output.contains("s3cr3tP@ss!"), "password value must be redacted");
+        assert!(output.contains("<REDACTED>"), "must have redacted placeholder");
     }
 
     #[test]
@@ -656,11 +638,7 @@ mod tests {
             tool_result: Some(serde_json::json!("hello\n")),
             ..Default::default()
         };
-        let output = input
-            .tool_result
-            .as_ref()
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let output = input.tool_result.as_ref().and_then(|v| v.as_str()).unwrap_or("");
         assert_eq!(output, "hello\n");
     }
 
@@ -807,8 +785,7 @@ mod tests {
     }
 
     // ── check_agent_timeout ─────────────────────────
-    // SAFETY: All env-var mutations serialized via #[serial] to prevent parallel test races.
-    #[serial]
+    // SAFETY: All env-var mutations are serialized within individual tests.
     #[test]
     fn agent_timeout_returns_none_when_disabled() {
         // EPIC_ORCHESTRATION not set — should return None
@@ -816,13 +793,9 @@ mod tests {
             std::env::remove_var("EPIC_ORCHESTRATION");
         }
         let result = check_agent_timeout("agent-1");
-        assert!(
-            result.is_none(),
-            "should be None when orchestration disabled"
-        );
+        assert!(result.is_none(), "should be None when orchestration disabled");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_returns_none_for_non_agent_tool() {
         // Even with EPIC_ORCHESTRATION=enabled, non-agent id should be fine
@@ -835,7 +808,6 @@ mod tests {
         }
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_detects_overdue_agent() {
         // Create a temp orchestrator dir with a status.json that has a started_at
@@ -867,13 +839,9 @@ mod tests {
         assert!(result.is_some(), "should detect timeout for overdue agent");
         let msg = result.unwrap();
         assert!(msg.contains("agent-1"), "message should mention agent id");
-        assert!(
-            msg.contains("timeout:"),
-            "message should mention timeout threshold"
-        );
+        assert!(msg.contains("timeout:"), "message should mention timeout threshold");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_returns_none_for_recent_agent() {
         // Agent started 1 minute ago — under threshold
@@ -903,7 +871,6 @@ mod tests {
         assert!(result.is_none(), "recent agent should not trigger timeout");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_missing_status_file() {
         // Agent dir exists but no status.json
@@ -922,7 +889,6 @@ mod tests {
         assert!(result.is_none(), "missing status file should not error");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_malformed_status_json() {
         // status.json contains invalid JSON
@@ -942,7 +908,6 @@ mod tests {
         assert!(result.is_none(), "malformed JSON should not error");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_missing_started_at() {
         // status.json is valid but has no started_at field
@@ -963,7 +928,6 @@ mod tests {
         assert!(result.is_none(), "missing started_at should not error");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_completed_agent() {
         // Agent completed — status is not "running"
@@ -990,9 +954,6 @@ mod tests {
             std::env::remove_var("EPIC_ORCHESTRATION");
         }
 
-        assert!(
-            result.is_none(),
-            "completed agent should not trigger timeout"
-        );
+        assert!(result.is_none(), "completed agent should not trigger timeout");
     }
 }

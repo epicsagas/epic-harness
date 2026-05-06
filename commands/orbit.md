@@ -82,6 +82,12 @@ If `EPIC_ORCHESTRATION=enabled`:
 2. Add `orchestration_id` field to the pipeline JSON
 3. The Rust `orchestrate` hook will use this ID to link pipeline state to orchestrator state
 
+**Orchestration setup (if EPIC_ORCHESTRATION enabled):**
+If `EPIC_ORCHESTRATION=enabled`:
+1. Generate an `orchestration_id` (same as pipeline id)
+2. Add `orchestration_id` field to the pipeline JSON
+3. The Rust `orchestrate` hook will use this ID to link pipeline state to orchestrator state
+
 ---
 
 ## Step 1: Mode Selection
@@ -354,6 +360,12 @@ gh pr create --title "<goal from spec>" --body "$(cat <<'EOF'
 
 ## Check Report
 <content of $HARNESS_DIR/orbit/CHECK-{pipeline_id}.md>
+
+**Orchestration data in PR:**
+Include in PR body:
+- Orchestration ID
+- Agent count and final states
+- Total orchestration elapsed time
 
 **Orchestration data in PR:**
 Include in PR body:
