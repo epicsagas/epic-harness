@@ -377,7 +377,28 @@ Update pipeline state: `"phase": "complete"`, `"status": "complete"`.
 {embedded}
 ```
 
-**"One orbit complete. Run `/evolve` to analyze this session's observations and improve skills for the next cycle."**
+### Step 7a: Evolve (Auto)
+
+PR created and CI green — run `/evolve` automatically now:
+
+1. Read `$HARNESS_DIR/obs/` observation logs from this session
+2. Read `$HARNESS_DIR/metrics.json` and `$HARNESS_DIR/evolution.jsonl`
+3. Analyze failure patterns, weak tools, weak file types from this orbit session
+4. Seed evolved skills if thresholds are met
+5. Gate: validate evolved skills, cap at `MAX_EVOLVED_SKILLS` (10)
+6. Report evolved skill summary
+
+```
+## Evolve Report
+- Sessions analyzed: 1 (this orbit)
+- Patterns detected: {list or "none"}
+- Skills evolved: {list or "none"}
+- Trend: {improving | stable | declining}
+```
+
+Update pipeline state: push `{"phase": "evolve", "status": "complete"}` to `phase_history`.
+
+**Orbit + Evolve complete. The next session starts smarter.**
 
 ---
 

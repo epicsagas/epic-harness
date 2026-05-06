@@ -53,12 +53,15 @@ flowchart TD
     RETRY -->|No| PAUSE["Pause — User decides"]
     PAUSE -->|continue| FIX
     PAUSE -->|abort| ABORT2["Abort"]
-    SHIP --> DONE["Orbit Complete\nConsolidated Report"]
+    SHIP --> EVOLVE["Evolve\nAuto-analyze session"]
+    EVOLVE --> DONE["Orbit Complete\nConsolidated Report"]
 ```
 
 **State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — updated after every phase transition, survives context compaction.
 
 **Human checkpoints**: spec approval (mandatory), 3 failed checks (pause).
+
+**Evolve**: runs automatically after PR created + CI green. Skipped on abort.
 
 ## Eval System (Ring 3 Core)
 
