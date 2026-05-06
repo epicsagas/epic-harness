@@ -77,6 +77,12 @@ At the start of every step (Step 3 through Step 7):
 2. If `now > deadline`: set `"status": "timeout"`, report to user, **STOP**
 3. Default deadline is 30 minutes from `started_at`. User may override by editing the field.
 
+**Orchestration setup (if EPIC_ORCHESTRATION enabled):**
+If `EPIC_ORCHESTRATION=enabled`:
+1. Generate an `orchestration_id` (same as pipeline id)
+2. Add `orchestration_id` field to the pipeline JSON
+3. The Rust `orchestrate` hook will use this ID to link pipeline state to orchestrator state
+
 ---
 
 ## Step 1: Mode Selection
@@ -223,6 +229,12 @@ Sanitize `goal_slug`: only `a-z`, `0-9`, `-`. Replace invalid characters with `-
 - Subagents: X DONE, Y CONCERNS, Z BLOCKED
 ```
 
+**Orchestration-aware Go Phase:**
+When `orchestration_id` is present in pipeline state:
+1. Delegate agent management to the orchestrator — the `/go` command's orchestration extensions handle this
+2. The Go Phase reads `$HARNESS_DIR/orchestrator/run.json` for real-time agent status instead of waiting for background notifications
+3. After Go Phase completes, include orchestration metrics in the Go Report
+
 Push `{"phase": "go", "status": "complete"}` to `phase_history` → **Step 4**.
 
 ---
@@ -248,6 +260,12 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 - Frontend: accessibility, semantic HTML
 - Database: migration safety, rollback plan
 - Infra: config validation, secret detection
+
+**Orchestration-aware Check:**
+When orchestration is active:
+1. The reviewer agent reads `$HARNESS_DIR/orchestrator/` for agent activity history
+2. The auditor checks for concurrent write conflicts logged in agent streams
+3. Include orchestration-specific metrics in the Check Report
 
 **Check Report:**
 ```
@@ -293,6 +311,14 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 > - **"continue"** — another fix cycle (increments `max_retries`)
 > - **"abort"** — stop, set `"status": "aborted"`
 
+**Orchestration cleanup:**
+On PASS or WARN:
+1. Update `$HARNESS_DIR/orchestrator/run.json` status to "complete"
+2. Preserve orchestrator state directory for /status and /evolve analysis
+On FAIL:
+1. Keep orchestrator state for debugging
+2. Include agent stream data in Action Items for targeted fixes
+
 ---
 
 ## Step 6: Ship
@@ -329,6 +355,12 @@ gh pr create --title "<goal from spec>" --body "$(cat <<'EOF'
 
 ## Check Report
 <content of $HARNESS_DIR/orbit/CHECK-{pipeline_id}.md>
+
+**Orchestration data in PR:**
+Include in PR body:
+- Orchestration ID
+- Agent count and final states
+- Total orchestration elapsed time
 
 ## Test Plan
 - [ ] Unit tests pass
@@ -406,6 +438,8 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 | Go    | complete | 0                |
 | Check | PASS     | {check_fail_count}|
 | Ship  | complete | 0                |
+
+| Orchestration | {enabled/disabled} | {agent_count} agents |
 
 ### Key Decisions
 {from council/direct synthesis}

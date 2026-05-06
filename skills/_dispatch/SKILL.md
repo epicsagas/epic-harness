@@ -25,6 +25,9 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
 | User shares code for review, mentions code smells, or asks to refactor/analyze | **syntagma** → `analyze_code` + `suggest_refactorings` → feed results into `/orbit` Direct |
 | Session start (project has harness-mem psychographic node) | Call `mem_query` type=psychographic → apply 5-dimension profile to all subsequent skill dispatch |
+| Orchestration run active (`$HARNESS_DIR/orchestrator/run.json` exists with status "running") | **orchestrate** |
+| Agent tool output received with inter-agent message | **orchestrate** |
+| User runs `/intervene` | **orchestrate** |
 
 ## Loop Transition Signals
 
@@ -41,6 +44,7 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 | `/orbit` phase done | Pipeline `status: running` | "(orbit) Phase complete. Continuing to next phase..." |
 | `/orbit` check FAIL × 3 | `check_fail_count >= max_retries` | "(orbit) 3 check failures reached. Pausing for your input." |
 | `/orbit` complete | PR created, CI green | "(orbit) Pipeline complete. See consolidated report above." |
+| `/intervene` executed | Control directive written | "Intervention recorded. Use /status to monitor." |
 
 These transitions are informational nudges only. The user controls when each phase runs.
 

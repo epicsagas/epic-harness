@@ -5,6 +5,7 @@ mod install_wizard;
 pub mod install;
 pub mod mem;
 pub mod observe;
+pub mod orchestrate;
 pub mod polish;
 pub mod reflect;
 pub mod resume;

@@ -224,6 +224,14 @@ pub const PROFILE_REFLECT: HookProfile = HookProfile::Standard;
 pub const PROFILE_SNAPSHOT: HookProfile = HookProfile::Standard;
 pub const PROFILE_RESUME: HookProfile = HookProfile::Minimal;
 
+/// Agent timeout threshold in seconds (default: 600 = 10 minutes).
+/// When EPIC_ORCHESTRATION is enabled, agents exceeding this runtime
+/// trigger a warning hint in the observe hook.
+pub const AGENT_TIMEOUT_SECS: u64 = 600;
+
+/// Number of recent stream.jsonl entries to check for concurrent write conflict detection.
+pub const CONFLICT_LOOKBACK: usize = 3;
+
 // ── Paths ────────────────────────────────────────────
 
 pub fn cwd() -> PathBuf {
