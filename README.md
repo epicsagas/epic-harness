@@ -2,7 +2,7 @@
 
 > A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.
 
-**8 commands. Auto-trigger skills. Self-evolving.**
+**Less to memorize. More intelligence per keystroke. Gets smarter every session.**
 
 <p align="center">
 <a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
@@ -16,11 +16,44 @@
   <a href="https://buymeacoffee.com/epicsaga"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black" alt="Buy Me a Coffee"></a>
 </p>
 
-A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns. Less surface area to memorize. More intelligence per keystroke.
+A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns.
 
 <p align="center">
   <img src="./assets/features.jpg" alt="epic harness features" width="100%" />
 </p>
+
+---
+
+## What It Does
+
+One command ships a feature end-to-end. Skills fire without you asking. The agent gets smarter after every session.
+
+```bash
+$ /orbit "Add JWT auth to the login API"
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+```
+
+Or step through manually:
+
+```bash
+/spec "Add JWT auth to the login API"   # clarifies requirements → SPEC-*.md
+/go                                      # auto-plans → TDD subagents → 4 min
+/check                                   # parallel review + security + tests → PASS
+/ship                                    # isolated test → PR → CI green
+```
+
+Skills trigger automatically in the background — no extra commands:
+
+```
+Writing a feature?    → tdd fires (Red→Green→Refactor enforced)
+Test fails?           → debug fires (root-cause first, no random fixes)
+Touching auth or DB?  → secure fires (OWASP checklist, no shortcuts)
+File hits 200 lines?  → simplify fires (extract, rename, reduce)
+```
+
+After the session ends, the **evolve loop** analyzes what broke, generates targeted skills, and loads them next session. The agent that struggled with TypeScript build failures will have an `evo-ts-care` skill next time.
+
+---
 
 ## Install
 
@@ -77,70 +110,61 @@ ls ~/.harness/              # Data directory exists
 
 Inside a Claude Code session: `/evolve status`
 
-### Quick Demo
+---
 
-**One command, full pipeline:**
-```bash
-$ /orbit
-# Choose mode:
-#   1. Interactive  — you run /discover + /spec, then "orbit go"
-#   2. Council      — 4-voice council generates spec, you approve
-→ spec approved → go (TDD) → check (PASS) → ship (PR + CI) → evolve
-```
+## Commands
 
-**Or step through manually:**
-```bash
-$ /spec "Add JWT auth to the login API"
-  → Clarifies requirements → produces SPEC-*.md
+| Command | What it does |
+|---------|-------------|
+| `/discover` | Frame the problem first — 5 Whys, JTBD, Socratic questioning (max 3 rounds) |
+| `/spec` | Convert requirements into a numbered R + AC document, saved as `SPEC-{timestamp}.md` |
+| `/go` | Auto-plan → TDD subagents → parallel execution with worktree isolation → AC verification |
+| `/check` | Parallel review + security audit + tests, with scope-based extras (API contract, accessibility, migration safety) |
+| `/ship` | Isolated pre-flight test in a clean worktree → PR with full check report → CI watch + auto-fix |
+| `/team` | Browse org libraries, hire existing teams, or design new ones (3–6 agents, synced to `.claude/agents/`) |
+| `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, inspect skill effectiveness, rollback |
+| `/orbit` | **Full autonomous pipeline**: spec → go → check → ship → evolve in one shot |
 
-$ /go
-  → Auto-plans → TDD subagents → DONE (4 min)
-
-$ /check
-  → Parallel code review + security audit + tests → PASS
-
-$ /ship
-  → Creates PR → CI green → merged
-```
-
-## Architecture: 4-Ring Model
+### Pipeline
 
 ```mermaid
-flowchart TB
-    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
-        direction LR
-        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+flowchart TD
+    subgraph orbit["  /orbit  (wraps entire pipeline)  "]
+        direction TD
+        D(["/discover\noptional"]):::manual
+        S(["/spec"]):::manual
+        G(["/go"]):::auto
+        C(["/check"]):::auto
+        SH(["/ship"]):::auto
+        EV(["/evolve"]):::auto
+
+        CL["Council\n4-voice auto-spec"]:::auto
+        DR["Direct\nauto-spec"]:::auto
+
+        D -->|frame problem| S
+        S -->|spec approved| G
+        CL -->|spec approved| G
+        DR -->|spec approved| G
+        G --> C
+        C -->|PASS| SH
+        C -->|"FAIL ×3 → pause"| G
+        SH --> EV
     end
 
-    subgraph R1["Ring 1 — Commands (you call these)"]
-        direction TB
-        subgraph orbit_wrap["  /orbit  "]
-            direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
-        end
-        c6("/team")
-        c7("/evolve")
-    end
-
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
-        direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
-    end
-
-    subgraph R3["Ring 3 — Evolve (self-improving)"]
-        direction LR
-        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
-    end
-
-    R0 -->|"observe every tool call"| R3
-    R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger skills"| R2
-    R0 -->|"resume: restore context"| R1
+    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
+    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
+
+**Purple** — manual entry: `/discover` (optional) → `/spec`. **Green** — autonomous after spec approval: go → check → ship → evolve.
+
+- Before `/spec`: if the problem is vague, use `/discover` to frame it first.
+- After `/spec`: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
+
+---
 
 ## /orbit — Autonomous Pipeline
 
-`/orbit` wraps the entire manual pipeline into a single autonomous execution.
+`/orbit` wraps the entire pipeline into a single autonomous execution. Pick a mode — everything else is hands-off until the PR.
 
 ```mermaid
 flowchart TD
@@ -171,89 +195,133 @@ flowchart TD
 
 State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
 
-## Commands
-
-| Command | What it does |
-|---------|-------------|
-| `/discover` | Explore and define the problem before specifying a solution — 5 Whys, JTBD, Socratic questioning |
-| `/spec` | Define what to build — clarify requirements, produce a spec |
-| `/go` | Build it — auto-plan, TDD subagents, 4-state result model (DONE/CONCERNS/NEEDS_CONTEXT/BLOCKED), parallel execution with worktree isolation |
-| `/check` | Verify — adaptive expert dispatch (scope-based), parallel code review + security audit + performance |
-| `/ship` | Ship — isolated pre-flight test, then PR, CI, merge |
-| `/team` | Create and sync org-level agent teams across projects |
-| `/evolve` | Manual evolution trigger / status / rollback |
-| `/orbit` | **Autonomous pipeline** — runs spec → go → check → ship in one shot. Choose interactive or council mode. |
-
-### Pipeline Overview
-
-```mermaid
-flowchart TD
-    subgraph orbit["  /orbit  (wraps entire pipeline)  "]
-        direction TD
-        D(["/discover\noptional"]):::manual
-        S(["/spec"]):::manual
-        G(["/go"]):::auto
-        C(["/check"]):::auto
-        SH(["/ship"]):::auto
-        EV(["/evolve"]):::auto
-
-        CL["Council\n4-voice auto-spec"]:::auto
-        DR["Direct\nauto-spec"]:::auto
-
-        D -->|frame problem| S
-        S -->|spec approved| G
-        CL -->|spec approved| G
-        DR -->|spec approved| G
-        G --> C
-        C -->|PASS| SH
-        C -->|"FAIL ×3 → pause"| G
-        SH --> EV
-    end
-
-    classDef manual fill:#4a4a6a,stroke:#9b9bcc,color:#fff
-    classDef auto   fill:#1a5c3a,stroke:#4caf7d,color:#fff
-```
-
-**Purple** — manual entry: `/discover` (optional) → `/spec`. **Green** — council auto-spec or autonomous execution after approval: go → check → ship → evolve.
-
-- **Before `/spec`**: if the problem is vague, use `/discover` to frame it first.
-- **After `/spec`**: if 3+ requirements and no team linked, `/spec` suggests `/team` before `/go`.
-- **`/orbit`**: wraps the full pipeline. Choose **interactive** (you run `/discover` → `/spec`, then "orbit go") or **council** (4-voice council auto-generates spec, you only approve).
+---
 
 ## Auto Skills (Ring 2)
 
-Skills trigger automatically. You don't invoke them.
+Skills trigger automatically based on context. You don't invoke them.
 
 | Skill | Triggers when |
 |-------|--------------|
-| **tdd** | New feature implementation |
-| **debug** | Test failure or error |
-| **discover** | Vague request, solution without problem, or unfocused complaint |
-| **secure** | Auth/DB/API/secrets code touched |
-| **perf** | Loops, queries, rendering code |
-| **simplify** | File > 200 lines or high complexity |
-| **document** | Public API added or changed |
-| **verify** | Before completing /go or /ship |
-| **context** | Context window > 70% used |
+| **tdd** | New feature implementation or bug fix |
+| **debug** | Test failure or runtime error |
+| **discover** | Vague request, solution without a problem, unfocused complaint |
+| **secure** | Auth / DB / API / secrets code touched |
+| **perf** | Loops, queries, rendering, batch operations |
+| **simplify** | File > 200 lines or high cyclomatic complexity |
+| **document** | Public API added or signature changed |
+| **verify** | Before completing `/go` or `/ship` |
+| **context** | Context window > 70% |
 | **council** | Ambiguous architectural or design decisions |
-| **agent-introspection** | Agent self-debugging after repeated failures |
+| **agent-introspection** | 3+ consecutive failures or circular retry pattern |
+
+---
+
+## Evolve (Ring 3)
+
+The harness watches every tool call, scores it on 3 axes, detects failure patterns, and generates targeted skills — automatically, at session end.
+
+### Scoring
+
+```
+composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
+```
+
+Failure classification (9 types): `type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
+
+### Pattern Detection
+
+| Pattern | Detects | Default threshold |
+|---------|---------|-------------------|
+| `repeated_same_error` | Same error N+ times | 3 |
+| `fix_then_break` | Edit success → build/test fails | 3 lookback, 2 cycles |
+| `long_debug_loop` | Stuck on same file | 5 operations |
+| `thrashing` | Edit↔Error alternating | 3 edits, 3 errors |
+
+### Evolution Flow
+
+```
+Observe (PostToolUse — 3-axis scoring)
+    ↓ obs/session_{id}.jsonl
+Analyze (SessionEnd)
+    ↓ per-tool, per-ext scores + patterns
+Propose (Solver — graduated by score: ≥0.90 skip, ≥0.70 moderate, <0.70 full)
+    ↓ SkillProposal[] with confidence
+Curate (Accept/Merge/Skip, feedback masked from solver)
+    ↓ evolved/{skill}/SKILL.md + meta.json
+Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
+    ↓ evolved_backup/ (best checkpoint)
+Instinct (high-success patterns → cross-project memory.db nodes)
+    ↓
+Reload (next session — resume loads evolved skills)
+```
+
+Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences).
+
+Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
+
+### Skill Effectiveness
+
+Every evolved skill tracked with A/B attribution:
+
+```
+/evolve history → Skill Effectiveness
+
+| Skill              | With | Without | Delta |
+|--------------------|------|---------|-------|
+| evo-ts-care        | 0.87 | 0.72    | +15%  |
+| evo-bash-discipline| 0.65 | 0.68    | -3%   |
+```
+
+Positive delta = effective. Negative = consider removing via `/evolve rollback`.
+
+### Cold-Start Presets
+
+On first session, stack-appropriate preset skills auto-apply:
+
+| Stack | Presets |
+|-------|---------|
+| Node.js/TypeScript | `evo-ts-care`, `evo-fix-build-fail` |
+| Go | `evo-go-care` |
+| Python | `evo-py-care` |
+| Rust | `evo-rs-care` |
+
+### Instinct Learning
+
+High-success patterns extracted and promoted across projects:
+
+```
+observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
+    → promote to global when observed in ≥ 2 projects
+```
+
+```bash
+/evolve              # Run now
+/evolve status       # Dashboard: scores, trends, patterns, skills
+/evolve history      # Full history + skill effectiveness
+/evolve cross-project # Cross-project pattern analysis
+/evolve rollback     # Restore previous best
+/evolve reset        # Clear all evolution data
+```
+
+---
 
 ## Hooks (Ring 0)
 
-Run invisibly. Single Rust binary (`epic-harness`) with subcommands.
+Run invisibly on every session. Single Rust binary (`epic-harness`) with subcommands.
 
 | Hook | When | Does |
 |------|------|------|
 | **resume** | Session start | Restore context, load memory, detect stack |
-| **guard** | Before Bash | Block force-push-to-main, rm -rf /, DROP prod |
+| **guard** | Before Bash | Block force-push-to-main, `rm -rf /`, DROP prod |
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
-| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution + GateGuard hints |
+| **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
 | **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
 
 Polish feeds back into observe: format failure → `lint_fail`, TypeScript error → `build_fail`. Edit→Error thrashing gets detected even when errors come from polish.
 
-Each session writes its own `session_{date}_{pid}_{random}.jsonl` — multiple sessions on the same project won't corrupt each other's data.
+Each session writes its own `session_{date}_{pid}_{random}.jsonl` — multiple concurrent sessions won't corrupt each other's data.
 
 ### Hook Profiles
 
@@ -275,6 +343,8 @@ blocked:
 warned:
   - pattern: docker\s+system\s+prune | msg: Docker prune — verify first
 ```
+
+---
 
 ## Team (`epic team`)
 
@@ -304,6 +374,8 @@ Multi-org: `epic team --org netflix` — separate topology per org.
 
 Merge strategy: changed agents prompt (default: keep existing, backup to `.history/`). Playbook always appends.
 
+---
+
 ## Multi-Tool Support
 
 All tools share the same `~/.harness/projects/{slug}/` data directory.
@@ -319,6 +391,57 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | **Aider** | —⁶ | — | — | — |
 
 ¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Guard at `BeforeModel` level · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
+
+---
+
+## Architecture: 4-Ring Model
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+        end
+        c7("/team")
+        c8("/evolve (manual)")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
+```
+
+---
+
+## Cross-Project Learning
+
+Opt-in to share failure patterns across projects:
+
+```bash
+touch ~/.harness/projects/{slug}/.cross-project-enabled
+```
+
+Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl`. Session start → shows hints from other projects' weak areas.
+
+---
 
 ## Unified Memory — WIP
 
@@ -369,104 +492,7 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 
 Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ days → tagged `stale`, excluded from recall. `pinned` tag prevents decay.
 
-## Evolve (Ring 3)
-
-Fuses [A-Evolve](https://github.com/A-EVO-Lab/a-evolve) automated evolution patterns into Claude Code's hook system.
-
-### Scoring
-
-Every tool call scored on 3 axes (weights configurable via `~/.harness/config.toml`):
-
-```
-composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
-```
-
-Failure classification (9 types): `type_error` · `syntax_error` · `test_fail` · `lint_fail` · `build_fail` · `permission_denied` · `timeout` · `not_found` · `runtime_error`
-
-### Pattern Detection
-
-| Pattern | Detects | Default threshold |
-|---------|---------|-------------------|
-| `repeated_same_error` | Same error N+ times | 3 |
-| `fix_then_break` | Edit success → build/test fails | 3 lookback, 2 cycles |
-| `long_debug_loop` | Stuck on same file | 5 operations |
-| `thrashing` | Edit↔Error alternating | 3 edits, 3 errors |
-
-### Evolution Flow
-
-```
-Observe (PostToolUse — 3-axis scoring)
-    ↓ obs/session_{id}.jsonl
-Analyze (SessionEnd)
-    ↓ per-tool, per-ext scores + patterns
-Propose (Solver — graduated by score: ≥0.90 skip, ≥0.70 moderate, <0.70 full)
-    ↓ SkillProposal[] with confidence
-Curate (Accept/Merge/Skip, feedback masked from solver)
-    ↓ evolved/{skill}/SKILL.md + meta.json
-Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
-    ↓ evolved_backup/ (best checkpoint)
-Instinct (high-success patterns → cross-project memory.db nodes)
-    ↓
-Reload (next session — resume loads evolved skills)
-```
-
-Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences).
-
-Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
-
-```bash
-/evolve              # Run now
-/evolve status       # Dashboard: scores, trends, patterns, skills
-/evolve history      # Full history + skill effectiveness
-/evolve cross-project # Cross-project pattern analysis
-/evolve rollback     # Restore previous best
-/evolve reset        # Clear all evolution data
-```
-
-### Skill Effectiveness
-
-Every evolved skill tracked with A/B attribution:
-
-```
-/evolve history → Skill Effectiveness
-
-| Skill              | With | Without | Delta |
-|--------------------|------|---------|-------|
-| evo-ts-care        | 0.87 | 0.72    | +15%  |
-| evo-bash-discipline| 0.65 | 0.68    | -3%   |
-```
-
-Positive delta = effective. Negative = consider removing via `/evolve rollback`.
-
-### Cold-Start Presets
-
-On first session, stack-appropriate preset skills auto-apply:
-
-| Stack | Presets |
-|-------|---------|
-| Node.js/TypeScript | `evo-ts-care`, `evo-fix-build-fail` |
-| Go | `evo-go-care` |
-| Python | `evo-py-care` |
-| Rust | `evo-rs-care` |
-
-### Instinct Learning
-
-High-success patterns extracted and promoted across projects:
-
-```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → promote to global when observed in ≥ 2 projects
-```
-
-## Cross-Project Learning
-
-Opt-in to share failure patterns across projects:
-
-```bash
-touch ~/.harness/projects/{slug}/.cross-project-enabled
-```
-
-Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl`. Session start → shows hints from other projects' weak areas.
+---
 
 ## Project Data
 
@@ -495,6 +521,8 @@ All data lives in `~/.harness/` (home directory), not in your project root. Surv
 ```
 
 Share safety rules with your team: `.harness/guard-rules.yaml` in the project root (committed to git).
+
+---
 
 ## Configuration
 
@@ -530,6 +558,8 @@ gated_promotion_min = 3
 # min_avg_score = 0.5
 ```
 
+---
+
 ## Development
 
 ```bash
@@ -539,6 +569,8 @@ cargo test                                                    # Tests
 ```
 
 Hooks look for the binary in two places: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
+
+---
 
 ## Links
 
