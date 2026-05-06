@@ -342,6 +342,12 @@ gated_promotion_min = 3
 
 # Maximum number of instinct nodes stored globally.
 # max_instincts = 20
+
+# Minimum session observations before instinct extraction runs.
+# min_observations = 10
+
+# Minimum session avg_score before instinct extraction runs.
+# min_avg_score = 0.5
 "#
 }
 

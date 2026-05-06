@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <img src="https://img.shields.io/badge/Version-0.1.0-brightgreen.svg" alt="Version">
+  <img src="https://img.shields.io/badge/Version-0.2.5-brightgreen.svg" alt="Version">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-purple.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Architecture-4_Ring-orange.svg" alt="4-Ring Architecture">
   <img src="https://img.shields.io/badge/Mode-Self_Evolving-green.svg" alt="Self Evolving">
@@ -203,7 +203,7 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 8 skills | ✓ 4 |
+| **Claude Code** | ✓ Full | ✓ 6 commands | ✓ 10 skills | ✓ 4 |
 | **Codex CLI** | ✓ Full¹ | ✓ 6 prompts | ✓ 7 | ✓ 4 |
 | **Gemini CLI** | ✓ Partial² | ✓ 6 commands | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ Full³ | ✓ 6 commands | ✓ via rules | ✓ 4 |
@@ -266,7 +266,7 @@ Fuses A-Evolve benchmark patterns into Claude Code's hook system.
 
 ### Scoring
 
-Every tool call scored on 3 axes (weights configurable via `src/hooks/common.rs`):
+Every tool call scored on 3 axes (weights configurable via `~/.harness/config.toml`):
 
 ```
 composite = 0.5 × tool_success + 0.3 × output_quality + 0.2 × execution_cost
@@ -417,6 +417,8 @@ gated_promotion_min = 3
 # confidence_threshold = 0.8
 # promotion_min_projects = 2
 # max_instincts = 20
+# min_observations = 10
+# min_avg_score = 0.5
 ```
 
 ## Development
