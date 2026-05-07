@@ -1,4 +1,11 @@
+pub mod config;
+pub mod evolve;
 pub mod hooks;
+pub mod shared;
+pub mod install;
+mod install_wizard;
 pub mod mem;
 pub mod orchestrate;
+pub mod serve;
 pub mod team;
+pub mod telemetry;

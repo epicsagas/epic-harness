@@ -1,7 +1,14 @@
+mod config;
+mod evolve;
 mod hooks;
+mod install;
+mod install_wizard;
 mod mem;
 mod orchestrate;
+mod serve;
+mod shared;
 mod team;
+mod telemetry;
 
 use std::env;
 use std::io::{self, IsTerminal, Read};
@@ -12,21 +19,21 @@ fn main() {
 
     // install / telemetry: skip consent check (they set it).
     if subcmd == "install" {
-        let code = hooks::install::run(&args[2..]);
+        let code = install::run(&args[2..]);
         std::process::exit(code);
     }
     if subcmd == "uninstall" {
-        let code = hooks::install::run_uninstall(&args[2..]);
+        let code = install::run_uninstall(&args[2..]);
         std::process::exit(code);
     }
     if subcmd == "telemetry" {
-        let code = hooks::telemetry::run_cli(&args[2..]);
+        let code = telemetry::run_cli(&args[2..]);
         std::process::exit(code);
     }
 
     // All other subcommands: auto-enable telemetry on first run (opt-out model).
     // Prints a one-time notice if consent was not yet set.
-    hooks::telemetry::ensure_consent_or_set_default();
+    telemetry::ensure_consent_or_set_default();
 
     if subcmd == "mem" {
         let code = mem::run(&args[1..]);
@@ -45,7 +52,7 @@ fn main() {
             .get(2)
             .and_then(|a| a.strip_prefix("--port="))
             .and_then(|p| p.parse::<u16>().ok());
-        std::process::exit(hooks::serve::run_serve(port));
+        std::process::exit(serve::run_serve(port));
     }
 
     // reflect --context: data collection mode (no stdin needed)

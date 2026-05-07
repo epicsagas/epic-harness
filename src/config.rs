@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use serde::Deserialize;
 
-use super::common;
+use crate::hooks::common;
 
 // ── Config Types ────────────────────────────────────
 

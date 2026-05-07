@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::common::*;
 use crate::mem::store;
-use super::telemetry::Telemetry;
+use crate::telemetry::Telemetry;
 
 /// Atomically acquire a session lock file.
 ///

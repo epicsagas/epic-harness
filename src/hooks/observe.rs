@@ -3,7 +3,7 @@ use std::fs;
 use std::sync::LazyLock;
 
 use super::common::*;
-use super::telemetry::{FailureClass, Telemetry, ToolCategory};
+use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
@@ -242,7 +242,7 @@ fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> O
 ///
 /// Uses static string slices exclusively to avoid heap allocations for hint text.
 pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
-    if !super::config::CONFIG.hook.gateguard_hints {
+    if !crate::config::CONFIG.hook.gateguard_hints {
         return;
     }
 

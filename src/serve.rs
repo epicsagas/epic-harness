@@ -3,13 +3,13 @@
 
 use tiny_http::{Response, Server};
 
-use super::common;
+use crate::hooks::common;
 use crate::orchestrate::state as orch;
 
 const DEFAULT_PORT: u16 = 7700;
 
 // HTML is embedded at compile time from assets/dashboard.html
-static DASHBOARD_HTML: &str = include_str!("../../assets/dashboard.html");
+static DASHBOARD_HTML: &str = include_str!("../assets/dashboard.html");
 
 pub fn run_serve(port: Option<u16>) -> i32 {
     let port = port.unwrap_or(DEFAULT_PORT);
