@@ -241,7 +241,7 @@ fn check_warned(cmd: &str) -> Vec<&'static str> {
 
 /// Returns true when `EPIC_ORCHESTRATION=enabled` or when `HARNESS_DIR/orchestrator` exists.
 fn is_orchestration_enabled() -> bool {
-    if std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled") {
+    if common::is_orchestration_enabled() {
         return true;
     }
     // Also enabled when the orchestrator directory exists
@@ -314,6 +314,18 @@ fn read_jsonl_tail(path: &Path, n: usize) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// Check if `needle` appears in `haystack` with a path boundary after it.
+/// Prevents partial matches like `/src/main.rs` matching `/src/main.rs.bak`.
+fn path_boundary_match(haystack: &str, needle: &str) -> bool {
+    let Some(pos) = haystack.find(needle) else { return false };
+    let end = pos + needle.len();
+    // needle 뒤에 오는 문자가 없거나 경계 문자여야 함
+    match haystack.as_bytes().get(end) {
+        None => true,
+        Some(&b) => b == b'/' || b == b' ' || b == b'\t' || b == b'\n' || b == b':',
+    }
+}
+
 /// Check if `file_path` appears in the recent entries of `stream.jsonl`.
 fn file_in_recent_entries(entries: &[serde_json::Value], file_path: &str) -> bool {
     entries.iter().any(|entry| {
@@ -326,9 +338,10 @@ fn file_in_recent_entries(entries: &[serde_json::Value], file_path: &str) -> boo
         {
             return true;
         }
-        // Also check action field (observe-style records)
+        // Also check action field (observe-style records) — use boundary match to
+        // avoid partial path hits like /src/main.rs matching /src/main.rs.bak
         if let Some(action) = entry.get("action").and_then(|v| v.as_str())
-            && action.contains(file_path)
+            && path_boundary_match(action, file_path)
         {
             return true;
         }
@@ -580,6 +593,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── Blocked commands ────────────────────────────
     #[test]
@@ -1038,6 +1052,25 @@ mod tests {
         assert!(!file_in_recent_entries(&entries, "/src/main.rs"));
     }
 
+    // ── R7: path boundary match tests ──
+
+    #[test]
+    fn file_in_recent_entries_no_partial_match() {
+        let entries = vec![serde_json::json!({
+            "action": "Edit /src/main.rs.bak: replaced fn"
+        })];
+        // /src/main.rs.bak는 /src/main.rs로 매칭되면 안 됨
+        assert!(!file_in_recent_entries(&entries, "/src/main.rs"));
+    }
+
+    #[test]
+    fn file_in_recent_entries_exact_match_with_colon() {
+        let entries = vec![serde_json::json!({
+            "action": "Edit /src/main.rs: replaced fn"
+        })];
+        assert!(file_in_recent_entries(&entries, "/src/main.rs"));
+    }
+
     #[test]
     fn detect_conflict_finds_other_agent() {
         let dir = tempfile::tempdir().unwrap();
@@ -1192,6 +1225,7 @@ mod tests {
     // ── run() integration with orchestration ────────────────
 
     #[test]
+    #[serial]
     fn run_orchestration_pause_blocks_edit() {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
@@ -1221,6 +1255,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_pause_not_targeting_passes() {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
@@ -1249,6 +1284,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_not_enabled_skips_checks() {
         // No HARNESS_DIR set — orchestration checks are skipped entirely
         unsafe {
@@ -1266,6 +1302,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_concurrent_warning_does_not_block() {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
@@ -1309,6 +1346,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_bash_tool_skipped() {
         // Bash tool should not trigger orchestration checks
         let dir = tempfile::tempdir().unwrap();

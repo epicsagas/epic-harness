@@ -171,7 +171,7 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
 
 /// Testable variant that accepts an explicit orchestrator directory.
 fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> Option<String> {
-    if std::env::var("EPIC_ORCHESTRATION").as_deref() != Ok("enabled") {
+    if !is_orchestration_enabled() {
         return None;
     }
 
@@ -199,9 +199,12 @@ fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> O
                 if digits.len() < 6 { return None; }
                 let (y, mo, d, h, mi, s_) = (digits[0], digits[1], digits[2], digits[3], digits[4], digits[5]);
                 // Simple UTC epoch approximation (no leap seconds, good enough for timeout)
-                let days: u64 = y * 365 + (y / 4) - (y / 100) + (y / 400)
-                    + if mo <= 2 { (mo + 9) * 153 + 2 } else { (mo - 3) * 153 + 2 } / 5
-                    + d - 719469;
+                let month_days: u64 = if mo <= 2 {
+                    (mo + 9) * 153 + 2
+                } else {
+                    (mo - 3) * 153 + 2
+                } / 5;
+                let days: u64 = y * 365 + (y / 4) - (y / 100) + (y / 400) + month_days + d - 719469;
                 Some(days * 86400 + h * 3600 + mi * 60 + s_)
             })
         })

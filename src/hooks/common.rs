@@ -754,6 +754,11 @@ pub fn compute_score(dims: &ScoreDimensions) -> f64 {
     (raw * 1000.0).round() / 1000.0
 }
 
+/// Returns true when EPIC_ORCHESTRATION=enabled env var is set.
+pub fn is_orchestration_enabled() -> bool {
+    std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled")
+}
+
 pub fn hash_string(s: &str) -> String {
     let mut hash: u32 = 0;
     for b in s.bytes() {

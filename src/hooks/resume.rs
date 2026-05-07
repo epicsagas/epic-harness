@@ -511,7 +511,7 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
     }
 
     // Only activate when EPIC_ORCHESTRATION is enabled
-    if std::env::var("EPIC_ORCHESTRATION").unwrap_or_default() != "enabled" {
+    if !is_orchestration_enabled() {
         return None;
     }
 
@@ -553,6 +553,7 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::path::PathBuf;
 
     /// Helper: return a unique lock path inside a temp dir for this test.
@@ -595,6 +596,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_returns_none_when_env_not_set() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
@@ -615,6 +617,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_returns_none_when_status_not_running() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
@@ -636,6 +639,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_returns_summary_when_active() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
@@ -686,6 +690,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_handles_missing_agent_status_gracefully() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
