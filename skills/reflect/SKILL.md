@@ -17,8 +17,7 @@ Block self-serving bias: "doing well" conclusions require concrete metrics.
 ```bash
 # HARNESS_DIR must be set in environment
 # If not: export HARNESS_DIR=$(epic-harness path)
-SCRIPT="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/reflect-context.sh"
-if [[ ! -f "$SCRIPT" ]]; then echo '{"error":"reflect-context.sh not found"}' >&2; exit 1; fi
+SCRIPT="$(dirname "$0")/reflect-context.sh"
 bash "$SCRIPT" 30 > /tmp/reflect_ctx.json
 ```
 
