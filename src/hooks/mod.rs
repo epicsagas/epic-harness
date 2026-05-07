@@ -1,13 +1,15 @@
 pub mod common;
 pub mod config;
 pub mod guard;
-mod install_wizard;
 pub mod install;
+mod install_wizard;
 pub mod mem;
 pub mod observe;
+pub mod orchestrate;
 pub mod polish;
 pub mod reflect;
 pub mod resume;
+pub mod serve;
 pub mod snapshot;
 pub mod team;
 pub mod telemetry;

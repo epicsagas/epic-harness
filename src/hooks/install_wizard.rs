@@ -4,7 +4,7 @@ use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::style::{Attribute, Print, ResetColor, SetAttribute, SetForegroundColor};
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use crossterm::{execute, queue};
 use std::io::{self, Write};
@@ -81,9 +81,7 @@ fn run_tui(tools: &[(&str, &str)]) -> io::Result<Vec<String>> {
             KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
                 cursor = cursor.saturating_sub(1);
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J')
-                if cursor + 1 < tools.len() =>
-            {
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') if cursor + 1 < tools.len() => {
                 cursor += 1;
             }
             KeyCode::Char(' ') => {
@@ -182,7 +180,9 @@ fn draw(
         Print("\r\n"),
         SetForegroundColor(DIM),
         Print(" ────────────────────────────────────────────────────────────────────────\r\n"),
-        Print("  ↑/↓ Move   Space Toggle   A All / none   N Clear   Enter Confirm   Esc Q Quit\r\n"),
+        Print(
+            "  ↑/↓ Move   Space Toggle   A All / none   N Clear   Enter Confirm   Esc Q Quit\r\n"
+        ),
         ResetColor,
     )?;
 

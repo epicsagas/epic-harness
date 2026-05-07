@@ -36,6 +36,7 @@ rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
 
 [dev-dependencies]
 tempfile = "3"
+serial_test = "3"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.gz"

@@ -6,9 +6,9 @@ use tiny_http::{Header, Method, Response, Server};
 
 use super::graph::rebuild_graph_json;
 use super::store::{
-    append_edge, delete_edge_by_id, delete_node_file, importance_for_type, now_iso, read_index,
-    read_node, remove_edges_for_node, remove_from_index, search_nodes, upsert_index,
-    validate_node_id, write_node, Edge, Node, NodeFrontmatter,
+    Edge, Node, NodeFrontmatter, append_edge, delete_edge_by_id, delete_node_file,
+    importance_for_type, now_iso, read_index, read_node, remove_edges_for_node, remove_from_index,
+    search_nodes, upsert_index, validate_node_id, write_node,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
@@ -16,7 +16,11 @@ const WEBVIEW_HTML: &str = include_str!("webview.html");
 fn cors_headers() -> Vec<Header> {
     vec![
         Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
-        Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, PUT, DELETE, OPTIONS").unwrap(),
+        Header::from_bytes(
+            b"Access-Control-Allow-Methods",
+            b"GET, POST, PUT, DELETE, OPTIONS",
+        )
+        .unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
         Header::from_bytes(b"Content-Type", b"application/json").unwrap(),
     ]
@@ -54,7 +58,8 @@ fn html_response(body: &str) -> Response<Cursor<Vec<u8>>> {
 }
 
 pub fn serve(args: &[String]) -> i32 {
-    let port: u16 = args.windows(2)
+    let port: u16 = args
+        .windows(2)
         .find(|w| w[0] == "--port")
         .and_then(|w| w[1].parse().ok())
         .unwrap_or(7700);
@@ -105,8 +110,12 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── DELETE /api/edges/:id ─────────────────────────
             _ if url.starts_with("/api/edges/") && matches!(request.method(), Method::Delete) => {
-                let edge_id = url.trim_start_matches("/api/edges/")
-                    .split('?').next().unwrap_or("").to_string();
+                let edge_id = url
+                    .trim_start_matches("/api/edges/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 if !validate_node_id(&edge_id) {
                     let body = "{\"error\":\"invalid edge id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -134,8 +143,12 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── GET /api/nodes/:id ────────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Get) => {
-                let id = url.trim_start_matches("/api/nodes/")
-                    .split('?').next().unwrap_or("").to_string();
+                let id = url
+                    .trim_start_matches("/api/nodes/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -166,8 +179,12 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── PUT /api/nodes/:id ────────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Put) => {
-                let id = url.trim_start_matches("/api/nodes/")
-                    .split('?').next().unwrap_or("").to_string();
+                let id = url
+                    .trim_start_matches("/api/nodes/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -185,8 +202,12 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── DELETE /api/nodes/:id ─────────────────────────
             _ if url.starts_with("/api/nodes/") && matches!(request.method(), Method::Delete) => {
-                let id = url.trim_start_matches("/api/nodes/")
-                    .split('?').next().unwrap_or("").to_string();
+                let id = url
+                    .trim_start_matches("/api/nodes/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     Box::new(move || json_response(&body, 400))
@@ -205,9 +226,9 @@ pub fn serve(args: &[String]) -> i32 {
                     .split('?')
                     .nth(1)
                     .and_then(|qs| {
-                        qs.split('&').find(|p| p.starts_with("q=")).map(|p| {
-                            percent_decode(p.trim_start_matches("q="))
-                        })
+                        qs.split('&')
+                            .find(|p| p.starts_with("q="))
+                            .map(|p| percent_decode(p.trim_start_matches("q=")))
                     })
                     .unwrap_or_default();
                 let results = do_search(&q);
@@ -216,9 +237,7 @@ pub fn serve(args: &[String]) -> i32 {
             }
 
             // ── OPTIONS (CORS preflight) ───────────────────────
-            (Method::Options, _) => {
-                Box::new(|| json_response("{}", 204))
-            }
+            (Method::Options, _) => Box::new(|| json_response("{}", 204)),
 
             // ── 404 ───────────────────────────────────────────
             _ => {
@@ -242,19 +261,32 @@ fn handle_post_node(body: &str) -> Result<String, String> {
 
     let tags: Vec<String> = v["tags"]
         .as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     let projects: Vec<String> = v["projects"]
         .as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
     let agents: Vec<String> = v["agents"]
         .as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
         .unwrap_or_default();
 
     let node_type = v["type"].as_str().unwrap_or("concept").to_string();
-    let importance = v["importance"].as_f64()
+    let importance = v["importance"]
+        .as_f64()
         .unwrap_or_else(|| importance_for_type(&node_type))
         .clamp(0.0, 1.0);
     let node = Node {
@@ -293,7 +325,10 @@ fn handle_put_node(id: &str, body: &str) -> Result<(), String> {
         node.body = b.to_string();
     }
     if let Some(tags) = v["tags"].as_array() {
-        node.frontmatter.tags = tags.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
+        node.frontmatter.tags = tags
+            .iter()
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect();
     }
     if let Some(imp) = v["importance"].as_f64() {
         node.frontmatter.importance = imp.clamp(0.0, 1.0);
@@ -330,7 +365,12 @@ fn do_search(query: &str) -> Vec<serde_json::Value> {
     search_nodes(query, 20)
         .into_iter()
         .map(|n| {
-            let snippet: String = n.body.chars().take(160).collect::<String>().replace('\n', " ");
+            let snippet: String = n
+                .body
+                .chars()
+                .take(160)
+                .collect::<String>()
+                .replace('\n', " ");
             json!({
                 "id": n.frontmatter.id,
                 "title": n.frontmatter.title,
@@ -347,7 +387,7 @@ fn percent_decode(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            let hex = std::str::from_utf8(&bytes[i+1..i+3]).unwrap_or("");
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
             if let Ok(b) = u8::from_str_radix(hex, 16) {
                 decoded.push(b);
                 i += 3;

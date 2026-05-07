@@ -27,6 +27,16 @@ Check if `$HARNESS_DIR/team/` exists — if yes, use project-specific agents.
 git checkout -b feature/{goal_slug}
 ```
 
+**Initialize orchestration (if EPIC_ORCHESTRATION enabled):**
+If `EPIC_ORCHESTRATION=enabled` is set in environment:
+1. Run: `HARNESS_DIR=$(epic-harness path)`
+2. Initialize orchestration run:
+   ```bash
+   mkdir -p "$HARNESS_DIR/orchestrator/agents"
+   ```
+3. Create `run.json` with the task plan (agents, dependencies)
+4. Create `agents/{id}/task.json` for each planned subagent
+
 ### Step 1: Plan
 
 Map each Requirement → one or more Tasks. Every task must reference its source requirement:
@@ -65,6 +75,13 @@ For each task, launch a subagent (Agent tool) with:
 | Task A, B parallel | Yes | No overlap | ❌ No |
 | Task A, B parallel | Yes | Overlap exists | ✅ Yes |
 
+**Orchestration-aware execution:**
+When `EPIC_ORCHESTRATION=enabled`:
+- Before launching each subagent, write its task definition to `$HARNESS_DIR/orchestrator/agents/{id}/task.json`
+- The `orchestrate` Rust hook will automatically track status updates via Pre/Post Agent tool invocations
+- Subagent output format should include structured state for the hook to parse
+- After all subagents complete, read `$HARNESS_DIR/orchestrator/run.json` to get final orchestration status
+
 ### Subagent Result States (Step 2.5)
 
 Every subagent must report one of 4 states on completion:
@@ -102,6 +119,12 @@ After all tasks complete:
 - Verify each Acceptance Criterion (AC1, AC2, ...) is demonstrably met
 - If anything fails, dispatch a subagent to fix it
 
+**Orchestration integration check:**
+If `EPIC_ORCHESTRATION=enabled`:
+1. Read `$HARNESS_DIR/orchestrator/run.json` for final status
+2. If any agents are in BLOCKED or FAILED state, include in the report
+3. If run status is "aborted" (user cancelled), note this in the report
+
 ### Step 4: Report
 
 ```
@@ -114,6 +137,8 @@ After all tasks complete:
 - Subagent states: X DONE, Y CONCERNS, Z BLOCKED
 - Concerns resolved: [list] / [unresolved list]
 - Remaining issues: none / [list]
+- Orchestration: enabled/disabled
+- Agent states: [from orchestrator state]
 ```
 
 Tell the user: **"Build complete. Run `/check` to verify before shipping."**

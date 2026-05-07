@@ -14,11 +14,14 @@ At the start of **every response** during an active orbit:
 2. Find the file with `"status": "running"`
 3. Read it. Verify `phase` matches where you left off
 4. **If `phase` is ahead of where you think you are, trust the file** — you may have compacted
-5. Resume from the documented `phase`. Do NOT re-ask mode selection, re-run spec, or re-discover
+5. **Conflict resolution (crash-mid-update)**: If `phase_history` contains an entry for the current `phase` with a completed timestamp, treat that phase as done and advance to the next phase — `phase_history` wins over the `phase` field when they disagree. This covers the case where the state file was partially written before a crash.
+6. Resume from the resolved phase. Do NOT re-ask mode selection, re-run spec, or re-discover
 
 If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
 
-**Crash recovery**: If `updated_at` is older than 30 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history`, and resume from there. Report the recovery to the user.
+**Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
+
+> **Note:** The crash staleness threshold (45 min) is intentionally larger than the pipeline deadline (30 min) to avoid misclassifying a timeout'd-but-active pipeline as crashed. A pipeline that hit its deadline will show `status: timeout`, not `status: running`.
 
 ---
 
@@ -33,7 +36,12 @@ mkdir -p $HARNESS_DIR/orbit
 
 Before creating `PIPELINE-{timestamp}.json`:
 
-1. Check: `grep -l '"status".*"running"' $HARNESS_DIR/orbit/PIPELINE-*.json 2>/dev/null`
+1. Check with a JSON-aware read (not regex grep, which can false-positive on field values):
+   ```bash
+   for f in $HARNESS_DIR/orbit/PIPELINE-*.json; do
+     [ -f "$f" ] && [ "$(jq -r .status "$f" 2>/dev/null)" = "running" ] && echo "$f" && break
+   done
+   ```
 2. If a match is found: **STOP**. Tell the user:
    > "An orbit pipeline is already active (PIPELINE-{id}, phase={phase}). Say **orbit abort** to cancel it, or wait for it to complete."
 3. Do NOT create a new pipeline file.
@@ -68,6 +76,11 @@ At the start of every step (Step 3 through Step 7):
 1. Read `deadline` from pipeline state
 2. If `now > deadline`: set `"status": "timeout"`, report to user, **STOP**
 3. Default deadline is 30 minutes from `started_at`. User may override by editing the field.
+**Orchestration setup (if EPIC_ORCHESTRATION enabled):**
+If `EPIC_ORCHESTRATION=enabled`:
+1. Generate an `orchestration_id` (same as pipeline id)
+2. Add `orchestration_id` field to the pipeline JSON
+3. The Rust `orchestrate` hook will use this ID to link pipeline state to orchestrator state
 
 ---
 
@@ -171,8 +184,8 @@ Update state: `"phase": "go"`.
 Before creating a branch, verify git state:
 
 ```bash
-# Clean working tree?
-git diff --quiet HEAD || (echo "ERROR: Dirty working tree. Commit or stash changes first." && exit 1)
+# Clean working tree? (--porcelain catches untracked files that git diff --quiet HEAD misses)
+[ -z "$(git status --porcelain)" ] || (echo "ERROR: Dirty working tree or untracked files. Commit or stash first." && exit 1)
 # Not on detached HEAD?
 git symbolic-ref -q HEAD || (echo "ERROR: Detached HEAD. Checkout a branch first." && exit 1)
 # Branch doesn't already exist?
@@ -215,6 +228,12 @@ Sanitize `goal_slug`: only `a-z`, `0-9`, `-`. Replace invalid characters with `-
 - Subagents: X DONE, Y CONCERNS, Z BLOCKED
 ```
 
+**Orchestration-aware Go Phase:**
+When `orchestration_id` is present in pipeline state:
+1. Delegate agent management to the orchestrator — the `/go` command's orchestration extensions handle this
+2. The Go Phase reads `$HARNESS_DIR/orchestrator/run.json` for real-time agent status instead of waiting for background notifications
+3. After Go Phase completes, include orchestration metrics in the Go Report
+
 Push `{"phase": "go", "status": "complete"}` to `phase_history` → **Step 4**.
 
 ---
@@ -241,6 +260,12 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 - Database: migration safety, rollback plan
 - Infra: config validation, secret detection
 
+**Orchestration-aware Check:**
+When orchestration is active:
+1. The reviewer agent reads `$HARNESS_DIR/orchestrator/` for agent activity history
+2. The auditor checks for concurrent write conflicts logged in agent streams
+3. Include orchestration-specific metrics in the Check Report
+
 **Check Report:**
 ```
 ## Check Report
@@ -258,6 +283,8 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 ```
 
 **Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`** — this is a separate file, not embedded in JSON. Set `"check_report": "$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md"` in pipeline state. This ensures the report survives context compaction.
+
+> **Security note:** `pipeline_id` used in the filename must contain only `a-z`, `0-9`, `-`, `_`. Replace any other characters with `-` before constructing the path. This prevents path traversal via a malformed pipeline ID.
 
 → **Step 5**.
 
@@ -282,6 +309,14 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 > **Orbit paused** — 3 check cycles failed. Decide:
 > - **"continue"** — another fix cycle (increments `max_retries`)
 > - **"abort"** — stop, set `"status": "aborted"`
+
+**Orchestration cleanup:**
+On PASS or WARN:
+1. Update `$HARNESS_DIR/orchestrator/run.json` status to "complete"
+2. Preserve orchestrator state directory for /status and /evolve analysis
+On FAIL:
+1. Keep orchestrator state for debugging
+2. Include agent stream data in Action Items for targeted fixes
 
 ---
 
@@ -320,6 +355,12 @@ gh pr create --title "<goal from spec>" --body "$(cat <<'EOF'
 ## Check Report
 <content of $HARNESS_DIR/orbit/CHECK-{pipeline_id}.md>
 
+**Orchestration data in PR:**
+Include in PR body:
+- Orchestration ID
+- Agent count and final states
+- Total orchestration elapsed time
+
 ## Test Plan
 - [ ] Unit tests pass
 - [ ] Integration tests pass
@@ -328,18 +369,51 @@ EOF
 )"
 ```
 
-**6d. CI:** `gh pr checks <PR_NUMBER> --watch` — diagnose and fix automatically on failure.
+**6d. CI:** Check CI status — do not block orbit on CI:
+
+```bash
+# Check if gh is available and CI is configured
+if command -v gh &>/dev/null && gh pr checks <PR_NUMBER> 2>/dev/null | grep -q .; then
+  CI_RETRY=0
+  CI_MAX_RETRIES=2
+  while [ $CI_RETRY -le $CI_MAX_RETRIES ]; do
+    gh pr checks <PR_NUMBER> --watch
+    if [ $? -eq 0 ]; then
+      CI_STATUS="PASS"
+      break
+    fi
+    CI_RETRY=$((CI_RETRY + 1))
+    if [ $CI_RETRY -le $CI_MAX_RETRIES ]; then
+      # Diagnose and fix automatically, then re-check
+      echo "CI failed (attempt $CI_RETRY/$CI_MAX_RETRIES) — diagnosing and fixing..."
+    else
+      CI_STATUS="FAIL"
+    fi
+  done
+else
+  # No CI configured (e.g., CodeCommit without gh Actions) — skip
+  CI_STATUS="N/A"
+  CI_NOTE="No CI configured — skipped"
+fi
+```
+
+- CI fails → diagnose and fix automatically, retry up to 2 times.
+- All retries exhausted → record `CI: FAIL`, proceed to Step 7 (evolve will analyze the failure pattern).
+- CI absent / `gh` not available → set `CI: N/A`, proceed immediately to Step 7.
+- Do NOT block orbit progression regardless of CI outcome.
 
 **Ship Report:**
 ```
 ## Ship Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - PR: <URL>
-- CI: PASS/FAIL
+- CI: PASS/FAIL/N/A
 - Ready to merge: YES/NO
 ```
 
 Push `{"phase": "ship", "status": "complete"}` to `phase_history`.
+
+> **Orbit context:** After pushing ship to `phase_history`, **immediately proceed to Step 7 (Orbit Complete + Evolve)**. Do NOT stop here.
 
 ---
 
@@ -364,6 +438,8 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 | Check | PASS     | {check_fail_count}|
 | Ship  | complete | 0                |
 
+| Orchestration | {enabled/disabled} | {agent_count} agents |
+
 ### Key Decisions
 {from council/direct synthesis}
 
@@ -374,7 +450,7 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 
 ### Step 7a: Evolve (Auto)
 
-PR created + CI green → run `/evolve` automatically:
+**Always run** — regardless of CI status (PASS / FAIL / N/A). Evolve on every completed orbit:
 1. Read `$HARNESS_DIR/obs/` session logs
 2. Read `$HARNESS_DIR/metrics.json` + `evolution.jsonl`
 3. Detect failure patterns, weak tools, weak file types

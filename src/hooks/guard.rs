@@ -1,8 +1,9 @@
 use regex::Regex;
+use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Instant;
 
-use super::common::{self, HookInput, hint, should_run, PROFILE_GUARD};
+use super::common::{self, CONFLICT_LOOKBACK, HookInput, PROFILE_GUARD, hint, should_run};
 use super::telemetry::{RuleKind, Telemetry};
 
 // ── Orbit State Cache ─────────────────────────────────
@@ -12,6 +13,10 @@ use super::telemetry::{RuleKind, Telemetry};
 struct OrbitCache {
     value: Option<serde_json::Value>,
     cached_at: Instant,
+    /// False until the first real directory scan has been performed.
+    /// Ensures the first call always scans regardless of elapsed time,
+    /// eliminating any dependence on clock arithmetic for the initial state.
+    initialized: bool,
 }
 
 static ORBIT_CACHE: OnceLock<Mutex<OrbitCache>> = OnceLock::new();
@@ -25,15 +30,18 @@ fn cached_orbit_state() -> Option<serde_json::Value> {
         Mutex::new(OrbitCache {
             value: None,
             cached_at: Instant::now(),
+            initialized: false,
         })
     });
     let mut guard = cache.lock().unwrap();
-    if guard.cached_at.elapsed().as_secs() < ORBIT_CACHE_TTL_SECS {
+    let expired = !guard.initialized || guard.cached_at.elapsed().as_secs() >= ORBIT_CACHE_TTL_SECS;
+    if !expired {
         return guard.value.clone();
     }
     let value = common::read_active_orbit_state();
     guard.value = value.clone();
     guard.cached_at = Instant::now();
+    guard.initialized = true;
     value
 }
 
@@ -50,6 +58,10 @@ fn parse_iso_to_epoch(s: &str) -> Option<u64> {
         return None;
     }
     let year: u64 = s.get(0..4)?.parse().ok()?;
+    // Years before 1970 produce a negative epoch — reject to avoid false deadline warnings.
+    if year < 1970 {
+        return None;
+    }
     let month: u64 = s.get(5..7)?.parse().ok()?;
     let day: u64 = s.get(8..10)?.parse().ok()?;
     let hour: u64 = s.get(11..13)?.parse().ok()?;
@@ -59,7 +71,11 @@ fn parse_iso_to_epoch(s: &str) -> Option<u64> {
     // Days from year
     let mut days: u64 = 0;
     for y in 1970..year {
-        days += if y.is_multiple_of(4) && !y.is_multiple_of(100) || y.is_multiple_of(400) { 366 } else { 365 };
+        days += if y.is_multiple_of(4) && !y.is_multiple_of(100) || y.is_multiple_of(400) {
+            366
+        } else {
+            365
+        };
     }
     let leap = year.is_multiple_of(4) && !year.is_multiple_of(100) || year.is_multiple_of(400);
     let month_days: [u64; 12] = if leap {
@@ -99,8 +115,9 @@ const BLOCKED_RULES: &[BuiltinRule] = &[
 /// Types: feat, fix, build, chore, ci, docs, style, refactor, perf, test
 static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+"
-    ).unwrap()
+        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+",
+    )
+    .unwrap()
 });
 
 /// Extract the commit message from a `git commit -m "..."` command.
@@ -116,9 +133,8 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     };
 
     // HEREDOC: find delimiter after <<, then find that delimiter on its own line
-    static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
-    });
+    static HEREDOC_START: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap());
     if let Some(caps) = HEREDOC_START.captures(cmd) {
         let delim = caps[1].to_string();
         let match_end = caps.get(0).unwrap().end();
@@ -138,12 +154,10 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     // and to allow the other quote type inside the message.
     // Use non-greedy .*? so we capture the FIRST -m argument (the subject),
     // not the last one (which would be the body in `git commit -m "subj" -m "body"`).
-    static SIMPLE_DQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap()
-    });
-    static SIMPLE_SQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap()
-    });
+    static SIMPLE_DQ: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap());
+    static SIMPLE_SQ: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap());
     if let Some(caps) = SIMPLE_DQ.captures(cmd) {
         return Some(caps[1].trim().to_string());
     }
@@ -225,9 +239,251 @@ fn check_warned(cmd: &str) -> Vec<&'static str> {
         .collect()
 }
 
+// ── Orchestration: Concurrent Write Conflict Detection ──────
+
+/// Returns true when `EPIC_ORCHESTRATION=enabled` or when `HARNESS_DIR/orchestrator` exists.
+fn is_orchestration_enabled() -> bool {
+    if common::is_orchestration_enabled() {
+        return true;
+    }
+    // Also enabled when the orchestrator directory exists
+    // (used for testing without env var races)
+    if orchestrator_dir().is_some() {
+        return true;
+    }
+    false
+}
+
+/// Extract the file path targeted by an Edit or Write tool_input.
+fn extract_file_path_from_tool_input(tool_input: &serde_json::Value) -> Option<String> {
+    tool_input
+        .get("file_path")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+/// Resolve the orchestrator base directory from `$HARNESS_DIR/orchestrator`.
+fn orchestrator_dir() -> Option<PathBuf> {
+    std::env::var("HARNESS_DIR")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .map(|p| p.join("orchestrator"))
+        .filter(|p| p.is_dir())
+}
+
+/// Return agent IDs whose `status.json` reports `"running"`.
+fn running_agent_ids(orch_dir: &Path) -> Vec<String> {
+    let agents_dir = orch_dir.join("agents");
+    if !agents_dir.is_dir() {
+        return vec![];
+    }
+    let mut ids = vec![];
+    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+        for entry in entries.flatten() {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let agent_id = match entry.file_name().into_string() {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let status_path = entry.path().join("status.json");
+            if let Ok(content) = std::fs::read_to_string(&status_path)
+                && let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content)
+                && doc.get("status").and_then(|v| v.as_str()) == Some("running")
+            {
+                ids.push(agent_id);
+            }
+        }
+    }
+    ids
+}
+
+/// Read the last N lines of a JSONL file, parsed as generic JSON values.
+fn read_jsonl_tail(path: &Path, n: usize) -> Vec<serde_json::Value> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    content
+        .lines()
+        .filter(|l| !l.is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .rev()
+        .take(n)
+        .collect()
+}
+
+/// Check if `needle` appears in `haystack` with a path boundary after it.
+/// Prevents partial matches like `/src/main.rs` matching `/src/main.rs.bak`.
+fn path_boundary_match(haystack: &str, needle: &str) -> bool {
+    let Some(pos) = haystack.find(needle) else {
+        return false;
+    };
+    let end = pos + needle.len();
+    // needle 뒤에 오는 문자가 없거나 경계 문자여야 함
+    match haystack.as_bytes().get(end) {
+        None => true,
+        Some(&b) => b == b'/' || b == b' ' || b == b'\t' || b == b'\n' || b == b':',
+    }
+}
+
+/// Check if `file_path` appears in the recent entries of `stream.jsonl`.
+fn file_in_recent_entries(entries: &[serde_json::Value], file_path: &str) -> bool {
+    entries.iter().any(|entry| {
+        // Check tool_input.file_path
+        if let Some(fp) = entry
+            .get("tool_input")
+            .and_then(|v| v.get("file_path"))
+            .and_then(|v| v.as_str())
+            && fp == file_path
+        {
+            return true;
+        }
+        // Also check action field (observe-style records) — use boundary match to
+        // avoid partial path hits like /src/main.rs matching /src/main.rs.bak
+        if let Some(action) = entry.get("action").and_then(|v| v.as_str())
+            && path_boundary_match(action, file_path)
+        {
+            return true;
+        }
+        false
+    })
+}
+
+/// Detect concurrent write conflicts: returns agent IDs that recently modified
+/// the same file path, excluding `exclude_agent_id`.
+/// Accepts an explicit orchestrator directory for testability.
+fn detect_concurrent_write_conflict(
+    file_path: &str,
+    exclude_agent_id: Option<&str>,
+    orch_dir: &Path,
+) -> Vec<String> {
+    let running = running_agent_ids(orch_dir);
+    let mut conflicts = vec![];
+
+    for agent_id in &running {
+        if let Some(exclude) = exclude_agent_id
+            && agent_id == exclude
+        {
+            continue;
+        }
+        let stream_path = orch_dir.join("agents").join(agent_id).join("stream.jsonl");
+        if !stream_path.is_file() {
+            continue;
+        }
+        let recent = read_jsonl_tail(&stream_path, CONFLICT_LOOKBACK);
+        if file_in_recent_entries(&recent, file_path) {
+            conflicts.push(agent_id.clone());
+        }
+    }
+    conflicts
+}
+
+/// Current agent ID from `EPIC_AGENT_ID` env var.
+fn current_agent_id() -> Option<String> {
+    std::env::var("EPIC_AGENT_ID").ok()
+}
+
+/// Check if `control.json` has a "pause" directive targeting the current agent.
+/// Returns true if the tool call should be blocked.
+/// Accepts an explicit orchestrator directory for testability.
+fn check_control_json_pause(current_agent: Option<&str>, orch_dir: &Path) -> bool {
+    let control_path = orch_dir.join("control.json");
+    let content = match std::fs::read_to_string(&control_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let doc: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(d) => d,
+        Err(_) => return false,
+    };
+
+    // Format 1: ControlDirective style {"action": "pause", "target": "agent-x" or "all"}
+    if let Some(action) = doc.get("action").and_then(|v| v.as_str()) {
+        if action == "pause" {
+            let target = doc.get("target").and_then(|v| v.as_str()).unwrap_or("all");
+            if target == "all" {
+                return true;
+            }
+            if let Some(agent) = current_agent {
+                return target == agent;
+            }
+        }
+        return false;
+    }
+
+    // Format 2: Legacy {"pause": ["agent-1", "agent-2"]} or {"pause": "agent-1"} or {"pause": true}
+    let pause_val = match doc.get("pause") {
+        Some(v) => v,
+        None => return false,
+    };
+    if pause_val.is_boolean() {
+        return pause_val.as_bool().unwrap_or(false);
+    }
+    if pause_val.is_string() {
+        if let Some(agent) = current_agent {
+            return pause_val.as_str() == Some(agent);
+        }
+        return false;
+    }
+    if let Some(arr) = pause_val.as_array() {
+        if let Some(agent) = current_agent {
+            return arr.iter().any(|v| v.as_str() == Some(agent));
+        }
+        return false;
+    }
+    false
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_GUARD) {
         return 0;
+    }
+
+    // ── Orchestration checks (Edit/Write tools only) ────
+    if is_orchestration_enabled() {
+        let tool_name = input.tool_name.as_deref().unwrap_or("");
+        let tool_lower = tool_name.to_lowercase();
+
+        if tool_lower == "edit" || tool_lower == "write" {
+            let orch_dir = orchestrator_dir();
+
+            // control.json pause check — blocks the tool call entirely
+            let agent_id = current_agent_id();
+            if let Some(ref orch) = orch_dir
+                && check_control_json_pause(agent_id.as_deref(), orch)
+            {
+                hint(
+                    "guard",
+                    &format!(
+                        "BLOCKED: control.json pause directive active for agent {}",
+                        agent_id.as_deref().unwrap_or("unknown")
+                    ),
+                );
+                return 2;
+            }
+
+            // Concurrent write conflict detection — informational warning only
+            if let Some(ref tool_input) = input.tool_input
+                && let Some(file_path) = extract_file_path_from_tool_input(tool_input)
+                && let Some(ref orch) = orch_dir
+            {
+                let conflicts =
+                    detect_concurrent_write_conflict(&file_path, agent_id.as_deref(), orch);
+                for other_id in &conflicts {
+                    hint(
+                        "guard",
+                        &format!(
+                            "Concurrent write conflict: agent {} recently modified {}",
+                            other_id, file_path
+                        ),
+                    );
+                }
+            }
+        }
     }
 
     let cmd = input
@@ -247,22 +503,32 @@ pub fn run(input: &HookInput) -> i32 {
     {
         let sanitize = common::sanitize_orbit_field;
         let orbit_branch = state.get("branch").and_then(|v| v.as_str()).unwrap_or("");
-        let pipeline_id = state.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let pipeline_id = state
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
 
         // Warn on branch-switching commands during active orbit
         if !orbit_branch.is_empty() && CHECKOUT_RE.is_match(cmd) {
-            hint("guard", &format!(
-                "WARNING: Orbit pipeline {} active on branch '{}'. Switching branches may break the pipeline.",
-                sanitize(pipeline_id), sanitize(orbit_branch)
-            ));
+            hint(
+                "guard",
+                &format!(
+                    "WARNING: Orbit pipeline {} active on branch '{}'. Switching branches may break the pipeline.",
+                    sanitize(pipeline_id),
+                    sanitize(orbit_branch)
+                ),
+            );
         }
 
         // Warn on rm commands targeting orbit files/directories
         if ORBIT_RM_RE.is_match(cmd) {
-            hint("guard", &format!(
-                "WARNING: Orbit pipeline {} is active. Removing orbit files may cause data loss.",
-                sanitize(pipeline_id)
-            ));
+            hint(
+                "guard",
+                &format!(
+                    "WARNING: Orbit pipeline {} is active. Removing orbit files may cause data loss.",
+                    sanitize(pipeline_id)
+                ),
+            );
         }
 
         // Check deadline timeout
@@ -274,10 +540,13 @@ pub fn run(input: &HookInput) -> i32 {
                 .unwrap_or_default()
                 .as_secs();
             if now_secs > deadline_secs {
-                hint("guard", &format!(
-                    "WARNING: Orbit pipeline {} has exceeded its deadline. Consider aborting or extending.",
-                    sanitize(pipeline_id)
-                ));
+                hint(
+                    "guard",
+                    &format!(
+                        "WARNING: Orbit pipeline {} has exceeded its deadline. Consider aborting or extending.",
+                        sanitize(pipeline_id)
+                    ),
+                );
             }
         }
     }
@@ -341,6 +610,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── Blocked commands ────────────────────────────
     #[test]
@@ -451,17 +721,24 @@ mod tests {
     // ── Conventional Commits ─────────────────────────
     #[test]
     fn cc_valid_feat() {
-        assert!(check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#)
+                .is_none()
+        );
     }
 
     #[test]
     fn cc_valid_fix_no_scope() {
-        assert!(check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none()
+        );
     }
 
     #[test]
     fn cc_valid_breaking() {
-        assert!(check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none()
+        );
     }
 
     #[test]
@@ -528,14 +805,20 @@ mod tests {
 
     #[test]
     fn cc_valid_multi_scope() {
-        assert!(check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#)
+                .is_none()
+        );
     }
 
     #[test]
     fn cc_valid_multi_m_body() {
         // Second -m is the body; subject should be validated, not the body line
         let cmd = r#"git commit -m "fix(mem): resolve injection" -m "- use rusqlite params""#;
-        assert!(check_conventional_commit(cmd).is_none(), "subject is valid CC, body must be ignored");
+        assert!(
+            check_conventional_commit(cmd).is_none(),
+            "subject is valid CC, body must be ignored"
+        );
     }
 
     #[test]
@@ -633,6 +916,13 @@ mod tests {
         assert_eq!(parse_iso_to_epoch("YYYY-MM-DDTHH:MM:SSZ"), None);
     }
 
+    #[test]
+    fn parse_iso_epoch_rejects_pre_epoch_year() {
+        // Years before 1970 must return None to prevent false deadline warnings
+        assert_eq!(parse_iso_to_epoch("1969-12-31T23:59:59Z"), None);
+        assert_eq!(parse_iso_to_epoch("0001-01-01T00:00:00Z"), None);
+    }
+
     /// Verify that a safe command (no block/warn) goes through the entire
     /// run() without touching telemetry. We confirm this indirectly: the
     /// OnceCell must still be unset after run() returns 0 for a safe command
@@ -693,10 +983,10 @@ mod tests {
     fn orbit_rm_no_match_safe_commands() {
         assert!(!ORBIT_RM_RE.is_match("ls orbit/"));
         assert!(!ORBIT_RM_RE.is_match("cat orbit/PIPELINE.json"));
-        assert!(!ORBIT_RM_RE.is_match("git rm file"));        // no 'orbit'
+        assert!(!ORBIT_RM_RE.is_match("git rm file")); // no 'orbit'
         assert!(!ORBIT_RM_RE.is_match("remove orbit files")); // 'remove' ≠ \brm\b
-        assert!(!ORBIT_RM_RE.is_match("rm -rf orbital"));     // \b rejects 'orbital'
-        assert!(!ORBIT_RM_RE.is_match("rm -rf myorbit"));     // \b rejects 'myorbit'
+        assert!(!ORBIT_RM_RE.is_match("rm -rf orbital")); // \b rejects 'orbital'
+        assert!(!ORBIT_RM_RE.is_match("rm -rf myorbit")); // \b rejects 'myorbit'
     }
 
     // ── Orbit cache ────────────────────────────────────
@@ -706,9 +996,391 @@ mod tests {
     }
 
     #[test]
-    fn cached_orbit_state_returns_none_when_no_harness() {
-        // Without a ~/.harness/projects/{slug}/orbit directory, the cache
-        // must return None and never panic.
-        assert!(cached_orbit_state().is_none());
+    fn cached_orbit_state_does_not_panic() {
+        // cached_orbit_state() must never panic regardless of whether an orbit
+        // directory or running pipeline exists in the local environment.
+        let _ = cached_orbit_state();
+    }
+
+    // ── Orchestration: concurrent write conflict detection ──
+
+    #[test]
+    fn extract_file_path_from_edit_input() {
+        let input = serde_json::json!({"file_path": "/src/main.rs", "old_string": "fn main()", "new_string": "fn main() {}"});
+        assert_eq!(
+            extract_file_path_from_tool_input(&input),
+            Some("/src/main.rs".into())
+        );
+    }
+
+    #[test]
+    fn extract_file_path_from_write_input() {
+        let input = serde_json::json!({"file_path": "/src/lib.ts", "content": "export {}"});
+        assert_eq!(
+            extract_file_path_from_tool_input(&input),
+            Some("/src/lib.ts".into())
+        );
+    }
+
+    #[test]
+    fn extract_file_path_missing_returns_none() {
+        let input = serde_json::json!({"command": "git status"});
+        assert_eq!(extract_file_path_from_tool_input(&input), None);
+    }
+
+    #[test]
+    fn extract_file_path_empty_returns_none() {
+        let input = serde_json::json!({"file_path": "", "content": ""});
+        assert_eq!(extract_file_path_from_tool_input(&input), None);
+    }
+
+    #[test]
+    fn read_jsonl_tail_reads_last_n() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stream.jsonl");
+        std::fs::write(
+            &path,
+            "{\"seq\":1}\n{\"seq\":2}\n{\"seq\":3}\n{\"seq\":4}\n{\"seq\":5}\n",
+        )
+        .unwrap();
+        let entries = read_jsonl_tail(&path, 3);
+        assert_eq!(entries.len(), 3);
+        // rev order: 5, 4, 3
+        assert_eq!(entries[0]["seq"], 5);
+        assert_eq!(entries[1]["seq"], 4);
+        assert_eq!(entries[2]["seq"], 3);
+    }
+
+    #[test]
+    fn read_jsonl_tail_missing_file_empty() {
+        let path = std::path::Path::new("/tmp/nonexistent_epic_test_file.jsonl");
+        let entries = read_jsonl_tail(path, 3);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn file_in_recent_entries_matches_tool_input_file_path() {
+        let entries = vec![serde_json::json!({
+            "tool_input": {"file_path": "/src/main.rs"}
+        })];
+        assert!(file_in_recent_entries(&entries, "/src/main.rs"));
+        assert!(!file_in_recent_entries(&entries, "/src/other.rs"));
+    }
+
+    #[test]
+    fn file_in_recent_entries_matches_action_field() {
+        let entries = vec![serde_json::json!({
+            "action": "Edit /src/lib.rs: replaced fn"
+        })];
+        assert!(file_in_recent_entries(&entries, "/src/lib.rs"));
+        assert!(!file_in_recent_entries(&entries, "/src/main.rs"));
+    }
+
+    #[test]
+    fn file_in_recent_entries_empty_no_match() {
+        let entries: Vec<serde_json::Value> = vec![];
+        assert!(!file_in_recent_entries(&entries, "/src/main.rs"));
+    }
+
+    // ── R7: path boundary match tests ──
+
+    #[test]
+    fn file_in_recent_entries_no_partial_match() {
+        let entries = vec![serde_json::json!({
+            "action": "Edit /src/main.rs.bak: replaced fn"
+        })];
+        // /src/main.rs.bak는 /src/main.rs로 매칭되면 안 됨
+        assert!(!file_in_recent_entries(&entries, "/src/main.rs"));
+    }
+
+    #[test]
+    fn file_in_recent_entries_exact_match_with_colon() {
+        let entries = vec![serde_json::json!({
+            "action": "Edit /src/main.rs: replaced fn"
+        })];
+        assert!(file_in_recent_entries(&entries, "/src/main.rs"));
+    }
+
+    #[test]
+    fn detect_conflict_finds_other_agent() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        let agents_dir = orch_dir.join("agents");
+
+        // agent-1: running, with stream containing file path
+        let agent1_dir = agents_dir.join("agent-1");
+        std::fs::create_dir_all(&agent1_dir).unwrap();
+        std::fs::write(agent1_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
+        std::fs::write(
+            agent1_dir.join("stream.jsonl"),
+            "{\"tool_input\":{\"file_path\":\"/src/main.rs\"}}\n",
+        )
+        .unwrap();
+
+        // agent-2: running, different file
+        let agent2_dir = agents_dir.join("agent-2");
+        std::fs::create_dir_all(&agent2_dir).unwrap();
+        std::fs::write(agent2_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
+        std::fs::write(
+            agent2_dir.join("stream.jsonl"),
+            "{\"tool_input\":{\"file_path\":\"/src/other.rs\"}}\n",
+        )
+        .unwrap();
+
+        // agent-1 modified /src/main.rs, we are agent-2
+        let conflicts =
+            detect_concurrent_write_conflict("/src/main.rs", Some("agent-2"), &orch_dir);
+        assert!(conflicts.contains(&"agent-1".to_string()));
+        assert!(!conflicts.contains(&"agent-2".to_string()));
+
+        // agent-2 modified /src/other.rs, no conflict for /src/main.rs
+        let no_conflicts =
+            detect_concurrent_write_conflict("/src/main.rs", Some("agent-1"), &orch_dir);
+        assert!(no_conflicts.is_empty());
+    }
+
+    #[test]
+    fn detect_conflict_empty_dir_returns_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        let conflicts = detect_concurrent_write_conflict("/src/main.rs", None, &orch_dir);
+        assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn detect_conflict_ignores_stopped_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        let agents_dir = orch_dir.join("agents");
+
+        let agent_dir = agents_dir.join("agent-stopped");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(agent_dir.join("status.json"), "{\"status\":\"stopped\"}").unwrap();
+        std::fs::write(
+            agent_dir.join("stream.jsonl"),
+            "{\"tool_input\":{\"file_path\":\"/src/main.rs\"}}\n",
+        )
+        .unwrap();
+
+        let conflicts = detect_concurrent_write_conflict("/src/main.rs", None, &orch_dir);
+        assert!(conflicts.is_empty());
+    }
+
+    // ── control.json pause enforcement ──────────────────────
+
+    #[test]
+    fn control_json_pause_boolean_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":true}").unwrap();
+
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
+    }
+
+    #[test]
+    fn control_json_pause_boolean_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":false}").unwrap();
+
+        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir));
+    }
+
+    #[test]
+    fn control_json_pause_string_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-1\"}").unwrap();
+
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
+        assert!(!check_control_json_pause(Some("agent-2"), &orch_dir));
+    }
+
+    #[test]
+    fn control_json_pause_array_match() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(
+            orch_dir.join("control.json"),
+            "{\"pause\":[\"agent-1\",\"agent-3\"]}",
+        )
+        .unwrap();
+
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
+        assert!(!check_control_json_pause(Some("agent-2"), &orch_dir));
+        assert!(check_control_json_pause(Some("agent-3"), &orch_dir));
+    }
+
+    #[test]
+    fn control_json_no_pause_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"resume\":true}").unwrap();
+
+        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir));
+    }
+
+    #[test]
+    fn control_json_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        // Dir exists but no control.json file
+        std::fs::create_dir_all(&orch_dir).unwrap();
+
+        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir));
+    }
+
+    // ── run() integration with orchestration ────────────────
+
+    #[test]
+    #[serial]
+    fn run_orchestration_pause_blocks_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-x\"}").unwrap();
+
+        // SAFETY: env mutation scoped to this test; HARNESS_DIR only read by
+        // orchestrator_dir() which resolves the temp path we created above.
+        unsafe {
+            std::env::set_var("HARNESS_DIR", dir.path());
+            std::env::set_var("EPIC_AGENT_ID", "agent-x");
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+
+        let input = HookInput {
+            tool_name: Some("Edit".into()),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(run(&input), 2, "pause directive must block Edit tool call");
+
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+            std::env::remove_var("EPIC_AGENT_ID");
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn run_orchestration_pause_not_targeting_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-other\"}").unwrap();
+
+        // SAFETY: env mutation scoped to this test
+        unsafe {
+            std::env::set_var("HARNESS_DIR", dir.path());
+            std::env::set_var("EPIC_AGENT_ID", "agent-x");
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+
+        let input = HookInput {
+            tool_name: Some("Edit".into()),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
+            ..Default::default()
+        };
+        assert_eq!(run(&input), 0, "non-targeted agent must not be blocked");
+
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+            std::env::remove_var("EPIC_AGENT_ID");
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn run_orchestration_not_enabled_skips_checks() {
+        // No HARNESS_DIR set — orchestration checks are skipped entirely
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        let input = HookInput {
+            tool_name: Some("Edit".into()),
+            tool_input: Some(serde_json::json!({"file_path": "/src/main.rs"})),
+            ..Default::default()
+        };
+        // Should return 0 (no command field -> early return, no orchestration block)
+        assert_eq!(run(&input), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn run_orchestration_concurrent_warning_does_not_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        let agents_dir = orch_dir.join("agents");
+
+        // agent-1 running, modified /src/shared.rs
+        let agent1_dir = agents_dir.join("agent-1");
+        std::fs::create_dir_all(&agent1_dir).unwrap();
+        std::fs::write(agent1_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
+        std::fs::write(
+            agent1_dir.join("stream.jsonl"),
+            "{\"tool_input\":{\"file_path\":\"/src/shared.rs\"}}\n",
+        )
+        .unwrap();
+
+        // control.json with no pause
+        std::fs::write(orch_dir.join("control.json"), "{}").unwrap();
+
+        // SAFETY: env mutation scoped to this test
+        unsafe {
+            std::env::set_var("HARNESS_DIR", dir.path());
+            std::env::set_var("EPIC_AGENT_ID", "agent-2");
+        }
+
+        let input = HookInput {
+            tool_name: Some("Write".into()),
+            tool_input: Some(serde_json::json!({"file_path": "/src/shared.rs", "content": "new"})),
+            ..Default::default()
+        };
+        // Warning is informational — must NOT block (return 0)
+        assert_eq!(run(&input), 0, "concurrent write warning must not block");
+
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+            std::env::remove_var("EPIC_AGENT_ID");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn run_orchestration_bash_tool_skipped() {
+        // Bash tool should not trigger orchestration checks
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+
+        // SAFETY: env mutation scoped to this test
+        unsafe {
+            std::env::set_var("HARNESS_DIR", dir.path());
+        }
+
+        let input = HookInput {
+            tool_name: Some("Bash".into()),
+            tool_input: Some(serde_json::json!({"command": "git status"})),
+            ..Default::default()
+        };
+        assert_eq!(run(&input), 0);
+
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+        }
     }
 }

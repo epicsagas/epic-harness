@@ -4,8 +4,8 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -110,7 +110,9 @@ fn test_mcp_install_already_registered() {
     let content = fs::read_to_string(&settings_path).unwrap();
     let val: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(
-        val["mcpServers"]["harness-mem"]["command"].as_str().unwrap(),
+        val["mcpServers"]["harness-mem"]["command"]
+            .as_str()
+            .unwrap(),
         "epic-harness",
         "existing registration should not be overwritten"
     );
@@ -125,12 +127,18 @@ fn test_add_and_query() {
     // Add a node
     let code = run_mem(&[
         "add",
-        "--title", "JWT Rotation Pattern",
-        "--type", "pattern",
-        "--tags", "auth,security",
-        "--project", "epic-harness",
-        "--agent", "claude-code",
-        "--body", "Rotate JWT keys every 24 hours.",
+        "--title",
+        "JWT Rotation Pattern",
+        "--type",
+        "pattern",
+        "--tags",
+        "auth,security",
+        "--project",
+        "epic-harness",
+        "--agent",
+        "claude-code",
+        "--body",
+        "Rotate JWT keys every 24 hours.",
     ]);
     assert_eq!(code, 0, "add should succeed");
 
@@ -158,12 +166,10 @@ fn test_link_and_related() {
 
     // Add two nodes
     run_mem(&[
-        "add", "--title", "Node A", "--type", "concept",
-        "--tags", "a", "--body", "body a",
+        "add", "--title", "Node A", "--type", "concept", "--tags", "a", "--body", "body a",
     ]);
     run_mem(&[
-        "add", "--title", "Node B", "--type", "concept",
-        "--tags", "b", "--body", "body b",
+        "add", "--title", "Node B", "--type", "concept", "--tags", "b", "--body", "body b",
     ]);
 
     // Get their IDs from store
@@ -180,7 +186,10 @@ fn test_link_and_related() {
     // Verify edges exist in DB
     let edges = epic_harness::hooks::mem::store::read_edges();
     assert!(!edges.is_empty(), "edges should be stored in DB");
-    assert!(edges.iter().any(|e| e.relation == "uses"), "edge should have 'uses' relation");
+    assert!(
+        edges.iter().any(|e| e.relation == "uses"),
+        "edge should have 'uses' relation"
+    );
 
     // related from A should return B
     let related = epic_harness::hooks::mem::graph::related_nodes(&id_a, 2);
@@ -204,7 +213,11 @@ fn test_migrate_dry_run() {
 
     // No nodes should have been written to DB
     let idx = epic_harness::hooks::mem::store::read_index();
-    assert_eq!(idx.nodes.len(), 0, "dry-run should not write any nodes to DB");
+    assert_eq!(
+        idx.nodes.len(),
+        0,
+        "dry-run should not write any nodes to DB"
+    );
 }
 
 #[test]
@@ -215,19 +228,33 @@ fn test_validate() {
 
     // Add a valid node via CLI (goes to DB)
     run_mem(&[
-        "add", "--title", "Valid Node", "--type", "concept",
-        "--tags", "test", "--body", "valid body",
+        "add",
+        "--title",
+        "Valid Node",
+        "--type",
+        "concept",
+        "--tags",
+        "test",
+        "--body",
+        "valid body",
     ]);
 
     // validate should pass for DB-based nodes (they are always structurally valid)
     // Inject a legacy corrupt .md file to trigger the legacy-path validation
     let legacy_dir = root.join(".harness").join("nodes");
     fs::create_dir_all(&legacy_dir).unwrap();
-    fs::write(legacy_dir.join("corrupt.md"), "not valid frontmatter at all").unwrap();
+    fs::write(
+        legacy_dir.join("corrupt.md"),
+        "not valid frontmatter at all",
+    )
+    .unwrap();
 
     // validate should exit 1 and report the corrupt legacy file
     let code = run_mem(&["validate"]);
-    assert_eq!(code, 1, "validate should fail when corrupt legacy file exists");
+    assert_eq!(
+        code, 1,
+        "validate should fail when corrupt legacy file exists"
+    );
 }
 
 // ── SQLite edge tests ──────────────────────────────────
@@ -235,7 +262,7 @@ fn test_validate() {
 #[test]
 fn test_delete_edge_by_id_is_consistent() {
     let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::{append_edge, delete_edge_by_id, read_edges, Edge};
+    use epic_harness::hooks::mem::store::{Edge, append_edge, delete_edge_by_id, read_edges};
 
     let root = temp_root();
     set_root(&root);
@@ -270,7 +297,7 @@ fn test_delete_edge_by_id_is_consistent() {
 #[test]
 fn test_remove_edges_for_node_is_consistent() {
     let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::{append_edge, remove_edges_for_node, read_edges, Edge};
+    use epic_harness::hooks::mem::store::{Edge, append_edge, read_edges, remove_edges_for_node};
 
     let root = temp_root();
     set_root(&root);
@@ -374,20 +401,41 @@ fn test_search_nodes_fts() {
     set_root(&root);
 
     run_mem(&[
-        "add", "--title", "Rust Async Pattern", "--type", "pattern",
-        "--tags", "rust,async", "--body", "Use tokio for async runtime.",
+        "add",
+        "--title",
+        "Rust Async Pattern",
+        "--type",
+        "pattern",
+        "--tags",
+        "rust,async",
+        "--body",
+        "Use tokio for async runtime.",
     ]);
     run_mem(&[
-        "add", "--title", "Python Basics", "--type", "concept",
-        "--tags", "python", "--body", "Python is a scripting language.",
+        "add",
+        "--title",
+        "Python Basics",
+        "--type",
+        "concept",
+        "--tags",
+        "python",
+        "--body",
+        "Python is a scripting language.",
     ]);
 
     let results = search_nodes("tokio", 10);
-    assert_eq!(results.len(), 1, "FTS should find one node matching 'tokio'");
+    assert_eq!(
+        results.len(),
+        1,
+        "FTS should find one node matching 'tokio'"
+    );
     assert_eq!(results[0].frontmatter.title, "Rust Async Pattern");
 
     let all = search_nodes("pattern", 10);
-    assert!(!all.is_empty(), "FTS should find nodes with 'pattern' in title or tags");
+    assert!(
+        !all.is_empty(),
+        "FTS should find nodes with 'pattern' in title or tags"
+    );
 }
 
 // ── write_node_dedup_conn + append_edge_conn tests ───
@@ -395,8 +443,8 @@ fn test_search_nodes_fts() {
 #[test]
 fn test_write_node_dedup_conn_and_append_edge_conn() {
     use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, append_edge_conn, new_uuid, now_iso,
-        Node, NodeFrontmatter, Edge, read_node,
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_node,
+        write_node_dedup_conn,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
@@ -480,8 +528,7 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
 #[test]
 fn test_smart_recall() {
     use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, smart_recall, new_uuid, now_iso,
-        Node, NodeFrontmatter,
+        Node, NodeFrontmatter, new_uuid, now_iso, open_db, smart_recall, write_node_dedup_conn,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
@@ -519,15 +566,22 @@ fn test_smart_recall() {
     // Smart recall for myproj should return 2 nodes, highest importance first
     let results = smart_recall(Some("myproj"), None, 10);
     assert_eq!(results.len(), 2, "should find 2 myproj nodes");
-    assert!(results[0].score >= results[1].score, "should be sorted by score desc");
-    assert!(results[0].node.frontmatter.title.contains("auth decision"),
-        "higher importance node should rank first");
+    assert!(
+        results[0].score >= results[1].score,
+        "should be sorted by score desc"
+    );
+    assert!(
+        results[0].node.frontmatter.title.contains("auth decision"),
+        "higher importance node should rank first"
+    );
 
     // Smart recall with hint should boost FTS-matching nodes
     let with_hint = smart_recall(Some("myproj"), Some("auth"), 10);
     assert!(!with_hint.is_empty());
-    assert!(with_hint[0].node.frontmatter.title.contains("auth"),
-        "FTS-matching node should rank highest when hint provided");
+    assert!(
+        with_hint[0].node.frontmatter.title.contains("auth"),
+        "FTS-matching node should rank highest when hint provided"
+    );
 
     // Other project should only return its own nodes
     let other = smart_recall(Some("otherproj"), None, 10);
@@ -538,9 +592,7 @@ fn test_smart_recall() {
 
 #[test]
 fn test_tag_stale_nodes() {
-    use epic_harness::hooks::mem::store::{
-        open_db, tag_stale_nodes, read_node, new_uuid,
-    };
+    use epic_harness::hooks::mem::store::{new_uuid, open_db, read_node, tag_stale_nodes};
     use rusqlite::params;
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
@@ -569,10 +621,16 @@ fn test_tag_stale_nodes() {
     assert_eq!(staled, 1, "only the old node should be tagged stale");
 
     let node = read_node(&id).unwrap();
-    assert!(node.frontmatter.tags.contains(&"stale".to_string()), "old node should have stale tag");
+    assert!(
+        node.frontmatter.tags.contains(&"stale".to_string()),
+        "old node should have stale tag"
+    );
 
     let fresh = read_node(&fresh_id).unwrap();
-    assert!(!fresh.frontmatter.tags.contains(&"stale".to_string()), "fresh node should not be stale");
+    assert!(
+        !fresh.frontmatter.tags.contains(&"stale".to_string()),
+        "fresh node should not be stale"
+    );
 
     // Running again should not double-tag
     let staled2 = tag_stale_nodes(90).unwrap();

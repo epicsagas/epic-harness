@@ -128,7 +128,10 @@ fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> {
 
     // Proposals from weak extensions (only in full mode - handled by caller)
     for (ext, stats) in &analysis.per_ext_stats {
-        if stats.success_rate >= CONFIG.pattern.weak_ext_rate || stats.total < CONFIG.pattern.weak_ext_min_obs || ext == "unknown" {
+        if stats.success_rate >= CONFIG.pattern.weak_ext_rate
+            || stats.total < CONFIG.pattern.weak_ext_min_obs
+            || ext == "unknown"
+        {
             continue;
         }
         let clean = ext.trim_start_matches('.');
@@ -485,7 +488,9 @@ fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             }
         }
         for (file, (edits, errors)) in &file_stats {
-            if *edits >= CONFIG.pattern.thrash_min_edits && *errors >= CONFIG.pattern.thrash_min_errors {
+            if *edits >= CONFIG.pattern.thrash_min_edits
+                && *errors >= CONFIG.pattern.thrash_min_errors
+            {
                 let basename = Path::new(file)
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -581,13 +586,21 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
     // Graduated Scope: skip seeding for excellent sessions
     if avg_score >= CONFIG.pattern.graduated_scope_skip {
         let skip = CONFIG.pattern.graduated_scope_skip;
-        hint("reflect", &format!("Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {skip})"));
+        hint(
+            "reflect",
+            &format!(
+                "Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {skip})"
+            ),
+        );
         return 0;
     }
 
     let full_seeding = avg_score < CONFIG.pattern.graduated_scope_moderate;
     if !full_seeding {
-        hint("reflect", &format!("Graduated Scope: moderate seeding (avg_score={avg_score:.3})"));
+        hint(
+            "reflect",
+            &format!("Graduated Scope: moderate seeding (avg_score={avg_score:.3})"),
+        );
     }
 
     let mut counters = load_promotion_counters();
@@ -608,8 +621,7 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
         }
 
         // Apply graduated scope: skip weak_ext and high_freq_error in moderate mode
-        if !full_seeding
-            && (proposal.origin == "weak_ext" || proposal.origin == "high_freq_error")
+        if !full_seeding && (proposal.origin == "weak_ext" || proposal.origin == "high_freq_error")
         {
             continue;
         }
@@ -638,9 +650,12 @@ fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
     save_promotion_counters(&counters);
     if promoted_count > 0 {
         let min_obs = CONFIG.evolution.gated_promotion_min;
-        hint("reflect", &format!(
-            "Gated Promotion: {promoted_count} skill(s) promoted after {min_obs}+ observations"
-        ));
+        hint(
+            "reflect",
+            &format!(
+                "Gated Promotion: {promoted_count} skill(s) promoted after {min_obs}+ observations"
+            ),
+        );
     }
     seeded
 }
@@ -674,16 +689,25 @@ fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f6
     let json = match serde_json::to_string_pretty(&meta) {
         Ok(j) => j,
         Err(e) => {
-            hint("reflect", &format!("Failed to serialize meta.json for {name}: {e}"));
+            hint(
+                "reflect",
+                &format!("Failed to serialize meta.json for {name}: {e}"),
+            );
             return;
         }
     };
     if let Err(e) = fs::write(dir.join("meta.json"), json) {
-        hint("reflect", &format!("Failed to write meta.json for {name}: {e}"));
+        hint(
+            "reflect",
+            &format!("Failed to write meta.json for {name}: {e}"),
+        );
         return;
     }
     if let Err(e) = fs::write(dir.join("SKILL.md"), content) {
-        hint("reflect", &format!("Failed to write SKILL.md for {name}: {e}"));
+        hint(
+            "reflect",
+            &format!("Failed to write SKILL.md for {name}: {e}"),
+        );
         // Clean up orphaned meta.json
         let _ = fs::remove_file(dir.join("meta.json"));
     }
@@ -910,7 +934,10 @@ fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) {
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
         .iter()
-        .filter(|(_, s)| s.total >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
+        .filter(|(_, s)| {
+            s.total >= CONFIG.pattern.weak_tool_min_obs
+                && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate
+        })
         .map(|(cat, _)| cat.clone())
         .collect();
 
@@ -1001,10 +1028,7 @@ fn round3(v: f64) -> f64 {
 
 /// Ingest session analysis results into the knowledge graph.
 /// Returns (nodes_created, edges_created).
-fn ingest_to_memory(
-    analysis: &SessionAnalysis,
-    patterns: &[DetectedPattern],
-) -> (u64, u64) {
+fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) -> (u64, u64) {
     let conn = match store::open_db() {
         Ok(c) => c,
         Err(_) => return (0, 0),
@@ -1028,7 +1052,12 @@ fn ingest_to_memory(
 
     // 8a. Session summary node
     {
-        let title = format!("session: {} {:.0}% avg={}", slug, analysis.success_rate * 100.0, analysis.avg_score);
+        let title = format!(
+            "session: {} {:.0}% avg={}",
+            slug,
+            analysis.success_rate * 100.0,
+            analysis.avg_score
+        );
         let body = build_summary(analysis);
         let node = store::Node {
             frontmatter: store::NodeFrontmatter {
@@ -1047,8 +1076,13 @@ fn ingest_to_memory(
             body,
         };
         match store::write_node_dedup_conn(&tx, &node, dedup_hours) {
-            Ok((id, false)) => { session_node_id = id; nodes_created += 1; }
-            Ok((id, true)) => { session_node_id = id; }
+            Ok((id, false)) => {
+                session_node_id = id;
+                nodes_created += 1;
+            }
+            Ok((id, true)) => {
+                session_node_id = id;
+            }
             Err(_) => {}
         }
     }
@@ -1061,7 +1095,11 @@ fn ingest_to_memory(
             "**Pattern**: {}\n**Description**: {}\n**Files**: {}\n**Remediation**: {}",
             pattern.pattern_type,
             pattern.description,
-            if pattern.involved_files.is_empty() { "various".into() } else { pattern.involved_files.join(", ") },
+            if pattern.involved_files.is_empty() {
+                "various".into()
+            } else {
+                pattern.involved_files.join(", ")
+            },
             pattern.suggested_remediation,
         );
         let node = store::Node {
@@ -1105,14 +1143,22 @@ fn ingest_to_memory(
 
     // 8c. Weak tool nodes
     for (cat, stats) in &analysis.per_tool_stats {
-        let rate = if stats.total > 0 { stats.successes as f64 / stats.total as f64 } else { 1.0 };
+        let rate = if stats.total > 0 {
+            stats.successes as f64 / stats.total as f64
+        } else {
+            1.0
+        };
         if rate >= CONFIG.pattern.weak_tool_rate || stats.total < CONFIG.pattern.weak_tool_min_obs {
             continue;
         }
         let title = format!("{}: weak tool {} ({:.0}%)", slug, cat, rate * 100.0);
         let body = format!(
             "Tool `{}` success rate: {:.1}% ({}/{} ops)\nTop failures: {:?}",
-            cat, rate * 100.0, stats.successes, stats.total, stats.failure_categories,
+            cat,
+            rate * 100.0,
+            stats.successes,
+            stats.total,
+            stats.failure_categories,
         );
         let node = store::Node {
             frontmatter: store::NodeFrontmatter {
@@ -1141,7 +1187,10 @@ fn ingest_to_memory(
             continue;
         }
         let title = format!("{}: high-freq {} ({}x)", slug, category, count);
-        let body = format!("Error category `{}` occurred {} times in this session.", category, count);
+        let body = format!(
+            "Error category `{}` occurred {} times in this session.",
+            category, count
+        );
         let node = store::Node {
             frontmatter: store::NodeFrontmatter {
                 id: store::new_uuid(),
@@ -1291,11 +1340,7 @@ fn promote_instincts_to_global(instincts: &[Instinct]) -> u64 {
                 id: store::new_uuid(),
                 node_type: "instinct".into(),
                 title,
-                tags: vec![
-                    "auto".into(),
-                    "instinct".into(),
-                    instinct.domain.clone(),
-                ],
+                tags: vec!["auto".into(), "instinct".into(), instinct.domain.clone()],
                 projects: instinct.projects.clone(),
                 agents: vec![],
                 created: now_iso(),
@@ -1410,7 +1455,10 @@ pub fn run(_input: &HookInput) -> i32 {
         0
     };
     if instincts_promoted > 0 {
-        hint("reflect", &format!("Instinct: promoted {instincts_promoted} new instinct(s)"));
+        hint(
+            "reflect",
+            &format!("Instinct: promoted {instincts_promoted} new instinct(s)"),
+        );
     }
 
     // 9. Evolution record
@@ -1500,7 +1548,10 @@ pub fn run(_input: &HookInput) -> i32 {
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
         .iter()
-        .filter(|(_, s)| s.total >= CONFIG.pattern.weak_tool_min_obs && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate)
+        .filter(|(_, s)| {
+            s.total >= CONFIG.pattern.weak_tool_min_obs
+                && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate
+        })
         .map(|(cat, s)| {
             format!(
                 "{cat} {}%",
@@ -1515,7 +1566,10 @@ pub fn run(_input: &HookInput) -> i32 {
     let weak_exts: Vec<String> = analysis
         .per_ext_stats
         .iter()
-        .filter(|(_, s)| s.total >= CONFIG.pattern.weak_ext_min_obs && s.success_rate < CONFIG.pattern.weak_ext_rate)
+        .filter(|(_, s)| {
+            s.total >= CONFIG.pattern.weak_ext_min_obs
+                && s.success_rate < CONFIG.pattern.weak_ext_rate
+        })
         .map(|(ext, s)| format!("{ext} {}%", (s.success_rate * 100.0) as u32))
         .collect();
     if !weak_exts.is_empty() {
@@ -1903,7 +1957,10 @@ mod tests {
         let (rollback, improved, _) = check_stagnation(&mut metrics, 0.0);
         assert!(!rollback);
         assert!(!improved);
-        assert_eq!(metrics.stagnation_count, 1, "stagnation_count must increment for score=0.0");
+        assert_eq!(
+            metrics.stagnation_count, 1,
+            "stagnation_count must increment for score=0.0"
+        );
     }
 
     #[test]
@@ -2162,7 +2219,10 @@ mod tests {
             ..Default::default()
         };
         let instincts = extract_instincts(&obs, &analysis);
-        assert!(instincts.is_empty(), "fewer than 10 observations should yield no instincts");
+        assert!(
+            instincts.is_empty(),
+            "fewer than 10 observations should yield no instincts"
+        );
     }
 
     #[test]
@@ -2176,7 +2236,10 @@ mod tests {
             ..Default::default()
         };
         let instincts = extract_instincts(&obs, &analysis);
-        assert!(instincts.is_empty(), "avg_score < 0.5 should yield no instincts");
+        assert!(
+            instincts.is_empty(),
+            "avg_score < 0.5 should yield no instincts"
+        );
     }
 
     #[test]
@@ -2320,7 +2383,10 @@ mod tests {
         // Override evolved_dir by writing directly to tmp path
         let skill_dir = tmp.path().join("evo-test-skill");
         ensure_dir(&skill_dir);
-        let _ = fs::write(skill_dir.join("SKILL.md"), "---\nname: test\n---\n\n# Content\n");
+        let _ = fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: test\n---\n\n# Content\n",
+        );
 
         let meta = SkillMeta {
             name: "evo-test-skill".into(),
@@ -2336,7 +2402,10 @@ mod tests {
 
         // Verify both files exist
         assert!(skill_dir.join("SKILL.md").is_file(), "SKILL.md must exist");
-        assert!(skill_dir.join("meta.json").is_file(), "meta.json must exist");
+        assert!(
+            skill_dir.join("meta.json").is_file(),
+            "meta.json must exist"
+        );
 
         // Verify meta.json content
         let meta_content = fs::read_to_string(skill_dir.join("meta.json")).expect("read meta");
@@ -2523,22 +2592,49 @@ mod tests {
     // ── sanitize_skill_name (path traversal prevention) ──
     #[test]
     fn sanitize_skill_name_rejects_traversal() {
-        assert!(!sanitize_skill_name("../etc/passwd"), "path traversal with .. must be rejected");
-        assert!(!sanitize_skill_name("foo/../../../etc"), "path traversal with / must be rejected");
-        assert!(!sanitize_skill_name("foo\\bar"), "backslash must be rejected");
+        assert!(
+            !sanitize_skill_name("../etc/passwd"),
+            "path traversal with .. must be rejected"
+        );
+        assert!(
+            !sanitize_skill_name("foo/../../../etc"),
+            "path traversal with / must be rejected"
+        );
+        assert!(
+            !sanitize_skill_name("foo\\bar"),
+            "backslash must be rejected"
+        );
         assert!(!sanitize_skill_name(".."), "bare .. must be rejected");
-        assert!(!sanitize_skill_name(".hidden"), "dot-prefixed name must be rejected");
+        assert!(
+            !sanitize_skill_name(".hidden"),
+            "dot-prefixed name must be rejected"
+        );
         assert!(!sanitize_skill_name(""), "empty name must be rejected");
         let long_name = "x".repeat(64);
-        assert!(!sanitize_skill_name(&long_name), "name >= 64 chars must be rejected");
+        assert!(
+            !sanitize_skill_name(&long_name),
+            "name >= 64 chars must be rejected"
+        );
     }
 
     #[test]
     fn sanitize_skill_name_accepts_valid_names() {
-        assert!(sanitize_skill_name("evo-ts-care"), "evo-ts-care should be valid");
-        assert!(sanitize_skill_name("evo-fix-syntax-error"), "evo-fix-syntax-error should be valid");
-        assert!(sanitize_skill_name("evo-bash-discipline"), "evo-bash-discipline should be valid");
-        assert!(sanitize_skill_name("evo-repeated_same_error"), "name with underscores should be valid");
+        assert!(
+            sanitize_skill_name("evo-ts-care"),
+            "evo-ts-care should be valid"
+        );
+        assert!(
+            sanitize_skill_name("evo-fix-syntax-error"),
+            "evo-fix-syntax-error should be valid"
+        );
+        assert!(
+            sanitize_skill_name("evo-bash-discipline"),
+            "evo-bash-discipline should be valid"
+        );
+        assert!(
+            sanitize_skill_name("evo-repeated_same_error"),
+            "name with underscores should be valid"
+        );
         assert!(sanitize_skill_name("a"), "single char name should be valid");
     }
 
