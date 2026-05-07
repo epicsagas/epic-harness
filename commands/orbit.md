@@ -338,18 +338,51 @@ EOF
 )"
 ```
 
-**6d. CI:** `gh pr checks <PR_NUMBER> --watch` — diagnose and fix automatically on failure.
+**6d. CI:** Check CI status — do not block orbit on CI:
+
+```bash
+# Check if gh is available and CI is configured
+if command -v gh &>/dev/null && gh pr checks <PR_NUMBER> 2>/dev/null | grep -q .; then
+  CI_RETRY=0
+  CI_MAX_RETRIES=2
+  while [ $CI_RETRY -le $CI_MAX_RETRIES ]; do
+    gh pr checks <PR_NUMBER> --watch
+    if [ $? -eq 0 ]; then
+      CI_STATUS="PASS"
+      break
+    fi
+    CI_RETRY=$((CI_RETRY + 1))
+    if [ $CI_RETRY -le $CI_MAX_RETRIES ]; then
+      # Diagnose and fix automatically, then re-check
+      echo "CI failed (attempt $CI_RETRY/$CI_MAX_RETRIES) — diagnosing and fixing..."
+    else
+      CI_STATUS="FAIL"
+    fi
+  done
+else
+  # No CI configured (e.g., CodeCommit without gh Actions) — skip
+  CI_STATUS="N/A"
+  CI_NOTE="No CI configured — skipped"
+fi
+```
+
+- CI fails → diagnose and fix automatically, retry up to 2 times.
+- All retries exhausted → record `CI: FAIL`, proceed to Step 7 (evolve will analyze the failure pattern).
+- CI absent / `gh` not available → set `CI: N/A`, proceed immediately to Step 7.
+- Do NOT block orbit progression regardless of CI outcome.
 
 **Ship Report:**
 ```
 ## Ship Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - PR: <URL>
-- CI: PASS/FAIL
+- CI: PASS/FAIL/N/A
 - Ready to merge: YES/NO
 ```
 
 Push `{"phase": "ship", "status": "complete"}` to `phase_history`.
+
+> **Orbit context:** After pushing ship to `phase_history`, **immediately proceed to Step 7 (Orbit Complete + Evolve)**. Do NOT stop here.
 
 ---
 
@@ -384,7 +417,7 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 
 ### Step 7a: Evolve (Auto)
 
-PR created + CI green → run `/evolve` automatically:
+**Always run** — regardless of CI status (PASS / FAIL / N/A). Evolve on every completed orbit:
 1. Read `$HARNESS_DIR/obs/` session logs
 2. Read `$HARNESS_DIR/metrics.json` + `evolution.jsonl`
 3. Detect failure patterns, weak tools, weak file types

@@ -89,7 +89,11 @@ If CI fails, diagnose and fix. Do not ask the user to fix CI — handle it.
 - Action needed: <if any>
 ```
 
-After the Ship Report, suggest: **"One loop complete. Run `/evolve` to analyze this session's observations and improve skills for the next cycle."**
+**If running inside `/orbit` pipeline** (a `PIPELINE-*.json` with `"status": "running"` exists):
+- Do NOT stop here. Return control to orbit — it will run Step 7 (Evolve) automatically.
+
+**If running standalone** (no active orbit pipeline):
+- Suggest: **"One loop complete. Run `/evolve` to analyze this session's observations and improve skills for the next cycle."**
 
 ## Red Flags
 - Shipping without a PASS check report
