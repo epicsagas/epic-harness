@@ -1,8 +1,8 @@
-# epic harness
+<h1 align="center">Epic Harness</h1>
 
-> Un arnés de agente de codificación IA autoelusivo — 8 comandos, 1 pipeline autónomo, habilidades de activación automática, aprende de tus fallos.
+<blockqoute><p align="center">Un arnés de agente de codificación IA autoelusivo — 8 comandos, 1 pipeline autónomo, habilidades de activación automática, aprende de tus fallos.</p></blockqoute>
 
-**8 comandos. Habilidades de activación automática. Autoelusivo.**
+<p align="center"><b>8 comandos. Habilidades de activación automática. Autoelusivo.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -21,6 +21,39 @@ Un plugin de Claude Code que **reemplaza más de 30 comandos con 8**, **activa h
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
+
+---
+
+## Qué hace
+
+Un comando lleva tu feature de idea a merge. Las habilidades se activan solas justo cuando hacen falta. Y en cada sesión, tu agente rinde mejor.
+
+```bash
+$ /orbit "Agregar autenticación JWT a la API de login"
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+```
+
+O ejecútalo paso a paso con control total:
+
+```bash
+/spec "Agregar autenticación JWT a la API de login"   # afina requisitos → SPEC-*.md
+/go                                                     # planificación automática → subagentes TDD → 4 min
+/check                                                  # revisión paralela + seguridad + pruebas → PASS
+/ship                                                   # prueba aislada → PR → CI en verde
+```
+
+Las habilidades corren en segundo plano automáticamente — sin comandos extra:
+
+```
+¿Construyendo una feature?   → tdd se activa (Red→Green→Refactor obligatorio)
+¿Falló una prueba?           → debug se activa (primero causa raíz, sin parches al azar)
+¿Tocaste auth o BD?          → secure se activa (checklist OWASP, sin atajos)
+¿Archivo con más de 200 líneas? → simplify se activa (extraer, renombrar, simplificar)
+```
+
+Al cerrar la sesión, el **bucle evolve** detecta qué te frenó, crea habilidades enfocadas y las carga en la siguiente ejecución. Si hoy sufres builds de TypeScript, mañana arrancas con `evo-ts-care`.
+
+---
 
 ## Instalación
 
@@ -103,41 +136,6 @@ $ /ship
   → Crea PR → CI verde → fusionado
 ```
 
-## Arquitectura: Modelo de 4 Anillos
-
-```mermaid
-flowchart TB
-    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
-        direction LR
-        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
-    end
-
-    subgraph R1["Ring 1 — Commands (you call these)"]
-        direction TB
-        subgraph orbit_wrap["  /orbit  "]
-            direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
-        end
-        c6("/team")
-        c7("/evolve")
-    end
-
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
-        direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
-    end
-
-    subgraph R3["Ring 3 — Evolve (self-improving)"]
-        direction LR
-        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
-    end
-
-    R0 -->|"observe every tool call"| R3
-    R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger skills"| R2
-    R0 -->|"resume: restore context"| R1
-```
-
 ## /orbit — Pipeline Autónomo
 
 `/orbit` envuelve todo el pipeline manual en una única ejecución autónoma.
@@ -145,23 +143,23 @@ flowchart TB
 ```mermaid
 flowchart TD
     START(["/orbit"]) --> MODE{"¿Modo?"}
-    MODE -->|"1 · Interactive"| WAIT["Usuario ejecuta\n/discover → /spec\nluego 'orbit go'"]:::human
-    MODE -->|"2 · Council auto-spec"| COUNCIL["Consejo de 4 Voces\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    MODE -->|"1 · Interactive"| WAIT["Usuario ejecuta /discover → /spec luego 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["Consejo de 4 Voces Architect · Skeptic Pragmatist · Critic"]:::auto
     WAIT --> SPEC_LOAD["Cargar especificación aprobada"]
     COUNCIL --> SYNTH["Sintetizar"] --> GEN["Generar especificación"] --> APPROVE{"¿Aprobar?"}:::human
     APPROVE -->|yes| SPEC_LOAD
     APPROVE -->|modify| GEN
     APPROVE -->|reject| ABORT(["Abortar"])
-    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    SPEC_LOAD --> GO["Go plan → TDD → integrate"]:::auto
+    GO --> CHECK["Check review + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship isolated test → PR → CI"]:::auto
     CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
-    RETRY -->|no| PAUSE["Pausa\nel usuario decide"]:::human
+    RETRY -->|no| PAUSE["Pausa el usuario decide"]:::human
     PAUSE -->|continue| GO
     PAUSE -->|abort| ABORT
-    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
-    EVOLVE --> DONE(["Orbit Completo\ninforme consolidado"]):::auto
+    SHIP --> EVOLVE["Evolve auto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit Completo informe consolidado"]):::auto
 
     classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
@@ -423,6 +421,41 @@ Los patrones de alto éxito se extraen y promueven entre proyectos:
 ```
 observe (100% confirmado) → extract_instincts() → instinct node (confianza ≥ 0.8)
     → promover a global cuando se observe en ≥ 2 proyectos
+```
+
+## Arquitectura: Modelo de 4 Anillos
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
 ```
 
 ## Aprendizaje Entre Proyectos

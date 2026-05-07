@@ -1,8 +1,8 @@
-# epic harness
+<h1 align="center">Epic Harness</h1>
 
-> 一個自我進化的 AI 程式設計智能體框架 — 8 條命令、1 條自主流水線、自動觸發技能，從你的失敗中學習。
+<blockqoute><p align="center">一個自我進化的 AI 程式設計智能體框架 — 8 條命令、1 條自主流水線、自動觸發技能，從你的失敗中學習。</p></blockqoute>
 
-**8 條命令。自動觸發技能。自我進化。**
+<p align="center"><b>8 條命令。自動觸發技能。自我進化。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -22,121 +22,38 @@
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
-## 安裝
+---
 
-> **第一次使用？** 請閱讀 [快速入門指南（5 分鐘）](../../QUICKSTART.md)。
+## 功能說明
 
-```bash
-# Claude Code
-/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
-
-# 任何其他工具
-cargo install epic-harness && epic install
-```
-
-| 環境 | 方式 |
-|-------------|--------|
-| **Claude Code** | 外掛市集（見上方） |
-| **macOS** | `brew install epicsagas/tap/epic-harness` |
-| **任意（含 Rust）** | `cargo install epic-harness` |
-| **從原始碼** | `git clone` + `cargo install --path .` |
-
-前置條件：**Git**。原始碼/二進位安裝還需要 [Rust 工具鏈](https://rustup.rs)。
-
-### `epic install` — 安裝精靈
-
-安裝二進位檔案後，執行 `epic install`（或 `epic install claude`）以：
-
-1. 建立 `~/.harness/` 目錄結構
-2. 將命令、技能和智能體同步到工具的設定目錄
-3. 為 Claude Code 註冊 MCP 伺服器（harness-mem）
-4. 若不存在，則建立含預設值的 `~/.harness/config.toml`
-
-在 Claude Code 中，`hooks/setup.sh` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
-
-### 其他工具
+一條命令，就能把功能從想法一路推進到合併。需要的技能會在關鍵時刻自動介入。每次會話後，代理都會再進化一點。
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (需要 Cursor 1.7+)
-epic install opencode     # OpenCode    → ~/.config/opencode/
-epic install cline        # Cline       → ~/Documents/Cline/Rules/
-epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-epic install              # 互動式選單
+$ /orbit "為登入 API 新增 JWT 驗證"
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-整合檔案從二進位**同步**而來：缺失或過時的檔案會被寫入。`GEMINI.md` 和 `AGENTS.md` 僅在不存在時才會建立。
-
-### 驗證
+也可以手動分步執行，保有完整掌控：
 
 ```bash
-epic --version              # 二進位已安裝
-ls ~/.harness/              # 資料目錄存在
+/spec "為登入 API 新增 JWT 驗證"   # 釐清需求 → SPEC-*.md
+/go                                # 自動規劃 → TDD 子代理 → 4 分鐘
+/check                             # 平行審查 + 安全 + 測試 → PASS
+/ship                              # 隔離測試 → PR → CI 綠燈
 ```
 
-在 Claude Code 工作階段中：`/evolve status`
+技能會在背景自動觸發 —— 不需要額外命令：
 
-### 快速示範
-
-**一條命令，完整流水線：**
-```bash
-$ /orbit
-# 選擇模式：
-#   1. 互動式  — 你執行 /discover + /spec，然後輸入 "orbit go"
-#   2. 委員會  — 4 聲部委員會生成規格說明，由你審核
-→ spec approved → go (TDD) → check (PASS) → ship (PR + CI) → evolve
+```
+正在開發新功能？         → 觸發 tdd（強制 Red→Green→Refactor）
+測試失敗？               → 觸發 debug（先找根因，不做盲修）
+修改了 auth 或 DB？      → 觸發 secure（OWASP 檢查清單，不走捷徑）
+檔案超過 200 行？        → 觸發 simplify（抽取、重新命名、簡化）
 ```
 
-**或逐步手動執行：**
-```bash
-$ /spec "Add JWT auth to the login API"
-  → 釐清需求 → 生成 SPEC-*.md
+會話結束後，**evolve 迴圈**會找出瓶頸、生成針對性技能，並在下一次會話自動載入。今天卡在 TypeScript 建置，下一次就有 `evo-ts-care` 幫你起跑。
 
-$ /go
-  → 自動規劃 → TDD 子智能體 → 完成（4 分鐘）
-
-$ /check
-  → 平行程式碼審查 + 安全審計 + 測試 → PASS
-
-$ /ship
-  → 建立 PR → CI 通過 → 合併
-```
-
-## 架構：4-Ring 模型
-
-```mermaid
-flowchart TB
-    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
-        direction LR
-        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
-    end
-
-    subgraph R1["Ring 1 — Commands (you call these)"]
-        direction TB
-        subgraph orbit_wrap["  /orbit  "]
-            direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
-        end
-        c6("/team")
-        c7("/evolve")
-    end
-
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
-        direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
-    end
-
-    subgraph R3["Ring 3 — Evolve (self-improving)"]
-        direction LR
-        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
-    end
-
-    R0 -->|"observe every tool call"| R3
-    R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger skills"| R2
-    R0 -->|"resume: restore context"| R1
-```
+---
 
 ## /orbit — 自主流水線
 
@@ -145,23 +62,23 @@ flowchart TB
 ```mermaid
 flowchart TD
     START(["/orbit"]) --> MODE{"模式？"}
-    MODE -->|"1 · 互動式"| WAIT["使用者執行\n/discover → /spec\n然後 'orbit go'"]:::human
-    MODE -->|"2 · 委員會自動生成規格"| COUNCIL["4 聲部委員會\n架構師 · 質疑者\n實用主義者 · 批評者"]:::auto
+    MODE -->|"1 · 互動式"| WAIT["使用者執行 /discover → /spec 然後 'orbit go'"]:::human
+    MODE -->|"2 · 委員會自動生成規格"| COUNCIL["4 聲部委員會 架構師 · 質疑者 實用主義者 · 批評者"]:::auto
     WAIT --> SPEC_LOAD["載入已審核的規格說明"]
     COUNCIL --> SYNTH["綜合"] --> GEN["生成規格說明"] --> APPROVE{"審核？"}:::human
     APPROVE -->|yes| SPEC_LOAD
     APPROVE -->|modify| GEN
     APPROVE -->|reject| ABORT(["中止"])
-    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    SPEC_LOAD --> GO["Go plan → TDD → integrate"]:::auto
+    GO --> CHECK["Check review + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship isolated test → PR → CI"]:::auto
     CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
-    RETRY -->|no| PAUSE["暫停\n使用者決定"]:::human
+    RETRY -->|no| PAUSE["暫停 使用者決定"]:::human
     PAUSE -->|continue| GO
     PAUSE -->|abort| ABORT
-    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
-    EVOLVE --> DONE(["Orbit 完成\n綜合報告"]):::auto
+    SHIP --> EVOLVE["Evolve auto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit 完成 綜合報告"]):::auto
 
     classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
@@ -305,7 +222,7 @@ epic mem add --title "JWT rotation" --type decision    # 新增節點
 epic mem search "JWT"                                  # FTS5 搜尋
 epic mem query --type decision --project my-project    # 過濾
 epic mem context --project my-project                  # 專案上下文
-epic mem serve                                         # Web UI → :7700
+epic mem serve                                         # Web UI → :7700 or custom port with --port 8800
 epic mem mcp-install                                   # 註冊 MCP 伺服器
 epic mem export --out ./docs/memory                    # 匯出為 Markdown
 ```
@@ -423,6 +340,122 @@ Reload (next session — resume loads evolved skills)
 ```
 observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
     → promote to global when observed in ≥ 2 projects
+```
+
+## 安裝
+
+> **第一次使用？** 請閱讀 [快速入門指南（5 分鐘）](../../QUICKSTART.md)。
+
+```bash
+# Claude Code
+/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+
+# 任何其他工具
+cargo install epic-harness && epic install
+```
+
+| 環境 | 方式 |
+|-------------|--------|
+| **Claude Code** | 外掛市集（見上方） |
+| **macOS** | `brew install epicsagas/tap/epic-harness` |
+| **任意（含 Rust）** | `cargo install epic-harness` |
+| **從原始碼** | `git clone` + `cargo install --path .` |
+
+前置條件：**Git**。原始碼/二進位安裝還需要 [Rust 工具鏈](https://rustup.rs)。
+
+### `epic install` — 安裝精靈
+
+安裝二進位檔案後，執行 `epic install`（或 `epic install claude`）以：
+
+1. 建立 `~/.harness/` 目錄結構
+2. 將命令、技能和智能體同步到工具的設定目錄
+3. 為 Claude Code 註冊 MCP 伺服器（harness-mem）
+4. 若不存在，則建立含預設值的 `~/.harness/config.toml`
+
+在 Claude Code 中，`hooks/setup.sh` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
+
+### 其他工具
+
+```bash
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (需要 Cursor 1.7+)
+epic install opencode     # OpenCode    → ~/.config/opencode/
+epic install cline        # Cline       → ~/Documents/Cline/Rules/
+epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
+epic install              # 互動式選單
+```
+
+整合檔案從二進位**同步**而來：缺失或過時的檔案會被寫入。`GEMINI.md` 和 `AGENTS.md` 僅在不存在時才會建立。
+
+### 驗證
+
+```bash
+epic --version              # 二進位已安裝
+ls ~/.harness/              # 資料目錄存在
+```
+
+在 Claude Code 工作階段中：`/evolve status`
+
+### 快速示範
+
+**一條命令，完整流水線：**
+```bash
+$ /orbit
+# 選擇模式：
+#   1. 互動式  — 你執行 /discover + /spec，然後輸入 "orbit go"
+#   2. 委員會  — 4 聲部委員會生成規格說明，由你審核
+→ spec approved → go (TDD) → check (PASS) → ship (PR + CI) → evolve
+```
+
+**或逐步手動執行：**
+```bash
+$ /spec "Add JWT auth to the login API"
+  → 釐清需求 → 生成 SPEC-*.md
+
+$ /go
+  → 自動規劃 → TDD 子智能體 → 完成（4 分鐘）
+
+$ /check
+  → 平行程式碼審查 + 安全審計 + 測試 → PASS
+
+$ /ship
+  → 建立 PR → CI 通過 → 合併
+```
+
+## 架構：4-Ring 模型
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
 ```
 
 ## 跨專案學習

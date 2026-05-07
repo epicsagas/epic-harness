@@ -1,8 +1,8 @@
-# epic harness
+<h1 align="center">Epic Harness</h1>
 
-> एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 8 कमांड, 1 स्वायत्त पाइपलाइन, ऑटो-ट्रिगर स्किल्स, आपकी विफलताओं से सीखता है।
+<blockqoute><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 8 कमांड, 1 स्वायत्त पाइपलाइन, ऑटो-ट्रिगर स्किल्स, आपकी विफलताओं से सीखता है।</p></blockqoute>
 
-**8 कमांड। ऑटो-ट्रिगर स्किल्स। स्व-विकसित।**
+<p align="center"><b>8 कमांड। ऑटो-ट्रिगर स्किल्स। स्व-विकसित।</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -21,6 +21,39 @@
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
+
+---
+
+## यह क्या करता है
+
+एक कमांड आपके फीचर को आइडिया से merge तक पहुंचा देता है। स्किल्स सही समय पर अपने-आप एक्टिव होती हैं। और हर सेशन के साथ एजेंट और मजबूत होता जाता है।
+
+```bash
+$ /orbit "लॉगिन API में JWT auth जोड़ो"
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+```
+
+या पूरा कंट्रोल रखते हुए स्टेप-बाय-स्टेप चलाएँ:
+
+```bash
+/spec "लॉगिन API में JWT auth जोड़ो"   # आवश्यकताएँ साफ करें → SPEC-*.md
+/go                                      # ऑटो-प्लान → TDD subagents → 4 मिनट
+/check                                   # समानांतर review + security + tests → PASS
+/ship                                    # isolated test → PR → CI green
+```
+
+स्किल्स बैकग्राउंड में अपने-आप चलती हैं — बिना अतिरिक्त कमांड:
+
+```
+नई feature बना रहे हैं?        → tdd ट्रिगर (Red→Green→Refactor अनिवार्य)
+टेस्ट फेल हुआ?                 → debug ट्रिगर (पहले root cause, कोई blind fix नहीं)
+auth/DB बदला?                  → secure ट्रिगर (OWASP checklist, कोई shortcut नहीं)
+फ़ाइल 200+ लाइनों की?          → simplify ट्रिगर (extract, rename, simplify)
+```
+
+सेशन खत्म होने पर **evolve loop** देखता है कि कहाँ रुकावट आई, targeted skills बनाता है, और अगली सेशन में लोड कर देता है। आज TypeScript build में अटके? अगली बार `evo-ts-care` साथ होगा।
+
+---
 
 ## इंस्टॉलेशन
 
@@ -103,41 +136,6 @@ $ /ship
   → PR बनाता है → CI हरा → मर्ज
 ```
 
-## आर्किटेक्चर: 4-रिंग मॉडल
-
-```mermaid
-flowchart TB
-    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
-        direction LR
-        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
-    end
-
-    subgraph R1["Ring 1 — Commands (you call these)"]
-        direction TB
-        subgraph orbit_wrap["  /orbit  "]
-            direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
-        end
-        c6("/team")
-        c7("/evolve")
-    end
-
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
-        direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
-    end
-
-    subgraph R3["Ring 3 — Evolve (self-improving)"]
-        direction LR
-        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
-    end
-
-    R0 -->|"observe every tool call"| R3
-    R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger skills"| R2
-    R0 -->|"resume: restore context"| R1
-```
-
 ## /orbit — स्वायत्त पाइपलाइन
 
 `/orbit` संपूर्ण मैन्युअल पाइपलाइन को एकल स्वायत्त निष्पादन में लपेटता है।
@@ -145,23 +143,23 @@ flowchart TB
 ```mermaid
 flowchart TD
     START(["/orbit"]) --> MODE{"मोड?"}
-    MODE -->|"1 · Interactive"| WAIT["उपयोगकर्ता चलाता है\n/discover → /spec\nफिर 'orbit go'"]:::human
-    MODE -->|"2 · Council auto-spec"| COUNCIL["4-आवाज़ काउंसिल\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    MODE -->|"1 · Interactive"| WAIT["उपयोगकर्ता चलाता है /discover → /spec फिर 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["4-आवाज़ काउंसिल Architect · Skeptic Pragmatist · Critic"]:::auto
     WAIT --> SPEC_LOAD["अनुमोदित स्पेसिफिकेशन लोड करें"]
     COUNCIL --> SYNTH["संश्लेषण"] --> GEN["स्पेसिफिकेशन बनाएं"] --> APPROVE{"अनुमोदित करें?"}:::human
     APPROVE -->|yes| SPEC_LOAD
     APPROVE -->|modify| GEN
     APPROVE -->|reject| ABORT(["रद्द करें"])
-    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    SPEC_LOAD --> GO["Go plan → TDD → integrate"]:::auto
+    GO --> CHECK["Check review + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship isolated test → PR → CI"]:::auto
     CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
-    RETRY -->|no| PAUSE["रुकें\nउपयोगकर्ता निर्णय लेता है"]:::human
+    RETRY -->|no| PAUSE["रुकें उपयोगकर्ता निर्णय लेता है"]:::human
     PAUSE -->|continue| GO
     PAUSE -->|abort| ABORT
-    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
-    EVOLVE --> DONE(["Orbit पूर्ण\nएकत्रित रिपोर्ट"]):::auto
+    SHIP --> EVOLVE["Evolve auto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit पूर्ण एकत्रित रिपोर्ट"]):::auto
 
     classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
@@ -423,6 +421,41 @@ Reload (अगला सत्र — resume विकसित स्किल�
 ```
 observe (100% पुष्टि) → extract_instincts() → instinct node (विश्वास ≥ 0.8)
     → global में प्रमोट करें जब ≥ 2 प्रोजेक्ट में देखा गया हो
+```
+
+## आर्किटेक्चर: 4-रिंग मॉडल
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
 ```
 
 ## क्रॉस-प्रोजेक्ट लर्निंग

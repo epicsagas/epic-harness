@@ -1,8 +1,8 @@
-# epic harness
+<h1 align="center">Epic Harness</h1>
 
-> 自己進化するAIコーディングエージェントハーネス — 8つのコマンド、1つの自律パイプライン、自動トリガースキル、失敗から学習します。
+<blockqoute><p align="center">自己進化するAIコーディングエージェントハーネス — 8つのコマンド、1つの自律パイプライン、自動トリガースキル、失敗から学習します。</p></blockqoute>
 
-**8つのコマンド。自動トリガースキル。自己進化。**
+<p align="center"><b>8つのコマンド。自動トリガースキル。自己進化。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -21,6 +21,39 @@ Claude Codeプラグインで、**30以上のコマンドを8つに置き換え*
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
 </p>
+
+---
+
+## できること
+
+1つのコマンドで、機能をアイデアからマージまで一気に進められます。必要なスキルは必要な瞬間に自動起動。セッションを重ねるほど、エージェントは確実に強くなります。
+
+```bash
+$ /orbit "ログインAPIにJWT認証を追加"
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+```
+
+もちろん、手動で段階的に進めることも可能です:
+
+```bash
+/spec "ログインAPIにJWT認証を追加"   # 要件を明確化 → SPEC-*.md
+/go                                   # 自動計画 → TDDサブエージェント → 4分
+/check                                # 並列レビュー + セキュリティ + テスト → PASS
+/ship                                 # 分離テスト → PR → CIグリーン
+```
+
+スキルはバックグラウンドで自動トリガー — 追加コマンド不要:
+
+```
+機能開発中?              → tdd 発火 (Red→Green→Refactor を強制)
+テスト失敗?              → debug 発火 (まず根本原因、やみくも修正なし)
+auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近道なし)
+ファイルが200行超?        → simplify 発火 (抽出・リネーム・簡素化)
+```
+
+セッション終了後、**evolveループ**がボトルネックを分析し、狙いを絞ったスキルを生成して次回に読み込みます。今日 TypeScript ビルドで詰まっても、次回は `evo-ts-care` が助けます。
+
+---
 
 ## インストール
 
@@ -103,41 +136,6 @@ $ /ship
   → PRを作成 → CI グリーン → マージ
 ```
 
-## アーキテクチャ: 4-Ring モデル
-
-```mermaid
-flowchart TB
-    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
-        direction LR
-        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
-    end
-
-    subgraph R1["Ring 1 — Commands (you call these)"]
-        direction TB
-        subgraph orbit_wrap["  /orbit  "]
-            direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
-        end
-        c6("/team")
-        c7("/evolve")
-    end
-
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
-        direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
-    end
-
-    subgraph R3["Ring 3 — Evolve (self-improving)"]
-        direction LR
-        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
-    end
-
-    R0 -->|"observe every tool call"| R3
-    R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger skills"| R2
-    R0 -->|"resume: restore context"| R1
-```
-
 ## /orbit — 自律パイプライン
 
 `/orbit` は手動パイプライン全体を単一の自律実行にまとめます。
@@ -145,23 +143,23 @@ flowchart TB
 ```mermaid
 flowchart TD
     START(["/orbit"]) --> MODE{"Mode?"}
-    MODE -->|"1 · Interactive"| WAIT["User runs\n/discover → /spec\nthen 'orbit go'"]:::human
-    MODE -->|"2 · Council auto-spec"| COUNCIL["4-Voice Council\nArchitect · Skeptic\nPragmatist · Critic"]:::auto
+    MODE -->|"1 · Interactive"| WAIT["User runs /discover → /spec then 'orbit go'"]:::human
+    MODE -->|"2 · Council auto-spec"| COUNCIL["4-Voice Council Architect · Skeptic Pragmatist · Critic"]:::auto
     WAIT --> SPEC_LOAD["Load approved spec"]
     COUNCIL --> SYNTH["Synthesize"] --> GEN["Generate spec"] --> APPROVE{"Approve?"}:::human
     APPROVE -->|yes| SPEC_LOAD
     APPROVE -->|modify| GEN
     APPROVE -->|reject| ABORT(["Abort"])
-    SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    SPEC_LOAD --> GO["Go plan → TDD → integrate"]:::auto
+    GO --> CHECK["Check review + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship isolated test → PR → CI"]:::auto
     CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
-    RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
+    RETRY -->|no| PAUSE["Pause user decides"]:::human
     PAUSE -->|continue| GO
     PAUSE -->|abort| ABORT
-    SHIP --> EVOLVE["Evolve\nauto-analyze session"]:::auto
-    EVOLVE --> DONE(["Orbit Complete\nconsolidated report"]):::auto
+    SHIP --> EVOLVE["Evolve auto-analyze session"]:::auto
+    EVOLVE --> DONE(["Orbit Complete consolidated report"]):::auto
 
     classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
@@ -305,7 +303,7 @@ epic mem add --title "JWT rotation" --type decision    # ノードを追加
 epic mem search "JWT"                                  # FTS5検索
 epic mem query --type decision --project my-project    # フィルター
 epic mem context --project my-project                  # プロジェクトコンテキスト
-epic mem serve                                         # Web UI → :7700
+epic mem serve                                         # Web UI → :7700 or custom port with --port 8800
 epic mem mcp-install                                   # MCPサーバーを登録
 epic mem export --out ./docs/memory                    # Markdownにエクスポート
 ```
@@ -423,6 +421,41 @@ Reload (next session — resume loads evolved skills)
 ```
 observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
     → promote to global when observed in ≥ 2 projects
+```
+
+## アーキテクチャ: 4-Ring モデル
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — Autopilot (hooks, invisible)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — Commands (you call these)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — Evolve (self-improving)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"observe every tool call"| R3
+    R3 -.->|"evolved skills"| R2
+    R1 -->|"auto-trigger skills"| R2
+    R0 -->|"resume: restore context"| R1
 ```
 
 ## クロスプロジェクト学習

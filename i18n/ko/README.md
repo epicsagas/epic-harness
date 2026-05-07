@@ -1,8 +1,8 @@
-# epic harness
+<h1 align="center">Epic Harness</h1>
 
-> 자기 진화형 AI 코딩 에이전트 하네스 — 8개 명령어, 1개 자율 파이프라인, 자동 트리거 스킬, 실패로부터 학습.
+<blockqoute><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 8개 명령어, 1개 자율 파이프라인, 자동 트리거 스킬, 실패로부터 학습.</p></blockqoute>
 
-**8개 명령어. 자동 트리거 스킬. 자기 진화형.**
+<p align="center"><b>8개 명령어. 자동 트리거 스킬. 자기 진화형.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -21,6 +21,39 @@
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
 </p>
+
+---
+
+## 무엇을 하나요
+
+명령어 하나로 기능을 아이디어 단계에서 머지 직전까지 밀어붙입니다. 필요한 스킬은 필요한 순간에 자동으로 개입합니다. 그리고 세션이 반복될수록 에이전트 성능이 눈에 띄게 좋아집니다.
+
+```bash
+$ /orbit "로그인 API에 JWT 인증 추가"
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+```
+
+원하면 수동으로 단계별 진행도 가능합니다:
+
+```bash
+/spec "로그인 API에 JWT 인증 추가"   # 요구사항 선명화 → SPEC-*.md
+/go                                    # 자동 계획 → TDD 서브에이전트 → 4분
+/check                                 # 병렬 리뷰 + 보안 + 테스트 → PASS
+/ship                                  # 격리 테스트 → PR → CI green
+```
+
+스킬은 백그라운드에서 자동 발동 — 추가 명령이 필요 없습니다:
+
+```
+기능 개발 중인가요?          → tdd 발동 (Red→Green→Refactor 강제)
+테스트가 실패했나요?         → debug 발동 (감이 아닌 원인 중심)
+auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, 지름길 금지)
+파일이 200줄을 넘었나요?     → simplify 발동 (추출, 리네이밍, 단순화)
+```
+
+세션이 끝나면 **evolve 루프**가 병목 원인을 분석하고, 맞춤형 스킬을 만들어 다음 세션에 로드합니다. 오늘 TypeScript 빌드에서 막혔다면, 다음 세션에는 `evo-ts-care`가 준비되어 있습니다.
+
+---
 
 ## 설치
 
@@ -103,41 +136,6 @@ $ /ship
   → PR 생성 → CI 통과 → 머지
 ```
 
-## 아키텍처: 4-Ring 모델
-
-```mermaid
-flowchart TB
-    subgraph R0["Ring 0 — 오토파일럿 (훅, 투명하게 동작)"]
-        direction LR
-        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
-    end
-
-    subgraph R1["Ring 1 — 명령어 (직접 호출)"]
-        direction TB
-        subgraph orbit_wrap["  /orbit  "]
-            direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
-        end
-        c6("/team")
-        c7("/evolve")
-    end
-
-    subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
-        direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
-    end
-
-    subgraph R3["Ring 3 — 진화 (자기 개선)"]
-        direction LR
-        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
-    end
-
-    R0 -->|"모든 도구 호출 관측"| R3
-    R3 -.->|"진화 스킬"| R2
-    R1 -->|"자동 트리거"| R2
-    R0 -->|"컨텍스트 복원"| R1
-```
-
 ## /orbit — 자율 파이프라인
 
 `/orbit`은 수동 파이프라인 전체를 하나의 자율 실행으로 감쌉니다.
@@ -145,22 +143,22 @@ flowchart TB
 ```mermaid
 flowchart TD
     START(["/orbit"]) --> MODE{"요구사항?"}:::human
-    MODE -->|"불분명"| WAIT["인터랙티브\n/discover → /spec\n후 'orbit go'"]:::human
-    MODE -->|"명확 + 복잡"| COUNCIL["Council\n4-voice 자동 스펙"]:::auto
-    MODE -->|"명확 + 단순"| DIRECT["Direct\n자동 스펙"]:::auto
+    MODE -->|"불분명"| WAIT["인터랙티브 /discover → /spec 후 'orbit go'"]:::human
+    MODE -->|"명확 + 복잡"| COUNCIL["Council 4-voice 자동 스펙"]:::auto
+    MODE -->|"명확 + 단순"| DIRECT["Direct 자동 스펙"]:::auto
     WAIT --> SPEC_LOAD["스펙 로드"]
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
-    SPEC_LOAD --> GO["Go\n계획 → TDD → 통합"]:::auto
-    GO --> CHECK["Check\n리뷰 + 감사 + 테스트"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\n격리 테스트 → PR → CI"]:::auto
+    SPEC_LOAD --> GO["Go 계획 → TDD → 통합"]:::auto
+    GO --> CHECK["Check 리뷰 + 감사 + 테스트"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship 격리 테스트 → PR → CI"]:::auto
     CHECK -->|FAIL| RETRY{"재시도 < 3?"}
     RETRY -->|예| GO
-    RETRY -->|아니오| PAUSE["일시정지\n사용자 결정"]:::human
+    RETRY -->|아니오| PAUSE["일시정지 사용자 결정"]:::human
     PAUSE -->|계속| GO
     PAUSE -->|중단| ABORT
-    SHIP --> EVOLVE["Evolve\n세션 자동 분석"]:::auto
-    EVOLVE --> DONE(["Orbit 완료\n통합 리포트"]):::auto
+    SHIP --> EVOLVE["Evolve 세션 자동 분석"]:::auto
+    EVOLVE --> DONE(["Orbit 완료 통합 리포트"]):::auto
 
     classDef human fill:#4a4a6a,stroke:#9b9bcc,color:#fff
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
@@ -304,7 +302,7 @@ epic mem add --title "JWT rotation" --type decision    # 노드 추가
 epic mem search "JWT"                                  # FTS5 검색
 epic mem query --type decision --project my-project    # 필터
 epic mem context --project my-project                  # 프로젝트 컨텍스트
-epic mem serve                                         # Web UI → :7700
+epic mem serve                                         # Web UI → :7700 or custom port with --port 8800
 epic mem mcp-install                                   # MCP 서버 등록
 epic mem export --out ./docs/memory                    # Markdown 내보내기
 ```
@@ -422,6 +420,41 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 ```
 observe (100% 확인) → extract_instincts() → instinct 노드 (confidence ≥ 0.8)
     → 2개 이상 프로젝트에서 관측 시 글로벌로 프로모션
+```
+
+## 아키텍처: 4-Ring 모델
+
+```mermaid
+flowchart TB
+    subgraph R0["Ring 0 — 오토파일럿 (훅, 투명하게 동작)"]
+        direction LR
+        h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
+    end
+
+    subgraph R1["Ring 1 — 명령어 (직접 호출)"]
+        direction TB
+        subgraph orbit_wrap["  /orbit  "]
+            direction LR
+            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+        end
+        c6("/team")
+        c7("/evolve")
+    end
+
+    subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
+        direction LR
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+    end
+
+    subgraph R3["Ring 3 — 진화 (자기 개선)"]
+        direction LR
+        e1(observe) --> e2(analyze) --> e3(seed) --> e4(gate) --> e5(reload)
+    end
+
+    R0 -->|"모든 도구 호출 관측"| R3
+    R3 -.->|"진화 스킬"| R2
+    R1 -->|"자동 트리거"| R2
+    R0 -->|"컨텍스트 복원"| R1
 ```
 
 ## 크로스 프로젝트 학습
