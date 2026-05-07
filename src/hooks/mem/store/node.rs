@@ -4,7 +4,7 @@ use rusqlite::{Connection, params};
 use std::io;
 
 use super::types::Node;
-use super::util::{join_csv, NODE_COLUMNS};
+use super::util::{NODE_COLUMNS, join_csv};
 
 pub fn write_node(node: &Node) -> io::Result<()> {
     let conn = super::open_db()?;
@@ -51,9 +51,12 @@ pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> Vec<Node> {
         Ok(s) => s,
         Err(_) => return vec![],
     };
-    stmt.query_map(rusqlite::params_from_iter(ids.iter()), super::util::row_to_node)
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+    stmt.query_map(
+        rusqlite::params_from_iter(ids.iter()),
+        super::util::row_to_node,
+    )
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
 }
 
 pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {

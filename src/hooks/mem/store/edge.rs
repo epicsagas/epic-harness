@@ -10,7 +10,14 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
+        params![
+            edge.id,
+            edge.source,
+            edge.target,
+            edge.relation,
+            edge.weight,
+            edge.ts
+        ],
     )
     .map_err(io::Error::other)?;
     Ok(())
@@ -21,7 +28,14 @@ pub fn append_edge_conn(conn: &Connection, edge: &Edge) -> io::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
+        params![
+            edge.id,
+            edge.source,
+            edge.target,
+            edge.relation,
+            edge.weight,
+            edge.ts
+        ],
     )
     .map_err(io::Error::other)?;
     Ok(())
@@ -29,9 +43,8 @@ pub fn append_edge_conn(conn: &Connection, edge: &Edge) -> io::Result<()> {
 
 /// Read all edges using an existing connection (no LIMIT — callers should paginate for large graphs).
 pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
-    let mut stmt = match conn.prepare(
-        "SELECT id, source, target, relation, weight, ts FROM edges",
-    ) {
+    let mut stmt = match conn.prepare("SELECT id, source, target, relation, weight, ts FROM edges")
+    {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[mem/store] read_edges_conn: prepare failed: {e}");

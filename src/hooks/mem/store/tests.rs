@@ -3,7 +3,13 @@
 use super::*;
 use std::path::PathBuf;
 
-fn make_node(id: &str, title: &str, node_type: &str, tags: &[&str], importance: Option<f64>) -> Node {
+fn make_node(
+    id: &str,
+    title: &str,
+    node_type: &str,
+    tags: &[&str],
+    importance: Option<f64>,
+) -> Node {
     let ts = "2024-01-01T00:00:00Z".to_string();
     Node {
         frontmatter: NodeFrontmatter {
@@ -154,7 +160,8 @@ fn open_mem_db() -> rusqlite::Connection {
         CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
         CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '2');",
-    ).expect("schema");
+    )
+    .expect("schema");
     conn
 }
 
@@ -168,7 +175,7 @@ fn smart_recall_graph_boost_lifts_connected_node() {
     let id_e = "eeeeeeee-0000-4000-8000-000000000001";
 
     let n1 = make_node(id_a, "Alpha Node", "concept", &[], Some(0.8));
-    let n2 = make_node(id_b, "Beta Node",  "concept", &[], Some(0.4));
+    let n2 = make_node(id_b, "Beta Node", "concept", &[], Some(0.4));
     write_node_conn(&conn, &n1).unwrap();
     write_node_conn(&conn, &n2).unwrap();
 
@@ -183,26 +190,38 @@ fn smart_recall_graph_boost_lifts_connected_node() {
     append_edge_conn(&conn, &edge).unwrap();
 
     let results = smart_recall_conn(&conn, None, None, 10);
-    let ids: Vec<&str> = results.iter().map(|sn| sn.node.frontmatter.id.as_str()).collect();
+    let ids: Vec<&str> = results
+        .iter()
+        .map(|sn| sn.node.frontmatter.id.as_str())
+        .collect();
     assert!(ids.contains(&id_a), "boost-a must appear");
     assert!(ids.contains(&id_b), "boost-b must appear");
 
     for sn in &results {
-        assert!(sn.score > 0.0, "score must be positive: {}", sn.node.frontmatter.id);
+        assert!(
+            sn.score > 0.0,
+            "score must be positive: {}",
+            sn.node.frontmatter.id
+        );
     }
 }
 
 // ── Phase 2a: session importance downgrade ────────────────
 #[test]
 fn test_session_importance_is_005() {
-    assert_eq!(importance_for_type("session"), 0.05,
-        "session importance should be 0.05, not 0.2");
+    assert_eq!(
+        importance_for_type("session"),
+        0.05,
+        "session importance should be 0.05, not 0.2"
+    );
 }
 
 #[test]
 fn test_session_importance_lower_than_pattern() {
-    assert!(importance_for_type("session") < importance_for_type("pattern"),
-        "session importance should be lower than pattern");
+    assert!(
+        importance_for_type("session") < importance_for_type("pattern"),
+        "session importance should be lower than pattern"
+    );
 }
 
 // ── Phase 2b: FTS5 trigram tokenizer ─────────────────────
@@ -210,13 +229,18 @@ fn test_session_importance_lower_than_pattern() {
 fn test_fts_uses_trigram_tokenizer() {
     let conn = open_mem_db();
     // Query the FTS table info to verify trigram tokenizer
-    let info: String = conn.query_row(
-        "SELECT sql FROM sqlite_master WHERE name = 'nodes_fts'",
-        [],
-        |row| row.get(0),
-    ).expect("nodes_fts should exist");
-    assert!(info.contains("trigram"),
-        "FTS5 table should use trigram tokenizer, got: {}", info);
+    let info: String = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name = 'nodes_fts'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("nodes_fts should exist");
+    assert!(
+        info.contains("trigram"),
+        "FTS5 table should use trigram tokenizer, got: {}",
+        info
+    );
 }
 
 #[test]
@@ -232,11 +256,13 @@ fn test_fts_trigram_korean_substring_search() {
     write_node_conn(&conn, &node_with_korean).unwrap();
 
     // Trigram tokenizer should match Korean substrings (3+ chars for valid trigrams)
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH '한국어'",
-        [],
-        |row| row.get(0),
-    ).unwrap_or(0);
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH '한국어'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
     assert!(count > 0, "trigram FTS should match Korean substring");
 }
 
@@ -244,11 +270,13 @@ fn test_fts_trigram_korean_substring_search() {
 #[test]
 fn test_schema_version_meta_table_exists() {
     let conn = open_mem_db();
-    let version: String = conn.query_row(
-        "SELECT value FROM _meta WHERE key = 'schema_version'",
-        [],
-        |row| row.get(0),
-    ).expect("_meta table with schema_version should exist");
+    let version: String = conn
+        .query_row(
+            "SELECT value FROM _meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("_meta table with schema_version should exist");
     assert_eq!(version, "2", "schema_version should be '2'");
 }
 
@@ -266,14 +294,19 @@ fn test_session_importance_backfill() {
 
     // Run the backfill that schema.rs applies
     let _ = conn.execute_batch(
-        "UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;"
+        "UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;",
     );
 
-    let imp: f64 = conn.query_row(
-        "SELECT importance FROM nodes WHERE id = 'session-backfill-test'",
-        [],
-        |row| row.get(0),
-    ).unwrap();
-    assert!((imp - 0.05).abs() < f64::EPSILON,
-        "session node importance should be backfilled to 0.05, got: {}", imp);
+    let imp: f64 = conn
+        .query_row(
+            "SELECT importance FROM nodes WHERE id = 'session-backfill-test'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        (imp - 0.05).abs() < f64::EPSILON,
+        "session node importance should be backfilled to 0.05, got: {}",
+        imp
+    );
 }

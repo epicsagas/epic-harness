@@ -2,7 +2,7 @@ use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use super::common::{self, HookInput, hint, should_run, CONFLICT_LOOKBACK, PROFILE_GUARD};
+use super::common::{self, CONFLICT_LOOKBACK, HookInput, PROFILE_GUARD, hint, should_run};
 use super::telemetry::{RuleKind, Telemetry};
 
 struct BuiltinRule {
@@ -30,8 +30,9 @@ const BLOCKED_RULES: &[BuiltinRule] = &[
 /// Types: feat, fix, build, chore, ci, docs, style, refactor, perf, test
 static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+"
-    ).unwrap()
+        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+",
+    )
+    .unwrap()
 });
 
 /// Extract the commit message from a `git commit -m "..."` command.
@@ -47,9 +48,8 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     };
 
     // HEREDOC: find delimiter after <<, then find that delimiter on its own line
-    static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
-    });
+    static HEREDOC_START: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap());
     if let Some(caps) = HEREDOC_START.captures(cmd) {
         let delim = caps[1].to_string();
         let match_end = caps.get(0).unwrap().end();
@@ -69,12 +69,10 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     // and to allow the other quote type inside the message.
     // Use non-greedy .*? so we capture the FIRST -m argument (the subject),
     // not the last one (which would be the body in `git commit -m "subj" -m "body"`).
-    static SIMPLE_DQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap()
-    });
-    static SIMPLE_SQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap()
-    });
+    static SIMPLE_DQ: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap());
+    static SIMPLE_SQ: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap());
     if let Some(caps) = SIMPLE_DQ.captures(cmd) {
         return Some(caps[1].trim().to_string());
     }
@@ -263,10 +261,7 @@ fn detect_concurrent_write_conflict(
         {
             continue;
         }
-        let stream_path = orch_dir
-            .join("agents")
-            .join(agent_id)
-            .join("stream.jsonl");
+        let stream_path = orch_dir.join("agents").join(agent_id).join("stream.jsonl");
         if !stream_path.is_file() {
             continue;
         }
@@ -352,10 +347,13 @@ pub fn run(input: &HookInput) -> i32 {
             if let Some(ref orch) = orch_dir
                 && check_control_json_pause(agent_id.as_deref(), orch)
             {
-                hint("guard", &format!(
-                    "BLOCKED: control.json pause directive active for agent {}",
-                    agent_id.as_deref().unwrap_or("unknown")
-                ));
+                hint(
+                    "guard",
+                    &format!(
+                        "BLOCKED: control.json pause directive active for agent {}",
+                        agent_id.as_deref().unwrap_or("unknown")
+                    ),
+                );
                 return 2;
             }
 
@@ -559,17 +557,24 @@ mod tests {
     // ── Conventional Commits ─────────────────────────
     #[test]
     fn cc_valid_feat() {
-        assert!(check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#)
+                .is_none()
+        );
     }
 
     #[test]
     fn cc_valid_fix_no_scope() {
-        assert!(check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none()
+        );
     }
 
     #[test]
     fn cc_valid_breaking() {
-        assert!(check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none()
+        );
     }
 
     #[test]
@@ -636,14 +641,20 @@ mod tests {
 
     #[test]
     fn cc_valid_multi_scope() {
-        assert!(check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#)
+                .is_none()
+        );
     }
 
     #[test]
     fn cc_valid_multi_m_body() {
         // Second -m is the body; subject should be validated, not the body line
         let cmd = r#"git commit -m "fix(mem): resolve injection" -m "- use rusqlite params""#;
-        assert!(check_conventional_commit(cmd).is_none(), "subject is valid CC, body must be ignored");
+        assert!(
+            check_conventional_commit(cmd).is_none(),
+            "subject is valid CC, body must be ignored"
+        );
     }
 
     #[test]
@@ -791,11 +802,7 @@ mod tests {
         // agent-1: running, with stream containing file path
         let agent1_dir = agents_dir.join("agent-1");
         std::fs::create_dir_all(&agent1_dir).unwrap();
-        std::fs::write(
-            agent1_dir.join("status.json"),
-            "{\"status\":\"running\"}",
-        )
-        .unwrap();
+        std::fs::write(agent1_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
         std::fs::write(
             agent1_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/main.rs\"}}\n",
@@ -805,11 +812,7 @@ mod tests {
         // agent-2: running, different file
         let agent2_dir = agents_dir.join("agent-2");
         std::fs::create_dir_all(&agent2_dir).unwrap();
-        std::fs::write(
-            agent2_dir.join("status.json"),
-            "{\"status\":\"running\"}",
-        )
-        .unwrap();
+        std::fs::write(agent2_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
         std::fs::write(
             agent2_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/other.rs\"}}\n",
@@ -845,11 +848,7 @@ mod tests {
 
         let agent_dir = agents_dir.join("agent-stopped");
         std::fs::create_dir_all(&agent_dir).unwrap();
-        std::fs::write(
-            agent_dir.join("status.json"),
-            "{\"status\":\"stopped\"}",
-        )
-        .unwrap();
+        std::fs::write(agent_dir.join("status.json"), "{\"status\":\"stopped\"}").unwrap();
         std::fs::write(
             agent_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/main.rs\"}}\n",
@@ -887,11 +886,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
         std::fs::create_dir_all(&orch_dir).unwrap();
-        std::fs::write(
-            orch_dir.join("control.json"),
-            "{\"pause\":\"agent-1\"}",
-        )
-        .unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-1\"}").unwrap();
 
         assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
         assert!(!check_control_json_pause(Some("agent-2"), &orch_dir));
@@ -952,7 +947,9 @@ mod tests {
 
         let input = HookInput {
             tool_name: Some("Edit".into()),
-            tool_input: Some(serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"})),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
             ..Default::default()
         };
         assert_eq!(run(&input), 2, "pause directive must block Edit tool call");
@@ -980,7 +977,9 @@ mod tests {
 
         let input = HookInput {
             tool_name: Some("Edit".into()),
-            tool_input: Some(serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"})),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
             ..Default::default()
         };
         assert_eq!(run(&input), 0, "non-targeted agent must not be blocked");
@@ -1018,11 +1017,7 @@ mod tests {
         // agent-1 running, modified /src/shared.rs
         let agent1_dir = agents_dir.join("agent-1");
         std::fs::create_dir_all(&agent1_dir).unwrap();
-        std::fs::write(
-            agent1_dir.join("status.json"),
-            "{\"status\":\"running\"}",
-        )
-        .unwrap();
+        std::fs::write(agent1_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
         std::fs::write(
             agent1_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/shared.rs\"}}\n",

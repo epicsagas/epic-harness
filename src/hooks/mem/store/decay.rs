@@ -44,14 +44,16 @@ pub fn decay_importance(days: u64, factor: f64, floor: f64) -> io::Result<u64> {
         let ss = secs % 60;
         format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
     };
-    let changed = conn.execute(
-        "UPDATE nodes SET importance = MAX(?3, importance * ?2)
+    let changed = conn
+        .execute(
+            "UPDATE nodes SET importance = MAX(?3, importance * ?2)
          WHERE (accessed_at < ?1 OR accessed_at = '')
            AND updated < ?1
            AND importance > ?3
            AND ',' || tags || ',' NOT LIKE '%,pinned,%'",
-        params![cutoff, factor, floor],
-    ).map_err(io::Error::other)?;
+            params![cutoff, factor, floor],
+        )
+        .map_err(io::Error::other)?;
     Ok(changed as u64)
 }
 
@@ -72,15 +74,17 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
         let ss = s % 60;
         format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
     };
-    let changed = conn.execute(
-        "UPDATE nodes SET tags = CASE
+    let changed = conn
+        .execute(
+            "UPDATE nodes SET tags = CASE
             WHEN tags = '' THEN 'stale'
             WHEN ',' || tags || ',' NOT LIKE '%,stale,%' THEN tags || ',stale'
             ELSE tags
          END
          WHERE updated < ?1
            AND ',' || tags || ',' NOT LIKE '%,stale,%'",
-        params![cutoff],
-    ).map_err(io::Error::other)?;
+            params![cutoff],
+        )
+        .map_err(io::Error::other)?;
     Ok(changed as u64)
 }

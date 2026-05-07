@@ -56,7 +56,8 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
 
     // Migrate existing DBs: add new columns (ignore errors if already present)
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
+    let _ =
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN accessed_at TEXT NOT NULL DEFAULT ''");
 
     // Backfill importance for existing nodes based on type
@@ -66,26 +67,29 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
          UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'concept';
          UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'project';
          UPDATE nodes SET importance = 0.4 WHERE importance = 0.5 AND type = 'error';
-         UPDATE nodes SET importance = 0.05 WHERE importance = 0.5 AND type = 'session';"
+         UPDATE nodes SET importance = 0.05 WHERE importance = 0.5 AND type = 'session';",
     );
 
     // Downgrade session importance from 0.2 to 0.05 (for existing DBs where backfill already ran)
     let _ = conn.execute_batch(
-        "UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;"
+        "UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;",
     );
 
     // Schema version tracking
     let _ = conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '2');"
+         INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '2');",
     );
 
     // Migrate FTS to trigram tokenizer if needed (schema_version < 2)
-    let needs_fts_migrate: bool = conn.query_row(
-        "SELECT value FROM _meta WHERE key = 'schema_version'",
-        [],
-        |row| row.get::<_, String>(0),
-    ).ok().map_or(true, |v| v != "2");
+    let needs_fts_migrate: bool = conn
+        .query_row(
+            "SELECT value FROM _meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .map_or(true, |v| v != "2");
 
     if needs_fts_migrate {
         let _ = conn.execute_batch(
@@ -148,8 +152,12 @@ pub(crate) fn auto_migrate_legacy(conn: &Connection) {
             if path.extension().and_then(|e| e.to_str()) != Some("md") {
                 continue;
             }
-            let Ok(content) = fs::read_to_string(&path) else { continue };
-            let Some(node) = parse_node(&content) else { continue };
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(node) = parse_node(&content) else {
+                continue;
+            };
             let fm = &node.frontmatter;
             let imp = importance_for_type(&fm.node_type);
             let _ = conn.execute(
@@ -178,8 +186,12 @@ pub(crate) fn auto_migrate_legacy(conn: &Connection) {
                      (id, source, target, relation, weight, ts)
                      VALUES (?1,?2,?3,?4,?5,?6)",
                     rusqlite::params![
-                        edge.id, edge.source, edge.target,
-                        edge.relation, edge.weight, edge.ts,
+                        edge.id,
+                        edge.source,
+                        edge.target,
+                        edge.relation,
+                        edge.weight,
+                        edge.ts,
                     ],
                 );
             }

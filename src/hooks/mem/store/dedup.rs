@@ -11,7 +11,11 @@ use super::util::days_to_ymd;
 /// last `window_hours` hours.  Uses the composite idx_nodes_title_updated index
 /// for O(log N) lookup.  Used to prevent duplicate writes when multiple callers
 /// (observe hook + skills + direct MCP) fire for the same event.
-pub(crate) fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hours: u64) -> Option<String> {
+pub(crate) fn find_duplicate_in_conn(
+    conn: &Connection,
+    title: &str,
+    window_hours: u64,
+) -> Option<String> {
     let cutoff_secs = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -29,7 +33,8 @@ pub(crate) fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hour
         "SELECT id FROM nodes WHERE title = ?1 AND updated > ?2 ORDER BY updated DESC LIMIT 1",
         params![title, cutoff],
         |row| row.get::<_, String>(0),
-    ).ok()
+    )
+    .ok()
 }
 
 /// Write-with-dedup: opens a single connection, checks for a duplicate, and

@@ -8,12 +8,10 @@ use std::path::{Path, PathBuf};
 // ── Column constants ──────────────────────────────────
 
 /// Standard SELECT columns for node queries. Use with row_to_node().
-pub(crate) const NODE_COLUMNS: &str =
-    "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
+pub(crate) const NODE_COLUMNS: &str = "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
 
 /// Same columns but table-prefixed for JOIN queries.
-pub(crate) const NODE_COLUMNS_PREFIXED: &str =
-    "id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
+pub(crate) const NODE_COLUMNS_PREFIXED: &str = "id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
 
 // ── CSV helpers ───────────────────────────────────────
 
@@ -83,12 +81,15 @@ pub fn validate_node_id(id: &str) -> bool {
     // UUID v4 strict: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
     let b = id.as_bytes();
     b.len() == 36
-        && b[8] == b'-' && b[13] == b'-' && b[18] == b'-' && b[23] == b'-'
+        && b[8] == b'-'
+        && b[13] == b'-'
+        && b[18] == b'-'
+        && b[23] == b'-'
         && b[14] == b'4'
         && matches!(b[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B')
-        && b.iter().enumerate().all(|(i, &c)| {
-            matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit()
-        })
+        && b.iter()
+            .enumerate()
+            .all(|(i, &c)| matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit())
 }
 
 // ── UUID ─────────────────────────────────────────────
@@ -177,7 +178,7 @@ fn days_since_epoch(year: u64, month: u64, day: u64) -> u64 {
     // Count leap years before `year` minus leap years before 1970,
     // using the Julian Day Number leap-year rule.
     let y = year as i64 - 1; // complete years before this one
-    let base = 1969i64;      // complete years before 1970
+    let base = 1969i64; // complete years before 1970
     let leaps = (y / 4 - y / 100 + y / 400) - (base / 4 - base / 100 + base / 400);
     let days_from_years = (year as i64 - 1970) * 365 + leaps;
 

@@ -6,8 +6,7 @@
 pub mod state;
 
 use state::{
-    self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction,
-    InboxMessage,
+    self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction, InboxMessage,
 };
 
 use super::common::{self, HookInput, hint, now_iso};
@@ -50,7 +49,10 @@ pub fn run_pre(input: &HookInput) -> i32 {
                 ControlAction::Pause => {
                     hint(
                         "orchestrator",
-                        &format!("Agent {} is paused by user directive (gen {})", agent_id, directive.generation),
+                        &format!(
+                            "Agent {} is paused by user directive (gen {})",
+                            agent_id, directive.generation
+                        ),
                     );
                     if let Some(msg) = &directive.message {
                         hint("orchestrator", &format!("Reason: {}", msg));
@@ -60,7 +62,10 @@ pub fn run_pre(input: &HookInput) -> i32 {
                 ControlAction::Cancel => {
                     hint(
                         "orchestrator",
-                        &format!("Agent {} cancelled by user directive (gen {})", agent_id, directive.generation),
+                        &format!(
+                            "Agent {} cancelled by user directive (gen {})",
+                            agent_id, directive.generation
+                        ),
                     );
                     return 2;
                 }
@@ -168,10 +173,7 @@ pub fn run_post(input: &HookInput) -> i32 {
                 let msg = InboxMessage {
                     from: "orchestrator".to_string(),
                     timestamp: now_iso(),
-                    message: format!(
-                        "Dependency '{}' completed. You are unblocked.",
-                        agent_id
-                    ),
+                    message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
                 };
                 let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
 

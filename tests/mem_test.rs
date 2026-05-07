@@ -642,9 +642,8 @@ fn test_tag_stale_nodes() {
 #[test]
 fn test_ingest_creates_project_hub_and_belongs_to_edges() {
     use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, append_edge_conn, read_node,
-        read_edges_conn, new_uuid, now_iso,
-        Node, NodeFrontmatter, Edge,
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_edges_conn,
+        read_node, write_node_dedup_conn,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
@@ -736,30 +735,46 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
 
     // Verify project hub exists with type='project'
     let hub = read_node(&hub_id).unwrap();
-    assert_eq!(hub.frontmatter.node_type, "project", "hub should be type 'project'");
-    assert_eq!(hub.frontmatter.title, "testproj", "hub title should match project slug");
+    assert_eq!(
+        hub.frontmatter.node_type, "project",
+        "hub should be type 'project'"
+    );
+    assert_eq!(
+        hub.frontmatter.title, "testproj",
+        "hub title should match project slug"
+    );
 
     // Verify belongs_to edges from session and pattern to hub
     let edges = read_edges_conn(&conn);
-    let belongs_edges: Vec<_> = edges.iter()
+    let belongs_edges: Vec<_> = edges
+        .iter()
         .filter(|e| e.relation == "belongs_to" && e.target == hub_id)
         .collect();
-    assert_eq!(belongs_edges.len(), 2, "should have 2 belongs_to edges to hub");
+    assert_eq!(
+        belongs_edges.len(),
+        2,
+        "should have 2 belongs_to edges to hub"
+    );
     let sources: Vec<&str> = belongs_edges.iter().map(|e| e.source.as_str()).collect();
-    assert!(sources.contains(&session_id.as_str()), "session should have belongs_to edge to hub");
-    assert!(sources.contains(&pattern_id.as_str()), "pattern should have belongs_to edge to hub");
+    assert!(
+        sources.contains(&session_id.as_str()),
+        "session should have belongs_to edge to hub"
+    );
+    assert!(
+        sources.contains(&pattern_id.as_str()),
+        "pattern should have belongs_to edge to hub"
+    );
 
     drop(conn);
 }
 
 #[test]
 fn test_centrality_endpoint_returns_degree_ordered() {
-    use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, append_edge_conn,
-        new_uuid, now_iso,
-        Node, NodeFrontmatter, Edge,
-    };
     use epic_harness::hooks::mem::server::compute_centrality;
+    use epic_harness::hooks::mem::store::{
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
+        write_node_dedup_conn,
+    };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
@@ -828,12 +843,11 @@ fn test_centrality_endpoint_returns_degree_ordered() {
 
 #[test]
 fn test_stats_endpoint_returns_correct_counts() {
-    use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, append_edge_conn,
-        new_uuid, now_iso,
-        Node, NodeFrontmatter, Edge,
-    };
     use epic_harness::hooks::mem::graph::compute_stats;
+    use epic_harness::hooks::mem::store::{
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
+        write_node_dedup_conn,
+    };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
@@ -904,9 +918,7 @@ fn test_stats_endpoint_returns_correct_counts() {
 #[test]
 fn test_recall_ranks_decisions_above_sessions() {
     use epic_harness::hooks::mem::store::{
-        open_db, write_node_dedup_conn, smart_recall_conn,
-        new_uuid,
-        Node, NodeFrontmatter,
+        Node, NodeFrontmatter, new_uuid, open_db, smart_recall_conn, write_node_dedup_conn,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
@@ -931,16 +943,33 @@ fn test_recall_ranks_decisions_above_sessions() {
             loop {
                 let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
                 let diy = if leap { 366 } else { 365 };
-                if remaining < diy { break; }
+                if remaining < diy {
+                    break;
+                }
                 remaining -= diy;
                 yr += 1;
             }
             let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
-            let md = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            let md = [
+                31u64,
+                if leap { 29 } else { 28 },
+                31,
+                30,
+                31,
+                30,
+                31,
+                31,
+                30,
+                31,
+                30,
+                31,
+            ];
             let mut mo = 1u64;
             let mut rd = remaining;
             for &days_in in &md {
-                if rd < days_in { break; }
+                if rd < days_in {
+                    break;
+                }
                 rd -= days_in;
                 mo += 1;
             }
@@ -962,16 +991,33 @@ fn test_recall_ranks_decisions_above_sessions() {
             loop {
                 let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
                 let diy = if leap { 366 } else { 365 };
-                if remaining < diy { break; }
+                if remaining < diy {
+                    break;
+                }
                 remaining -= diy;
                 yr += 1;
             }
             let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
-            let md = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            let md = [
+                31u64,
+                if leap { 29 } else { 28 },
+                31,
+                30,
+                31,
+                30,
+                31,
+                31,
+                30,
+                31,
+                30,
+                31,
+            ];
             let mut mo = 1u64;
             let mut rd = remaining;
             for &days_in in &md {
-                if rd < days_in { break; }
+                if rd < days_in {
+                    break;
+                }
                 rd -= days_in;
                 mo += 1;
             }
@@ -1025,10 +1071,20 @@ fn test_recall_ranks_decisions_above_sessions() {
     assert_eq!(results.len(), 6, "should return all 6 nodes");
 
     // Verify decision node appears BEFORE any session node in results
-    let decision_idx = results.iter().position(|sn| sn.node.frontmatter.node_type == "decision");
-    let first_session_idx = results.iter().position(|sn| sn.node.frontmatter.node_type == "session");
-    assert!(decision_idx.is_some(), "decision node should be present in results");
-    assert!(first_session_idx.is_some(), "session nodes should be present in results");
+    let decision_idx = results
+        .iter()
+        .position(|sn| sn.node.frontmatter.node_type == "decision");
+    let first_session_idx = results
+        .iter()
+        .position(|sn| sn.node.frontmatter.node_type == "session");
+    assert!(
+        decision_idx.is_some(),
+        "decision node should be present in results"
+    );
+    assert!(
+        first_session_idx.is_some(),
+        "session nodes should be present in results"
+    );
     assert!(
         decision_idx.unwrap() < first_session_idx.unwrap(),
         "decision node should rank above all session nodes"
@@ -1041,7 +1097,8 @@ fn test_recall_ranks_decisions_above_sessions() {
             assert!(
                 sn.score < decision_score,
                 "session score ({}) should be lower than decision score ({})",
-                sn.score, decision_score
+                sn.score,
+                decision_score
             );
         }
     }

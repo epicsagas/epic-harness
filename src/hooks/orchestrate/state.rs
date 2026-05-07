@@ -105,7 +105,9 @@ const CONTROL_FILE: &str = "control.json";
 pub fn validate_agent_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Returns the orchestrator state directory: `$HARNESS_DIR/orchestrator/`
@@ -264,10 +266,7 @@ pub fn write_run(base: &Path, run: &OrchestrationRun) -> io::Result<()> {
 
 /// Evaluate the dependency graph: given an agent that just completed,
 /// return the IDs of agents that are now unblocked (all their deps are done/failed).
-pub fn evaluate_dependencies(
-    run: &OrchestrationRun,
-    completed_agent_id: &str,
-) -> Vec<String> {
+pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -> Vec<String> {
     let mut unblocked = Vec::new();
 
     // Build a set of completed/failed agent IDs
@@ -315,9 +314,7 @@ pub fn parse_agent_state(output: &str) -> Option<AgentStatus> {
         || output.contains("## Status: DONE_WITH_CONCERNS")
     {
         Some(AgentStatus::Done)
-    } else if output.contains("## Status: BLOCKED")
-        || output.contains("## Status: NEEDS_CONTEXT")
-    {
+    } else if output.contains("## Status: BLOCKED") || output.contains("## Status: NEEDS_CONTEXT") {
         Some(AgentStatus::Blocked)
     } else {
         None
@@ -400,7 +397,10 @@ mod tests {
 
         let run_path = run_file(tmp.path());
         let tmp_path = run_path.with_extension("json.tmp");
-        assert!(!tmp_path.exists(), "no .tmp file should remain after atomic write");
+        assert!(
+            !tmp_path.exists(),
+            "no .tmp file should remain after atomic write"
+        );
     }
 
     // ── Test 2: Writing and reading agent status ──
@@ -498,10 +498,7 @@ mod tests {
                 ("tester", AgentStatus::Blocked),
                 ("reviewer", AgentStatus::Pending),
             ],
-            vec![
-                ("tester", vec!["builder"]),
-                ("reviewer", vec!["builder"]),
-            ],
+            vec![("tester", vec!["builder"]), ("reviewer", vec!["builder"])],
         );
 
         let mut unblocked = evaluate_dependencies(&run, "builder");
@@ -554,7 +551,10 @@ mod tests {
         );
 
         let unblocked = evaluate_dependencies(&run, "other");
-        assert!(unblocked.is_empty(), "agents with no deps should not appear");
+        assert!(
+            unblocked.is_empty(),
+            "agents with no deps should not appear"
+        );
     }
 
     #[test]
@@ -703,10 +703,7 @@ mod tests {
     fn is_run_complete_all_done() {
         let run = make_run(
             "complete",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Done),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Done)],
             vec![],
         );
         assert!(is_run_complete(&run));
@@ -716,10 +713,7 @@ mod tests {
     fn is_run_complete_mixed_done_failed() {
         let run = make_run(
             "mixed",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Failed),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Failed)],
             vec![],
         );
         assert!(is_run_complete(&run));
@@ -729,10 +723,7 @@ mod tests {
     fn is_run_not_complete_with_running() {
         let run = make_run(
             "not-done",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Running),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Running)],
             vec![],
         );
         assert!(!is_run_complete(&run));
@@ -742,10 +733,7 @@ mod tests {
     fn is_run_not_complete_with_blocked() {
         let run = make_run(
             "blocked",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Blocked),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Blocked)],
             vec![],
         );
         assert!(!is_run_complete(&run));

@@ -1029,11 +1029,13 @@ fn round3(v: f64) -> f64 {
 /// Find or create a project hub node. Returns the hub node's ID.
 fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::Result<String> {
     // Check if hub already exists
-    let existing: Option<String> = conn.query_row(
-        "SELECT id FROM nodes WHERE type = 'project' AND title = ?1 LIMIT 1",
-        rusqlite::params![format!("project: {}", slug)],
-        |row| row.get(0),
-    ).ok();
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT id FROM nodes WHERE type = 'project' AND title = ?1 LIMIT 1",
+            rusqlite::params![format!("project: {}", slug)],
+            |row| row.get(0),
+        )
+        .ok();
 
     if let Some(id) = existing {
         return Ok(id);
@@ -1279,64 +1281,83 @@ fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) ->
     if let Ok(hub_id) = ensure_project_hub(&tx, &slug) {
         // Link session node to project hub
         if !session_node_id.is_empty() {
-            let _ = store::append_edge_conn(&tx, &store::Edge {
-                id: store::new_uuid(),
-                source: session_node_id.clone(),
-                target: hub_id.clone(),
-                relation: "belongs_to".to_string(),
-                weight: 0.5,
-                ts: ts.clone(),
-            }).map(|_| edges_created += 1);
+            let _ = store::append_edge_conn(
+                &tx,
+                &store::Edge {
+                    id: store::new_uuid(),
+                    source: session_node_id.clone(),
+                    target: hub_id.clone(),
+                    relation: "belongs_to".to_string(),
+                    weight: 0.5,
+                    ts: ts.clone(),
+                },
+            )
+            .map(|_| edges_created += 1);
         }
         // Link pattern nodes to project hub
         for (pid, _) in &pattern_node_ids {
-            let _ = store::append_edge_conn(&tx, &store::Edge {
-                id: store::new_uuid(),
-                source: pid.clone(),
-                target: hub_id.clone(),
-                relation: "belongs_to".to_string(),
-                weight: 0.7,
-                ts: ts.clone(),
-            }).map(|_| edges_created += 1);
+            let _ = store::append_edge_conn(
+                &tx,
+                &store::Edge {
+                    id: store::new_uuid(),
+                    source: pid.clone(),
+                    target: hub_id.clone(),
+                    relation: "belongs_to".to_string(),
+                    weight: 0.7,
+                    ts: ts.clone(),
+                },
+            )
+            .map(|_| edges_created += 1);
         }
         // Link error nodes to project hub
         for eid in &error_node_ids {
-            let _ = store::append_edge_conn(&tx, &store::Edge {
-                id: store::new_uuid(),
-                source: eid.clone(),
-                target: hub_id.clone(),
-                relation: "belongs_to".to_string(),
-                weight: 0.7,
-                ts: ts.clone(),
-            }).map(|_| edges_created += 1);
+            let _ = store::append_edge_conn(
+                &tx,
+                &store::Edge {
+                    id: store::new_uuid(),
+                    source: eid.clone(),
+                    target: hub_id.clone(),
+                    relation: "belongs_to".to_string(),
+                    weight: 0.7,
+                    ts: ts.clone(),
+                },
+            )
+            .map(|_| edges_created += 1);
         }
     }
 
     // 8g. Session chain: link to previous session in same project
     if !session_node_id.is_empty() {
-        let prev_session: Option<String> = tx.query_row(
-            "SELECT id FROM nodes WHERE type = 'session' AND id != ?1
+        let prev_session: Option<String> = tx
+            .query_row(
+                "SELECT id FROM nodes WHERE type = 'session' AND id != ?1
              AND (',' || projects || ',' LIKE '%,' || ?2 || ',%')
              ORDER BY updated DESC LIMIT 1",
-            rusqlite::params![session_node_id, slug],
-            |row| row.get(0),
-        ).ok();
+                rusqlite::params![session_node_id, slug],
+                |row| row.get(0),
+            )
+            .ok();
 
         if let Some(prev_id) = prev_session {
-            let _ = store::append_edge_conn(&tx, &store::Edge {
-                id: store::new_uuid(),
-                source: prev_id,
-                target: session_node_id.clone(),
-                relation: "follows".to_string(),
-                weight: 0.3,
-                ts: ts.clone(),
-            }).map(|_| edges_created += 1);
+            let _ = store::append_edge_conn(
+                &tx,
+                &store::Edge {
+                    id: store::new_uuid(),
+                    source: prev_id,
+                    target: session_node_id.clone(),
+                    relation: "follows".to_string(),
+                    weight: 0.3,
+                    ts: ts.clone(),
+                },
+            )
+            .map(|_| edges_created += 1);
         }
     }
 
     // 8h. Same-tag edges: link non-session nodes that share tags
     let pattern_only_ids: Vec<String> = pattern_node_ids.iter().map(|(id, _)| id.clone()).collect();
-    let all_new_ids: Vec<&str> = pattern_only_ids.iter()
+    let all_new_ids: Vec<&str> = pattern_only_ids
+        .iter()
         .chain(error_node_ids.iter())
         .map(String::as_str)
         .collect();
@@ -1344,20 +1365,27 @@ fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) ->
     if all_new_ids.len() >= 2 {
         let new_nodes = store::read_nodes_conn(&tx, &all_new_ids);
         for i in 0..new_nodes.len() {
-            for j in (i+1)..new_nodes.len() {
-                let shared: Vec<String> = new_nodes[i].frontmatter.tags.iter()
+            for j in (i + 1)..new_nodes.len() {
+                let shared: Vec<String> = new_nodes[i]
+                    .frontmatter
+                    .tags
+                    .iter()
                     .filter(|t| **t != "auto" && new_nodes[j].frontmatter.tags.contains(t))
                     .cloned()
                     .collect();
                 if !shared.is_empty() {
-                    let _ = store::append_edge_conn(&tx, &store::Edge {
-                        id: store::new_uuid(),
-                        source: new_nodes[i].frontmatter.id.clone(),
-                        target: new_nodes[j].frontmatter.id.clone(),
-                        relation: "shares_context".to_string(),
-                        weight: shared.len() as f64,
-                        ts: ts.clone(),
-                    }).map(|_| edges_created += 1);
+                    let _ = store::append_edge_conn(
+                        &tx,
+                        &store::Edge {
+                            id: store::new_uuid(),
+                            source: new_nodes[i].frontmatter.id.clone(),
+                            target: new_nodes[j].frontmatter.id.clone(),
+                            relation: "shares_context".to_string(),
+                            weight: shared.len() as f64,
+                            ts: ts.clone(),
+                        },
+                    )
+                    .map(|_| edges_created += 1);
                 }
             }
         }
@@ -2785,7 +2813,11 @@ mod tests {
         assert_eq!(node.frontmatter.node_type, "project");
         assert_eq!(node.frontmatter.title, "project: test-project");
         assert!(node.frontmatter.tags.contains(&"hub".to_string()));
-        assert!(node.frontmatter.projects.contains(&"test-project".to_string()));
+        assert!(
+            node.frontmatter
+                .projects
+                .contains(&"test-project".to_string())
+        );
     }
 
     #[test]
@@ -2842,9 +2874,9 @@ mod tests {
 
         // Verify edge exists
         let edges = store::read_edges_conn(&conn);
-        let found = edges.iter().any(|e|
-            e.source == session_id && e.target == hub_id && e.relation == "belongs_to"
-        );
+        let found = edges
+            .iter()
+            .any(|e| e.source == session_id && e.target == hub_id && e.relation == "belongs_to");
         assert!(found, "belongs_to edge from session to hub must exist");
     }
 
@@ -2886,13 +2918,15 @@ mod tests {
         store::write_node_conn(&conn, &curr_node).unwrap();
 
         // Simulate the follows edge logic from ingest_to_memory
-        let prev_session: Option<String> = conn.query_row(
-            "SELECT id FROM nodes WHERE type = 'session' AND id != ?1
+        let prev_session: Option<String> = conn
+            .query_row(
+                "SELECT id FROM nodes WHERE type = 'session' AND id != ?1
              AND (',' || projects || ',' LIKE '%,' || ?2 || ',%')
              ORDER BY updated DESC LIMIT 1",
-            rusqlite::params![curr_id, "chain-proj"],
-            |row| row.get(0),
-        ).ok();
+                rusqlite::params![curr_id, "chain-proj"],
+                |row| row.get(0),
+            )
+            .ok();
 
         assert!(prev_session.is_some(), "should find a previous session");
         assert_eq!(prev_session.unwrap(), prev_id);
@@ -2909,10 +2943,13 @@ mod tests {
         store::append_edge_conn(&conn, &edge).unwrap();
 
         let edges = store::read_edges_conn(&conn);
-        let found = edges.iter().any(|e|
-            e.source == prev_id && e.target == curr_id && e.relation == "follows"
+        let found = edges
+            .iter()
+            .any(|e| e.source == prev_id && e.target == curr_id && e.relation == "follows");
+        assert!(
+            found,
+            "follows edge must exist from prev to current session"
         );
-        assert!(found, "follows edge must exist from prev to current session");
     }
 
     #[test]
@@ -2955,11 +2992,17 @@ mod tests {
         let new_nodes = store::read_nodes_conn(&conn, &all_new_ids);
         assert_eq!(new_nodes.len(), 2);
 
-        let shared: Vec<String> = new_nodes[0].frontmatter.tags.iter()
+        let shared: Vec<String> = new_nodes[0]
+            .frontmatter
+            .tags
+            .iter()
             .filter(|t| **t != "auto" && new_nodes[1].frontmatter.tags.contains(t))
             .cloned()
             .collect();
-        assert!(shared.contains(&"bash".to_string()), "should share 'bash' tag");
+        assert!(
+            shared.contains(&"bash".to_string()),
+            "should share 'bash' tag"
+        );
 
         // Create shares_context edge
         let edge = store::Edge {
@@ -2973,10 +3016,13 @@ mod tests {
         store::append_edge_conn(&conn, &edge).unwrap();
 
         let edges = store::read_edges_conn(&conn);
-        let found = edges.iter().any(|e|
-            e.source == id_a && e.target == id_b && e.relation == "shares_context"
+        let found = edges
+            .iter()
+            .any(|e| e.source == id_a && e.target == id_b && e.relation == "shares_context");
+        assert!(
+            found,
+            "shares_context edge must exist between same-tag nodes"
         );
-        assert!(found, "shares_context edge must exist between same-tag nodes");
     }
 
     #[test]
@@ -3017,11 +3063,17 @@ mod tests {
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
         let new_nodes = store::read_nodes_conn(&conn, &all_new_ids);
 
-        let shared: Vec<String> = new_nodes[0].frontmatter.tags.iter()
+        let shared: Vec<String> = new_nodes[0]
+            .frontmatter
+            .tags
+            .iter()
             .filter(|t| **t != "auto" && new_nodes[1].frontmatter.tags.contains(t))
             .cloned()
             .collect();
-        assert!(shared.is_empty(), "nodes sharing only 'auto' tag should have no shared tags");
+        assert!(
+            shared.is_empty(),
+            "nodes sharing only 'auto' tag should have no shared tags"
+        );
     }
 
     // ── instinct promotion gate (no .min(1) bypass) ──

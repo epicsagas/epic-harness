@@ -5,14 +5,14 @@ use rusqlite::Connection;
 use super::decay::touch_node_conn;
 use super::search::search_nodes_conn;
 use super::types::{Node, ScoredNode};
-use super::util::{parse_iso_to_secs, NODE_COLUMNS};
+use super::util::{NODE_COLUMNS, parse_iso_to_secs};
 
 /// Composite relevance score weights.
-pub const W_RECENCY:    f64 = 0.20;  // was 0.25 — reduced to make room for graph boost
+pub const W_RECENCY: f64 = 0.20; // was 0.25 — reduced to make room for graph boost
 pub const W_IMPORTANCE: f64 = 0.35;
-pub const W_ACCESS:     f64 = 0.15;
-pub const W_FTS:        f64 = 0.20;  // was 0.25
-pub const W_GRAPH:      f64 = 0.10;  // edge-weight connectivity boost (new)
+pub const W_ACCESS: f64 = 0.15;
+pub const W_FTS: f64 = 0.20; // was 0.25
+pub const W_GRAPH: f64 = 0.10; // edge-weight connectivity boost (new)
 
 /// Smart recall using an existing connection.
 pub fn smart_recall_conn(
@@ -42,9 +42,7 @@ pub fn smart_recall_conn(
 
     // Fetch candidate nodes (broad set); candidate_limit is computed, not user input.
     let candidate_limit = (limit * 4).max(40) as i64;
-    let mut conditions: Vec<&str> = vec![
-        "',' || tags || ',' NOT LIKE '%,stale,%'",
-    ];
+    let mut conditions: Vec<&str> = vec!["',' || tags || ',' NOT LIKE '%,stale,%'"];
     // Collect bound parameter values alongside conditions.
     let mut param_vals: Vec<Box<dyn rusqlite::ToSql>> = vec![];
     if let Some(p) = project {
@@ -75,7 +73,11 @@ pub fn smart_recall_conn(
             let recency = compute_recency(&node.frontmatter.updated, now_secs);
             let importance = node.frontmatter.importance;
             let access_freq = (node.frontmatter.access_count.max(0) as f64 / 20.0).min(1.0);
-            let fts_match = if fts_ids.contains(&node.frontmatter.id) { 1.0 } else { 0.0 };
+            let fts_match = if fts_ids.contains(&node.frontmatter.id) {
+                1.0
+            } else {
+                0.0
+            };
 
             let score = W_RECENCY * recency
                 + W_IMPORTANCE * importance
@@ -86,12 +88,19 @@ pub fn smart_recall_conn(
         })
         .collect();
 
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(limit);
 
     // Graph-boost pass: add W_GRAPH * edge_weight_score for edges between top candidates.
     if scored.len() > 1 {
-        let ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
+        let ids: Vec<String> = scored
+            .iter()
+            .map(|sn| sn.node.frontmatter.id.clone())
+            .collect();
         let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         // Sum edge weights for each node connected to other top-scored candidates.
         let sql = format!(
@@ -104,7 +113,9 @@ pub fn smart_recall_conn(
         if let Ok(mut stmt) = conn.prepare(&sql) {
             let base: Vec<&dyn rusqlite::ToSql> =
                 ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-            let sql_params: Vec<&dyn rusqlite::ToSql> = base.iter().copied()
+            let sql_params: Vec<&dyn rusqlite::ToSql> = base
+                .iter()
+                .copied()
                 .chain(base.iter().copied())
                 .chain(base.iter().copied())
                 .chain(base.iter().copied())
@@ -115,17 +126,30 @@ pub fn smart_recall_conn(
                 })
                 .map(|rows| {
                     let mut map: std::collections::HashMap<String, f64> = Default::default();
-                    for r in rows.flatten() { *map.entry(r.0).or_default() += r.1; }
+                    for r in rows.flatten() {
+                        *map.entry(r.0).or_default() += r.1;
+                    }
                     map
                 })
                 .unwrap_or_default();
-            let max_w = weight_map.values().cloned().fold(0.0_f64, f64::max).max(1.0);
+            let max_w = weight_map
+                .values()
+                .cloned()
+                .fold(0.0_f64, f64::max)
+                .max(1.0);
             for sn in &mut scored {
-                let boost = weight_map.get(&sn.node.frontmatter.id).copied().unwrap_or(0.0);
+                let boost = weight_map
+                    .get(&sn.node.frontmatter.id)
+                    .copied()
+                    .unwrap_or(0.0);
                 sn.score += W_GRAPH * (boost / max_w);
             }
             // Re-sort after boost
-            scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            scored.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
     }
 
@@ -141,11 +165,7 @@ pub fn smart_recall_conn(
 ///
 /// Opens its own connection; for repeated calls within a single session prefer
 /// `smart_recall_conn` to reuse an already-open connection.
-pub fn smart_recall(
-    project: Option<&str>,
-    hint: Option<&str>,
-    limit: usize,
-) -> Vec<ScoredNode> {
+pub fn smart_recall(project: Option<&str>, hint: Option<&str>, limit: usize) -> Vec<ScoredNode> {
     let conn = match super::open_db() {
         Ok(c) => c,
         Err(_) => return vec![],

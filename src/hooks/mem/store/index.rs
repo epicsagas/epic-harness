@@ -9,9 +9,9 @@ pub fn read_index() -> Index {
         Ok(c) => c,
         Err(_) => return Index::default(),
     };
-    let mut stmt = match conn.prepare(
-        "SELECT id, type, title, tags, projects, updated FROM nodes ORDER BY updated DESC",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT id, type, title, tags, projects, updated FROM nodes ORDER BY updated DESC")
+    {
         Ok(s) => s,
         Err(_) => return Index::default(),
     };
@@ -28,14 +28,16 @@ pub fn read_index() -> Index {
         })
         .map(|rows| {
             rows.filter_map(|r| r.ok())
-                .map(|(id, node_type, title, tags_str, projects_str, updated)| IndexNode {
-                    id,
-                    title,
-                    node_type,
-                    tags: split_csv(&tags_str),
-                    projects: split_csv(&projects_str),
-                    updated,
-                })
+                .map(
+                    |(id, node_type, title, tags_str, projects_str, updated)| IndexNode {
+                        id,
+                        title,
+                        node_type,
+                        tags: split_csv(&tags_str),
+                        projects: split_csv(&projects_str),
+                        updated,
+                    },
+                )
                 .collect()
         })
         .unwrap_or_default();
@@ -48,9 +50,15 @@ pub fn read_index() -> Index {
         for tag in &n.tags {
             by_tag.entry(tag.clone()).or_default().push(n.id.clone());
         }
-        by_type.entry(n.node_type.clone()).or_default().push(n.id.clone());
+        by_type
+            .entry(n.node_type.clone())
+            .or_default()
+            .push(n.id.clone());
         for proj in &n.projects {
-            by_project.entry(proj.clone()).or_default().push(n.id.clone());
+            by_project
+                .entry(proj.clone())
+                .or_default()
+                .push(n.id.clone());
         }
     }
 
