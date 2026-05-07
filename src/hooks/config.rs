@@ -15,6 +15,26 @@ pub struct HarnessConfig {
     pub evolution: EvolutionConfig,
     pub pattern: PatternConfig,
     pub instinct: InstinctConfig,
+    pub context: ContextConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ContextConfig {
+    /// 기본 활성 소스 목록. 빈 배열이면 ["harness"] 와 동일.
+    pub sources: Vec<String>,
+    pub alcove: AlcoveConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct AlcoveConfig {
+    /// Alcove vault 루트 경로 (예: ~/.alcove/vaults/OSN). 비어 있으면 미설정.
+    pub vault_path: String,
+    /// 수집할 프로젝트 목록. 빈 배열이면 전체.
+    pub projects: Vec<String>,
+    /// 최대 수집 문서 수 (기본 20).
+    pub max_docs: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -184,6 +204,25 @@ impl Default for InstinctConfig {
     }
 }
 
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            sources: vec!["harness".into()],
+            alcove: AlcoveConfig::default(),
+        }
+    }
+}
+
+impl Default for AlcoveConfig {
+    fn default() -> Self {
+        Self {
+            vault_path: String::new(),
+            projects: vec![],
+            max_docs: 20,
+        }
+    }
+}
+
 // ── Global Config Instance ──────────────────────────
 
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
@@ -348,6 +387,21 @@ gated_promotion_min = 3
 
 # Minimum session avg_score before instinct extraction runs.
 # min_avg_score = 0.5
+
+# ── Context sources ──────────────────────────────────
+[context]
+# Default sources included in reflect --context output.
+# "harness" is always included. Add "claude-session", "alcove", or "all".
+sources = ["harness"]
+
+[context.alcove]
+# Path to Alcove vault root (e.g. ~/.alcove/vaults/MyOrg).
+# Leave empty if Alcove is not used.
+vault_path = ""
+# Projects to include (empty = all projects in vault).
+projects = []
+# Maximum number of documents to collect.
+max_docs = 20
 "#
 }
 
@@ -439,6 +493,40 @@ max_instincts = 10
         // load_config() would catch this and return defaults
         let c = HarnessConfig::default();
         assert_eq!(c.hook.profile, "standard");
+    }
+
+    #[test]
+    fn context_config_defaults() {
+        let c = ContextConfig::default();
+        assert_eq!(c.sources, vec!["harness".to_string()]);
+        assert_eq!(c.alcove.max_docs, 20);
+    }
+
+    #[test]
+    fn context_config_from_toml() {
+        let toml = r#"
+[context]
+sources = ["harness", "alcove"]
+[context.alcove]
+vault_path = "/tmp/vault"
+max_docs = 5
+"#;
+        let c: HarnessConfig = toml::from_str(toml).unwrap();
+        assert_eq!(c.context.sources, vec!["harness".to_string(), "alcove".to_string()]);
+        assert_eq!(c.context.alcove.vault_path, "/tmp/vault");
+        assert_eq!(c.context.alcove.max_docs, 5);
+    }
+
+    #[test]
+    fn alcove_config_empty_vault_path() {
+        let c = AlcoveConfig::default();
+        assert!(c.vault_path.is_empty());
+    }
+
+    #[test]
+    fn template_includes_context_section() {
+        let template = default_config_template();
+        assert!(template.contains("[context]"));
     }
 
     #[test]
