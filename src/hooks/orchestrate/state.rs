@@ -1,5 +1,7 @@
 //! state.rs -- Orchestration state types and file I/O helpers
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

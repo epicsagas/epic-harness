@@ -442,6 +442,7 @@ impl Telemetry {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_enabled(&self) -> bool {
         self.consent == ConsentLevel::On
     }

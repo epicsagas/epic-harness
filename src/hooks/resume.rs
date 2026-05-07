@@ -511,6 +511,7 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::path::PathBuf;
 
     /// Helper: return a unique lock path inside a temp dir for this test.
@@ -578,6 +579,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_returns_none_when_status_not_running() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
@@ -603,6 +605,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_returns_summary_when_active() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
@@ -657,6 +660,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_handles_missing_agent_status_gracefully() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");

@@ -447,6 +447,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── Blocked commands ────────────────────────────
     #[test]
@@ -931,6 +932,7 @@ mod tests {
     // ── run() integration with orchestration ────────────────
 
     #[test]
+    #[serial]
     fn run_orchestration_pause_blocks_edit() {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
@@ -962,6 +964,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_pause_not_targeting_passes() {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
@@ -992,6 +995,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_not_enabled_skips_checks() {
         // No HARNESS_DIR set — orchestration checks are skipped entirely
         unsafe {
@@ -1009,6 +1013,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_concurrent_warning_does_not_block() {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
@@ -1048,6 +1053,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn run_orchestration_bash_tool_skipped() {
         // Bash tool should not trigger orchestration checks
         let dir = tempfile::tempdir().unwrap();

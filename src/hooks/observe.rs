@@ -447,6 +447,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── score_bash ──────────────────────────────────
     #[test]
@@ -811,6 +812,7 @@ mod tests {
     // ── check_agent_timeout ─────────────────────────
     // SAFETY: All env-var mutations are serialized within individual tests.
     #[test]
+    #[serial]
     fn agent_timeout_returns_none_when_disabled() {
         // EPIC_ORCHESTRATION not set — should return None
         unsafe {
@@ -824,6 +826,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_returns_none_for_non_agent_tool() {
         // Even with EPIC_ORCHESTRATION=enabled, non-agent id should be fine
         // (no status file → no timeout)
@@ -836,6 +839,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_detects_overdue_agent() {
         // Create a temp orchestrator dir with a status.json that has a started_at
         // far enough in the past to exceed the threshold
@@ -873,6 +877,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_returns_none_for_recent_agent() {
         // Agent started 1 minute ago — under threshold
         let dir = tempfile::tempdir().unwrap();
@@ -902,6 +907,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_handles_missing_status_file() {
         // Agent dir exists but no status.json
         let dir = tempfile::tempdir().unwrap();
@@ -920,6 +926,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_handles_malformed_status_json() {
         // status.json contains invalid JSON
         let dir = tempfile::tempdir().unwrap();
@@ -939,6 +946,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_handles_missing_started_at() {
         // status.json is valid but has no started_at field
         let dir = tempfile::tempdir().unwrap();
@@ -959,6 +967,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn agent_timeout_handles_completed_agent() {
         // Agent completed — status is not "running"
         let dir = tempfile::tempdir().unwrap();

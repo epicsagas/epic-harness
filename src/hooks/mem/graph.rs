@@ -93,6 +93,7 @@ pub fn rebuild_graph() -> io::Result<()> {
 
 /// Build graph JSON string directly from DB (no file I/O).
 /// Used by the web server to always return fresh data.
+#[allow(dead_code)]
 pub fn rebuild_graph_json() -> io::Result<String> {
     serde_json::to_string_pretty(&build_graph()?)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))

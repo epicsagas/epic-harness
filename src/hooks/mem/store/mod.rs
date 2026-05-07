@@ -20,20 +20,18 @@ mod tests;
 
 // ── Re-exports: types ────────────────────────────────
 
-pub use types::{
-    Edge, Index, IndexNode, Node, NodeFrontmatter, ScoredNode, default_importance,
-    importance_for_type,
-};
+pub use types::{Edge, IndexNode, Node, NodeFrontmatter, importance_for_type};
 
 // ── Re-exports: util ─────────────────────────────────
 
-pub use util::{
-    atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, parse_iso_to_secs,
-    validate_node_id,
-};
+pub use util::{atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, validate_node_id};
+
+#[cfg(test)]
+pub(crate) use util::parse_iso_to_secs;
 
 // ── Re-exports: schema ───────────────────────────────
 
+#[cfg(test)]
 pub(crate) use schema::init_schema;
 
 // ── Re-exports: node ─────────────────────────────────
@@ -47,6 +45,7 @@ pub(crate) use node::write_node_conn;
 
 // ── Re-exports: edge ─────────────────────────────────
 
+#[allow(unused_imports)]
 pub use edge::{
     append_edge, append_edge_conn, delete_edge_by_id, read_edges, read_edges_conn,
     remove_edges_for_node,
@@ -62,13 +61,11 @@ pub use dedup::{write_node_dedup, write_node_dedup_conn};
 
 // ── Re-exports: decay ────────────────────────────────
 
-pub use decay::{decay_importance, tag_stale_nodes, touch_node_conn, touch_nodes_conn};
+pub use decay::{decay_importance, tag_stale_nodes, touch_nodes_conn};
 
 // ── Re-exports: recall ───────────────────────────────
 
-pub use recall::{
-    W_ACCESS, W_FTS, W_GRAPH, W_IMPORTANCE, W_RECENCY, smart_recall, smart_recall_conn,
-};
+pub use recall::{smart_recall, smart_recall_conn};
 
 // ── Re-exports: search ───────────────────────────────
 

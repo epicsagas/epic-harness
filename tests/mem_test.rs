@@ -941,7 +941,7 @@ fn test_recall_ranks_decisions_above_sessions() {
             let mut yr = 1970u64;
             let mut remaining = days;
             loop {
-                let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+                let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
                 let diy = if leap { 366 } else { 365 };
                 if remaining < diy {
                     break;
@@ -949,7 +949,7 @@ fn test_recall_ranks_decisions_above_sessions() {
                 remaining -= diy;
                 yr += 1;
             }
-            let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+            let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
             let md = [
                 31u64,
                 if leap { 29 } else { 28 },
@@ -989,7 +989,7 @@ fn test_recall_ranks_decisions_above_sessions() {
             let mut yr = 1970u64;
             let mut remaining = days;
             loop {
-                let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+                let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
                 let diy = if leap { 366 } else { 365 };
                 if remaining < diy {
                     break;
@@ -997,7 +997,7 @@ fn test_recall_ranks_decisions_above_sessions() {
                 remaining -= diy;
                 yr += 1;
             }
-            let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+            let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
             let md = [
                 31u64,
                 if leap { 29 } else { 28 },

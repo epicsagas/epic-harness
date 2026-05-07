@@ -89,7 +89,7 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
             |row| row.get::<_, String>(0),
         )
         .ok()
-        .map_or(true, |v| v != "2");
+        .is_none_or(|v| v != "2");
 
     if needs_fts_migrate {
         let _ = conn.execute_batch(

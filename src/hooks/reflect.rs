@@ -1624,7 +1624,7 @@ pub fn run_context(days: u32) -> i32 {
     let low_lt06 = scores.iter().filter(|&&s| s < 0.6).count() as u64;
 
     let mut top_tools: Vec<(String, u64)> = tool_counts.into_iter().collect();
-    top_tools.sort_by(|a, b| b.1.cmp(&a.1));
+    top_tools.sort_by_key(|b| std::cmp::Reverse(b.1));
     let top_tools_map: serde_json::Map<String, serde_json::Value> = top_tools
         .iter()
         .take(10)
@@ -1632,14 +1632,14 @@ pub fn run_context(days: u32) -> i32 {
         .collect();
 
     let mut fc_sorted: Vec<(String, u64)> = failure_cats.into_iter().collect();
-    fc_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    fc_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
     let fc_map: serde_json::Map<String, serde_json::Value> = fc_sorted
         .iter()
         .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
         .collect();
 
     let mut ext_sorted: Vec<(String, u64)> = file_ext_counts.into_iter().collect();
-    ext_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    ext_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
     let ext_map: serde_json::Map<String, serde_json::Value> = ext_sorted
         .iter()
         .take(8)
@@ -1696,11 +1696,10 @@ pub fn run_context(days: u32) -> i32 {
                 }
             }
         }
-        if let Some(t) = r.get("trend").and_then(|v| v.as_str()) {
-            if !t.is_empty() {
+        if let Some(t) = r.get("trend").and_then(|v| v.as_str())
+            && !t.is_empty() {
                 trend_hist.push(t.to_string());
             }
-        }
         skills_generated += r.get("skills_generated").and_then(|v| v.as_u64()).unwrap_or(0);
         if r.get("stagnation_triggered").and_then(|v| v.as_bool()).unwrap_or(false) {
             stagnation_count += 1;
@@ -1726,7 +1725,7 @@ pub fn run_context(days: u32) -> i32 {
         recent_seeded.into_iter().filter(|s| seen.insert(s.clone())).collect()
     };
     let mut pf_sorted: Vec<(String, u64)> = pattern_freq.into_iter().collect();
-    pf_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    pf_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
     let pf_map: serde_json::Map<String, serde_json::Value> = pf_sorted
         .iter()
         .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
@@ -1777,7 +1776,7 @@ pub fn run_context(days: u32) -> i32 {
         .collect();
 
     let latest_dims = sh.last().map(|s| {
-        serde_json::to_value(&s.dimension_averages).unwrap_or_default()
+        serde_json::to_value(s.dimension_averages).unwrap_or_default()
     }).unwrap_or_default();
 
     let metrics_summary = serde_json::json!({

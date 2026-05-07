@@ -3,6 +3,8 @@
 //! Manages the orchestration lifecycle via file-based state.
 //! Gated by `EPIC_ORCHESTRATION=enabled` env var.
 
+#![allow(dead_code)]
+
 pub mod state;
 
 use state::{

@@ -392,6 +392,7 @@ pub fn claude_json_path() -> PathBuf {
     dirs_home().join(".claude.json")
 }
 
+#[allow(dead_code)]
 pub fn claude_plugin_cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("CLAUDE_CODE_PLUGIN_CACHE_DIR")
         && !d.is_empty()
@@ -761,6 +762,7 @@ pub fn compute_score(dims: &ScoreDimensions) -> f64 {
 }
 
 /// Returns true when EPIC_ORCHESTRATION=enabled env var is set.
+#[allow(dead_code)]
 pub fn is_orchestration_enabled() -> bool {
     std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled")
 }
@@ -979,6 +981,7 @@ pub fn normalize_pipeline_id(id: &str) -> String {
 /// - Plane-14 Unicode tag characters (U+E0000–U+E01EF), the primary LLM injection vector
 ///
 /// Truncates to 256 Unicode scalar values.
+#[allow(dead_code)]
 pub fn sanitize_orbit_field(s: &str) -> String {
     s.chars()
         .filter(|c| {
@@ -1312,6 +1315,7 @@ warned:
     }
 
     #[test]
+    #[serial_test::serial]
     fn hook_profile_all_cases() {
         // SAFETY: All env-var mutations are serialized within this single test
         // to avoid cross-test race conditions on EPIC_HOOK_PROFILE.
@@ -1564,7 +1568,7 @@ warned:
     #[test]
     fn sanitize_orbit_strips_bidi_override() {
         // U+202E RIGHT-TO-LEFT OVERRIDE — Cf category, misses is_control()
-        let s = format!("legit\u{202E}OVERRIDE\u{202C}text");
+        let s = "legit\u{202E}OVERRIDE\u{202C}text".to_string();
         let out = sanitize_orbit_field(&s);
         assert!(!out.chars().any(|c| ('\u{202A}'..='\u{202E}').contains(&c)));
         assert!(out.contains("legit"));
@@ -1573,7 +1577,7 @@ warned:
     #[test]
     fn sanitize_orbit_strips_bidi_isolate() {
         // U+2066 LEFT-TO-RIGHT ISOLATE — Cf category
-        let s = format!("before\u{2066}inject\u{2069}after");
+        let s = "before\u{2066}inject\u{2069}after".to_string();
         let out = sanitize_orbit_field(&s);
         assert!(!out.chars().any(|c| ('\u{2066}'..='\u{2069}').contains(&c)));
     }
