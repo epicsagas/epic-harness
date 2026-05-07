@@ -24,6 +24,10 @@ A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skil
 
 ---
 
+![Demo](./demo/demo.gif)
+
+---
+
 ## What It Does
 
 One command ships a feature end-to-end. Skills fire without you asking. The agent gets smarter after every session.
@@ -409,6 +413,9 @@ Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl
 
 ---
 
+<details>
+<summary><strong>Unified Memory — WIP</strong></summary>
+
 ## Unified Memory — WIP
 
 > **Status: In Development.** Not yet fully functional. CLI commands, MCP tools, and Web UI are works in progress.
@@ -458,7 +465,12 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 
 Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ days → tagged `stale`, excluded from recall. `pinned` tag prevents decay.
 
+</details>
+
 ---
+
+<details>
+<summary><strong>Project Data — directory layout</strong></summary>
 
 ## Project Data
 
@@ -488,7 +500,12 @@ All data lives in `~/.harness/` (home directory), not in your project root. Surv
 
 Share safety rules with your team: `.harness/guard-rules.yaml` in the project root (committed to git).
 
+</details>
+
 ---
+
+<details>
+<summary><strong>Configuration — config.toml reference</strong></summary>
 
 ## Configuration
 
@@ -523,6 +540,57 @@ gated_promotion_min = 3
 # min_observations = 10
 # min_avg_score = 0.5
 ```
+
+</details>
+
+---
+
+## Troubleshooting
+
+<details>
+<summary>command not found: epic after install</summary>
+
+Add the Cargo bin directory to your PATH:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Add this line to your `~/.zshrc` or `~/.bashrc` to make it permanent.
+</details>
+
+<details>
+<summary>Hooks not firing in Claude Code</summary>
+
+Re-run the install to sync hooks into Claude Code settings:
+
+```bash
+epic install claude
+```
+
+Then restart Claude Code. Hooks are written to `~/.claude/settings.json`.
+</details>
+
+<details>
+<summary>Permission denied on macOS (Gatekeeper)</summary>
+
+macOS may block unsigned binaries downloaded from the internet:
+
+```bash
+xattr -d com.apple.quarantine ~/.cargo/bin/epic-harness
+xattr -d com.apple.quarantine ~/.cargo/bin/epic
+```
+</details>
+
+<details>
+<summary>epic: binary not found inside plugin hooks</summary>
+
+The plugin looks for the binary in `hooks/bin/epic-harness` first. After updating via `cargo install`, copy it:
+
+```bash
+cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
+```
+</details>
 
 ---
 
