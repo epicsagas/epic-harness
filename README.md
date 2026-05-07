@@ -1,8 +1,8 @@
-# epic harness
+<h1 align="center">Epic Harness</h1>
 
-> A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.
+<blockqoute><p align="center">A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.</p></blockqoute>
 
-**Less to memorize. More intelligence per keystroke. Gets smarter every session.**
+<p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
 
 <p align="center">
 <a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
@@ -426,7 +426,7 @@ epic mem add --title "JWT rotation" --type decision    # Add node
 epic mem search "JWT"                                  # FTS5 search
 epic mem query --type decision --project my-project    # Filter
 epic mem context --project my-project                  # Project context
-epic mem serve                                         # Web UI → :7700
+epic mem serve                                         # Web UI → :7700 or custom port with --port 8800
 epic mem mcp-install                                   # Register MCP server
 epic mem export --out ./docs/memory                    # Export to Markdown
 ```
