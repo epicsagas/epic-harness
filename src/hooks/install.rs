@@ -1527,12 +1527,12 @@ pub fn run(args: &[String]) -> i32 {
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let target: Option<PathBuf> = args.iter().position(|a| a == "--target")
         .and_then(|i| args.get(i + 1))
-        .map(|s| PathBuf::from(s));
+        .map(PathBuf::from);
 
     // First positional arg that isn't a flag or --target value
     let tool_arg = {
         let target_next = args.iter().position(|a| a == "--target")
-            .and_then(|i| Some(i + 1));
+            .map(|i| i + 1);
         args.iter()
             .enumerate()
             .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
@@ -1728,10 +1728,10 @@ pub fn run_uninstall(args: &[String]) -> i32 {
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let target: Option<PathBuf> = args.iter().position(|a| a == "--target")
         .and_then(|i| args.get(i + 1))
-        .map(|s| PathBuf::from(s));
+        .map(PathBuf::from);
     let tool_arg = {
         let target_next = args.iter().position(|a| a == "--target")
-            .and_then(|i| Some(i + 1));
+            .map(|i| i + 1);
         args.iter()
             .enumerate()
             .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)

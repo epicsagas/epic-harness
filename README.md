@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockqoute><p align="center">A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.</p></blockqoute>
+<blockquote><p align="center">A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.</p></blockquote>
 
 <p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
 
