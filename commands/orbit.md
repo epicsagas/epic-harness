@@ -259,6 +259,8 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 
 **Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`** — this is a separate file, not embedded in JSON. Set `"check_report": "$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md"` in pipeline state. This ensures the report survives context compaction.
 
+> **Security note:** `pipeline_id` used in the filename must contain only `a-z`, `0-9`, `-`, `_`. Replace any other characters with `-` before constructing the path. This prevents path traversal via a malformed pipeline ID.
+
 → **Step 5**.
 
 ---
