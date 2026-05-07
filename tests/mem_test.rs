@@ -32,7 +32,7 @@ fn run_mem(args: &[&str]) -> i32 {
     let args: Vec<String> = std::iter::once("mem".to_string())
         .chain(args.iter().map(|s| s.to_string()))
         .collect();
-    epic_harness::hooks::mem::run(&args)
+    epic_harness::mem::run(&args)
 }
 
 fn set_claude_settings(path: &Path) {
@@ -143,7 +143,7 @@ fn test_add_and_query() {
     assert_eq!(code, 0, "add should succeed");
 
     // Verify node exists in DB via read_index
-    let idx = epic_harness::hooks::mem::store::read_index();
+    let idx = epic_harness::mem::store::read_index();
     let nodes = &idx.nodes;
     assert_eq!(nodes.len(), 1, "exactly one node should be in DB");
     assert_eq!(nodes[0].title, "JWT Rotation Pattern");
@@ -173,7 +173,7 @@ fn test_link_and_related() {
     ]);
 
     // Get their IDs from store
-    let idx = epic_harness::hooks::mem::store::read_index();
+    let idx = epic_harness::mem::store::read_index();
     let nodes = &idx.nodes;
     assert_eq!(nodes.len(), 2);
     let id_a = nodes[0].id.clone();
@@ -184,7 +184,7 @@ fn test_link_and_related() {
     assert_eq!(code, 0, "link should succeed");
 
     // Verify edges exist in DB
-    let edges = epic_harness::hooks::mem::store::read_edges();
+    let edges = epic_harness::mem::store::read_edges();
     assert!(!edges.is_empty(), "edges should be stored in DB");
     assert!(
         edges.iter().any(|e| e.relation == "uses"),
@@ -192,7 +192,7 @@ fn test_link_and_related() {
     );
 
     // related from A should return B
-    let related = epic_harness::hooks::mem::graph::related_nodes(&id_a, 2);
+    let related = epic_harness::mem::graph::related_nodes(&id_a, 2);
     assert!(related.contains(&id_b), "related from A should include B");
 }
 
@@ -212,7 +212,7 @@ fn test_migrate_dry_run() {
     assert_eq!(code, 0, "migrate --dry-run should succeed");
 
     // No nodes should have been written to DB
-    let idx = epic_harness::hooks::mem::store::read_index();
+    let idx = epic_harness::mem::store::read_index();
     assert_eq!(
         idx.nodes.len(),
         0,
@@ -262,7 +262,7 @@ fn test_validate() {
 #[test]
 fn test_delete_edge_by_id_is_consistent() {
     let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::{Edge, append_edge, delete_edge_by_id, read_edges};
+    use epic_harness::mem::store::{Edge, append_edge, delete_edge_by_id, read_edges};
 
     let root = temp_root();
     set_root(&root);
@@ -297,7 +297,7 @@ fn test_delete_edge_by_id_is_consistent() {
 #[test]
 fn test_remove_edges_for_node_is_consistent() {
     let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::{Edge, append_edge, read_edges, remove_edges_for_node};
+    use epic_harness::mem::store::{Edge, append_edge, read_edges, remove_edges_for_node};
 
     let root = temp_root();
     set_root(&root);
@@ -333,7 +333,7 @@ fn test_remove_edges_for_node_is_consistent() {
 
 #[test]
 fn test_validate_node_id_valid() {
-    use epic_harness::hooks::mem::store::validate_node_id;
+    use epic_harness::mem::store::validate_node_id;
 
     // Valid UUID v4
     assert!(validate_node_id("550e8400-e29b-41d4-a716-446655440000"));
@@ -342,7 +342,7 @@ fn test_validate_node_id_valid() {
 
 #[test]
 fn test_validate_node_id_invalid() {
-    use epic_harness::hooks::mem::store::validate_node_id;
+    use epic_harness::mem::store::validate_node_id;
 
     assert!(!validate_node_id("../etc/passwd"));
     assert!(!validate_node_id("../../secret"));
@@ -353,7 +353,7 @@ fn test_validate_node_id_invalid() {
 
 #[test]
 fn test_validate_node_id_rejects_traversal() {
-    use epic_harness::hooks::mem::store::validate_node_id;
+    use epic_harness::mem::store::validate_node_id;
 
     assert!(!validate_node_id("../etc/passwd"));
     assert!(!validate_node_id("../../secret"));
@@ -362,7 +362,7 @@ fn test_validate_node_id_rejects_traversal() {
 
 #[test]
 fn test_validate_node_id_accepts_valid_uuid() {
-    use epic_harness::hooks::mem::store::validate_node_id;
+    use epic_harness::mem::store::validate_node_id;
 
     assert!(validate_node_id("550e8400-e29b-41d4-a716-446655440000"));
 }
@@ -395,7 +395,7 @@ fn test_mcp_install_no_leftover_tmp() {
 #[test]
 fn test_search_nodes_fts() {
     let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::hooks::mem::store::search_nodes;
+    use epic_harness::mem::store::search_nodes;
 
     let root = temp_root();
     set_root(&root);
@@ -442,7 +442,7 @@ fn test_search_nodes_fts() {
 
 #[test]
 fn test_write_node_dedup_conn_and_append_edge_conn() {
-    use epic_harness::hooks::mem::store::{
+    use epic_harness::mem::store::{
         Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_node,
         write_node_dedup_conn,
     };
@@ -527,7 +527,7 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
 
 #[test]
 fn test_smart_recall() {
-    use epic_harness::hooks::mem::store::{
+    use epic_harness::mem::store::{
         Node, NodeFrontmatter, new_uuid, now_iso, open_db, smart_recall, write_node_dedup_conn,
     };
     let _guard = ENV_LOCK.lock().unwrap();
@@ -592,7 +592,7 @@ fn test_smart_recall() {
 
 #[test]
 fn test_tag_stale_nodes() {
-    use epic_harness::hooks::mem::store::{new_uuid, open_db, read_node, tag_stale_nodes};
+    use epic_harness::mem::store::{new_uuid, open_db, read_node, tag_stale_nodes};
     use rusqlite::params;
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
@@ -641,7 +641,7 @@ fn test_tag_stale_nodes() {
 
 #[test]
 fn test_ingest_creates_project_hub_and_belongs_to_edges() {
-    use epic_harness::hooks::mem::store::{
+    use epic_harness::mem::store::{
         Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_edges_conn,
         read_node, write_node_dedup_conn,
     };
@@ -770,8 +770,8 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
 
 #[test]
 fn test_centrality_endpoint_returns_degree_ordered() {
-    use epic_harness::hooks::mem::server::compute_centrality;
-    use epic_harness::hooks::mem::store::{
+    use epic_harness::mem::server::compute_centrality;
+    use epic_harness::mem::store::{
         Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
         write_node_dedup_conn,
     };
@@ -843,8 +843,8 @@ fn test_centrality_endpoint_returns_degree_ordered() {
 
 #[test]
 fn test_stats_endpoint_returns_correct_counts() {
-    use epic_harness::hooks::mem::graph::compute_stats;
-    use epic_harness::hooks::mem::store::{
+    use epic_harness::mem::graph::compute_stats;
+    use epic_harness::mem::store::{
         Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
         write_node_dedup_conn,
     };
@@ -917,7 +917,7 @@ fn test_stats_endpoint_returns_correct_counts() {
 
 #[test]
 fn test_recall_ranks_decisions_above_sessions() {
-    use epic_harness::hooks::mem::store::{
+    use epic_harness::mem::store::{
         Node, NodeFrontmatter, new_uuid, open_db, smart_recall_conn, write_node_dedup_conn,
     };
     let _guard = ENV_LOCK.lock().unwrap();

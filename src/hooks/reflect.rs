@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::common::*;
 use super::config::CONFIG;
-use super::mem::store;
+use crate::mem::store;
 use super::telemetry::{SessionTrend, Telemetry};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);

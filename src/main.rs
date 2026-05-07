@@ -1,4 +1,7 @@
 mod hooks;
+mod mem;
+mod orchestrate;
+mod team;
 
 use std::env;
 use std::io::{self, IsTerminal, Read};
@@ -26,15 +29,15 @@ fn main() {
     hooks::telemetry::ensure_consent_or_set_default();
 
     if subcmd == "mem" {
-        let code = hooks::mem::run(&args[1..]);
+        let code = mem::run(&args[1..]);
         std::process::exit(code);
     }
     if subcmd == "team" {
-        let code = hooks::team::run(&args[1..]);
+        let code = team::run(&args[1..]);
         std::process::exit(code);
     }
     if subcmd == "org" {
-        let code = hooks::team::run_org(&args[1..]);
+        let code = team::run_org(&args[1..]);
         std::process::exit(code);
     }
     if subcmd == "serve" {

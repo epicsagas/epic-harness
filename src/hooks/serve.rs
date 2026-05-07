@@ -4,7 +4,7 @@
 use tiny_http::{Response, Server};
 
 use super::common;
-use super::orchestrate::state as orch;
+use crate::orchestrate::state as orch;
 
 const DEFAULT_PORT: u16 = 7700;
 

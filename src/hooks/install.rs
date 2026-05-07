@@ -1577,7 +1577,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     // Restricted to `epic install claude` — other tools should not implicitly
     // create org state in ~/.harness/orgs/.
     if !dry_run && tool == "claude" {
-        crate::hooks::team::store::install_default_team_if_needed("epic");
+        crate::team::store::install_default_team_if_needed("epic");
     }
 
     0
