@@ -1889,16 +1889,27 @@ pub fn run_context(
     }
 
     // Effective sources
+    // mem is always included (baseline). --source adds extra sources on top.
     let effective_sources: Vec<&str> = if sources.contains(&"all".to_string()) {
-        vec!["harness", "claude-session", "alcove"]
+        vec!["harness", "mem", "claude-session", "alcove"]
     } else if sources.is_empty() {
-        vec!["harness"]
+        vec!["harness", "mem"]
     } else {
-        sources.iter().map(|s| s.as_str()).collect()
+        // Always prepend mem unless the caller explicitly passed "mem" already
+        let mut v: Vec<&str> = vec!["harness", "mem"];
+        for s in sources.iter() {
+            let s = s.as_str();
+            if s != "harness" && s != "mem" {
+                v.push(s);
+            }
+        }
+        v
     };
 
     let extra_sources_json = {
         let mut map = serde_json::Map::new();
+        // mem — always collected
+        map.insert("mem".into(), collect_mem(&project_slugs));
         if effective_sources.contains(&"claude-session") {
             map.insert("claude_session".into(), collect_claude_session());
         }
@@ -1940,6 +1951,93 @@ pub fn run_context(
 
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
     0
+}
+
+/// Collect mem nodes from ~/.harness/memory.db.
+/// Pulls top nodes by importance for each project slug (or all if slugs = [current]).
+/// Session-type nodes are excluded (importance=0.05, noise) unless there's nothing else.
+fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
+    let conn = match store::open_db() {
+        Ok(c) => c,
+        Err(e) => {
+            return serde_json::json!({"error": format!("mem db unavailable: {e}")});
+        }
+    };
+
+    // Determine project filter: use first slug if single-project, else no filter (all)
+    let project_filter: Option<&str> = if project_slugs.len() == 1 {
+        project_slugs.first().map(|s| s.as_str())
+    } else {
+        None
+    };
+
+    // Smart recall — hint = broad engineering context, limit = 30
+    let recalled = store::smart_recall_conn(
+        &conn,
+        project_filter,
+        Some("decision pattern error resolution concept"),
+        30,
+    );
+
+    // Also pull top decisions/resolutions explicitly (high-value types)
+    let decisions = store::query_nodes_conn(
+        &conn,
+        None,       // tag filter
+        Some("decision"),
+        project_filter,
+        10,
+    );
+    let resolutions = store::query_nodes_conn(
+        &conn,
+        None,
+        Some("resolution"),
+        project_filter,
+        10,
+    );
+
+    // Merge and deduplicate by id, prefer higher-importance entry
+    let mut seen: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+
+    for sn in &recalled {
+        let id = sn.node.frontmatter.id.clone();
+        let entry = serde_json::json!({
+            "id": id,
+            "type": sn.node.frontmatter.node_type,
+            "title": sn.node.frontmatter.title,
+            "importance": sn.node.frontmatter.importance,
+            "tags": sn.node.frontmatter.tags,
+            "updated": sn.node.frontmatter.updated,
+            "body_preview": sn.node.body.chars().take(200).collect::<String>(),
+        });
+        seen.insert(id, entry);
+    }
+    for node in decisions.iter().chain(resolutions.iter()) {
+        let id = node.frontmatter.id.clone();
+        seen.entry(id.clone()).or_insert_with(|| serde_json::json!({
+            "id": id,
+            "type": node.frontmatter.node_type,
+            "title": node.frontmatter.title,
+            "importance": node.frontmatter.importance,
+            "tags": node.frontmatter.tags,
+            "updated": node.frontmatter.updated,
+            "body_preview": node.body.chars().take(200).collect::<String>(),
+        }));
+    }
+
+    // Sort by importance desc, take top 30
+    let mut nodes: Vec<serde_json::Value> = seen.into_values().collect();
+    nodes.sort_by(|a, b| {
+        let ia = a.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let ib = b.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        ib.partial_cmp(&ia).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    nodes.truncate(30);
+
+    serde_json::json!({
+        "total_nodes_sampled": nodes.len(),
+        "project_filter": project_filter,
+        "nodes": nodes,
+    })
 }
 
 fn collect_claude_session() -> serde_json::Value {
