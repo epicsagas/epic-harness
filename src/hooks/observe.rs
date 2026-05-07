@@ -171,7 +171,7 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
 
 /// Testable variant that accepts an explicit orchestrator directory.
 fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> Option<String> {
-    if !is_orchestration_enabled() {
+    if std::env::var("EPIC_ORCHESTRATION").as_deref() != Ok("enabled") {
         return None;
     }
 
@@ -203,12 +203,15 @@ fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> O
                     digits[0], digits[1], digits[2], digits[3], digits[4], digits[5],
                 );
                 // Simple UTC epoch approximation (no leap seconds, good enough for timeout)
-                let month_days: u64 = if mo <= 2 {
-                    (mo + 9) * 153 + 2
-                } else {
-                    (mo - 3) * 153 + 2
-                } / 5;
-                let days: u64 = y * 365 + (y / 4) - (y / 100) + (y / 400) + month_days + d - 719469;
+                let days: u64 = y * 365 + (y / 4) - (y / 100)
+                    + (y / 400)
+                    + if mo <= 2 {
+                        (mo + 9) * 153 + 2
+                    } else {
+                        (mo - 3) * 153 + 2
+                    } / 5
+                    + d
+                    - 719469;
                 Some(days * 86400 + h * 3600 + mi * 60 + s_)
             })
         })
@@ -330,7 +333,7 @@ pub fn run(input: &HookInput) -> i32 {
         error_snippet: None,
         file_ext,
         sequence_id: Some(seq_id),
-        pipeline_id: detect_active_orbit_id(),
+        pipeline_id: super::common::detect_active_orbit_id(),
     };
 
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
@@ -444,7 +447,6 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     // ── score_bash ──────────────────────────────────
     #[test]
@@ -807,8 +809,7 @@ mod tests {
     }
 
     // ── check_agent_timeout ─────────────────────────
-    // SAFETY: All env-var mutations serialized via #[serial] to prevent parallel test races.
-    #[serial]
+    // SAFETY: All env-var mutations are serialized within individual tests.
     #[test]
     fn agent_timeout_returns_none_when_disabled() {
         // EPIC_ORCHESTRATION not set — should return None
@@ -822,7 +823,6 @@ mod tests {
         );
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_returns_none_for_non_agent_tool() {
         // Even with EPIC_ORCHESTRATION=enabled, non-agent id should be fine
@@ -835,7 +835,6 @@ mod tests {
         }
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_detects_overdue_agent() {
         // Create a temp orchestrator dir with a status.json that has a started_at
@@ -873,7 +872,6 @@ mod tests {
         );
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_returns_none_for_recent_agent() {
         // Agent started 1 minute ago — under threshold
@@ -903,7 +901,6 @@ mod tests {
         assert!(result.is_none(), "recent agent should not trigger timeout");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_missing_status_file() {
         // Agent dir exists but no status.json
@@ -922,7 +919,6 @@ mod tests {
         assert!(result.is_none(), "missing status file should not error");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_malformed_status_json() {
         // status.json contains invalid JSON
@@ -942,7 +938,6 @@ mod tests {
         assert!(result.is_none(), "malformed JSON should not error");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_missing_started_at() {
         // status.json is valid but has no started_at field
@@ -963,7 +958,6 @@ mod tests {
         assert!(result.is_none(), "missing started_at should not error");
     }
 
-    #[serial]
     #[test]
     fn agent_timeout_handles_completed_agent() {
         // Agent completed — status is not "running"

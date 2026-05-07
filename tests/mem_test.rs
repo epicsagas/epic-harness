@@ -636,3 +636,472 @@ fn test_tag_stale_nodes() {
     let staled2 = tag_stale_nodes(90).unwrap();
     assert_eq!(staled2, 0, "already-stale node should not be re-tagged");
 }
+
+// ── Auto-edge integration tests ──────────────────────
+
+#[test]
+fn test_ingest_creates_project_hub_and_belongs_to_edges() {
+    use epic_harness::hooks::mem::store::{
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_edges_conn,
+        read_node, write_node_dedup_conn,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+    let ts = now_iso();
+
+    // Insert a session node with a project slug
+    let session_id = new_uuid();
+    let session_node = Node {
+        frontmatter: NodeFrontmatter {
+            id: session_id.clone(),
+            node_type: "session".into(),
+            title: "test session".into(),
+            tags: vec!["auto".into()],
+            projects: vec!["testproj".into()],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts.clone(),
+            importance: 0.05,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: "session body".into(),
+    };
+    write_node_dedup_conn(&conn, &session_node, 24).unwrap();
+
+    // Insert a pattern node linked to the session
+    let pattern_id = new_uuid();
+    let pattern_node = Node {
+        frontmatter: NodeFrontmatter {
+            id: pattern_id.clone(),
+            node_type: "pattern".into(),
+            title: "test pattern".into(),
+            tags: vec!["auto".into()],
+            projects: vec!["testproj".into()],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts.clone(),
+            importance: 0.5,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: "pattern body".into(),
+    };
+    write_node_dedup_conn(&conn, &pattern_node, 24).unwrap();
+
+    // Create a project hub node (simulating what reflect would create)
+    let hub_id = new_uuid();
+    let hub_node = Node {
+        frontmatter: NodeFrontmatter {
+            id: hub_id.clone(),
+            node_type: "project".into(),
+            title: "testproj".into(),
+            tags: vec!["hub".into()],
+            projects: vec!["testproj".into()],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts.clone(),
+            importance: 0.7,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: "project hub for testproj".into(),
+    };
+    write_node_dedup_conn(&conn, &hub_node, 24).unwrap();
+
+    // Create belongs_to edges from session and pattern to hub
+    let edge1 = Edge {
+        id: new_uuid(),
+        source: session_id.clone(),
+        target: hub_id.clone(),
+        relation: "belongs_to".into(),
+        weight: 1.0,
+        ts: ts.clone(),
+    };
+    append_edge_conn(&conn, &edge1).unwrap();
+
+    let edge2 = Edge {
+        id: new_uuid(),
+        source: pattern_id.clone(),
+        target: hub_id.clone(),
+        relation: "belongs_to".into(),
+        weight: 1.0,
+        ts: ts.clone(),
+    };
+    append_edge_conn(&conn, &edge2).unwrap();
+
+    // Verify project hub exists with type='project'
+    let hub = read_node(&hub_id).unwrap();
+    assert_eq!(
+        hub.frontmatter.node_type, "project",
+        "hub should be type 'project'"
+    );
+    assert_eq!(
+        hub.frontmatter.title, "testproj",
+        "hub title should match project slug"
+    );
+
+    // Verify belongs_to edges from session and pattern to hub
+    let edges = read_edges_conn(&conn);
+    let belongs_edges: Vec<_> = edges
+        .iter()
+        .filter(|e| e.relation == "belongs_to" && e.target == hub_id)
+        .collect();
+    assert_eq!(
+        belongs_edges.len(),
+        2,
+        "should have 2 belongs_to edges to hub"
+    );
+    let sources: Vec<&str> = belongs_edges.iter().map(|e| e.source.as_str()).collect();
+    assert!(
+        sources.contains(&session_id.as_str()),
+        "session should have belongs_to edge to hub"
+    );
+    assert!(
+        sources.contains(&pattern_id.as_str()),
+        "pattern should have belongs_to edge to hub"
+    );
+
+    drop(conn);
+}
+
+#[test]
+fn test_centrality_endpoint_returns_degree_ordered() {
+    use epic_harness::hooks::mem::server::compute_centrality;
+    use epic_harness::hooks::mem::store::{
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
+        write_node_dedup_conn,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+    let ts = now_iso();
+
+    // Create nodes A, B, C
+    let id_a = new_uuid();
+    let id_b = new_uuid();
+    let id_c = new_uuid();
+
+    for (id, title) in [(&id_a, "Node A"), (&id_b, "Node B"), (&id_c, "Node C")] {
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: id.clone(),
+                node_type: "concept".into(),
+                title: title.into(),
+                tags: vec![],
+                projects: vec![],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+                importance: 0.5,
+                access_count: 0,
+                accessed_at: String::new(),
+            },
+            body: "test body".into(),
+        };
+        write_node_dedup_conn(&conn, &node, 24).unwrap();
+    }
+
+    // Create edges: A->B, A->C, B->C
+    // A has degree 2 (out to B, out to C)
+    // B has degree 2 (in from A, out to C)
+    // C has degree 2 (in from A, in from B)
+    let edges = [
+        (new_uuid(), &id_a, &id_b),
+        (new_uuid(), &id_a, &id_c),
+        (new_uuid(), &id_b, &id_c),
+    ];
+    for (eid, src, tgt) in &edges {
+        let edge = Edge {
+            id: eid.clone(),
+            source: src.to_string(),
+            target: tgt.to_string(),
+            relation: "related".into(),
+            weight: 1.0,
+            ts: ts.clone(),
+        };
+        append_edge_conn(&conn, &edge).unwrap();
+    }
+
+    // Verify centrality returns all nodes ordered by degree
+    let centrality = compute_centrality(&conn, 20);
+    assert_eq!(centrality.len(), 3, "should return all 3 nodes");
+
+    // All should have degree 2
+    for item in &centrality {
+        let degree = item["degree"].as_i64().unwrap();
+        assert_eq!(degree, 2, "each node should have degree 2");
+    }
+
+    drop(conn);
+}
+
+#[test]
+fn test_stats_endpoint_returns_correct_counts() {
+    use epic_harness::hooks::mem::graph::compute_stats;
+    use epic_harness::hooks::mem::store::{
+        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
+        write_node_dedup_conn,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+    let ts = now_iso();
+
+    // Insert 3 session nodes, 2 pattern nodes, 1 decision node
+    let node_configs = [
+        ("session", "sess1", 0.05),
+        ("session", "sess2", 0.05),
+        ("session", "sess3", 0.05),
+        ("pattern", "pat1", 0.5),
+        ("pattern", "pat2", 0.5),
+        ("decision", "dec1", 0.9),
+    ];
+
+    let mut node_ids: Vec<String> = vec![];
+    for (ntype, title, imp) in &node_configs {
+        let id = new_uuid();
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: id.clone(),
+                node_type: (*ntype).into(),
+                title: (*title).into(),
+                tags: vec![],
+                projects: vec!["testproj".into()],
+                agents: vec![],
+                created: ts.clone(),
+                updated: ts.clone(),
+                importance: *imp,
+                access_count: 0,
+                accessed_at: String::new(),
+            },
+            body: "body".into(),
+        };
+        write_node_dedup_conn(&conn, &node, 24).unwrap();
+        node_ids.push(id);
+    }
+
+    // Create 4 edges
+    for i in 0..4usize {
+        let edge = Edge {
+            id: new_uuid(),
+            source: node_ids[i].clone(),
+            target: node_ids[i + 1].clone(),
+            relation: "related".into(),
+            weight: 1.0,
+            ts: ts.clone(),
+        };
+        append_edge_conn(&conn, &edge).unwrap();
+    }
+
+    drop(conn);
+
+    // Verify /api/stats returns total_nodes=6, total_edges=4
+    let stats = compute_stats().unwrap();
+    assert_eq!(stats["total_nodes"], 6, "should have 6 total nodes");
+    assert_eq!(stats["total_edges"], 4, "should have 4 total edges");
+
+    // Verify by_type has correct counts
+    let by_type = stats["by_type"].as_object().unwrap();
+    assert_eq!(by_type["session"], 3, "should have 3 session nodes");
+    assert_eq!(by_type["pattern"], 2, "should have 2 pattern nodes");
+    assert_eq!(by_type["decision"], 1, "should have 1 decision node");
+}
+
+#[test]
+fn test_recall_ranks_decisions_above_sessions() {
+    use epic_harness::hooks::mem::store::{
+        Node, NodeFrontmatter, new_uuid, open_db, smart_recall_conn, write_node_dedup_conn,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let conn = open_db().unwrap();
+
+    // Build a timestamp 2 days ago for sessions (recent)
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let recent_ts = {
+        let s = now_secs - (2 * 86400);
+        let sec = s % 60;
+        let min = (s / 60) % 60;
+        let hour = (s / 3600) % 24;
+        let days = s / 86400;
+        let (y, m, d) = {
+            let mut yr = 1970u64;
+            let mut remaining = days;
+            loop {
+                let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+                let diy = if leap { 366 } else { 365 };
+                if remaining < diy {
+                    break;
+                }
+                remaining -= diy;
+                yr += 1;
+            }
+            let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+            let md = [
+                31u64,
+                if leap { 29 } else { 28 },
+                31,
+                30,
+                31,
+                30,
+                31,
+                31,
+                30,
+                31,
+                30,
+                31,
+            ];
+            let mut mo = 1u64;
+            let mut rd = remaining;
+            for &days_in in &md {
+                if rd < days_in {
+                    break;
+                }
+                rd -= days_in;
+                mo += 1;
+            }
+            (yr, mo, rd + 1)
+        };
+        format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
+    };
+
+    // Build a timestamp 60 days ago for the decision (old)
+    let old_ts = {
+        let s = now_secs - (60 * 86400);
+        let sec = s % 60;
+        let min = (s / 60) % 60;
+        let hour = (s / 3600) % 24;
+        let days = s / 86400;
+        let (y, m, d) = {
+            let mut yr = 1970u64;
+            let mut remaining = days;
+            loop {
+                let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+                let diy = if leap { 366 } else { 365 };
+                if remaining < diy {
+                    break;
+                }
+                remaining -= diy;
+                yr += 1;
+            }
+            let leap = (yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0;
+            let md = [
+                31u64,
+                if leap { 29 } else { 28 },
+                31,
+                30,
+                31,
+                30,
+                31,
+                31,
+                30,
+                31,
+                30,
+                31,
+            ];
+            let mut mo = 1u64;
+            let mut rd = remaining;
+            for &days_in in &md {
+                if rd < days_in {
+                    break;
+                }
+                rd -= days_in;
+                mo += 1;
+            }
+            (yr, mo, rd + 1)
+        };
+        format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
+    };
+
+    // Insert 5 session nodes (importance 0.05) with recent timestamps
+    for i in 0..5i32 {
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: new_uuid(),
+                node_type: "session".into(),
+                title: format!("recent session {i}"),
+                tags: vec!["test".into()],
+                projects: vec!["proj".into()],
+                agents: vec![],
+                created: recent_ts.clone(),
+                updated: recent_ts.clone(),
+                importance: 0.05,
+                access_count: 0,
+                accessed_at: String::new(),
+            },
+            body: "session data".into(),
+        };
+        write_node_dedup_conn(&conn, &node, 24).unwrap();
+    }
+
+    // Insert 1 decision node (importance 0.9) with older timestamp
+    let decision_node = Node {
+        frontmatter: NodeFrontmatter {
+            id: new_uuid(),
+            node_type: "decision".into(),
+            title: "critical decision".into(),
+            tags: vec!["test".into()],
+            projects: vec!["proj".into()],
+            agents: vec![],
+            created: old_ts.clone(),
+            updated: old_ts.clone(),
+            importance: 0.9,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: "important decision body".into(),
+    };
+    write_node_dedup_conn(&conn, &decision_node, 24).unwrap();
+
+    // Call smart_recall_conn with limit=10
+    let results = smart_recall_conn(&conn, Some("proj"), None, 10);
+    assert_eq!(results.len(), 6, "should return all 6 nodes");
+
+    // Verify decision node appears BEFORE any session node in results
+    let decision_idx = results
+        .iter()
+        .position(|sn| sn.node.frontmatter.node_type == "decision");
+    let first_session_idx = results
+        .iter()
+        .position(|sn| sn.node.frontmatter.node_type == "session");
+    assert!(
+        decision_idx.is_some(),
+        "decision node should be present in results"
+    );
+    assert!(
+        first_session_idx.is_some(),
+        "session nodes should be present in results"
+    );
+    assert!(
+        decision_idx.unwrap() < first_session_idx.unwrap(),
+        "decision node should rank above all session nodes"
+    );
+
+    // Verify session nodes have lower scores than decision node
+    let decision_score = results[decision_idx.unwrap()].score;
+    for sn in &results {
+        if sn.node.frontmatter.node_type == "session" {
+            assert!(
+                sn.score < decision_score,
+                "session score ({}) should be lower than decision score ({})",
+                sn.score,
+                decision_score
+            );
+        }
+    }
+
+    drop(conn);
+}

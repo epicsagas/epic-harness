@@ -3,17 +3,17 @@
 //! Manages the orchestration lifecycle via file-based state.
 //! Gated by `EPIC_ORCHESTRATION=enabled` env var.
 
-#![allow(dead_code)]
-
 pub mod state;
 
-use state::{self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction};
+use state::{
+    self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction, InboxMessage,
+};
 
 use super::common::{self, HookInput, hint, now_iso};
 
 /// Check if orchestration is enabled via env var.
 pub fn is_enabled() -> bool {
-    common::is_orchestration_enabled()
+    std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled")
 }
 
 /// Return the orchestrator base directory (uses harness_dir).
@@ -37,9 +37,6 @@ pub fn run_pre(input: &HookInput) -> i32 {
         Some(id) => id,
         None => return 0,
     };
-
-    // Self-register if EPIC_RUN_ID is set and agent not yet in run.json
-    let _ = orch_state::self_register_agent(&base, "dynamic", "auto-spawned agent");
 
     // Check control directive
     if let Some(directive) = orch_state::read_control(&base) {
@@ -80,29 +77,17 @@ pub fn run_pre(input: &HookInput) -> i32 {
                 ControlAction::Resume => {
                     // Resume clears any prior pause; no action needed at pre-invocation
                 }
-                ControlAction::Reassign => {
-                    // Reassign: directive.message contains the target agent_id
-                    if let Some(to_id) = &directive.message {
-                        let _ = orch_state::reassign_agent(&base, &agent_id, to_id);
-                        hint(
-                            "orchestrator",
-                            &format!("Task reassigned from {} to {}", agent_id, to_id),
-                        );
-                    }
-                }
             }
         }
     }
 
-    // Read unread inbox messages only
-    let messages = orch_state::read_inbox_unread(&base, &agent_id);
+    // Read inbox messages
+    let messages = orch_state::read_inbox(&base, &agent_id);
     for msg in &messages {
         hint(
             "orchestrator",
             &format!("Inbox from {}: {}", msg.from, msg.message),
         );
-        // Mark as read immediately
-        let _ = orch_state::mark_inbox_read(&base, &agent_id, &msg.id);
     }
 
     // Update heartbeat
@@ -158,21 +143,6 @@ pub fn run_post(input: &HookInput) -> i32 {
     };
     let _ = orch_state::append_event(&base, &agent_id, &event);
 
-    // Check for send_to directive in structured output
-    if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&output)
-        && let (Some(to), Some(body)) = (
-            doc.get("send_to").and_then(|v| v.as_str()),
-            doc.get("body").and_then(|v| v.as_str()),
-        )
-    {
-        let msg_type = doc
-            .get("msg_type")
-            .and_then(|v| v.as_str())
-            .and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok())
-            .unwrap_or(orch_state::MessageType::Result);
-        let _ = orch_state::send_message(&base, &agent_id, to, msg_type, body);
-    }
-
     // Update agent status
     if let Some(status) = new_status.clone() {
         if let Some(mut agent_status) = orch_state::read_agent_status(&base, &agent_id) {
@@ -200,15 +170,14 @@ pub fn run_post(input: &HookInput) -> i32 {
             // Evaluate deps
             let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
             for ub_id in &unblocked {
-                let _ = orch_state::send_message(
-                    &base,
-                    "orchestrator",
-                    ub_id,
-                    orch_state::MessageType::Handoff,
-                    &format!("Dependency '{}' completed. You are unblocked.", agent_id),
-                );
+                let msg = InboxMessage {
+                    from: "orchestrator".to_string(),
+                    timestamp: now_iso(),
+                    message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
+                };
+                let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
 
-                // Update run agent status to Pending (was Blocked)
+                // Update run agent status
                 for agent in &mut run.agents {
                     if agent.id == *ub_id {
                         agent.status = AgentStatus::Pending;
@@ -229,40 +198,33 @@ pub fn run_post(input: &HookInput) -> i32 {
 }
 
 /// Extract the agent ID from hook input.
-/// Priority: EPIC_AGENT_ID env var > explicit agent_id field > prompt hash.
+/// Agent tool input typically has a "prompt" or "id" field.
 fn extract_agent_id(input: &HookInput) -> Option<String> {
     let tool = input.tool_name.as_deref()?;
     if tool.to_lowercase() != "agent" {
         return None;
     }
-    // 1순위: EPIC_AGENT_ID env var
-    if let Ok(id) = std::env::var("EPIC_AGENT_ID")
-        && !id.is_empty()
-        && orch_state::validate_agent_id(&id)
-    {
-        return Some(id);
-    }
-    // 2순위: tool_input의 explicit agent_id
-    if let Some(id) = input
-        .tool_input
-        .as_ref()
-        .and_then(|v| v.get("agent_id"))
-        .and_then(|v| v.as_str())
-        .filter(|id| orch_state::validate_agent_id(id))
-        .map(String::from)
-    {
-        return Some(id);
-    }
-    // 3순위: prompt 해시
     input
         .tool_input
         .as_ref()?
         .get("prompt")
         .and_then(|v| v.as_str())
         .map(|s| {
+            // Use first line or first 32 chars as a simple ID
             let first_line = s.lines().next().unwrap_or(s);
-            let hash = common::hash_string(first_line.trim());
+            let trimmed = first_line.trim();
+            // Generate a stable hash-based ID
+            let hash = common::hash_string(trimmed);
             format!("agent-{}", &hash[..8])
+        })
+        .or_else(|| {
+            // Fallback: look for explicit "agent_id" field
+            input
+                .tool_input
+                .as_ref()?
+                .get("agent_id")
+                .and_then(|v| v.as_str())
+                .map(String::from)
         })
 }
 
@@ -303,12 +265,10 @@ fn resolve_output(input: &HookInput) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
 
     #[test]
-    #[serial]
     fn is_enabled_defaults_to_false() {
-        // SAFETY: serialized via #[serial] to prevent cross-test env var races
+        // SAFETY: isolated test, we ensure the var is removed
         unsafe {
             std::env::remove_var("EPIC_ORCHESTRATION");
         }
@@ -316,9 +276,8 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn is_enabled_true_when_set() {
-        // SAFETY: serialized via #[serial]
+        // SAFETY: isolated test
         unsafe {
             std::env::set_var("EPIC_ORCHESTRATION", "enabled");
         }
@@ -329,7 +288,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn is_enabled_false_for_other_values() {
         unsafe {
             std::env::set_var("EPIC_ORCHESTRATION", "true");
@@ -341,7 +299,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn run_pre_returns_0_when_disabled() {
         unsafe {
             std::env::remove_var("EPIC_ORCHESTRATION");
@@ -355,7 +312,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn run_post_returns_0_when_disabled() {
         unsafe {
             std::env::remove_var("EPIC_ORCHESTRATION");
@@ -396,56 +352,6 @@ mod tests {
             ..Default::default()
         };
         assert!(extract_agent_id(&input).is_none());
-    }
-
-    #[test]
-    #[serial]
-    fn extract_agent_id_prefers_env_var() {
-        unsafe {
-            std::env::set_var("EPIC_AGENT_ID", "env-agent-1");
-        }
-        let input = HookInput {
-            tool_name: Some("Agent".to_string()),
-            tool_input: Some(serde_json::json!({"agent_id": "explicit-id", "prompt": "test"})),
-            ..Default::default()
-        };
-        let id = extract_agent_id(&input);
-        unsafe {
-            std::env::remove_var("EPIC_AGENT_ID");
-        }
-        assert_eq!(id, Some("env-agent-1".to_string()));
-    }
-
-    #[test]
-    #[serial]
-    fn extract_agent_id_env_var_over_prompt_hash() {
-        unsafe {
-            std::env::set_var("EPIC_AGENT_ID", "env-agent-2");
-        }
-        let input = HookInput {
-            tool_name: Some("Agent".to_string()),
-            tool_input: Some(serde_json::json!({"prompt": "Build auth module"})),
-            ..Default::default()
-        };
-        let id = extract_agent_id(&input);
-        unsafe {
-            std::env::remove_var("EPIC_AGENT_ID");
-        }
-        assert_eq!(id, Some("env-agent-2".to_string()));
-    }
-
-    #[test]
-    #[serial]
-    fn extract_agent_id_explicit_id_when_no_env_var() {
-        unsafe {
-            std::env::remove_var("EPIC_AGENT_ID");
-        }
-        let input = HookInput {
-            tool_name: Some("Agent".to_string()),
-            tool_input: Some(serde_json::json!({"agent_id": "explicit-id"})),
-            ..Default::default()
-        };
-        assert_eq!(extract_agent_id(&input), Some("explicit-id".to_string()));
     }
 
     #[test]
