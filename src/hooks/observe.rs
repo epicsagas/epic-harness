@@ -449,6 +449,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── score_bash ──────────────────────────────────
     #[test]
@@ -789,7 +790,8 @@ mod tests {
     }
 
     // ── check_agent_timeout ─────────────────────────
-    // SAFETY: All env-var mutations are serialized within individual tests.
+    // SAFETY: All env-var mutations serialized via #[serial] to prevent parallel test races.
+    #[serial]
     #[test]
     fn agent_timeout_returns_none_when_disabled() {
         // EPIC_ORCHESTRATION not set — should return None
@@ -800,6 +802,7 @@ mod tests {
         assert!(result.is_none(), "should be None when orchestration disabled");
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_returns_none_for_non_agent_tool() {
         // Even with EPIC_ORCHESTRATION=enabled, non-agent id should be fine
@@ -812,6 +815,7 @@ mod tests {
         }
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_detects_overdue_agent() {
         // Create a temp orchestrator dir with a status.json that has a started_at
@@ -846,6 +850,7 @@ mod tests {
         assert!(msg.contains("timeout:"), "message should mention timeout threshold");
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_returns_none_for_recent_agent() {
         // Agent started 1 minute ago — under threshold
@@ -875,6 +880,7 @@ mod tests {
         assert!(result.is_none(), "recent agent should not trigger timeout");
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_handles_missing_status_file() {
         // Agent dir exists but no status.json
@@ -893,6 +899,7 @@ mod tests {
         assert!(result.is_none(), "missing status file should not error");
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_handles_malformed_status_json() {
         // status.json contains invalid JSON
@@ -912,6 +919,7 @@ mod tests {
         assert!(result.is_none(), "malformed JSON should not error");
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_handles_missing_started_at() {
         // status.json is valid but has no started_at field
@@ -932,6 +940,7 @@ mod tests {
         assert!(result.is_none(), "missing started_at should not error");
     }
 
+    #[serial]
     #[test]
     fn agent_timeout_handles_completed_agent() {
         // Agent completed — status is not "running"
