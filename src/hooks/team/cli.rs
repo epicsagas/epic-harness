@@ -296,7 +296,7 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
     let mission = load_mission(org, team).unwrap_or_default();
 
     let dest = if global {
-        let base = home_dir().join(".claude").join("agents");
+        let base = crate::hooks::common::claude_config_dir().join("agents");
         // Create and canonicalize base BEFORE creating team subdir (TOCTOU defense)
         fs::create_dir_all(&base)
             .map_err(|e| io::Error::new(e.kind(), format!("failed to create {}: {}", base.display(), e)))?;
@@ -860,7 +860,7 @@ fn cmd_sync(args: &[String]) -> i32 {
     match result {
         Ok(count) => {
             let dest = if global {
-                home_dir().join(".claude").join("agents").join(&team)
+                crate::hooks::common::claude_config_dir().join("agents").join(&team)
             } else {
                 std::env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))

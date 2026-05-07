@@ -657,11 +657,7 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
 }
 
 fn claude_json_path() -> PathBuf {
-    if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") {
-        return PathBuf::from(p);
-    }
-    // Claude Code stores MCP config in ~/.claude.json (global app state), not ~/.claude/settings.json
-    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".claude.json")
+    crate::hooks::common::claude_json_path()
 }
 
 fn cmd_export(args: &[String]) -> io::Result<i32> {

@@ -91,8 +91,9 @@ fn main() {
             eprintln!("  path         Print the harness data directory");
             eprintln!("  version      Print version\n");
             eprintln!("INSTALL TARGETS:  codex  gemini  cursor  opencode  cline  aider");
-            eprintln!("  --local       Install in ./.claude/ instead of ~/.claude/");
-            eprintln!("  --dry-run     Preview without writing\n");
+            eprintln!("  --local           Install in ./.claude/ instead of ~/.claude/");
+            eprintln!("  --target <path>   Override install target directory");
+            eprintln!("  --dry-run         Preview without writing\n");
             eprintln!("Run 'epic-harness mem help' for memory subcommand details.");
             if is_unknown { 1 } else { 0 }
         }

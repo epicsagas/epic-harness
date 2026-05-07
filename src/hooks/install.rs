@@ -603,7 +603,7 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
 static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     "claude",
     [(
-        ".claude/settings.json",
+        "settings.json",
         include_str!("../../hooks/hooks.json")
     ),]
 );
@@ -723,13 +723,13 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             preserve_files: &[".aider.conf.yml"],
             executable_files: &[],
         }),
-        // Claude Code: install hooks into ~/.claude/settings.json + MCP injection via inject_mcp_claude().
+        // Claude Code: install hooks into settings.json inside claude config dir + MCP injection via inject_mcp_claude().
         "claude" => Some(ToolConfig {
-            global_dir: PathBuf::from(&home),
-            local_dir: cwd.clone(),
+            global_dir: crate::hooks::common::claude_config_dir(),
+            local_dir: cwd.join(".claude"),
             root_files: &[],
             files: CLAUDE_FILES,
-            note: Some("Installs hooks in ~/.claude/settings.json and registers harness-mem MCP server in ~/.claude.json."),
+            note: Some("Installs hooks in settings.json and registers harness-mem MCP server. Respects CLAUDE_CONFIG_DIR env var."),
             alt_dir: None,
             alt_prefix: "",
             preserve_files: &[],
@@ -982,9 +982,9 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
 ///
 /// Called on `epic install claude` so the locally-installed binary always
 /// keeps the cache in sync without waiting for an npm publish.
-fn sync_plugin_cache(home: &str, dry_run: bool) {
-    let cache_base = std::path::Path::new(home)
-        .join(".claude/plugins/cache/epicsagas/epic");
+fn sync_plugin_cache(dry_run: bool) {
+    let cache_base = crate::hooks::common::claude_plugin_cache_dir()
+        .join("cache/epicsagas/epic");
 
     let entries = match fs::read_dir(&cache_base) {
         Ok(e) => e,
@@ -1063,11 +1063,7 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
 /// Injects `mcpServers.harness-mem` into `~/.claude.json`.
 /// Claude Code uses this file (not ~/.claude/settings.json) for global app state including MCP.
 fn inject_mcp_claude() {
-    let Some(home) = std::env::var_os("HOME") else {
-        eprintln!("[harness] Could not determine home directory — skipping Claude MCP injection.");
-        return;
-    };
-    let claude_json = std::path::Path::new(&home).join(".claude.json");
+    let claude_json = crate::hooks::common::claude_json_path();
 
     let raw = if claude_json.exists() {
         fs::read_to_string(&claude_json).unwrap_or_else(|_| "{}".to_string())
@@ -1078,7 +1074,7 @@ fn inject_mcp_claude() {
     let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
     if json["mcpServers"]["harness-mem"].is_object() {
-        eprintln!("[harness] mcpServers.harness-mem already registered in ~/.claude.json — skipping.");
+        eprintln!("[harness] mcpServers.harness-mem already registered in {} — skipping.", claude_json.display());
         return;
     }
 
@@ -1099,7 +1095,7 @@ fn inject_mcp_claude() {
     let out = match serde_json::to_string_pretty(&json) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
+            eprintln!("[harness] Failed to serialize {}: {e}", claude_json.display());
             return;
         }
     };
@@ -1110,31 +1106,27 @@ fn inject_mcp_claude() {
     let tmp = claude_json
         .with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
-        eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
+        eprintln!("[harness] Registered mcpServers.harness-mem in {}", claude_json.display());
     } else {
         let _ = fs::remove_file(&tmp); // clean up tmp on failure
-        eprintln!("[harness] Failed to write ~/.claude.json");
+        eprintln!("[harness] Failed to write {}", claude_json.display());
     }
 }
 
-/// Removes `mcpServers.harness-mem` from `~/.claude.json`.
+/// Removes `mcpServers.harness-mem` from `.claude.json`.
 /// Mirror of `inject_mcp_claude()` — called by `uninstall_tool` for the "claude" tool.
 fn remove_mcp_claude(dry_run: bool) {
-    let Some(home) = std::env::var_os("HOME") else {
-        eprintln!("[harness] Could not determine home directory — skipping Claude MCP removal.");
-        return;
-    };
-    let claude_json = std::path::Path::new(&home).join(".claude.json");
+    let claude_json = crate::hooks::common::claude_json_path();
 
     if !claude_json.exists() {
-        eprintln!("[harness] ~/.claude.json not found — nothing to remove.");
+        eprintln!("[harness] {} not found — nothing to remove.", claude_json.display());
         return;
     }
 
     let raw = match fs::read_to_string(&claude_json) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[harness] Failed to read ~/.claude.json: {e}");
+            eprintln!("[harness] Failed to read {}: {e}", claude_json.display());
             return;
         }
     };
@@ -1142,18 +1134,18 @@ fn remove_mcp_claude(dry_run: bool) {
     let mut json: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("[harness] Failed to parse ~/.claude.json: {e}");
+            eprintln!("[harness] Failed to parse {}: {e}", claude_json.display());
             return;
         }
     };
 
     if json["mcpServers"].get("harness-mem").is_none() {
-        eprintln!("[harness] mcpServers.harness-mem not found in ~/.claude.json — nothing to remove.");
+        eprintln!("[harness] mcpServers.harness-mem not found in {} — nothing to remove.", claude_json.display());
         return;
     }
 
     if dry_run {
-        eprintln!("[harness] (dry-run) would remove mcpServers.harness-mem from ~/.claude.json");
+        eprintln!("[harness] (dry-run) would remove mcpServers.harness-mem from {}", claude_json.display());
         return;
     }
 
@@ -1164,7 +1156,7 @@ fn remove_mcp_claude(dry_run: bool) {
     let out = match serde_json::to_string_pretty(&json) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
+            eprintln!("[harness] Failed to serialize {}: {e}", claude_json.display());
             return;
         }
     };
@@ -1175,10 +1167,10 @@ fn remove_mcp_claude(dry_run: bool) {
     let tmp = claude_json
         .with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
-        eprintln!("[harness] Removed mcpServers.harness-mem from ~/.claude.json");
+        eprintln!("[harness] Removed mcpServers.harness-mem from {}", claude_json.display());
     } else {
         let _ = fs::remove_file(&tmp); // clean up tmp on failure
-        eprintln!("[harness] Failed to write ~/.claude.json");
+        eprintln!("[harness] Failed to write {}", claude_json.display());
     }
 }
 
@@ -1385,7 +1377,7 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
 
 // ── Install a single tool ─────────────────────────────────────────────────────
 
-fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
+fn install_tool(tool: &str, local: bool, dry_run: bool, target: Option<&Path>) -> i32 {
     let cfg = match tool_config(tool) {
         Some(c) => c,
         None => {
@@ -1396,7 +1388,11 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         }
     };
 
-    let target_dir = if local {
+    let _owned_target: PathBuf;
+    let target_dir: &Path = if let Some(t) = target {
+        _owned_target = t.to_path_buf();
+        &_owned_target
+    } else if local {
         &cfg.local_dir
     } else {
         &cfg.global_dir
@@ -1427,7 +1423,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 
     for (rel, content) in cfg.files {
         let effective_content;
-        let content = if tool == "claude" && *rel == ".claude/settings.json" {
+        let content = if tool == "claude" && *rel == "settings.json" {
             effective_content = sanitize_claude_global_hooks(content);
             effective_content.as_str()
         } else {
@@ -1510,8 +1506,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     // Sync plugin cache for Claude Code (keeps commands/skills/agents up-to-date
     // without requiring an npm publish for every change).
     if tool == "claude" {
-        let home = std::env::var("HOME").unwrap_or_default();
-        sync_plugin_cache(&home, dry_run);
+        sync_plugin_cache(dry_run);
     }
 
     // Seed the default epic org/team on first install (idempotent).
@@ -1527,15 +1522,22 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 // ── Public entry point ────────────────────────────────────────────────────────
 
 pub fn run(args: &[String]) -> i32 {
-    // Parse: epic-harness install [<tool>] [--local] [--dry-run]
+    // Parse: epic-harness install [<tool>] [--local] [--dry-run] [--target <path>]
     let local = args.iter().any(|a| a == "--local");
     let dry_run = args.iter().any(|a| a == "--dry-run");
+    let target: Option<PathBuf> = args.iter().position(|a| a == "--target")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| PathBuf::from(s));
 
-    // First positional arg that isn't a flag
-    let tool_arg = args
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .map(|s| s.as_str());
+    // First positional arg that isn't a flag or --target value
+    let tool_arg = {
+        let target_next = args.iter().position(|a| a == "--target")
+            .and_then(|i| Some(i + 1));
+        args.iter()
+            .enumerate()
+            .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
+            .map(|(_, s)| s.as_str())
+    };
 
     match tool_arg {
         None => {
@@ -1548,7 +1550,7 @@ pub fn run(args: &[String]) -> i32 {
             let mut exit = 0;
             for tool in &selected {
                 eprintln!("[harness] Installing {tool}...");
-                let code = install_tool(tool, local, dry_run);
+                let code = install_tool(tool, local, dry_run, target.as_deref());
                 if code != 0 {
                     exit = code;
                 }
@@ -1563,7 +1565,7 @@ pub fn run(args: &[String]) -> i32 {
         }
 
         Some(tool) => {
-            let code = install_tool(tool, local, dry_run);
+            let code = install_tool(tool, local, dry_run, target.as_deref());
             ensure_global_config(dry_run);
             code
         }
@@ -1598,7 +1600,7 @@ fn ensure_global_config(dry_run: bool) {
 
 // ── Uninstall ─────────────────────────────────────────────────────────────────
 
-fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
+fn uninstall_tool(tool: &str, local: bool, dry_run: bool, _target: Option<&Path>) -> i32 {
     let cfg = match tool_config(tool) {
         Some(c) => c,
         None => {
@@ -1724,10 +1726,17 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 pub fn run_uninstall(args: &[String]) -> i32 {
     let local = args.iter().any(|a| a == "--local");
     let dry_run = args.iter().any(|a| a == "--dry-run");
-    let tool_arg = args
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .map(|s| s.as_str());
+    let target: Option<PathBuf> = args.iter().position(|a| a == "--target")
+        .and_then(|i| args.get(i + 1))
+        .map(|s| PathBuf::from(s));
+    let tool_arg = {
+        let target_next = args.iter().position(|a| a == "--target")
+            .and_then(|i| Some(i + 1));
+        args.iter()
+            .enumerate()
+            .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
+            .map(|(_, s)| s.as_str())
+    };
 
     match tool_arg {
         None => {
@@ -1739,7 +1748,7 @@ pub fn run_uninstall(args: &[String]) -> i32 {
             let mut exit = 0;
             for tool in &selected {
                 eprintln!("[harness] Uninstalling {tool}...");
-                let code = uninstall_tool(tool, local, dry_run);
+                let code = uninstall_tool(tool, local, dry_run, target.as_deref());
                 if code != 0 {
                     exit = code;
                 }
@@ -1750,7 +1759,7 @@ pub fn run_uninstall(args: &[String]) -> i32 {
             println!("Available integrations: claude, codex, gemini, cursor, opencode, cline, aider");
             0
         }
-        Some(tool) => uninstall_tool(tool, local, dry_run),
+        Some(tool) => uninstall_tool(tool, local, dry_run, target.as_deref()),
     }
 }
 
@@ -2113,9 +2122,11 @@ mod tests {
         let fake_home = std::env::temp_dir()
             .join(format!("epic_test_no_cache_{}", rand_suffix()));
         // 디렉토리를 만들지 않아야 함 — cache_base read_dir 실패해야 함
-        let home_str = fake_home.to_string_lossy().to_string();
+        unsafe { std::env::set_var("HOME", &fake_home); }
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR"); }
+        unsafe { std::env::remove_var("CLAUDE_CODE_PLUGIN_CACHE_DIR"); }
         // dry_run=true 로 호출 — 패닉 없이 즉시 반환되어야 함
-        sync_plugin_cache(&home_str, true);
+        sync_plugin_cache(true);
         // 여기까지 도달하면 성공
     }
 
@@ -2126,9 +2137,11 @@ mod tests {
         let cache_base = base_dir
             .join(".claude/plugins/cache/epicsagas/epic");
         fs::create_dir_all(&cache_base).unwrap();
-        let home_str = base_dir.to_string_lossy().to_string();
+        unsafe { std::env::set_var("HOME", &base_dir); }
+        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR"); }
+        unsafe { std::env::remove_var("CLAUDE_CODE_PLUGIN_CACHE_DIR"); }
         // 패닉 없이 종료되어야 함
-        sync_plugin_cache(&home_str, true);
+        sync_plugin_cache(true);
         let _ = fs::remove_dir_all(base_dir);
     }
 }

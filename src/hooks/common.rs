@@ -350,6 +350,49 @@ pub(crate) fn dirs_home() -> PathBuf {
     panic!("[harness] FATAL: Home directory not detected. Please set HOME or USERPROFILE.");
 }
 
+// ── Claude Code Path Resolution ──────────────────────
+
+/// Effective Claude Code config directory.
+/// Priority: `CLAUDE_CONFIG_DIR` env var > `$HOME/.claude/`
+pub fn claude_config_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("CLAUDE_CONFIG_DIR") {
+        if !d.is_empty() {
+            return PathBuf::from(d);
+        }
+    }
+    dirs_home().join(".claude")
+}
+
+/// Path to `.claude.json` (MCP server registry).
+/// Priority: `CLAUDE_SETTINGS_PATH` env var > `CLAUDE_CONFIG_DIR` parent > `$HOME/.claude.json`
+pub fn claude_json_path() -> PathBuf {
+    if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    if let Ok(d) = std::env::var("CLAUDE_CONFIG_DIR") {
+        if !d.is_empty() {
+            return PathBuf::from(&d)
+                .parent()
+                .map(|p| p.join(".claude.json"))
+                .unwrap_or_else(|| PathBuf::from(d).join(".claude.json"));
+        }
+    }
+    dirs_home().join(".claude.json")
+}
+
+/// Claude Code plugin cache directory.
+/// Priority: `CLAUDE_CODE_PLUGIN_CACHE_DIR` env var > `claude_config_dir()/plugins`
+pub fn claude_plugin_cache_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("CLAUDE_CODE_PLUGIN_CACHE_DIR") {
+        if !d.is_empty() {
+            return PathBuf::from(d);
+        }
+    }
+    claude_config_dir().join("plugins")
+}
+
 // ── Content Sanitization ─────────────────────────────
 
 /// Strip characters that could be used for prompt injection in generated skill content:
