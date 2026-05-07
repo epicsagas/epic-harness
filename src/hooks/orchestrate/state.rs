@@ -1,5 +1,7 @@
 //! state.rs -- Orchestration state types and file I/O helpers
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -34,6 +36,7 @@ pub enum ControlAction {
     Cancel,
     Redirect,
     Resume,
+    Reassign,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,11 +80,25 @@ pub struct AgentStatusFile {
     pub status: AgentStatus,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum MessageType {
+    Handoff,
+    Question,
+    Blocked,
+    Result,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InboxMessage {
+    pub id: String,
     pub from: String,
     pub timestamp: String,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub msg_type: Option<MessageType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,6 +111,8 @@ pub struct ControlDirective {
 
 // ── Constants ─────────────────────────────────────────
 
+/// Maximum number of concurrent agents per orchestration run.
+/// Used in Phase 3 (R14: Dynamic Agent Spawning) to cap agent count.
 pub const MAX_CONCURRENT_AGENTS: usize = 6;
 const RUN_FILE: &str = "run.json";
 const CONTROL_FILE: &str = "control.json";
@@ -172,19 +191,27 @@ pub fn append_jsonl(path: &Path, record: &impl Serialize) -> io::Result<()> {
     Ok(())
 }
 
+/// Error type for `read_jsonl`.
+#[derive(Debug)]
+pub enum ReadJsonlError {
+    FileTooLarge(u64),
+    Io(std::io::Error),
+}
+
 /// Read all lines from a JSONL file as typed records.
-/// Skips files larger than 10 MB to prevent memory exhaustion.
-pub fn read_jsonl<T: serde::de::DeserializeOwned>(path: &Path) -> Vec<T> {
-    const MAX_JSONL_BYTES: u64 = 10 * 1024 * 1024; // 10 MB
-    if fs::metadata(path).map(|m| m.len()).unwrap_or(0) > MAX_JSONL_BYTES {
-        return Vec::new();
+/// Returns `Err(ReadJsonlError::FileTooLarge)` if file exceeds 10 MB.
+pub fn read_jsonl<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Vec<T>, ReadJsonlError> {
+    const MAX_JSONL_BYTES: u64 = 10 * 1024 * 1024;
+    let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if size > MAX_JSONL_BYTES {
+        return Err(ReadJsonlError::FileTooLarge(size));
     }
-    fs::read_to_string(path)
+    Ok(fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
         .filter(|l| !l.is_empty())
         .filter_map(|l| serde_json::from_str(l).ok())
-        .collect()
+        .collect())
 }
 
 // ── Orchestration operations ──────────────────────────
@@ -225,19 +252,227 @@ pub fn append_event(base: &Path, agent_id: &str, event: &AgentEvent) -> io::Resu
 
 /// Read all events from an agent's stream.jsonl.
 pub fn read_events(base: &Path, agent_id: &str) -> Vec<AgentEvent> {
-    read_jsonl(&agent_stream_file(base, agent_id))
+    read_jsonl(&agent_stream_file(base, agent_id)).unwrap_or_default()
 }
 
 /// Post a message to an agent's inbox.
+/// If `msg.id` is empty, an ID is auto-generated from a hash of from+timestamp+message.
 pub fn post_inbox_message(base: &Path, agent_id: &str, msg: &InboxMessage) -> io::Result<()> {
     let a_dir = agent_dir(base, agent_id);
     fs::create_dir_all(&a_dir)?;
-    append_jsonl(&agent_inbox_file(base, agent_id), msg)
+    let msg = if msg.id.is_empty() {
+        let hash_input = format!("{}{}{}", msg.from, msg.timestamp, msg.message);
+        let id = format!(
+            "msg-{:x}",
+            hash_input
+                .bytes()
+                .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64))
+        );
+        InboxMessage { id, ..msg.clone() }
+    } else {
+        msg.clone()
+    };
+    append_jsonl(&agent_inbox_file(base, agent_id), &msg)
+}
+
+/// Mark an inbox message as read by setting its `read_at` timestamp.
+/// Rewrites the entire inbox.jsonl atomically with the updated entry.
+pub fn mark_inbox_read(base: &Path, agent_id: &str, msg_id: &str) -> io::Result<()> {
+    let path = agent_inbox_file(base, agent_id);
+    let messages: Vec<InboxMessage> = read_jsonl(&path).unwrap_or_default();
+    let now = crate::hooks::common::now_iso();
+    let updated: Vec<InboxMessage> = messages
+        .into_iter()
+        .map(|mut m| {
+            if m.id == msg_id && m.read_at.is_none() {
+                m.read_at = Some(now.clone());
+            }
+            m
+        })
+        .collect();
+    let tmp = path.with_extension("jsonl.tmp");
+    {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&tmp)?;
+        for m in &updated {
+            let json = serde_json::to_string(m).map_err(io::Error::other)?;
+            writeln!(f, "{json}")?;
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
+    }
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+/// Read only unread inbox messages (`read_at` is `None`).
+pub fn read_inbox_unread(base: &Path, agent_id: &str) -> Vec<InboxMessage> {
+    read_inbox(base, agent_id)
+        .into_iter()
+        .filter(|m| m.read_at.is_none())
+        .collect()
 }
 
 /// Read all inbox messages for an agent.
 pub fn read_inbox(base: &Path, agent_id: &str) -> Vec<InboxMessage> {
-    read_jsonl(&agent_inbox_file(base, agent_id))
+    read_jsonl(&agent_inbox_file(base, agent_id)).unwrap_or_default()
+}
+
+/// Send a typed message from one agent to another agent's inbox.
+pub fn send_message(
+    base: &Path,
+    from: &str,
+    to: &str,
+    msg_type: MessageType,
+    body: &str,
+) -> io::Result<()> {
+    if !validate_agent_id(from) || !validate_agent_id(to) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid agent_id"));
+    }
+    let now = crate::hooks::common::now_iso();
+    let raw = format!("{from}{to}{now}{body}");
+    let id = format!(
+        "msg-{:x}",
+        raw.bytes()
+            .fold(0u64, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u64))
+    );
+    let msg = InboxMessage {
+        id,
+        from: from.to_string(),
+        timestamp: now,
+        message: body.to_string(),
+        msg_type: Some(msg_type),
+        read_at: None,
+    };
+    post_inbox_message(base, to, &msg)
+}
+
+/// Add a new agent to an existing orchestration run at runtime.
+/// The agents list is append-only — existing agents are never removed or modified.
+/// Creates the agent's directory structure and updates run.json atomically.
+pub fn add_agent(base: &Path, run_id: &str, agent_def: AgentDef) -> io::Result<()> {
+    if !validate_agent_id(&agent_def.id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid agent_id: {}", agent_def.id),
+        ));
+    }
+    let mut run = read_run(base)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run.json not found"))?;
+    if run.id != run_id {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("run_id mismatch: expected {}, got {}", run.id, run_id),
+        ));
+    }
+    // Check max concurrent agents
+    let active = run
+        .agents
+        .iter()
+        .filter(|a| a.status == AgentStatus::Running || a.status == AgentStatus::Pending)
+        .count();
+    if active >= MAX_CONCURRENT_AGENTS {
+        return Err(io::Error::new(
+            io::ErrorKind::WouldBlock,
+            format!("max concurrent agents ({MAX_CONCURRENT_AGENTS}) reached"),
+        ));
+    }
+    // Create agent directory
+    let a_dir = agent_dir(base, &agent_def.id);
+    fs::create_dir_all(&a_dir)?;
+    // Append agent (never modify existing)
+    run.agents.push(agent_def);
+    run.updated_at = crate::hooks::common::now_iso();
+    write_run(base, &run)
+}
+
+/// Self-register the current agent using EPIC_AGENT_ID and EPIC_RUN_ID env vars.
+/// No-op if either env var is missing or agent already exists in run.
+pub fn self_register_agent(base: &Path, role: &str, task: &str) -> io::Result<()> {
+    let agent_id = match std::env::var("EPIC_AGENT_ID") {
+        Ok(id) if !id.is_empty() => id,
+        _ => return Ok(()), // no-op
+    };
+    let run_id = match std::env::var("EPIC_RUN_ID") {
+        Ok(id) if !id.is_empty() => id,
+        _ => return Ok(()), // no-op
+    };
+    // Check if already registered
+    if let Some(run) = read_run(base)
+        && run.agents.iter().any(|a| a.id == agent_id)
+    {
+        return Ok(()); // already exists, no-op
+    }
+    let agent_def = AgentDef {
+        id: agent_id,
+        role: role.to_string(),
+        task: task.to_string(),
+        satisfies: vec![],
+        status: AgentStatus::Running,
+        started_at: Some(crate::hooks::common::now_iso()),
+        completed_at: None,
+    };
+    add_agent(base, &run_id, agent_def)
+}
+
+/// Reassign a blocked/failed agent's task to another agent.
+///
+/// - Copies `from_agent`'s task description to `to_agent`'s inbox as a `Handoff` message
+/// - Sets `from_agent` status to `AgentStatus::Failed` (task handed off)
+/// - Updates run.json atomically
+pub fn reassign_agent(base: &Path, from_id: &str, to_id: &str) -> io::Result<()> {
+    if !validate_agent_id(from_id) || !validate_agent_id(to_id) {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid agent_id"));
+    }
+    let mut run = read_run(base)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run.json not found"))?;
+
+    // Find from agent and extract its task
+    let from_task = run
+        .agents
+        .iter()
+        .find(|a| a.id == from_id)
+        .map(|a| a.task.clone())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("agent {from_id} not found"),
+            )
+        })?;
+
+    // Verify to agent exists
+    if !run.agents.iter().any(|a| a.id == to_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("agent {to_id} not found"),
+        ));
+    }
+
+    // Mark from_agent as Failed (task handed off)
+    for agent in &mut run.agents {
+        if agent.id == from_id {
+            agent.status = AgentStatus::Failed;
+            agent.completed_at = Some(crate::hooks::common::now_iso());
+        }
+    }
+    run.updated_at = crate::hooks::common::now_iso();
+    write_run(base, &run)?;
+
+    // Send task to to_agent inbox as Handoff
+    send_message(
+        base,
+        "orchestrator",
+        to_id,
+        MessageType::Handoff,
+        &format!("Reassigned task from {from_id}: {from_task}"),
+    )
 }
 
 /// Write a control directive.
@@ -308,16 +543,18 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 }
 
 /// Parse the agent output to extract the terminal state.
-/// Looks for known status patterns in the output text.
+/// Only matches status markers at line start or document start to prevent false positives
+/// (e.g., `"The old ## Status: DONE format was deprecated"` must not match).
 pub fn parse_agent_state(output: &str) -> Option<AgentStatus> {
-    // Match the standard output format from agents
-    if (output.contains("## Status: DONE") && !output.contains("DONE_WITH_CONCERNS"))
-        || output.contains("## Status: DONE_WITH_CONCERNS")
-    {
+    let is_status_line = |marker: &str| -> bool {
+        output == marker
+            || output.starts_with(marker)
+            || output.contains(&format!("\n{marker}"))
+    };
+
+    if is_status_line("## Status: DONE_WITH_CONCERNS") || is_status_line("## Status: DONE") {
         Some(AgentStatus::Done)
-    } else if output.contains("## Status: BLOCKED")
-        || output.contains("## Status: NEEDS_CONTEXT")
-    {
+    } else if is_status_line("## Status: BLOCKED") || is_status_line("## Status: NEEDS_CONTEXT") {
         Some(AgentStatus::Blocked)
     } else {
         None
@@ -792,14 +1029,20 @@ mod tests {
         init_run(tmp.path(), &run).unwrap();
 
         let msg1 = InboxMessage {
+            id: "".to_string(), // auto-generated
             from: "agent-y".to_string(),
             timestamp: "2026-05-07T10:00:00Z".to_string(),
             message: "R1 is complete, you can start".to_string(),
+            msg_type: None,
+            read_at: None,
         };
         let msg2 = InboxMessage {
+            id: "".to_string(), // auto-generated
             from: "user".to_string(),
             timestamp: "2026-05-07T10:01:00Z".to_string(),
             message: "Focus on edge cases".to_string(),
+            msg_type: None,
+            read_at: None,
         };
 
         post_inbox_message(tmp.path(), "agent-x", &msg1).unwrap();
@@ -816,6 +1059,114 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let msgs = read_inbox(tmp.path(), "nonexistent");
         assert!(msgs.is_empty());
+    }
+
+    #[test]
+    fn post_inbox_auto_generates_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("inbox-auto-id", vec![("agent-x", AgentStatus::Pending)], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let msg = InboxMessage {
+            id: "".to_string(),
+            from: "agent-y".to_string(),
+            timestamp: "2026-05-07T10:00:00Z".to_string(),
+            message: "hello".to_string(),
+            msg_type: None,
+            read_at: None,
+        };
+        post_inbox_message(tmp.path(), "agent-x", &msg).unwrap();
+
+        let msgs = read_inbox(tmp.path(), "agent-x");
+        assert!(!msgs[0].id.is_empty(), "id should be auto-generated");
+        assert!(msgs[0].id.starts_with("msg-"), "id should start with msg-");
+    }
+
+    #[test]
+    fn mark_inbox_read_updates_read_at() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("inbox-read", vec![("agent-x", AgentStatus::Pending)], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let msg = InboxMessage {
+            id: "msg-001".to_string(),
+            from: "agent-y".to_string(),
+            timestamp: "2026-05-07T10:00:00Z".to_string(),
+            message: "start now".to_string(),
+            msg_type: None,
+            read_at: None,
+        };
+        post_inbox_message(tmp.path(), "agent-x", &msg).unwrap();
+
+        // Before mark: read_at is None
+        let msgs = read_inbox(tmp.path(), "agent-x");
+        assert!(msgs[0].read_at.is_none());
+
+        // Mark as read
+        mark_inbox_read(tmp.path(), "agent-x", "msg-001").unwrap();
+
+        // After mark: read_at is set
+        let msgs = read_inbox(tmp.path(), "agent-x");
+        assert!(msgs[0].read_at.is_some());
+    }
+
+    #[test]
+    fn read_inbox_unread_filters_read_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("inbox-unread", vec![("agent-x", AgentStatus::Pending)], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let msg1 = InboxMessage {
+            id: "msg-001".to_string(),
+            from: "a".to_string(),
+            timestamp: "2026-05-07T10:00:00Z".to_string(),
+            message: "first".to_string(),
+            msg_type: None,
+            read_at: Some("2026-05-07T10:01:00Z".to_string()), // already read
+        };
+        let msg2 = InboxMessage {
+            id: "msg-002".to_string(),
+            from: "b".to_string(),
+            timestamp: "2026-05-07T10:01:00Z".to_string(),
+            message: "second".to_string(),
+            msg_type: None,
+            read_at: None, // unread
+        };
+        post_inbox_message(tmp.path(), "agent-x", &msg1).unwrap();
+        post_inbox_message(tmp.path(), "agent-x", &msg2).unwrap();
+
+        let unread = read_inbox_unread(tmp.path(), "agent-x");
+        assert_eq!(unread.len(), 1);
+        assert_eq!(unread[0].id, "msg-002");
+    }
+
+    // ── parse_agent_state false positive prevention (R5) ──
+
+    #[test]
+    fn parse_done_false_positive_prevented() {
+        // "## Status: DONE" が行の先頭でない場合 → None
+        let output = "The old ## Status: DONE format was deprecated in v2";
+        assert_eq!(parse_agent_state(output), None);
+    }
+
+    #[test]
+    fn parse_done_at_line_start() {
+        let output = "Some preamble\n## Status: DONE\nSome postamble";
+        assert_eq!(parse_agent_state(output), Some(AgentStatus::Done));
+    }
+
+    // ── read_jsonl large file error (R6) ──
+
+    #[test]
+    fn read_jsonl_returns_err_for_large_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.jsonl");
+        // 11MB 파일 생성
+        let line = "{\"seq\":1}\n";
+        let content = line.repeat(11 * 1024 * 1024 / line.len() + 1);
+        fs::write(&path, content).unwrap();
+        let result: Result<Vec<serde_json::Value>, _> = read_jsonl(&path);
+        assert!(matches!(result, Err(ReadJsonlError::FileTooLarge(_))));
     }
 
     // ── Max concurrent agents ──
@@ -883,5 +1234,313 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "file must be owner-read/write only");
+    }
+
+    // ── R12: send_message ──
+
+    #[test]
+    fn send_message_delivers_to_inbox() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run(
+            "msg-test",
+            vec![
+                ("agent-a", AgentStatus::Running),
+                ("agent-b", AgentStatus::Pending),
+            ],
+            vec![],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        send_message(tmp.path(), "agent-a", "agent-b", MessageType::Handoff, "R1 complete").unwrap();
+
+        let msgs = read_inbox(tmp.path(), "agent-b");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].from, "agent-a");
+        assert_eq!(msgs[0].msg_type, Some(MessageType::Handoff));
+        assert!(msgs[0].message.contains("R1 complete"));
+        assert!(msgs[0].read_at.is_none());
+    }
+
+    #[test]
+    fn send_message_rejects_invalid_agent_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = send_message(tmp.path(), "../evil", "agent-b", MessageType::Result, "test");
+        assert!(result.is_err());
+    }
+
+    // ── R13: push notification uses Handoff type ──
+
+    #[test]
+    fn push_notification_uses_handoff_type() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run(
+            "push-test",
+            vec![
+                ("builder", AgentStatus::Done),
+                ("tester", AgentStatus::Blocked),
+            ],
+            vec![("tester", vec!["builder"])],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        // Simulate orchestrator sending handoff push notification
+        send_message(
+            tmp.path(),
+            "orchestrator",
+            "tester",
+            MessageType::Handoff,
+            "Dependency 'builder' completed. You are unblocked.",
+        )
+        .unwrap();
+
+        let msgs = read_inbox_unread(tmp.path(), "tester");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].from, "orchestrator");
+        assert_eq!(msgs[0].msg_type, Some(MessageType::Handoff));
+        assert!(msgs[0].message.contains("unblocked"));
+        assert!(msgs[0].read_at.is_none(), "message should be unread");
+    }
+
+    #[test]
+    fn push_notification_unblocks_agent_with_multiple_deps() {
+        let tmp = tempfile::tempdir().unwrap();
+        // tester depends on both builder and linter; both are done
+        let run = make_run(
+            "push-multi-dep",
+            vec![
+                ("builder", AgentStatus::Done),
+                ("linter", AgentStatus::Done),
+                ("tester", AgentStatus::Blocked),
+            ],
+            vec![("tester", vec!["builder", "linter"])],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        // evaluate_dependencies sees both builder and linter as finished,
+        // so tester is unblocked when linter completes
+        let unblocked = evaluate_dependencies(&run, "linter");
+        assert_eq!(unblocked, vec!["tester"]);
+
+        // Send the handoff notification
+        send_message(
+            tmp.path(),
+            "orchestrator",
+            "tester",
+            MessageType::Handoff,
+            "Dependency 'linter' completed. You are unblocked.",
+        )
+        .unwrap();
+
+        let msgs = read_inbox_unread(tmp.path(), "tester");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].msg_type, Some(MessageType::Handoff));
+    }
+
+    #[test]
+    fn message_type_serialization() {
+        let types = vec![
+            (MessageType::Handoff, "\"handoff\""),
+            (MessageType::Question, "\"question\""),
+            (MessageType::Blocked, "\"blocked\""),
+            (MessageType::Result, "\"result\""),
+        ];
+        for (t, expected) in types {
+            assert_eq!(serde_json::to_string(&t).unwrap(), expected);
+        }
+    }
+
+    // ── R14: Dynamic Agent Spawning ──
+
+    #[test]
+    fn add_agent_appends_to_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run(
+            "dyn-test",
+            vec![("agent-a", AgentStatus::Running)],
+            vec![],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        let new_agent = AgentDef {
+            id: "agent-b".to_string(),
+            role: "tester".to_string(),
+            task: "run tests".to_string(),
+            satisfies: vec!["R2".to_string()],
+            status: AgentStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        };
+        add_agent(tmp.path(), "dyn-test", new_agent).unwrap();
+
+        let loaded = read_run(tmp.path()).unwrap();
+        assert_eq!(loaded.agents.len(), 2);
+        assert_eq!(loaded.agents[1].id, "agent-b");
+        assert_eq!(loaded.agents[0].id, "agent-a"); // existing unchanged
+    }
+
+    #[test]
+    fn add_agent_rejects_invalid_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("dyn-invalid", vec![], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let bad_agent = AgentDef {
+            id: "../evil".to_string(),
+            role: "bad".to_string(),
+            task: "escape".to_string(),
+            satisfies: vec![],
+            status: AgentStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        };
+        assert!(add_agent(tmp.path(), "dyn-invalid", bad_agent).is_err());
+    }
+
+    #[test]
+    fn add_agent_enforces_max_concurrent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let agent_ids = ["a0", "a1", "a2", "a3", "a4", "a5"]; // MAX_CONCURRENT_AGENTS = 6
+        assert_eq!(agent_ids.len(), MAX_CONCURRENT_AGENTS);
+        let agents: Vec<(&str, AgentStatus)> = agent_ids
+            .iter()
+            .map(|id| (*id, AgentStatus::Running))
+            .collect();
+        let run = make_run("max-test", agents, vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let extra = AgentDef {
+            id: "agent-extra".to_string(),
+            role: "extra".to_string(),
+            task: "overflow".to_string(),
+            satisfies: vec![],
+            status: AgentStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        };
+        assert!(matches!(
+            add_agent(tmp.path(), "max-test", extra),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
+        ));
+    }
+
+    #[test]
+    fn add_agent_creates_agent_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("dir-test", vec![], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let new_agent = AgentDef {
+            id: "agent-new".to_string(),
+            role: "builder".to_string(),
+            task: "build".to_string(),
+            satisfies: vec![],
+            status: AgentStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        };
+        add_agent(tmp.path(), "dir-test", new_agent).unwrap();
+
+        assert!(agent_dir(tmp.path(), "agent-new").is_dir());
+    }
+
+    #[test]
+    fn add_agent_rejects_run_id_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("correct-id", vec![], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        let new_agent = AgentDef {
+            id: "agent-x".to_string(),
+            role: "builder".to_string(),
+            task: "build".to_string(),
+            satisfies: vec![],
+            status: AgentStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        };
+        let result = add_agent(tmp.path(), "wrong-id", new_agent);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn add_agent_returns_not_found_when_no_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        // orchestrator dir exists but run.json does not
+        fs::create_dir_all(orchestrator_dir(tmp.path())).unwrap();
+
+        let new_agent = AgentDef {
+            id: "agent-x".to_string(),
+            role: "builder".to_string(),
+            task: "build".to_string(),
+            satisfies: vec![],
+            status: AgentStatus::Pending,
+            started_at: None,
+            completed_at: None,
+        };
+        let result = add_agent(tmp.path(), "any-id", new_agent);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::NotFound);
+    }
+
+    // ── R15: Agent Load Balancing — reassign_agent ──
+
+    #[test]
+    fn reassign_moves_task_to_inbox() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run(
+            "reassign-test",
+            vec![
+                ("agent-blocked", AgentStatus::Blocked),
+                ("agent-free", AgentStatus::Pending),
+            ],
+            vec![],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        reassign_agent(tmp.path(), "agent-blocked", "agent-free").unwrap();
+
+        // from_agent should be Failed
+        let loaded = read_run(tmp.path()).unwrap();
+        let from = loaded.agents.iter().find(|a| a.id == "agent-blocked").unwrap();
+        assert_eq!(from.status, AgentStatus::Failed);
+
+        // to_agent inbox should have the handoff
+        let msgs = read_inbox_unread(tmp.path(), "agent-free");
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].msg_type, Some(MessageType::Handoff));
+        assert!(msgs[0].message.contains("agent-blocked"));
+    }
+
+    #[test]
+    fn reassign_rejects_invalid_agent_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run("reassign-invalid", vec![], vec![]);
+        init_run(tmp.path(), &run).unwrap();
+
+        assert!(reassign_agent(tmp.path(), "../evil", "agent-b").is_err());
+        assert!(reassign_agent(tmp.path(), "agent-a", "../../etc").is_err());
+    }
+
+    #[test]
+    fn reassign_rejects_unknown_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run(
+            "reassign-unknown",
+            vec![("agent-a", AgentStatus::Blocked)],
+            vec![],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        // to_agent doesn't exist
+        assert!(reassign_agent(tmp.path(), "agent-a", "nonexistent").is_err());
+    }
+
+    #[test]
+    fn control_action_reassign_serialization() {
+        let json = serde_json::to_string(&ControlAction::Reassign).unwrap();
+        assert_eq!(json, "\"reassign\"");
+        let action: ControlAction = serde_json::from_str("\"reassign\"").unwrap();
+        assert_eq!(action, ControlAction::Reassign);
     }
 }

@@ -9,6 +9,7 @@ pub mod orchestrate;
 pub mod polish;
 pub mod reflect;
 pub mod resume;
+pub mod serve;
 pub mod snapshot;
 pub mod team;
 pub mod telemetry;

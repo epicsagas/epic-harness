@@ -19,10 +19,10 @@ description: "Auto-triggered during active orchestration. Provides coordination 
 4. Messages from user (via /intervene redirect): adjust task accordingly
 
 ### Step 3: Check dependencies
-1. Read `$HARNESS_DIR/orchestrator/run.json` dependency graph
-2. Identify which agents this agent depends on
-3. Read their `status.json` — if any dependency is not DONE, wait
-4. If all dependencies are DONE, proceed with task
+1. Read your agent's inbox (`inbox.jsonl`) for unread messages
+2. If you receive a `handoff` message from "orchestrator": your dependencies are resolved — proceed with your task
+3. If inbox is empty and your task has not started yet: check `run.json` dependency graph as a fallback
+4. If any dependency is not DONE, wait for the Handoff inbox notification from the orchestrator (push-based — no polling)
 
 ### Step 4: Execute with progress reporting
 While working on the assigned task:
@@ -49,6 +49,29 @@ When agents need to communicate (via SendMessage or future inbox/outbox):
   "timestamp": "ISO-8601"
 }
 ```
+
+## Agent-to-Agent Messaging
+
+When an agent needs to communicate with another agent:
+
+### Via send_message (Rust hook — automatic)
+The orchestrate hook's `send_message` function writes directly to the target agent's inbox.
+Message types:
+- `handoff` — task completed, passing results to next agent
+- `question` — blocking question, sender waits for reply
+- `blocked` — sender is stuck, requesting help
+- `result` — sharing output data for downstream consumption
+
+### Via structured output (LLM → hook)
+Include in your completion output:
+```json
+{
+  "send_to": "agent-id",
+  "msg_type": "handoff|question|blocked|result",
+  "body": "message content"
+}
+```
+The `run_post` hook detects this pattern and calls `send_message` automatically.
 
 ## Anti-Rationalization
 

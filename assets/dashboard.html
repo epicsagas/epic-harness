@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Epic Harness — Orchestration Dashboard</title>
+<style>
+  body { font-family: monospace; background: #1a1a1a; color: #e0e0e0; margin: 0; padding: 20px; }
+  h1 { color: #7ec8e3; font-size: 1.2em; margin-bottom: 4px; }
+  #status { color: #aaa; font-size: 0.85em; margin-bottom: 16px; }
+  #graph { border: 1px solid #333; background: #111; border-radius: 6px; }
+  .node circle { stroke: #7ec8e3; stroke-width: 2px; }
+  .node text { fill: #e0e0e0; font-size: 11px; }
+  .link { stroke: #444; stroke-width: 1.5px; marker-end: url(#arrow); }
+  .status-running  { fill: #4caf50; }
+  .status-pending  { fill: #9e9e9e; }
+  .status-done     { fill: #2196f3; }
+  .status-blocked  { fill: #ff9800; }
+  .status-failed   { fill: #f44336; }
+  #agents { margin-top: 16px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.85em; }
+  th { text-align: left; color: #7ec8e3; border-bottom: 1px solid #333; padding: 4px 8px; }
+  td { padding: 4px 8px; border-bottom: 1px solid #222; }
+  #refresh { margin-top: 12px; color: #666; font-size: 0.75em; }
+</style>
+</head>
+<body>
+<h1>Epic Harness — Orchestration Dashboard</h1>
+<div id="status">Loading...</div>
+<svg id="graph" width="800" height="320"></svg>
+<div id="agents"><table id="agent-table">
+  <thead><tr><th>Agent</th><th>Role</th><th>Status</th><th>Started</th></tr></thead>
+  <tbody id="agent-rows"></tbody>
+</table></div>
+<div id="refresh">Auto-refreshes every 5s</div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+const statusColor = {running:'#4caf50',pending:'#9e9e9e',done:'#2196f3',blocked:'#ff9800',failed:'#f44336'};
+
+async function fetchRun() {
+  try {
+    const r = await fetch('/api/run');
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
+function renderGraph(run) {
+  const svg = d3.select('#graph');
+  svg.selectAll('*').remove();
+  if (!run || !run.agents || run.agents.length === 0) {
+    svg.append('text').attr('x',20).attr('y',40).attr('fill','#666').text('No active orchestration run.');
+    return;
+  }
+
+  // Arrow marker
+  svg.append('defs').append('marker')
+    .attr('id','arrow').attr('viewBox','0 -5 10 10').attr('refX',20).attr('refY',0)
+    .attr('markerWidth',6).attr('markerHeight',6).attr('orient','auto')
+    .append('path').attr('d','M0,-5L10,0L0,5').attr('fill','#555');
+
+  const deps = run.dependency_graph || {};
+  const nodes = run.agents.map(a => ({id:a.id, role:a.role, status:a.status}));
+  const links = [];
+  Object.entries(deps).forEach(([src, targets]) => {
+    targets.forEach(tgt => links.push({source:tgt, target:src}));
+  });
+
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d=>d.id).distance(120))
+    .force('charge', d3.forceManyBody().strength(-200))
+    .force('center', d3.forceCenter(400, 160));
+
+  const link = svg.append('g').selectAll('line').data(links).join('line').attr('class','link');
+  const node = svg.append('g').selectAll('g').data(nodes).join('g').attr('class','node');
+  node.append('circle').attr('r',18).attr('fill', d => statusColor[d.status] || '#9e9e9e');
+  node.append('text').attr('dy',4).attr('text-anchor','middle').text(d=>d.id.slice(0,10));
+
+  sim.on('tick', () => {
+    link.attr('x1',d=>d.source.x).attr('y1',d=>d.source.y)
+        .attr('x2',d=>d.target.x).attr('y2',d=>d.target.y);
+    node.attr('transform',d=>`translate(${d.x},${d.y})`);
+  });
+}
+
+function renderTable(run) {
+  const tbody = document.getElementById('agent-rows');
+  tbody.innerHTML = '';
+  if (!run || !run.agents) return;
+  run.agents.forEach(a => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${a.id}</td><td>${a.role}</td><td style="color:${statusColor[a.status]||'#aaa'}">${a.status}</td><td>${a.started_at||'—'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function refresh() {
+  const run = await fetchRun();
+  const statusEl = document.getElementById('status');
+  if (run && run.id) {
+    statusEl.textContent = `Run: ${run.id} | Status: ${run.status} | Agents: ${run.agents.length}`;
+  } else {
+    statusEl.textContent = 'No active orchestration run.';
+  }
+  renderGraph(run);
+  renderTable(run);
+  document.getElementById('refresh').textContent = `Last updated: ${new Date().toLocaleTimeString()} (auto-refreshes every 5s)`;
+}
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
