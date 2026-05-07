@@ -124,7 +124,9 @@ const CONTROL_FILE: &str = "control.json";
 pub fn validate_agent_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Returns the orchestrator state directory: `$HARNESS_DIR/orchestrator/`
@@ -334,7 +336,10 @@ pub fn send_message(
     body: &str,
 ) -> io::Result<()> {
     if !validate_agent_id(from) || !validate_agent_id(to) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid agent_id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid agent_id",
+        ));
     }
     let now = crate::hooks::common::now_iso();
     let raw = format!("{from}{to}{now}{body}");
@@ -429,7 +434,10 @@ pub fn self_register_agent(base: &Path, role: &str, task: &str) -> io::Result<()
 /// - Updates run.json atomically
 pub fn reassign_agent(base: &Path, from_id: &str, to_id: &str) -> io::Result<()> {
     if !validate_agent_id(from_id) || !validate_agent_id(to_id) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid agent_id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid agent_id",
+        ));
     }
     let mut run = read_run(base)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run.json not found"))?;
@@ -499,10 +507,7 @@ pub fn write_run(base: &Path, run: &OrchestrationRun) -> io::Result<()> {
 
 /// Evaluate the dependency graph: given an agent that just completed,
 /// return the IDs of agents that are now unblocked (all their deps are done/failed).
-pub fn evaluate_dependencies(
-    run: &OrchestrationRun,
-    completed_agent_id: &str,
-) -> Vec<String> {
+pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -> Vec<String> {
     let mut unblocked = Vec::new();
 
     // Build a set of completed/failed agent IDs
@@ -547,9 +552,7 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 /// (e.g., `"The old ## Status: DONE format was deprecated"` must not match).
 pub fn parse_agent_state(output: &str) -> Option<AgentStatus> {
     let is_status_line = |marker: &str| -> bool {
-        output == marker
-            || output.starts_with(marker)
-            || output.contains(&format!("\n{marker}"))
+        output == marker || output.starts_with(marker) || output.contains(&format!("\n{marker}"))
     };
 
     if is_status_line("## Status: DONE_WITH_CONCERNS") || is_status_line("## Status: DONE") {
@@ -637,7 +640,10 @@ mod tests {
 
         let run_path = run_file(tmp.path());
         let tmp_path = run_path.with_extension("json.tmp");
-        assert!(!tmp_path.exists(), "no .tmp file should remain after atomic write");
+        assert!(
+            !tmp_path.exists(),
+            "no .tmp file should remain after atomic write"
+        );
     }
 
     // ── Test 2: Writing and reading agent status ──
@@ -735,10 +741,7 @@ mod tests {
                 ("tester", AgentStatus::Blocked),
                 ("reviewer", AgentStatus::Pending),
             ],
-            vec![
-                ("tester", vec!["builder"]),
-                ("reviewer", vec!["builder"]),
-            ],
+            vec![("tester", vec!["builder"]), ("reviewer", vec!["builder"])],
         );
 
         let mut unblocked = evaluate_dependencies(&run, "builder");
@@ -791,7 +794,10 @@ mod tests {
         );
 
         let unblocked = evaluate_dependencies(&run, "other");
-        assert!(unblocked.is_empty(), "agents with no deps should not appear");
+        assert!(
+            unblocked.is_empty(),
+            "agents with no deps should not appear"
+        );
     }
 
     #[test]
@@ -940,10 +946,7 @@ mod tests {
     fn is_run_complete_all_done() {
         let run = make_run(
             "complete",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Done),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Done)],
             vec![],
         );
         assert!(is_run_complete(&run));
@@ -953,10 +956,7 @@ mod tests {
     fn is_run_complete_mixed_done_failed() {
         let run = make_run(
             "mixed",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Failed),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Failed)],
             vec![],
         );
         assert!(is_run_complete(&run));
@@ -966,10 +966,7 @@ mod tests {
     fn is_run_not_complete_with_running() {
         let run = make_run(
             "not-done",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Running),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Running)],
             vec![],
         );
         assert!(!is_run_complete(&run));
@@ -979,10 +976,7 @@ mod tests {
     fn is_run_not_complete_with_blocked() {
         let run = make_run(
             "blocked",
-            vec![
-                ("a", AgentStatus::Done),
-                ("b", AgentStatus::Blocked),
-            ],
+            vec![("a", AgentStatus::Done), ("b", AgentStatus::Blocked)],
             vec![],
         );
         assert!(!is_run_complete(&run));
@@ -1064,7 +1058,11 @@ mod tests {
     #[test]
     fn post_inbox_auto_generates_id() {
         let tmp = tempfile::tempdir().unwrap();
-        let run = make_run("inbox-auto-id", vec![("agent-x", AgentStatus::Pending)], vec![]);
+        let run = make_run(
+            "inbox-auto-id",
+            vec![("agent-x", AgentStatus::Pending)],
+            vec![],
+        );
         init_run(tmp.path(), &run).unwrap();
 
         let msg = InboxMessage {
@@ -1085,7 +1083,11 @@ mod tests {
     #[test]
     fn mark_inbox_read_updates_read_at() {
         let tmp = tempfile::tempdir().unwrap();
-        let run = make_run("inbox-read", vec![("agent-x", AgentStatus::Pending)], vec![]);
+        let run = make_run(
+            "inbox-read",
+            vec![("agent-x", AgentStatus::Pending)],
+            vec![],
+        );
         init_run(tmp.path(), &run).unwrap();
 
         let msg = InboxMessage {
@@ -1113,7 +1115,11 @@ mod tests {
     #[test]
     fn read_inbox_unread_filters_read_messages() {
         let tmp = tempfile::tempdir().unwrap();
-        let run = make_run("inbox-unread", vec![("agent-x", AgentStatus::Pending)], vec![]);
+        let run = make_run(
+            "inbox-unread",
+            vec![("agent-x", AgentStatus::Pending)],
+            vec![],
+        );
         init_run(tmp.path(), &run).unwrap();
 
         let msg1 = InboxMessage {
@@ -1251,7 +1257,14 @@ mod tests {
         );
         init_run(tmp.path(), &run).unwrap();
 
-        send_message(tmp.path(), "agent-a", "agent-b", MessageType::Handoff, "R1 complete").unwrap();
+        send_message(
+            tmp.path(),
+            "agent-a",
+            "agent-b",
+            MessageType::Handoff,
+            "R1 complete",
+        )
+        .unwrap();
 
         let msgs = read_inbox(tmp.path(), "agent-b");
         assert_eq!(msgs.len(), 1);
@@ -1264,7 +1277,13 @@ mod tests {
     #[test]
     fn send_message_rejects_invalid_agent_id() {
         let tmp = tempfile::tempdir().unwrap();
-        let result = send_message(tmp.path(), "../evil", "agent-b", MessageType::Result, "test");
+        let result = send_message(
+            tmp.path(),
+            "../evil",
+            "agent-b",
+            MessageType::Result,
+            "test",
+        );
         assert!(result.is_err());
     }
 
@@ -1354,11 +1373,7 @@ mod tests {
     #[test]
     fn add_agent_appends_to_run() {
         let tmp = tempfile::tempdir().unwrap();
-        let run = make_run(
-            "dyn-test",
-            vec![("agent-a", AgentStatus::Running)],
-            vec![],
-        );
+        let run = make_run("dyn-test", vec![("agent-a", AgentStatus::Running)], vec![]);
         init_run(tmp.path(), &run).unwrap();
 
         let new_agent = AgentDef {
@@ -1502,7 +1517,11 @@ mod tests {
 
         // from_agent should be Failed
         let loaded = read_run(tmp.path()).unwrap();
-        let from = loaded.agents.iter().find(|a| a.id == "agent-blocked").unwrap();
+        let from = loaded
+            .agents
+            .iter()
+            .find(|a| a.id == "agent-blocked")
+            .unwrap();
         assert_eq!(from.status, AgentStatus::Failed);
 
         // to_agent inbox should have the handoff

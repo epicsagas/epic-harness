@@ -7,9 +7,7 @@
 
 pub mod state;
 
-use state::{
-    self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction,
-};
+use state::{self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction};
 
 use super::common::{self, HookInput, hint, now_iso};
 
@@ -54,7 +52,10 @@ pub fn run_pre(input: &HookInput) -> i32 {
                 ControlAction::Pause => {
                     hint(
                         "orchestrator",
-                        &format!("Agent {} is paused by user directive (gen {})", agent_id, directive.generation),
+                        &format!(
+                            "Agent {} is paused by user directive (gen {})",
+                            agent_id, directive.generation
+                        ),
                     );
                     if let Some(msg) = &directive.message {
                         hint("orchestrator", &format!("Reason: {}", msg));
@@ -64,7 +65,10 @@ pub fn run_pre(input: &HookInput) -> i32 {
                 ControlAction::Cancel => {
                     hint(
                         "orchestrator",
-                        &format!("Agent {} cancelled by user directive (gen {})", agent_id, directive.generation),
+                        &format!(
+                            "Agent {} cancelled by user directive (gen {})",
+                            agent_id, directive.generation
+                        ),
                     );
                     return 2;
                 }
@@ -397,35 +401,45 @@ mod tests {
     #[test]
     #[serial]
     fn extract_agent_id_prefers_env_var() {
-        unsafe { std::env::set_var("EPIC_AGENT_ID", "env-agent-1"); }
+        unsafe {
+            std::env::set_var("EPIC_AGENT_ID", "env-agent-1");
+        }
         let input = HookInput {
             tool_name: Some("Agent".to_string()),
             tool_input: Some(serde_json::json!({"agent_id": "explicit-id", "prompt": "test"})),
             ..Default::default()
         };
         let id = extract_agent_id(&input);
-        unsafe { std::env::remove_var("EPIC_AGENT_ID"); }
+        unsafe {
+            std::env::remove_var("EPIC_AGENT_ID");
+        }
         assert_eq!(id, Some("env-agent-1".to_string()));
     }
 
     #[test]
     #[serial]
     fn extract_agent_id_env_var_over_prompt_hash() {
-        unsafe { std::env::set_var("EPIC_AGENT_ID", "env-agent-2"); }
+        unsafe {
+            std::env::set_var("EPIC_AGENT_ID", "env-agent-2");
+        }
         let input = HookInput {
             tool_name: Some("Agent".to_string()),
             tool_input: Some(serde_json::json!({"prompt": "Build auth module"})),
             ..Default::default()
         };
         let id = extract_agent_id(&input);
-        unsafe { std::env::remove_var("EPIC_AGENT_ID"); }
+        unsafe {
+            std::env::remove_var("EPIC_AGENT_ID");
+        }
         assert_eq!(id, Some("env-agent-2".to_string()));
     }
 
     #[test]
     #[serial]
     fn extract_agent_id_explicit_id_when_no_env_var() {
-        unsafe { std::env::remove_var("EPIC_AGENT_ID"); }
+        unsafe {
+            std::env::remove_var("EPIC_AGENT_ID");
+        }
         let input = HookInput {
             tool_name: Some("Agent".to_string()),
             tool_input: Some(serde_json::json!({"agent_id": "explicit-id"})),

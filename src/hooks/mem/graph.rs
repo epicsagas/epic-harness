@@ -6,7 +6,9 @@ use std::io;
 
 use rusqlite::{Connection, params_from_iter};
 
-use super::store::{atomic_write, graph_path, list_node_ids, open_db, read_edges_conn, read_nodes_conn};
+use super::store::{
+    atomic_write, graph_path, list_node_ids, open_db, read_edges_conn, read_nodes_conn,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
@@ -147,11 +149,8 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
 
     conn.prepare(sql)
         .and_then(|mut stmt| {
-            stmt.query_map(
-                rusqlite::params![start_id],
-                |row| row.get::<_, String>(0),
-            )
-            .map(|rows| rows.flatten().collect())
+            stmt.query_map(rusqlite::params![start_id], |row| row.get::<_, String>(0))
+                .map(|rows| rows.flatten().collect())
         })
         .unwrap_or_default()
 }
@@ -177,8 +176,8 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::store::{Edge, append_edge_conn, init_schema};
     use super::*;
-    use super::super::store::{append_edge_conn, init_schema, Edge};
     use rusqlite::Connection;
 
     /// Open a fresh in-memory SQLite DB with the full schema applied.
@@ -218,7 +217,10 @@ mod tests {
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
         assert!(ids.contains(&"B"), "B should be a neighbor of A");
         assert!(ids.contains(&"C"), "C should be a neighbor of A");
-        assert!(ids.contains(&"D"), "D should be a neighbor of A (backward edge)");
+        assert!(
+            ids.contains(&"D"),
+            "D should be a neighbor of A (backward edge)"
+        );
         assert!(!ids.contains(&"A"), "seed A must not appear in results");
     }
 
@@ -263,14 +265,24 @@ mod tests {
         let result = related_nodes_conn(&conn, "A", 2);
         assert!(result.contains(&"B".to_string()), "should reach B");
         assert!(result.contains(&"C".to_string()), "should reach C (2-hop)");
-        assert!(!result.contains(&"A".to_string()), "start node must not appear");
+        assert!(
+            !result.contains(&"A".to_string()),
+            "start node must not appear"
+        );
 
         // Cycle: C -> A — results must still be deduplicated (no duplicates).
         insert_edge(&conn, "e3", "C", "A");
         let cyclic = related_nodes_conn(&conn, "A", 3);
         let unique: HashSet<_> = cyclic.iter().collect();
-        assert_eq!(cyclic.len(), unique.len(), "no duplicate nodes in cyclic graph");
-        assert!(!cyclic.contains(&"A".to_string()), "start node must not appear even in cycle");
+        assert_eq!(
+            cyclic.len(),
+            unique.len(),
+            "no duplicate nodes in cyclic graph"
+        );
+        assert!(
+            !cyclic.contains(&"A".to_string()),
+            "start node must not appear even in cycle"
+        );
     }
 
     /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
@@ -285,6 +297,10 @@ mod tests {
         let seeds = vec!["A".to_string(), "B".to_string()];
         let result = graph_neighbors_conn(&conn, &seeds);
         let c_weight = result.iter().find(|(id, _)| id == "C").map(|(_, w)| *w);
-        assert_eq!(c_weight, Some(2.0), "C connected to both seeds should have total weight 2.0");
+        assert_eq!(
+            c_weight,
+            Some(2.0),
+            "C connected to both seeds should have total weight 2.0"
+        );
     }
 }

@@ -18,12 +18,12 @@ static SKILL_AGENT_INTROSPECTION: &str = include_str!("../../skills/agent-intros
 // _dispatch is Claude Code only, not installed to other tools
 
 // ── Canonical commands (Claude Code plugin cache sync) ───────────────────────
-static CMD_CHECK: &str  = include_str!("../../commands/check.md");
+static CMD_CHECK: &str = include_str!("../../commands/check.md");
 static CMD_EVOLVE: &str = include_str!("../../commands/evolve.md");
-static CMD_GO: &str     = include_str!("../../commands/go.md");
-static CMD_SHIP: &str   = include_str!("../../commands/ship.md");
-static CMD_SPEC: &str   = include_str!("../../commands/spec.md");
-static CMD_TEAM: &str   = include_str!("../../commands/team.md");
+static CMD_GO: &str = include_str!("../../commands/go.md");
+static CMD_SHIP: &str = include_str!("../../commands/ship.md");
+static CMD_SPEC: &str = include_str!("../../commands/spec.md");
+static CMD_TEAM: &str = include_str!("../../commands/team.md");
 
 static SKILL_DISPATCH: &str = include_str!("../../skills/_dispatch/SKILL.md");
 
@@ -242,10 +242,7 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
                     "   - Parallel: yes\n",
                     "   - Could parallelize: yes (but will run sequentially)\n",
                 );
-                result = result.replace(
-                    "   - Parallel: no\n",
-                    "   - Could parallelize: no\n",
-                );
+                result = result.replace("   - Parallel: no\n", "   - Could parallelize: no\n");
                 result = result.replace(
                     "   - Parallel: yes (with Task 1)\n",
                     "   - Could parallelize: yes (but will run sequentially, after Task 2)\n",
@@ -355,10 +352,7 @@ fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
 
             // Gemini: minor text tweak for tdd
             if tool == "gemini" && name == "tdd" {
-                result = result.replace(
-                    "- `/go` sub-agents: always",
-                    "- `/go` tasks: always",
-                );
+                result = result.replace("- `/go` sub-agents: always", "- `/go` tasks: always");
             }
             if tool == "gemini" && name == "context" {
                 result = result.replace(
@@ -602,10 +596,7 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
 
 static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     "claude",
-    [(
-        "settings.json",
-        include_str!("../../hooks/hooks.json")
-    ),]
+    [("settings.json", include_str!("../../hooks/hooks.json")),]
 );
 
 // ── Tool config ───────────────────────────────────────────────────────────────
@@ -729,7 +720,9 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             local_dir: cwd.join(".claude"),
             root_files: &[],
             files: CLAUDE_FILES,
-            note: Some("Installs hooks in settings.json and registers harness-mem MCP server. Respects CLAUDE_CONFIG_DIR env var."),
+            note: Some(
+                "Installs hooks in settings.json and registers harness-mem MCP server. Respects CLAUDE_CONFIG_DIR env var.",
+            ),
             alt_dir: None,
             alt_prefix: "",
             preserve_files: &[],
@@ -983,8 +976,7 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
 /// Called on `epic install claude` so the locally-installed binary always
 /// keeps the cache in sync without waiting for an npm publish.
 fn sync_plugin_cache(dry_run: bool) {
-    let cache_base = crate::hooks::common::claude_plugin_cache_dir()
-        .join("cache/epicsagas/epic");
+    let cache_base = crate::hooks::common::claude_plugin_cache_dir().join("cache/epicsagas/epic");
 
     let entries = match fs::read_dir(&cache_base) {
         Ok(e) => e,
@@ -1002,28 +994,31 @@ fn sync_plugin_cache(dry_run: bool) {
     };
 
     let files: &[(&str, &str)] = &[
-        ("commands/check.md",          CMD_CHECK),
-        ("commands/evolve.md",         CMD_EVOLVE),
-        ("commands/go.md",             CMD_GO),
-        ("commands/ship.md",           CMD_SHIP),
-        ("commands/spec.md",           CMD_SPEC),
-        ("commands/team.md",           CMD_TEAM),
-        ("skills/_dispatch/SKILL.md",  SKILL_DISPATCH),
-        ("skills/commit/SKILL.md",     SKILL_COMMIT),
-        ("skills/context/SKILL.md",    SKILL_CONTEXT),
-        ("skills/debug/SKILL.md",      SKILL_DEBUG),
-        ("skills/document/SKILL.md",   SKILL_DOCUMENT),
-        ("skills/perf/SKILL.md",       SKILL_PERF),
-        ("skills/secure/SKILL.md",     SKILL_SECURE),
-        ("skills/simplify/SKILL.md",   SKILL_SIMPLIFY),
-        ("skills/tdd/SKILL.md",        SKILL_TDD),
-        ("skills/verify/SKILL.md",     SKILL_VERIFY),
-        ("skills/council/SKILL.md",    SKILL_COUNCIL),
-        ("skills/agent-introspection/SKILL.md", SKILL_AGENT_INTROSPECTION),
-        ("agents/auditor.md",          AGENT_AUDITOR),
-        ("agents/builder.md",          AGENT_BUILDER),
-        ("agents/planner.md",          AGENT_PLANNER),
-        ("agents/reviewer.md",         AGENT_REVIEWER),
+        ("commands/check.md", CMD_CHECK),
+        ("commands/evolve.md", CMD_EVOLVE),
+        ("commands/go.md", CMD_GO),
+        ("commands/ship.md", CMD_SHIP),
+        ("commands/spec.md", CMD_SPEC),
+        ("commands/team.md", CMD_TEAM),
+        ("skills/_dispatch/SKILL.md", SKILL_DISPATCH),
+        ("skills/commit/SKILL.md", SKILL_COMMIT),
+        ("skills/context/SKILL.md", SKILL_CONTEXT),
+        ("skills/debug/SKILL.md", SKILL_DEBUG),
+        ("skills/document/SKILL.md", SKILL_DOCUMENT),
+        ("skills/perf/SKILL.md", SKILL_PERF),
+        ("skills/secure/SKILL.md", SKILL_SECURE),
+        ("skills/simplify/SKILL.md", SKILL_SIMPLIFY),
+        ("skills/tdd/SKILL.md", SKILL_TDD),
+        ("skills/verify/SKILL.md", SKILL_VERIFY),
+        ("skills/council/SKILL.md", SKILL_COUNCIL),
+        (
+            "skills/agent-introspection/SKILL.md",
+            SKILL_AGENT_INTROSPECTION,
+        ),
+        ("agents/auditor.md", AGENT_AUDITOR),
+        ("agents/builder.md", AGENT_BUILDER),
+        ("agents/planner.md", AGENT_PLANNER),
+        ("agents/reviewer.md", AGENT_REVIEWER),
     ];
 
     let mut synced = 0u32;
@@ -1074,7 +1069,10 @@ fn inject_mcp_claude() {
     let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
     if json["mcpServers"]["harness-mem"].is_object() {
-        eprintln!("[harness] mcpServers.harness-mem already registered in {} — skipping.", claude_json.display());
+        eprintln!(
+            "[harness] mcpServers.harness-mem already registered in {} — skipping.",
+            claude_json.display()
+        );
         return;
     }
 
@@ -1095,7 +1093,10 @@ fn inject_mcp_claude() {
     let out = match serde_json::to_string_pretty(&json) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[harness] Failed to serialize {}: {e}", claude_json.display());
+            eprintln!(
+                "[harness] Failed to serialize {}: {e}",
+                claude_json.display()
+            );
             return;
         }
     };
@@ -1103,10 +1104,13 @@ fn inject_mcp_claude() {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    let tmp = claude_json
-        .with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
+    let tmp =
+        claude_json.with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
-        eprintln!("[harness] Registered mcpServers.harness-mem in {}", claude_json.display());
+        eprintln!(
+            "[harness] Registered mcpServers.harness-mem in {}",
+            claude_json.display()
+        );
     } else {
         let _ = fs::remove_file(&tmp); // clean up tmp on failure
         eprintln!("[harness] Failed to write {}", claude_json.display());
@@ -1119,7 +1123,10 @@ fn remove_mcp_claude(dry_run: bool) {
     let claude_json = crate::hooks::common::claude_json_path();
 
     if !claude_json.exists() {
-        eprintln!("[harness] {} not found — nothing to remove.", claude_json.display());
+        eprintln!(
+            "[harness] {} not found — nothing to remove.",
+            claude_json.display()
+        );
         return;
     }
 
@@ -1140,12 +1147,18 @@ fn remove_mcp_claude(dry_run: bool) {
     };
 
     if json["mcpServers"].get("harness-mem").is_none() {
-        eprintln!("[harness] mcpServers.harness-mem not found in {} — nothing to remove.", claude_json.display());
+        eprintln!(
+            "[harness] mcpServers.harness-mem not found in {} — nothing to remove.",
+            claude_json.display()
+        );
         return;
     }
 
     if dry_run {
-        eprintln!("[harness] (dry-run) would remove mcpServers.harness-mem from {}", claude_json.display());
+        eprintln!(
+            "[harness] (dry-run) would remove mcpServers.harness-mem from {}",
+            claude_json.display()
+        );
         return;
     }
 
@@ -1156,7 +1169,10 @@ fn remove_mcp_claude(dry_run: bool) {
     let out = match serde_json::to_string_pretty(&json) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("[harness] Failed to serialize {}: {e}", claude_json.display());
+            eprintln!(
+                "[harness] Failed to serialize {}: {e}",
+                claude_json.display()
+            );
             return;
         }
     };
@@ -1164,10 +1180,13 @@ fn remove_mcp_claude(dry_run: bool) {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    let tmp = claude_json
-        .with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
+    let tmp =
+        claude_json.with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
     if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
-        eprintln!("[harness] Removed mcpServers.harness-mem from {}", claude_json.display());
+        eprintln!(
+            "[harness] Removed mcpServers.harness-mem from {}",
+            claude_json.display()
+        );
     } else {
         let _ = fs::remove_file(&tmp); // clean up tmp on failure
         eprintln!("[harness] Failed to write {}", claude_json.display());
@@ -1185,13 +1204,13 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
     }
 
     let settings_path = match tool {
-        "codex"    => None, // Codex uses hooks.json, no mcpServers concept
-        "gemini"   => Some(target_dir.join("settings.json")),
-        "cursor"   => Some(target_dir.join("mcp.json")),
+        "codex" => None, // Codex uses hooks.json, no mcpServers concept
+        "gemini" => Some(target_dir.join("settings.json")),
+        "cursor" => Some(target_dir.join("mcp.json")),
         "opencode" => Some(target_dir.join("opencode.json")),
-        "cline"    => None, // Cline MCP is configured per-workspace, not via global install
-        "aider"    => None, // No MCP support
-        _          => None,
+        "cline" => None, // Cline MCP is configured per-workspace, not via global install
+        "aider" => None, // No MCP support
+        _ => None,
     };
 
     let settings_path = match settings_path {
@@ -1219,7 +1238,9 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
     // Others use { "mcpServers": { "name": { command, args[] } } }
     if tool == "opencode" {
         if json["mcp"]["harness-mem"].is_object() {
-            eprintln!("[harness] mcp.harness-mem already registered in {tool} settings — skipping.");
+            eprintln!(
+                "[harness] mcp.harness-mem already registered in {tool} settings — skipping."
+            );
             return;
         }
         json["mcp"]["harness-mem"] = serde_json::json!({
@@ -1228,7 +1249,9 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
         });
     } else {
         if json["mcpServers"]["harness-mem"].is_object() {
-            eprintln!("[harness] mcpServers.harness-mem already registered in {tool} settings — skipping.");
+            eprintln!(
+                "[harness] mcpServers.harness-mem already registered in {tool} settings — skipping."
+            );
             return;
         }
         json["mcpServers"]["harness-mem"] = serde_json::json!({
@@ -1324,7 +1347,8 @@ fn interactive_menu_fallback() -> Vec<String> {
     for token in line.split(',') {
         let token = token.trim();
         if let Ok(n) = token.parse::<usize>()
-            && n >= 1 && n <= TOOLS.len()
+            && n >= 1
+            && n <= TOOLS.len()
         {
             selected.push(TOOLS[n - 1].0.to_string());
         }
@@ -1354,7 +1378,10 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
         }
         "cursor" => {
             // Skills: concatenated into harness-skills.mdc
-            files.push(("rules/harness-skills.mdc".to_string(), build_cursor_skills_mdc()));
+            files.push((
+                "rules/harness-skills.mdc".to_string(),
+                build_cursor_skills_mdc(),
+            ));
             // Agents: transformed canonical
             for (name, content) in CANONICAL_AGENTS {
                 let transformed = transform_agent(tool, name, content);
@@ -1492,7 +1519,9 @@ fn install_tool(tool: &str, local: bool, dry_run: bool, target: Option<&Path>) -
                 .unwrap_or(false);
             if !ok {
                 eprintln!();
-                eprintln!("[harness] WARNING: ~/.codex/config.toml exists but does not enable hooks.");
+                eprintln!(
+                    "[harness] WARNING: ~/.codex/config.toml exists but does not enable hooks."
+                );
                 eprintln!("[harness] Hooks are OFF by default. Add these lines to enable them:");
                 eprintln!();
                 eprintln!("    [features]");
@@ -1525,14 +1554,15 @@ pub fn run(args: &[String]) -> i32 {
     // Parse: epic-harness install [<tool>] [--local] [--dry-run] [--target <path>]
     let local = args.iter().any(|a| a == "--local");
     let dry_run = args.iter().any(|a| a == "--dry-run");
-    let target: Option<PathBuf> = args.iter().position(|a| a == "--target")
+    let target: Option<PathBuf> = args
+        .iter()
+        .position(|a| a == "--target")
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
 
     // First positional arg that isn't a flag or --target value
     let tool_arg = {
-        let target_next = args.iter().position(|a| a == "--target")
-            .map(|i| i + 1);
+        let target_next = args.iter().position(|a| a == "--target").map(|i| i + 1);
         args.iter()
             .enumerate()
             .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
@@ -1560,7 +1590,9 @@ pub fn run(args: &[String]) -> i32 {
         }
 
         Some("--list" | "list") => {
-            println!("Available integrations: claude, codex, gemini, cursor, opencode, cline, aider");
+            println!(
+                "Available integrations: claude, codex, gemini, cursor, opencode, cline, aider"
+            );
             0
         }
 
@@ -1593,8 +1625,15 @@ fn ensure_global_config(dry_run: bool) {
     }
     let _ = std::fs::create_dir_all(&harness_dir);
     match std::fs::write(&config_path, super::config::default_config_template()) {
-        Ok(_) => eprintln!("[harness] Created {} with default configuration", config_path.display()),
-        Err(e) => eprintln!("[harness] Warning: could not create {}: {}", config_path.display(), e),
+        Ok(_) => eprintln!(
+            "[harness] Created {} with default configuration",
+            config_path.display()
+        ),
+        Err(e) => eprintln!(
+            "[harness] Warning: could not create {}: {}",
+            config_path.display(),
+            e
+        ),
     }
 }
 
@@ -1617,11 +1656,19 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool, _target: Option<&Path>
         return 0;
     }
 
-    let target_dir = if local { &cfg.local_dir } else { &cfg.global_dir };
+    let target_dir = if local {
+        &cfg.local_dir
+    } else {
+        &cfg.global_dir
+    };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let alt_target: Option<PathBuf> = cfg.alt_dir.as_ref().map(|global_alt| {
         if local {
-            cwd.join(global_alt.file_name().unwrap_or(std::ffi::OsStr::new("agents")))
+            cwd.join(
+                global_alt
+                    .file_name()
+                    .unwrap_or(std::ffi::OsStr::new("agents")),
+            )
         } else {
             global_alt.clone()
         }
@@ -1726,12 +1773,13 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool, _target: Option<&Path>
 pub fn run_uninstall(args: &[String]) -> i32 {
     let local = args.iter().any(|a| a == "--local");
     let dry_run = args.iter().any(|a| a == "--dry-run");
-    let target: Option<PathBuf> = args.iter().position(|a| a == "--target")
+    let target: Option<PathBuf> = args
+        .iter()
+        .position(|a| a == "--target")
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
     let tool_arg = {
-        let target_next = args.iter().position(|a| a == "--target")
-            .map(|i| i + 1);
+        let target_next = args.iter().position(|a| a == "--target").map(|i| i + 1);
         args.iter()
             .enumerate()
             .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
@@ -1756,7 +1804,9 @@ pub fn run_uninstall(args: &[String]) -> i32 {
             exit
         }
         Some("--list" | "list") => {
-            println!("Available integrations: claude, codex, gemini, cursor, opencode, cline, aider");
+            println!(
+                "Available integrations: claude, codex, gemini, cursor, opencode, cline, aider"
+            );
             0
         }
         Some(tool) => uninstall_tool(tool, local, dry_run, target.as_deref()),
@@ -1770,8 +1820,11 @@ mod tests {
     use super::*;
 
     fn tmp_dir() -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("epic_test_{}_{}", std::process::id(), rand_suffix()));
+        let dir = std::env::temp_dir().join(format!(
+            "epic_test_{}_{}",
+            std::process::id(),
+            rand_suffix()
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1904,7 +1957,9 @@ mod tests {
     #[test]
     fn test_transform_agent_gemini_remaps_tools() {
         let result = transform_agent("gemini", "builder", AGENT_BUILDER);
-        assert!(result.contains("tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]"));
+        assert!(result.contains(
+            "tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]"
+        ));
         assert!(!result.contains("tools: [Read, Edit, Write, Bash, Grep, Glob]"));
     }
 
@@ -2044,11 +2099,7 @@ mod tests {
         let dir = tmp_dir();
         let dest = dir.join("settings.json");
         // Existing file has a user key that must survive the merge.
-        fs::write(
-            &dest,
-            r#"{"theme":"dark","hooksConfig":{"old":true}}"#,
-        )
-        .unwrap();
+        fs::write(&dest, r#"{"theme":"dark","hooksConfig":{"old":true}}"#).unwrap();
         let new_content = r#"{"hooksConfig":{"new":true}}"#;
         let status = write_or_sync(&dest, new_content, false);
         assert!(matches!(status, FileStatus::Updated));
@@ -2095,7 +2146,8 @@ mod tests {
                 for entry in entries_arr {
                     if let Some(cmd_hooks) = entry["hooks"].as_array() {
                         for cmd_hook in cmd_hooks {
-                            if cmd_hook["command"].as_str()
+                            if cmd_hook["command"]
+                                .as_str()
                                 .is_some_and(|cmd| cmd.contains("command -v epic-harness"))
                             {
                                 found_path_fallback = true;
@@ -2119,12 +2171,17 @@ mod tests {
     #[test]
     fn test_sync_plugin_cache_no_panic_on_missing_dir() {
         // HOME을 존재하지 않는 임시 경로로 설정 → cache_base 없음 → silent return
-        let fake_home = std::env::temp_dir()
-            .join(format!("epic_test_no_cache_{}", rand_suffix()));
+        let fake_home = std::env::temp_dir().join(format!("epic_test_no_cache_{}", rand_suffix()));
         // 디렉토리를 만들지 않아야 함 — cache_base read_dir 실패해야 함
-        unsafe { std::env::set_var("HOME", &fake_home); }
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR"); }
-        unsafe { std::env::remove_var("CLAUDE_CODE_PLUGIN_CACHE_DIR"); }
+        unsafe {
+            std::env::set_var("HOME", &fake_home);
+        }
+        unsafe {
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
+        }
+        unsafe {
+            std::env::remove_var("CLAUDE_CODE_PLUGIN_CACHE_DIR");
+        }
         // dry_run=true 로 호출 — 패닉 없이 즉시 반환되어야 함
         sync_plugin_cache(true);
         // 여기까지 도달하면 성공
@@ -2134,12 +2191,17 @@ mod tests {
     fn test_sync_plugin_cache_no_panic_on_empty_cache_dir() {
         // cache_base 디렉토리는 존재하지만 version 서브디렉토리가 없는 경우
         let base_dir = tmp_dir();
-        let cache_base = base_dir
-            .join(".claude/plugins/cache/epicsagas/epic");
+        let cache_base = base_dir.join(".claude/plugins/cache/epicsagas/epic");
         fs::create_dir_all(&cache_base).unwrap();
-        unsafe { std::env::set_var("HOME", &base_dir); }
-        unsafe { std::env::remove_var("CLAUDE_CONFIG_DIR"); }
-        unsafe { std::env::remove_var("CLAUDE_CODE_PLUGIN_CACHE_DIR"); }
+        unsafe {
+            std::env::set_var("HOME", &base_dir);
+        }
+        unsafe {
+            std::env::remove_var("CLAUDE_CONFIG_DIR");
+        }
+        unsafe {
+            std::env::remove_var("CLAUDE_CODE_PLUGIN_CACHE_DIR");
+        }
         // 패닉 없이 종료되어야 함
         sync_plugin_cache(true);
         let _ = fs::remove_dir_all(base_dir);

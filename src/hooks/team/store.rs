@@ -192,8 +192,7 @@ pub fn save_team_config(config: &TeamConfig) -> io::Result<()> {
     let dir = team_store_dir(&config.org, &config.name);
     fs::create_dir_all(&dir)?;
     let path = dir.join("config.json");
-    let content = serde_json::to_string_pretty(config)
-        .map_err(io::Error::other)?;
+    let content = serde_json::to_string_pretty(config).map_err(io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
     fs::write(&tmp, &content)?;
     // Restrict to owner-only before rename so the file is never world-readable,
@@ -230,13 +229,25 @@ pub fn load_playbook(org: &str, team: &str) -> String {
 /// Playbook files are append-only; cap at 1 MiB to prevent unbounded growth.
 const PLAYBOOK_MAX_BYTES: usize = 1024 * 1024;
 
-pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date: &str) -> io::Result<()> {
+pub fn append_playbook(
+    org: &str,
+    team: &str,
+    section: &str,
+    project: &str,
+    date: &str,
+) -> io::Result<()> {
     let dir = team_store_dir(org, team);
     fs::create_dir_all(&dir)?;
     let path = dir.join("playbook.md");
     let existing = fs::read_to_string(&path).unwrap_or_default();
-    let safe_project = project.replace("-->", "-- >").replace("<!--", "<! --").replace("--!>", "--! >");
-    let safe_date = date.replace("-->", "-- >").replace("<!--", "<! --").replace("--!>", "--! >");
+    let safe_project = project
+        .replace("-->", "-- >")
+        .replace("<!--", "<! --")
+        .replace("--!>", "--! >");
+    let safe_date = date
+        .replace("-->", "-- >")
+        .replace("<!--", "<! --")
+        .replace("--!>", "--! >");
     let header = if !project.is_empty() || !date.is_empty() {
         format!("<!-- project: {} | date: {} -->\n", safe_project, safe_date)
     } else {
@@ -248,14 +259,12 @@ pub fn append_playbook(org: &str, team: &str, section: &str, project: &str, date
         format!("{}\n\n---\n\n{}{}", existing, header, section)
     };
     if new_content.len() > PLAYBOOK_MAX_BYTES {
-        return Err(io::Error::other(
-            format!(
-                "playbook would exceed {} bytes (current: {}, append: {}); use 'epic team show --playbook' to review and trim",
-                PLAYBOOK_MAX_BYTES,
-                existing.len(),
-                new_content.len() - existing.len(),
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "playbook would exceed {} bytes (current: {}, append: {}); use 'epic team show --playbook' to review and trim",
+            PLAYBOOK_MAX_BYTES,
+            existing.len(),
+            new_content.len() - existing.len(),
+        )));
     }
     let tmp = path.with_extension("md.tmp");
     fs::write(&tmp, &new_content)?;
@@ -279,12 +288,21 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
                 // Allowlist: only [a-zA-Z0-9_-] — rejects path separators, device names, homoglyphs
                 .filter(|name| {
                     let valid = !name.is_empty()
-                        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+                        && name
+                            .chars()
+                            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
                     if !valid {
                         // Sanitize before printing: replace non-printable/control chars to
                         // prevent ANSI injection via crafted filenames.
-                        let safe: String = name.chars()
-                            .map(|c| if c.is_ascii_graphic() || c == ' ' { c } else { '?' })
+                        let safe: String = name
+                            .chars()
+                            .map(|c| {
+                                if c.is_ascii_graphic() || c == ' ' {
+                                    c
+                                } else {
+                                    '?'
+                                }
+                            })
                             .collect();
                         eprintln!("[harness] warn: skipping agent file with invalid name '{safe}'");
                     }
@@ -299,7 +317,11 @@ pub fn list_agents(org: &str, team: &str) -> Vec<String> {
 
 /// Validate that an agent name contains only `[a-zA-Z0-9_-]` — no path separators.
 fn validate_agent_name(name: &str) -> io::Result<()> {
-    if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("invalid agent name '{name}': only [a-zA-Z0-9_-] allowed"),
@@ -314,7 +336,13 @@ pub fn load_agent(org: &str, team: &str, agent_name: &str) -> Option<String> {
     fs::read_to_string(&path).ok()
 }
 
-pub fn save_agent(org: &str, team: &str, agent_name: &str, content: &str, backup: bool) -> io::Result<()> {
+pub fn save_agent(
+    org: &str,
+    team: &str,
+    agent_name: &str,
+    content: &str,
+    backup: bool,
+) -> io::Result<()> {
     validate_agent_name(agent_name)?;
     let agents_dir = team_agents_dir(org, team);
     fs::create_dir_all(&agents_dir)?;
@@ -366,25 +394,51 @@ pub fn default_org() -> String {
 pub fn default_agents_for_type(team_type: &str) -> Vec<(&'static str, &'static str)> {
     match team_type {
         "stream" => vec![
-            ("domain-expert", "Deep knowledge of the domain, business logic, and feature design"),
-            ("reviewer", "Code review, quality assurance, and standards enforcement"),
-            ("tester", "Test strategy, coverage analysis, and quality validation"),
+            (
+                "domain-expert",
+                "Deep knowledge of the domain, business logic, and feature design",
+            ),
+            (
+                "reviewer",
+                "Code review, quality assurance, and standards enforcement",
+            ),
+            (
+                "tester",
+                "Test strategy, coverage analysis, and quality validation",
+            ),
         ],
         "platform" => vec![
-            ("api-designer", "API design, contracts, versioning, and developer experience"),
-            ("infra-specialist", "Infrastructure, deployment, reliability, and scalability"),
-            ("dx-agent", "Developer experience, tooling, and platform usability"),
+            (
+                "api-designer",
+                "API design, contracts, versioning, and developer experience",
+            ),
+            (
+                "infra-specialist",
+                "Infrastructure, deployment, reliability, and scalability",
+            ),
+            (
+                "dx-agent",
+                "Developer experience, tooling, and platform usability",
+            ),
         ],
-        "enabling" => vec![
-            ("specialist", "Domain specialist providing expertise and enablement to other teams"),
-        ],
+        "enabling" => vec![(
+            "specialist",
+            "Domain specialist providing expertise and enablement to other teams",
+        )],
         "subsystem" => vec![
-            ("domain-specialist", "Deep subsystem knowledge, internals, and component ownership"),
-            ("integration-tester", "Integration testing, interface contracts, and cross-system validation"),
+            (
+                "domain-specialist",
+                "Deep subsystem knowledge, internals, and component ownership",
+            ),
+            (
+                "integration-tester",
+                "Integration testing, interface contracts, and cross-system validation",
+            ),
         ],
-        _ => vec![
-            ("domain-expert", "Deep knowledge of the domain, business logic, and feature design"),
-        ],
+        _ => vec![(
+            "domain-expert",
+            "Deep knowledge of the domain, business logic, and feature design",
+        )],
     }
 }
 
@@ -407,7 +461,12 @@ fn sanitize_name(s: &str) -> String {
         .collect()
 }
 
-pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_type: &str) -> String {
+pub fn build_agent_file(
+    role: &str,
+    description: &str,
+    team_name: &str,
+    _team_type: &str,
+) -> String {
     // YAML frontmatter uses double-quoted scalars to prevent injection via colons, hashes,
     // and Unicode line separators. `tools` is always a static string from tools_for_role().
     let role_q = yaml_quote(role);
@@ -422,7 +481,13 @@ pub fn build_agent_file(role: &str, description: &str, team_name: &str, _team_ty
 
 /// Inject `org` and `team` fields into frontmatter, and replace/append `## Team Context`.
 /// Called at sync time on canonical agent content before writing to .claude/agents/.
-pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team_type: &str, mission: &str) -> String {
+pub fn inject_team_context(
+    agent_content: &str,
+    org: &str,
+    team_name: &str,
+    team_type: &str,
+    mission: &str,
+) -> String {
     let mission_clean = strip_line_breaks(&sanitize_mission(mission));
     let type_label_clean: String;
     let type_label = match team_type {
@@ -441,8 +506,8 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
     let content = if let Some(rest) = agent_content.strip_prefix("---") {
         // Find closing ---
         if let Some(end) = rest.find("\n---") {
-            let fm_body = &rest[..end];                      // between the two ---
-            let after   = &rest[end + 4..];                  // everything after closing ---
+            let fm_body = &rest[..end]; // between the two ---
+            let after = &rest[end + 4..]; // everything after closing ---
 
             // Strip any existing org:/team: lines then append fresh ones
             let cleaned_fm: String = fm_body
@@ -451,7 +516,13 @@ pub fn inject_team_context(agent_content: &str, org: &str, team_name: &str, team
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            format!("---{}\norg: {}\nteam: {}\n---{}", cleaned_fm, yaml_quote(org), yaml_quote(team_name), after)
+            format!(
+                "---{}\norg: {}\nteam: {}\n---{}",
+                cleaned_fm,
+                yaml_quote(org),
+                yaml_quote(team_name),
+                after
+            )
         } else {
             agent_content.to_string()
         }
@@ -501,10 +572,13 @@ pub(crate) fn yaml_unescape_display(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '\\' {
             match chars.next() {
-                Some('"')  => out.push('"'),
+                Some('"') => out.push('"'),
                 Some('\\') => out.push('\\'),
-                Some('t')  => out.push('\t'),
-                Some(other) => { out.push('\\'); out.push(other); }
+                Some('t') => out.push('\t'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
                 None => out.push('\\'),
             }
         } else {
@@ -517,11 +591,13 @@ pub(crate) fn yaml_unescape_display(s: &str) -> String {
     // Reserved region (E0080–E00FF, currently unassigned but still invisible), and
     // Variation Selectors Supplement (E0100–E01EF), all LLM prompt-injection vectors.
     // Note: BMP Private Use Area (U+E000–U+F8FF, 4-digit hex) is distinct and allowed.
-    out.chars().filter(|&c| {
-        c == '\t'
-            || ('\x20'..'\u{7F}').contains(&c)
-            || (c >= '\u{A0}' && !('\u{E0000}'..='\u{E01EF}').contains(&c))
-    }).collect()
+    out.chars()
+        .filter(|&c| {
+            c == '\t'
+                || ('\x20'..'\u{7F}').contains(&c)
+                || (c >= '\u{A0}' && !('\u{E0000}'..='\u{E01EF}').contains(&c))
+        })
+        .collect()
 }
 
 /// Read a named field from an agent file's YAML frontmatter.
@@ -557,12 +633,25 @@ pub(crate) fn read_team_from_agent_file(content: &str) -> Option<String> {
     read_frontmatter_field(content, "team:")
 }
 
-pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(String, String)], project: &str) -> String {
+pub fn build_playbook_section(
+    team_name: &str,
+    team_type: &str,
+    agents: &[(String, String)],
+    project: &str,
+) -> String {
     let coordination_notes = match team_type {
-        "stream" => "Stream-aligned teams own end-to-end delivery for their domain. Coordinate with platform teams for shared infrastructure and enabling teams for capability uplift.",
-        "platform" => "Platform teams provide self-service capabilities to stream teams. Maintain clear API contracts, SLOs, and developer documentation.",
-        "enabling" => "Enabling teams temporarily collaborate with stream teams to build capability. Time-box engagements and transfer knowledge back to the stream team.",
-        "subsystem" => "Subsystem teams own complex components consumed by multiple stream teams. Maintain clear interface contracts and versioning policies.",
+        "stream" => {
+            "Stream-aligned teams own end-to-end delivery for their domain. Coordinate with platform teams for shared infrastructure and enabling teams for capability uplift."
+        }
+        "platform" => {
+            "Platform teams provide self-service capabilities to stream teams. Maintain clear API contracts, SLOs, and developer documentation."
+        }
+        "enabling" => {
+            "Enabling teams temporarily collaborate with stream teams to build capability. Time-box engagements and transfer knowledge back to the stream team."
+        }
+        "subsystem" => {
+            "Subsystem teams own complex components consumed by multiple stream teams. Maintain clear interface contracts and versioning policies."
+        }
         _ => "Coordinate with other teams through clear interface contracts and shared standards.",
     };
 
@@ -573,8 +662,11 @@ pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(Strin
 
     format!(
         "## {} Team Playbook\n**Type**: {}  **Project**: {}\n### Agent Roster\n{}\n### Coordination\n{}\n",
-        strip_line_breaks(team_name), strip_line_breaks(team_type), strip_line_breaks(project),
-        agent_roster, coordination_notes
+        strip_line_breaks(team_name),
+        strip_line_breaks(team_type),
+        strip_line_breaks(project),
+        agent_roster,
+        coordination_notes
     )
 }
 
@@ -582,8 +674,7 @@ pub fn build_playbook_section(team_name: &str, team_type: &str, agents: &[(Strin
 
 const DEFAULT_TEAM_NAME: &str = "core";
 const DEFAULT_TEAM_TYPE: &str = "stream";
-const DEFAULT_TEAM_MISSION: &str =
-    "Support delivery with operations, documentation, and codebase exploration — complementing builder, reviewer, auditor, and planner";
+const DEFAULT_TEAM_MISSION: &str = "Support delivery with operations, documentation, and codebase exploration — complementing builder, reviewer, auditor, and planner";
 
 const DEFAULT_AGENT_OPS: &str = r#"---
 name: ops
@@ -759,9 +850,18 @@ pub fn install_default_team_if_needed(org: &str) -> bool {
 
     // playbook.md — initial entry
     let agent_list: Vec<(String, String)> = [
-        ("ops", "CI/CD, deployment, release management, infrastructure config"),
-        ("scribe", "READMEs, changelogs, ADRs, API docs, onboarding guides"),
-        ("explorer", "Codebase archaeology, dependency analysis, performance investigation"),
+        (
+            "ops",
+            "CI/CD, deployment, release management, infrastructure config",
+        ),
+        (
+            "scribe",
+            "READMEs, changelogs, ADRs, API docs, onboarding guides",
+        ),
+        (
+            "explorer",
+            "Codebase archaeology, dependency analysis, performance investigation",
+        ),
     ]
     .iter()
     .map(|(n, d)| (n.to_string(), d.to_string()))
@@ -790,7 +890,9 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         let config = TeamConfig {
             name: "alpha".to_string(),
@@ -808,15 +910,24 @@ mod tests {
 
         // No leftover .tmp file
         let tmp_path = final_path.with_extension("json.tmp");
-        assert!(!tmp_path.exists(), "no .tmp file should remain after atomic write");
+        assert!(
+            !tmp_path.exists(),
+            "no .tmp file should remain after atomic write"
+        );
     }
 
     #[test]
     fn test_sanitize_mission_strips_frontmatter_separator() {
         let dirty = "line1\n---\nmalicious: injected";
         let clean = sanitize_mission(dirty);
-        assert!(!clean.contains("\n---"), "sanitized mission must not contain frontmatter separator");
-        assert!(clean.contains("line1"), "legitimate content must be preserved");
+        assert!(
+            !clean.contains("\n---"),
+            "sanitized mission must not contain frontmatter separator"
+        );
+        assert!(
+            clean.contains("line1"),
+            "legitimate content must be preserved"
+        );
         // null byte should also be removed
         let with_null = "hello\0world";
         let clean_null = sanitize_mission(with_null);
@@ -824,7 +935,10 @@ mod tests {
         // Plane-14 Tags/VarSel injection chars must be stripped from write path
         let with_tags = "hello\u{E0001}world\u{E0100}end";
         let clean_tags = sanitize_mission(with_tags);
-        assert_eq!(clean_tags, "helloworldend", "Tags+VarSel chars must be stripped");
+        assert_eq!(
+            clean_tags, "helloworldend",
+            "Tags+VarSel chars must be stripped"
+        );
     }
 
     #[test]
@@ -832,11 +946,20 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         // project name containing --> would break HTML comment
         let malicious_project = "foo --> <script>";
-        append_playbook("testorg2", "beta", "## section", malicious_project, "2026-01-01").unwrap();
+        append_playbook(
+            "testorg2",
+            "beta",
+            "## section",
+            malicious_project,
+            "2026-01-01",
+        )
+        .unwrap();
 
         let content = load_playbook("testorg2", "beta");
         // After escaping, "foo --> <script>" becomes "foo -- > <script>".
@@ -854,10 +977,18 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
-        assert!(install_default_team_if_needed("epic"), "first call should seed");
-        assert!(!install_default_team_if_needed("epic"), "second call should no-op");
+        assert!(
+            install_default_team_if_needed("epic"),
+            "first call should seed"
+        );
+        assert!(
+            !install_default_team_if_needed("epic"),
+            "second call should no-op"
+        );
 
         let teams = list_teams("epic");
         assert_eq!(teams, vec!["core"]);
@@ -868,10 +999,15 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
         install_default_team_if_needed("epic");
         let agents = list_agents("epic", "core");
-        assert!(!agents.is_empty(), "core team should have agents after seeding");
+        assert!(
+            !agents.is_empty(),
+            "core team should have agents after seeding"
+        );
         assert!(agents.contains(&"ops".to_string()));
         assert!(agents.contains(&"scribe".to_string()));
         assert!(agents.contains(&"explorer".to_string()));
@@ -882,7 +1018,9 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
         let orgs = list_orgs();
         assert!(orgs.is_empty(), "fresh HOME should have no orgs");
     }
@@ -892,12 +1030,17 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
         // Create an org dir with no teams subdir
         let org_path = tmp.path().join(".harness").join("orgs").join("empty-org");
         std::fs::create_dir_all(&org_path).unwrap();
         let teams = list_teams("empty-org");
-        assert!(teams.is_empty(), "org with no teams dir should return empty list");
+        assert!(
+            teams.is_empty(),
+            "org with no teams dir should return empty list"
+        );
     }
 
     #[test]
@@ -905,13 +1048,19 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp_dir.path()); }
+        unsafe {
+            env::set_var("HOME", tmp_dir.path());
+        }
 
         install_default_team_if_needed("epic");
-        let agent_path = tmp_dir.path()
+        let agent_path = tmp_dir
+            .path()
             .join(".harness/orgs/epic/teams/core/agents/ops.md");
         assert!(agent_path.exists(), "agent file should exist");
-        assert!(!agent_path.with_extension("md.tmp").exists(), "no .md.tmp should remain");
+        assert!(
+            !agent_path.with_extension("md.tmp").exists(),
+            "no .md.tmp should remain"
+        );
     }
 
     #[test]
@@ -921,10 +1070,15 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
         // Simulate: project dir with no .claude/agents/ — scan returns empty
         let project_agents = tmp.path().join("project").join(".claude").join("agents");
-        assert!(!project_agents.exists(), ".claude/agents should not exist yet");
+        assert!(
+            !project_agents.exists(),
+            ".claude/agents should not exist yet"
+        );
         // Reading subdirs from a nonexistent path must yield empty (not panic)
         let subdirs: Vec<_> = if project_agents.is_dir() {
             std::fs::read_dir(&project_agents)
@@ -940,7 +1094,10 @@ mod tests {
         } else {
             vec![]
         };
-        assert!(subdirs.is_empty(), "no .claude/agents/ should yield empty linked teams");
+        assert!(
+            subdirs.is_empty(),
+            "no .claude/agents/ should yield empty linked teams"
+        );
     }
 
     #[test]
@@ -1055,7 +1212,10 @@ mod tests {
         assert_eq!(yaml_unescape_display("\"café\""), "café");
         assert_eq!(yaml_unescape_display("\"日本語\""), "日本語");
         // end-to-end roundtrip: yaml_quote → yaml_unescape_display recovers original printable content
-        assert_eq!(yaml_unescape_display(&yaml_quote("say \"hi\"")), "say \"hi\"");
+        assert_eq!(
+            yaml_unescape_display(&yaml_quote("say \"hi\"")),
+            "say \"hi\""
+        );
         assert_eq!(yaml_unescape_display(&yaml_quote("a\\b")), "a\\b");
         assert_eq!(yaml_unescape_display(&yaml_quote("col:\tval")), "col:\tval");
         // empty quoted
@@ -1067,11 +1227,20 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         // --!> is a bogus HTML5 comment terminator
         let malicious_project = "foo --!> bar";
-        append_playbook("testorg4", "delta", "## section", malicious_project, "2026-01-01").unwrap();
+        append_playbook(
+            "testorg4",
+            "delta",
+            "## section",
+            malicious_project,
+            "2026-01-01",
+        )
+        .unwrap();
         let content = load_playbook("testorg4", "delta");
         assert!(
             content.contains("foo --! > bar"),
@@ -1084,10 +1253,19 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         let malicious_project = "foo <!-- bar";
-        append_playbook("testorg3", "gamma", "## section", malicious_project, "2026-01-01").unwrap();
+        append_playbook(
+            "testorg3",
+            "gamma",
+            "## section",
+            malicious_project,
+            "2026-01-01",
+        )
+        .unwrap();
         let content = load_playbook("testorg3", "gamma");
         assert!(
             content.contains("foo <! -- bar"),
@@ -1100,7 +1278,9 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         // Section just over the 1 MiB limit
         let big_section = "x".repeat(PLAYBOOK_MAX_BYTES + 1);
@@ -1111,7 +1291,10 @@ mod tests {
         );
         // Playbook file must not have been created (atomic write aborted before rename)
         let path = team_store_dir("testorg5", "epsilon").join("playbook.md");
-        assert!(!path.exists(), "playbook must not exist after rejected append");
+        assert!(
+            !path.exists(),
+            "playbook must not exist after rejected append"
+        );
     }
 
     #[test]
@@ -1119,7 +1302,9 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         // Section exactly at the limit should succeed (empty project/date → no header)
         let at_limit = "y".repeat(PLAYBOOK_MAX_BYTES);
@@ -1133,7 +1318,9 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         // Pre-fill playbook to PLAYBOOK_MAX_BYTES - 6 bytes.
         // Adding the 7-byte separator "\n\n---\n\n" makes new_content.len() == PLAYBOOK_MAX_BYTES + 1.
@@ -1164,7 +1351,9 @@ mod tests {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         // SAFETY: HOME_LOCK serializes HOME mutation across team tests
-        unsafe { env::set_var("HOME", tmp.path()); }
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
 
         let config = TeamConfig {
             name: "permbeta".to_string(),
@@ -1178,6 +1367,10 @@ mod tests {
 
         let path = team_store_dir("permorg", "permbeta").join("config.json");
         let mode = std::fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600, "config.json must be owner-read/write only");
+        assert_eq!(
+            mode & 0o777,
+            0o600,
+            "config.json must be owner-read/write only"
+        );
     }
 }

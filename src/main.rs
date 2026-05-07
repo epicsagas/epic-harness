@@ -78,7 +78,10 @@ fn main() {
             if is_unknown {
                 eprintln!("error: unknown subcommand '{subcmd}'\n");
             }
-            eprintln!("epic-harness {} — Self-evolving agent harness for Claude Code\n", env!("CARGO_PKG_VERSION"));
+            eprintln!(
+                "epic-harness {} — Self-evolving agent harness for Claude Code\n",
+                env!("CARGO_PKG_VERSION")
+            );
             eprintln!("USAGE:");
             eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
             eprintln!("HOOK SUBCOMMANDS (invoked automatically by Claude Code hooks):");
@@ -92,7 +95,9 @@ fn main() {
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
-            eprintln!("  serve        Start orchestration dashboard web server (default port: 7700)");
+            eprintln!(
+                "  serve        Start orchestration dashboard web server (default port: 7700)"
+            );
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");
             eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");

@@ -8,14 +8,14 @@
 
 use rusqlite::Connection;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
 use super::graph::{graph_neighbors_conn, related_nodes_conn};
 use super::store::{
-    importance_for_type, new_uuid, now_iso, open_db, query_nodes_conn, read_node_conn,
-    read_nodes_conn, search_nodes_conn, smart_recall_conn, touch_nodes_conn, validate_node_id,
-    write_node_dedup_conn, Node, NodeFrontmatter,
+    Node, NodeFrontmatter, importance_for_type, new_uuid, now_iso, open_db, query_nodes_conn,
+    read_node_conn, read_nodes_conn, search_nodes_conn, smart_recall_conn, touch_nodes_conn,
+    validate_node_id, write_node_dedup_conn,
 };
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
@@ -128,7 +128,11 @@ fn tool_mem_add(conn: &Connection, args: &Value) -> Value {
 
     let tags: Vec<String> = args["tags"]
         .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
         .unwrap_or_default();
 
     let projects: Vec<String> = args["project"]
@@ -163,9 +167,9 @@ fn tool_mem_add(conn: &Connection, args: &Value) -> Value {
     };
 
     match write_node_dedup_conn(conn, &node, 24) {
-        Ok((existing_id, true))  => json!({ "id": existing_id, "deduplicated": true }),
-        Ok((_, false))           => json!({ "id": id, "created": now }),
-        Err(e)                   => json!({ "error": format!("write failed: {e}") }),
+        Ok((existing_id, true)) => json!({ "id": existing_id, "deduplicated": true }),
+        Ok((_, false)) => json!({ "id": id, "created": now }),
+        Err(e) => json!({ "error": format!("write failed: {e}") }),
     }
 }
 
@@ -176,20 +180,23 @@ fn tool_mem_query(conn: &Connection, args: &Value) -> Value {
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
     let nodes = query_nodes_conn(conn, tag, type_filter, project, limit);
-    let results: Vec<Value> = nodes.iter().map(|node| {
-        let fm = &node.frontmatter;
-        json!({
-            "id":           fm.id,
-            "title":        fm.title,
-            "type":         fm.node_type,
-            "tags":         fm.tags,
-            "updated":      fm.updated,
-            "projects":     fm.projects,
-            "importance":   fm.importance,
-            "access_count": fm.access_count,
-            "body":         node.body.chars().take(200).collect::<String>()
+    let results: Vec<Value> = nodes
+        .iter()
+        .map(|node| {
+            let fm = &node.frontmatter;
+            json!({
+                "id":           fm.id,
+                "title":        fm.title,
+                "type":         fm.node_type,
+                "tags":         fm.tags,
+                "updated":      fm.updated,
+                "projects":     fm.projects,
+                "importance":   fm.importance,
+                "access_count": fm.access_count,
+                "body":         node.body.chars().take(200).collect::<String>()
+            })
         })
-    }).collect();
+        .collect();
 
     json!(results)
 }
@@ -210,7 +217,12 @@ fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
     let results: Vec<Value> = nodes
         .iter()
         .map(|node| {
-            let snippet: String = node.body.chars().take(200).collect::<String>().replace('\n', " ");
+            let snippet: String = node
+                .body
+                .chars()
+                .take(200)
+                .collect::<String>()
+                .replace('\n', " ");
             json!({
                 "id":         node.frontmatter.id,
                 "title":      node.frontmatter.title,
@@ -264,18 +276,21 @@ fn tool_mem_context(conn: &Connection, args: &Value) -> Value {
     // Use smart_recall for importance-weighted context
     let scored = smart_recall_conn(conn, project, None, limit);
 
-    let results: Vec<Value> = scored.iter().map(|sn| {
-        json!({
-            "id":         sn.node.frontmatter.id,
-            "title":      sn.node.frontmatter.title,
-            "type":       sn.node.frontmatter.node_type,
-            "tags":       sn.node.frontmatter.tags,
-            "updated":    sn.node.frontmatter.updated,
-            "importance": sn.node.frontmatter.importance,
-            "score":      (sn.score * 1000.0).round() / 1000.0,
-            "summary":    sn.node.body.chars().take(300).collect::<String>()
+    let results: Vec<Value> = scored
+        .iter()
+        .map(|sn| {
+            json!({
+                "id":         sn.node.frontmatter.id,
+                "title":      sn.node.frontmatter.title,
+                "type":       sn.node.frontmatter.node_type,
+                "tags":       sn.node.frontmatter.tags,
+                "updated":    sn.node.frontmatter.updated,
+                "importance": sn.node.frontmatter.importance,
+                "score":      (sn.score * 1000.0).round() / 1000.0,
+                "summary":    sn.node.body.chars().take(300).collect::<String>()
+            })
         })
-    }).collect();
+        .collect();
 
     json!(results)
 }
@@ -292,30 +307,38 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
     // Phase 1: Smart recall with composite scoring
     let scored = smart_recall_conn(conn, project, Some(hint), limit);
 
-    let mut results: Vec<Value> = scored.iter().map(|sn| {
-        json!({
-            "id":         sn.node.frontmatter.id,
-            "title":      sn.node.frontmatter.title,
-            "type":       sn.node.frontmatter.node_type,
-            "tags":       sn.node.frontmatter.tags,
-            "importance": sn.node.frontmatter.importance,
-            "score":      (sn.score * 1000.0).round() / 1000.0,
-            "body":       sn.node.body.chars().take(400).collect::<String>()
+    let mut results: Vec<Value> = scored
+        .iter()
+        .map(|sn| {
+            json!({
+                "id":         sn.node.frontmatter.id,
+                "title":      sn.node.frontmatter.title,
+                "type":       sn.node.frontmatter.node_type,
+                "tags":       sn.node.frontmatter.tags,
+                "importance": sn.node.frontmatter.importance,
+                "score":      (sn.score * 1000.0).round() / 1000.0,
+                "body":       sn.node.body.chars().take(400).collect::<String>()
+            })
         })
-    }).collect();
+        .collect();
 
     // Phase 2: Graph-augmented — include 1-hop neighbors of top results
     if include_neighbors && !scored.is_empty() {
-        let seed_ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
+        let seed_ids: Vec<String> = scored
+            .iter()
+            .map(|sn| sn.node.frontmatter.id.clone())
+            .collect();
         let neighbors = graph_neighbors_conn(conn, &seed_ids);
 
         // Add up to 5 graph neighbors not already in results — batch-read in one query.
-        let existing_ids: std::collections::HashSet<&str> = scored.iter()
+        let existing_ids: std::collections::HashSet<&str> = scored
+            .iter()
             .map(|sn| sn.node.frontmatter.id.as_str())
             .collect();
 
         // Collect candidate (id, weight) pairs first so we can batch-read nodes.
-        let candidates: Vec<(&str, f64)> = neighbors.iter()
+        let candidates: Vec<(&str, f64)> = neighbors
+            .iter()
             .filter(|(nid, _)| !existing_ids.contains(nid.as_str()))
             .take(5)
             .map(|(nid, w)| (nid.as_str(), *w))
@@ -360,12 +383,12 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
 
 fn call_tool(conn: &Connection, name: &str, args: &Value) -> Value {
     let result = match name {
-        "mem_add"     => tool_mem_add(conn, args),
-        "mem_query"   => tool_mem_query(conn, args),
-        "mem_search"  => tool_mem_search(conn, args),
+        "mem_add" => tool_mem_add(conn, args),
+        "mem_query" => tool_mem_query(conn, args),
+        "mem_search" => tool_mem_search(conn, args),
         "mem_related" => tool_mem_related(conn, args),
         "mem_context" => tool_mem_context(conn, args),
-        "mem_recall"  => tool_mem_recall(conn, args),
+        "mem_recall" => tool_mem_recall(conn, args),
         _ => json!({ "error": format!("Unknown tool: {name}") }),
     };
     json!({ "content": [{ "type": "text", "text": result.to_string() }] })
@@ -480,4 +503,3 @@ pub fn run_mcp_server() -> i32 {
     }
     0
 }
-

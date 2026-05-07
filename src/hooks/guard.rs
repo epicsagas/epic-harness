@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, OnceLock};
 use std::time::Instant;
 
-use super::common::{self, HookInput, hint, should_run, CONFLICT_LOOKBACK, PROFILE_GUARD};
+use super::common::{self, CONFLICT_LOOKBACK, HookInput, PROFILE_GUARD, hint, should_run};
 use super::telemetry::{RuleKind, Telemetry};
 
 // ── Orbit State Cache ─────────────────────────────────
@@ -71,7 +71,11 @@ fn parse_iso_to_epoch(s: &str) -> Option<u64> {
     // Days from year
     let mut days: u64 = 0;
     for y in 1970..year {
-        days += if y.is_multiple_of(4) && !y.is_multiple_of(100) || y.is_multiple_of(400) { 366 } else { 365 };
+        days += if y.is_multiple_of(4) && !y.is_multiple_of(100) || y.is_multiple_of(400) {
+            366
+        } else {
+            365
+        };
     }
     let leap = year.is_multiple_of(4) && !year.is_multiple_of(100) || year.is_multiple_of(400);
     let month_days: [u64; 12] = if leap {
@@ -111,8 +115,9 @@ const BLOCKED_RULES: &[BuiltinRule] = &[
 /// Types: feat, fix, build, chore, ci, docs, style, refactor, perf, test
 static CC_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+"
-    ).unwrap()
+        r"^(feat|fix|build|chore|ci|docs|style|refactor|perf|test)(\([a-zA-Z0-9_/.,:-]+\))?!?:\s.+",
+    )
+    .unwrap()
 });
 
 /// Extract the commit message from a `git commit -m "..."` command.
@@ -128,9 +133,8 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     };
 
     // HEREDOC: find delimiter after <<, then find that delimiter on its own line
-    static HEREDOC_START: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap()
-    });
+    static HEREDOC_START: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*-m\s+"\$\(cat\s+<<'?(\w+)'?"#).unwrap());
     if let Some(caps) = HEREDOC_START.captures(cmd) {
         let delim = caps[1].to_string();
         let match_end = caps.get(0).unwrap().end();
@@ -150,12 +154,10 @@ fn extract_commit_message(cmd: &str) -> Option<String> {
     // and to allow the other quote type inside the message.
     // Use non-greedy .*? so we capture the FIRST -m argument (the subject),
     // not the last one (which would be the body in `git commit -m "subj" -m "body"`).
-    static SIMPLE_DQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap()
-    });
-    static SIMPLE_SQ: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap()
-    });
+    static SIMPLE_DQ: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*?-m\s+"([^"]+)""#).unwrap());
+    static SIMPLE_SQ: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"git\s+commit\s+.*?-m\s+'([^']+)'"#).unwrap());
     if let Some(caps) = SIMPLE_DQ.captures(cmd) {
         return Some(caps[1].trim().to_string());
     }
@@ -317,7 +319,9 @@ fn read_jsonl_tail(path: &Path, n: usize) -> Vec<serde_json::Value> {
 /// Check if `needle` appears in `haystack` with a path boundary after it.
 /// Prevents partial matches like `/src/main.rs` matching `/src/main.rs.bak`.
 fn path_boundary_match(haystack: &str, needle: &str) -> bool {
-    let Some(pos) = haystack.find(needle) else { return false };
+    let Some(pos) = haystack.find(needle) else {
+        return false;
+    };
     let end = pos + needle.len();
     // needle 뒤에 오는 문자가 없거나 경계 문자여야 함
     match haystack.as_bytes().get(end) {
@@ -366,10 +370,7 @@ fn detect_concurrent_write_conflict(
         {
             continue;
         }
-        let stream_path = orch_dir
-            .join("agents")
-            .join(agent_id)
-            .join("stream.jsonl");
+        let stream_path = orch_dir.join("agents").join(agent_id).join("stream.jsonl");
         if !stream_path.is_file() {
             continue;
         }
@@ -455,10 +456,13 @@ pub fn run(input: &HookInput) -> i32 {
             if let Some(ref orch) = orch_dir
                 && check_control_json_pause(agent_id.as_deref(), orch)
             {
-                hint("guard", &format!(
-                    "BLOCKED: control.json pause directive active for agent {}",
-                    agent_id.as_deref().unwrap_or("unknown")
-                ));
+                hint(
+                    "guard",
+                    &format!(
+                        "BLOCKED: control.json pause directive active for agent {}",
+                        agent_id.as_deref().unwrap_or("unknown")
+                    ),
+                );
                 return 2;
             }
 
@@ -499,22 +503,32 @@ pub fn run(input: &HookInput) -> i32 {
     {
         let sanitize = common::sanitize_orbit_field;
         let orbit_branch = state.get("branch").and_then(|v| v.as_str()).unwrap_or("");
-        let pipeline_id = state.get("id").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let pipeline_id = state
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
 
         // Warn on branch-switching commands during active orbit
         if !orbit_branch.is_empty() && CHECKOUT_RE.is_match(cmd) {
-            hint("guard", &format!(
-                "WARNING: Orbit pipeline {} active on branch '{}'. Switching branches may break the pipeline.",
-                sanitize(pipeline_id), sanitize(orbit_branch)
-            ));
+            hint(
+                "guard",
+                &format!(
+                    "WARNING: Orbit pipeline {} active on branch '{}'. Switching branches may break the pipeline.",
+                    sanitize(pipeline_id),
+                    sanitize(orbit_branch)
+                ),
+            );
         }
 
         // Warn on rm commands targeting orbit files/directories
         if ORBIT_RM_RE.is_match(cmd) {
-            hint("guard", &format!(
-                "WARNING: Orbit pipeline {} is active. Removing orbit files may cause data loss.",
-                sanitize(pipeline_id)
-            ));
+            hint(
+                "guard",
+                &format!(
+                    "WARNING: Orbit pipeline {} is active. Removing orbit files may cause data loss.",
+                    sanitize(pipeline_id)
+                ),
+            );
         }
 
         // Check deadline timeout
@@ -526,10 +540,13 @@ pub fn run(input: &HookInput) -> i32 {
                 .unwrap_or_default()
                 .as_secs();
             if now_secs > deadline_secs {
-                hint("guard", &format!(
-                    "WARNING: Orbit pipeline {} has exceeded its deadline. Consider aborting or extending.",
-                    sanitize(pipeline_id)
-                ));
+                hint(
+                    "guard",
+                    &format!(
+                        "WARNING: Orbit pipeline {} has exceeded its deadline. Consider aborting or extending.",
+                        sanitize(pipeline_id)
+                    ),
+                );
             }
         }
     }
@@ -704,17 +721,24 @@ mod tests {
     // ── Conventional Commits ─────────────────────────
     #[test]
     fn cc_valid_feat() {
-        assert!(check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "feat(auth): add login endpoint""#)
+                .is_none()
+        );
     }
 
     #[test]
     fn cc_valid_fix_no_scope() {
-        assert!(check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "fix: resolve null pointer""#).is_none()
+        );
     }
 
     #[test]
     fn cc_valid_breaking() {
-        assert!(check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "refactor!: drop legacy API""#).is_none()
+        );
     }
 
     #[test]
@@ -781,14 +805,20 @@ mod tests {
 
     #[test]
     fn cc_valid_multi_scope() {
-        assert!(check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#).is_none());
+        assert!(
+            check_conventional_commit(r#"git commit -m "fix(cli,index): prevent injection""#)
+                .is_none()
+        );
     }
 
     #[test]
     fn cc_valid_multi_m_body() {
         // Second -m is the body; subject should be validated, not the body line
         let cmd = r#"git commit -m "fix(mem): resolve injection" -m "- use rusqlite params""#;
-        assert!(check_conventional_commit(cmd).is_none(), "subject is valid CC, body must be ignored");
+        assert!(
+            check_conventional_commit(cmd).is_none(),
+            "subject is valid CC, body must be ignored"
+        );
     }
 
     #[test]
@@ -953,10 +983,10 @@ mod tests {
     fn orbit_rm_no_match_safe_commands() {
         assert!(!ORBIT_RM_RE.is_match("ls orbit/"));
         assert!(!ORBIT_RM_RE.is_match("cat orbit/PIPELINE.json"));
-        assert!(!ORBIT_RM_RE.is_match("git rm file"));        // no 'orbit'
+        assert!(!ORBIT_RM_RE.is_match("git rm file")); // no 'orbit'
         assert!(!ORBIT_RM_RE.is_match("remove orbit files")); // 'remove' ≠ \brm\b
-        assert!(!ORBIT_RM_RE.is_match("rm -rf orbital"));     // \b rejects 'orbital'
-        assert!(!ORBIT_RM_RE.is_match("rm -rf myorbit"));     // \b rejects 'myorbit'
+        assert!(!ORBIT_RM_RE.is_match("rm -rf orbital")); // \b rejects 'orbital'
+        assert!(!ORBIT_RM_RE.is_match("rm -rf myorbit")); // \b rejects 'myorbit'
     }
 
     // ── Orbit cache ────────────────────────────────────
@@ -1080,11 +1110,7 @@ mod tests {
         // agent-1: running, with stream containing file path
         let agent1_dir = agents_dir.join("agent-1");
         std::fs::create_dir_all(&agent1_dir).unwrap();
-        std::fs::write(
-            agent1_dir.join("status.json"),
-            "{\"status\":\"running\"}",
-        )
-        .unwrap();
+        std::fs::write(agent1_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
         std::fs::write(
             agent1_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/main.rs\"}}\n",
@@ -1094,11 +1120,7 @@ mod tests {
         // agent-2: running, different file
         let agent2_dir = agents_dir.join("agent-2");
         std::fs::create_dir_all(&agent2_dir).unwrap();
-        std::fs::write(
-            agent2_dir.join("status.json"),
-            "{\"status\":\"running\"}",
-        )
-        .unwrap();
+        std::fs::write(agent2_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
         std::fs::write(
             agent2_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/other.rs\"}}\n",
@@ -1134,11 +1156,7 @@ mod tests {
 
         let agent_dir = agents_dir.join("agent-stopped");
         std::fs::create_dir_all(&agent_dir).unwrap();
-        std::fs::write(
-            agent_dir.join("status.json"),
-            "{\"status\":\"stopped\"}",
-        )
-        .unwrap();
+        std::fs::write(agent_dir.join("status.json"), "{\"status\":\"stopped\"}").unwrap();
         std::fs::write(
             agent_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/main.rs\"}}\n",
@@ -1176,11 +1194,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = dir.path().join("orchestrator");
         std::fs::create_dir_all(&orch_dir).unwrap();
-        std::fs::write(
-            orch_dir.join("control.json"),
-            "{\"pause\":\"agent-1\"}",
-        )
-        .unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-1\"}").unwrap();
 
         assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
         assert!(!check_control_json_pause(Some("agent-2"), &orch_dir));
@@ -1242,7 +1256,9 @@ mod tests {
 
         let input = HookInput {
             tool_name: Some("Edit".into()),
-            tool_input: Some(serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"})),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
             ..Default::default()
         };
         assert_eq!(run(&input), 2, "pause directive must block Edit tool call");
@@ -1271,7 +1287,9 @@ mod tests {
 
         let input = HookInput {
             tool_name: Some("Edit".into()),
-            tool_input: Some(serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"})),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
             ..Default::default()
         };
         assert_eq!(run(&input), 0, "non-targeted agent must not be blocked");
@@ -1311,11 +1329,7 @@ mod tests {
         // agent-1 running, modified /src/shared.rs
         let agent1_dir = agents_dir.join("agent-1");
         std::fs::create_dir_all(&agent1_dir).unwrap();
-        std::fs::write(
-            agent1_dir.join("status.json"),
-            "{\"status\":\"running\"}",
-        )
-        .unwrap();
+        std::fs::write(agent1_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
         std::fs::write(
             agent1_dir.join("stream.jsonl"),
             "{\"tool_input\":{\"file_path\":\"/src/shared.rs\"}}\n",

@@ -9,30 +9,39 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    append_edge, delete_node_file, importance_for_type, list_node_ids, now_iso, parse_node,
-    query_nodes, read_node, remove_edges_for_node, remove_from_index, search_nodes,
-    serialize_node, smart_recall, upsert_index, validate_node_id, write_node, write_node_dedup,
-    Edge, IndexNode, Node, NodeFrontmatter,
+    Edge, IndexNode, Node, NodeFrontmatter, append_edge, delete_node_file, importance_for_type,
+    list_node_ids, now_iso, parse_node, query_nodes, read_node, remove_edges_for_node,
+    remove_from_index, search_nodes, serialize_node, smart_recall, upsert_index, validate_node_id,
+    write_node, write_node_dedup,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
-    ("add",         "Add a new memory node"),
-    ("edit",        "Edit an existing node"),
-    ("delete",      "Delete a node and its edges"),
-    ("query",       "List/filter nodes from the index"),
-    ("search",      "Full-text search across node files"),
-    ("related",     "BFS traversal — find related nodes"),
-    ("link",        "Create a directed edge between two nodes"),
-    ("graph",       "Manage the graph cache (rebuild)"),
-    ("validate",    "Check all node files for parse errors"),
-    ("export",      "Dump all nodes to Markdown files (for Git backup)"),
-    ("migrate",     "Import legacy project memory files"),
-    ("context",     "Show recently-updated nodes for a project"),
-    ("recall",      "Smart recall — relevance-ranked memories for current task"),
-    ("mcp",         "Run as stdio MCP server (JSON-RPC 2.0)"),
-    ("mcp-install", "Register the harness-mem MCP server in Claude Code"),
-    ("serve",       "Start the REST + Web UI server"),
-    ("help",        "Show this help message"),
+    ("add", "Add a new memory node"),
+    ("edit", "Edit an existing node"),
+    ("delete", "Delete a node and its edges"),
+    ("query", "List/filter nodes from the index"),
+    ("search", "Full-text search across node files"),
+    ("related", "BFS traversal — find related nodes"),
+    ("link", "Create a directed edge between two nodes"),
+    ("graph", "Manage the graph cache (rebuild)"),
+    ("validate", "Check all node files for parse errors"),
+    (
+        "export",
+        "Dump all nodes to Markdown files (for Git backup)",
+    ),
+    ("migrate", "Import legacy project memory files"),
+    ("context", "Show recently-updated nodes for a project"),
+    (
+        "recall",
+        "Smart recall — relevance-ranked memories for current task",
+    ),
+    ("mcp", "Run as stdio MCP server (JSON-RPC 2.0)"),
+    (
+        "mcp-install",
+        "Register the harness-mem MCP server in Claude Code",
+    ),
+    ("serve", "Start the REST + Web UI server"),
+    ("help", "Show this help message"),
 ];
 
 fn print_help() {
@@ -54,7 +63,9 @@ fn print_subcommand_help(sub: &str) {
             println!("  harness mem add [OPTIONS]\n");
             println!("OPTIONS:");
             println!("  --title <text>      Node title (default: Untitled)");
-            println!("  --type <type>       Node type: concept|decision|pattern|task|... (default: concept)");
+            println!(
+                "  --type <type>       Node type: concept|decision|pattern|task|... (default: concept)"
+            );
             println!("  --tags <a,b,c>      Comma-separated tags");
             println!("  --project <name>    Associate with a project slug");
             println!("  --agent <name>      Associate with an agent name");
@@ -163,12 +174,16 @@ fn print_subcommand_help(sub: &str) {
             println!("USAGE:");
             println!("  harness mem recall <HINT> [OPTIONS]\n");
             println!("ARGUMENTS:");
-            println!("  <HINT>              Describe current task (e.g. 'auth refactor', 'CI fix')\n");
+            println!(
+                "  <HINT>              Describe current task (e.g. 'auth refactor', 'CI fix')\n"
+            );
             println!("OPTIONS:");
             println!("  --project <name>    Filter by project slug");
             println!("  --limit <n>         Max nodes to return (default: 10)");
             println!("\nOUTPUT: JSON array of relevance-scored nodes");
-            println!("\nScoring: recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)");
+            println!(
+                "\nScoring: recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)"
+            );
         }
         "mcp-install" => {
             println!("harness mem mcp-install — Register the harness-mem MCP server\n");
@@ -218,7 +233,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         Some(s) => s,
         None => {
             print_help();
-            return 0;  // help is not an error
+            return 0; // help is not an error
         }
     };
 
@@ -231,22 +246,22 @@ pub fn dispatch(args: &[String]) -> i32 {
     }
 
     let result = match sub {
-        "add"         => cmd_add(&args[1..]),
-        "edit"        => cmd_edit(&args[1..]),
-        "delete"      => cmd_delete(&args[1..]),
-        "query"       => cmd_query(&args[1..]),
-        "search"      => cmd_search(&args[1..]),
-        "related"     => cmd_related(&args[1..]),
-        "link"        => cmd_link(&args[1..]),
-        "graph"       => cmd_graph(&args[1..]),
-        "validate"    => cmd_validate(),
-        "export"      => cmd_export(&args[1..]),
-        "migrate"     => cmd_migrate(&args[1..]),
-        "context"     => cmd_context(&args[1..]),
-        "recall"      => cmd_recall(&args[1..]),
-        "mcp"         => return super::mcp::run_mcp_server(),
+        "add" => cmd_add(&args[1..]),
+        "edit" => cmd_edit(&args[1..]),
+        "delete" => cmd_delete(&args[1..]),
+        "query" => cmd_query(&args[1..]),
+        "search" => cmd_search(&args[1..]),
+        "related" => cmd_related(&args[1..]),
+        "link" => cmd_link(&args[1..]),
+        "graph" => cmd_graph(&args[1..]),
+        "validate" => cmd_validate(),
+        "export" => cmd_export(&args[1..]),
+        "migrate" => cmd_migrate(&args[1..]),
+        "context" => cmd_context(&args[1..]),
+        "recall" => cmd_recall(&args[1..]),
+        "mcp" => return super::mcp::run_mcp_server(),
         "mcp-install" => cmd_mcp_install(&args[1..]),
-        "serve"       => return super::server::serve(&args[1..]),
+        "serve" => return super::server::serve(&args[1..]),
         "help" | "--help" | "-h" => {
             print_help();
             return 0;
@@ -254,7 +269,8 @@ pub fn dispatch(args: &[String]) -> i32 {
         _ => {
             // "did you mean?" suggestion
             let known: Vec<&str> = SUBCOMMANDS.iter().map(|(n, _)| *n).collect();
-            let best = known.iter()
+            let best = known
+                .iter()
                 .filter_map(|&name| {
                     let d = levenshtein(sub, name);
                     if d <= 3 { Some((d, name)) } else { None }
@@ -310,18 +326,25 @@ fn csv_to_vec(s: &str) -> Vec<String> {
 fn cmd_add(args: &[String]) -> io::Result<i32> {
     let (_, flags) = parse_flags(args);
 
-    let title   = flags.get("title").cloned().unwrap_or_else(|| "Untitled".to_string());
-    let node_type = flags.get("type").cloned().unwrap_or_else(|| "concept".to_string());
-    let tags    = csv_to_vec(flags.get("tags").map(|s| s.as_str()).unwrap_or(""));
+    let title = flags
+        .get("title")
+        .cloned()
+        .unwrap_or_else(|| "Untitled".to_string());
+    let node_type = flags
+        .get("type")
+        .cloned()
+        .unwrap_or_else(|| "concept".to_string());
+    let tags = csv_to_vec(flags.get("tags").map(|s| s.as_str()).unwrap_or(""));
     let projects = csv_to_vec(flags.get("project").map(|s| s.as_str()).unwrap_or(""));
-    let agents  = csv_to_vec(flags.get("agent").map(|s| s.as_str()).unwrap_or(""));
-    let body    = flags.get("body").cloned().unwrap_or_default();
-    let importance = flags.get("importance")
+    let agents = csv_to_vec(flags.get("agent").map(|s| s.as_str()).unwrap_or(""));
+    let body = flags.get("body").cloned().unwrap_or_default();
+    let importance = flags
+        .get("importance")
         .and_then(|v| v.parse::<f64>().ok())
         .unwrap_or_else(|| importance_for_type(&node_type))
         .clamp(0.0, 1.0);
 
-    let id  = Uuid::new_v4().to_string();
+    let id = Uuid::new_v4().to_string();
     let now = now_iso();
 
     let node = Node {
@@ -344,16 +367,21 @@ fn cmd_add(args: &[String]) -> io::Result<i32> {
     // Single DB connection: dedup check + write in one open_db() call
     match write_node_dedup(&node, 24)? {
         (existing_id, true) => println!("{{\"id\":\"{existing_id}\",\"deduplicated\":true}}"),
-        (_, false)          => println!("{{\"id\":\"{id}\"}}"),
+        (_, false) => println!("{{\"id\":\"{id}\"}}"),
     }
     Ok(0)
 }
 
 fn cmd_edit(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
-    let id = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "edit requires <id>"))?;
+    let id = pos
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "edit requires <id>"))?;
     if !validate_node_id(id) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid node id",
+        ));
     }
 
     let mut node = read_node(id)?;
@@ -383,9 +411,14 @@ fn cmd_edit(args: &[String]) -> io::Result<i32> {
 
 fn cmd_delete(args: &[String]) -> io::Result<i32> {
     let (pos, _) = parse_flags(args);
-    let id = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "delete requires <id>"))?;
+    let id = pos
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "delete requires <id>"))?;
     if !validate_node_id(id) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid node id",
+        ));
     }
 
     delete_node_file(id)?;
@@ -397,7 +430,10 @@ fn cmd_delete(args: &[String]) -> io::Result<i32> {
 
 fn cmd_query(args: &[String]) -> io::Result<i32> {
     let (_, flags) = parse_flags(args);
-    let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(100);
+    let limit: usize = flags
+        .get("limit")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(100);
 
     let tag = flags.get("tag").map(|s| s.as_str());
     let node_type = flags.get("type").map(|s| s.as_str());
@@ -433,10 +469,13 @@ fn cmd_query(args: &[String]) -> io::Result<i32> {
 
 fn cmd_search(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
-    let query = pos.first().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "search requires <query>")
-    })?;
-    let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(20);
+    let query = pos
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "search requires <query>"))?;
+    let limit: usize = flags
+        .get("limit")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(20);
 
     let nodes = search_nodes(query, limit);
     let results: Vec<serde_json::Value> = nodes
@@ -461,14 +500,16 @@ fn cmd_search(args: &[String]) -> io::Result<i32> {
 
 fn cmd_related(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
-    let id = pos.first().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "related requires <id>"))?;
+    let id = pos
+        .first()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "related requires <id>"))?;
     if !validate_node_id(id) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid node id",
+        ));
     }
-    let depth: usize = flags
-        .get("depth")
-        .and_then(|d| d.parse().ok())
-        .unwrap_or(2);
+    let depth: usize = flags.get("depth").and_then(|d| d.parse().ok()).unwrap_or(2);
 
     let related = related_nodes(id, depth);
     let out = serde_json::to_string_pretty(&related)
@@ -480,15 +521,27 @@ fn cmd_related(args: &[String]) -> io::Result<i32> {
 fn cmd_link(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
     if pos.len() < 2 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "link requires <src-id> <dst-id>"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "link requires <src-id> <dst-id>",
+        ));
     }
     let src = &pos[0];
     let dst = &pos[1];
     if !validate_node_id(src) || !validate_node_id(dst) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid node id"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid node id",
+        ));
     }
-    let relation = flags.get("relation").cloned().unwrap_or_else(|| "related".to_string());
-    let weight: f64 = flags.get("weight").and_then(|w| w.parse().ok()).unwrap_or(1.0);
+    let relation = flags
+        .get("relation")
+        .cloned()
+        .unwrap_or_else(|| "related".to_string());
+    let weight: f64 = flags
+        .get("weight")
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(1.0);
 
     let edge = Edge {
         id: Uuid::new_v4().to_string(),
@@ -543,7 +596,11 @@ fn cmd_validate() -> io::Result<i32> {
         for entry in fs::read_dir(&legacy_dir)? {
             let entry = entry?;
             let path = entry.path();
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if !name.ends_with(".md") {
                 continue;
             }
@@ -572,7 +629,9 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
     let harness_root = std::env::var("HARNESS_ROOT")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| "/tmp".to_string());
-    let projects_dir = PathBuf::from(&harness_root).join(".harness").join("projects");
+    let projects_dir = PathBuf::from(&harness_root)
+        .join(".harness")
+        .join("projects");
 
     if !projects_dir.exists() {
         println!("{{\"migrated\":0}}");
@@ -602,7 +661,11 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
         for entry in fs::read_dir(&mem_dir)? {
             let entry = entry?;
             let path = entry.path();
-            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if !name.ends_with(".md") {
                 continue;
             }
@@ -648,11 +711,15 @@ fn cmd_migrate(args: &[String]) -> io::Result<i32> {
 
     // Index is maintained automatically by the SQLite DB (write_node handles it).
 
-    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-        "migrated": migrated,
-        "dry_run": dry_run,
-        "nodes": results
-    })).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "migrated": migrated,
+            "dry_run": dry_run,
+            "nodes": results
+        }))
+        .unwrap_or_default()
+    );
     Ok(0)
 }
 
@@ -694,11 +761,15 @@ fn cmd_export(args: &[String]) -> io::Result<i32> {
         exported += 1;
     }
 
-    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-        "exported": exported,
-        "dry_run":  dry_run,
-        "dir":      out_dir.display().to_string(),
-    })).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "exported": exported,
+            "dry_run":  dry_run,
+            "dir":      out_dir.display().to_string(),
+        }))
+        .unwrap_or_default()
+    );
     Ok(0)
 }
 
@@ -713,7 +784,7 @@ fn find_epic_harness_binary() -> String {
 fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
     let (_, flags) = parse_flags(args);
     let dry_run = flags.contains_key("dry-run");
-    let force   = flags.contains_key("force");
+    let force = flags.contains_key("force");
 
     let settings_path = claude_json_path();
 
@@ -723,8 +794,12 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
         "{}".to_string()
     };
 
-    let mut settings: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse ~/.claude.json: {e}")))?;
+    let mut settings: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to parse ~/.claude.json: {e}"),
+        )
+    })?;
 
     if settings["mcpServers"]["harness-mem"].is_object() && !force {
         println!("harness-mem already registered (use --force to overwrite)");
@@ -756,10 +831,7 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
         fs::create_dir_all(parent)?;
     }
     // Use process ID in tmp filename to avoid collisions (file permissions rely on umask, acceptable for local dev tool)
-    let tmp_path = settings_path.with_file_name(format!(
-        ".claude.{}.json.tmp",
-        std::process::id()
-    ));
+    let tmp_path = settings_path.with_file_name(format!(".claude.{}.json.tmp", std::process::id()));
     fs::write(&tmp_path, &new_content)?;
     fs::rename(&tmp_path, &settings_path)?;
 
@@ -775,23 +847,30 @@ fn cmd_context(args: &[String]) -> io::Result<i32> {
     let project = flags.get("project").cloned().unwrap_or_default();
     let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(5);
 
-    let project_opt = if project.is_empty() { None } else { Some(project.as_str()) };
+    let project_opt = if project.is_empty() {
+        None
+    } else {
+        Some(project.as_str())
+    };
     let scored = smart_recall(project_opt, None, limit);
 
-    let results: Vec<serde_json::Value> = scored.iter().map(|sn| {
-        let fm = &sn.node.frontmatter;
-        serde_json::json!({
-            "id":           fm.id,
-            "title":        fm.title,
-            "type":         fm.node_type,
-            "tags":         fm.tags,
-            "projects":     fm.projects,
-            "updated":      fm.updated,
-            "importance":   fm.importance,
-            "access_count": fm.access_count,
-            "score":        (sn.score * 1000.0).round() / 1000.0,
+    let results: Vec<serde_json::Value> = scored
+        .iter()
+        .map(|sn| {
+            let fm = &sn.node.frontmatter;
+            serde_json::json!({
+                "id":           fm.id,
+                "title":        fm.title,
+                "type":         fm.node_type,
+                "tags":         fm.tags,
+                "projects":     fm.projects,
+                "updated":      fm.updated,
+                "importance":   fm.importance,
+                "access_count": fm.access_count,
+                "score":        (sn.score * 1000.0).round() / 1000.0,
+            })
         })
-    }).collect();
+        .collect();
 
     let out = serde_json::to_string_pretty(&results)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -803,29 +882,38 @@ fn cmd_recall(args: &[String]) -> io::Result<i32> {
     let (pos, flags) = parse_flags(args);
     let hint = pos.first().cloned().unwrap_or_default();
     let project = flags.get("project").cloned();
-    let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(10);
+    let limit: usize = flags
+        .get("limit")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(10);
 
     if hint.is_empty() {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "recall requires a hint (describe your current task)"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "recall requires a hint (describe your current task)",
+        ));
     }
 
     let project_opt = project.as_deref();
     let hint_opt = Some(hint.as_str());
     let scored = smart_recall(project_opt, hint_opt, limit);
 
-    let results: Vec<serde_json::Value> = scored.iter().map(|sn| {
-        let fm = &sn.node.frontmatter;
-        serde_json::json!({
-            "id":           fm.id,
-            "title":        fm.title,
-            "type":         fm.node_type,
-            "tags":         fm.tags,
-            "importance":   fm.importance,
-            "access_count": fm.access_count,
-            "score":        (sn.score * 1000.0).round() / 1000.0,
-            "body":         sn.node.body.chars().take(300).collect::<String>(),
+    let results: Vec<serde_json::Value> = scored
+        .iter()
+        .map(|sn| {
+            let fm = &sn.node.frontmatter;
+            serde_json::json!({
+                "id":           fm.id,
+                "title":        fm.title,
+                "type":         fm.node_type,
+                "tags":         fm.tags,
+                "importance":   fm.importance,
+                "access_count": fm.access_count,
+                "score":        (sn.score * 1000.0).round() / 1000.0,
+                "body":         sn.node.body.chars().take(300).collect::<String>(),
+            })
         })
-    }).collect();
+        .collect();
 
     let out = serde_json::to_string_pretty(&results)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;

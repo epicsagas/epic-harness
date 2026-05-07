@@ -12,7 +12,10 @@ use super::telemetry::Telemetry;
 /// Returns `false` when the file already exists (`AlreadyExists`) or on any
 /// other I/O error (safe fallback — treat as "already running").
 fn acquire_session_lock(lock: &Path) -> bool {
-    let hd = lock.parent().map(|p| p.to_path_buf()).unwrap_or_else(harness_dir);
+    let hd = lock
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(harness_dir);
     let _ = fs::create_dir_all(&hd);
     match fs::OpenOptions::new()
         .write(true)
@@ -211,7 +214,6 @@ pub fn run(_input: &HookInput) -> i32 {
                 harness_dir().display()
             ),
         );
-
     }
 
     // Seed the default org/team whenever orgs dir is empty (idempotent)
@@ -267,16 +269,26 @@ pub fn run(_input: &HookInput) -> i32 {
         {
             // Verify the pipeline file still physically exists before claiming recovery needed.
             let safe_id = super::common::normalize_pipeline_id(id);
-            let pipeline_file = super::common::orbit_dir().join(format!("PIPELINE-{}.json", safe_id));
+            let pipeline_file =
+                super::common::orbit_dir().join(format!("PIPELINE-{}.json", safe_id));
             if pipeline_file.exists() {
-                let phase = orbit.get("phase").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let mode = orbit.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown");
-                hint("resume", &format!(
-                    "ORBIT RECOVERY (snapshot): Pipeline {}, phase={}, mode={}",
-                    super::common::sanitize_orbit_field(id),
-                    super::common::sanitize_orbit_field(phase),
-                    super::common::sanitize_orbit_field(mode),
-                ));
+                let phase = orbit
+                    .get("phase")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let mode = orbit
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                hint(
+                    "resume",
+                    &format!(
+                        "ORBIT RECOVERY (snapshot): Pipeline {}, phase={}, mode={}",
+                        super::common::sanitize_orbit_field(id),
+                        super::common::sanitize_orbit_field(phase),
+                        super::common::sanitize_orbit_field(mode),
+                    ),
+                );
             }
         }
     }
@@ -286,12 +298,23 @@ pub fn run(_input: &HookInput) -> i32 {
     if let Some(ref state) = live_orbit_state {
         let sanitize = super::common::sanitize_orbit_field;
         if let Some(id) = state.get("id").and_then(|v| v.as_str()) {
-            let phase = state.get("phase").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let mode = state.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown");
-            hint("orbit", &format!(
-                "Pipeline {} active: phase={}, mode={}",
-                sanitize(id), sanitize(phase), sanitize(mode)
-            ));
+            let phase = state
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let mode = state
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            hint(
+                "orbit",
+                &format!(
+                    "Pipeline {} active: phase={}, mode={}",
+                    sanitize(id),
+                    sanitize(phase),
+                    sanitize(mode)
+                ),
+            );
             if let Some(branch) = state.get("branch").and_then(|v| v.as_str())
                 && !branch.is_empty()
             {
@@ -437,10 +460,14 @@ pub fn run(_input: &HookInput) -> i32 {
     {
         let slug = project_slug();
         let scored = store::smart_recall(Some(&slug), None, 10);
-        let important: Vec<_> = scored.iter()
+        let important: Vec<_> = scored
+            .iter()
             .filter(|sn| {
                 let t = sn.node.frontmatter.node_type.as_str();
-                matches!(t, "decision" | "resolution" | "pattern" | "error" | "concept")
+                matches!(
+                    t,
+                    "decision" | "resolution" | "pattern" | "error" | "concept"
+                )
             })
             .take(7)
             .collect();
@@ -448,10 +475,13 @@ pub fn run(_input: &HookInput) -> i32 {
             hint("resume", "Knowledge graph — relevant memories:");
             for sn in &important {
                 let fm = &sn.node.frontmatter;
-                hint("resume", &format!(
-                    "  [{}] {} (importance={:.1}, score={:.2})",
-                    fm.node_type, fm.title, fm.importance, sn.score
-                ));
+                hint(
+                    "resume",
+                    &format!(
+                        "  [{}] {} (importance={:.1}, score={:.2})",
+                        fm.node_type, fm.title, fm.importance, sn.score
+                    ),
+                );
             }
         }
     }
@@ -460,13 +490,19 @@ pub fn run(_input: &HookInput) -> i32 {
     if let Ok(decayed) = store::decay_importance(30, 0.9, 0.05)
         && decayed > 0
     {
-        hint("resume", &format!("Memory decay: decayed importance for {decayed} node(s)"));
+        hint(
+            "resume",
+            &format!("Memory decay: decayed importance for {decayed} node(s)"),
+        );
     }
     // Also tag truly ancient nodes as stale (180+ days)
     if let Ok(staled) = store::tag_stale_nodes(180)
         && staled > 0
     {
-        hint("resume", &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"));
+        hint(
+            "resume",
+            &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"),
+        );
     }
 
     // 6. Stack
@@ -565,7 +601,10 @@ mod tests {
     fn acquire_session_lock_first_call_succeeds() {
         let dir = tempfile::tempdir().expect("tempdir");
         let lock = temp_lock(dir.path(), "session_first");
-        assert!(acquire_session_lock(&lock), "first acquire must return true");
+        assert!(
+            acquire_session_lock(&lock),
+            "first acquire must return true"
+        );
         assert!(lock.exists(), "lock file must be created");
     }
 
@@ -608,7 +647,9 @@ mod tests {
         .expect("write run.json");
 
         // Ensure env is not set
-        unsafe { std::env::remove_var("EPIC_ORCHESTRATION"); }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
         assert_eq!(
             restore_orchestration_state(dir.path()),
             None,
@@ -628,9 +669,13 @@ mod tests {
         )
         .expect("write run.json");
 
-        unsafe { std::env::set_var("EPIC_ORCHESTRATION", "enabled"); }
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
         let result = restore_orchestration_state(dir.path());
-        unsafe { std::env::remove_var("EPIC_ORCHESTRATION"); }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
 
         assert_eq!(
             result, None,
@@ -666,9 +711,13 @@ mod tests {
         )
         .expect("write reviewer status");
 
-        unsafe { std::env::set_var("EPIC_ORCHESTRATION", "enabled"); }
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
         let result = restore_orchestration_state(dir.path());
-        unsafe { std::env::remove_var("EPIC_ORCHESTRATION"); }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
 
         let summary = result.expect("must return Some when active orchestration exists");
         assert!(
@@ -705,9 +754,13 @@ mod tests {
         )
         .expect("write run.json");
 
-        unsafe { std::env::set_var("EPIC_ORCHESTRATION", "enabled"); }
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
         let result = restore_orchestration_state(dir.path());
-        unsafe { std::env::remove_var("EPIC_ORCHESTRATION"); }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
 
         let summary = result.expect("must return Some even with missing agent status files");
         assert!(
