@@ -55,6 +55,7 @@ fn feedback_to_observe(
         result: Some(if success { "success" } else { "error" }.into()),
         score: Some(compute_score(&dims)),
         dimensions: Some(dims),
+        pipeline_id: detect_active_orbit_id(),
         failure_category: if success {
             None
         } else {

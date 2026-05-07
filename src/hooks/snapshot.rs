@@ -101,6 +101,7 @@ pub fn run(input: &HookInput) -> i32 {
         summary,
         pending_tasks: input.pending_tasks.clone().unwrap_or_default(),
         context_usage: input.context_usage,
+        pipeline_state: super::common::read_active_orbit_state(),
     };
 
     let filename = format!(
