@@ -343,17 +343,33 @@ EOF
 ```bash
 # Check if gh is available and CI is configured
 if command -v gh &>/dev/null && gh pr checks <PR_NUMBER> 2>/dev/null | grep -q .; then
-  gh pr checks <PR_NUMBER> --watch
-  CI_STATUS=$?
+  CI_RETRY=0
+  CI_MAX_RETRIES=2
+  while [ $CI_RETRY -le $CI_MAX_RETRIES ]; do
+    gh pr checks <PR_NUMBER> --watch
+    if [ $? -eq 0 ]; then
+      CI_STATUS="PASS"
+      break
+    fi
+    CI_RETRY=$((CI_RETRY + 1))
+    if [ $CI_RETRY -le $CI_MAX_RETRIES ]; then
+      # Diagnose and fix automatically, then re-check
+      echo "CI failed (attempt $CI_RETRY/$CI_MAX_RETRIES) — diagnosing and fixing..."
+    else
+      CI_STATUS="FAIL"
+    fi
+  done
 else
   # No CI configured (e.g., CodeCommit without gh Actions) — skip
-  CI_STATUS=0
+  CI_STATUS="N/A"
   CI_NOTE="No CI configured — skipped"
 fi
 ```
 
-- CI fails → diagnose and fix automatically. Do NOT block orbit progression.
+- CI fails → diagnose and fix automatically, retry up to 2 times.
+- All retries exhausted → record `CI: FAIL`, proceed to Step 7 (evolve will analyze the failure pattern).
 - CI absent / `gh` not available → set `CI: N/A`, proceed immediately to Step 7.
+- Do NOT block orbit progression regardless of CI outcome.
 
 **Ship Report:**
 ```
