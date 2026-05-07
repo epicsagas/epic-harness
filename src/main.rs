@@ -45,6 +45,27 @@ fn main() {
         std::process::exit(hooks::serve::run_serve(port));
     }
 
+    // reflect --context: data collection mode (no stdin needed)
+    if subcmd == "reflect" {
+        let has_context = args.iter().any(|a| a.starts_with("--context"));
+        if has_context {
+            let days: u32 = args
+                .iter()
+                .find(|a| a.starts_with("--context"))
+                .and_then(|a| a.strip_prefix("--context=").filter(|s| !s.is_empty()))
+                .and_then(|s| s.parse().ok())
+                .unwrap_or_else(|| {
+                    // --context as separate arg: look for next positional
+                    args.iter()
+                        .position(|a| a == "--context")
+                        .and_then(|i| args.get(i + 1))
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(30)
+                });
+            std::process::exit(hooks::reflect::run_context(days));
+        }
+    }
+
     // Read stdin once, pass to hook subcommands (skip if TTY — no EOF would arrive)
     let mut stdin_buf = String::new();
     if !io::stdin().is_terminal() {
@@ -90,7 +111,8 @@ fn main() {
             eprintln!("  observe      Record tool call observations for pattern analysis");
             eprintln!("  polish       Auto-format and typecheck after file edits");
             eprintln!("  snapshot     Save session state mid-conversation");
-            eprintln!("  reflect      Analyze observations and evolve skills (session end)\n");
+            eprintln!("  reflect      Analyze observations and evolve skills (session end)");
+            eprintln!("  reflect --context [DAYS]  Collect harness data as JSON for /reflect skill\n");
             eprintln!("USER SUBCOMMANDS:");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");

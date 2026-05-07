@@ -15,13 +15,11 @@ Block self-serving bias: "doing well" conclusions require concrete metrics.
 ### Step 0 — Collect Context
 
 ```bash
-# HARNESS_DIR must be set in environment
-# If not: export HARNESS_DIR=$(epic-harness path)
-SCRIPT="$(dirname "$0")/reflect-context.sh"
-bash "$SCRIPT" 30 > /tmp/reflect_ctx.json
+# Uses Rust subcommand — works on all platforms (Linux, macOS, Windows)
+epic-harness reflect --context 30 > /tmp/reflect_ctx.json
 ```
 
-Fallback if script fails:
+Fallback if subcommand fails:
 ```bash
 echo "obs_files: $(ls "$HARNESS_DIR/obs/" | wc -l)"
 python3 -c "import json; m=json.load(open('$HARNESS_DIR/metrics.json')); print('total_sessions:', m.get('total_sessions',0))"

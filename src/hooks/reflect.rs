@@ -1541,6 +1541,365 @@ struct WorkspaceManifest {
     skills: Vec<SkillMeta>,
 }
 
+// ── Reflect Context (subcommand) ─────────────────────
+
+/// Collect harness data for /reflect skill as JSON on stdout.
+/// Replaces the Python-based `reflect-context.sh` for Windows compat.
+pub fn run_context(days: u32) -> i32 {
+    if !harness_exists() {
+        eprintln!("{{\"error\":\"harness directory not found\"}}");
+        return 1;
+    }
+
+    // 1. Obs stats
+    let cutoff_tag = {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let cutoff_ts = now.saturating_sub((days as u64) * 86400);
+        // Format as YYYYMMDD for filename filtering
+        let days_since_epoch = cutoff_ts / 86400;
+        // Simple epoch-to-date (no chrono dep)
+        let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
+        format!("{y:04}{m:02}{d:02}")
+    };
+
+    let all_obs_files = list_files(&obs_dir(), ".jsonl");
+    let obs_files: Vec<String> = all_obs_files
+        .into_iter()
+        .filter(|f| {
+            let tag = f.replace("session_", "");
+            tag.get(..8).map(|s| s >= cutoff_tag.as_str()).unwrap_or(true)
+        })
+        .collect();
+
+    let mut total_obs: u64 = 0;
+    let mut tool_counts: HashMap<String, u64> = HashMap::new();
+    let mut failure_cats: HashMap<String, u64> = HashMap::new();
+    let mut file_ext_counts: HashMap<String, u64> = HashMap::new();
+    let mut scores: Vec<f64> = Vec::new();
+    let mut dim_sums: HashMap<String, f64> = HashMap::new();
+    let mut dim_counts: HashMap<String, u64> = HashMap::new();
+    let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
+
+    for f in &obs_files {
+        let recs: Vec<ObsRecord> = read_jsonl_typed(&obs_dir().join(f));
+        for r in &recs {
+            total_obs += 1;
+            *tool_counts.entry(r.tool.clone()).or_default() += 1;
+            if let Some(ref fc) = r.failure_category {
+                *failure_cats.entry(fc.clone()).or_default() += 1;
+            }
+            if let Some(ref ext) = r.file_ext {
+                *file_ext_counts.entry(ext.clone()).or_default() += 1;
+            }
+            if let Some(s) = r.score {
+                scores.push(s);
+            }
+            if let Some(ref dims) = r.dimensions {
+                let ds = serde_json::to_value(dims).ok();
+                if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                    for (k, v) in obj {
+                        if let Some(n) = v.as_f64() {
+                            *dim_sums.entry(k.clone()).or_default() += n;
+                            *dim_counts.entry(k.clone()).or_default() += 1;
+                        }
+                    }
+                }
+            }
+            let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+            entry.1 += 1;
+            if r.result.as_deref() == Some("success")
+                || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+            {
+                entry.0 += 1;
+            }
+        }
+    }
+
+    let avg_score = if scores.is_empty() { 0.0 } else { round3(scores.iter().sum::<f64>() / scores.len() as f64) };
+    let high_ge09 = scores.iter().filter(|&&s| s >= 0.9).count() as u64;
+    let mid_06_09 = scores.iter().filter(|&&s| (0.6..0.9).contains(&s)).count() as u64;
+    let low_lt06 = scores.iter().filter(|&&s| s < 0.6).count() as u64;
+
+    let mut top_tools: Vec<(String, u64)> = tool_counts.into_iter().collect();
+    top_tools.sort_by(|a, b| b.1.cmp(&a.1));
+    let top_tools_map: serde_json::Map<String, serde_json::Value> = top_tools
+        .iter()
+        .take(10)
+        .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
+        .collect();
+
+    let mut fc_sorted: Vec<(String, u64)> = failure_cats.into_iter().collect();
+    fc_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    let fc_map: serde_json::Map<String, serde_json::Value> = fc_sorted
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
+        .collect();
+
+    let mut ext_sorted: Vec<(String, u64)> = file_ext_counts.into_iter().collect();
+    ext_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    let ext_map: serde_json::Map<String, serde_json::Value> = ext_sorted
+        .iter()
+        .take(8)
+        .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
+        .collect();
+
+    let dim_avgs: serde_json::Map<String, serde_json::Value> = dim_sums
+        .iter()
+        .map(|(k, s)| {
+            let c = dim_counts.get(k).copied().unwrap_or(1);
+            (k.clone(), serde_json::Value::from(round3(s / c as f64)))
+        })
+        .collect();
+
+    let weak_tools: Vec<String> = tool_success_map
+        .iter()
+        .filter(|(_, (s, n))| *n >= 5 && (*s as f64 / *n as f64) < 0.6)
+        .map(|(t, _)| t.clone())
+        .collect();
+    let strong_tools: Vec<String> = tool_success_map
+        .iter()
+        .filter(|(_, (s, n))| *n >= 5 && (*s as f64 / *n as f64) >= 0.9)
+        .map(|(t, _)| t.clone())
+        .collect();
+    let total_success: u64 = tool_success_map.values().map(|(s, _)| *s).sum();
+    let total_calls: u64 = tool_success_map.values().map(|(_, n)| *n).sum();
+    let tool_success_rate = if total_calls == 0 { 0.0 } else { round3(total_success as f64 / total_calls as f64) };
+
+    let obs_stats = serde_json::json!({
+        "total": total_obs,
+        "avg_score": avg_score,
+        "score_distribution": { "high_ge09": high_ge09, "mid_06_09": mid_06_09, "low_lt06": low_lt06 },
+        "top_tools": top_tools_map,
+        "failure_categories": fc_map,
+        "top_file_exts": ext_map,
+        "dimension_averages": dim_avgs,
+        "weak_tools": weak_tools,
+        "strong_tools": strong_tools,
+        "tool_success_rate": tool_success_rate,
+    });
+
+    // 2. Evolution stats
+    let evo_records: Vec<serde_json::Value> =
+        read_jsonl_typed::<serde_json::Value>(&evolution_file());
+    let mut pattern_freq: HashMap<String, u64> = HashMap::new();
+    let mut trend_hist: Vec<String> = Vec::new();
+    let mut skills_generated: u64 = 0;
+    let mut stagnation_count: u64 = 0;
+    for r in &evo_records {
+        if let Some(pats) = r.get("patterns").and_then(|p| p.as_array()) {
+            for p in pats {
+                if let Some(t) = p.get("type").and_then(|v| v.as_str()) {
+                    *pattern_freq.entry(t.to_string()).or_default() += 1;
+                }
+            }
+        }
+        if let Some(t) = r.get("trend").and_then(|v| v.as_str()) {
+            if !t.is_empty() {
+                trend_hist.push(t.to_string());
+            }
+        }
+        skills_generated += r.get("skills_generated").and_then(|v| v.as_u64()).unwrap_or(0);
+        if r.get("stagnation_triggered").and_then(|v| v.as_bool()).unwrap_or(false) {
+            stagnation_count += 1;
+        }
+    }
+    let recent_evo: Vec<&serde_json::Value> = evo_records.iter().rev().take(10).collect();
+    let recent_weak: Vec<String> = recent_evo
+        .iter()
+        .filter_map(|r| r.get("weak_tools").and_then(|v| v.as_array()))
+        .flat_map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)))
+        .collect();
+    let recent_weak: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        recent_weak.into_iter().filter(|s| seen.insert(s.clone())).collect()
+    };
+    let recent_seeded: Vec<String> = recent_evo
+        .iter()
+        .filter_map(|r| r.get("seeded_skills").and_then(|v| v.as_array()))
+        .flat_map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)))
+        .collect();
+    let recent_seeded: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        recent_seeded.into_iter().filter(|s| seen.insert(s.clone())).collect()
+    };
+    let mut pf_sorted: Vec<(String, u64)> = pattern_freq.into_iter().collect();
+    pf_sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    let pf_map: serde_json::Map<String, serde_json::Value> = pf_sorted
+        .iter()
+        .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
+        .collect();
+    let evo_stats = serde_json::json!({
+        "total_sessions": evo_records.len(),
+        "patterns_detected": evo_records.iter().filter(|r| r.get("patterns").and_then(|p| p.as_object()).map(|o| !o.is_empty()).unwrap_or(false)).count(),
+        "skills_generated": skills_generated,
+        "pattern_frequency": pf_map,
+        "trend_last10": trend_hist.into_iter().rev().take(10).collect::<Vec<_>>(),
+        "recent_weak_tools": recent_weak,
+        "recent_seeded_skills": recent_seeded,
+        "stagnation_count": stagnation_count,
+    });
+
+    // 3. Metrics summary
+    let metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    let sh = &metrics.score_history;
+    let score_trend_delta: f64 = if sh.len() >= 3 {
+        let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
+        let deltas: Vec<f64> = recent.windows(2).map(|w| w[0] - w[1]).collect();
+        if deltas.is_empty() { 0.0 } else { round4(deltas.iter().sum::<f64>() / deltas.len() as f64) }
+    } else { 0.0 };
+
+    let score_comparison = if sh.len() >= 10 {
+        let first5: f64 = sh.iter().take(5).map(|s| s.avg_score).sum::<f64>() / 5.0;
+        let last5: f64 = sh.iter().rev().take(5).map(|s| s.avg_score).sum::<f64>() / 5.0;
+        let dir = if last5 > first5 { "improving" } else if last5 < first5 { "declining" } else { "stable" };
+        Some(serde_json::json!({
+            "first_5_avg": round3(first5),
+            "last_5_avg": round3(last5),
+            "direction": dir,
+            "delta": round3(last5 - first5),
+        }))
+    } else { None };
+
+    let skill_attr: serde_json::Map<String, serde_json::Value> = metrics
+        .skill_attribution
+        .iter()
+        .map(|(k, v)| {
+            (k.clone(), serde_json::json!({
+                "sessions_active": v.sessions_active,
+                "avg_score_with": v.avg_score_with,
+                "avg_score_without": v.avg_score_without,
+                "delta": round3(v.avg_score_with - v.avg_score_without),
+            }))
+        })
+        .collect();
+
+    let latest_dims = sh.last().map(|s| {
+        serde_json::to_value(&s.dimension_averages).unwrap_or_default()
+    }).unwrap_or_default();
+
+    let metrics_summary = serde_json::json!({
+        "total_sessions": metrics.total_sessions,
+        "avg_success_rate": metrics.avg_success_rate,
+        "total_evolved_skills": metrics.total_evolved_skills,
+        "last_session": metrics.last_session,
+        "trend": metrics.trend,
+        "best_score": metrics.best_score,
+        "stagnation_count": metrics.stagnation_count,
+        "score_trend_delta": score_trend_delta,
+        "score_comparison": score_comparison,
+        "latest_avg_score": sh.last().map(|s| s.avg_score).unwrap_or(0.0),
+        "latest_dimensions": latest_dims,
+        "skill_attribution": skill_attr,
+    });
+
+    // 4. Session snapshots
+    let snap_files = list_files(&sessions_dir(), ".json");
+    let snapshots: Vec<serde_json::Value> = snap_files
+        .iter()
+        .rev()
+        .take(5)
+        .filter_map(|f| {
+            let sp: serde_json::Value = read_json(&sessions_dir().join(f), serde_json::Value::Null);
+            if sp.is_null() { return None; }
+            Some(serde_json::json!({
+                "timestamp": sp.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
+                "type": sp.get("type").and_then(|v| v.as_str()).unwrap_or(""),
+                "summary": sp.get("summary").and_then(|v| v.as_str()).unwrap_or("").chars().take(400).collect::<String>(),
+            }))
+        })
+        .collect();
+
+    // 5. Evolved skills
+    let evolved = list_dirs(&evolved_dir());
+    let mut evolved_list: Vec<serde_json::Value> = Vec::new();
+    let mut by_type: HashMap<&str, u64> = HashMap::new();
+    for name in &evolved {
+        let skill_path = evolved_dir().join(name).join("SKILL.md");
+        let content = fs::read_to_string(&skill_path).unwrap_or_default();
+        let stype = if content.contains("Evolved:") || content.contains("evolved_from:") {
+            "evolved"
+        } else if content.to_lowercase().contains("auto-evolved") {
+            "auto-evolved"
+        } else {
+            "preset"
+        };
+        *by_type.entry(stype).or_default() += 1;
+        evolved_list.push(serde_json::json!({"name": name, "type": stype}));
+    }
+
+    // Compile
+    let output = serde_json::json!({
+        "generated_at": now_iso(),
+        "analysis_window_days": days,
+        "obs_stats": obs_stats,
+        "evolution_stats": evo_stats,
+        "metrics_summary": metrics_summary,
+        "session_snapshots": snapshots,
+        "evolved_skills": evolved_list,
+        "evolved_skills_summary": {
+            "total": evolved.len(),
+            "by_type": {
+                "preset": by_type.get("preset").copied().unwrap_or(0),
+                "evolved": by_type.get("evolved").copied().unwrap_or(0),
+                "auto-evolved": by_type.get("auto-evolved").copied().unwrap_or(0),
+            }
+        },
+    });
+
+    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    0
+}
+
+/// Simple epoch-day to (year, month, day) without chrono dependency.
+fn epoch_days_to_ymd(days: i32) -> (i32, u32, u32) {
+    let mut y = 1970 + days / 365;
+    // Refine
+    for candidate in (1970..=y + 2).rev() {
+        let d = days_to_year_start(candidate);
+        if d <= days {
+            y = candidate;
+            break;
+        }
+    }
+    let remaining = days - days_to_year_start(y);
+    let leap = is_leap(y);
+    let month_days: [u32; 12] = if leap {
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    } else {
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    };
+    let mut m: u32 = 1;
+    let mut acc: i32 = 0;
+    for (i, &md) in month_days.iter().enumerate() {
+        if acc + md as i32 > remaining {
+            m = (i + 1) as u32;
+            break;
+        }
+        acc += md as i32;
+    }
+    let d = (remaining - acc + 1).max(1) as u32;
+    (y, m, d)
+}
+
+fn days_to_year_start(year: i32) -> i32 {
+    let mut days = 0i32;
+    for y in 1970..year {
+        days += if is_leap(y) { 366 } else { 365 };
+    }
+    days
+}
+
+fn is_leap(y: i32) -> bool {
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+}
+
+fn round4(v: f64) -> f64 {
+    (v * 10000.0).round() / 10000.0
+}
+
 // ── Main Hook ───────────────────────────────────────
 
 pub fn run(_input: &HookInput) -> i32 {

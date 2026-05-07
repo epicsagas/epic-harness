@@ -15,15 +15,20 @@ static SKILL_TDD: &str = include_str!("../../skills/tdd/SKILL.md");
 static SKILL_VERIFY: &str = include_str!("../../skills/verify/SKILL.md");
 static SKILL_COUNCIL: &str = include_str!("../../skills/council/SKILL.md");
 static SKILL_AGENT_INTROSPECTION: &str = include_str!("../../skills/agent-introspection/SKILL.md");
+static SKILL_REFLECT: &str = include_str!("../../skills/reflect/SKILL.md");
+static SKILL_DISCOVER: &str = include_str!("../../skills/discover/SKILL.md");
+static SKILL_ORCHESTRATE: &str = include_str!("../../skills/orchestrate/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
-
-// ── Canonical commands (Claude Code plugin cache sync) ───────────────────────
 static CMD_CHECK: &str = include_str!("../../commands/check.md");
 static CMD_EVOLVE: &str = include_str!("../../commands/evolve.md");
 static CMD_GO: &str = include_str!("../../commands/go.md");
 static CMD_SHIP: &str = include_str!("../../commands/ship.md");
 static CMD_SPEC: &str = include_str!("../../commands/spec.md");
 static CMD_TEAM: &str = include_str!("../../commands/team.md");
+static CMD_DISCOVER: &str = include_str!("../../commands/discover.md");
+static CMD_ORBIT: &str = include_str!("../../commands/orbit.md");
+static CMD_INTERVENE: &str = include_str!("../../commands/intervene.md");
+static CMD_STATUS: &str = include_str!("../../commands/status.md");
 
 static SKILL_DISPATCH: &str = include_str!("../../skills/_dispatch/SKILL.md");
 
@@ -44,6 +49,9 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("verify", SKILL_VERIFY),
     ("council", SKILL_COUNCIL),
     ("agent-introspection", SKILL_AGENT_INTROSPECTION),
+    ("reflect", SKILL_REFLECT),
+    ("discover", SKILL_DISCOVER),
+    ("orchestrate", SKILL_ORCHESTRATE),
 ];
 
 static CANONICAL_AGENTS: &[(&str, &str)] = &[
@@ -437,6 +445,14 @@ static CODEX_FILES: &[(&str, &str)] = integration_files!(
             "prompts/team.md",
             include_str!("../../integrations/codex/prompts/team.md")
         ),
+        (
+            "prompts/discover.md",
+            include_str!("../../integrations/codex/prompts/discover.md")
+        ),
+        (
+            "prompts/orbit.md",
+            include_str!("../../integrations/codex/prompts/orbit.md")
+        ),
     ]
 );
 
@@ -474,6 +490,14 @@ static GEMINI_FILES: &[(&str, &str)] = integration_files!(
         (
             "commands/team.md",
             include_str!("../../integrations/gemini/commands/team.md")
+        ),
+        (
+            "commands/discover.md",
+            include_str!("../../integrations/gemini/commands/discover.md")
+        ),
+        (
+            "commands/orbit.md",
+            include_str!("../../integrations/gemini/commands/orbit.md")
         ),
     ]
 );
@@ -513,6 +537,14 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
             "commands/team.md",
             include_str!("../../integrations/cursor/commands/team.md")
         ),
+        (
+            "commands/discover.md",
+            include_str!("../../integrations/cursor/commands/discover.md")
+        ),
+        (
+            "commands/orbit.md",
+            include_str!("../../integrations/cursor/commands/orbit.md")
+        ),
     ]
 );
 
@@ -542,6 +574,14 @@ static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
         (
             "commands/team.md",
             include_str!("../../integrations/opencode/commands/team.md")
+        ),
+        (
+            "commands/discover.md",
+            include_str!("../../integrations/opencode/commands/discover.md")
+        ),
+        (
+            "commands/orbit.md",
+            include_str!("../../integrations/opencode/commands/orbit.md")
         ),
         (
             "plugins/epic-harness.js",
@@ -1003,6 +1043,10 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
         ("commands/ship.md", CMD_SHIP),
         ("commands/spec.md", CMD_SPEC),
         ("commands/team.md", CMD_TEAM),
+        ("commands/discover.md", CMD_DISCOVER),
+        ("commands/orbit.md", CMD_ORBIT),
+        ("commands/intervene.md", CMD_INTERVENE),
+        ("commands/status.md", CMD_STATUS),
         ("skills/_dispatch/SKILL.md", SKILL_DISPATCH),
         ("skills/commit/SKILL.md", SKILL_COMMIT),
         ("skills/context/SKILL.md", SKILL_CONTEXT),
@@ -1018,6 +1062,9 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
             "skills/agent-introspection/SKILL.md",
             SKILL_AGENT_INTROSPECTION,
         ),
+        ("skills/reflect/SKILL.md", SKILL_REFLECT),
+        ("skills/discover/SKILL.md", SKILL_DISCOVER),
+        ("skills/orchestrate/SKILL.md", SKILL_ORCHESTRATE),
         ("agents/auditor.md", AGENT_AUDITOR),
         ("agents/builder.md", AGENT_BUILDER),
         ("agents/planner.md", AGENT_PLANNER),
@@ -2029,7 +2076,7 @@ mod tests {
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"skills/tdd/SKILL.md"));
         assert!(paths.contains(&"agents/builder.md"));
-        assert_eq!(files.len(), 11 + 4); // 11 skills + 4 agents
+        assert_eq!(files.len(), 14 + 4); // 14 skills + 4 agents
     }
 
     #[test]
