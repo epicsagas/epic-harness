@@ -201,6 +201,7 @@ flowchart TD
 | **context** | 컨텍스트 윈도우 사용률 70% 초과 시 |
 | **council** | 모호한 아키텍처 또는 설계 결정 시 |
 | **agent-introspection** | 반복 실패 후 에이전트 자기 디버깅 |
+| **reflect** | AI를 사고 증폭기로 쓰고 있는지 냉정하게 평가 |
 
 ## 훅 (Ring 0)
 
