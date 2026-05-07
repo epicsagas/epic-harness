@@ -878,7 +878,7 @@ pub fn detect_active_orbit_id() -> Option<String> {
     val.get("id")
         .and_then(|v| v.as_str())
         // Truncate to prevent unbounded strings in observation records
-        .map(|id| id[..id.len().min(128)].to_string())
+        .map(|id| id.chars().take(128).collect::<String>())
 }
 
 /// Read the full pipeline state for an active orbit.

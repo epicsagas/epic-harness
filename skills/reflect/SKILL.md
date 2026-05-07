@@ -17,7 +17,8 @@ description: "AI를 사고 증폭기로 사용하고 있는지 냉정하게 성�
 ```bash
 # HARNESS_DIR은 환경변수로 미리 설정되어 있어야 함
 # 없으면: export HARNESS_DIR=$(epic-harness path)
-SCRIPT="$HARNESS_DIR/../../../scripts/reflect-context.sh"
+SCRIPT="$(git rev-parse --show-toplevel 2>/dev/null)/scripts/reflect-context.sh"
+if [[ ! -f "$SCRIPT" ]]; then echo '{"error":"reflect-context.sh not found"}' >&2; exit 1; fi
 bash "$SCRIPT" 30 > /tmp/reflect_ctx.json
 ```
 
