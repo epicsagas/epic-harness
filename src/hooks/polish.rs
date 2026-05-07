@@ -207,10 +207,7 @@ mod tests {
 
         // Malicious file_path that escapes a double-quoted shell argument and
         // runs `touch <sentinel>`.
-        let malicious = format!(
-            "foo\"; touch {} ; echo \"",
-            sentinel.to_string_lossy()
-        );
+        let malicious = format!("foo\"; touch {} ; echo \"", sentinel.to_string_lossy());
 
         // "echo" always succeeds; we only care that the shell never ran.
         let _ = try_exec_args("echo", &[&malicious], dir.path());

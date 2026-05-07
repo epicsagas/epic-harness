@@ -3,14 +3,13 @@ use std::fs;
 use std::sync::LazyLock;
 
 use super::common::*;
-use super::telemetry::{FailureClass, ToolCategory, Telemetry};
+use super::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
-static MASK_SK: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
+static MASK_SK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
 static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret)[=:]\s*\S+").unwrap()
 });
@@ -57,7 +56,8 @@ fn score_bash(output: &str, command: &str) -> ScoreDimensions {
     } else if is_empty {
         quality = 0.7;
     }
-    static WARN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
+    static WARN_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
     static DEPREC_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
     if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
@@ -157,6 +157,80 @@ fn should_sample_tool_error() -> bool {
     check_and_increment_counter(&counter_file)
 }
 
+/// Check whether an agent has exceeded the timeout threshold.
+///
+/// Only active when `EPIC_ORCHESTRATION=enabled`. Reads the agent's
+/// `status.json` from the orchestrator state directory and compares
+/// elapsed time since `started_at` against `AGENT_TIMEOUT_SECS`.
+///
+/// Returns `Some(warning_message)` if the agent is overdue, `None` otherwise.
+fn check_agent_timeout(agent_id: &str) -> Option<String> {
+    let orch_dir = harness_dir().join("orchestrator").join("agents");
+    check_agent_timeout_with_dir(agent_id, &orch_dir)
+}
+
+/// Testable variant that accepts an explicit orchestrator directory.
+fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> Option<String> {
+    if !is_orchestration_enabled() {
+        return None;
+    }
+
+    let status_path = orch_dir.join(agent_id).join("status.json");
+    let content = fs::read_to_string(&status_path).ok()?;
+    let status: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+    // Only check running agents
+    let agent_status = status.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if agent_status != "running" {
+        return None;
+    }
+
+    let started_at = status.get("started_at").and_then(|v| {
+        // Support both epoch seconds (u64) and ISO-8601 string
+        v.as_u64().or_else(|| {
+            v.as_str().and_then(|s| {
+                // Parse ISO-8601: "2026-05-07T10:00:00Z" -> epoch seconds
+                // Minimal parser: extract YYYY-MM-DDTHH:MM:SS
+                let digits: Vec<u64> = s
+                    .split(|c: char| !c.is_ascii_digit())
+                    .filter(|p| !p.is_empty())
+                    .filter_map(|p| p.parse().ok())
+                    .collect();
+                if digits.len() < 6 {
+                    return None;
+                }
+                let (y, mo, d, h, mi, s_) = (
+                    digits[0], digits[1], digits[2], digits[3], digits[4], digits[5],
+                );
+                // Simple UTC epoch approximation (no leap seconds, good enough for timeout)
+                let month_days: u64 = if mo <= 2 {
+                    (mo + 9) * 153 + 2
+                } else {
+                    (mo - 3) * 153 + 2
+                } / 5;
+                let days: u64 = y * 365 + (y / 4) - (y / 100) + (y / 400) + month_days + d - 719469;
+                Some(days * 86400 + h * 3600 + mi * 60 + s_)
+            })
+        })
+    })?;
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let elapsed = now_secs.saturating_sub(started_at);
+    if elapsed > AGENT_TIMEOUT_SECS {
+        let elapsed_min = elapsed / 60;
+        let threshold_min = AGENT_TIMEOUT_SECS / 60;
+        Some(format!(
+            "\u{26a0} Agent {} has been running for {} minutes (timeout: {} min)",
+            agent_id, elapsed_min, threshold_min
+        ))
+    } else {
+        None
+    }
+}
+
 /// Generate concrete, fact-based investigation hints after Edit or Write tool usage.
 ///
 /// Instead of generic "are you sure?" prompts, outputs structured questions that
@@ -181,9 +255,7 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
         FILE_RE.find(a).map(|m| m.as_str())
     });
 
-    let ext = file_path
-        .and_then(|p| p.rsplit('.').next())
-        .unwrap_or("");
+    let ext = file_path.and_then(|p| p.rsplit('.').next()).unwrap_or("");
 
     let hints: &[&str] = match ext {
         "rs" => &[
@@ -348,10 +420,23 @@ pub fn run(input: &HookInput) -> i32 {
 
     // GateGuard: emit concrete investigation hints for Edit/Write to force
     // fact-based verification instead of generic "are you sure?" prompts.
-    generate_investigation_hints(
-        input.tool_name.as_deref().unwrap_or(""),
-        action.as_deref(),
-    );
+    generate_investigation_hints(input.tool_name.as_deref().unwrap_or(""), action.as_deref());
+
+    // Agent timeout detection: when EPIC_ORCHESTRATION is enabled and the
+    // current tool is an Agent call, check if the agent has exceeded the
+    // timeout threshold. This is gated by the env var so it adds zero
+    // latency to non-orchestration sessions.
+    let tool_name_lower = input.tool_name.as_deref().unwrap_or("").to_lowercase();
+    if tool_name_lower == "agent"
+        && let Some(agent_id) = input
+            .tool_input
+            .as_ref()
+            .and_then(|v| v.get("agent_id"))
+            .and_then(|v| v.as_str())
+        && let Some(timeout_msg) = check_agent_timeout(agent_id)
+    {
+        hint("agent-timeout", &timeout_msg);
+    }
 
     0
 }
@@ -359,6 +444,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ── score_bash ──────────────────────────────────
     #[test]
@@ -395,7 +481,10 @@ mod tests {
     #[test]
     fn score_bash_no_warnings_found_not_penalized() {
         let dims = score_bash("No warnings found", "cargo check");
-        assert_eq!(dims.output_quality, 1.0, "substring 'warning' in negative phrase must not penalize");
+        assert_eq!(
+            dims.output_quality, 1.0,
+            "substring 'warning' in negative phrase must not penalize"
+        );
     }
 
     #[test]
@@ -514,15 +603,24 @@ mod tests {
     fn test_mask_bearer_token() {
         let input = r#"curl -H "Authorization: Bearer sk-abc123XYZ" failed"#;
         let output = mask_secrets(input);
-        assert!(!output.contains("sk-abc123XYZ"), "Bearer token must be redacted");
-        assert!(output.contains("Bearer <REDACTED>"), "must have redacted placeholder");
+        assert!(
+            !output.contains("sk-abc123XYZ"),
+            "Bearer token must be redacted"
+        );
+        assert!(
+            output.contains("Bearer <REDACTED>"),
+            "must have redacted placeholder"
+        );
     }
 
     #[test]
     fn test_mask_sk_key() {
         let input = "Error: invalid key sk-proj-abcDEF12345678 supplied";
         let output = mask_secrets(input);
-        assert!(!output.contains("sk-proj-abcDEF12345678"), "sk- key must be redacted");
+        assert!(
+            !output.contains("sk-proj-abcDEF12345678"),
+            "sk- key must be redacted"
+        );
         assert!(output.contains("sk-<REDACTED>"), "must have sk-<REDACTED>");
     }
 
@@ -530,8 +628,14 @@ mod tests {
     fn test_mask_password_equals() {
         let input = "connection failed: password=s3cr3tP@ss! reason=timeout";
         let output = mask_secrets(input);
-        assert!(!output.contains("s3cr3tP@ss!"), "password value must be redacted");
-        assert!(output.contains("<REDACTED>"), "must have redacted placeholder");
+        assert!(
+            !output.contains("s3cr3tP@ss!"),
+            "password value must be redacted"
+        );
+        assert!(
+            output.contains("<REDACTED>"),
+            "must have redacted placeholder"
+        );
     }
 
     #[test]
@@ -552,7 +656,11 @@ mod tests {
             tool_result: Some(serde_json::json!("hello\n")),
             ..Default::default()
         };
-        let output = input.tool_result.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+        let output = input
+            .tool_result
+            .as_ref()
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         assert_eq!(output, "hello\n");
     }
 
@@ -696,5 +804,195 @@ mod tests {
     fn hints_for_empty_tool_name() {
         // Empty tool name should not match Edit/Write — no output, no panic
         generate_investigation_hints("", Some("/src/main.rs"));
+    }
+
+    // ── check_agent_timeout ─────────────────────────
+    // SAFETY: All env-var mutations serialized via #[serial] to prevent parallel test races.
+    #[serial]
+    #[test]
+    fn agent_timeout_returns_none_when_disabled() {
+        // EPIC_ORCHESTRATION not set — should return None
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+        let result = check_agent_timeout("agent-1");
+        assert!(
+            result.is_none(),
+            "should be None when orchestration disabled"
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_returns_none_for_non_agent_tool() {
+        // Even with EPIC_ORCHESTRATION=enabled, non-agent id should be fine
+        // (no status file → no timeout)
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+            let result = check_agent_timeout("nonexistent-agent");
+            std::env::remove_var("EPIC_ORCHESTRATION");
+            assert!(result.is_none(), "no status file means no timeout");
+        }
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_detects_overdue_agent() {
+        // Create a temp orchestrator dir with a status.json that has a started_at
+        // far enough in the past to exceed the threshold
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = dir.path().join("agent-1");
+        fs::create_dir_all(&agent_dir).unwrap();
+
+        // started_at = 20 minutes ago (1200 seconds)
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let started_at = now_secs - 1200;
+        let status = serde_json::json!({
+            "status": "running",
+            "started_at": started_at
+        });
+        fs::write(agent_dir.join("status.json"), status.to_string()).unwrap();
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = check_agent_timeout_with_dir("agent-1", dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert!(result.is_some(), "should detect timeout for overdue agent");
+        let msg = result.unwrap();
+        assert!(msg.contains("agent-1"), "message should mention agent id");
+        assert!(
+            msg.contains("timeout:"),
+            "message should mention timeout threshold"
+        );
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_returns_none_for_recent_agent() {
+        // Agent started 1 minute ago — under threshold
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = dir.path().join("agent-2");
+        fs::create_dir_all(&agent_dir).unwrap();
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let started_at = now_secs - 60; // 1 minute ago
+        let status = serde_json::json!({
+            "status": "running",
+            "started_at": started_at
+        });
+        fs::write(agent_dir.join("status.json"), status.to_string()).unwrap();
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = check_agent_timeout_with_dir("agent-2", dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert!(result.is_none(), "recent agent should not trigger timeout");
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_handles_missing_status_file() {
+        // Agent dir exists but no status.json
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = dir.path().join("agent-3");
+        fs::create_dir_all(&agent_dir).unwrap();
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = check_agent_timeout_with_dir("agent-3", dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert!(result.is_none(), "missing status file should not error");
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_handles_malformed_status_json() {
+        // status.json contains invalid JSON
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = dir.path().join("agent-4");
+        fs::create_dir_all(&agent_dir).unwrap();
+        fs::write(agent_dir.join("status.json"), "not json at all").unwrap();
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = check_agent_timeout_with_dir("agent-4", dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert!(result.is_none(), "malformed JSON should not error");
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_handles_missing_started_at() {
+        // status.json is valid but has no started_at field
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = dir.path().join("agent-5");
+        fs::create_dir_all(&agent_dir).unwrap();
+        let status = serde_json::json!({"status": "running"});
+        fs::write(agent_dir.join("status.json"), status.to_string()).unwrap();
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = check_agent_timeout_with_dir("agent-5", dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert!(result.is_none(), "missing started_at should not error");
+    }
+
+    #[serial]
+    #[test]
+    fn agent_timeout_handles_completed_agent() {
+        // Agent completed — status is not "running"
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = dir.path().join("agent-6");
+        fs::create_dir_all(&agent_dir).unwrap();
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let started_at = now_secs - 1200; // 20 minutes ago, but completed
+        let status = serde_json::json!({
+            "status": "completed",
+            "started_at": started_at
+        });
+        fs::write(agent_dir.join("status.json"), status.to_string()).unwrap();
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = check_agent_timeout_with_dir("agent-6", dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert!(
+            result.is_none(),
+            "completed agent should not trigger timeout"
+        );
     }
 }

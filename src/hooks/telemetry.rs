@@ -86,7 +86,6 @@ impl FailureClass {
             Self::Unknown => "unknown",
         }
     }
-
 }
 
 impl std::str::FromStr for FailureClass {
@@ -165,7 +164,6 @@ impl ToolCategory {
             Self::Other => "other",
         }
     }
-
 }
 
 impl std::str::FromStr for ToolCategory {
@@ -198,7 +196,6 @@ impl SessionTrend {
             Self::Declining => "declining",
         }
     }
-
 }
 
 impl std::str::FromStr for SessionTrend {
@@ -252,9 +249,7 @@ pub enum ConsentLevel {
 }
 
 fn consent_file() -> PathBuf {
-    dirs_config()
-        .join("epic-harness")
-        .join("telemetry-consent")
+    dirs_config().join("epic-harness").join("telemetry-consent")
 }
 
 fn install_id_file() -> PathBuf {
@@ -373,11 +368,22 @@ fn new_uuid_v4() -> String {
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     format!(
         "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3],
-        bytes[4], bytes[5],
-        bytes[6], bytes[7],
-        bytes[8], bytes[9],
-        bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
     )
 }
 
@@ -451,29 +457,34 @@ impl Telemetry {
         let payload = if extra.is_empty() {
             format!(
                 r#"{{"event":"{}","distinct_id":"{}","properties":{{{}}}}}"#,
-                event_escaped,
-                distinct_id_escaped,
-                self.base_props,
+                event_escaped, distinct_id_escaped, self.base_props,
             )
         } else {
             format!(
                 r#"{{"event":"{}","distinct_id":"{}","properties":{{{},{}}}}}"#,
-                event_escaped,
-                distinct_id_escaped,
-                self.base_props,
-                extra,
+                event_escaped, distinct_id_escaped, self.base_props, extra,
             )
         };
         posthog_send(&payload);
     }
 
     /// Capture an error to Sentry. `message` must be a pre-classified enum string (no free text).
-    pub fn capture_error(&self, message: &str, failure_class: FailureClass, command: Option<Command>) {
+    pub fn capture_error(
+        &self,
+        message: &str,
+        failure_class: FailureClass,
+        command: Option<Command>,
+    ) {
         if !self.is_enabled() {
             return;
         }
         let cmd_tag = command.map(|c| c.as_str()).unwrap_or("none");
-        sentry_send(message, failure_class.as_str(), cmd_tag, env!("CARGO_PKG_VERSION"));
+        sentry_send(
+            message,
+            failure_class.as_str(),
+            cmd_tag,
+            env!("CARGO_PKG_VERSION"),
+        );
     }
 }
 
@@ -513,7 +524,12 @@ impl Telemetry {
         );
     }
 
-    pub fn track_command_failed(&self, command: Command, duration_ms: u64, failure_class: FailureClass) {
+    pub fn track_command_failed(
+        &self,
+        command: Command,
+        duration_ms: u64,
+        failure_class: FailureClass,
+    ) {
         self.track(
             "command_failed",
             &format!(
@@ -553,7 +569,10 @@ impl Telemetry {
 
     /// polish hook: formatter or type-checker failed.
     pub fn track_polish_failed(&self, formatter: FormatterKind) {
-        self.track("polish_failed", &format!(r#""formatter":"{}""#, formatter.as_str()));
+        self.track(
+            "polish_failed",
+            &format!(r#""formatter":"{}""#, formatter.as_str()),
+        );
         self.capture_error("polish_failed", FailureClass::HookFailed, None);
     }
 
@@ -676,9 +695,8 @@ fn sentry_send(message: &str, failure_class: &str, command: &str, version: &str)
         .and_then(|s| s.split("//").nth(1))
         .unwrap_or("");
 
-    let auth = format!(
-        "Sentry sentry_version=7,sentry_key={key},sentry_client=epic-harness/{version}"
-    );
+    let auth =
+        format!("Sentry sentry_version=7,sentry_key={key},sentry_client=epic-harness/{version}");
 
     http_post_envelope(&host, &format!("{path}/envelope/"), &envelope, &auth);
 }
@@ -814,18 +832,42 @@ mod tests {
 
     #[test]
     fn tool_category_from_str_known() {
-        assert!(matches!(ToolCategory::from_str("bash").unwrap(), ToolCategory::Bash));
-        assert!(matches!(ToolCategory::from_str("edit").unwrap(), ToolCategory::Edit));
-        assert!(matches!(ToolCategory::from_str("write").unwrap(), ToolCategory::Write));
-        assert!(matches!(ToolCategory::from_str("read").unwrap(), ToolCategory::Read));
-        assert!(matches!(ToolCategory::from_str("glob").unwrap(), ToolCategory::Glob));
-        assert!(matches!(ToolCategory::from_str("grep").unwrap(), ToolCategory::Grep));
+        assert!(matches!(
+            ToolCategory::from_str("bash").unwrap(),
+            ToolCategory::Bash
+        ));
+        assert!(matches!(
+            ToolCategory::from_str("edit").unwrap(),
+            ToolCategory::Edit
+        ));
+        assert!(matches!(
+            ToolCategory::from_str("write").unwrap(),
+            ToolCategory::Write
+        ));
+        assert!(matches!(
+            ToolCategory::from_str("read").unwrap(),
+            ToolCategory::Read
+        ));
+        assert!(matches!(
+            ToolCategory::from_str("glob").unwrap(),
+            ToolCategory::Glob
+        ));
+        assert!(matches!(
+            ToolCategory::from_str("grep").unwrap(),
+            ToolCategory::Grep
+        ));
     }
 
     #[test]
     fn tool_category_from_str_unknown() {
-        assert!(matches!(ToolCategory::from_str("unknown_tool").unwrap(), ToolCategory::Other));
-        assert!(matches!(ToolCategory::from_str("").unwrap(), ToolCategory::Other));
+        assert!(matches!(
+            ToolCategory::from_str("unknown_tool").unwrap(),
+            ToolCategory::Other
+        ));
+        assert!(matches!(
+            ToolCategory::from_str("").unwrap(),
+            ToolCategory::Other
+        ));
     }
 
     #[test]
@@ -837,38 +879,83 @@ mod tests {
 
     #[test]
     fn session_trend_from_str_known() {
-        assert!(matches!(SessionTrend::from_str("improving").unwrap(), SessionTrend::Improving));
-        assert!(matches!(SessionTrend::from_str("declining").unwrap(), SessionTrend::Declining));
-        assert!(matches!(SessionTrend::from_str("stable").unwrap(), SessionTrend::Stable));
+        assert!(matches!(
+            SessionTrend::from_str("improving").unwrap(),
+            SessionTrend::Improving
+        ));
+        assert!(matches!(
+            SessionTrend::from_str("declining").unwrap(),
+            SessionTrend::Declining
+        ));
+        assert!(matches!(
+            SessionTrend::from_str("stable").unwrap(),
+            SessionTrend::Stable
+        ));
     }
 
     #[test]
     fn session_trend_from_str_unknown_defaults_stable() {
-        assert!(matches!(SessionTrend::from_str("whatever").unwrap(), SessionTrend::Stable));
-        assert!(matches!(SessionTrend::from_str("").unwrap(), SessionTrend::Stable));
+        assert!(matches!(
+            SessionTrend::from_str("whatever").unwrap(),
+            SessionTrend::Stable
+        ));
+        assert!(matches!(
+            SessionTrend::from_str("").unwrap(),
+            SessionTrend::Stable
+        ));
     }
 
     #[test]
     fn session_trend_as_str_roundtrip() {
-        assert_eq!(SessionTrend::from_str("improving").unwrap().as_str(), "improving");
-        assert_eq!(SessionTrend::from_str("declining").unwrap().as_str(), "declining");
+        assert_eq!(
+            SessionTrend::from_str("improving").unwrap().as_str(),
+            "improving"
+        );
+        assert_eq!(
+            SessionTrend::from_str("declining").unwrap().as_str(),
+            "declining"
+        );
         assert_eq!(SessionTrend::from_str("stable").unwrap().as_str(), "stable");
     }
 
     #[test]
     fn failure_class_from_str_known() {
-        assert!(matches!(FailureClass::from_str("user_abort").unwrap(), FailureClass::UserAbort));
-        assert!(matches!(FailureClass::from_str("claude_api_error").unwrap(), FailureClass::ClaudeApiError));
-        assert!(matches!(FailureClass::from_str("tool_permission_denied").unwrap(), FailureClass::ToolPermissionDenied));
-        assert!(matches!(FailureClass::from_str("hook_failed").unwrap(), FailureClass::HookFailed));
-        assert!(matches!(FailureClass::from_str("git_conflict").unwrap(), FailureClass::GitConflict));
-        assert!(matches!(FailureClass::from_str("timeout_exceeded").unwrap(), FailureClass::TimeoutExceeded));
+        assert!(matches!(
+            FailureClass::from_str("user_abort").unwrap(),
+            FailureClass::UserAbort
+        ));
+        assert!(matches!(
+            FailureClass::from_str("claude_api_error").unwrap(),
+            FailureClass::ClaudeApiError
+        ));
+        assert!(matches!(
+            FailureClass::from_str("tool_permission_denied").unwrap(),
+            FailureClass::ToolPermissionDenied
+        ));
+        assert!(matches!(
+            FailureClass::from_str("hook_failed").unwrap(),
+            FailureClass::HookFailed
+        ));
+        assert!(matches!(
+            FailureClass::from_str("git_conflict").unwrap(),
+            FailureClass::GitConflict
+        ));
+        assert!(matches!(
+            FailureClass::from_str("timeout_exceeded").unwrap(),
+            FailureClass::TimeoutExceeded
+        ));
     }
 
     #[test]
     fn failure_class_from_str_unknown_defaults_unknown() {
-        assert!(matches!(FailureClass::from_str("not_a_class").unwrap(), FailureClass::Unknown));
-        assert!(matches!(FailureClass::from_str("").unwrap(), FailureClass::Unknown));
+        assert!(matches!(
+            FailureClass::from_str("not_a_class").unwrap(),
+            FailureClass::Unknown
+        ));
+        assert!(matches!(
+            FailureClass::from_str("").unwrap(),
+            FailureClass::Unknown
+        ));
     }
 
     #[test]
@@ -945,7 +1032,7 @@ mod tests {
         assert!(is_valid_uuid("550e8400-e29b-4d4a-a716-446655440000"));
         // generated by new_uuid_v4 — must always pass its own validator
         let id = new_uuid_v4();
-        assert!(is_valid_uuid(&id), "new_uuid_v4() produced invalid UUID: {id}");
+        assert!(is_valid_uuid(&id), "new_uuid_v4() produced invalid UUID");
     }
 
     #[test]
@@ -977,7 +1064,11 @@ mod tests {
         );
         Telemetry {
             consent,
-            distinct_id: if consent == ConsentLevel::On { "test-id".into() } else { String::new() },
+            distinct_id: if consent == ConsentLevel::On {
+                "test-id".into()
+            } else {
+                String::new()
+            },
             base_props,
         }
     }
@@ -996,7 +1087,10 @@ mod tests {
     fn read_consent_defaults_to_off_when_unset() {
         // read_consent() must be conservative — no file means no consent.
         // ensure_consent_or_set_default() is responsible for setting On.
-        assert_eq!(read_consent_raw().unwrap_or(ConsentLevel::Off), ConsentLevel::Off);
+        assert_eq!(
+            read_consent_raw().unwrap_or(ConsentLevel::Off),
+            ConsentLevel::Off
+        );
     }
 
     #[test]

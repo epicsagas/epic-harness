@@ -224,6 +224,14 @@ pub const PROFILE_REFLECT: HookProfile = HookProfile::Standard;
 pub const PROFILE_SNAPSHOT: HookProfile = HookProfile::Standard;
 pub const PROFILE_RESUME: HookProfile = HookProfile::Minimal;
 
+/// Agent timeout threshold in seconds (default: 600 = 10 minutes).
+/// When EPIC_ORCHESTRATION is enabled, agents exceeding this runtime
+/// trigger a warning hint in the observe hook.
+pub const AGENT_TIMEOUT_SECS: u64 = 600;
+
+/// Number of recent stream.jsonl entries to check for concurrent write conflict detection.
+pub const CONFLICT_LOOKBACK: usize = 3;
+
 // ── Paths ────────────────────────────────────────────
 
 pub fn cwd() -> PathBuf {
@@ -359,17 +367,23 @@ pub(crate) fn dirs_home() -> PathBuf {
 }
 
 pub fn claude_config_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("CLAUDE_CONFIG_DIR") && !d.is_empty() {
+    if let Ok(d) = std::env::var("CLAUDE_CONFIG_DIR")
+        && !d.is_empty()
+    {
         return PathBuf::from(d);
     }
     dirs_home().join(".claude")
 }
 
 pub fn claude_json_path() -> PathBuf {
-    if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") && !p.is_empty() {
+    if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH")
+        && !p.is_empty()
+    {
         return PathBuf::from(p);
     }
-    if let Ok(d) = std::env::var("CLAUDE_CONFIG_DIR") && !d.is_empty() {
+    if let Ok(d) = std::env::var("CLAUDE_CONFIG_DIR")
+        && !d.is_empty()
+    {
         return PathBuf::from(&d)
             .parent()
             .map(|p| p.join(".claude.json"))
@@ -379,7 +393,9 @@ pub fn claude_json_path() -> PathBuf {
 }
 
 pub fn claude_plugin_cache_dir() -> PathBuf {
-    if let Ok(d) = std::env::var("CLAUDE_CODE_PLUGIN_CACHE_DIR") && !d.is_empty() {
+    if let Ok(d) = std::env::var("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+        && !d.is_empty()
+    {
         return PathBuf::from(d);
     }
     claude_config_dir().join("plugins")
@@ -740,10 +756,13 @@ pub fn session_id() -> String {
 
 pub fn compute_score(dims: &ScoreDimensions) -> f64 {
     let w = &super::config::CONFIG.scoring.weights;
-    let raw = w[0] * dims.tool_success
-        + w[1] * dims.output_quality
-        + w[2] * dims.execution_cost;
+    let raw = w[0] * dims.tool_success + w[1] * dims.output_quality + w[2] * dims.execution_cost;
     (raw * 1000.0).round() / 1000.0
+}
+
+/// Returns true when EPIC_ORCHESTRATION=enabled env var is set.
+pub fn is_orchestration_enabled() -> bool {
+    std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled")
 }
 
 pub fn hash_string(s: &str) -> String {
@@ -904,7 +923,8 @@ fn cached_orbit_state_common() -> Option<serde_json::Value> {
         })
     });
     let mut guard = cache.lock().unwrap();
-    let expired = !guard.initialized || guard.cached_at.elapsed().as_secs() >= ORBIT_ID_CACHE_TTL_SECS;
+    let expired =
+        !guard.initialized || guard.cached_at.elapsed().as_secs() >= ORBIT_ID_CACHE_TTL_SECS;
     if !expired {
         return guard.value.clone();
     }
@@ -937,7 +957,13 @@ pub fn read_active_orbit_state() -> Option<serde_json::Value> {
 /// Truncates to 128 characters.
 pub fn normalize_pipeline_id(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .take(128)
         .collect()
 }
@@ -966,7 +992,6 @@ pub fn sanitize_orbit_field(s: &str) -> String {
         .take(256)
         .collect()
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1365,7 +1390,10 @@ warned:
         // ESC, BEL, TAB — all control characters
         let s = "abc\x1b[31mred\x07\x09def";
         let out = sanitize_orbit_field(s);
-        assert!(!out.chars().any(|c| c.is_control()), "control chars must be stripped");
+        assert!(
+            !out.chars().any(|c| c.is_control()),
+            "control chars must be stripped"
+        );
     }
 
     #[test]
@@ -1398,7 +1426,8 @@ warned:
         let s = format!("legit-id{}injected", plane14_tag);
         let out = sanitize_orbit_field(&s);
         assert!(
-            !out.chars().any(|c| ('\u{E0000}'..='\u{E01EF}').contains(&c)),
+            !out.chars()
+                .any(|c| ('\u{E0000}'..='\u{E01EF}').contains(&c)),
             "Plane-14 tag characters must be stripped"
         );
         assert!(out.contains("legit-id"));
@@ -1456,7 +1485,11 @@ warned:
     fn scan_returns_none_for_completed_pipeline() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("PIPELINE-20260507-done.json");
-        fs::write(&file, r#"{"id":"test-id-002","status":"complete","phase":"ship"}"#).unwrap();
+        fs::write(
+            &file,
+            r#"{"id":"test-id-002","status":"complete","phase":"ship"}"#,
+        )
+        .unwrap();
 
         let result = scan_running_pipeline_in(dir.path());
         assert!(result.is_none(), "completed pipelines should be ignored");

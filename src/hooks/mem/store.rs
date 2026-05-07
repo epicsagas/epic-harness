@@ -40,16 +40,16 @@ fn default_importance() -> f64 {
 /// Default importance by node type.
 pub fn importance_for_type(node_type: &str) -> f64 {
     match node_type {
-        "decision"     => 0.9,
-        "resolution"   => 0.8,
+        "decision" => 0.9,
+        "resolution" => 0.8,
         "psychographic" => 0.8,
-        "instinct"     => 0.7,
-        "concept"      => 0.7,
-        "project"      => 0.7,
-        "pattern"      => 0.5,
-        "error"        => 0.4,
-        "session"      => 0.2,
-        _            => 0.5,
+        "instinct" => 0.7,
+        "concept" => 0.7,
+        "project" => 0.7,
+        "pattern" => 0.5,
+        "error" => 0.4,
+        "session" => 0.2,
+        _ => 0.5,
     }
 }
 
@@ -118,12 +118,15 @@ pub fn validate_node_id(id: &str) -> bool {
     // UUID v4 strict: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
     let b = id.as_bytes();
     b.len() == 36
-        && b[8] == b'-' && b[13] == b'-' && b[18] == b'-' && b[23] == b'-'
+        && b[8] == b'-'
+        && b[13] == b'-'
+        && b[18] == b'-'
+        && b[23] == b'-'
         && b[14] == b'4'
         && matches!(b[19], b'8' | b'9' | b'a' | b'b' | b'A' | b'B')
-        && b.iter().enumerate().all(|(i, &c)| {
-            matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit()
-        })
+        && b.iter()
+            .enumerate()
+            .all(|(i, &c)| matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit())
 }
 
 // ── DB connection + schema ─────────────────────────────
@@ -133,8 +136,7 @@ pub fn open_db() -> io::Result<Connection> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(&path)
-        .map_err(io::Error::other)?;
+    let conn = Connection::open(&path).map_err(io::Error::other)?;
 
     // WAL mode for better concurrency
     conn.execute_batch("PRAGMA journal_mode=WAL;")
@@ -191,7 +193,8 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
 
     // Migrate existing DBs: add new columns (ignore errors if already present)
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5");
-    let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
+    let _ =
+        conn.execute_batch("ALTER TABLE nodes ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0");
     let _ = conn.execute_batch("ALTER TABLE nodes ADD COLUMN accessed_at TEXT NOT NULL DEFAULT ''");
 
     // Backfill importance for existing nodes based on type
@@ -201,7 +204,7 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
          UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'concept';
          UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'project';
          UPDATE nodes SET importance = 0.4 WHERE importance = 0.5 AND type = 'error';
-         UPDATE nodes SET importance = 0.2 WHERE importance = 0.5 AND type = 'session';"
+         UPDATE nodes SET importance = 0.2 WHERE importance = 0.5 AND type = 'session';",
     );
 
     conn.execute_batch(
@@ -252,8 +255,12 @@ fn auto_migrate_legacy(conn: &Connection) {
             if path.extension().and_then(|e| e.to_str()) != Some("md") {
                 continue;
             }
-            let Ok(content) = fs::read_to_string(&path) else { continue };
-            let Some(node) = parse_node(&content) else { continue };
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(node) = parse_node(&content) else {
+                continue;
+            };
             let fm = &node.frontmatter;
             let imp = importance_for_type(&fm.node_type);
             let _ = conn.execute(
@@ -282,8 +289,12 @@ fn auto_migrate_legacy(conn: &Connection) {
                      (id, source, target, relation, weight, ts)
                      VALUES (?1,?2,?3,?4,?5,?6)",
                     rusqlite::params![
-                        edge.id, edge.source, edge.target,
-                        edge.relation, edge.weight, edge.ts,
+                        edge.id,
+                        edge.source,
+                        edge.target,
+                        edge.relation,
+                        edge.weight,
+                        edge.ts,
                     ],
                 );
             }
@@ -308,12 +319,10 @@ fn split_csv(s: &str) -> Vec<String> {
 }
 
 /// Standard SELECT columns for node queries. Use with row_to_node().
-const NODE_COLUMNS: &str =
-    "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
+const NODE_COLUMNS: &str = "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
 
 /// Same columns but table-prefixed for JOIN queries.
-const NODE_COLUMNS_PREFIXED: &str =
-    "id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
+const NODE_COLUMNS_PREFIXED: &str = "id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
 
 fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
     let tags: String = row.get(3)?;
@@ -422,18 +431,23 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
+        params![
+            edge.id,
+            edge.source,
+            edge.target,
+            edge.relation,
+            edge.weight,
+            edge.ts
+        ],
     )
     .map_err(io::Error::other)?;
     Ok(())
 }
 
-
 /// Read all edges using an existing connection (no LIMIT — callers should paginate for large graphs).
 pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
-    let mut stmt = match conn.prepare(
-        "SELECT id, source, target, relation, weight, ts FROM edges",
-    ) {
+    let mut stmt = match conn.prepare("SELECT id, source, target, relation, weight, ts FROM edges")
+    {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[mem/store] read_edges_conn: prepare failed: {e}");
@@ -489,9 +503,9 @@ pub fn read_index() -> Index {
         Ok(c) => c,
         Err(_) => return Index::default(),
     };
-    let mut stmt = match conn.prepare(
-        "SELECT id, type, title, tags, projects, updated FROM nodes ORDER BY updated DESC",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT id, type, title, tags, projects, updated FROM nodes ORDER BY updated DESC")
+    {
         Ok(s) => s,
         Err(_) => return Index::default(),
     };
@@ -508,14 +522,16 @@ pub fn read_index() -> Index {
         })
         .map(|rows| {
             rows.filter_map(|r| r.ok())
-                .map(|(id, node_type, title, tags_str, projects_str, updated)| IndexNode {
-                    id,
-                    title,
-                    node_type,
-                    tags: split_csv(&tags_str),
-                    projects: split_csv(&projects_str),
-                    updated,
-                })
+                .map(
+                    |(id, node_type, title, tags_str, projects_str, updated)| IndexNode {
+                        id,
+                        title,
+                        node_type,
+                        tags: split_csv(&tags_str),
+                        projects: split_csv(&projects_str),
+                        updated,
+                    },
+                )
                 .collect()
         })
         .unwrap_or_default();
@@ -528,9 +544,15 @@ pub fn read_index() -> Index {
         for tag in &n.tags {
             by_tag.entry(tag.clone()).or_default().push(n.id.clone());
         }
-        by_type.entry(n.node_type.clone()).or_default().push(n.id.clone());
+        by_type
+            .entry(n.node_type.clone())
+            .or_default()
+            .push(n.id.clone());
         for proj in &n.projects {
-            by_project.entry(proj.clone()).or_default().push(n.id.clone());
+            by_project
+                .entry(proj.clone())
+                .or_default()
+                .push(n.id.clone());
         }
     }
 
@@ -576,7 +598,8 @@ fn find_duplicate_in_conn(conn: &Connection, title: &str, window_hours: u64) -> 
         "SELECT id FROM nodes WHERE title = ?1 AND updated > ?2 ORDER BY updated DESC LIMIT 1",
         params![title, cutoff],
         |row| row.get::<_, String>(0),
-    ).ok()
+    )
+    .ok()
 }
 
 /// Write-with-dedup: opens a single connection, checks for a duplicate, and
@@ -607,7 +630,14 @@ pub fn append_edge_conn(conn: &Connection, edge: &Edge) -> io::Result<()> {
     conn.execute(
         "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![edge.id, edge.source, edge.target, edge.relation, edge.weight, edge.ts],
+        params![
+            edge.id,
+            edge.source,
+            edge.target,
+            edge.relation,
+            edge.weight,
+            edge.ts
+        ],
     )
     .map_err(io::Error::other)?;
     Ok(())
@@ -630,27 +660,29 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
         let ss = s % 60;
         format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
     };
-    let changed = conn.execute(
-        "UPDATE nodes SET tags = CASE
+    let changed = conn
+        .execute(
+            "UPDATE nodes SET tags = CASE
             WHEN tags = '' THEN 'stale'
             WHEN ',' || tags || ',' NOT LIKE '%,stale,%' THEN tags || ',stale'
             ELSE tags
          END
          WHERE updated < ?1
            AND ',' || tags || ',' NOT LIKE '%,stale,%'",
-        params![cutoff],
-    ).map_err(io::Error::other)?;
+            params![cutoff],
+        )
+        .map_err(io::Error::other)?;
     Ok(changed as u64)
 }
 
 // ── Smart recall (composite scoring) ─────────────────
 
 /// Composite relevance score weights.
-const W_RECENCY:    f64 = 0.20;  // was 0.25 — reduced to make room for graph boost
+const W_RECENCY: f64 = 0.20; // was 0.25 — reduced to make room for graph boost
 const W_IMPORTANCE: f64 = 0.35;
-const W_ACCESS:     f64 = 0.15;
-const W_FTS:        f64 = 0.20;  // was 0.25
-const W_GRAPH:      f64 = 0.10;  // edge-weight connectivity boost (new)
+const W_ACCESS: f64 = 0.15;
+const W_FTS: f64 = 0.20; // was 0.25
+const W_GRAPH: f64 = 0.10; // edge-weight connectivity boost (new)
 
 /// Scored node: a node with a computed relevance score.
 #[derive(Debug, Clone)]
@@ -699,9 +731,7 @@ pub fn smart_recall_conn(
 
     // Fetch candidate nodes (broad set); candidate_limit is computed, not user input.
     let candidate_limit = (limit * 4).max(40) as i64;
-    let mut conditions: Vec<&str> = vec![
-        "',' || tags || ',' NOT LIKE '%,stale,%'",
-    ];
+    let mut conditions: Vec<&str> = vec!["',' || tags || ',' NOT LIKE '%,stale,%'"];
     // Collect bound parameter values alongside conditions.
     let mut param_vals: Vec<Box<dyn rusqlite::ToSql>> = vec![];
     if let Some(p) = project {
@@ -732,7 +762,11 @@ pub fn smart_recall_conn(
             let recency = compute_recency(&node.frontmatter.updated, now_secs);
             let importance = node.frontmatter.importance;
             let access_freq = (node.frontmatter.access_count.max(0) as f64 / 20.0).min(1.0);
-            let fts_match = if fts_ids.contains(&node.frontmatter.id) { 1.0 } else { 0.0 };
+            let fts_match = if fts_ids.contains(&node.frontmatter.id) {
+                1.0
+            } else {
+                0.0
+            };
 
             let score = W_RECENCY * recency
                 + W_IMPORTANCE * importance
@@ -743,12 +777,19 @@ pub fn smart_recall_conn(
         })
         .collect();
 
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(limit);
 
     // Graph-boost pass: add W_GRAPH * edge_weight_score for edges between top candidates.
     if scored.len() > 1 {
-        let ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
+        let ids: Vec<String> = scored
+            .iter()
+            .map(|sn| sn.node.frontmatter.id.clone())
+            .collect();
         let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         // Sum edge weights for each node connected to other top-scored candidates.
         let sql = format!(
@@ -761,7 +802,9 @@ pub fn smart_recall_conn(
         if let Ok(mut stmt) = conn.prepare(&sql) {
             let base: Vec<&dyn rusqlite::ToSql> =
                 ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
-            let params: Vec<&dyn rusqlite::ToSql> = base.iter().copied()
+            let params: Vec<&dyn rusqlite::ToSql> = base
+                .iter()
+                .copied()
                 .chain(base.iter().copied())
                 .chain(base.iter().copied())
                 .chain(base.iter().copied())
@@ -772,17 +815,30 @@ pub fn smart_recall_conn(
                 })
                 .map(|rows| {
                     let mut map: std::collections::HashMap<String, f64> = Default::default();
-                    for r in rows.flatten() { *map.entry(r.0).or_default() += r.1; }
+                    for r in rows.flatten() {
+                        *map.entry(r.0).or_default() += r.1;
+                    }
                     map
                 })
                 .unwrap_or_default();
-            let max_w = weight_map.values().cloned().fold(0.0_f64, f64::max).max(1.0);
+            let max_w = weight_map
+                .values()
+                .cloned()
+                .fold(0.0_f64, f64::max)
+                .max(1.0);
             for sn in &mut scored {
-                let boost = weight_map.get(&sn.node.frontmatter.id).copied().unwrap_or(0.0);
+                let boost = weight_map
+                    .get(&sn.node.frontmatter.id)
+                    .copied()
+                    .unwrap_or(0.0);
                 sn.score += W_GRAPH * (boost / max_w);
             }
             // Re-sort after boost
-            scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            scored.sort_by(|a, b| {
+                b.score
+                    .partial_cmp(&a.score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
         }
     }
 
@@ -798,11 +854,7 @@ pub fn smart_recall_conn(
 ///
 /// Opens its own connection; for repeated calls within a single session prefer
 /// `smart_recall_conn` to reuse an already-open connection.
-pub fn smart_recall(
-    project: Option<&str>,
-    hint: Option<&str>,
-    limit: usize,
-) -> Vec<ScoredNode> {
+pub fn smart_recall(project: Option<&str>, hint: Option<&str>, limit: usize) -> Vec<ScoredNode> {
     let conn = match open_db() {
         Ok(c) => c,
         Err(_) => return vec![],
@@ -843,7 +895,7 @@ fn days_since_epoch(year: u64, month: u64, day: u64) -> u64 {
     // Count leap years before `year` minus leap years before 1970,
     // using the Julian Day Number leap-year rule.
     let y = year as i64 - 1; // complete years before this one
-    let base = 1969i64;      // complete years before 1970
+    let base = 1969i64; // complete years before 1970
     let leaps = (y / 4 - y / 100 + y / 400) - (base / 4 - base / 100 + base / 400);
     let days_from_years = (year as i64 - 1970) * 365 + leaps;
 
@@ -884,7 +936,6 @@ pub fn touch_nodes_conn(conn: &Connection, ids: &[String]) {
     let _ = conn.execute_batch("RELEASE touch_batch");
 }
 
-
 /// Gradually decay importance for nodes not accessed in `days`.
 /// Instead of binary stale tagging, reduces importance by `factor` (e.g., 0.9 = 10% decay).
 /// Nodes with importance already at or below `floor` are not decayed further.
@@ -903,14 +954,16 @@ pub fn decay_importance(days: u64, factor: f64, floor: f64) -> io::Result<u64> {
         let ss = secs % 60;
         format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
     };
-    let changed = conn.execute(
-        "UPDATE nodes SET importance = MAX(?3, importance * ?2)
+    let changed = conn
+        .execute(
+            "UPDATE nodes SET importance = MAX(?3, importance * ?2)
          WHERE (accessed_at < ?1 OR accessed_at = '')
            AND updated < ?1
            AND importance > ?3
            AND ',' || tags || ',' NOT LIKE '%,pinned,%'",
-        params![cutoff, factor, floor],
-    ).map_err(io::Error::other)?;
+            params![cutoff, factor, floor],
+        )
+        .map_err(io::Error::other)?;
     Ok(changed as u64)
 }
 
@@ -1114,7 +1167,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn make_node(id: &str, title: &str, node_type: &str, tags: &[&str], importance: Option<f64>) -> Node {
+    fn make_node(
+        id: &str,
+        title: &str,
+        node_type: &str,
+        tags: &[&str],
+        importance: Option<f64>,
+    ) -> Node {
         let ts = "2024-01-01T00:00:00Z".to_string();
         Node {
             frontmatter: NodeFrontmatter {
@@ -1263,7 +1322,8 @@ mod tests {
             CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
             CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
             CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);",
-        ).expect("schema");
+        )
+        .expect("schema");
         conn
     }
 
@@ -1277,7 +1337,7 @@ mod tests {
         let id_e = "eeeeeeee-0000-4000-8000-000000000001";
 
         let n1 = make_node(id_a, "Alpha Node", "concept", &[], Some(0.8));
-        let n2 = make_node(id_b, "Beta Node",  "concept", &[], Some(0.4));
+        let n2 = make_node(id_b, "Beta Node", "concept", &[], Some(0.4));
         write_node_conn(&conn, &n1).unwrap();
         write_node_conn(&conn, &n2).unwrap();
 
@@ -1292,12 +1352,19 @@ mod tests {
         append_edge_conn(&conn, &edge).unwrap();
 
         let results = smart_recall_conn(&conn, None, None, 10);
-        let ids: Vec<&str> = results.iter().map(|sn| sn.node.frontmatter.id.as_str()).collect();
+        let ids: Vec<&str> = results
+            .iter()
+            .map(|sn| sn.node.frontmatter.id.as_str())
+            .collect();
         assert!(ids.contains(&id_a), "boost-a must appear");
         assert!(ids.contains(&id_b), "boost-b must appear");
 
         for sn in &results {
-            assert!(sn.score > 0.0, "score must be positive: {}", sn.node.frontmatter.id);
+            assert!(
+                sn.score > 0.0,
+                "score must be positive: {}",
+                sn.node.frontmatter.id
+            );
         }
     }
 }

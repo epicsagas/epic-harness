@@ -12,7 +12,10 @@ use super::telemetry::Telemetry;
 /// Returns `false` when the file already exists (`AlreadyExists`) or on any
 /// other I/O error (safe fallback — treat as "already running").
 fn acquire_session_lock(lock: &Path) -> bool {
-    let hd = lock.parent().map(|p| p.to_path_buf()).unwrap_or_else(harness_dir);
+    let hd = lock
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(harness_dir);
     let _ = fs::create_dir_all(&hd);
     match fs::OpenOptions::new()
         .write(true)
@@ -211,7 +214,6 @@ pub fn run(_input: &HookInput) -> i32 {
                 harness_dir().display()
             ),
         );
-
     }
 
     // Seed the default org/team whenever orgs dir is empty (idempotent)
@@ -267,16 +269,26 @@ pub fn run(_input: &HookInput) -> i32 {
         {
             // Verify the pipeline file still physically exists before claiming recovery needed.
             let safe_id = super::common::normalize_pipeline_id(id);
-            let pipeline_file = super::common::orbit_dir().join(format!("PIPELINE-{}.json", safe_id));
+            let pipeline_file =
+                super::common::orbit_dir().join(format!("PIPELINE-{}.json", safe_id));
             if pipeline_file.exists() {
-                let phase = orbit.get("phase").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let mode = orbit.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown");
-                hint("resume", &format!(
-                    "ORBIT RECOVERY (snapshot): Pipeline {}, phase={}, mode={}",
-                    super::common::sanitize_orbit_field(id),
-                    super::common::sanitize_orbit_field(phase),
-                    super::common::sanitize_orbit_field(mode),
-                ));
+                let phase = orbit
+                    .get("phase")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let mode = orbit
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                hint(
+                    "resume",
+                    &format!(
+                        "ORBIT RECOVERY (snapshot): Pipeline {}, phase={}, mode={}",
+                        super::common::sanitize_orbit_field(id),
+                        super::common::sanitize_orbit_field(phase),
+                        super::common::sanitize_orbit_field(mode),
+                    ),
+                );
             }
         }
     }
@@ -286,12 +298,23 @@ pub fn run(_input: &HookInput) -> i32 {
     if let Some(ref state) = live_orbit_state {
         let sanitize = super::common::sanitize_orbit_field;
         if let Some(id) = state.get("id").and_then(|v| v.as_str()) {
-            let phase = state.get("phase").and_then(|v| v.as_str()).unwrap_or("unknown");
-            let mode = state.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown");
-            hint("orbit", &format!(
-                "Pipeline {} active: phase={}, mode={}",
-                sanitize(id), sanitize(phase), sanitize(mode)
-            ));
+            let phase = state
+                .get("phase")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let mode = state
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            hint(
+                "orbit",
+                &format!(
+                    "Pipeline {} active: phase={}, mode={}",
+                    sanitize(id),
+                    sanitize(phase),
+                    sanitize(mode)
+                ),
+            );
             if let Some(branch) = state.get("branch").and_then(|v| v.as_str())
                 && !branch.is_empty()
             {
@@ -437,10 +460,14 @@ pub fn run(_input: &HookInput) -> i32 {
     {
         let slug = project_slug();
         let scored = store::smart_recall(Some(&slug), None, 10);
-        let important: Vec<_> = scored.iter()
+        let important: Vec<_> = scored
+            .iter()
             .filter(|sn| {
                 let t = sn.node.frontmatter.node_type.as_str();
-                matches!(t, "decision" | "resolution" | "pattern" | "error" | "concept")
+                matches!(
+                    t,
+                    "decision" | "resolution" | "pattern" | "error" | "concept"
+                )
             })
             .take(7)
             .collect();
@@ -448,10 +475,13 @@ pub fn run(_input: &HookInput) -> i32 {
             hint("resume", "Knowledge graph — relevant memories:");
             for sn in &important {
                 let fm = &sn.node.frontmatter;
-                hint("resume", &format!(
-                    "  [{}] {} (importance={:.1}, score={:.2})",
-                    fm.node_type, fm.title, fm.importance, sn.score
-                ));
+                hint(
+                    "resume",
+                    &format!(
+                        "  [{}] {} (importance={:.1}, score={:.2})",
+                        fm.node_type, fm.title, fm.importance, sn.score
+                    ),
+                );
             }
         }
     }
@@ -460,13 +490,19 @@ pub fn run(_input: &HookInput) -> i32 {
     if let Ok(decayed) = store::decay_importance(30, 0.9, 0.05)
         && decayed > 0
     {
-        hint("resume", &format!("Memory decay: decayed importance for {decayed} node(s)"));
+        hint(
+            "resume",
+            &format!("Memory decay: decayed importance for {decayed} node(s)"),
+        );
     }
     // Also tag truly ancient nodes as stale (180+ days)
     if let Ok(staled) = store::tag_stale_nodes(180)
         && staled > 0
     {
-        hint("resume", &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"));
+        hint(
+            "resume",
+            &format!("Memory cleanup: tagged {staled} ancient node(s) as stale"),
+        );
     }
 
     // 6. Stack
@@ -486,15 +522,74 @@ pub fn run(_input: &HookInput) -> i32 {
         hint("resume", &h);
     }
 
-    // 9. Telemetry — session_started event (consent already ensured in main.rs)
+    // 9. Orchestration state restoration — inject active agent summary after
+    //    context compaction so orchestration state survives session restore.
+    if let Some(summary) = restore_orchestration_state(&harness_dir()) {
+        hint("resume", &summary);
+    }
+
+    // 10. Telemetry — session_started event (consent already ensured in main.rs)
     Telemetry::init().track_session_started();
 
     0
 }
 
+// ── Orchestration State Restoration ──────────────────
+
+/// Checks for an active orchestration run and builds a summary of all agent
+/// states. Returns `None` when orchestration is disabled, no run exists, or
+/// the run is not in "running" status. Must not fail on partially present
+/// state files.
+fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
+    let run_path = harness_dir.join("orchestrator").join("run.json");
+    if !run_path.exists() {
+        return None;
+    }
+
+    // Only activate when EPIC_ORCHESTRATION is enabled
+    if !is_orchestration_enabled() {
+        return None;
+    }
+
+    let run_json = std::fs::read_to_string(&run_path).ok()?;
+    let run: serde_json::Value = serde_json::from_str(&run_json).ok()?;
+
+    if run["status"].as_str()? != "running" {
+        return None;
+    }
+
+    // Build a summary of all agent states
+    let agents_dir = harness_dir.join("orchestrator").join("agents");
+    let mut agent_summaries = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+        for entry in entries.flatten() {
+            let status_path = entry.path().join("status.json");
+            if let Ok(status_json) = std::fs::read_to_string(&status_path)
+                && let Ok(status) = serde_json::from_str::<serde_json::Value>(&status_json)
+            {
+                agent_summaries.push(format!(
+                    "- {}: {} (started: {})",
+                    entry.file_name().to_string_lossy(),
+                    status["status"].as_str().unwrap_or("unknown"),
+                    status["started_at"].as_str().unwrap_or("n/a")
+                ));
+            }
+        }
+    }
+
+    let run_id = run["id"].as_str().unwrap_or("unknown");
+    Some(format!(
+        "## Orchestration State Restored\nRun ID: {}\nStatus: running\nAgents:\n{}",
+        run_id,
+        agent_summaries.join("\n")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::path::PathBuf;
 
     /// Helper: return a unique lock path inside a temp dir for this test.
@@ -506,7 +601,10 @@ mod tests {
     fn acquire_session_lock_first_call_succeeds() {
         let dir = tempfile::tempdir().expect("tempdir");
         let lock = temp_lock(dir.path(), "session_first");
-        assert!(acquire_session_lock(&lock), "first acquire must return true");
+        assert!(
+            acquire_session_lock(&lock),
+            "first acquire must return true"
+        );
         assert!(lock.exists(), "lock file must be created");
     }
 
@@ -521,6 +619,158 @@ mod tests {
         assert!(
             !acquire_session_lock(&lock),
             "second acquire on same lock must return false"
+        );
+    }
+
+    // ── restore_orchestration_state ──────────────────
+
+    #[test]
+    fn orchestration_returns_none_when_no_orchestrator_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert_eq!(
+            restore_orchestration_state(dir.path()),
+            None,
+            "must return None when orchestrator dir does not exist"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn orchestration_returns_none_when_env_not_set() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let orch_dir = dir.path().join("orchestrator");
+        fs::create_dir_all(&orch_dir).expect("create orchestrator dir");
+        fs::write(
+            orch_dir.join("run.json"),
+            r#"{"id":"run-1","status":"running"}"#,
+        )
+        .expect("write run.json");
+
+        // Ensure env is not set
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+        assert_eq!(
+            restore_orchestration_state(dir.path()),
+            None,
+            "must return None when EPIC_ORCHESTRATION is not set"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn orchestration_returns_none_when_status_not_running() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let orch_dir = dir.path().join("orchestrator");
+        fs::create_dir_all(&orch_dir).expect("create orchestrator dir");
+        fs::write(
+            orch_dir.join("run.json"),
+            r#"{"id":"run-2","status":"completed"}"#,
+        )
+        .expect("write run.json");
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = restore_orchestration_state(dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        assert_eq!(
+            result, None,
+            "must return None when run status is not running"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn orchestration_returns_summary_when_active() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let orch_dir = dir.path().join("orchestrator");
+        let agents_dir = orch_dir.join("agents");
+        let builder_dir = agents_dir.join("builder");
+        let reviewer_dir = agents_dir.join("reviewer");
+        fs::create_dir_all(&builder_dir).expect("create builder dir");
+        fs::create_dir_all(&reviewer_dir).expect("create reviewer dir");
+
+        fs::write(
+            orch_dir.join("run.json"),
+            r#"{"id":"run-42","status":"running"}"#,
+        )
+        .expect("write run.json");
+
+        fs::write(
+            builder_dir.join("status.json"),
+            r#"{"status":"idle","started_at":"2026-05-07T10:00:00Z"}"#,
+        )
+        .expect("write builder status");
+        fs::write(
+            reviewer_dir.join("status.json"),
+            r#"{"status":"working","started_at":"2026-05-07T10:01:00Z"}"#,
+        )
+        .expect("write reviewer status");
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = restore_orchestration_state(dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        let summary = result.expect("must return Some when active orchestration exists");
+        assert!(
+            summary.contains("run-42"),
+            "summary must contain run ID: {summary}"
+        );
+        assert!(
+            summary.contains("Status: running"),
+            "summary must contain status: {summary}"
+        );
+        assert!(
+            summary.contains("builder: idle"),
+            "summary must contain builder agent: {summary}"
+        );
+        assert!(
+            summary.contains("reviewer: working"),
+            "summary must contain reviewer agent: {summary}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn orchestration_handles_missing_agent_status_gracefully() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let orch_dir = dir.path().join("orchestrator");
+        let agents_dir = orch_dir.join("agents");
+        // Create agent dir without status.json
+        let builder_dir = agents_dir.join("builder");
+        fs::create_dir_all(&builder_dir).expect("create builder dir");
+
+        fs::write(
+            orch_dir.join("run.json"),
+            r#"{"id":"run-99","status":"running"}"#,
+        )
+        .expect("write run.json");
+
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        let result = restore_orchestration_state(dir.path());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+
+        let summary = result.expect("must return Some even with missing agent status files");
+        assert!(
+            summary.contains("run-99"),
+            "summary must contain run ID: {summary}"
+        );
+        // No agent lines should be present since builder has no status.json
+        assert!(
+            !summary.contains("builder:"),
+            "summary must not list builder when its status.json is missing: {summary}"
         );
     }
 }

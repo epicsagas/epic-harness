@@ -37,6 +37,13 @@ fn main() {
         let code = hooks::team::run_org(&args[1..]);
         std::process::exit(code);
     }
+    if subcmd == "serve" {
+        let port = args
+            .get(2)
+            .and_then(|a| a.strip_prefix("--port="))
+            .and_then(|p| p.parse::<u16>().ok());
+        std::process::exit(hooks::serve::run_serve(port));
+    }
 
     // Read stdin once, pass to hook subcommands (skip if TTY — no EOF would arrive)
     let mut stdin_buf = String::new();
@@ -57,7 +64,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" => unreachable!(),
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" => unreachable!(),
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0
@@ -71,7 +78,10 @@ fn main() {
             if is_unknown {
                 eprintln!("error: unknown subcommand '{subcmd}'\n");
             }
-            eprintln!("epic-harness {} — Self-evolving agent harness for Claude Code\n", env!("CARGO_PKG_VERSION"));
+            eprintln!(
+                "epic-harness {} — Self-evolving agent harness for Claude Code\n",
+                env!("CARGO_PKG_VERSION")
+            );
             eprintln!("USAGE:");
             eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
             eprintln!("HOOK SUBCOMMANDS (invoked automatically by Claude Code hooks):");
@@ -85,6 +95,9 @@ fn main() {
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
+            eprintln!(
+                "  serve        Start orchestration dashboard web server (default port: 7700)"
+            );
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");
             eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
