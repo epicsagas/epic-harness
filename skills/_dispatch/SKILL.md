@@ -24,6 +24,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | Context window > 70% used | **context** |
 | User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
 | User shares code for review, mentions code smells, or asks to refactor/analyze | **syntagma** → `analyze_code` + `suggest_refactorings` → feed results into `/orbit` Direct |
+| User invokes `/reflect`, asks "AI를 잘 쓰고 있나", "사고 증폭기로 쓰고 있나", or requests AI usage self-reflection | **reflect** |
 | Session start (project has harness-mem psychographic node) | Call `mem_query` type=psychographic → apply 5-dimension profile to all subsequent skill dispatch |
 | Orchestration run active (`$HARNESS_DIR/orchestrator/run.json` exists with status "running") | **orchestrate** |
 | Agent tool output received with inter-agent message | **orchestrate** |

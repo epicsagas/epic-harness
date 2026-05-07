@@ -179,6 +179,7 @@ Skills trigger automatically based on context. You don't invoke them.
 | **context** | Context window > 70% |
 | **council** | Ambiguous architectural or design decisions |
 | **agent-introspection** | 3+ consecutive failures or circular retry pattern |
+| **reflect** | On-demand: are you using AI as a thought amplifier? Cold evidence-based self-assessment |
 
 ---
 

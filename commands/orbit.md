@@ -76,7 +76,6 @@ At the start of every step (Step 3 through Step 7):
 1. Read `deadline` from pipeline state
 2. If `now > deadline`: set `"status": "timeout"`, report to user, **STOP**
 3. Default deadline is 30 minutes from `started_at`. User may override by editing the field.
-
 **Orchestration setup (if EPIC_ORCHESTRATION enabled):**
 If `EPIC_ORCHESTRATION=enabled`:
 1. Generate an `orchestration_id` (same as pipeline id)

@@ -1562,7 +1562,8 @@ pub fn run(args: &[String]) -> i32 {
 
     // First positional arg that isn't a flag or --target value
     let tool_arg = {
-        let target_next = args.iter().position(|a| a == "--target").map(|i| i + 1);
+        let target_next = args.iter().position(|a| a == "--target")
+            .map(|i| i + 1);
         args.iter()
             .enumerate()
             .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
@@ -1779,7 +1780,8 @@ pub fn run_uninstall(args: &[String]) -> i32 {
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
     let tool_arg = {
-        let target_next = args.iter().position(|a| a == "--target").map(|i| i + 1);
+        let target_next = args.iter().position(|a| a == "--target")
+            .map(|i| i + 1);
         args.iter()
             .enumerate()
             .find(|(i, a)| !a.starts_with("--") && Some(*i) != target_next)
