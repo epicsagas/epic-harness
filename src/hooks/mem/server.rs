@@ -30,6 +30,11 @@ const VALID_NODE_TYPES: &[&str] = &[
 ];
 
 const MAX_BODY_CHARS: usize = 65_536;
+const MAX_TITLE_CHARS: usize = 512;
+const MAX_ARRAY_ITEMS: usize = 50;
+const MAX_RELATION_CHARS: usize = 64;
+const WEIGHT_MIN: f64 = 0.0;
+const WEIGHT_MAX: f64 = 100.0;
 
 fn cors_headers(port: u16) -> Vec<Header> {
     let origin = format!("http://localhost:{port}");
@@ -368,6 +373,7 @@ fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String
         .as_array()
         .map(|a| {
             a.iter()
+                .take(MAX_ARRAY_ITEMS)
                 .filter_map(|x| x.as_str().map(|s| s.to_string()))
                 .collect()
         })
@@ -376,6 +382,7 @@ fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String
         .as_array()
         .map(|a| {
             a.iter()
+                .take(MAX_ARRAY_ITEMS)
                 .filter_map(|x| x.as_str().map(|s| s.to_string()))
                 .collect()
         })
@@ -384,6 +391,7 @@ fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String
         .as_array()
         .map(|a| {
             a.iter()
+                .take(MAX_ARRAY_ITEMS)
                 .filter_map(|x| x.as_str().map(|s| s.to_string()))
                 .collect()
         })
@@ -401,7 +409,12 @@ fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String
         frontmatter: NodeFrontmatter {
             id: id.clone(),
             node_type,
-            title: v["title"].as_str().unwrap_or("Untitled").to_string(),
+            title: v["title"]
+                .as_str()
+                .unwrap_or("Untitled")
+                .chars()
+                .take(MAX_TITLE_CHARS)
+                .collect(),
             tags,
             projects,
             agents,
@@ -429,7 +442,7 @@ fn handle_put_node_conn(id: &str, body: &str, conn: &Connection) -> Result<(), S
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
 
     if let Some(t) = v["title"].as_str() {
-        node.frontmatter.title = t.to_string();
+        node.frontmatter.title = t.chars().take(MAX_TITLE_CHARS).collect();
     }
     if let Some(t) = v["type"].as_str() {
         if !VALID_NODE_TYPES.contains(&t) {
@@ -443,6 +456,7 @@ fn handle_put_node_conn(id: &str, body: &str, conn: &Connection) -> Result<(), S
     if let Some(tags) = v["tags"].as_array() {
         node.frontmatter.tags = tags
             .iter()
+            .take(MAX_ARRAY_ITEMS)
             .filter_map(|x| x.as_str().map(|s| s.to_string()))
             .collect();
     }
@@ -455,24 +469,47 @@ fn handle_put_node_conn(id: &str, body: &str, conn: &Connection) -> Result<(), S
     Ok(())
 }
 
-fn handle_post_edge(body: &str) -> Result<String, String> {
+fn parse_edge_payload(body: &str) -> Result<Edge, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let source = v["source"].as_str().unwrap_or("").to_string();
     let target = v["target"].as_str().unwrap_or("").to_string();
     if !validate_node_id(&source) || !validate_node_id(&target) {
         return Err("invalid source or target node id".to_string());
     }
-    let edge_id = uuid::Uuid::new_v4().to_string();
-    let edge = Edge {
-        id: edge_id.clone(),
+    let relation: String = v["relation"]
+        .as_str()
+        .unwrap_or("related")
+        .chars()
+        .take(MAX_RELATION_CHARS)
+        .collect();
+    let weight = v["weight"]
+        .as_f64()
+        .unwrap_or(1.0)
+        .clamp(WEIGHT_MIN, WEIGHT_MAX);
+    Ok(Edge {
+        id: uuid::Uuid::new_v4().to_string(),
         source,
         target,
-        relation: v["relation"].as_str().unwrap_or("related").to_string(),
-        weight: v["weight"].as_f64().unwrap_or(1.0),
+        relation,
+        weight,
         ts: now_iso(),
-    };
+    })
+}
+
+fn handle_post_edge(body: &str) -> Result<String, String> {
+    let edge = parse_edge_payload(body)?;
+    let id = edge.id.clone();
     append_edge(&edge).map_err(|e| e.to_string())?;
-    Ok(edge_id)
+    Ok(id)
+}
+
+#[cfg(test)]
+fn handle_post_edge_conn(body: &str, conn: &Connection) -> Result<String, String> {
+    use super::store::append_edge_conn;
+    let edge = parse_edge_payload(body)?;
+    let id = edge.id.clone();
+    append_edge_conn(conn, &edge).map_err(|e| e.to_string())?;
+    Ok(id)
 }
 
 /// Search using a shared connection (avoids per-request open_db).
@@ -766,6 +803,143 @@ mod tests {
             MAX_BODY_CHARS,
             "body must be capped at MAX_BODY_CHARS after PUT"
         );
+    }
+
+    #[test]
+    fn post_node_caps_title_at_max_chars() {
+        use super::super::store::{init_schema, read_node_conn};
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let long_title: String = "t".repeat(MAX_TITLE_CHARS + 50);
+        let body = format!(
+            r#"{{"type":"concept","title":{},"body":"hello"}}"#,
+            serde_json::to_string(&long_title).unwrap()
+        );
+        let id = handle_post_node_conn(&body, &conn).expect("should create node");
+        let node = read_node_conn(&conn, &id).expect("node should exist");
+        assert_eq!(
+            node.frontmatter.title.chars().count(),
+            MAX_TITLE_CHARS,
+            "title must be capped at MAX_TITLE_CHARS"
+        );
+    }
+
+    #[test]
+    fn post_node_caps_tags_array_at_max_items() {
+        use super::super::store::{init_schema, read_node_conn};
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let tags: Vec<String> = (0..(MAX_ARRAY_ITEMS + 10))
+            .map(|i| format!("tag{i}"))
+            .collect();
+        let body = format!(
+            r#"{{"type":"concept","title":"T","body":"b","tags":{}}}"#,
+            serde_json::to_string(&tags).unwrap()
+        );
+        let id = handle_post_node_conn(&body, &conn).expect("should create node");
+        let node = read_node_conn(&conn, &id).expect("node should exist");
+        assert!(
+            node.frontmatter.tags.len() <= MAX_ARRAY_ITEMS,
+            "tags array must be capped at MAX_ARRAY_ITEMS, got {}",
+            node.frontmatter.tags.len()
+        );
+    }
+
+    #[test]
+    fn post_edge_caps_relation_at_max_chars() {
+        use super::super::store::{
+            Node, NodeFrontmatter, init_schema, read_edges_conn, write_node_conn,
+        };
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let id1 = "a1b2c3d4-e5f6-4a7b-8c9d-e0f1a2b3c4d5";
+        let id2 = "b2c3d4e5-f6a7-4b8c-9d0e-f1a2b3c4d5e6";
+        for (id, title) in [(id1, "Node1"), (id2, "Node2")] {
+            let node = Node {
+                frontmatter: NodeFrontmatter {
+                    id: id.to_string(),
+                    node_type: "concept".to_string(),
+                    title: title.to_string(),
+                    tags: vec![],
+                    projects: vec![],
+                    agents: vec![],
+                    created: "2026-01-01T00:00:00Z".to_string(),
+                    updated: "2026-01-01T00:00:00Z".to_string(),
+                    importance: 0.5,
+                    access_count: 0,
+                    accessed_at: String::new(),
+                },
+                body: "b".to_string(),
+            };
+            write_node_conn(&conn, &node).expect("write node");
+        }
+        let long_rel: String = "r".repeat(MAX_RELATION_CHARS + 20);
+        let body = format!(
+            r#"{{"source":"{id1}","target":"{id2}","relation":{},"weight":1.0}}"#,
+            serde_json::to_string(&long_rel).unwrap()
+        );
+        handle_post_edge_conn(&body, &conn).expect("should create edge");
+        let edges = read_edges_conn(&conn);
+        assert_eq!(edges.len(), 1);
+        assert!(
+            edges[0].relation.chars().count() <= MAX_RELATION_CHARS,
+            "relation must be capped at MAX_RELATION_CHARS, got {}",
+            edges[0].relation.chars().count()
+        );
+    }
+
+    #[test]
+    fn post_edge_clamps_weight_to_valid_range() {
+        use super::super::store::{
+            Node, NodeFrontmatter, init_schema, read_edges_conn, write_node_conn,
+        };
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let a1 = "a1b2c3d4-e5f6-4a7b-8c9d-000000000001";
+        let a2 = "a1b2c3d4-e5f6-4a7b-8c9d-000000000002";
+        let b1 = "a1b2c3d4-e5f6-4a7b-8c9d-000000000003";
+        let b2 = "a1b2c3d4-e5f6-4a7b-8c9d-000000000004";
+        for (id, title) in [(a1, "A1"), (a2, "A2"), (b1, "B1"), (b2, "B2")] {
+            let node = Node {
+                frontmatter: NodeFrontmatter {
+                    id: id.to_string(),
+                    node_type: "concept".to_string(),
+                    title: title.to_string(),
+                    tags: vec![],
+                    projects: vec![],
+                    agents: vec![],
+                    created: "2026-01-01T00:00:00Z".to_string(),
+                    updated: "2026-01-01T00:00:00Z".to_string(),
+                    importance: 0.5,
+                    access_count: 0,
+                    accessed_at: String::new(),
+                },
+                body: "b".to_string(),
+            };
+            write_node_conn(&conn, &node).expect("write node");
+        }
+        // Weight below minimum → clamped to WEIGHT_MIN
+        handle_post_edge_conn(
+            &format!(r#"{{"source":"{a1}","target":"{a2}","relation":"r","weight":-5.0}}"#),
+            &conn,
+        )
+        .expect("should clamp negative weight");
+        // Weight above maximum → clamped to WEIGHT_MAX
+        handle_post_edge_conn(
+            &format!(r#"{{"source":"{b1}","target":"{b2}","relation":"r","weight":999.0}}"#),
+            &conn,
+        )
+        .expect("should clamp oversized weight");
+
+        let edges = read_edges_conn(&conn);
+        assert_eq!(edges.len(), 2);
+        for e in &edges {
+            assert!(
+                e.weight >= WEIGHT_MIN && e.weight <= WEIGHT_MAX,
+                "weight {} must be in [{WEIGHT_MIN}, {WEIGHT_MAX}]",
+                e.weight
+            );
+        }
     }
 
     #[test]
