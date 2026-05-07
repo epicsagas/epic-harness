@@ -86,9 +86,16 @@ function renderTable(run) {
   const tbody = document.getElementById('agent-rows');
   tbody.innerHTML = '';
   if (!run || !run.agents) return;
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   run.agents.forEach(a => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${a.id}</td><td>${a.role}</td><td style="color:${statusColor[a.status]||'#aaa'}">${a.status}</td><td>${a.started_at||'—'}</td>`;
+    const color = statusColor[a.status] || '#aaa';
+    ['id','role','status','started_at'].forEach((key, i) => {
+      const td = document.createElement('td');
+      if (i === 2) td.style.color = color;
+      td.textContent = a[key] || '—';
+      tr.appendChild(td);
+    });
     tbody.appendChild(tr);
   });
 }

@@ -13,7 +13,7 @@ static DASHBOARD_HTML: &str = include_str!("../../assets/dashboard.html");
 
 pub fn run_serve(port: Option<u16>) -> i32 {
     let port = port.unwrap_or(DEFAULT_PORT);
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("127.0.0.1:{port}");
     let server = match Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {

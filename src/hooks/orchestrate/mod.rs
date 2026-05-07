@@ -233,7 +233,9 @@ fn extract_agent_id(input: &HookInput) -> Option<String> {
     }
     // 1순위: EPIC_AGENT_ID env var
     if let Ok(id) = std::env::var("EPIC_AGENT_ID")
-        && !id.is_empty() {
+        && !id.is_empty()
+        && orch_state::validate_agent_id(&id)
+    {
         return Some(id);
     }
     // 2순위: tool_input의 explicit agent_id
@@ -242,6 +244,7 @@ fn extract_agent_id(input: &HookInput) -> Option<String> {
         .as_ref()
         .and_then(|v| v.get("agent_id"))
         .and_then(|v| v.as_str())
+        .filter(|id| orch_state::validate_agent_id(id))
         .map(String::from)
     {
         return Some(id);
