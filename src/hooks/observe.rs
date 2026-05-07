@@ -258,6 +258,7 @@ pub fn run(input: &HookInput) -> i32 {
         error_snippet: None,
         file_ext,
         sequence_id: Some(seq_id),
+        pipeline_id: detect_active_orbit_id(),
     };
 
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)

@@ -228,6 +228,12 @@ pub fn run(_input: &HookInput) -> i32 {
     // 1. Latest session snapshot
     let mut snaps = list_files(&sessions_dir(), ".json");
     snaps.sort();
+
+    // Perform a single directory scan for the active orbit state.
+    // The result is shared between the snapshot fallback block (1a) and the
+    // live hint block (1b) so that `read_active_orbit_state()` is called exactly once.
+    let live_orbit_state = super::common::read_active_orbit_state();
+
     if let Some(latest_name) = snaps.last() {
         let snap: SessionSnapshot = read_json(
             &sessions_dir().join(latest_name),
@@ -237,6 +243,7 @@ pub fn run(_input: &HookInput) -> i32 {
                 summary: String::new(),
                 pending_tasks: vec![],
                 context_usage: None,
+                pipeline_state: None,
             },
         );
         if !snap.summary.is_empty() {
@@ -247,6 +254,46 @@ pub fn run(_input: &HookInput) -> i32 {
                 "resume",
                 &format!("Pending: {}", snap.pending_tasks.join(", ")),
             );
+        }
+        // 1a. Snapshot-based orbit recovery.
+        // Only emit when there is no live pipeline file — the live check (1b) is authoritative
+        // and its hint is suppressed here to avoid showing two conflicting orbit messages.
+        if live_orbit_state.is_none()
+            && let Some(ref orbit) = snap.pipeline_state
+            && orbit.get("status").and_then(|v| v.as_str()) == Some("running")
+            && let Some(id) = orbit.get("id").and_then(|v| v.as_str())
+        {
+            hint("resume", &format!(
+                "ORBIT RECOVERY (snapshot): Pipeline {}",
+                super::common::sanitize_orbit_field(id)
+            ));
+        }
+    }
+
+    // 1b. Detect active orbit (live check, authoritative).
+    // Reuses the result from the single scan above — no second directory scan.
+    if let Some(ref state) = live_orbit_state {
+        let sanitize = super::common::sanitize_orbit_field;
+        if let Some(id) = state.get("id").and_then(|v| v.as_str()) {
+            let phase = state.get("phase").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let mode = state.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown");
+            hint("orbit", &format!(
+                "Pipeline {} active: phase={}, mode={}",
+                sanitize(id), sanitize(phase), sanitize(mode)
+            ));
+            if let Some(branch) = state.get("branch").and_then(|v| v.as_str())
+                && !branch.is_empty()
+            {
+                hint("orbit", &format!("Branch: {}", sanitize(branch)));
+            }
+            if let Some(spec) = state.get("spec_file").and_then(|v| v.as_str())
+                && !spec.is_empty()
+            {
+                hint("orbit", &format!("Spec: {}", sanitize(spec)));
+            }
+            if let Some(deadline) = state.get("deadline").and_then(|v| v.as_str()) {
+                hint("orbit", &format!("Deadline: {}", sanitize(deadline)));
+            }
         }
     }
 

@@ -1643,6 +1643,7 @@ mod tests {
             },
             file_ext: Some(".ts".into()),
             sequence_id: Some(1),
+            pipeline_id: None,
         }
     }
 

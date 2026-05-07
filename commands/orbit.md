@@ -6,12 +6,39 @@ description: "Autonomous pipeline: spec → go → check → ship → evolve in 
 
 Full autonomous pipeline: spec → go → check → ship → evolve in one shot.
 
+## Phase Recovery Protocol
+
+At the start of **every response** during an active orbit:
+
+1. Run `ls $HARNESS_DIR/orbit/PIPELINE-*.json 2>/dev/null`
+2. Find the file with `"status": "running"`
+3. Read it. Verify `phase` matches where you left off
+4. **If `phase` is ahead of where you think you are, trust the file** — you may have compacted
+5. Resume from the documented `phase`. Do NOT re-ask mode selection, re-run spec, or re-discover
+
+If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
+
+**Crash recovery**: If `updated_at` is older than 30 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history`, and resume from there. Report the recovery to the user.
+
+---
+
 ## Step 0: Preflight
 
 ```bash
 HARNESS_DIR=$(epic-harness path)
 mkdir -p $HARNESS_DIR/orbit
 ```
+
+### Concurrent Orbit Guard
+
+Before creating `PIPELINE-{timestamp}.json`:
+
+1. Check: `grep -l '"status".*"running"' $HARNESS_DIR/orbit/PIPELINE-*.json 2>/dev/null`
+2. If a match is found: **STOP**. Tell the user:
+   > "An orbit pipeline is already active (PIPELINE-{id}, phase={phase}). Say **orbit abort** to cancel it, or wait for it to complete."
+3. Do NOT create a new pipeline file.
+
+### Create Pipeline State
 
 Create `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 ```json
@@ -26,13 +53,21 @@ Create `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
   "check_fail_count": 0,
   "max_retries": 3,
   "check_report": null,
+  "deadline": "{ISO-8601, now + 30 minutes}",
   "started_at": "{ISO-8601}",
   "updated_at": "{ISO-8601}",
   "phase_history": []
 }
 ```
 
-Update after every phase transition — this is the checkpoint if context is compacted.
+Update `updated_at` after every phase transition — this is the checkpoint if context is compacted.
+
+### Deadline Enforcement
+
+At the start of every step (Step 3 through Step 7):
+1. Read `deadline` from pipeline state
+2. If `now > deadline`: set `"status": "timeout"`, report to user, **STOP**
+3. Default deadline is 30 minutes from `started_at`. User may override by editing the field.
 
 ---
 
@@ -130,7 +165,23 @@ Write `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`. Show as 
 Update state: `"phase": "go"`.
 
 1. Load spec: `ls -t $HARNESS_DIR/specs/SPEC-*.md | head -1` — extract `goal_slug`, R1…, AC1…
-2. Create branch: `git checkout -b feature/{goal_slug}`
+
+### Git Preflight
+
+Before creating a branch, verify git state:
+
+```bash
+# Clean working tree?
+git diff --quiet HEAD || (echo "ERROR: Dirty working tree. Commit or stash changes first." && exit 1)
+# Not on detached HEAD?
+git symbolic-ref -q HEAD || (echo "ERROR: Detached HEAD. Checkout a branch first." && exit 1)
+# Branch doesn't already exist?
+git show-ref --quiet refs/heads/feature/{goal_slug} && echo "WARN: Branch already exists, reusing" || true
+```
+
+Sanitize `goal_slug`: only `a-z`, `0-9`, `-`. Replace invalid characters with `-`.
+
+2. Create branch: `git checkout -b feature/{goal_slug}` (reuse if exists)
 3. Plan tasks — map each Requirement:
    ```
    Task 1: [desc] — satisfies: R1 — depends on: none    — modifies: [files]
@@ -206,7 +257,7 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 1. [blocker or warning]
 ```
 
-**Store full check report text in `check_report` field of pipeline state** — must survive context compaction for Ship phase.
+**Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`** — this is a separate file, not embedded in JSON. Set `"check_report": "$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md"` in pipeline state. This ensures the report survives context compaction.
 
 → **Step 5**.
 
@@ -238,7 +289,7 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 
 Update state: `"phase": "ship"`.
 
-**Gate:** check report must exist and show PASS/WARN. Missing → STOP.
+**Gate:** Read check report from `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`. If file does not exist → STOP. Report must show PASS/WARN.
 
 **6a. Isolated integration test** — launch agent with `isolation: "worktree"`:
 - Full build from scratch · complete test suite · linter + formatter
@@ -267,7 +318,7 @@ gh pr create --title "<goal from spec>" --body "$(cat <<'EOF'
 - AC1: ✅  AC2: ✅
 
 ## Check Report
-<full check report>
+<content of $HARNESS_DIR/orbit/CHECK-{pipeline_id}.md>
 
 ## Test Plan
 - [ ] Unit tests pass
@@ -350,3 +401,7 @@ Push `{"phase": "evolve", "status": "complete"}` to `phase_history`.
 - Shipping with FAIL on any security check item
 - Losing `check_report` between phases
 - Creating PR without full check report in body
+- Starting a second orbit while one is already running
+- Ignoring the Phase Recovery Protocol after context compaction
+- Proceeding past deadline without user consent
+- Creating a branch with unsanitized goal_slug or dirty working tree
