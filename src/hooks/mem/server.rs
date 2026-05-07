@@ -1,56 +1,58 @@
 //! server.rs — tiny_http based REST API server
 
+use std::cell::RefCell;
 use std::io::{Cursor, Read as _};
+use std::rc::Rc;
 
+use rusqlite::Connection;
 use tiny_http::{Header, Method, Response, Server};
 
-use super::graph::rebuild_graph_json;
+use super::graph::{compute_stats, rebuild_graph_json};
 use super::store::{
-    Edge, Node, NodeFrontmatter, append_edge, delete_edge_by_id, delete_node_file,
-    importance_for_type, now_iso, read_index, read_node, remove_edges_for_node, remove_from_index,
-    search_nodes, upsert_index, validate_node_id, write_node,
+    append_edge, delete_edge_by_id, delete_node_file, importance_for_type, now_iso, open_db,
+    read_index, read_node_conn, remove_edges_for_node, remove_from_index,
+    search_nodes_conn, validate_node_id, write_node_conn, Edge, Node, NodeFrontmatter,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
+const D3_JS: &str = include_str!("d3.min.js");
 
-fn cors_headers() -> Vec<Header> {
+fn cors_headers(port: u16) -> Vec<Header> {
+    let origin = format!("http://localhost:{port}");
     vec![
-        Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
-        Header::from_bytes(
-            b"Access-Control-Allow-Methods",
-            b"GET, POST, PUT, DELETE, OPTIONS",
-        )
-        .unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Origin", origin.as_bytes()).unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, PUT, DELETE, OPTIONS").unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
         Header::from_bytes(b"Content-Type", b"application/json").unwrap(),
     ]
 }
 
-fn html_headers() -> Vec<Header> {
+fn html_headers(port: u16) -> Vec<Header> {
+    let origin = format!("http://localhost:{port}");
     vec![
-        Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap(),
+        Header::from_bytes(b"Access-Control-Allow-Origin", origin.as_bytes()).unwrap(),
         Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
     ]
 }
 
-fn json_response(body: &str, code: u16) -> Response<Cursor<Vec<u8>>> {
+fn json_response(body: &str, code: u16, port: u16) -> Response<Cursor<Vec<u8>>> {
     let data = body.as_bytes().to_vec();
     let len = data.len();
     Response::new(
         tiny_http::StatusCode(code),
-        cors_headers(),
+        cors_headers(port),
         Cursor::new(data),
         Some(len),
         None,
     )
 }
 
-fn html_response(body: &str) -> Response<Cursor<Vec<u8>>> {
+fn html_response(body: &str, port: u16) -> Response<Cursor<Vec<u8>>> {
     let data = body.as_bytes().to_vec();
     let len = data.len();
     Response::new(
         tiny_http::StatusCode(200),
-        html_headers(),
+        html_headers(port),
         Cursor::new(data),
         Some(len),
         None,
@@ -65,6 +67,17 @@ pub fn serve(args: &[String]) -> i32 {
         .unwrap_or(7700);
 
     let addr = format!("127.0.0.1:{port}");
+
+    // Open a single long-lived DB connection for the entire server lifetime.
+    let conn = match open_db() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to open memory DB: {e}");
+            return 1;
+        }
+    };
+    let conn = Rc::new(RefCell::new(conn));
+
     let server = match Server::http(&addr) {
         Ok(s) => s,
         Err(e) => {
@@ -81,31 +94,82 @@ pub fn serve(args: &[String]) -> i32 {
 
         let response: Box<dyn Fn() -> Response<Cursor<Vec<u8>>>> = match (method, url.as_str()) {
             // ── GET / ────────────────────────────────────────
-            (Method::Get, "/") => Box::new(|| html_response(WEBVIEW_HTML)),
+            (Method::Get, "/") => {
+                let p = port;
+                Box::new(move || html_response(WEBVIEW_HTML, p))
+            }
+
+            // ── GET /d3.js ───────────────────────────────────
+            (Method::Get, "/d3.js") => {
+                Box::new(move || {
+                    let data = D3_JS.as_bytes().to_vec();
+                    Response::new(
+                        tiny_http::StatusCode(200),
+                        vec![
+                            Header::from_bytes(b"Content-Type", b"application/javascript; charset=utf-8").unwrap(),
+                            Header::from_bytes(b"Cache-Control", b"public, max-age=86400").unwrap(),
+                        ],
+                        Cursor::new(data),
+                        Some(D3_JS.len()),
+                        None,
+                    )
+                })
+            }
+
+            // ── GET /api/stats ───────────────────────────────
+            (Method::Get, "/api/stats") => {
+                let body = compute_stats()
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|_| "{\"error\":\"stats unavailable\"}".to_string());
+                let p = port;
+                Box::new(move || json_response(&body, 200, p))
+            }
 
             // ── GET /api/graph ────────────────────────────────
             (Method::Get, "/api/graph") => {
                 let body = rebuild_graph_json().unwrap_or_else(|_| "{}".to_string());
-                Box::new(move || json_response(&body, 200))
+                let p = port;
+                Box::new(move || json_response(&body, 200, p))
+            }
+
+            // ── GET /api/graph/centrality ────────────────────
+            _ if url.starts_with("/api/graph/centrality") && matches!(request.method(), Method::Get) => {
+                let limit: usize = url
+                    .split('?')
+                    .nth(1)
+                    .and_then(|qs| {
+                        qs.split('&').find_map(|p| {
+                            p.strip_prefix("limit=").and_then(|v| v.parse().ok())
+                        })
+                    })
+                    .unwrap_or(20);
+                let db = Rc::clone(&conn);
+                let centrality = compute_centrality(&db.borrow(), limit);
+                let body = serde_json::to_string(&centrality).unwrap_or_default();
+                let p = port;
+                Box::new(move || json_response(&body, 200, p))
             }
 
             // ── GET /api/nodes ────────────────────────────────
             (Method::Get, "/api/nodes") => {
                 let idx = read_index();
                 let body = serde_json::to_string(&idx.nodes).unwrap_or_default();
-                Box::new(move || json_response(&body, 200))
+                let p = port;
+                Box::new(move || json_response(&body, 200, p))
             }
 
             // ── POST /api/nodes ───────────────────────────────
             (Method::Post, "/api/nodes") => {
                 let mut body = String::new();
                 let _ = request.as_reader().take(1 << 20).read_to_string(&mut body);
-                let result = handle_post_node(&body);
+                let db = Rc::clone(&conn);
+                let result = handle_post_node_conn(&body, &db.borrow());
                 let (resp_body, code) = match result {
                     Ok(id) => (format!("{{\"id\":\"{id}\"}}"), 201u16),
                     Err(e) => (format!("{{\"error\":\"{e}\"}}"), 400),
                 };
-                Box::new(move || json_response(&resp_body, code))
+                let p = port;
+                Box::new(move || json_response(&resp_body, code, p))
             }
 
             // ── DELETE /api/edges/:id ─────────────────────────
@@ -118,14 +182,16 @@ pub fn serve(args: &[String]) -> i32 {
                     .to_string();
                 if !validate_node_id(&edge_id) {
                     let body = "{\"error\":\"invalid edge id\"}".to_string();
-                    Box::new(move || json_response(&body, 400))
+                    let p = port;
+                    Box::new(move || json_response(&body, 400, p))
                 } else {
                     let result = delete_edge_by_id(&edge_id);
                     let (body, code) = match result {
                         Ok(_) => (format!("{{\"deleted\":\"{edge_id}\"}}"), 200u16),
                         Err(e) => (format!("{{\"error\":\"{e}\"}}"), 500),
                     };
-                    Box::new(move || json_response(&body, code))
+                    let p = port;
+                    Box::new(move || json_response(&body, code, p))
                 }
             }
 
@@ -138,7 +204,8 @@ pub fn serve(args: &[String]) -> i32 {
                     Ok(id) => (format!("{{\"edge_id\":\"{id}\"}}"), 201u16),
                     Err(e) => (format!("{{\"error\":\"{e}\"}}"), 400),
                 };
-                Box::new(move || json_response(&resp_body, code))
+                let p = port;
+                Box::new(move || json_response(&resp_body, code, p))
             }
 
             // ── GET /api/nodes/:id ────────────────────────────
@@ -151,9 +218,11 @@ pub fn serve(args: &[String]) -> i32 {
                     .to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
-                    Box::new(move || json_response(&body, 400))
+                    let p = port;
+                    Box::new(move || json_response(&body, 400, p))
                 } else {
-                    let result = read_node(&id);
+                    let db = Rc::clone(&conn);
+                    let result = read_node_conn(&db.borrow(), &id);
                     let (body, code) = match result {
                         Ok(node) => {
                             let v = serde_json::json!({
@@ -173,7 +242,8 @@ pub fn serve(args: &[String]) -> i32 {
                         }
                         Err(e) => (format!("{{\"error\":\"{e}\"}}"), 404),
                     };
-                    Box::new(move || json_response(&body, code))
+                    let p = port;
+                    Box::new(move || json_response(&body, code, p))
                 }
             }
 
@@ -187,16 +257,19 @@ pub fn serve(args: &[String]) -> i32 {
                     .to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
-                    Box::new(move || json_response(&body, 400))
+                    let p = port;
+                    Box::new(move || json_response(&body, 400, p))
                 } else {
                     let mut body = String::new();
                     let _ = request.as_reader().take(1 << 20).read_to_string(&mut body);
-                    let result = handle_put_node(&id, &body);
+                    let db = Rc::clone(&conn);
+                    let result = handle_put_node_conn(&id, &body, &db.borrow());
                     let (resp_body, code) = match result {
                         Ok(_) => (format!("{{\"id\":\"{id}\"}}"), 200u16),
                         Err(e) => (format!("{{\"error\":\"{e}\"}}"), 400),
                     };
-                    Box::new(move || json_response(&resp_body, code))
+                    let p = port;
+                    Box::new(move || json_response(&resp_body, code, p))
                 }
             }
 
@@ -210,13 +283,15 @@ pub fn serve(args: &[String]) -> i32 {
                     .to_string();
                 if !validate_node_id(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
-                    Box::new(move || json_response(&body, 400))
+                    let p = port;
+                    Box::new(move || json_response(&body, 400, p))
                 } else {
                     let _ = delete_node_file(&id);
                     let _ = remove_edges_for_node(&id);
                     let _ = remove_from_index(&id);
                     let body = format!("{{\"deleted\":\"{id}\"}}");
-                    Box::new(move || json_response(&body, 200))
+                    let p = port;
+                    Box::new(move || json_response(&body, 200, p))
                 }
             }
 
@@ -231,18 +306,24 @@ pub fn serve(args: &[String]) -> i32 {
                             .map(|p| percent_decode(p.trim_start_matches("q=")))
                     })
                     .unwrap_or_default();
-                let results = do_search(&q);
+                let db = Rc::clone(&conn);
+                let results = do_search_conn(&q, &db.borrow());
                 let body = serde_json::to_string(&results).unwrap_or_default();
-                Box::new(move || json_response(&body, 200))
+                let p = port;
+                Box::new(move || json_response(&body, 200, p))
             }
 
             // ── OPTIONS (CORS preflight) ───────────────────────
-            (Method::Options, _) => Box::new(|| json_response("{}", 204)),
+            (Method::Options, _) => {
+                let p = port;
+                Box::new(move || json_response("{}", 204, p))
+            }
 
             // ── 404 ───────────────────────────────────────────
             _ => {
                 let body = "{\"error\":\"not found\"}".to_string();
-                Box::new(move || json_response(&body, 404))
+                let p = port;
+                Box::new(move || json_response(&body, 404, p))
             }
         };
 
@@ -254,7 +335,8 @@ pub fn serve(args: &[String]) -> i32 {
 
 // ── Helpers ───────────────────────────────────────────
 
-fn handle_post_node(body: &str) -> Result<String, String> {
+/// Create a new node using a shared connection (avoids per-request open_db).
+fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = now_iso();
@@ -306,13 +388,13 @@ fn handle_post_node(body: &str) -> Result<String, String> {
         body: v["body"].as_str().unwrap_or("").to_string(),
     };
 
-    write_node(&node).map_err(|e| e.to_string())?;
-    let _ = upsert_index(&node);
+    write_node_conn(conn, &node).map_err(|e| e.to_string())?;
     Ok(id)
 }
 
-fn handle_put_node(id: &str, body: &str) -> Result<(), String> {
-    let mut node = read_node(id).map_err(|e| e.to_string())?;
+/// Update a node using a shared connection (avoids per-request open_db).
+fn handle_put_node_conn(id: &str, body: &str, conn: &Connection) -> Result<(), String> {
+    let mut node = read_node_conn(conn, id).map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
 
     if let Some(t) = v["title"].as_str() {
@@ -335,8 +417,7 @@ fn handle_put_node(id: &str, body: &str) -> Result<(), String> {
     }
     node.frontmatter.updated = now_iso();
 
-    write_node(&node).map_err(|e| e.to_string())?;
-    let _ = upsert_index(&node);
+    write_node_conn(conn, &node).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -360,9 +441,10 @@ fn handle_post_edge(body: &str) -> Result<String, String> {
     Ok(edge_id)
 }
 
-fn do_search(query: &str) -> Vec<serde_json::Value> {
+/// Search using a shared connection (avoids per-request open_db).
+fn do_search_conn(query: &str, conn: &Connection) -> Vec<serde_json::Value> {
     use serde_json::json;
-    search_nodes(query, 20)
+    search_nodes_conn(conn, query, 20)
         .into_iter()
         .map(|n| {
             let snippet: String = n
@@ -379,6 +461,40 @@ fn do_search(query: &str) -> Vec<serde_json::Value> {
             })
         })
         .collect()
+}
+
+/// Compute degree centrality: top N nodes by total edge count (in + out).
+/// Uses a shared connection (no per-request open_db).
+pub fn compute_centrality(conn: &Connection, limit: usize) -> Vec<serde_json::Value> {
+    let safe_limit = limit.min(100);
+    let sql = format!(
+        "SELECT n.id, n.title, n.type, n.importance, cnt.total_degree
+         FROM (
+             SELECT node_id, SUM(degree) AS total_degree FROM (
+                 SELECT source AS node_id, COUNT(*) AS degree FROM edges GROUP BY source
+                 UNION ALL
+                 SELECT target AS node_id, COUNT(*) AS degree FROM edges GROUP BY target
+             ) GROUP BY node_id
+         ) cnt
+         JOIN nodes n ON n.id = cnt.node_id
+         ORDER BY cnt.total_degree DESC
+         LIMIT {safe_limit}"
+    );
+
+    conn.prepare(&sql)
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0)?,
+                    "title": row.get::<_, String>(1)?,
+                    "type": row.get::<_, String>(2)?,
+                    "importance": row.get::<_, f64>(3)?,
+                    "degree": row.get::<_, i64>(4)?,
+                }))
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default()
 }
 
 fn percent_decode(s: &str) -> String {
@@ -402,4 +518,94 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&decoded).into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cors_headers_restrict_origin_to_localhost() {
+        let headers = cors_headers(9999);
+        let origin = headers.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+            .expect("CORS origin header should exist");
+        assert_eq!(
+            origin.value.as_str(),
+            "http://localhost:9999",
+            "CORS origin must be restricted to localhost with the given port"
+        );
+    }
+
+    #[test]
+    fn test_cors_headers_different_ports() {
+        let h1 = cors_headers(7700);
+        let h2 = cors_headers(8080);
+        let o1 = h1.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin")).unwrap();
+        let o2 = h2.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin")).unwrap();
+        assert_eq!(o1.value.as_str(), "http://localhost:7700");
+        assert_eq!(o2.value.as_str(), "http://localhost:8080");
+    }
+
+    #[test]
+    fn test_cors_headers_include_content_type_json() {
+        let headers = cors_headers(7700);
+        assert!(headers.iter().any(|h| h.field.equiv("Content-Type") && h.value.as_str() == "application/json"));
+    }
+
+    #[test]
+    fn test_cors_headers_include_methods() {
+        let headers = cors_headers(7700);
+        assert!(headers.iter().any(|h| h.field.equiv("Access-Control-Allow-Methods")));
+    }
+
+    #[test]
+    fn test_html_headers_restrict_origin_to_localhost() {
+        let headers = html_headers(7700);
+        let origin = headers.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+            .expect("HTML CORS origin header should exist");
+        assert_eq!(
+            origin.value.as_str(),
+            "http://localhost:7700",
+            "HTML CORS origin must be restricted to localhost with the given port"
+        );
+    }
+
+    #[test]
+    fn test_html_headers_content_type() {
+        let headers = html_headers(7700);
+        assert!(headers.iter().any(|h| h.field.equiv("Content-Type") && h.value.as_str().contains("text/html")));
+    }
+
+    #[test]
+    fn test_json_response_uses_port_specific_cors() {
+        let resp = json_response("{}", 200, 1234);
+        let origin = resp.headers().iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+            .expect("response should have CORS origin header");
+        assert_eq!(origin.value.as_str(), "http://localhost:1234");
+    }
+
+    #[test]
+    fn test_html_response_uses_port_specific_cors() {
+        let resp = html_response("<html></html>", 5678);
+        let origin = resp.headers().iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+            .expect("response should have CORS origin header");
+        assert_eq!(origin.value.as_str(), "http://localhost:5678");
+    }
+
+    #[test]
+    fn test_cors_origin_is_never_wildcard() {
+        // Ensure no header set ever returns "*" as origin
+        for port in [7700u16, 8080, 3000, 9999] {
+            for h in cors_headers(port) {
+                if h.field.equiv("Access-Control-Allow-Origin") {
+                    assert_ne!(h.value.as_str(), "*", "CORS origin must never be wildcard (port={port})");
+                }
+            }
+            for h in html_headers(port) {
+                if h.field.equiv("Access-Control-Allow-Origin") {
+                    assert_ne!(h.value.as_str(), "*", "CORS origin must never be wildcard (port={port})");
+                }
+            }
+        }
+    }
 }

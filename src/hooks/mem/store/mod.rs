@@ -1,0 +1,107 @@
+//! store/ — Node/Edge SQLite I/O (replaces file-based store)
+//!
+//! Re-exports all public items from focused submodules.
+
+// ── Internal submodules ──────────────────────────────
+
+pub mod types;
+mod util;
+mod schema;
+mod node;
+mod edge;
+mod index;
+mod dedup;
+mod decay;
+mod recall;
+mod search;
+
+#[cfg(test)]
+mod tests;
+
+// ── Re-exports: types ────────────────────────────────
+
+pub use types::{
+    Node, NodeFrontmatter, Edge, Index, IndexNode, ScoredNode,
+    default_importance, importance_for_type,
+};
+
+// ── Re-exports: util ─────────────────────────────────
+
+pub use util::{
+    db_path, nodes_dir, graph_path, validate_node_id,
+    new_uuid, now_iso, atomic_write, parse_iso_to_secs,
+};
+
+// ── Re-exports: schema ───────────────────────────────
+
+pub(crate) use schema::init_schema;
+
+// ── Re-exports: node ─────────────────────────────────
+
+pub use node::{
+    write_node, read_node, read_node_conn, read_nodes_conn,
+    delete_node_file, list_node_ids,
+    serialize_node, parse_node,
+};
+
+pub(crate) use node::write_node_conn;
+
+// ── Re-exports: edge ─────────────────────────────────
+
+pub use edge::{
+    append_edge, append_edge_conn, read_edges_conn, read_edges,
+    delete_edge_by_id, remove_edges_for_node,
+};
+
+// ── Re-exports: index ────────────────────────────────
+
+pub use index::{read_index, upsert_index, remove_from_index};
+
+// ── Re-exports: dedup ────────────────────────────────
+
+pub use dedup::{write_node_dedup, write_node_dedup_conn};
+
+// ── Re-exports: decay ────────────────────────────────
+
+pub use decay::{
+    decay_importance, tag_stale_nodes,
+    touch_node_conn, touch_nodes_conn,
+};
+
+// ── Re-exports: recall ───────────────────────────────
+
+pub use recall::{
+    smart_recall, smart_recall_conn,
+    W_RECENCY, W_IMPORTANCE, W_ACCESS, W_FTS, W_GRAPH,
+};
+
+// ── Re-exports: search ───────────────────────────────
+
+pub use search::{
+    search_nodes, search_nodes_conn,
+    query_nodes, query_nodes_conn,
+};
+
+// ── DB connection ────────────────────────────────────
+
+use rusqlite::Connection;
+use std::fs;
+use std::io;
+
+/// Open the memory database, applying schema and auto-migration.
+pub fn open_db() -> io::Result<Connection> {
+    let path = db_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let conn = Connection::open(&path)
+        .map_err(io::Error::other)?;
+
+    // WAL mode for better concurrency
+    conn.execute_batch("PRAGMA journal_mode=WAL;")
+        .map_err(io::Error::other)?;
+
+    schema::init_schema(&conn)?;
+    schema::auto_migrate_legacy(&conn);
+    Ok(conn)
+}

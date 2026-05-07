@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cross-Agent Unified Memory</title>
-<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="/d3.js"></script>
 <script>
 /* lightweight markdown → HTML (no external dependency) */
 const marked = { parse(md) {
@@ -329,7 +329,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
         <label class="filter-row"><input type="checkbox" data-type="project" checked><span class="type-dot" style="background:var(--c-project)"></span><span class="filter-label">Project</span><span class="filter-count" id="cnt-project">0</span></label>
         <label class="filter-row"><input type="checkbox" data-type="decision" checked><span class="type-dot" style="background:var(--c-decision)"></span><span class="filter-label">Decision</span><span class="filter-count" id="cnt-decision">0</span></label>
         <label class="filter-row"><input type="checkbox" data-type="error" checked><span class="type-dot" style="background:var(--c-error)"></span><span class="filter-label">Error</span><span class="filter-count" id="cnt-error">0</span></label>
-        <label class="filter-row"><input type="checkbox" data-type="session" checked><span class="type-dot" style="background:var(--c-session)"></span><span class="filter-label">Session</span><span class="filter-count" id="cnt-session">0</span></label>
+        <label class="filter-row"><input type="checkbox" data-type="session"><span class="type-dot" style="background:var(--c-session)"></span><span class="filter-label">Session</span><span class="filter-count" id="cnt-session">0</span></label>
         <label class="filter-row"><input type="checkbox" data-type="resolution" checked><span class="type-dot" style="background:var(--c-resolution)"></span><span class="filter-label">Resolution</span><span class="filter-count" id="cnt-resolution">0</span></label>
       </div>
     </div>
@@ -345,6 +345,15 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
       <div class="filter-title" data-i18n="search_results">Search Results</div>
       <div id="search-results-list"></div>
     </div>
+  </div>
+
+  <!-- Stats Panel -->
+  <div id="stats-panel" style="display:none; background:#1a1a2e; padding:12px 16px; border-radius:8px; margin-bottom:12px;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+      <h3 style="margin:0; color:#eee; font-size:14px;">Statistics</h3>
+      <button onclick="toggleStats()" style="background:none; border:none; color:#888; cursor:pointer;">&#10005;</button>
+    </div>
+    <div id="stats-content" style="display:flex; gap:20px; flex-wrap:wrap; margin-top:8px; font-size:13px; color:#aaa;"></div>
   </div>
 
   <!-- Graph Canvas -->
@@ -665,7 +674,7 @@ const S = {
   nodes: [],
   edges: [],
   nodeMap: {},
-  activeTypes: new Set(['concept','pattern','project','decision','error','session','resolution']),
+  activeTypes: new Set(['concept','pattern','project','decision','error','resolution']),
   activeTags:  new Set(),
   activeProject: '',
   searchHits: null,   // Set<id> | null
@@ -717,6 +726,28 @@ function showLoading(on, msg) {
 function openModal(id)  { document.getElementById(id).classList.add('visible'); }
 function closeModal(id) { document.getElementById(id).classList.remove('visible'); }
 
+function toggleStats() { document.getElementById('stats-panel').style.display = 'none'; }
+function loadStats() {
+  fetch('/api/stats').then(r=>r.json()).then(s=>{
+    if(!s||!s.by_type) return;
+    var c=document.getElementById('stats-content');
+    if(!c) return;
+    c.innerHTML='';
+    var items=[
+      ['Nodes', s.total_nodes||0],
+      ['Edges', s.total_edges||0],
+      ['Avg Importance', (s.avg_importance||0).toFixed(2)],
+    ];
+    Object.entries(s.by_type||{}).forEach(function(kv){ items.push([kv[0], kv[1]]); });
+    items.forEach(function(kv){
+      var d=document.createElement('div');
+      d.innerHTML='<span style="color:#666">'+esc(String(kv[0]))+'</span><br><strong style="color:#ddd">'+esc(String(kv[1]))+'</strong>';
+      c.appendChild(d);
+    });
+    document.getElementById('stats-panel').style.display='block';
+  }).catch(function(){});
+}
+
 /* ════════════════════════════════════════════════════
    Boot
    ════════════════════════════════════════════════════ */
@@ -725,6 +756,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initD3();
   bindUI();
   loadGraph();
+  loadStats();
 });
 
 /* ════════════════════════════════════════════════════
@@ -871,7 +903,11 @@ function initD3() {
 /* ════════════════════════════════════════════════════
    D3 Render
    ════════════════════════════════════════════════════ */
-function nodeR(deg) { return Math.min(26, Math.max(6, 6 + Math.sqrt(deg) * 2.4)); }
+function nodeR(d) {
+    var baseR = 4 + (d.importance || 0.5) * 12;
+    var degreeBonus = Math.min(4, (d._deg || d.degree || 0) * 0.5);
+    return Math.max(3, baseR + degreeBonus);
+}
 
 function renderGraph() {
   const vn  = visNodes();
@@ -913,7 +949,7 @@ function renderGraph() {
       .strength(isLarge ? -70 : -160)
       .distanceMax(280))
     .force('center', d3.forceCenter(W/2, H/2))
-    .force('collide', d3.forceCollide().radius(d => nodeR(d._deg) + 4));
+    .force('collide', d3.forceCollide().radius(d => nodeR(d) + 4));
 
   /* -- Links -- */
   linkSel = gMain.select('.g-links')
@@ -953,13 +989,13 @@ function renderGraph() {
     );
 
   nodeSel.select('circle')
-    .attr('r', d => nodeR(d._deg))
+    .attr('r', d => nodeR(d))
     .attr('fill', d => typeHex(d.type))
     .attr('stroke', d => typeHex(d.type))
     .attr('fill-opacity', 0.82);
 
   nodeSel.select('text')
-    .attr('y', d => nodeR(d._deg) + 12)
+    .attr('y', d => nodeR(d) + 12)
     .text(d => {
       const t = d.title || d.id;
       return t.length > 14 ? t.slice(0,13)+'…' : t;
@@ -1067,13 +1103,13 @@ function renderDetail(node) {
   // tags
   const tagsEl = document.getElementById('detail-tags');
   tagsEl.innerHTML = (node.tags||[])
-    .map(t => `<span class="detail-tag">${t}</span>`).join('');
+    .map(t => `<span class="detail-tag">${esc(t)}</span>`).join('');
 
   // meta
   document.getElementById('detail-meta').innerHTML = [
-    ['ID',      node.id],
-    ['Projects',(node.projects||[]).join(', ') || '—'],
-    ['Agents',  (node.agents||[]).join(', ')   || '—'],
+    ['ID',      esc(node.id)],
+    ['Projects', esc((node.projects||[]).join(', ') || '—')],
+    ['Agents',  esc((node.agents||[]).join(', ')   || '—')],
     ['Created', node.created ? new Date(node.created).toLocaleString() : '—'],
     ['Updated', node.updated ? new Date(node.updated).toLocaleString() : '—'],
   ].map(([k,v]) => `<span class="meta-key">${k}</span><span class="meta-val">${v}</span>`).join('');
@@ -1100,8 +1136,8 @@ function renderDetail(node) {
       const rc = relHex(edge.relation);
       item.innerHTML = `
         <span class="edge-dir">${out ? '→' : '←'}</span>
-        <span class="edge-rel" style="background:${rc}22;border:1px solid ${rc}55;color:${rc}">${edge.relation||'?'}</span>
-        <span class="edge-target">${oth.title||oth.id}</span>
+        <span class="edge-rel" style="background:${rc}22;border:1px solid ${rc}55;color:${rc}">${esc(edge.relation||'?')}</span>
+        <span class="edge-target">${esc(oth.title||oth.id)}</span>
       `;
       item.addEventListener('click', () => selectNode(othId));
       edgesEl.appendChild(item);
@@ -1154,9 +1190,9 @@ const doSearch = debounce(async (q) => {
       const el = document.createElement('div');
       el.className = 'search-result-item';
       el.innerHTML = `
-        <div class="search-result-type">${r.type||''}</div>
-        <div class="search-result-title">${r.title||r.id}</div>
-        ${r.snippet ? `<div class="search-result-snippet">${r.snippet}</div>` : ''}
+        <div class="search-result-type">${esc(r.type||'')}</div>
+        <div class="search-result-title">${esc(r.title||r.id)}</div>
+        ${r.snippet ? `<div class="search-result-snippet">${esc(r.snippet)}</div>` : ''}
       `;
       el.addEventListener('click', () => selectNode(r.id));
       list.appendChild(el);

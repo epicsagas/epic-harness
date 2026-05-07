@@ -17,6 +17,12 @@ pub struct GraphNode {
     #[serde(rename = "type")]
     pub node_type: String,
     pub tags: Vec<String>,
+    #[serde(default = "default_graph_importance")]
+    pub importance: f64,
+}
+
+fn default_graph_importance() -> f64 {
+    0.5
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +52,7 @@ fn build_graph() -> io::Result<Graph> {
             title: node.frontmatter.title,
             node_type: node.frontmatter.node_type,
             tags: node.frontmatter.tags,
+            importance: node.frontmatter.importance,
         })
         .collect();
     let edges = read_edges_conn(&conn)
@@ -153,6 +160,32 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
                 .map(|rows| rows.flatten().collect())
         })
         .unwrap_or_default()
+}
+
+/// Compute aggregate stats for the `/api/stats` endpoint.
+pub fn compute_stats() -> io::Result<serde_json::Value> {
+    let conn = open_db()?;
+    let total_nodes: i64 = conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap_or(0);
+    let total_edges: i64 = conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0)).unwrap_or(0);
+    let avg_importance: f64 = conn.query_row("SELECT AVG(importance) FROM nodes", [], |r| r.get(0)).unwrap_or(0.0);
+
+    let mut stmt = conn.prepare("SELECT type, COUNT(*) FROM nodes GROUP BY type")
+        .map_err(io::Error::other)?;
+    let by_type: serde_json::Map<String, serde_json::Value> = stmt
+        .query_map([], |row| {
+            let t: String = row.get(0)?;
+            let c: i64 = row.get(1)?;
+            Ok((t, serde_json::Value::from(c)))
+        })
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default();
+
+    Ok(serde_json::json!({
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "avg_importance": (avg_importance * 100.0).round() / 100.0,
+        "by_type": serde_json::Value::Object(by_type),
+    }))
 }
 
 /// BFS traversal from `start_id` to all reachable nodes via a SQL recursive CTE.
@@ -302,5 +335,22 @@ mod tests {
             Some(2.0),
             "C connected to both seeds should have total weight 2.0"
         );
+    }
+
+    /// GraphNode includes importance field serialized as JSON.
+    #[test]
+    fn graph_node_includes_importance() {
+        let n = GraphNode {
+            id: "test-1".to_string(),
+            title: "Test".to_string(),
+            node_type: "concept".to_string(),
+            tags: vec![],
+            importance: 0.85,
+        };
+        let json = serde_json::to_string(&n).unwrap();
+        assert!(json.contains("\"importance\":0.85"), "importance should appear in JSON: {json}");
+        // Deserialize back
+        let parsed: GraphNode = serde_json::from_str(&json).unwrap();
+        assert!((parsed.importance - 0.85).abs() < f64::EPSILON);
     }
 }

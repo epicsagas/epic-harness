@@ -237,6 +237,7 @@ pub fn run(_input: &HookInput) -> i32 {
                 summary: String::new(),
                 pending_tasks: vec![],
                 context_usage: None,
+                pipeline_state: None,
             },
         );
         if !snap.summary.is_empty() {
