@@ -364,6 +364,8 @@ pub fn claude_config_dir() -> PathBuf {
     dirs_home().join(".claude")
 }
 
+/// Path to `.claude.json` (MCP server registry).
+/// Priority: `CLAUDE_SETTINGS_PATH` env var > `CLAUDE_CONFIG_DIR` parent > `$HOME/.claude.json`
 pub fn claude_json_path() -> PathBuf {
     if let Ok(p) = std::env::var("CLAUDE_SETTINGS_PATH") && !p.is_empty() {
         return PathBuf::from(p);
@@ -377,6 +379,8 @@ pub fn claude_json_path() -> PathBuf {
     dirs_home().join(".claude.json")
 }
 
+/// Claude Code plugin cache directory.
+/// Priority: `CLAUDE_CODE_PLUGIN_CACHE_DIR` env var > `claude_config_dir()/plugins`
 pub fn claude_plugin_cache_dir() -> PathBuf {
     if let Ok(d) = std::env::var("CLAUDE_CODE_PLUGIN_CACHE_DIR") && !d.is_empty() {
         return PathBuf::from(d);

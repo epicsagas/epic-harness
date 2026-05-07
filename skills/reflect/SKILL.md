@@ -23,8 +23,8 @@ bash "$SCRIPT" 30 > /tmp/reflect_ctx.json
 
 실패하면 직접 수집:
 ```bash
-echo "obs_files: $(ls $HARNESS_DIR/obs/ | wc -l)"
-echo "total_sessions: $(python3 -c "import json; m=json.load(open('$HARNESS_DIR/metrics.json')); print(m.get('total_sessions',0))")"
+echo "obs_files: $(ls "$HARNESS_DIR/obs/" | wc -l)"
+python3 -c "import json; m=json.load(open('$HARNESS_DIR/metrics.json')); print('total_sessions:', m.get('total_sessions',0))"
 ```
 
 harness-mem에서 관련 기억 조회 (도구가 활성화된 경우):

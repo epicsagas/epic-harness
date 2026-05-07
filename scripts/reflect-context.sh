@@ -11,6 +11,7 @@ if [[ -z "$HARNESS_DIR" ]]; then
 fi
 
 DAYS="${1:-30}"
+[[ "$DAYS" =~ ^[0-9]+$ ]] || { echo '{"error":"invalid days argument — must be a positive integer"}' >&2; exit 1; }
 CUTOFF=$(date -v "-${DAYS}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -d "-${DAYS} days" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "")
 
 python3 - "$HARNESS_DIR" "$DAYS" "$CUTOFF" << 'PYEOF'
@@ -64,7 +65,8 @@ for fp in obs_files:
                     dim_sums[k] += float(v)
                     dim_counts[k] += 1
                 tool_success[tool][1] += 1
-                if d.get("result") == "success" or d.get("score", 0) >= 0.7:
+                result = d.get("result")
+                if result == "success" or (result is None and d.get("score", 0) >= 0.7):
                     tool_success[tool][0] += 1
     except Exception:
         pass
