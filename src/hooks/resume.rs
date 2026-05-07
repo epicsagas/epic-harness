@@ -256,17 +256,28 @@ pub fn run(_input: &HookInput) -> i32 {
             );
         }
         // 1a. Snapshot-based orbit recovery.
-        // Only emit when there is no live pipeline file — the live check (1b) is authoritative
-        // and its hint is suppressed here to avoid showing two conflicting orbit messages.
+        // Only emit when there is no live pipeline file — the live check (1b) is authoritative.
+        // Additionally cross-check the snapshotted pipeline ID against the orbit directory:
+        // if the corresponding PIPELINE-{id}.json no longer exists (pipeline completed and was
+        // cleaned up, or status changed), this is a stale snapshot and must NOT trigger recovery.
         if live_orbit_state.is_none()
             && let Some(ref orbit) = snap.pipeline_state
             && orbit.get("status").and_then(|v| v.as_str()) == Some("running")
             && let Some(id) = orbit.get("id").and_then(|v| v.as_str())
         {
-            hint("resume", &format!(
-                "ORBIT RECOVERY (snapshot): Pipeline {}",
-                super::common::sanitize_orbit_field(id)
-            ));
+            // Verify the pipeline file still physically exists before claiming recovery needed.
+            let safe_id = super::common::normalize_pipeline_id(id);
+            let pipeline_file = super::common::orbit_dir().join(format!("PIPELINE-{}.json", safe_id));
+            if pipeline_file.exists() {
+                let phase = orbit.get("phase").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let mode = orbit.get("mode").and_then(|v| v.as_str()).unwrap_or("unknown");
+                hint("resume", &format!(
+                    "ORBIT RECOVERY (snapshot): Pipeline {}, phase={}, mode={}",
+                    super::common::sanitize_orbit_field(id),
+                    super::common::sanitize_orbit_field(phase),
+                    super::common::sanitize_orbit_field(mode),
+                ));
+            }
         }
     }
 

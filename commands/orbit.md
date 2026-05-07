@@ -14,11 +14,14 @@ At the start of **every response** during an active orbit:
 2. Find the file with `"status": "running"`
 3. Read it. Verify `phase` matches where you left off
 4. **If `phase` is ahead of where you think you are, trust the file** — you may have compacted
-5. Resume from the documented `phase`. Do NOT re-ask mode selection, re-run spec, or re-discover
+5. **Conflict resolution (crash-mid-update)**: If `phase_history` contains an entry for the current `phase` with a completed timestamp, treat that phase as done and advance to the next phase — `phase_history` wins over the `phase` field when they disagree. This covers the case where the state file was partially written before a crash.
+6. Resume from the resolved phase. Do NOT re-ask mode selection, re-run spec, or re-discover
 
 If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
 
-**Crash recovery**: If `updated_at` is older than 30 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history`, and resume from there. Report the recovery to the user.
+**Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
+
+> **Note:** The crash staleness threshold (45 min) is intentionally larger than the pipeline deadline (30 min) to avoid misclassifying a timeout'd-but-active pipeline as crashed. A pipeline that hit its deadline will show `status: timeout`, not `status: running`.
 
 ---
 
@@ -33,7 +36,12 @@ mkdir -p $HARNESS_DIR/orbit
 
 Before creating `PIPELINE-{timestamp}.json`:
 
-1. Check: `grep -l '"status".*"running"' $HARNESS_DIR/orbit/PIPELINE-*.json 2>/dev/null`
+1. Check with a JSON-aware read (not regex grep, which can false-positive on field values):
+   ```bash
+   for f in $HARNESS_DIR/orbit/PIPELINE-*.json; do
+     [ -f "$f" ] && [ "$(jq -r .status "$f" 2>/dev/null)" = "running" ] && echo "$f" && break
+   done
+   ```
 2. If a match is found: **STOP**. Tell the user:
    > "An orbit pipeline is already active (PIPELINE-{id}, phase={phase}). Say **orbit abort** to cancel it, or wait for it to complete."
 3. Do NOT create a new pipeline file.
@@ -171,8 +179,8 @@ Update state: `"phase": "go"`.
 Before creating a branch, verify git state:
 
 ```bash
-# Clean working tree?
-git diff --quiet HEAD || (echo "ERROR: Dirty working tree. Commit or stash changes first." && exit 1)
+# Clean working tree? (--porcelain catches untracked files that git diff --quiet HEAD misses)
+[ -z "$(git status --porcelain)" ] || (echo "ERROR: Dirty working tree or untracked files. Commit or stash first." && exit 1)
 # Not on detached HEAD?
 git symbolic-ref -q HEAD || (echo "ERROR: Detached HEAD. Checkout a branch first." && exit 1)
 # Branch doesn't already exist?

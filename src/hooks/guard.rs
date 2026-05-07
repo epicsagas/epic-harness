@@ -12,6 +12,10 @@ use super::telemetry::{RuleKind, Telemetry};
 struct OrbitCache {
     value: Option<serde_json::Value>,
     cached_at: Instant,
+    /// False until the first real directory scan has been performed.
+    /// Ensures the first call always scans regardless of elapsed time,
+    /// eliminating any dependence on clock arithmetic for the initial state.
+    initialized: bool,
 }
 
 static ORBIT_CACHE: OnceLock<Mutex<OrbitCache>> = OnceLock::new();
@@ -24,19 +28,19 @@ fn cached_orbit_state() -> Option<serde_json::Value> {
     let cache = ORBIT_CACHE.get_or_init(|| {
         Mutex::new(OrbitCache {
             value: None,
-            // Initialize as already-expired so the first call always performs a real scan.
-            cached_at: Instant::now()
-                .checked_sub(std::time::Duration::from_secs(ORBIT_CACHE_TTL_SECS + 1))
-                .unwrap_or_else(Instant::now),
+            cached_at: Instant::now(),
+            initialized: false,
         })
     });
     let mut guard = cache.lock().unwrap();
-    if guard.cached_at.elapsed().as_secs() < ORBIT_CACHE_TTL_SECS {
+    let expired = !guard.initialized || guard.cached_at.elapsed().as_secs() >= ORBIT_CACHE_TTL_SECS;
+    if !expired {
         return guard.value.clone();
     }
     let value = common::read_active_orbit_state();
     guard.value = value.clone();
     guard.cached_at = Instant::now();
+    guard.initialized = true;
     value
 }
 
@@ -53,6 +57,10 @@ fn parse_iso_to_epoch(s: &str) -> Option<u64> {
         return None;
     }
     let year: u64 = s.get(0..4)?.parse().ok()?;
+    // Years before 1970 produce a negative epoch — reject to avoid false deadline warnings.
+    if year < 1970 {
+        return None;
+    }
     let month: u64 = s.get(5..7)?.parse().ok()?;
     let day: u64 = s.get(8..10)?.parse().ok()?;
     let hour: u64 = s.get(11..13)?.parse().ok()?;
@@ -634,6 +642,13 @@ mod tests {
         // Non-numeric date parts must return None
         assert_eq!(parse_iso_to_epoch("not-a-timestamp------Z"), None);
         assert_eq!(parse_iso_to_epoch("YYYY-MM-DDTHH:MM:SSZ"), None);
+    }
+
+    #[test]
+    fn parse_iso_epoch_rejects_pre_epoch_year() {
+        // Years before 1970 must return None to prevent false deadline warnings
+        assert_eq!(parse_iso_to_epoch("1969-12-31T23:59:59Z"), None);
+        assert_eq!(parse_iso_to_epoch("0001-01-01T00:00:00Z"), None);
     }
 
     /// Verify that a safe command (no block/warn) goes through the entire
