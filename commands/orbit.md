@@ -338,18 +338,35 @@ EOF
 )"
 ```
 
-**6d. CI:** `gh pr checks <PR_NUMBER> --watch` — diagnose and fix automatically on failure.
+**6d. CI:** Check CI status — do not block orbit on CI:
+
+```bash
+# Check if gh is available and CI is configured
+if command -v gh &>/dev/null && gh pr checks <PR_NUMBER> 2>/dev/null | grep -q .; then
+  gh pr checks <PR_NUMBER> --watch
+  CI_STATUS=$?
+else
+  # No CI configured (e.g., CodeCommit without gh Actions) — skip
+  CI_STATUS=0
+  CI_NOTE="No CI configured — skipped"
+fi
+```
+
+- CI fails → diagnose and fix automatically. Do NOT block orbit progression.
+- CI absent / `gh` not available → set `CI: N/A`, proceed immediately to Step 7.
 
 **Ship Report:**
 ```
 ## Ship Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - PR: <URL>
-- CI: PASS/FAIL
+- CI: PASS/FAIL/N/A
 - Ready to merge: YES/NO
 ```
 
 Push `{"phase": "ship", "status": "complete"}` to `phase_history`.
+
+> **Orbit context:** After pushing ship to `phase_history`, **immediately proceed to Step 7 (Orbit Complete + Evolve)**. Do NOT stop here.
 
 ---
 
@@ -384,7 +401,7 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 
 ### Step 7a: Evolve (Auto)
 
-PR created + CI green → run `/evolve` automatically:
+**Always run** — regardless of CI status (PASS / FAIL / N/A). Evolve on every completed orbit:
 1. Read `$HARNESS_DIR/obs/` session logs
 2. Read `$HARNESS_DIR/metrics.json` + `evolution.jsonl`
 3. Detect failure patterns, weak tools, weak file types
