@@ -39,13 +39,16 @@ pub struct Graph {
     pub edges: Vec<GraphEdge>,
 }
 
-/// Build a `Graph` value from the current DB state (shared by `rebuild_graph` and `rebuild_graph_json`).
-/// Opens a single DB connection and reuses it for both node and edge queries (no N+1 open_db calls).
-fn build_graph() -> io::Result<Graph> {
-    let ids = list_node_ids()?;
-    let conn = open_db()?;
+/// Maximum number of edges returned in a graph payload.
+/// Prevents unbounded memory growth on dense graphs.
+const MAX_GRAPH_EDGES: usize = 2000;
+
+/// Build a `Graph` value from an existing connection.
+/// Reuses the caller's connection — no additional `open_db` call.
+fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
+    let ids = list_node_ids()?; // list_node_ids opens its own connection — that's OK
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let nodes = read_nodes_conn(&conn, &id_refs)
+    let nodes = read_nodes_conn(conn, &id_refs)
         .into_iter()
         .map(|node| GraphNode {
             id: node.frontmatter.id,
@@ -55,8 +58,9 @@ fn build_graph() -> io::Result<Graph> {
             importance: node.frontmatter.importance,
         })
         .collect();
-    let edges = read_edges_conn(&conn)
+    let edges = read_edges_conn(conn)
         .into_iter()
+        .take(MAX_GRAPH_EDGES) // LIMIT 2000
         .map(|e| GraphEdge {
             source: e.source,
             target: e.target,
@@ -65,6 +69,20 @@ fn build_graph() -> io::Result<Graph> {
         })
         .collect();
     Ok(Graph { nodes, edges })
+}
+
+/// Build a `Graph` value from the current DB state.
+/// Opens a fresh connection and delegates to `build_graph_conn`.
+fn build_graph() -> io::Result<Graph> {
+    let conn = open_db()?;
+    build_graph_conn(&conn)
+}
+
+/// Build graph JSON string from an existing connection (no open_db call).
+/// Used by the web server to always return fresh data via its shared connection.
+pub fn rebuild_graph_json_conn(conn: &Connection) -> io::Result<String> {
+    serde_json::to_string_pretty(&build_graph_conn(conn)?)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 pub fn rebuild_graph() -> io::Result<()> {
@@ -165,11 +183,18 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
 /// Compute aggregate stats for the `/api/stats` endpoint.
 pub fn compute_stats() -> io::Result<serde_json::Value> {
     let conn = open_db()?;
-    let total_nodes: i64 = conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0)).unwrap_or(0);
-    let total_edges: i64 = conn.query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0)).unwrap_or(0);
-    let avg_importance: f64 = conn.query_row("SELECT AVG(importance) FROM nodes", [], |r| r.get(0)).unwrap_or(0.0);
+    let total_nodes: i64 = conn
+        .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
+        .unwrap_or(0);
+    let total_edges: i64 = conn
+        .query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))
+        .unwrap_or(0);
+    let avg_importance: f64 = conn
+        .query_row("SELECT AVG(importance) FROM nodes", [], |r| r.get(0))
+        .unwrap_or(0.0);
 
-    let mut stmt = conn.prepare("SELECT type, COUNT(*) FROM nodes GROUP BY type")
+    let mut stmt = conn
+        .prepare("SELECT type, COUNT(*) FROM nodes GROUP BY type")
         .map_err(io::Error::other)?;
     let by_type: serde_json::Map<String, serde_json::Value> = stmt
         .query_map([], |row| {
@@ -348,7 +373,10 @@ mod tests {
             importance: 0.85,
         };
         let json = serde_json::to_string(&n).unwrap();
-        assert!(json.contains("\"importance\":0.85"), "importance should appear in JSON: {json}");
+        assert!(
+            json.contains("\"importance\":0.85"),
+            "importance should appear in JSON: {json}"
+        );
         // Deserialize back
         let parsed: GraphNode = serde_json::from_str(&json).unwrap();
         assert!((parsed.importance - 0.85).abs() < f64::EPSILON);

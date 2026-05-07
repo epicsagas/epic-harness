@@ -7,21 +7,39 @@ use std::rc::Rc;
 use rusqlite::Connection;
 use tiny_http::{Header, Method, Response, Server};
 
-use super::graph::{compute_stats, rebuild_graph_json};
+use super::graph::{compute_stats, rebuild_graph_json_conn};
 use super::store::{
-    append_edge, delete_edge_by_id, delete_node_file, importance_for_type, now_iso, open_db,
-    read_index, read_node_conn, remove_edges_for_node, remove_from_index,
-    search_nodes_conn, validate_node_id, write_node_conn, Edge, Node, NodeFrontmatter,
+    Edge, Node, NodeFrontmatter, append_edge, delete_edge_by_id, delete_node_file,
+    importance_for_type, now_iso, open_db, read_index, read_node_conn, remove_edges_for_node,
+    remove_from_index, search_nodes_conn, validate_node_id, write_node_conn,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
 const D3_JS: &str = include_str!("d3.min.js");
 
+const VALID_NODE_TYPES: &[&str] = &[
+    "decision",
+    "resolution",
+    "concept",
+    "project",
+    "error",
+    "session",
+    "pattern",
+    "instinct",
+    "psychographic",
+];
+
+const MAX_BODY_CHARS: usize = 65_536;
+
 fn cors_headers(port: u16) -> Vec<Header> {
     let origin = format!("http://localhost:{port}");
     vec![
         Header::from_bytes(b"Access-Control-Allow-Origin", origin.as_bytes()).unwrap(),
-        Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, PUT, DELETE, OPTIONS").unwrap(),
+        Header::from_bytes(
+            b"Access-Control-Allow-Methods",
+            b"GET, POST, PUT, DELETE, OPTIONS",
+        )
+        .unwrap(),
         Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
         Header::from_bytes(b"Content-Type", b"application/json").unwrap(),
     ]
@@ -100,21 +118,23 @@ pub fn serve(args: &[String]) -> i32 {
             }
 
             // ── GET /d3.js ───────────────────────────────────
-            (Method::Get, "/d3.js") => {
-                Box::new(move || {
-                    let data = D3_JS.as_bytes().to_vec();
-                    Response::new(
-                        tiny_http::StatusCode(200),
-                        vec![
-                            Header::from_bytes(b"Content-Type", b"application/javascript; charset=utf-8").unwrap(),
-                            Header::from_bytes(b"Cache-Control", b"public, max-age=86400").unwrap(),
-                        ],
-                        Cursor::new(data),
-                        Some(D3_JS.len()),
-                        None,
-                    )
-                })
-            }
+            (Method::Get, "/d3.js") => Box::new(move || {
+                let data = D3_JS.as_bytes().to_vec();
+                Response::new(
+                    tiny_http::StatusCode(200),
+                    vec![
+                        Header::from_bytes(
+                            b"Content-Type",
+                            b"application/javascript; charset=utf-8",
+                        )
+                        .unwrap(),
+                        Header::from_bytes(b"Cache-Control", b"public, max-age=86400").unwrap(),
+                    ],
+                    Cursor::new(data),
+                    Some(D3_JS.len()),
+                    None,
+                )
+            }),
 
             // ── GET /api/stats ───────────────────────────────
             (Method::Get, "/api/stats") => {
@@ -127,20 +147,23 @@ pub fn serve(args: &[String]) -> i32 {
 
             // ── GET /api/graph ────────────────────────────────
             (Method::Get, "/api/graph") => {
-                let body = rebuild_graph_json().unwrap_or_else(|_| "{}".to_string());
+                let db = Rc::clone(&conn);
+                let body =
+                    rebuild_graph_json_conn(&db.borrow()).unwrap_or_else(|_| "{}".to_string());
                 let p = port;
                 Box::new(move || json_response(&body, 200, p))
             }
 
             // ── GET /api/graph/centrality ────────────────────
-            _ if url.starts_with("/api/graph/centrality") && matches!(request.method(), Method::Get) => {
+            _ if url.starts_with("/api/graph/centrality")
+                && matches!(request.method(), Method::Get) =>
+            {
                 let limit: usize = url
                     .split('?')
                     .nth(1)
                     .and_then(|qs| {
-                        qs.split('&').find_map(|p| {
-                            p.strip_prefix("limit=").and_then(|v| v.parse().ok())
-                        })
+                        qs.split('&')
+                            .find_map(|p| p.strip_prefix("limit=").and_then(|v| v.parse().ok()))
                     })
                     .unwrap_or(20);
                 let db = Rc::clone(&conn);
@@ -367,6 +390,9 @@ fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String
         .unwrap_or_default();
 
     let node_type = v["type"].as_str().unwrap_or("concept").to_string();
+    if !VALID_NODE_TYPES.contains(&node_type.as_str()) {
+        return Err(format!("invalid node type: {node_type}"));
+    }
     let importance = v["importance"]
         .as_f64()
         .unwrap_or_else(|| importance_for_type(&node_type))
@@ -385,7 +411,12 @@ fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String
             access_count: 0,
             accessed_at: String::new(),
         },
-        body: v["body"].as_str().unwrap_or("").to_string(),
+        body: v["body"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(MAX_BODY_CHARS)
+            .collect(),
     };
 
     write_node_conn(conn, &node).map_err(|e| e.to_string())?;
@@ -401,10 +432,13 @@ fn handle_put_node_conn(id: &str, body: &str, conn: &Connection) -> Result<(), S
         node.frontmatter.title = t.to_string();
     }
     if let Some(t) = v["type"].as_str() {
+        if !VALID_NODE_TYPES.contains(&t) {
+            return Err(format!("invalid node type: {t}"));
+        }
         node.frontmatter.node_type = t.to_string();
     }
     if let Some(b) = v["body"].as_str() {
-        node.body = b.to_string();
+        node.body = b.chars().take(MAX_BODY_CHARS).collect();
     }
     if let Some(tags) = v["tags"].as_array() {
         node.frontmatter.tags = tags
@@ -527,7 +561,9 @@ mod tests {
     #[test]
     fn test_cors_headers_restrict_origin_to_localhost() {
         let headers = cors_headers(9999);
-        let origin = headers.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+        let origin = headers
+            .iter()
+            .find(|h| h.field.equiv("Access-Control-Allow-Origin"))
             .expect("CORS origin header should exist");
         assert_eq!(
             origin.value.as_str(),
@@ -540,8 +576,14 @@ mod tests {
     fn test_cors_headers_different_ports() {
         let h1 = cors_headers(7700);
         let h2 = cors_headers(8080);
-        let o1 = h1.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin")).unwrap();
-        let o2 = h2.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin")).unwrap();
+        let o1 = h1
+            .iter()
+            .find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+            .unwrap();
+        let o2 = h2
+            .iter()
+            .find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+            .unwrap();
         assert_eq!(o1.value.as_str(), "http://localhost:7700");
         assert_eq!(o2.value.as_str(), "http://localhost:8080");
     }
@@ -549,19 +591,29 @@ mod tests {
     #[test]
     fn test_cors_headers_include_content_type_json() {
         let headers = cors_headers(7700);
-        assert!(headers.iter().any(|h| h.field.equiv("Content-Type") && h.value.as_str() == "application/json"));
+        assert!(
+            headers
+                .iter()
+                .any(|h| h.field.equiv("Content-Type") && h.value.as_str() == "application/json")
+        );
     }
 
     #[test]
     fn test_cors_headers_include_methods() {
         let headers = cors_headers(7700);
-        assert!(headers.iter().any(|h| h.field.equiv("Access-Control-Allow-Methods")));
+        assert!(
+            headers
+                .iter()
+                .any(|h| h.field.equiv("Access-Control-Allow-Methods"))
+        );
     }
 
     #[test]
     fn test_html_headers_restrict_origin_to_localhost() {
         let headers = html_headers(7700);
-        let origin = headers.iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+        let origin = headers
+            .iter()
+            .find(|h| h.field.equiv("Access-Control-Allow-Origin"))
             .expect("HTML CORS origin header should exist");
         assert_eq!(
             origin.value.as_str(),
@@ -573,13 +625,20 @@ mod tests {
     #[test]
     fn test_html_headers_content_type() {
         let headers = html_headers(7700);
-        assert!(headers.iter().any(|h| h.field.equiv("Content-Type") && h.value.as_str().contains("text/html")));
+        assert!(
+            headers
+                .iter()
+                .any(|h| h.field.equiv("Content-Type") && h.value.as_str().contains("text/html"))
+        );
     }
 
     #[test]
     fn test_json_response_uses_port_specific_cors() {
         let resp = json_response("{}", 200, 1234);
-        let origin = resp.headers().iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+        let origin = resp
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Access-Control-Allow-Origin"))
             .expect("response should have CORS origin header");
         assert_eq!(origin.value.as_str(), "http://localhost:1234");
     }
@@ -587,9 +646,126 @@ mod tests {
     #[test]
     fn test_html_response_uses_port_specific_cors() {
         let resp = html_response("<html></html>", 5678);
-        let origin = resp.headers().iter().find(|h| h.field.equiv("Access-Control-Allow-Origin"))
+        let origin = resp
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("Access-Control-Allow-Origin"))
             .expect("response should have CORS origin header");
         assert_eq!(origin.value.as_str(), "http://localhost:5678");
+    }
+
+    #[test]
+    fn post_node_rejects_invalid_node_type() {
+        use super::super::store::init_schema;
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let body = r#"{"type":"invalid_type","title":"Test","body":"hello"}"#;
+        let result = handle_post_node_conn(body, &conn);
+        assert!(result.is_err(), "invalid node type must be rejected");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("invalid node type"),
+            "error must mention invalid node type, got: {err}"
+        );
+    }
+
+    #[test]
+    fn post_node_accepts_valid_node_type() {
+        use super::super::store::init_schema;
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let body = r#"{"type":"concept","title":"Test","body":"hello"}"#;
+        let result = handle_post_node_conn(body, &conn);
+        assert!(
+            result.is_ok(),
+            "valid node type must be accepted, got err: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
+    fn put_node_rejects_invalid_node_type() {
+        use super::super::store::{Node, NodeFrontmatter, init_schema, write_node_conn};
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        // Write a valid node first
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: "test-id-001".to_string(),
+                node_type: "concept".to_string(),
+                title: "Test".to_string(),
+                tags: vec![],
+                projects: vec![],
+                agents: vec![],
+                created: "2026-01-01T00:00:00Z".to_string(),
+                updated: "2026-01-01T00:00:00Z".to_string(),
+                importance: 0.7,
+                access_count: 0,
+                accessed_at: String::new(),
+            },
+            body: "body".to_string(),
+        };
+        write_node_conn(&conn, &node).expect("write node");
+        let update_body = r#"{"type":"bad_type"}"#;
+        let result = handle_put_node_conn("test-id-001", update_body, &conn);
+        assert!(result.is_err(), "invalid node type in PUT must be rejected");
+    }
+
+    #[test]
+    fn post_node_caps_body_at_max_chars() {
+        use super::super::store::{init_schema, read_node_conn};
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let long_body: String = "a".repeat(MAX_BODY_CHARS + 100);
+        let body = format!(
+            r#"{{"type":"concept","title":"Big","body":{}}}"#,
+            serde_json::to_string(&long_body).unwrap()
+        );
+        let id = handle_post_node_conn(&body, &conn).expect("should create node");
+        let node = read_node_conn(&conn, &id).expect("node should exist");
+        assert_eq!(
+            node.body.chars().count(),
+            MAX_BODY_CHARS,
+            "body must be capped at MAX_BODY_CHARS"
+        );
+    }
+
+    #[test]
+    fn put_node_caps_body_at_max_chars() {
+        use super::super::store::{
+            Node, NodeFrontmatter, init_schema, read_node_conn, write_node_conn,
+        };
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_schema(&conn).expect("init_schema");
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: "test-id-002".to_string(),
+                node_type: "concept".to_string(),
+                title: "Test".to_string(),
+                tags: vec![],
+                projects: vec![],
+                agents: vec![],
+                created: "2026-01-01T00:00:00Z".to_string(),
+                updated: "2026-01-01T00:00:00Z".to_string(),
+                importance: 0.7,
+                access_count: 0,
+                accessed_at: String::new(),
+            },
+            body: "original".to_string(),
+        };
+        write_node_conn(&conn, &node).expect("write node");
+        let long_body: String = "x".repeat(MAX_BODY_CHARS + 200);
+        let update = format!(
+            r#"{{"body":{}}}"#,
+            serde_json::to_string(&long_body).unwrap()
+        );
+        handle_put_node_conn("test-id-002", &update, &conn).expect("should update node");
+        let updated = read_node_conn(&conn, "test-id-002").expect("node should exist");
+        assert_eq!(
+            updated.body.chars().count(),
+            MAX_BODY_CHARS,
+            "body must be capped at MAX_BODY_CHARS after PUT"
+        );
     }
 
     #[test]
@@ -598,12 +774,20 @@ mod tests {
         for port in [7700u16, 8080, 3000, 9999] {
             for h in cors_headers(port) {
                 if h.field.equiv("Access-Control-Allow-Origin") {
-                    assert_ne!(h.value.as_str(), "*", "CORS origin must never be wildcard (port={port})");
+                    assert_ne!(
+                        h.value.as_str(),
+                        "*",
+                        "CORS origin must never be wildcard (port={port})"
+                    );
                 }
             }
             for h in html_headers(port) {
                 if h.field.equiv("Access-Control-Allow-Origin") {
-                    assert_ne!(h.value.as_str(), "*", "CORS origin must never be wildcard (port={port})");
+                    assert_ne!(
+                        h.value.as_str(),
+                        "*",
+                        "CORS origin must never be wildcard (port={port})"
+                    );
                 }
             }
         }
