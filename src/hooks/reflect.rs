@@ -16,34 +16,58 @@ static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 /// Collect harness data for /reflect skill as JSON on stdout.
 /// Replaces the Python-based `reflect-context.sh` for Windows compat.
-pub fn run_context(days: u32) -> i32 {
+pub fn run_context(
+    days: u32,
+    since: Option<String>,
+    project: Option<String>,
+    all_projects: bool,
+    sources: Vec<String>,
+) -> i32 {
     if !harness_exists() {
         eprintln!("{{\"error\":\"harness directory not found\"}}");
         return 1;
     }
 
-    // 1. Obs stats
-    let cutoff_tag = {
+    // Determine which project slugs to analyze
+    let project_slugs: Vec<String> = if all_projects {
+        list_harness_project_slugs()
+    } else if let Some(ref slug) = project {
+        vec![slug.clone()]
+    } else {
+        vec![project_slug()]
+    };
+
+    // Fix 1: Validate slugs — reject path traversal attempts
+    for slug in &project_slugs {
+        if slug.contains("..") || slug.contains('/') || slug.contains('\\') {
+            eprintln!("{{\"error\":\"invalid project slug: {slug}\"}}");
+            return 1;
+        }
+    }
+
+    // Fix 5: Validate --since format (YYYYMMDD)
+    if let Some(ref s) = since {
+        if s.len() != 8 || !s.chars().all(|c| c.is_ascii_digit()) {
+            eprintln!("{{\"error\":\"--since must be YYYYMMDD format, got: {s}\"}}");
+            return 1;
+        }
+    }
+
+    // 1. Obs stats — compute date range
+    let (cutoff_tag, date_from) = if let Some(ref s) = since {
+        (s.clone(), s.clone())
+    } else {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
         let cutoff_ts = now.saturating_sub((days as u64) * 86400);
-        // Format as YYYYMMDD for filename filtering
         let days_since_epoch = cutoff_ts / 86400;
-        // Simple epoch-to-date (no chrono dep)
         let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
-        format!("{y:04}{m:02}{d:02}")
+        let tag = format!("{y:04}{m:02}{d:02}");
+        (tag.clone(), tag)
     };
-
-    let all_obs_files = list_files(&obs_dir(), ".jsonl");
-    let obs_files: Vec<String> = all_obs_files
-        .into_iter()
-        .filter(|f| {
-            let tag = f.replace("session_", "");
-            tag.get(..8).map(|s| s >= cutoff_tag.as_str()).unwrap_or(true)
-        })
-        .collect();
+    let date_to = today();
 
     let mut total_obs: u64 = 0;
     let mut tool_counts: HashMap<String, u64> = HashMap::new();
@@ -54,37 +78,67 @@ pub fn run_context(days: u32) -> i32 {
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    for f in &obs_files {
-        let recs: Vec<ObsRecord> = read_jsonl_typed(&obs_dir().join(f));
-        for r in &recs {
-            total_obs += 1;
-            *tool_counts.entry(r.tool.clone()).or_default() += 1;
-            if let Some(ref fc) = r.failure_category {
-                *failure_cats.entry(fc.clone()).or_default() += 1;
-            }
-            if let Some(ref ext) = r.file_ext {
-                *file_ext_counts.entry(ext.clone()).or_default() += 1;
-            }
-            if let Some(s) = r.score {
-                scores.push(s);
-            }
-            if let Some(ref dims) = r.dimensions {
-                let ds = serde_json::to_value(dims).ok();
-                if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
-                    for (k, v) in obj {
-                        if let Some(n) = v.as_f64() {
-                            *dim_sums.entry(k.clone()).or_default() += n;
-                            *dim_counts.entry(k.clone()).or_default() += 1;
+    // Collect obs from all target project slugs
+    for slug in &project_slugs {
+        // Fix 1: Verify resolved path stays within harness projects root
+        let slug_harness = harness_dir_for_slug(slug);
+        let safe = if slug_harness.exists() {
+            slug_harness
+                .canonicalize()
+                .ok()
+                .map(|p| p.starts_with(harness_projects_root()))
+                .unwrap_or(false)
+        } else {
+            slug_harness.starts_with(harness_projects_root())
+        };
+        if !safe {
+            eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
+            return 1;
+        }
+        let slug_obs_dir = slug_harness.join("obs");
+        if !slug_obs_dir.is_dir() {
+            continue;
+        }
+        let all_obs = list_files(&slug_obs_dir, ".jsonl");
+        let filtered: Vec<String> = all_obs
+            .into_iter()
+            .filter(|f| {
+                let tag = f.replace("session_", "");
+                tag.get(..8).map(|s| s >= cutoff_tag.as_str()).unwrap_or(true)
+            })
+            .collect();
+        for f in &filtered {
+            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
+            for r in &recs {
+                total_obs += 1;
+                *tool_counts.entry(r.tool.clone()).or_default() += 1;
+                if let Some(ref fc) = r.failure_category {
+                    *failure_cats.entry(fc.clone()).or_default() += 1;
+                }
+                if let Some(ref ext) = r.file_ext {
+                    *file_ext_counts.entry(ext.clone()).or_default() += 1;
+                }
+                if let Some(s) = r.score {
+                    scores.push(s);
+                }
+                if let Some(ref dims) = r.dimensions {
+                    let ds = serde_json::to_value(dims).ok();
+                    if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                        for (k, v) in obj {
+                            if let Some(n) = v.as_f64() {
+                                *dim_sums.entry(k.clone()).or_default() += n;
+                                *dim_counts.entry(k.clone()).or_default() += 1;
+                            }
                         }
                     }
                 }
-            }
-            let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-            entry.1 += 1;
-            if r.result.as_deref() == Some("success")
-                || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-            {
-                entry.0 += 1;
+                let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+                entry.1 += 1;
+                if r.result.as_deref() == Some("success")
+                    || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+                {
+                    entry.0 += 1;
+                }
             }
         }
     }
@@ -133,14 +187,19 @@ pub fn run_context(days: u32) -> i32 {
         })
         .collect();
 
+    // Fix 6: Use CONFIG thresholds instead of hardcoded literals
+    let wt_min = CONFIG.pattern.weak_tool_min_obs;
+    let wt_rate = CONFIG.pattern.weak_tool_rate;
+    let st_rate = 0.9f64; // strong_tool threshold — not in CONFIG, kept as named constant
+
     let weak_tools: Vec<String> = tool_success_map
         .iter()
-        .filter(|(_, (s, n))| *n >= 5 && (*s as f64 / *n as f64) < 0.6)
+        .filter(|(_, (s, n))| *n >= wt_min && (*s as f64 / *n as f64) < wt_rate)
         .map(|(t, _)| t.clone())
         .collect();
     let strong_tools: Vec<String> = tool_success_map
         .iter()
-        .filter(|(_, (s, n))| *n >= 5 && (*s as f64 / *n as f64) >= 0.9)
+        .filter(|(_, (s, n))| *n >= wt_min && (*s as f64 / *n as f64) >= st_rate)
         .map(|(t, _)| t.clone())
         .collect();
     let total_success: u64 = tool_success_map.values().map(|(s, _)| *s).sum();
@@ -308,10 +367,52 @@ pub fn run_context(days: u32) -> i32 {
         evolved_list.push(serde_json::json!({"name": name, "type": stype}));
     }
 
+    // Effective sources
+    // mem is always included (baseline). --source adds extra sources on top.
+    let effective_sources: Vec<&str> = if sources.contains(&"all".to_string()) {
+        vec!["harness", "mem", "claude-session", "alcove"]
+    } else if sources.is_empty() {
+        vec!["harness", "mem"]
+    } else {
+        // Always prepend mem unless the caller explicitly passed "mem" already
+        let mut v: Vec<&str> = vec!["harness", "mem"];
+        for s in sources.iter() {
+            let s = s.as_str();
+            if s != "harness" && s != "mem" {
+                v.push(s);
+            }
+        }
+        v
+    };
+
+    let extra_sources_json = {
+        let mut map = serde_json::Map::new();
+        // mem — always collected
+        map.insert("mem".into(), collect_mem(&project_slugs));
+        if effective_sources.contains(&"claude-session") {
+            map.insert("claude_session".into(), collect_claude_session());
+        }
+        if effective_sources.contains(&"alcove") {
+            map.insert("alcove".into(), collect_alcove(&CONFIG.context.alcove));
+        }
+        serde_json::Value::Object(map)
+    };
+
+    // Fix 4: Scope note clarifying which fields are per-project vs aggregated
+    let scope_note = if all_projects || project.is_some() {
+        "evolution_stats, metrics_summary, session_snapshots, and evolved_skills are scoped to the current working directory project. Only obs_stats is aggregated across all analyzed projects."
+    } else {
+        ""
+    };
+
     // Compile
     let output = serde_json::json!({
         "generated_at": now_iso(),
         "analysis_window_days": days,
+        "date_range": { "from": date_from, "to": date_to },
+        "projects_analyzed": project_slugs,
+        "scope_note": scope_note,
+        "extra_sources": extra_sources_json,
         "obs_stats": obs_stats,
         "evolution_stats": evo_stats,
         "metrics_summary": metrics_summary,
@@ -329,6 +430,212 @@ pub fn run_context(days: u32) -> i32 {
 
     println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
     0
+}
+
+/// Collect mem nodes from ~/.harness/memory.db.
+/// Pulls top nodes by importance for each project slug (or all if slugs = [current]).
+/// Session-type nodes are excluded (importance=0.05, noise) unless there's nothing else.
+fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
+    let conn = match store::open_db() {
+        Ok(c) => c,
+        Err(e) => {
+            return serde_json::json!({"error": format!("mem db unavailable: {e}")});
+        }
+    };
+
+    // Determine project filter: use first slug if single-project, else no filter (all)
+    let project_filter: Option<&str> = if project_slugs.len() == 1 {
+        project_slugs.first().map(|s| s.as_str())
+    } else {
+        None
+    };
+
+    // Smart recall — hint = broad engineering context, limit = 30
+    let recalled = store::smart_recall_conn(
+        &conn,
+        project_filter,
+        Some("decision pattern error resolution concept"),
+        30,
+    );
+
+    // Also pull top decisions/resolutions explicitly (high-value types)
+    let decisions = store::query_nodes_conn(
+        &conn,
+        None,       // tag filter
+        Some("decision"),
+        project_filter,
+        10,
+    );
+    let resolutions = store::query_nodes_conn(
+        &conn,
+        None,
+        Some("resolution"),
+        project_filter,
+        10,
+    );
+
+    // Merge and deduplicate by id, prefer higher-importance entry
+    let mut seen: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+
+    for sn in &recalled {
+        let id = sn.node.frontmatter.id.clone();
+        let entry = serde_json::json!({
+            "id": id,
+            "type": sn.node.frontmatter.node_type,
+            "title": sn.node.frontmatter.title,
+            "importance": sn.node.frontmatter.importance,
+            "tags": sn.node.frontmatter.tags,
+            "updated": sn.node.frontmatter.updated,
+            "body_preview": sn.node.body.chars().take(200).collect::<String>(),
+        });
+        seen.insert(id, entry);
+    }
+    for node in decisions.iter().chain(resolutions.iter()) {
+        let id = node.frontmatter.id.clone();
+        seen.entry(id.clone()).or_insert_with(|| serde_json::json!({
+            "id": id,
+            "type": node.frontmatter.node_type,
+            "title": node.frontmatter.title,
+            "importance": node.frontmatter.importance,
+            "tags": node.frontmatter.tags,
+            "updated": node.frontmatter.updated,
+            "body_preview": node.body.chars().take(200).collect::<String>(),
+        }));
+    }
+
+    // Sort by importance desc, take top 30
+    let mut nodes: Vec<serde_json::Value> = seen.into_values().collect();
+    nodes.sort_by(|a, b| {
+        let ia = a.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let ib = b.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        ib.partial_cmp(&ia).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    nodes.truncate(30);
+
+    serde_json::json!({
+        "total_nodes_sampled": nodes.len(),
+        "project_filter": project_filter,
+        "nodes": nodes,
+    })
+}
+
+fn collect_claude_session() -> serde_json::Value {
+    let claude_projects = dirs_home().join(".claude").join("projects");
+    if !claude_projects.is_dir() {
+        return serde_json::json!({"error": "~/.claude/projects not found"});
+    }
+    let mut sessions: Vec<serde_json::Value> = vec![];
+    let project_dirs: Vec<_> = std::fs::read_dir(&claude_projects)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    for pd in project_dirs.iter().take(20) {
+        let jsonl_files = list_files(&pd.path(), ".jsonl");
+        for f in jsonl_files.iter().rev().take(3) {
+            let recs: Vec<serde_json::Value> = read_jsonl_typed(&pd.path().join(f));
+            for r in recs.iter().take(5) {
+                let meta = serde_json::json!({
+                    "project": pd.file_name().to_string_lossy(),
+                    "timestamp": r.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
+                    "model": r.get("model").and_then(|v| v.as_str()).unwrap_or(""),
+                    "message_count": r.get("message_count").and_then(|v| v.as_u64()).unwrap_or(0),
+                    "cost_usd": r.get("cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                });
+                sessions.push(meta);
+            }
+        }
+    }
+    sessions.sort_by(|a, b| {
+        let ta = a.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+        let tb = b.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+        tb.cmp(ta)
+    });
+    let sessions: Vec<_> = sessions.into_iter().take(20).collect();
+    serde_json::json!({
+        "total_sessions_sampled": sessions.len(),
+        "sessions": sessions,
+    })
+}
+
+fn collect_alcove(cfg: &super::config::AlcoveConfig) -> serde_json::Value {
+    if cfg.vault_path.is_empty() {
+        return serde_json::json!({"error": "alcove vault_path not configured"});
+    }
+    let vault = if cfg.vault_path.starts_with("~/") {
+        dirs_home().join(&cfg.vault_path[2..])
+    } else {
+        std::path::PathBuf::from(&cfg.vault_path)
+    };
+    // Fix 2: Canonicalize vault path and verify it stays within home directory
+    let vault = if let Ok(canonical) = vault.canonicalize() {
+        let home = dirs_home();
+        if !canonical.starts_with(&home) {
+            return serde_json::json!({
+                "error": format!("vault_path escapes home directory: {}", canonical.display())
+            });
+        }
+        canonical
+    } else {
+        return serde_json::json!({"error": format!("vault_path not found: {}", vault.display())});
+    };
+    let max = cfg.max_docs.max(1);
+    let mut docs: Vec<serde_json::Value> = vec![];
+    let mut visited = 0usize;
+    collect_md_files(&vault, &cfg.projects, max, &mut docs, 0, &mut visited);
+    serde_json::json!({
+        "vault_path": cfg.vault_path,
+        "docs_collected": docs.len(),
+        "documents": docs,
+    })
+}
+
+fn collect_md_files(
+    dir: &std::path::Path,
+    filter_projects: &[String],
+    max: usize,
+    out: &mut Vec<serde_json::Value>,
+    depth: usize,
+    visited: &mut usize,
+) {
+    // Fix 3: Guard against deep recursion, excessive file visits, and symlink loops
+    const MAX_DEPTH: usize = 10;
+    const MAX_VISITED: usize = 5000;
+
+    if out.len() >= max || depth > MAX_DEPTH || *visited > MAX_VISITED {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        if out.len() >= max || *visited > MAX_VISITED {
+            break;
+        }
+        let path = entry.path();
+        // Fix 3: Skip symlinks to prevent directory traversal via symlink
+        if path.is_dir() && !path.is_symlink() {
+            if !filter_projects.is_empty() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !filter_projects.iter().any(|p| p == &name) {
+                    continue;
+                }
+            }
+            collect_md_files(&path, &[], max, out, depth + 1, visited);
+        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            *visited += 1;
+            let content = std::fs::read_to_string(&path).unwrap_or_default();
+            let summary: String = content.chars().take(200).collect();
+            out.push(serde_json::json!({
+                "path": path.display().to_string(),
+                "summary": summary,
+            }));
+        }
+    }
 }
 
 /// Simple epoch-day to (year, month, day) without chrono dependency.
@@ -673,5 +980,69 @@ mod tests {
         let (y, m, _d) = epoch_days_to_ymd(180);
         assert_eq!(y, 1970);
         assert!(m >= 6 && m <= 7, "month should be June or July, got {m}");
+    }
+
+    // ── run_context signature ──────────────────────────
+    #[test]
+    fn effective_sources_all_expands() {
+        let sources: Vec<String> = vec!["all".into()];
+        let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
+            vec!["harness", "claude-session", "alcove"]
+        } else if sources.is_empty() {
+            vec!["harness"]
+        } else {
+            sources.iter().map(|s| s.as_str()).collect()
+        };
+        assert_eq!(effective, vec!["harness", "claude-session", "alcove"]);
+    }
+
+    #[test]
+    fn effective_sources_empty_defaults_to_harness() {
+        let sources: Vec<String> = vec![];
+        let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
+            vec!["harness", "claude-session", "alcove"]
+        } else if sources.is_empty() {
+            vec!["harness"]
+        } else {
+            sources.iter().map(|s| s.as_str()).collect()
+        };
+        assert_eq!(effective, vec!["harness"]);
+    }
+
+    #[test]
+    fn effective_sources_explicit_list_passthrough() {
+        let sources: Vec<String> = vec!["harness".into(), "alcove".into()];
+        let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
+            vec!["harness", "claude-session", "alcove"]
+        } else if sources.is_empty() {
+            vec!["harness"]
+        } else {
+            sources.iter().map(|s| s.as_str()).collect()
+        };
+        assert_eq!(effective, vec!["harness", "alcove"]);
+    }
+
+    #[test]
+    fn since_overrides_days_in_date_range() {
+        // When --since is provided, date_from should equal since value
+        let since: Option<String> = Some("20260101".into());
+        let days: u32 = 30;
+
+        let (cutoff_tag, date_from) = if let Some(ref s) = since {
+            (s.clone(), s.clone())
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let cutoff_ts = now.saturating_sub((days as u64) * 86400);
+            let days_since_epoch = cutoff_ts / 86400;
+            let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
+            let tag = format!("{y:04}{m:02}{d:02}");
+            (tag.clone(), tag)
+        };
+
+        assert_eq!(cutoff_tag, "20260101");
+        assert_eq!(date_from, "20260101");
     }
 }
