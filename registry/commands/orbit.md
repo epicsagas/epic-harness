@@ -16,10 +16,16 @@ At the start of **every response** during an active orbit:
 4. **If `phase` is ahead of where you think you are, trust the file** — you may have compacted
 5. **Conflict resolution (crash-mid-update)**: If `phase_history` contains an entry for the current `phase` with a completed timestamp, treat that phase as done and advance to the next phase — `phase_history` wins over the `phase` field when they disagree. This covers the case where the state file was partially written before a crash.
 6. Resume from the resolved phase. Do NOT re-ask mode selection, re-run spec, or re-discover
+7. **Worktree recovery**: If `worktree_name` is set in pipeline state:
+   - Check if worktree still exists: `git worktree list | grep "{worktree_name}"`
+   - If exists: re-enter via `EnterWorktree` with `path` parameter pointing to the worktree path
+   - If not found: worktree was cleaned up externally — abort orbit with warning, set `"status": "aborted"`
 
 If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
 
 **Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
+
+> **Worktree crash safety**: Pipeline state (`PIPELINE-*.json`), spec files, and check reports live in `$HARNESS_DIR` (shared across worktrees — same git remote → same project slug). They survive worktree loss. If the worktree was cleaned up externally during a crash, abort the orbit and warn the user.
 
 > **Note:** The crash staleness threshold (45 min) is intentionally larger than the pipeline deadline (30 min) to avoid misclassifying a timeout'd-but-active pipeline as crashed. A pipeline that hit its deadline will show `status: timeout`, not `status: running`.
 
@@ -58,6 +64,8 @@ Create `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
   "spec_file": null,
   "goal_slug": null,
   "branch": null,
+  "worktree_name": null,
+  "original_cwd": null,
   "check_fail_count": 0,
   "max_retries": 3,
   "check_report": null,
@@ -98,7 +106,7 @@ If `EPIC_ORCHESTRATION=enabled`:
 > **2. Council** — Clear but complex (architecture, trade-offs, multiple concerns). 4-voice council auto-generates spec and proceeds.
 > **3. Direct** — Clear and simple. Spec written immediately, build starts now.
 
-**Exception — skip mode selection if syntagma results are in context** (`analyze_code` / `suggest_refactorings` output present): enter Direct automatically.
+**Exception — skip mode selection if episteme results are in context** (`analyze_code` / `suggest_refactorings` output present): enter Direct automatically.
 
 Do NOT proceed until the user picks a mode. Record: `"mode": "interactive" | "council" | "direct"`.
 
@@ -168,10 +176,10 @@ Record via `mem_add` (type=decision, importance=0.9). Show spec as FYI → **pro
 
 Write spec immediately — no council, no discovery.
 
-**If syntagma results are present:**
+**If episteme results are present:**
 - Map each detected smell → Requirement (e.g., God Class → R1: Extract responsibilities)
 - Map each suggested refactoring → AC (e.g., Extract Method → AC1: each method ≤ 20 lines, single responsibility)
-- Use syntagma output as authoritative source — do NOT re-derive from raw request
+- Use episteme output as authoritative source — do NOT re-derive from raw request
 
 **Otherwise:** derive `goal_slug`, Requirements, and AC directly from the request.
 
@@ -187,30 +195,40 @@ Update state: `"phase": "go"`.
 
 ### Git Preflight
 
-Before creating a branch, verify git state:
+Before entering worktree isolation, verify git state:
 
 ```bash
 # Clean working tree? (--porcelain catches untracked files that git diff --quiet HEAD misses)
 [ -z "$(git status --porcelain)" ] || (echo "ERROR: Dirty working tree or untracked files. Commit or stash first." && exit 1)
 # Not on detached HEAD?
 git symbolic-ref -q HEAD || (echo "ERROR: Detached HEAD. Checkout a branch first." && exit 1)
-# Branch doesn't already exist?
-git show-ref --quiet refs/heads/feature/{goal_slug} && echo "WARN: Branch already exists, reusing" || true
 ```
 
 Sanitize `goal_slug`: only `a-z`, `0-9`, `-`. Replace invalid characters with `-`.
 
-2. Create branch: `git checkout -b feature/{goal_slug}` (reuse if exists)
+### Worktree Isolation
+
+Enter an isolated git worktree so other sessions can freely switch branches without conflicting with the orbit pipeline:
+
+1. Record current directory as `original_cwd` in pipeline state
+2. Call `EnterWorktree` with name `orbit-{goal_slug}`
+   - Creates `.claude/worktrees/orbit-{goal_slug}/` with a fresh branch from `origin/{default-branch}`
+   - The worktree branch is `orbit-{goal_slug}`
+3. Record `worktree_name` and `branch` in pipeline state
+4. All subsequent phases (go/check/ship) execute inside the worktree
+5. State files remain accessible: `$HARNESS_DIR` resolves to the same `~/.harness/projects/{slug}/` (same git remote → same project slug)
+
+> **Why worktree?** Orbit pipelines can run for 30+ minutes. Without isolation, switching branches in another session corrupts the in-progress worktree — uncommitted changes, branch state, and file edits collide. Worktree isolation guarantees the orbit operates on its own copy of the repo.
 3. Plan tasks — map each Requirement:
    ```
    Task 1: [desc] — satisfies: R1 — depends on: none    — modifies: [files]
    Task 2: [desc] — satisfies: R2 — depends on: Task 1  — modifies: [files]
    ```
-4. Execute via subagents (Agent tool):
+4. Execute via subagents (Agent tool) — **all inside the worktree**:
    - TDD: write test first → implement → green
    - `debug` skill on test failure; `verify` skill before done
    - `run_in_background: true` for independent tasks
-   - `isolation: "worktree"` only if parallel tasks modify overlapping files
+   - `isolation: "worktree"` only if parallel tasks modify overlapping files (nested worktree for subagent-level conflict)
 
 **Subagent states:**
 
@@ -227,7 +245,7 @@ Sanitize `goal_slug`: only `a-z`, `0-9`, `-`. Replace invalid characters with `-
 ```
 ## Go Report
 - Spec: SPEC-{timestamp} ({goal_slug})
-- Branch: feature/{goal_slug}
+- Branch: orbit-{goal_slug} (worktree: orbit-{goal_slug})
 - Requirements: R1 ✅, R2 ✅, ...
 - AC verified: AC1 ✅, AC2 ✅, ...
 - Tests: X/Y passing
@@ -332,7 +350,8 @@ Update state: `"phase": "ship"`.
 
 **Gate:** Read check report from `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`. If file does not exist → STOP. Report must show PASS/WARN.
 
-**6a. Isolated integration test** — launch agent with `isolation: "worktree"`:
+**6a. Integration verification** — run directly in worktree (already isolated from main tree):
+- Clean build artifacts first: `cargo clean` / `npm run clean` / equivalent
 - Full build from scratch · complete test suite · linter + formatter
 - Fail → STOP. Do NOT create PR.
 
@@ -425,6 +444,8 @@ fi
 
 Push `{"phase": "ship", "status": "complete"}` to `phase_history`.
 
+**6e. Exit worktree:** Call `ExitWorktree` with `action: "keep"` (preserve worktree and branch until user merges the PR — branch is needed for PR head). The session returns to the original working directory. Pipeline state, specs, and check reports are already in `$HARNESS_DIR` (shared).
+
 > **Orbit context:** After pushing ship to `phase_history`, **immediately proceed to Step 7 (Orbit Complete + Evolve)**. Do NOT stop here.
 
 ---
@@ -439,7 +460,8 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 - Pipeline: PIPELINE-{id}
 - Mode: {interactive|council|direct}
 - Spec: SPEC-{timestamp} ({goal_slug})
-- Branch: feature/{goal_slug}
+- Branch: orbit-{goal_slug}
+- Worktree: {worktree_name} (preserved for PR)
 - PR: {URL}
 - Duration: {started_at → now}
 
@@ -482,7 +504,7 @@ Push `{"phase": "evolve", "status": "complete"}` to `phase_history`.
 ---
 
 ## Red Flags
-- Skipping mode selection without syntagma results present
+- Skipping mode selection without episteme results present
 - Proceeding past spec without `status: approved`
 - Continuing after 3 check failures without user consent
 - Skipping isolated integration test before PR
@@ -493,3 +515,6 @@ Push `{"phase": "evolve", "status": "complete"}` to `phase_history`.
 - Ignoring the Phase Recovery Protocol after context compaction
 - Proceeding past deadline without user consent
 - Creating a branch with unsanitized goal_slug or dirty working tree
+- Losing worktree reference between phases (worktree_name missing from pipeline state)
+- Forgetting to exit worktree before orbit complete (leaves session in wrong directory)
+- Entering worktree without saving original_cwd (can't find state files after)

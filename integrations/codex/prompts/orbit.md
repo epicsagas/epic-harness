@@ -8,11 +8,49 @@ description: "Complete orbit — autonomous spec through ship. Choose interactiv
 
 You are entering **Orbit** mode — the full autonomous pipeline from spec to PR in one shot.
 
+## Phase Recovery Protocol
+
+At the start of **every response** during an active orbit:
+
+1. Run `ls $HARNESS_DIR/orbit/PIPELINE-*.json 2>/dev/null`
+2. Find the file with `"status": "running"`
+3. Read it. Verify `phase` matches where you left off
+4. **If `phase` is ahead of where you think you are, trust the file** — you may have compacted
+5. **Conflict resolution (crash-mid-update)**: If `phase_history` contains an entry for the current `phase` with a completed timestamp, treat that phase as done and advance to the next phase — `phase_history` wins over the `phase` field when they disagree.
+6. Resume from the resolved phase. Do NOT re-ask mode selection, re-run spec, or re-discover
+7. **Worktree recovery**: If `worktree_name` is set in pipeline state:
+   - Check if worktree still exists: `git worktree list | grep "{worktree_name}"`
+   - If exists: `cd` into the worktree path to continue work
+   - If not found: worktree was cleaned up externally — abort orbit with warning, set `"status": "aborted"`
+
+If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
+
+**Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
+
+> **Worktree crash safety**: Pipeline state (`PIPELINE-*.json`), spec files, and check reports live in `$HARNESS_DIR` (shared across worktrees — same git remote → same project slug). They survive worktree loss. If the worktree was cleaned up externally during a crash, abort the orbit and warn the user.
+
 ## Step 0: Preflight
 
 Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 ```json
-{"id":"{timestamp}","mode":null,"phase":"mode_select","status":"running","spec_file":null,"goal_slug":null,"branch":null,"check_fail_count":0,"max_retries":3,"check_report":null,"started_at":"{ISO}","updated_at":"{ISO}","phase_history":[]}
+{
+  "id": "{timestamp}",
+  "mode": null,
+  "phase": "mode_select",
+  "status": "running",
+  "spec_file": null,
+  "goal_slug": null,
+  "branch": null,
+  "worktree_name": null,
+  "original_cwd": null,
+  "check_fail_count": 0,
+  "max_retries": 3,
+  "check_report": null,
+  "deadline": "{ISO-8601, now + 30 minutes}",
+  "started_at": "{ISO-8601}",
+  "updated_at": "{ISO-8601}",
+  "phase_history": []
+}
 ```
 
 ## Step 1: Mode Selection
@@ -39,11 +77,27 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 
 ## Step 3: Build (Go)
 
-1. Load spec, extract `goal_slug`, create branch `feature/{goal_slug}`
-2. Plan tasks from Requirements (R1, R2...)
-3. Execute with Codex sub-agents — TDD, debug on failure, verify before done
-4. Handle states: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
-5. Integrate: full test suite, verify ACs
+1. Load spec, extract `goal_slug`
+2. **Git preflight**: verify clean working tree and not on detached HEAD:
+   ```bash
+   [ -z "$(git status --porcelain)" ] || (echo "ERROR: Dirty working tree or untracked files. Commit or stash first." && exit 1)
+   git symbolic-ref -q HEAD || (echo "ERROR: Detached HEAD. Checkout a branch first." && exit 1)
+   ```
+3. **Worktree isolation**: Create an isolated git worktree so other sessions can freely switch branches:
+   ```bash
+   git worktree add .claude/worktrees/orbit-{goal_slug} -b orbit-{goal_slug} origin/{default-branch}
+   cd .claude/worktrees/orbit-{goal_slug}
+   ```
+   - Record `worktree_name` as `orbit-{goal_slug}` and `original_cwd` in pipeline state
+   - All subsequent phases (go/check/ship) execute inside the worktree
+   - State files remain accessible: `$HARNESS_DIR` resolves to the same project directory (same git remote → same project slug)
+
+   > **Why worktree?** Orbit pipelines can run for 30+ minutes. Without isolation, switching branches in another session corrupts the in-progress work — uncommitted changes, branch state, and file edits collide. Worktree isolation guarantees the orbit operates on its own copy of the repo.
+4. Plan tasks from Requirements (R1, R2...)
+5. Execute with Codex sub-agents — TDD, debug on failure, verify before done
+   - All execution happens inside the worktree
+6. Handle states: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
+7. Integrate: full test suite, verify ACs
 
 ## Step 4: Check
 
@@ -64,10 +118,19 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 ## Step 6: Ship
 
 1. **Gate**: verify PASS check report exists
-2. **Isolated test**: launch Codex sub-agent with worktree isolation — build + test + lint
+2. **Integration verification** — run directly in worktree (already isolated from main tree):
+   - Clean build artifacts first: `cargo clean` / `npm run clean` / equivalent
+   - Full build from scratch · complete test suite · linter + formatter
+   - Fail → STOP. Do NOT create PR.
 3. **Git hygiene**: conventional commits, rebase, squash fixups
 4. **Create PR** via `gh pr create` with spec + check report in body
 5. **CI watch** via `gh pr checks --watch`, auto-fix failures
+6. **Exit worktree**: Return to original directory and keep the worktree (needed for PR head):
+   ```bash
+   cd {original_cwd}
+   # Worktree preserved — branch is needed for PR
+   ```
+   Record worktree status in pipeline state.
 
 ## Step 7: Report
 
@@ -76,6 +139,8 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 - Pipeline: PIPELINE-{id}
 - Mode: {interactive|council}
 - Spec: SPEC-{timestamp} ({goal_slug})
+- Branch: orbit-{goal_slug}
+- Worktree: orbit-{goal_slug} (preserved for PR)
 - PR: {URL}
 - Check retries: {count}
 
@@ -97,3 +162,7 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 - Skipping isolated integration test
 - Shipping with FAIL in security checks
 - Losing check report between phases
+- Creating branch with dirty working tree
+- Losing worktree reference between phases (`worktree_name` missing from pipeline state)
+- Forgetting to exit worktree before orbit complete (leaves session in wrong directory)
+- Entering worktree without saving `original_cwd` (can't find state files after)
