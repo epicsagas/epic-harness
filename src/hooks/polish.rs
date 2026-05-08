@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::Command;
 
 use super::common::*;
-use super::telemetry::{FormatterKind, Telemetry};
+use crate::telemetry::{FormatterKind, Telemetry};
 
 /// Execute a program with discrete arguments — no shell involved.
 /// This is the safe replacement for `try_exec` when `file_path` is part of

@@ -4,38 +4,38 @@ use std::path::{Path, PathBuf};
 
 // ── Canonical sources (single source of truth) ──────────────────────────────
 
-static SKILL_COMMIT: &str = include_str!("../../skills/commit/SKILL.md");
-static SKILL_CONTEXT: &str = include_str!("../../skills/context/SKILL.md");
-static SKILL_DEBUG: &str = include_str!("../../skills/debug/SKILL.md");
-static SKILL_DOCUMENT: &str = include_str!("../../skills/document/SKILL.md");
-static SKILL_PERF: &str = include_str!("../../skills/perf/SKILL.md");
-static SKILL_SECURE: &str = include_str!("../../skills/secure/SKILL.md");
-static SKILL_SIMPLIFY: &str = include_str!("../../skills/simplify/SKILL.md");
-static SKILL_TDD: &str = include_str!("../../skills/tdd/SKILL.md");
-static SKILL_VERIFY: &str = include_str!("../../skills/verify/SKILL.md");
-static SKILL_COUNCIL: &str = include_str!("../../skills/council/SKILL.md");
-static SKILL_AGENT_INTROSPECTION: &str = include_str!("../../skills/agent-introspection/SKILL.md");
-static SKILL_REFLECT: &str = include_str!("../../skills/reflect/SKILL.md");
-static SKILL_DISCOVER: &str = include_str!("../../skills/discover/SKILL.md");
-static SKILL_ORCHESTRATE: &str = include_str!("../../skills/orchestrate/SKILL.md");
+static SKILL_COMMIT: &str = include_str!("../skills/commit/SKILL.md");
+static SKILL_CONTEXT: &str = include_str!("../skills/context/SKILL.md");
+static SKILL_DEBUG: &str = include_str!("../skills/debug/SKILL.md");
+static SKILL_DOCUMENT: &str = include_str!("../skills/document/SKILL.md");
+static SKILL_PERF: &str = include_str!("../skills/perf/SKILL.md");
+static SKILL_SECURE: &str = include_str!("../skills/secure/SKILL.md");
+static SKILL_SIMPLIFY: &str = include_str!("../skills/simplify/SKILL.md");
+static SKILL_TDD: &str = include_str!("../skills/tdd/SKILL.md");
+static SKILL_VERIFY: &str = include_str!("../skills/verify/SKILL.md");
+static SKILL_COUNCIL: &str = include_str!("../skills/council/SKILL.md");
+static SKILL_AGENT_INTROSPECTION: &str = include_str!("../skills/agent-introspection/SKILL.md");
+static SKILL_REFLECT: &str = include_str!("../skills/reflect/SKILL.md");
+static SKILL_DISCOVER: &str = include_str!("../skills/discover/SKILL.md");
+static SKILL_ORCHESTRATE: &str = include_str!("../skills/orchestrate/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
-static CMD_CHECK: &str = include_str!("../../commands/check.md");
-static CMD_EVOLVE: &str = include_str!("../../commands/evolve.md");
-static CMD_GO: &str = include_str!("../../commands/go.md");
-static CMD_SHIP: &str = include_str!("../../commands/ship.md");
-static CMD_SPEC: &str = include_str!("../../commands/spec.md");
-static CMD_TEAM: &str = include_str!("../../commands/team.md");
-static CMD_DISCOVER: &str = include_str!("../../commands/discover.md");
-static CMD_ORBIT: &str = include_str!("../../commands/orbit.md");
-static CMD_INTERVENE: &str = include_str!("../../commands/intervene.md");
-static CMD_STATUS: &str = include_str!("../../commands/status.md");
+static CMD_CHECK: &str = include_str!("../commands/check.md");
+static CMD_EVOLVE: &str = include_str!("../commands/evolve.md");
+static CMD_GO: &str = include_str!("../commands/go.md");
+static CMD_SHIP: &str = include_str!("../commands/ship.md");
+static CMD_SPEC: &str = include_str!("../commands/spec.md");
+static CMD_TEAM: &str = include_str!("../commands/team.md");
+static CMD_DISCOVER: &str = include_str!("../commands/discover.md");
+static CMD_ORBIT: &str = include_str!("../commands/orbit.md");
+static CMD_INTERVENE: &str = include_str!("../commands/intervene.md");
+static CMD_STATUS: &str = include_str!("../commands/status.md");
 
-static SKILL_DISPATCH: &str = include_str!("../../skills/_dispatch/SKILL.md");
+static SKILL_DISPATCH: &str = include_str!("../skills/_dispatch/SKILL.md");
 
-static AGENT_AUDITOR: &str = include_str!("../../agents/auditor.md");
-static AGENT_BUILDER: &str = include_str!("../../agents/builder.md");
-static AGENT_PLANNER: &str = include_str!("../../agents/planner.md");
-static AGENT_REVIEWER: &str = include_str!("../../agents/reviewer.md");
+static AGENT_AUDITOR: &str = include_str!("../agents/auditor.md");
+static AGENT_BUILDER: &str = include_str!("../agents/builder.md");
+static AGENT_PLANNER: &str = include_str!("../agents/planner.md");
+static AGENT_REVIEWER: &str = include_str!("../agents/reviewer.md");
 
 static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("commit", SKILL_COMMIT),
@@ -411,47 +411,47 @@ static CODEX_FILES: &[(&str, &str)] = integration_files!(
     [
         (
             "hooks.json",
-            include_str!("../../integrations/codex/hooks.json")
+            include_str!("../integrations/codex/hooks.json")
         ),
         // config.toml: enables codex_hooks (off by default without this).
         (
             "config.toml",
-            include_str!("../../integrations/codex/config.toml")
+            include_str!("../integrations/codex/config.toml")
         ),
         // Prompts are the Codex slash-command mechanism (~/.codex/prompts/).
         // Note: Codex marks prompts as deprecated in favour of skills, but they
         // still provide named /prompts:check etc. shortcuts in the CLI/IDE UI.
         (
             "prompts/check.md",
-            include_str!("../../integrations/codex/prompts/check.md")
+            include_str!("../integrations/codex/prompts/check.md")
         ),
         (
             "prompts/evolve.md",
-            include_str!("../../integrations/codex/prompts/evolve.md")
+            include_str!("../integrations/codex/prompts/evolve.md")
         ),
         (
             "prompts/go.md",
-            include_str!("../../integrations/codex/prompts/go.md")
+            include_str!("../integrations/codex/prompts/go.md")
         ),
         (
             "prompts/ship.md",
-            include_str!("../../integrations/codex/prompts/ship.md")
+            include_str!("../integrations/codex/prompts/ship.md")
         ),
         (
             "prompts/spec.md",
-            include_str!("../../integrations/codex/prompts/spec.md")
+            include_str!("../integrations/codex/prompts/spec.md")
         ),
         (
             "prompts/team.md",
-            include_str!("../../integrations/codex/prompts/team.md")
+            include_str!("../integrations/codex/prompts/team.md")
         ),
         (
             "prompts/discover.md",
-            include_str!("../../integrations/codex/prompts/discover.md")
+            include_str!("../integrations/codex/prompts/discover.md")
         ),
         (
             "prompts/orbit.md",
-            include_str!("../../integrations/codex/prompts/orbit.md")
+            include_str!("../integrations/codex/prompts/orbit.md")
         ),
     ]
 );
@@ -461,43 +461,43 @@ static GEMINI_FILES: &[(&str, &str)] = integration_files!(
     [
         (
             "settings.json",
-            include_str!("../../integrations/gemini/settings.json")
+            include_str!("../integrations/gemini/settings.json")
         ),
         (
             "GEMINI.md",
-            include_str!("../../integrations/gemini/GEMINI.md")
+            include_str!("../integrations/gemini/GEMINI.md")
         ),
         (
             "commands/check.md",
-            include_str!("../../integrations/gemini/commands/check.md")
+            include_str!("../integrations/gemini/commands/check.md")
         ),
         (
             "commands/evolve.md",
-            include_str!("../../integrations/gemini/commands/evolve.md")
+            include_str!("../integrations/gemini/commands/evolve.md")
         ),
         (
             "commands/go.md",
-            include_str!("../../integrations/gemini/commands/go.md")
+            include_str!("../integrations/gemini/commands/go.md")
         ),
         (
             "commands/ship.md",
-            include_str!("../../integrations/gemini/commands/ship.md")
+            include_str!("../integrations/gemini/commands/ship.md")
         ),
         (
             "commands/spec.md",
-            include_str!("../../integrations/gemini/commands/spec.md")
+            include_str!("../integrations/gemini/commands/spec.md")
         ),
         (
             "commands/team.md",
-            include_str!("../../integrations/gemini/commands/team.md")
+            include_str!("../integrations/gemini/commands/team.md")
         ),
         (
             "commands/discover.md",
-            include_str!("../../integrations/gemini/commands/discover.md")
+            include_str!("../integrations/gemini/commands/discover.md")
         ),
         (
             "commands/orbit.md",
-            include_str!("../../integrations/gemini/commands/orbit.md")
+            include_str!("../integrations/gemini/commands/orbit.md")
         ),
     ]
 );
@@ -507,43 +507,43 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     [
         (
             "hooks.json",
-            include_str!("../../integrations/cursor/hooks.json")
+            include_str!("../integrations/cursor/hooks.json")
         ),
         (
             "rules/harness-context.mdc",
-            include_str!("../../integrations/cursor/rules/harness-context.mdc")
+            include_str!("../integrations/cursor/rules/harness-context.mdc")
         ),
         (
             "commands/check.md",
-            include_str!("../../integrations/cursor/commands/check.md")
+            include_str!("../integrations/cursor/commands/check.md")
         ),
         (
             "commands/evolve.md",
-            include_str!("../../integrations/cursor/commands/evolve.md")
+            include_str!("../integrations/cursor/commands/evolve.md")
         ),
         (
             "commands/go.md",
-            include_str!("../../integrations/cursor/commands/go.md")
+            include_str!("../integrations/cursor/commands/go.md")
         ),
         (
             "commands/ship.md",
-            include_str!("../../integrations/cursor/commands/ship.md")
+            include_str!("../integrations/cursor/commands/ship.md")
         ),
         (
             "commands/spec.md",
-            include_str!("../../integrations/cursor/commands/spec.md")
+            include_str!("../integrations/cursor/commands/spec.md")
         ),
         (
             "commands/team.md",
-            include_str!("../../integrations/cursor/commands/team.md")
+            include_str!("../integrations/cursor/commands/team.md")
         ),
         (
             "commands/discover.md",
-            include_str!("../../integrations/cursor/commands/discover.md")
+            include_str!("../integrations/cursor/commands/discover.md")
         ),
         (
             "commands/orbit.md",
-            include_str!("../../integrations/cursor/commands/orbit.md")
+            include_str!("../integrations/cursor/commands/orbit.md")
         ),
     ]
 );
@@ -553,39 +553,39 @@ static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
     [
         (
             "commands/check.md",
-            include_str!("../../integrations/opencode/commands/check.md")
+            include_str!("../integrations/opencode/commands/check.md")
         ),
         (
             "commands/evolve.md",
-            include_str!("../../integrations/opencode/commands/evolve.md")
+            include_str!("../integrations/opencode/commands/evolve.md")
         ),
         (
             "commands/go.md",
-            include_str!("../../integrations/opencode/commands/go.md")
+            include_str!("../integrations/opencode/commands/go.md")
         ),
         (
             "commands/ship.md",
-            include_str!("../../integrations/opencode/commands/ship.md")
+            include_str!("../integrations/opencode/commands/ship.md")
         ),
         (
             "commands/spec.md",
-            include_str!("../../integrations/opencode/commands/spec.md")
+            include_str!("../integrations/opencode/commands/spec.md")
         ),
         (
             "commands/team.md",
-            include_str!("../../integrations/opencode/commands/team.md")
+            include_str!("../integrations/opencode/commands/team.md")
         ),
         (
             "commands/discover.md",
-            include_str!("../../integrations/opencode/commands/discover.md")
+            include_str!("../integrations/opencode/commands/discover.md")
         ),
         (
             "commands/orbit.md",
-            include_str!("../../integrations/opencode/commands/orbit.md")
+            include_str!("../integrations/opencode/commands/orbit.md")
         ),
         (
             "plugins/epic-harness.js",
-            include_str!("../../integrations/opencode/plugins/epic-harness.js")
+            include_str!("../integrations/opencode/plugins/epic-harness.js")
         ),
     ]
 );
@@ -595,27 +595,27 @@ static CLINE_FILES: &[(&str, &str)] = integration_files!(
     [
         (
             "hooks/PreToolUse",
-            include_str!("../../integrations/cline/hooks/PreToolUse")
+            include_str!("../integrations/cline/hooks/PreToolUse")
         ),
         (
             "hooks/PostToolUse",
-            include_str!("../../integrations/cline/hooks/PostToolUse")
+            include_str!("../integrations/cline/hooks/PostToolUse")
         ),
         (
             "hooks/TaskStart",
-            include_str!("../../integrations/cline/hooks/TaskStart")
+            include_str!("../integrations/cline/hooks/TaskStart")
         ),
         (
             "hooks/TaskResume",
-            include_str!("../../integrations/cline/hooks/TaskResume")
+            include_str!("../integrations/cline/hooks/TaskResume")
         ),
         (
             "hooks/TaskCancel",
-            include_str!("../../integrations/cline/hooks/TaskCancel")
+            include_str!("../integrations/cline/hooks/TaskCancel")
         ),
         (
             "rules/epic-harness.md",
-            include_str!("../../integrations/cline/rules/epic-harness.md")
+            include_str!("../integrations/cline/rules/epic-harness.md")
         ),
     ]
 );
@@ -625,11 +625,11 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
     [
         (
             ".aider.conf.yml",
-            include_str!("../../integrations/aider/.aider.conf.yml")
+            include_str!("../integrations/aider/.aider.conf.yml")
         ),
         (
             ".aider/CONVENTIONS.md",
-            include_str!("../../integrations/aider/.aider/CONVENTIONS.md")
+            include_str!("../integrations/aider/.aider/CONVENTIONS.md")
         ),
     ]
 );
@@ -638,7 +638,7 @@ static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     "claude",
     [(
         ".claude/settings.json",
-        include_str!("../../hooks/hooks.json")
+        include_str!("../hooks/hooks.json")
     ),]
 );
 
@@ -1328,7 +1328,7 @@ const TOOLS: &[(&str, &str)] = &[
 
 fn interactive_menu() -> Vec<String> {
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
-        match super::install_wizard::interactive_select_tools(TOOLS) {
+        match crate::install_wizard::interactive_select_tools(TOOLS) {
             // telemetry consent already handled inside interactive_select_tools
             Ok(selected) => selected,
             Err(e) => {
@@ -1346,13 +1346,13 @@ fn interactive_menu() -> Vec<String> {
 }
 
 fn prompt_and_save_telemetry_consent() {
-    let level = super::telemetry::prompt_consent_interactive();
-    super::telemetry::write_consent(level);
+    let level = crate::telemetry::prompt_consent_interactive();
+    crate::telemetry::write_consent(level);
     match level {
-        super::telemetry::ConsentLevel::On => {
+        crate::telemetry::ConsentLevel::On => {
             eprintln!("[harness] Telemetry enabled. To opt out: epic-harness telemetry off");
         }
-        super::telemetry::ConsentLevel::Off => {
+        crate::telemetry::ConsentLevel::Off => {
             eprintln!("[harness] Telemetry disabled. To enable: epic-harness telemetry on");
         }
     }
@@ -1577,7 +1577,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     // Restricted to `epic install claude` — other tools should not implicitly
     // create org state in ~/.harness/orgs/.
     if !dry_run && tool == "claude" {
-        crate::hooks::team::store::install_default_team_if_needed("epic");
+        crate::team::store::install_default_team_if_needed("epic");
     }
 
     0
@@ -1651,7 +1651,7 @@ fn ensure_global_config(dry_run: bool) {
         return;
     }
     let _ = std::fs::create_dir_all(&harness_dir);
-    match std::fs::write(&config_path, super::config::default_config_template()) {
+    match std::fs::write(&config_path, crate::config::default_config_template()) {
         Ok(_) => eprintln!(
             "[harness] Created {} with default configuration",
             config_path.display()

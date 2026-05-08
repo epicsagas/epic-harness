@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use super::common::{self, CONFLICT_LOOKBACK, HookInput, PROFILE_GUARD, hint, should_run};
-use super::telemetry::{RuleKind, Telemetry};
+use crate::telemetry::{RuleKind, Telemetry};
 
 struct BuiltinRule {
     pattern: &'static str,

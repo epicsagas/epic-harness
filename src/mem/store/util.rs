@@ -55,17 +55,17 @@ pub(crate) fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
 
 /// Returns the path to the SQLite database file (~/.harness/memory.db).
 pub fn db_path() -> PathBuf {
-    let home = std::env::var("HARNESS_ROOT")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| "/tmp".to_string());
-    PathBuf::from(home).join(".harness").join("memory.db")
+    if let Ok(root) = std::env::var("HARNESS_ROOT") {
+        return PathBuf::from(root).join(".harness").join("memory.db");
+    }
+    crate::shared::paths::dirs_home().join(".harness").join("memory.db")
 }
 
 /// Compatibility: returns the .harness directory (parent of db_path).
 pub fn nodes_dir() -> PathBuf {
     db_path()
         .parent()
-        .unwrap_or_else(|| Path::new("/tmp"))
+        .expect("db_path always has .harness parent")
         .to_path_buf()
 }
 
@@ -73,7 +73,7 @@ pub fn nodes_dir() -> PathBuf {
 pub fn graph_path() -> PathBuf {
     db_path()
         .parent()
-        .unwrap_or_else(|| Path::new("/tmp"))
+        .expect("db_path always has .harness parent")
         .join("graph.json")
 }
 

@@ -1,4 +1,14 @@
+mod config;
+mod evolve;
 mod hooks;
+mod install;
+mod install_wizard;
+mod mem;
+mod orchestrate;
+mod serve;
+mod shared;
+mod team;
+mod telemetry;
 
 use std::env;
 use std::io::{self, IsTerminal, Read};
@@ -27,7 +37,7 @@ fn parse_flag_str(args: &[String], flag: &str) -> Option<String> {
             args.iter()
                 .position(|a| a == flag)
                 .and_then(|i| args.get(i + 1))
-                .map(|s| s.clone())
+                .cloned()
         })
 }
 
@@ -39,13 +49,12 @@ fn parse_flag_multi(args: &[String], flag: &str) -> Vec<String> {
     while i < args.len() {
         if args[i].starts_with(&eq) {
             results.push(args[i][eq.len()..].to_string());
-        } else if args[i] == flag {
-            if let Some(val) = args.get(i + 1) {
-                if !val.starts_with('-') {
-                    results.push(val.clone());
-                    i += 1;
-                }
-            }
+        } else if args[i] == flag
+            && let Some(val) = args.get(i + 1)
+            && !val.starts_with('-')
+        {
+            results.push(val.clone());
+            i += 1;
         }
         i += 1;
     }
@@ -149,32 +158,32 @@ fn main() {
 
     // install / telemetry: skip consent check (they set it).
     if subcmd == "install" {
-        let code = hooks::install::run(&args[2..]);
+        let code = install::run(&args[2..]);
         std::process::exit(code);
     }
     if subcmd == "uninstall" {
-        let code = hooks::install::run_uninstall(&args[2..]);
+        let code = install::run_uninstall(&args[2..]);
         std::process::exit(code);
     }
     if subcmd == "telemetry" {
-        let code = hooks::telemetry::run_cli(&args[2..]);
+        let code = telemetry::run_cli(&args[2..]);
         std::process::exit(code);
     }
 
     // All other subcommands: auto-enable telemetry on first run (opt-out model).
     // Prints a one-time notice if consent was not yet set.
-    hooks::telemetry::ensure_consent_or_set_default();
+    telemetry::ensure_consent_or_set_default();
 
     if subcmd == "mem" {
-        let code = hooks::mem::run(&args[1..]);
+        let code = mem::run(&args[1..]);
         std::process::exit(code);
     }
     if subcmd == "team" {
-        let code = hooks::team::run(&args[1..]);
+        let code = team::run(&args[1..]);
         std::process::exit(code);
     }
     if subcmd == "org" {
-        let code = hooks::team::run_org(&args[1..]);
+        let code = team::run_org(&args[1..]);
         std::process::exit(code);
     }
     if subcmd == "serve" {
@@ -182,7 +191,7 @@ fn main() {
             .get(2)
             .and_then(|a| a.strip_prefix("--port="))
             .and_then(|p| p.parse::<u16>().ok());
-        std::process::exit(hooks::serve::run_serve(port));
+        std::process::exit(serve::run_serve(port));
     }
 
     // reflect --context: data collection mode (no stdin needed)

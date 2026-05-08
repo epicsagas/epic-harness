@@ -41,9 +41,9 @@ pub fn append_edge_conn(conn: &Connection, edge: &Edge) -> io::Result<()> {
     Ok(())
 }
 
-/// Read all edges using an existing connection (no LIMIT — callers should paginate for large graphs).
-pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
-    let mut stmt = match conn.prepare("SELECT id, source, target, relation, weight, ts FROM edges")
+/// Read edges using an existing connection, capped at `limit`.
+pub fn read_edges_conn(conn: &Connection, limit: usize) -> Vec<Edge> {
+    let mut stmt = match conn.prepare("SELECT id, source, target, relation, weight, ts FROM edges LIMIT ?1")
     {
         Ok(s) => s,
         Err(e) => {
@@ -51,7 +51,7 @@ pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
             return vec![];
         }
     };
-    stmt.query_map([], |row| {
+    stmt.query_map(params![limit as i64], |row| {
         Ok(Edge {
             id: row.get(0)?,
             source: row.get(1)?,
@@ -67,8 +67,12 @@ pub fn read_edges_conn(conn: &Connection) -> Vec<Edge> {
 
 #[allow(dead_code)] // used by integration tests (tests/mem_test.rs)
 pub fn read_edges() -> Vec<Edge> {
+    read_edges_limit(5000)
+}
+
+pub fn read_edges_limit(limit: usize) -> Vec<Edge> {
     match super::open_db() {
-        Ok(conn) => read_edges_conn(&conn),
+        Ok(conn) => read_edges_conn(&conn, limit),
         Err(e) => {
             eprintln!("[mem/store] read_edges: open_db failed: {e}");
             vec![]

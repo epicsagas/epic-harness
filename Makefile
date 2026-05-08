@@ -2,7 +2,7 @@ PLUGIN_CACHE := $(HOME)/.claude/plugins/cache/epicsagas/epic/0.1.0/hooks/bin/epi
 CARGO_BIN    := $(HOME)/.cargo/bin/epic-harness
 HOOKS_BIN    := hooks/bin/epic-harness
 
-.PHONY: build install gen-skills gen-skills-dry lint-skills
+.PHONY: build install gen-skills gen-skills-dry lint-skills demo-record demo-gif demo-clean
 
 build:
 	cargo build --release
@@ -77,3 +77,28 @@ lint-skills:
 	else \
 		echo "All skill descriptions pass CSO lint."; \
 	fi
+
+# ── Demo recording (syntagma + orbit) ────────────────────────────
+DEMO_DIR  := docs/demo
+DEMO_CAST := $(DEMO_DIR)/syntagma-orbit.cast
+DEMO_GIF  := $(DEMO_DIR)/syntagma-orbit.gif
+DEMO_ROWS := 40
+DEMO_COLS := 120
+DEMO_FPS  := 12
+
+demo-prepare:
+	@zsh $(DEMO_DIR)/prepare.sh
+
+demo-record:
+	@zsh $(DEMO_DIR)/prepare.sh --record
+
+demo-gif:
+	@if [ ! -f $(DEMO_CAST) ]; then echo "Run 'make demo-record' first"; exit 1; fi
+	@echo "Converting $(DEMO_CAST) → $(DEMO_GIF) ($(DEMO_FPS)fps)..."
+	@agg --rows $(DEMO_ROWS) --cols $(DEMO_COLS) --fps $(DEMO_FPS) $(DEMO_CAST) $(DEMO_GIF)
+	@ls -lh $(DEMO_GIF)
+
+demo-clean:
+	@rm -f $(DEMO_CAST) $(DEMO_GIF)
+	@rm -rf examples/user-api-demo
+	@echo "Cleaned demo artifacts."

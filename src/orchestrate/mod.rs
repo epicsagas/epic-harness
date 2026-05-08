@@ -11,7 +11,7 @@ use state::{
     self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction, InboxMessage,
 };
 
-use super::common::{self, HookInput, hint, now_iso};
+use crate::hooks::common::{self, HookInput, hint, now_iso};
 
 /// Check if orchestration is enabled via env var.
 pub fn is_enabled() -> bool {

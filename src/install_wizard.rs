@@ -19,13 +19,13 @@ pub fn interactive_select_tools(tools: &[(&str, &str)]) -> io::Result<Vec<String
     let selected = run_tui(tools)?;
     if !selected.is_empty() {
         // TUI leaves alternate screen — prompt on normal screen
-        let level = super::telemetry::prompt_consent_interactive();
-        super::telemetry::write_consent(level);
+        let level = crate::telemetry::prompt_consent_interactive();
+        crate::telemetry::write_consent(level);
         match level {
-            super::telemetry::ConsentLevel::On => {
+            crate::telemetry::ConsentLevel::On => {
                 eprintln!("[harness] Telemetry enabled. To opt out: epic-harness telemetry off");
             }
-            super::telemetry::ConsentLevel::Off => {
+            crate::telemetry::ConsentLevel::Off => {
                 eprintln!("[harness] Telemetry disabled. To enable: epic-harness telemetry on");
             }
         }

@@ -453,7 +453,7 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
                     // the canonical content before inject_team_context adds org/team
                     // frontmatter fields that could interfere with substring matching).
                     let transformed =
-                        crate::hooks::install::transform_agent(tool, agent_name, &content);
+                        crate::install::transform_agent(tool, agent_name, &content);
                     let injected =
                         inject_team_context(&transformed, org, team, &config.team_type, &mission);
                     let dest_path = tool_team_dir.join(format!("{}.md", agent_name));
