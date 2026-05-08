@@ -89,6 +89,8 @@ flowchart TD
 
 狀態持久化於 `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — 在上下文壓縮後仍可恢復。
 
+> **注意**: 智慧型代理在修改orbit本身或僅編輯文件時可能繞過流程。參見[已知問題（智慧型代理判斷）](#已知問題智慧型代理判斷)。
+
 ## 命令
 
 | 命令 | 功能 |

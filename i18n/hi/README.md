@@ -170,6 +170,8 @@ flowchart TD
 
 `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` में स्थिति बनी रहती है — संदर्भ कम्पैक्शन के बाद भी जीवित रहती है।
 
+> **Caveats**: The agent may bypass the pipeline when modifying orbit itself or editing docs only. See [Known Issues (Agent Judgment)](#known-issues-agent-judgment).
+
 ## कमांड
 
 | कमांड | क्या करता है |

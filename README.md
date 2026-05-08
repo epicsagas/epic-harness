@@ -164,6 +164,8 @@ flowchart TD
 
 State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
 
+> **Caveats**: The agent may bypass the pipeline when modifying orbit itself or editing docs only. See [Known Issues (Agent Judgment)](#known-issues-agent-judgment).
+
 ---
 
 ## Auto Skills (Ring 2)

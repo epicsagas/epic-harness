@@ -170,6 +170,8 @@ flowchart TD
 
 状态持久化于 `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — 在上下文压缩后仍可恢复。
 
+> **注意**: 智能体在修改orbit本身或仅编辑文档时可能绕过流程。参见[已知问题（智能体判断）](#已知问题智能体判断)。
+
 ## 命令
 
 | 命令 | 功能 |

@@ -170,6 +170,8 @@ flowchart TD
 
 Zustand wird in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` gespeichert — überlebt Kontext-Komprimierung.
 
+> **Caveats**: The agent may bypass the pipeline when modifying orbit itself or editing docs only. See [Known Issues (Agent Judgment)](#known-issues-agent-judgment).
+
 ## Befehle
 
 | Befehl | Funktion |
