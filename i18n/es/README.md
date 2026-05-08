@@ -540,6 +540,29 @@ cargo test                                                    # Pruebas
 
 Los hooks buscan el binario en dos lugares: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
 
+## Known Issues (Agent Judgment)
+
+These issues arise from the agent's interpretation of context rather than bugs in the code. Listed here so users know what to watch for.
+
+### Discovered Issues
+
+| Issue | When | What happens | Workaround |
+|-------|------|-------------|------------|
+| **Orbit self-modification bypass** | `/orbit` is asked to improve orbit itself | Agent may skip the orbit pipeline entirely and edit files ad-hoc on main, leaving changes uncommitted with no spec/PR/traceability | After orbit completes, check `git status`. If changes are on main without a pipeline state, commit manually or re-run `/orbit` from a separate branch |
+| **Doc-only task skips protocol** | `/orbit` receives a markdown-only change (no code to test) | Agent may judge TDD/test phases as meaningless and skip the full pipeline | Acceptable for pure doc changes. For mixed code+doc, ensure the agent doesn't skip code-related phases |
+| **Mode misclassification** | Request is borderline between Direct and Council | Agent may choose Direct when Council (4-voice) would catch more edge cases, or vice versa | If the agent picks a mode that feels wrong, say "use Council mode" or "use Direct mode" explicitly |
+
+### Intentional Design Choices
+
+These were considered for enhancement but kept as-is after evaluation:
+
+| Choice | Why not enhanced | Rationale |
+|--------|-----------------|-----------|
+| **Worktree enters at Go phase, not orbit start** | Could isolate from preflight | Preflight/mode/spec are read-only. Isolating earlier adds complexity with no benefit — the branch isn't created until Go phase anyway |
+| **Worktree preserved after Ship** | Could auto-remove on PR merge | The branch is the PR head. Removing it before merge breaks the PR. Cleanup is left to the user after merge |
+| **Branch named `orbit-{slug}` not `feature/{slug}`** | Could match conventional branch naming | `EnterWorktree` doesn't allow `/` in names. Renaming post-creation adds a step for cosmetic benefit only |
+| **No lightweight pipeline path for doc changes** | Could detect doc-only and skip TDD/tests | Detection is fragile (what counts as "doc"?). Adding a separate path increases protocol complexity for marginal gain |
+
 ## Enlaces
 
 - [Changelog](../../CHANGELOG.md) — historial de versiones
