@@ -417,7 +417,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
   <!-- Detail Panel -->
   <div id="detail-panel">
     <div id="detail-header">
-      <span id="detail-title">Node Detail</span>
+      <span id="detail-title" data-i18n="node_detail">Node Detail</span>
       <span id="detail-type-badge" class="type-badge"></span>
       <button id="panel-close">&times;</button>
     </div>
@@ -757,7 +757,7 @@ const S = {
    D3 refs
    ════════════════════════════════════════════════════ */
 let svg, gMain, sim;
-let linkSel, nodeSel, linkLblSel, clusterLabelSel;
+let linkSel, nodeSel, linkLblSel;
 let zoomB;
 const pinned = {};
 
@@ -1154,7 +1154,7 @@ function renderGraph() {
   nodeSel.select('circle')
     .attr('r', d => nodeR(d))
     .attr('fill', d => typeHex(d.type))
-    .attr('stroke', d => d3.color(typeHex(d.type)).brighter(0.5))
+    .attr('stroke', d => { const c = d3.color(typeHex(d.type)); return c ? c.brighter(0.5) : typeHex(d.type); })
     .attr('fill-opacity', d => 0.5 + (d.importance || 0.5) * 0.5);
 
   nodeSel.select('text')
@@ -1458,7 +1458,7 @@ function bindUI() {
   document.querySelectorAll('#type-filters input[type=checkbox]').forEach(cb => {
     cb.addEventListener('change', () => {
       cb.checked ? S.activeTypes.add(cb.dataset.type) : S.activeTypes.delete(cb.dataset.type);
-      renderGraph();
+      applyFilters();
     });
   });
 
