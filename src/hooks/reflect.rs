@@ -980,7 +980,7 @@ mod tests {
         // Approximate check: day 180 should be around June/July 1970
         let (y, m, _d) = epoch_days_to_ymd(180);
         assert_eq!(y, 1970);
-        assert!(m >= 6 && m <= 7, "month should be June or July, got {m}");
+        assert!((6..=7).contains(&m), "month should be June or July, got {m}");
     }
 
     // ── run_context signature ──────────────────────────

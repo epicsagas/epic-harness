@@ -61,97 +61,6 @@ fn parse_flag_multi(args: &[String], flag: &str) -> Vec<String> {
     results
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_flag_multi, parse_flag_str, parse_flag_u32};
-
-    fn s(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
-    }
-
-    // ── parse_flag_u32 ────────────────────────────────
-    #[test]
-    fn parse_flag_u32_eq_form() {
-        let args = s(&["reflect", "--context=7"]);
-        assert_eq!(parse_flag_u32(&args, "--context"), Some(7));
-    }
-
-    #[test]
-    fn parse_flag_u32_space_form() {
-        let args = s(&["reflect", "--days", "14"]);
-        assert_eq!(parse_flag_u32(&args, "--days"), Some(14));
-    }
-
-    #[test]
-    fn parse_flag_u32_missing() {
-        let args = s(&["reflect", "--context"]);
-        assert_eq!(parse_flag_u32(&args, "--days"), None);
-    }
-
-    #[test]
-    fn parse_flag_u32_invalid_value() {
-        let args = s(&["reflect", "--days", "abc"]);
-        assert_eq!(parse_flag_u32(&args, "--days"), None);
-    }
-
-    #[test]
-    fn parse_flag_u32_eq_form_prefers_eq() {
-        let args = s(&["reflect", "--days=5", "--days", "99"]);
-        assert_eq!(parse_flag_u32(&args, "--days"), Some(5));
-    }
-
-    // ── parse_flag_str ────────────────────────────────
-    #[test]
-    fn parse_flag_str_eq_form() {
-        let args = s(&["reflect", "--since=20260101"]);
-        assert_eq!(parse_flag_str(&args, "--since"), Some("20260101".into()));
-    }
-
-    #[test]
-    fn parse_flag_str_space_form() {
-        let args = s(&["reflect", "--project", "my-project"]);
-        assert_eq!(parse_flag_str(&args, "--project"), Some("my-project".into()));
-    }
-
-    #[test]
-    fn parse_flag_str_missing() {
-        let args = s(&["reflect", "--context"]);
-        assert_eq!(parse_flag_str(&args, "--since"), None);
-    }
-
-    // ── parse_flag_multi ──────────────────────────────
-    #[test]
-    fn parse_flag_multi_single_space() {
-        let args = s(&["reflect", "--source", "harness"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), vec!["harness".to_string()]);
-    }
-
-    #[test]
-    fn parse_flag_multi_repeated_space() {
-        let args = s(&["reflect", "--source", "harness", "--source", "alcove"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), vec!["harness".to_string(), "alcove".to_string()]);
-    }
-
-    #[test]
-    fn parse_flag_multi_eq_form() {
-        let args = s(&["reflect", "--source=claude-session"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), vec!["claude-session".to_string()]);
-    }
-
-    #[test]
-    fn parse_flag_multi_empty() {
-        let args = s(&["reflect", "--context"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn parse_flag_multi_skips_next_flag_as_value() {
-        let args = s(&["reflect", "--source", "--context", "harness"]);
-        // "--context" starts with '-', so it should NOT be treated as a value
-        assert_eq!(parse_flag_multi(&args, "--source"), Vec::<String>::new());
-    }
-}
-
 fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
@@ -304,4 +213,95 @@ fn main() {
     print!("{stdin_buf}");
 
     std::process::exit(exit_code);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_flag_multi, parse_flag_str, parse_flag_u32};
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── parse_flag_u32 ────────────────────────────────
+    #[test]
+    fn parse_flag_u32_eq_form() {
+        let args = s(&["reflect", "--context=7"]);
+        assert_eq!(parse_flag_u32(&args, "--context"), Some(7));
+    }
+
+    #[test]
+    fn parse_flag_u32_space_form() {
+        let args = s(&["reflect", "--days", "14"]);
+        assert_eq!(parse_flag_u32(&args, "--days"), Some(14));
+    }
+
+    #[test]
+    fn parse_flag_u32_missing() {
+        let args = s(&["reflect", "--context"]);
+        assert_eq!(parse_flag_u32(&args, "--days"), None);
+    }
+
+    #[test]
+    fn parse_flag_u32_invalid_value() {
+        let args = s(&["reflect", "--days", "abc"]);
+        assert_eq!(parse_flag_u32(&args, "--days"), None);
+    }
+
+    #[test]
+    fn parse_flag_u32_eq_form_prefers_eq() {
+        let args = s(&["reflect", "--days=5", "--days", "99"]);
+        assert_eq!(parse_flag_u32(&args, "--days"), Some(5));
+    }
+
+    // ── parse_flag_str ────────────────────────────────
+    #[test]
+    fn parse_flag_str_eq_form() {
+        let args = s(&["reflect", "--since=20260101"]);
+        assert_eq!(parse_flag_str(&args, "--since"), Some("20260101".into()));
+    }
+
+    #[test]
+    fn parse_flag_str_space_form() {
+        let args = s(&["reflect", "--project", "my-project"]);
+        assert_eq!(parse_flag_str(&args, "--project"), Some("my-project".into()));
+    }
+
+    #[test]
+    fn parse_flag_str_missing() {
+        let args = s(&["reflect", "--context"]);
+        assert_eq!(parse_flag_str(&args, "--since"), None);
+    }
+
+    // ── parse_flag_multi ──────────────────────────────
+    #[test]
+    fn parse_flag_multi_single_space() {
+        let args = s(&["reflect", "--source", "harness"]);
+        assert_eq!(parse_flag_multi(&args, "--source"), vec!["harness".to_string()]);
+    }
+
+    #[test]
+    fn parse_flag_multi_repeated_space() {
+        let args = s(&["reflect", "--source", "harness", "--source", "alcove"]);
+        assert_eq!(parse_flag_multi(&args, "--source"), vec!["harness".to_string(), "alcove".to_string()]);
+    }
+
+    #[test]
+    fn parse_flag_multi_eq_form() {
+        let args = s(&["reflect", "--source=claude-session"]);
+        assert_eq!(parse_flag_multi(&args, "--source"), vec!["claude-session".to_string()]);
+    }
+
+    #[test]
+    fn parse_flag_multi_empty() {
+        let args = s(&["reflect", "--context"]);
+        assert_eq!(parse_flag_multi(&args, "--source"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn parse_flag_multi_skips_next_flag_as_value() {
+        let args = s(&["reflect", "--source", "--context", "harness"]);
+        // "--context" starts with '-', so it should NOT be treated as a value
+        assert_eq!(parse_flag_multi(&args, "--source"), Vec::<String>::new());
+    }
 }
