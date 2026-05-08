@@ -769,8 +769,8 @@ pub fn run_cli(args: &[String]) -> i32 {
     match sub {
         "on" => {
             write_consent(ConsentLevel::On);
-            let id = load_or_create_install_id();
-            eprintln!("[telemetry] Enabled (install ID: {id}).");
+            let _id = load_or_create_install_id();
+            eprintln!("[telemetry] Enabled.");
             0
         }
         "off" => {
@@ -781,16 +781,16 @@ pub fn run_cli(args: &[String]) -> i32 {
         // legacy aliases → map to on
         "community" | "anonymous" => {
             write_consent(ConsentLevel::On);
-            let id = load_or_create_install_id();
-            eprintln!("[telemetry] Enabled (install ID: {id}).");
+            let _id = load_or_create_install_id();
+            eprintln!("[telemetry] Enabled.");
             0
         }
         _ => {
             let level = read_consent();
             match level {
                 ConsentLevel::On => {
-                    let id = load_or_create_install_id();
-                    eprintln!("[telemetry] Status: on  (install ID: {id})");
+                    let _id = load_or_create_install_id();
+                    eprintln!("[telemetry] Status: on");
                 }
                 ConsentLevel::Off => {
                     eprintln!("[telemetry] Status: off");
