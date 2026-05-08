@@ -4,38 +4,38 @@ use std::path::{Path, PathBuf};
 
 // ── Canonical sources (single source of truth) ──────────────────────────────
 
-static SKILL_COMMIT: &str = include_str!("../skills/commit/SKILL.md");
-static SKILL_CONTEXT: &str = include_str!("../skills/context/SKILL.md");
-static SKILL_DEBUG: &str = include_str!("../skills/debug/SKILL.md");
-static SKILL_DOCUMENT: &str = include_str!("../skills/document/SKILL.md");
-static SKILL_PERF: &str = include_str!("../skills/perf/SKILL.md");
-static SKILL_SECURE: &str = include_str!("../skills/secure/SKILL.md");
-static SKILL_SIMPLIFY: &str = include_str!("../skills/simplify/SKILL.md");
-static SKILL_TDD: &str = include_str!("../skills/tdd/SKILL.md");
-static SKILL_VERIFY: &str = include_str!("../skills/verify/SKILL.md");
-static SKILL_COUNCIL: &str = include_str!("../skills/council/SKILL.md");
-static SKILL_AGENT_INTROSPECTION: &str = include_str!("../skills/agent-introspection/SKILL.md");
-static SKILL_REFLECT: &str = include_str!("../skills/reflect/SKILL.md");
-static SKILL_DISCOVER: &str = include_str!("../skills/discover/SKILL.md");
-static SKILL_ORCHESTRATE: &str = include_str!("../skills/orchestrate/SKILL.md");
+static SKILL_COMMIT: &str = include_str!("../registry/skills/commit/SKILL.md");
+static SKILL_CONTEXT: &str = include_str!("../registry/skills/context/SKILL.md");
+static SKILL_DEBUG: &str = include_str!("../registry/skills/debug/SKILL.md");
+static SKILL_DOCUMENT: &str = include_str!("../registry/skills/document/SKILL.md");
+static SKILL_PERF: &str = include_str!("../registry/skills/perf/SKILL.md");
+static SKILL_SECURE: &str = include_str!("../registry/skills/secure/SKILL.md");
+static SKILL_SIMPLIFY: &str = include_str!("../registry/skills/simplify/SKILL.md");
+static SKILL_TDD: &str = include_str!("../registry/skills/tdd/SKILL.md");
+static SKILL_VERIFY: &str = include_str!("../registry/skills/verify/SKILL.md");
+static SKILL_COUNCIL: &str = include_str!("../registry/skills/council/SKILL.md");
+static SKILL_AGENT_INTROSPECTION: &str = include_str!("../registry/skills/agent-introspection/SKILL.md");
+static SKILL_REFLECT: &str = include_str!("../registry/skills/reflect/SKILL.md");
+static SKILL_DISCOVER: &str = include_str!("../registry/skills/discover/SKILL.md");
+static SKILL_ORCHESTRATE: &str = include_str!("../registry/skills/orchestrate/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
-static CMD_CHECK: &str = include_str!("../commands/check.md");
-static CMD_EVOLVE: &str = include_str!("../commands/evolve.md");
-static CMD_GO: &str = include_str!("../commands/go.md");
-static CMD_SHIP: &str = include_str!("../commands/ship.md");
-static CMD_SPEC: &str = include_str!("../commands/spec.md");
-static CMD_TEAM: &str = include_str!("../commands/team.md");
-static CMD_DISCOVER: &str = include_str!("../commands/discover.md");
-static CMD_ORBIT: &str = include_str!("../commands/orbit.md");
-static CMD_INTERVENE: &str = include_str!("../commands/intervene.md");
-static CMD_STATUS: &str = include_str!("../commands/status.md");
+static CMD_CHECK: &str = include_str!("../registry/commands/check.md");
+static CMD_EVOLVE: &str = include_str!("../registry/commands/evolve.md");
+static CMD_GO: &str = include_str!("../registry/commands/go.md");
+static CMD_SHIP: &str = include_str!("../registry/commands/ship.md");
+static CMD_SPEC: &str = include_str!("../registry/commands/spec.md");
+static CMD_TEAM: &str = include_str!("../registry/commands/team.md");
+static CMD_DISCOVER: &str = include_str!("../registry/commands/discover.md");
+static CMD_ORBIT: &str = include_str!("../registry/commands/orbit.md");
+static CMD_INTERVENE: &str = include_str!("../registry/commands/intervene.md");
+static CMD_STATUS: &str = include_str!("../registry/commands/status.md");
 
-static SKILL_DISPATCH: &str = include_str!("../skills/_dispatch/SKILL.md");
+static SKILL_DISPATCH: &str = include_str!("../registry/skills/_dispatch/SKILL.md");
 
-static AGENT_AUDITOR: &str = include_str!("../agents/auditor.md");
-static AGENT_BUILDER: &str = include_str!("../agents/builder.md");
-static AGENT_PLANNER: &str = include_str!("../agents/planner.md");
-static AGENT_REVIEWER: &str = include_str!("../agents/reviewer.md");
+static AGENT_AUDITOR: &str = include_str!("../registry/agents/auditor.md");
+static AGENT_BUILDER: &str = include_str!("../registry/agents/builder.md");
+static AGENT_PLANNER: &str = include_str!("../registry/agents/planner.md");
+static AGENT_REVIEWER: &str = include_str!("../registry/agents/reviewer.md");
 
 static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("commit", SKILL_COMMIT),

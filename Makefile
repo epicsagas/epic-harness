@@ -17,7 +17,7 @@ install: build
 gen-skills:
 	@echo "Validating skills..."
 	@missing=0; \
-	for dir in skills/*/; do \
+	for dir in registry/skills/*/; do \
 		skill_file="$$dir/SKILL.md"; \
 		if [ ! -f "$$skill_file" ]; then \
 			echo "MISSING: $$skill_file"; \
@@ -49,7 +49,7 @@ gen-skills:
 # Dry-run mode: shows what would change (for CI stagnation detection)
 gen-skills-dry:
 	@echo "Dry-run skill validation..."
-	@for dir in skills/*/; do \
+	@for dir in registry/skills/*/; do \
 		skill_file="$$dir/SKILL.md"; \
 		if [ ! -f "$$skill_file" ]; then \
 			echo "WOULD CREATE: $$skill_file"; \
@@ -63,7 +63,7 @@ gen-skills-dry:
 lint-skills:
 	@echo "Linting skill descriptions..."
 	@issues=0; \
-	for dir in skills/*/; do \
+	for dir in registry/skills/*/; do \
 		skill_file="$$dir/SKILL.md"; \
 		if [ -f "$$skill_file" ]; then \
 			if grep -qiE 'workflow|step [0-9]|phase [0-9]|dispatch' "$$skill_file" 2>/dev/null; then \

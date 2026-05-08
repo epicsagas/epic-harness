@@ -21,12 +21,12 @@
     "ai"
   ],
   "files": [
-    "commands/",
-    "skills/",
-    "agents/",
+    "registry/commands/",
+    "registry/skills/",
+    "registry/agents/",
     "hooks/",
-    "references/",
-    "presets/",
+    "registry/presets/",
+    "docs/",
     "plugin.json",
     "CLAUDE.md",
     "README.md",

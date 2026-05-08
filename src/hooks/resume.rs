@@ -57,24 +57,24 @@ fn apply_cold_start_presets(stacks: &[&str]) -> u32 {
             "Node.js" => &[
                 (
                     "evo-ts-care",
-                    include_str!("../../presets/node/evo-ts-care.md"),
+                    include_str!("../../registry/presets/node/evo-ts-care.md"),
                 ),
                 (
                     "evo-fix-build-fail",
-                    include_str!("../../presets/node/evo-fix-build-fail.md"),
+                    include_str!("../../registry/presets/node/evo-fix-build-fail.md"),
                 ),
             ],
             "Go" => &[(
                 "evo-go-care",
-                include_str!("../../presets/go/evo-go-care.md"),
+                include_str!("../../registry/presets/go/evo-go-care.md"),
             )],
             "Python" => &[(
                 "evo-py-care",
-                include_str!("../../presets/python/evo-py-care.md"),
+                include_str!("../../registry/presets/python/evo-py-care.md"),
             )],
             "Rust" => &[(
                 "evo-rs-care",
-                include_str!("../../presets/rust/evo-rs-care.md"),
+                include_str!("../../registry/presets/rust/evo-rs-care.md"),
             )],
             _ => continue,
         };

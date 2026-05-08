@@ -24,7 +24,7 @@ A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skil
 
 ---
 
-![Demo](./demo/demo.gif)
+![Demo](./docs/demo/demo.gif)
 
 ---
 
@@ -61,7 +61,7 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 
 ## Install
 
-> **First time?** Read the [Quick Start Guide (5 min)](QUICKSTART.md).
+> **First time?** Read the [Quick Start Guide (5 min)](docs/quickstart.md).
 
 ```bash
 # Claude Code

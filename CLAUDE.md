@@ -4,14 +4,16 @@
 
 ## Structure
 
-- `commands/` — 8 slash commands (discover, spec, go, check, ship, team, evolve, orbit)
-- `skills/` — 12 auto skills + _dispatch engine
-- `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
+- `registry/` — Seeding resources (embedded in Rust binary at compile time)
+  - `commands/` — 8 slash commands (discover, spec, go, check, ship, team, evolve, orbit)
+  - `skills/` — 12 auto skills + _dispatch engine
+  - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
+  - `presets/` — Cold-start skill templates
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
 - `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
-- `presets/` — Cold-start skill templates (embedded in Rust binary at compile time)
-- `references/` — Checklists (security, performance, testing, team-patterns)
+- `docs/` — User-facing documentation and assets
+  - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
 - `integrations/` — Per-tool integration files (6 tools):
   - `codex/` — hooks.json, config.toml, prompts/(8), skills/(7), agents/(4)
   - `gemini/` — settings.json, GEMINI.md, commands/(8), skills/(7), agents/(4)
