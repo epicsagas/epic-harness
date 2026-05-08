@@ -285,9 +285,7 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 ¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요 · ² `BeforeModel` 레벨에서 guard 실행 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
-## 통합 메모리 — WIP
-
-> **개발 중.** CLI 명령어, MCP 도구, Web UI는 아직 완전히 동작하지 않습니다.
+## 통합 메모리
 
 모든 에이전트가 `~/.harness/memory.db`(SQLite + FTS5) 지식 그래프를 공유합니다. 외부 런타임 불필요.
 
@@ -333,6 +331,8 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 | `session` | 자동 (reflect) | 0.2 |
 
 수명 주기: 30일 이상 미접근 → 중요도 10% 감쇠 (최소 0.05). 180일 이상 → `stale` 태그, 리콜 제외. `pinned` 태그는 감쇠 면역.
+
+> **Web UI**: 그래프 시각화는 현재 적극 개선 중입니다 — 클러스터링, 이웃 하이라이트, 오프라인 폴백이 최근 추가되었습니다. 더 많은 개선이 진행 중입니다.
 
 ## 진화 (Ring 3)
 

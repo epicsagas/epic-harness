@@ -285,9 +285,7 @@ epic team delete backend --global      # orgストアから永久に削除
 
 ¹ `~/.codex/config.toml` で `codex_hooks = true` · ² `BeforeModel` レベルでのガード · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
 
-## 統合メモリ — WIP
-
-> **ステータス: 開発中。** まだ完全には機能していません。CLIコマンド、MCPツール、Web UIは開発中です。
+## 統合メモリ
 
 すべてのエージェントが `~/.harness/memory.db`（全文検索付きSQLite）のナレッジグラフを共有します。外部ランタイムは不要です。
 
@@ -333,6 +331,8 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
 | `session` | 自動（reflect） | 0.2 |
 
 ライフサイクル: アクセスなしで30日以上 → 重要度が10%低下（最低0.05）。180日以上 → `stale` タグが付き、リコールから除外。`pinned` タグは劣化を防ぎます。
+
+> **Web UI**: グラフ可視化は積極的に改善中です — クラスタリング、近隣ハイライト、オフラインフォールバックが最近追加されました。さらに改良を進めています。
 
 ## 進化（Ring 3）
 

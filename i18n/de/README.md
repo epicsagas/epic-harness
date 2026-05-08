@@ -285,9 +285,7 @@ Alle Tools teilen dasselbe `~/.harness/projects/{slug}/`-Datenverzeichnis.
 
 ¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Guard auf `BeforeModel`-Ebene · ³ Cursor 1.7+ · ⁴ JS-Plugin · ⁵ 5 Hook-Skripte · ⁶ Nur Konventionen
 
-## Unified Memory — WIP
-
-> **Status: In Entwicklung.** Noch nicht vollständig funktionsfähig. CLI-Befehle, MCP-Tools und Web UI sind in Arbeit.
+## Unified Memory
 
 Alle Agenten teilen einen Wissensgraphen in `~/.harness/memory.db` (SQLite mit Volltextsuche). Keine externe Laufzeit.
 
@@ -333,6 +331,8 @@ epic mem export --out ./docs/memory                    # Nach Markdown exportier
 | `session` | Auto (reflect) | 0.2 |
 
 Lebenszyklus: 30+ Tage ohne Zugriff → 10% Wichtigkeitsverfall (Minimum 0.05). 180+ Tage → als `stale` markiert, vom Abruf ausgeschlossen. `pinned`-Tag verhindert Verfall.
+
+> **Web UI**: Die Graph-Visualisierung wird aktiv verbessert — Clustering, Nachbar-Hervorhebung und Offline-Fallback wurden kürzlich hinzugefügt. Weitere Verbesserungen in Arbeit.
 
 ## Evolve (Ring 3)
 
