@@ -204,9 +204,7 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 
 ¹ `codex_hooks = true` 在 `~/.codex/config.toml` · ② 守衛在 `BeforeModel` 級別 · ③ Cursor 1.7+ · ④ JS 外掛 · ⑤ 5 個掛鉤腳本 · ⑥ 僅約定
 
-## 統一記憶體 — 開發中
-
-> **狀態：開發中。** 尚未完全可用。CLI 命令、MCP 工具和 Web UI 仍在開發中。
+## 統一記憶體
 
 所有智能體共享儲存於 `~/.harness/memory.db` 的知識圖譜（SQLite，含全文搜尋）。無需外部執行時期。
 
@@ -252,6 +250,8 @@ epic mem export --out ./docs/memory                    # 匯出為 Markdown
 | `session` | 自動（reflect） | 0.2 |
 
 生命週期：超過 30 天未存取 → 重要性衰減 10%（下限 0.05）。超過 180 天 → 標記為 `stale`，從檢索中排除。`pinned` 標籤可防止衰減。
+
+> **Web UI**：圖形視覺化正在積極改進中——聚類、鄰居高亮和離線回退已最近添加。更多改進正在進行中。
 
 ## 進化（Ring 3）
 

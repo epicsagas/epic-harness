@@ -128,6 +128,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 }
 .tag-chip:hover { border-color: var(--accent); }
 .tag-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.filter-hint { font-size: 10px; color: var(--text-muted); line-height: 1.4; margin-top: 6px; opacity: 0.7; }
 #project-select {
   width: 100%; background: var(--bg); border: 1px solid var(--border);
   border-radius: var(--radius); color: var(--text); padding: 5px 8px;
@@ -377,7 +378,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
         <label class="filter-row"><input type="checkbox" data-type="session"><span class="type-dot" style="background:var(--c-session)"></span><span class="filter-label">Session</span><span class="filter-count" id="cnt-session">0</span></label>
         <label class="filter-row"><input type="checkbox" data-type="resolution" checked><span class="type-dot" style="background:var(--c-resolution)"></span><span class="filter-label">Resolution</span><span class="filter-count" id="cnt-resolution">0</span></label>
       </div>
-    </div>
+      <div class="filter-hint" data-i18n="hint_session_hidden">Session nodes (low importance) are hidden by default. Check to show.</div>
     <div class="filter-section">
       <div class="filter-title">Tags</div>
       <div id="tag-cloud"></div>
@@ -614,6 +615,7 @@ const I18N = {
     status_online:      'online',
     status_offline:     'offline',
     status_connecting:  'connecting',
+    hint_session_hidden:'Session nodes (low importance) are hidden by default. Check to show.',
   },
   ko: {
     search_placeholder: '노드 검색...',
@@ -661,6 +663,7 @@ const I18N = {
     results_unit:       '건',
     status_online:      '온라인',
     status_offline:     '오프라인',
+    hint_session_hidden:'세션 노드(낮은 중요도)가 기본 숨김 처리됩니다. 체크하면 표시됩니다.',
     status_connecting:  '연결 중',
   },
 };
@@ -1004,8 +1007,12 @@ function initD3() {
     if (nodeSel) {
       nodeSel.classed('selected', false);
       nodeSel.classed('neighbor', false);
+      nodeSel.classed('dimmed', false);
     }
-    if (linkSel) linkSel.classed('highlighted', false);
+    if (linkSel) {
+      linkSel.classed('highlighted', false);
+      linkSel.classed('dimmed', false);
+    }
   });
 }
 

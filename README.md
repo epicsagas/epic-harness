@@ -413,12 +413,7 @@ Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl
 
 ---
 
-<details>
-<summary><strong>Unified Memory — WIP</strong></summary>
-
-## Unified Memory — WIP
-
-> **Status: In Development.** Not yet fully functional. CLI commands, MCP tools, and Web UI are works in progress.
+## Unified Memory
 
 All agents share a knowledge graph in `~/.harness/memory.db` (SQLite with full-text search). No external runtime.
 
@@ -465,7 +460,7 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 
 Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ days → tagged `stale`, excluded from recall. `pinned` tag prevents decay.
 
-</details>
+> **Web UI**: The graph visualization is actively being improved — clustering, neighbor highlighting, and offline fallback landed recently. More enhancements in progress.
 
 ---
 
