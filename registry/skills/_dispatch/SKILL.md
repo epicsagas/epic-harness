@@ -23,7 +23,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User wants to commit changes | **commit** |
 | Context window > 70% used | **context** |
 | User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
-| User shares code for review, mentions code smells, or asks to refactor/analyze | **syntagma** → `analyze_code` + `suggest_refactorings` → feed results into `/orbit` Direct |
+| User shares code for review, mentions code smells, or asks to refactor/analyze | **episteme** → `analyze_code` + `suggest_refactorings` → feed results into `/orbit` Direct |
 | User invokes `/reflect`, asks about AI usage quality, "am I using AI well", "thought amplifier", or requests AI usage self-assessment | **reflect** |
 | Session start (project has harness-mem psychographic node) | Call `mem_query` type=psychographic → apply 5-dimension profile to all subsequent skill dispatch |
 | Orchestration run active (`$HARNESS_DIR/orchestrator/run.json` exists with status "running") | **orchestrate** |
@@ -55,7 +55,7 @@ When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exist
 
 - **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/check`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
 - **Dispatch skills normally** — tdd, debug, verify, secure, perf, simplify, document, context all fire as usual within each phase
-- **syntagma pre-analysis**: if syntagma `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to Step 2C as spec material — skip mode selection entirely and enter Direct Build
+- **episteme pre-analysis**: if episteme `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to Step 2C as spec material — skip mode selection entirely and enter Direct Build
 - **After orbit completes** (`status: complete` or `status: aborted`) — resume normal dispatch behavior
 
 **Orbit Recovery on Session Resume**: When a session resumes (after context compaction or crash) and an active pipeline is detected:

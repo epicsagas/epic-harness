@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# ── syntagma + orbit live recording setup ──────────────────────
+# ── Episteme + orbit live recording setup ──────────────────────
 #
 # Usage:
 #   zsh docs/demo/prepare.sh           # prepare only
@@ -13,7 +13,7 @@ DEMO_DST="$REPO_ROOT/examples/user-api-demo"
 DEMO_ROWS=40
 DEMO_COLS=120
 
-echo "-- syntagma + orbit recording setup ---------------"
+echo "-- Episteme + orbit recording setup ---------------"
 echo ""
 
 # 1. Copy target project (clean state)
@@ -49,16 +49,16 @@ echo ""
 if [ "${1:-}" = "--record" ]; then
     echo "-- launching asciinema + claudy --------------------"
     echo "   Target: examples/user-api-demo"
-    echo "   Cast:   docs/demo/syntagma-orbit.cast"
+    echo "   Cast:   docs/demo/episteme-orbit.cast"
     echo "   Stop:   Ctrl+C or /exit in Claude Code"
     echo ""
     sleep 1
-    exec asciinema rec --overwrite "$REPO_ROOT/docs/demo/syntagma-orbit.cast" \
+    exec asciinema rec --overwrite "$REPO_ROOT/docs/demo/episteme-orbit.cast" \
       --command "cd '$DEMO_DST' && claudy zai --yolo"
 else
     echo "-- manual recording -------------------------------"
     echo ""
-    echo "  asciinema rec docs/demo/syntagma-orbit.cast \\"
+    echo "  asciinema rec docs/demo/episteme-orbit.cast \\"
     echo "    --command 'cd examples/user-api-demo && claudy zai --yolo'"
     echo ""
     echo "  After recording, convert:"

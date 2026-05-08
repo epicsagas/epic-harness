@@ -1,18 +1,18 @@
-# Syntagma + Orbit Demo Prompt Guide
+# Episteme + Orbit Demo Prompt Guide
 
 Prompts to type into Claude Code during recording, in order.
 Wait for each response to fully complete before entering the next prompt.
 
 ---
 
-## Phase 1: Code Analysis (Syntagma auto-trigger)
+## Phase 1: Code Analysis (Episteme auto-trigger)
 
 ```
-Analyze user_service.py for code quality issues. Use syntagma tools to detect smells, suggest refactorings, and explore the knowledge graph. When done, save the full analysis results to syntagma-analysis.md in the project root.
+Analyze user_service.py for code quality issues. Use episteme tools to detect smells, suggest refactorings, and explore the knowledge graph. When done, save the full analysis results to episteme-analysis.md in the project root.
 ```
 
-> _dispatch automatically routes to syntagma: analyze_code -> suggest_refactorings -> search_knowledge.
-> Results are written to syntagma-analysis.md so /orbit can reference them.
+> _dispatch automatically routes to episteme: analyze_code -> suggest_refactorings -> search_knowledge.
+> Results are written to episteme-analysis.md so /orbit can reference them.
 > Wait for the full response before proceeding.
 
 ---
@@ -33,7 +33,7 @@ Explore the knowledge graph around the detected smells. Use get_neighbors and fi
 /epic:orbit
 ```
 
-> Orbit detects syntagma results in context and auto-enters Direct Mode.
+> Orbit detects episteme results in context and auto-enters Direct Mode.
 > The full pipeline runs: Spec -> Go -> Check -> Ship -> Evolve.
 > This is the longest phase (~3-5 min).
 

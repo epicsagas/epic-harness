@@ -78,10 +78,10 @@ lint-skills:
 		echo "All skill descriptions pass CSO lint."; \
 	fi
 
-# ── Demo recording (syntagma + orbit) ────────────────────────────
+# ── Demo recording (episteme + orbit) ────────────────────────────
 DEMO_DIR  := docs/demo
-DEMO_CAST := $(DEMO_DIR)/syntagma-orbit.cast
-DEMO_GIF  := $(DEMO_DIR)/syntagma-orbit.gif
+DEMO_CAST := $(DEMO_DIR)/episteme-orbit.cast
+DEMO_GIF  := $(DEMO_DIR)/episteme-orbit.gif
 DEMO_ROWS := 40
 DEMO_COLS := 120
 DEMO_FPS  := 12
