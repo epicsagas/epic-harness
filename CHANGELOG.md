@@ -7,15 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] — 2026-05-09
+
+### Added
+- Agent judgment known issues section in all READMEs
+- Version bump checklist in AGENTS.md (Cargo.toml, package.json, plugin.json, git tag)
+
 ### Changed
-- **Module architecture restructured**: decomposed `src/hooks/` God Module (14 submodules, 12,405 lines) into domain-aligned top-level modules following Single Responsibility Principle
-  - `mem/`, `team/`, `orchestrate/` promoted to `src/` top level (self-contained, zero internal changes)
-  - `config.rs`, `telemetry.rs`, `install.rs`, `serve.rs` moved to `src/` top level
-  - `common.rs` (1,630 lines) split into `src/shared/` with 9 domain modules: types, scoring, obs, evolution, paths, classify, helpers, orbit, sanitize — re-export shim preserves backward compatibility
-  - Evolution engine extracted from `reflect.rs` (3,472→677 lines) into `src/evolve/` with 5 submodules: analysis, skills, metrics, ingest, instincts
-  - All cross-module import paths updated from relative (`super::`) to absolute (`crate::`)
-  - `include_str!` relative paths adjusted after file moves
-- No logic changes — pure structural refactoring (480 tests passing, clippy clean)
+- Reorganized project structure: `commands/`, `skills/`, `agents/`, `presets/` → `registry/`; docs → `docs/`
+- Renamed syntagma references to episteme across docs and build
+- `/orbit` isolates pipeline in git worktree to prevent session conflicts
+- AGENTS.md synced with latest project content (replaced outdated template)
+- CLAUDE.md consolidated to reference AGENTS.md
+- Marketplace.json descriptions updated (6 → 8 commands)
+- 9 i18n READMEs added (de, es, fr, hi, ja, ko, pt-BR, zh-CN, zh-TW)
 
 ## [0.2.1] — 2026-04-25 [YANKED]
 
