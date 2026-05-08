@@ -5,6 +5,18 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Module architecture restructured**: decomposed `src/hooks/` God Module (14 submodules, 12,405 lines) into domain-aligned top-level modules following Single Responsibility Principle
+  - `mem/`, `team/`, `orchestrate/` promoted to `src/` top level (self-contained, zero internal changes)
+  - `config.rs`, `telemetry.rs`, `install.rs`, `serve.rs` moved to `src/` top level
+  - `common.rs` (1,630 lines) split into `src/shared/` with 9 domain modules: types, scoring, obs, evolution, paths, classify, helpers, orbit, sanitize — re-export shim preserves backward compatibility
+  - Evolution engine extracted from `reflect.rs` (3,472→677 lines) into `src/evolve/` with 5 submodules: analysis, skills, metrics, ingest, instincts
+  - All cross-module import paths updated from relative (`super::`) to absolute (`crate::`)
+  - `include_str!` relative paths adjusted after file moves
+- No logic changes — pure structural refactoring (480 tests passing, clippy clean)
+
 ## [0.2.1] — 2026-04-25 [YANKED]
 
 > **YANKED**: This release wrote Claude hook commands containing `${CLAUDE_PLUGIN_ROOT}` into global `~/.claude/settings.json`.  
