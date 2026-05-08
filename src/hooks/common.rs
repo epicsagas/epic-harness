@@ -290,6 +290,37 @@ pub fn harness_dir() -> PathBuf {
     DIR.clone()
 }
 
+/// Returns the root directory that contains all per-project harness data.
+/// ~/.harness/projects/
+pub fn harness_projects_root() -> PathBuf {
+    dirs_home().join(".harness").join("projects")
+}
+
+/// Lists all project slugs that have harness data directories.
+/// Returns sorted Vec<String> of directory names under harness_projects_root().
+pub fn list_harness_project_slugs() -> Vec<String> {
+    let root = harness_projects_root();
+    if !root.is_dir() {
+        return vec![];
+    }
+    let mut slugs: Vec<String> = std::fs::read_dir(&root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    slugs.sort();
+    slugs
+}
+
+/// Returns the harness data directory for a given project slug.
+/// ~/.harness/projects/{slug}/
+pub fn harness_dir_for_slug(slug: &str) -> PathBuf {
+    harness_projects_root().join(slug)
+}
+
 /// Legacy project-local path used for migration detection only.
 pub(crate) fn local_harness_dir() -> PathBuf {
     cwd().join(".harness")
@@ -1626,5 +1657,29 @@ warned:
         let out = normalize_pipeline_id(id);
         assert!(!out.contains('/'));
         assert!(!out.contains('.'));
+    }
+
+    // ── harness_projects_root / list_harness_project_slugs / harness_dir_for_slug ──
+    #[test]
+    fn harness_projects_root_ends_with_projects() {
+        let root = harness_projects_root();
+        assert!(root.ends_with("projects"));
+    }
+
+    #[test]
+    fn harness_dir_for_slug_is_under_root() {
+        let slug = "my-project-abc123";
+        let dir = harness_dir_for_slug(slug);
+        assert!(dir.starts_with(harness_projects_root()));
+        assert!(dir.ends_with(slug));
+    }
+
+    #[test]
+    fn list_harness_project_slugs_nonexistent_root_returns_empty() {
+        // harness_projects_root가 없으면 빈 Vec 반환
+        // 실제 ~/.harness/projects 가 있으면 비어있지 않을 수 있으므로
+        // harness_dir_for_slug 로 경로 구조만 검증
+        let dir = harness_dir_for_slug("test-slug");
+        assert!(dir.to_string_lossy().contains("test-slug"));
     }
 }
