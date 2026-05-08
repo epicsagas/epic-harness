@@ -449,7 +449,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn);
+        let edges = store::read_edges_conn(&conn, 5000);
         let found = edges
             .iter()
             .any(|e| e.source == session_id && e.target == hub_id && e.relation == "belongs_to");
@@ -515,7 +515,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn);
+        let edges = store::read_edges_conn(&conn, 5000);
         let found = edges
             .iter()
             .any(|e| e.source == prev_id && e.target == curr_id && e.relation == "follows");
@@ -585,7 +585,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn);
+        let edges = store::read_edges_conn(&conn, 5000);
         let found = edges
             .iter()
             .any(|e| e.source == id_a && e.target == id_b && e.relation == "shares_context");

@@ -37,7 +37,7 @@ fn parse_flag_str(args: &[String], flag: &str) -> Option<String> {
             args.iter()
                 .position(|a| a == flag)
                 .and_then(|i| args.get(i + 1))
-                .map(|s| s.clone())
+                .cloned()
         })
 }
 
@@ -49,13 +49,12 @@ fn parse_flag_multi(args: &[String], flag: &str) -> Vec<String> {
     while i < args.len() {
         if args[i].starts_with(&eq) {
             results.push(args[i][eq.len()..].to_string());
-        } else if args[i] == flag {
-            if let Some(val) = args.get(i + 1) {
-                if !val.starts_with('-') {
-                    results.push(val.clone());
-                    i += 1;
-                }
-            }
+        } else if args[i] == flag
+            && let Some(val) = args.get(i + 1)
+            && !val.starts_with('-')
+        {
+            results.push(val.clone());
+            i += 1;
         }
         i += 1;
     }

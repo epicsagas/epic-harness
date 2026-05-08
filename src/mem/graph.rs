@@ -58,9 +58,8 @@ fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
             importance: node.frontmatter.importance,
         })
         .collect();
-    let edges = read_edges_conn(conn)
+    let edges = read_edges_conn(conn, MAX_GRAPH_EDGES)
         .into_iter()
-        .take(MAX_GRAPH_EDGES) // LIMIT 2000
         .map(|e| GraphEdge {
             source: e.source,
             target: e.target,

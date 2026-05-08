@@ -5,6 +5,7 @@ use std::sync::LazyLock;
 use super::common::*;
 use crate::config::CONFIG;
 use crate::evolve;
+use crate::mem::store;
 use crate::shared::{
     evolution::*, helpers::*, obs::ObsRecord, paths::*,
 };
@@ -46,11 +47,11 @@ pub fn run_context(
     }
 
     // Fix 5: Validate --since format (YYYYMMDD)
-    if let Some(ref s) = since {
-        if s.len() != 8 || !s.chars().all(|c| c.is_ascii_digit()) {
-            eprintln!("{{\"error\":\"--since must be YYYYMMDD format, got: {s}\"}}");
-            return 1;
-        }
+    if let Some(ref s) = since
+        && (s.len() != 8 || !s.chars().all(|c| c.is_ascii_digit()))
+    {
+        eprintln!("{{\"error\":\"--since must be YYYYMMDD format, got: {s}\"}}");
+        return 1;
     }
 
     // 1. Obs stats — compute date range
@@ -560,7 +561,7 @@ fn collect_claude_session() -> serde_json::Value {
     })
 }
 
-fn collect_alcove(cfg: &super::config::AlcoveConfig) -> serde_json::Value {
+fn collect_alcove(cfg: &crate::config::AlcoveConfig) -> serde_json::Value {
     if cfg.vault_path.is_empty() {
         return serde_json::json!({"error": "alcove vault_path not configured"});
     }

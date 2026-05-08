@@ -879,7 +879,7 @@ mod tests {
             serde_json::to_string(&long_rel).unwrap()
         );
         handle_post_edge_conn(&body, &conn).expect("should create edge");
-        let edges = read_edges_conn(&conn);
+        let edges = read_edges_conn(&conn, 5000);
         assert_eq!(edges.len(), 1);
         assert!(
             edges[0].relation.chars().count() <= MAX_RELATION_CHARS,
@@ -931,7 +931,7 @@ mod tests {
         )
         .expect("should clamp oversized weight");
 
-        let edges = read_edges_conn(&conn);
+        let edges = read_edges_conn(&conn, 5000);
         assert_eq!(edges.len(), 2);
         for e in &edges {
             assert!(

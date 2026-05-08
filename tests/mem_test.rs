@@ -745,7 +745,7 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
     );
 
     // Verify belongs_to edges from session and pattern to hub
-    let edges = read_edges_conn(&conn);
+    let edges = read_edges_conn(&conn, 5000);
     let belongs_edges: Vec<_> = edges
         .iter()
         .filter(|e| e.relation == "belongs_to" && e.target == hub_id)

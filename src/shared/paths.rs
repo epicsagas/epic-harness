@@ -57,6 +57,33 @@ pub fn harness_dir() -> PathBuf {
     DIR.clone()
 }
 
+pub fn harness_projects_root() -> PathBuf {
+    dirs_home().join(".harness").join("projects")
+}
+
+/// Lists all project slugs that have harness data directories.
+pub fn list_harness_project_slugs() -> Vec<String> {
+    let root = harness_projects_root();
+    if !root.is_dir() {
+        return vec![];
+    }
+    let mut slugs: Vec<String> = std::fs::read_dir(&root)
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .collect();
+    slugs.sort();
+    slugs
+}
+
+/// Returns the harness data directory for a given project slug.
+pub fn harness_dir_for_slug(slug: &str) -> PathBuf {
+    harness_projects_root().join(slug)
+}
+
 /// Legacy project-local path used for migration detection only.
 pub(crate) fn local_harness_dir() -> PathBuf {
     cwd().join(".harness")
