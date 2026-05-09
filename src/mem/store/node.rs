@@ -41,22 +41,22 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 }
 
 /// Batch-read multiple nodes by ID in a single `WHERE id IN (...)` query.
-pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> Vec<Node> {
+pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> io::Result<Vec<Node>> {
     if ids.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
     let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({ph})");
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    stmt.query_map(
-        rusqlite::params_from_iter(ids.iter()),
-        super::util::row_to_node,
-    )
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map(
+            rusqlite::params_from_iter(ids.iter()),
+            super::util::row_to_node,
+        )
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
 }
 
 pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {
@@ -78,19 +78,24 @@ pub fn delete_node_file_conn(conn: &Connection, id: &str) -> io::Result<()> {
 }
 
 /// Read all nodes ordered by updated DESC in a single query.
-pub fn read_all_nodes_conn(conn: &Connection) -> Vec<Node> {
+pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC");
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    stmt.query_map([], super::util::row_to_node)
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map([], super::util::row_to_node)
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
 }
 
 pub fn list_node_ids() -> io::Result<Vec<String>> {
     let conn = super::open_db()?;
+    list_node_ids_conn(&conn)
+}
+
+/// List all node IDs using an existing connection.
+pub fn list_node_ids_conn(conn: &Connection) -> io::Result<Vec<String>> {
     let mut stmt = conn
         .prepare("SELECT id FROM nodes")
         .map_err(io::Error::other)?;

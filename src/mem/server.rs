@@ -11,7 +11,7 @@ use super::graph::{compute_stats, rebuild_graph_json_conn};
 use super::store::{
     Edge, Node, NodeFrontmatter, append_edge, delete_edge_by_id, delete_node_file,
     importance_for_type, now_iso, open_db, read_index, read_node_conn, remove_edges_for_node,
-    remove_from_index, search_nodes_conn, validate_node_id, write_node_conn,
+    remove_from_index, search_nodes_conn, validate_uuid, write_node_conn,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
@@ -208,7 +208,7 @@ pub fn serve(args: &[String]) -> i32 {
                     .next()
                     .unwrap_or("")
                     .to_string();
-                if !validate_node_id(&edge_id) {
+                if !validate_uuid(&edge_id) {
                     let body = "{\"error\":\"invalid edge id\"}".to_string();
                     let p = port;
                     Box::new(move || json_response(&body, 400, p))
@@ -244,7 +244,7 @@ pub fn serve(args: &[String]) -> i32 {
                     .next()
                     .unwrap_or("")
                     .to_string();
-                if !validate_node_id(&id) {
+                if !validate_uuid(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     let p = port;
                     Box::new(move || json_response(&body, 400, p))
@@ -283,7 +283,7 @@ pub fn serve(args: &[String]) -> i32 {
                     .next()
                     .unwrap_or("")
                     .to_string();
-                if !validate_node_id(&id) {
+                if !validate_uuid(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     let p = port;
                     Box::new(move || json_response(&body, 400, p))
@@ -309,7 +309,7 @@ pub fn serve(args: &[String]) -> i32 {
                     .next()
                     .unwrap_or("")
                     .to_string();
-                if !validate_node_id(&id) {
+                if !validate_uuid(&id) {
                     let body = "{\"error\":\"invalid node id\"}".to_string();
                     let p = port;
                     Box::new(move || json_response(&body, 400, p))
@@ -473,7 +473,7 @@ fn parse_edge_payload(body: &str) -> Result<Edge, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let source = v["source"].as_str().unwrap_or("").to_string();
     let target = v["target"].as_str().unwrap_or("").to_string();
-    if !validate_node_id(&source) || !validate_node_id(&target) {
+    if !validate_uuid(&source) || !validate_uuid(&target) {
         return Err("invalid source or target node id".to_string());
     }
     let relation: String = v["relation"]
@@ -515,7 +515,7 @@ fn handle_post_edge_conn(body: &str, conn: &Connection) -> Result<String, String
 /// Search using a shared connection (avoids per-request open_db).
 fn do_search_conn(query: &str, conn: &Connection) -> Vec<serde_json::Value> {
     use serde_json::json;
-    search_nodes_conn(conn, query, 20)
+    search_nodes_conn(conn, query, 20).unwrap_or_default()
         .into_iter()
         .map(|n| {
             let snippet: String = n
@@ -879,7 +879,7 @@ mod tests {
             serde_json::to_string(&long_rel).unwrap()
         );
         handle_post_edge_conn(&body, &conn).expect("should create edge");
-        let edges = read_edges_conn(&conn, 5000);
+        let edges = read_edges_conn(&conn, 5000).unwrap();
         assert_eq!(edges.len(), 1);
         assert!(
             edges[0].relation.chars().count() <= MAX_RELATION_CHARS,
@@ -931,7 +931,7 @@ mod tests {
         )
         .expect("should clamp oversized weight");
 
-        let edges = read_edges_conn(&conn, 5000);
+        let edges = read_edges_conn(&conn, 5000).unwrap();
         assert_eq!(edges.len(), 2);
         for e in &edges {
             assert!(

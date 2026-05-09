@@ -189,7 +189,7 @@ fn smart_recall_graph_boost_lifts_connected_node() {
     };
     append_edge_conn(&conn, &edge).unwrap();
 
-    let results = smart_recall_conn(&conn, None, None, 10);
+    let results = smart_recall_conn(&conn, None, None, 10).unwrap();
     let ids: Vec<&str> = results
         .iter()
         .map(|sn| sn.node.frontmatter.id.as_str())

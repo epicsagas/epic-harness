@@ -1,5 +1,7 @@
 //! search.rs — FTS search and dynamic filter queries
 
+use std::io;
+
 use rusqlite::{Connection, params};
 
 use super::types::Node;
@@ -10,10 +12,10 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    search_nodes_conn(&conn, query, limit)
+    search_nodes_conn(&conn, query, limit).unwrap_or_else(|_| vec![])
 }
 
-pub fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> Vec<Node> {
+pub fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> io::Result<Vec<Node>> {
     let sql = format!(
         "SELECT n.{NODE_COLUMNS_PREFIXED}
          FROM nodes n
@@ -22,13 +24,13 @@ pub fn search_nodes_conn(conn: &Connection, query: &str, limit: usize) -> Vec<No
          ORDER BY n.importance DESC
          LIMIT ?2"
     );
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    stmt.query_map(params![query, limit as i64], super::util::row_to_node)
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map(params![query, limit as i64], super::util::row_to_node)
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
 }
 
 /// Dynamic filter query using an existing connection.
@@ -38,7 +40,7 @@ pub fn query_nodes_conn(
     node_type: Option<&str>,
     project: Option<&str>,
     limit: usize,
-) -> Vec<Node> {
+) -> io::Result<Vec<Node>> {
     // Cap limit to prevent oversized result sets.
     let limit = limit.min(200);
 
@@ -72,14 +74,14 @@ pub fn query_nodes_conn(
         limit as i64,
     );
 
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
     let refs: Vec<&dyn rusqlite::ToSql> = param_vals.iter().map(|b| b.as_ref()).collect();
-    stmt.query_map(refs.as_slice(), super::util::row_to_node)
-        .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        .unwrap_or_default()
+    let nodes: Vec<Node> = stmt
+        .query_map(refs.as_slice(), super::util::row_to_node)
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
 }
 
 /// Dynamic filter query.
@@ -93,5 +95,5 @@ pub fn query_nodes(
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    query_nodes_conn(&conn, tag, node_type, project, limit)
+    query_nodes_conn(&conn, tag, node_type, project, limit).unwrap_or_else(|_| vec![])
 }

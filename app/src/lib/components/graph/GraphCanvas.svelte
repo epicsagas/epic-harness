@@ -13,8 +13,10 @@
   let svgEl: SVGSVGElement | undefined = $state();
   let containerEl: HTMLDivElement | undefined = $state();
   let graph: ReturnType<typeof renderForceGraph> | null = null;
+  let destroyed = false;
 
   function rerender() {
+    if (destroyed) return;
     if (!svgEl || !containerEl) return;
     const rect = containerEl.getBoundingClientRect();
     if (rect.width < 10 || rect.height < 10) return;
@@ -43,6 +45,7 @@
     const observer = new ResizeObserver(() => rerender());
     if (containerEl) observer.observe(containerEl);
     return () => {
+      destroyed = true;
       observer.disconnect();
       graph?.destroy();
     };

@@ -11,7 +11,7 @@ use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
     Edge, IndexNode, Node, NodeFrontmatter, append_edge, delete_node_file, importance_for_type,
     list_node_ids, now_iso, parse_node, query_nodes, read_node, remove_edges_for_node,
-    remove_from_index, search_nodes, serialize_node, smart_recall, upsert_index, validate_node_id,
+    remove_from_index, search_nodes, serialize_node, smart_recall, upsert_index, validate_uuid,
     write_node, write_node_dedup,
 };
 
@@ -377,7 +377,7 @@ fn cmd_edit(args: &[String]) -> io::Result<i32> {
     let id = pos
         .first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "edit requires <id>"))?;
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -414,7 +414,7 @@ fn cmd_delete(args: &[String]) -> io::Result<i32> {
     let id = pos
         .first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "delete requires <id>"))?;
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -503,7 +503,7 @@ fn cmd_related(args: &[String]) -> io::Result<i32> {
     let id = pos
         .first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "related requires <id>"))?;
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -528,7 +528,7 @@ fn cmd_link(args: &[String]) -> io::Result<i32> {
     }
     let src = &pos[0];
     let dst = &pos[1];
-    if !validate_node_id(src) || !validate_node_id(dst) {
+    if !validate_uuid(src) || !validate_uuid(dst) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -852,7 +852,7 @@ fn cmd_context(args: &[String]) -> io::Result<i32> {
     } else {
         Some(project.as_str())
     };
-    let scored = smart_recall(project_opt, None, limit);
+    let scored = smart_recall(project_opt, None, limit).unwrap_or_default();
 
     let results: Vec<serde_json::Value> = scored
         .iter()
@@ -896,7 +896,7 @@ fn cmd_recall(args: &[String]) -> io::Result<i32> {
 
     let project_opt = project.as_deref();
     let hint_opt = Some(hint.as_str());
-    let scored = smart_recall(project_opt, hint_opt, limit);
+    let scored = smart_recall(project_opt, hint_opt, limit)?;
 
     let results: Vec<serde_json::Value> = scored
         .iter()

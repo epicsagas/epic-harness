@@ -7,6 +7,9 @@ export const stats = writable<Stats | null>(null);
 export const selectedNode = writable<NodeDetail | null>(null);
 export const searchResults = writable<SearchResult[]>([]);
 
+let loadSeq = 0;
+let selectSeq = 0;
+
 export const typeFilters = writable<Record<string, boolean>>({});
 export const tagFilters = writable<string[]>([]);
 export const projectFilter = writable<string>('');
@@ -34,10 +37,13 @@ export const filteredEdges = derived(
 );
 
 export async function loadGraph() {
+  const seq = ++loadSeq;
   try {
     const data = await api.getGraph();
+    if (seq !== loadSeq) return;
     graphData.set(data);
   } catch (e) {
+    if (seq !== loadSeq) return;
     console.error('Failed to load graph:', e);
   }
 }
@@ -52,10 +58,13 @@ export async function loadStats() {
 }
 
 export async function selectNodeById(id: string) {
+  const seq = ++selectSeq;
   try {
     const detail = await api.getNode(id);
+    if (seq !== selectSeq) return;
     selectedNode.set(detail);
   } catch (e) {
+    if (seq !== selectSeq) return;
     console.error('Failed to load node:', e);
     selectedNode.set(null);
   }

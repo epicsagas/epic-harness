@@ -20,20 +20,28 @@ function getStoredTheme(): Theme {
 
 export const theme = writable<Theme>(getStoredTheme());
 
-export function initTheme() {
+export function initTheme(): () => void {
   const stored = getStoredTheme();
   theme.set(stored);
   applyTheme(stored);
 
-  theme.subscribe((t) => {
+  const unsub = theme.subscribe((t) => {
     localStorage.setItem('graphos-theme', t);
     applyTheme(t);
   });
 
-  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    const current = getStoredTheme();
-    if (current === 'system') applyTheme('system');
-  });
+  const mql = window.matchMedia('(prefers-color-scheme: dark)');
+  const handler = (e: MediaQueryListEvent) => {
+    if (!localStorage.getItem('graphos-theme')) {
+      theme.set(e.matches ? 'dark' : 'light');
+    }
+  };
+  mql.addEventListener('change', handler);
+
+  return () => {
+    unsub();
+    mql.removeEventListener('change', handler);
+  };
 }
 
 export function setTheme(t: Theme) {

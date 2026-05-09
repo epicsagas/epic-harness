@@ -94,8 +94,8 @@ pub fn delete_edge(id: String, state: State<'_, AppState>) -> Result<String, Str
 }
 
 #[tauri::command]
-pub fn get_edges(state: State<'_, AppState>) -> Result<Vec<EdgeResponse>, String> {
+pub fn get_edges(limit: Option<usize>, state: State<'_, AppState>) -> Result<Vec<EdgeResponse>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let edges = read_edges_conn(&conn, 2000);
+    let edges = read_edges_conn(&conn, limit.unwrap_or(2000)).map_err(|e| e.to_string())?;
     Ok(edges.into_iter().map(EdgeResponse::from).collect())
 }

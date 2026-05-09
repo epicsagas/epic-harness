@@ -97,7 +97,7 @@ impl From<Node> for NodeDetailResponse {
 #[tauri::command]
 pub fn get_nodes(state: State<'_, AppState>) -> Result<Vec<NodeResponse>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let nodes = read_all_nodes_conn(&conn);
+    let nodes = read_all_nodes_conn(&conn).map_err(|e| e.to_string())?;
     Ok(nodes.iter().map(NodeResponse::from).collect())
 }
 
