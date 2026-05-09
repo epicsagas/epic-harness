@@ -1082,7 +1082,7 @@ mod tests {
     fn other_tool_failure_gets_differentiated_quality() {
         // Simulate the catch-all arm logic directly
         let failure_cat = Some("type_error");
-        let fq = failure_quality(failure_cat.as_deref());
+        let fq = failure_quality(failure_cat);
         let dims = ScoreDimensions {
             tool_success: if failure_cat.is_none() { 1.0 } else { 0.0 },
             output_quality: fq,

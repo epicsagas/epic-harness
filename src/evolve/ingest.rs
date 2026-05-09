@@ -901,7 +901,7 @@ mod tests {
         }
 
         // 9. Verify the resolution node and edges exist
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap();
         let resolved_in: Vec<_> = edges
             .iter()
             .filter(|e| e.relation == "resolved_in" && e.target == curr_session_id)
@@ -1024,7 +1024,7 @@ mod tests {
         }
 
         // 5. Verify no resolution nodes exist
-        let all_edges = store::read_edges_conn(&conn, 5000);
+        let all_edges = store::read_edges_conn(&conn, 5000).unwrap();
         let resolved_edges: Vec<_> = all_edges
             .iter()
             .filter(|e| e.relation == "resolved_in")

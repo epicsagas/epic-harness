@@ -72,6 +72,7 @@ pub fn delete_node_file(id: &str) -> io::Result<()> {
 
 /// Delete a node using an existing connection (for use with shared state).
 /// Check if a node with the given ID exists.
+#[allow(dead_code)]
 pub fn node_exists_conn(conn: &Connection, id: &str) -> bool {
     conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?1)",

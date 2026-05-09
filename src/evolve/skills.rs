@@ -622,7 +622,7 @@ mod tests {
                 i + 1,
                 min
             );
-            assert_eq!(counters.counts["evo-test"], (i + 1) as u64);
+            assert_eq!(counters.counts["evo-test"], (i + 1));
         }
         // The min-th call must return true
         assert!(
