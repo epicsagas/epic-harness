@@ -397,11 +397,24 @@ pub fn run(_input: &HookInput) -> i32 {
             hint("resume", "Knowledge graph — relevant memories:");
             for sn in &important {
                 let fm = &sn.node.frontmatter;
+                let body_preview = sn.node.body.chars().take(150).collect::<String>();
+                let body_line = if body_preview.len() < sn.node.body.len() {
+                    format!(
+                        "{}...",
+                        body_preview.lines().next().unwrap_or(&body_preview)
+                    )
+                } else {
+                    body_preview
+                        .lines()
+                        .next()
+                        .unwrap_or(&body_preview)
+                        .to_string()
+                };
                 hint(
                     "resume",
                     &format!(
-                        "  [{}] {} (importance={:.1}, score={:.2})",
-                        fm.node_type, fm.title, fm.importance, sn.score
+                        "  [{}] {} (importance={:.1})\n    → {}",
+                        fm.node_type, fm.title, fm.importance, body_line
                     ),
                 );
             }

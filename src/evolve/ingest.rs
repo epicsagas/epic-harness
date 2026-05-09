@@ -3,6 +3,37 @@ use crate::shared::{evolution::*, helpers::*, paths::*};
 
 use super::analysis::build_summary;
 
+/// Query pattern types detected in the previous session (the session that the
+/// current session "follows"). Extracts non-generic tags from CSV tag strings.
+pub fn query_prev_pattern_types(conn: &rusqlite::Connection, session_node_id: &str) -> Vec<String> {
+    let mut results = Vec::new();
+    let sql = "SELECT n.tags FROM nodes n
+         JOIN edges e ON e.source = n.id
+         WHERE n.type = 'pattern'
+         AND e.relation = 'detected_in'
+         AND e.target IN (
+            SELECT e2.source FROM edges e2
+            WHERE e2.target = ?1 AND e2.relation = 'follows'
+         )";
+    if let Ok(mut stmt) = conn.prepare(sql) {
+        let rows = stmt.query_map(rusqlite::params![session_node_id], |row| {
+            let tags_str: String = row.get(0)?;
+            Ok(tags_str)
+        });
+        if let Ok(iter) = rows {
+            for r in iter.flatten() {
+                for tag in r.split(',') {
+                    let tag = tag.trim().trim_matches('"');
+                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
+                        results.push(tag.to_string());
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
 /// Find or create a project hub node. Returns the hub node's ID.
 pub fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::Result<String> {
     // Check if hub already exists
@@ -151,6 +182,73 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                 };
                 if store::append_edge_conn(&tx, &edge).is_ok() {
                     edges_created += 1;
+                }
+            }
+        }
+    }
+
+    // 8b-2. Resolution nodes: patterns resolved since last session
+    if !session_node_id.is_empty() {
+        let prev_pattern_types = query_prev_pattern_types(&tx, &session_node_id);
+
+        // Get current pattern types for comparison
+        let current_pattern_types: Vec<&str> =
+            patterns.iter().map(|p| p.pattern_type.as_str()).collect();
+
+        // For each previous pattern, check if the same type exists in current session
+        for pattern_type in &prev_pattern_types {
+            if !pattern_type.is_empty() && !current_pattern_types.contains(&pattern_type.as_str()) {
+                let title = format!("{}: resolved {} (auto)", slug, pattern_type);
+                let body = format!(
+                    "**Resolved**: Pattern `{}` was detected in the previous session but absent in this session.\n\
+                     **Inference**: The approach or fix applied likely addressed the root cause.",
+                    pattern_type,
+                );
+                let node = store::Node {
+                    frontmatter: store::NodeFrontmatter {
+                        id: store::new_uuid(),
+                        node_type: "resolution".into(),
+                        title,
+                        tags: vec!["auto".into(), "resolution".into(), pattern_type.to_string()],
+                        projects: vec![slug.clone()],
+                        agents: vec![],
+                        created: ts.clone(),
+                        updated: ts.clone(),
+                        importance: store::importance_for_type("resolution"),
+                        access_count: 0,
+                        accessed_at: String::new(),
+                    },
+                    body,
+                };
+                if let Ok((id, false)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+                    nodes_created += 1;
+                    // Edge: resolution -> session (resolved_in)
+                    let edge = store::Edge {
+                        id: store::new_uuid(),
+                        source: id.clone(),
+                        target: session_node_id.clone(),
+                        relation: "resolved_in".into(),
+                        weight: 1.0,
+                        ts: ts.clone(),
+                    };
+                    if store::append_edge_conn(&tx, &edge).is_ok() {
+                        edges_created += 1;
+                    }
+                    // Link resolution to project hub
+                    if let Ok(ref hub_id) = ensure_project_hub(&tx, &slug) {
+                        let _ = store::append_edge_conn(
+                            &tx,
+                            &store::Edge {
+                                id: store::new_uuid(),
+                                source: id,
+                                target: hub_id.clone(),
+                                relation: "belongs_to".to_string(),
+                                weight: 0.7,
+                                ts: ts.clone(),
+                            },
+                        )
+                        .map(|_| edges_created += 1);
+                    }
                 }
             }
         }
@@ -642,6 +740,298 @@ mod tests {
         assert!(
             shared.is_empty(),
             "nodes sharing only 'auto' tag should have no shared tags"
+        );
+    }
+
+    #[test]
+    fn resolution_node_created_when_pattern_absent_in_current_session() {
+        let conn = open_test_mem_db();
+        let slug = "res-test-proj";
+
+        // 1. Create project hub
+        let hub_id = ensure_project_hub(&conn, slug).unwrap();
+
+        // 2. Create previous session node
+        let prev_session_id = store::new_uuid();
+        let prev_session = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: prev_session_id.clone(),
+                node_type: "session".into(),
+                title: format!("session: {} 50% avg=0.5", slug),
+                tags: vec!["auto".into(), "session".into()],
+                projects: vec![slug.into()],
+                created: "2026-01-01T00:00:00Z".into(),
+                updated: "2026-01-01T00:00:00Z".into(),
+                ..Default::default()
+            },
+            body: "previous session".into(),
+        };
+        store::write_node_conn(&conn, &prev_session).unwrap();
+
+        // 3. Create a pattern node from the previous session
+        let pattern_id = store::new_uuid();
+        let pattern_node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: pattern_id.clone(),
+                node_type: "pattern".into(),
+                title: format!("{}: repeated_same_error (3x)", slug),
+                tags: vec!["auto".into(), "repeated_same_error".into()],
+                projects: vec![slug.into()],
+                created: "2026-01-01T00:00:00Z".into(),
+                updated: "2026-01-01T00:00:00Z".into(),
+                ..Default::default()
+            },
+            body: "pattern body".into(),
+        };
+        store::write_node_conn(&conn, &pattern_node).unwrap();
+
+        // 4. Edge: pattern -> prev_session (detected_in)
+        store::append_edge_conn(
+            &conn,
+            &store::Edge {
+                id: store::new_uuid(),
+                source: pattern_id.clone(),
+                target: prev_session_id.clone(),
+                relation: "detected_in".into(),
+                weight: 1.0,
+                ts: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+
+        // 5. Create current session node (simulates what ingest_to_memory does)
+        let curr_session_id = store::new_uuid();
+        let curr_session = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: curr_session_id.clone(),
+                node_type: "session".into(),
+                title: format!("session: {} 90% avg=0.9", slug),
+                tags: vec!["auto".into(), "session".into()],
+                projects: vec![slug.into()],
+                created: "2026-01-02T00:00:00Z".into(),
+                updated: "2026-01-02T00:00:00Z".into(),
+                ..Default::default()
+            },
+            body: "current session".into(),
+        };
+        store::write_node_conn(&conn, &curr_session).unwrap();
+
+        // 6. Edge: prev_session -> curr_session (follows)
+        store::append_edge_conn(
+            &conn,
+            &store::Edge {
+                id: store::new_uuid(),
+                source: prev_session_id,
+                target: curr_session_id.clone(),
+                relation: "follows".into(),
+                weight: 0.3,
+                ts: "2026-01-02T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+
+        // 7. Query prev pattern types via shared helper
+        let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
+
+        // Should find exactly the one pattern type from prev session
+        assert_eq!(
+            prev_pattern_types.len(),
+            1,
+            "should find one previous pattern type"
+        );
+        assert_eq!(
+            prev_pattern_types[0], "repeated_same_error",
+            "pattern type should be extracted from tags"
+        );
+
+        // 8. Simulate resolution creation (no current patterns = resolved)
+        let current_pattern_types: Vec<&str> = vec![]; // empty = no patterns in current session
+
+        for pattern_type in &prev_pattern_types {
+            assert!(!current_pattern_types.contains(&pattern_type.as_str()));
+
+            let title = format!("{}: resolved {} (auto)", slug, pattern_type);
+            let resolution_id = store::new_uuid();
+            let resolution_node = store::Node {
+                frontmatter: store::NodeFrontmatter {
+                    id: resolution_id.clone(),
+                    node_type: "resolution".into(),
+                    title,
+                    tags: vec!["auto".into(), "resolution".into(), pattern_type.to_string()],
+                    projects: vec![slug.into()],
+                    created: "2026-01-02T00:00:00Z".into(),
+                    updated: "2026-01-02T00:00:00Z".into(),
+                    importance: store::importance_for_type("resolution"),
+                    ..Default::default()
+                },
+                body: format!(
+                    "**Resolved**: Pattern `{}` was detected in the previous session but absent in this session.",
+                    pattern_type,
+                ),
+            };
+            store::write_node_conn(&conn, &resolution_node).unwrap();
+
+            // Edge: resolution -> session (resolved_in)
+            store::append_edge_conn(
+                &conn,
+                &store::Edge {
+                    id: store::new_uuid(),
+                    source: resolution_id.clone(),
+                    target: curr_session_id.clone(),
+                    relation: "resolved_in".into(),
+                    weight: 1.0,
+                    ts: "2026-01-02T00:00:00Z".into(),
+                },
+            )
+            .unwrap();
+
+            // Edge: resolution -> hub (belongs_to)
+            store::append_edge_conn(
+                &conn,
+                &store::Edge {
+                    id: store::new_uuid(),
+                    source: resolution_id.clone(),
+                    target: hub_id.clone(),
+                    relation: "belongs_to".into(),
+                    weight: 0.7,
+                    ts: "2026-01-02T00:00:00Z".into(),
+                },
+            )
+            .unwrap();
+        }
+
+        // 9. Verify the resolution node and edges exist
+        let edges = store::read_edges_conn(&conn, 5000);
+        let resolved_in: Vec<_> = edges
+            .iter()
+            .filter(|e| e.relation == "resolved_in" && e.target == curr_session_id)
+            .collect();
+        assert_eq!(
+            resolved_in.len(),
+            1,
+            "should have exactly one resolved_in edge"
+        );
+
+        // Verify the resolution node is linked to the project hub
+        let resolution_to_hub: Vec<_> = edges
+            .iter()
+            .filter(|e| {
+                e.relation == "belongs_to"
+                    && e.target == hub_id
+                    && resolved_in.iter().any(|rie| rie.source == e.source)
+            })
+            .collect();
+        assert_eq!(
+            resolution_to_hub.len(),
+            1,
+            "resolution node must have a belongs_to edge to the project hub"
+        );
+    }
+
+    #[test]
+    fn no_resolution_node_when_pattern_still_present() {
+        let conn = open_test_mem_db();
+        let slug = "res-still-present";
+
+        // 1. Create previous session with a pattern
+        let prev_session_id = store::new_uuid();
+        let prev_session = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: prev_session_id.clone(),
+                node_type: "session".into(),
+                title: format!("session: {} 50%", slug),
+                tags: vec!["auto".into()],
+                projects: vec![slug.into()],
+                created: "2026-01-01T00:00:00Z".into(),
+                updated: "2026-01-01T00:00:00Z".into(),
+                ..Default::default()
+            },
+            body: "prev session".into(),
+        };
+        store::write_node_conn(&conn, &prev_session).unwrap();
+
+        let pattern_id = store::new_uuid();
+        let pattern_node = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: pattern_id.clone(),
+                node_type: "pattern".into(),
+                title: format!("{}: thrashing (5x)", slug),
+                tags: vec!["auto".into(), "thrashing".into()],
+                projects: vec![slug.into()],
+                created: "2026-01-01T00:00:00Z".into(),
+                updated: "2026-01-01T00:00:00Z".into(),
+                ..Default::default()
+            },
+            body: "pattern body".into(),
+        };
+        store::write_node_conn(&conn, &pattern_node).unwrap();
+
+        store::append_edge_conn(
+            &conn,
+            &store::Edge {
+                id: store::new_uuid(),
+                source: pattern_id,
+                target: prev_session_id.clone(),
+                relation: "detected_in".into(),
+                weight: 1.0,
+                ts: "2026-01-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+
+        // 2. Create current session
+        let curr_session_id = store::new_uuid();
+        let curr_session = store::Node {
+            frontmatter: store::NodeFrontmatter {
+                id: curr_session_id.clone(),
+                node_type: "session".into(),
+                title: format!("session: {} 80%", slug),
+                tags: vec!["auto".into()],
+                projects: vec![slug.into()],
+                created: "2026-01-02T00:00:00Z".into(),
+                updated: "2026-01-02T00:00:00Z".into(),
+                ..Default::default()
+            },
+            body: "curr session".into(),
+        };
+        store::write_node_conn(&conn, &curr_session).unwrap();
+
+        store::append_edge_conn(
+            &conn,
+            &store::Edge {
+                id: store::new_uuid(),
+                source: prev_session_id,
+                target: curr_session_id.clone(),
+                relation: "follows".into(),
+                weight: 0.3,
+                ts: "2026-01-02T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+
+        // 3. Query prev pattern types via shared helper
+        let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
+
+        assert_eq!(prev_pattern_types.len(), 1);
+        assert_eq!(prev_pattern_types[0], "thrashing");
+
+        // 4. Current session has the SAME pattern type -- should NOT create resolution
+        let current_pattern_types: Vec<&str> = vec!["thrashing"];
+
+        for pattern_type in &prev_pattern_types {
+            // The pattern is still present, so resolution should NOT be created
+            assert!(current_pattern_types.contains(&pattern_type.as_str()));
+        }
+
+        // 5. Verify no resolution nodes exist
+        let all_edges = store::read_edges_conn(&conn, 5000);
+        let resolved_edges: Vec<_> = all_edges
+            .iter()
+            .filter(|e| e.relation == "resolved_in")
+            .collect();
+        assert!(
+            resolved_edges.is_empty(),
+            "no resolved_in edges should exist when pattern is still present"
         );
     }
 }

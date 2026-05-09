@@ -77,6 +77,16 @@ pub struct EvolutionConfig {
     /// Minimum number of session observations before a skill can be promoted.
     /// Prevents premature skill creation from single successes.
     pub gated_promotion_min: u64,
+
+    /// Score degradation threshold that triggers rollback (e.g. 0.05 = 5% drop).
+    pub rollback_degradation: f64,
+
+    /// If best_score is below this floor, always rollback on stagnation.
+    pub rollback_best_floor: f64,
+
+    /// Number of recent sessions averaged for stagnation detection.
+    /// Prevents outlier sessions from permanently gating improvement.
+    pub stagnation_rolling_window: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -166,8 +176,11 @@ impl Default for EvolutionConfig {
         Self {
             max_skills: 10,
             stagnation_limit: 3,
-            improvement_threshold: 0.05,
-            gated_promotion_min: 3,
+            improvement_threshold: 0.02,
+            gated_promotion_min: 2,
+            rollback_degradation: 0.05,
+            rollback_best_floor: 0.90,
+            stagnation_rolling_window: 3,
         }
     }
 }
@@ -186,8 +199,8 @@ impl Default for PatternConfig {
             weak_ext_rate: 0.5,
             weak_ext_min_obs: 3,
             high_freq_error_min: 5,
-            graduated_scope_skip: 0.90,
-            graduated_scope_moderate: 0.70,
+            graduated_scope_skip: 0.95,
+            graduated_scope_moderate: 0.80,
         }
     }
 }
@@ -324,13 +337,23 @@ max_skills = 10
 stagnation_limit = 3
 
 # Minimum score improvement ratio to count as "improving".
-# 0.05 = 5% improvement needed per session to avoid stagnation.
-improvement_threshold = 0.05
+# 0.02 = 2% improvement needed per session to avoid stagnation.
+improvement_threshold = 0.02
 
 # Minimum session observations before a skill can be promoted.
 # Prevents premature skill creation from single successes.
 # A skill must be observed this many times across sessions before being created.
-gated_promotion_min = 3
+gated_promotion_min = 2
+
+# Score degradation threshold that triggers evolved-skill rollback.
+# 0.05 = 5% drop from best_score triggers rollback.
+# rollback_degradation = 0.05
+
+# If best_score is below this floor, always rollback on stagnation.
+# rollback_best_floor = 0.90
+
+# Number of recent sessions used for rolling-average stagnation check.
+# stagnation_rolling_window = 3
 
 # ── Pattern detection (power-user) ──────────────────
 # These thresholds control when failure patterns are detected.
@@ -366,8 +389,8 @@ gated_promotion_min = 3
 # ≥ skip  → no skill generation
 # ≥ moderate → only weak-tool proposals
 # < moderate → full seeding
-# graduated_scope_skip = 0.90
-# graduated_scope_moderate = 0.70
+# graduated_scope_skip = 0.95
+# graduated_scope_moderate = 0.80
 
 # ── Instinct learning ───────────────────────────────
 # High-success patterns extracted and promoted across projects.
@@ -419,9 +442,10 @@ mod tests {
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
         assert_eq!(c.evolution.stagnation_limit, 3);
-        assert_eq!(c.evolution.gated_promotion_min, 3);
+        assert_eq!(c.evolution.gated_promotion_min, 2);
+        assert_eq!(c.evolution.stagnation_rolling_window, 3);
         assert_eq!(c.pattern.repeated_error_min, 3);
-        assert_eq!(c.pattern.graduated_scope_skip, 0.90);
+        assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.pattern.weak_ext_min_obs, 3);
         assert_eq!(c.instinct.confidence_threshold, 0.8);
