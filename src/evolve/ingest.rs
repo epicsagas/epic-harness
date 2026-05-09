@@ -5,6 +5,40 @@ use crate::shared::{
 
 use super::analysis::build_summary;
 
+/// Query pattern types detected in the previous session (the session that the
+/// current session "follows"). Extracts non-generic tags from CSV tag strings.
+pub fn query_prev_pattern_types(
+    conn: &rusqlite::Connection,
+    session_node_id: &str,
+) -> Vec<String> {
+    let mut results = Vec::new();
+    let sql = "SELECT n.tags FROM nodes n
+         JOIN edges e ON e.source = n.id
+         WHERE n.type = 'pattern'
+         AND e.relation = 'detected_in'
+         AND e.target IN (
+            SELECT e2.source FROM edges e2
+            WHERE e2.target = ?1 AND e2.relation = 'follows'
+         )";
+    if let Ok(mut stmt) = conn.prepare(sql) {
+        let rows = stmt.query_map(rusqlite::params![session_node_id], |row| {
+            let tags_str: String = row.get(0)?;
+            Ok(tags_str)
+        });
+        if let Ok(iter) = rows {
+            for r in iter.flatten() {
+                for tag in r.split(',') {
+                    let tag = tag.trim().trim_matches('"');
+                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
+                        results.push(tag.to_string());
+                    }
+                }
+            }
+        }
+    }
+    results
+}
+
 /// Find or create a project hub node. Returns the hub node's ID.
 pub fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::Result<String> {
     // Check if hub already exists
@@ -160,43 +194,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 
     // 8b-2. Resolution nodes: patterns resolved since last session
     if !session_node_id.is_empty() {
-        // Find pattern types from the previous session via the follows edge.
-        // Tags are stored as CSV, so extract the pattern_type tag by filtering
-        // out the generic "auto" and "pattern" tags.
-        let prev_pattern_types: Vec<String> = {
-            let mut results = Vec::new();
-            // Tags are stored as CSV, extract the pattern_type tag by filtering
-            // out the generic "auto" and "pattern" tags.
-            let sql = "SELECT n.tags FROM nodes n
-                 JOIN edges e ON e.source = n.id
-                 WHERE n.type = 'pattern'
-                 AND e.relation = 'detected_in'
-                 AND e.target IN (
-                    SELECT e2.source FROM edges e2
-                    WHERE e2.target = ?1 AND e2.relation = 'follows'
-                 )";
-            if let Ok(mut stmt) = tx.prepare(sql) {
-                let rows = stmt.query_map(rusqlite::params![session_node_id], |row| {
-                    let tags_str: String = row.get(0)?;
-                    Ok(tags_str)
-                });
-                if let Ok(iter) = rows {
-                    for r in iter.flatten() {
-                        // CSV tags: "auto,repeated_same_error" → extract non-generic
-                        for tag in r.split(',') {
-                            let tag = tag.trim().trim_matches('"');
-                            if !tag.is_empty()
-                                && tag != "auto"
-                                && tag != "pattern"
-                            {
-                                results.push(tag.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-            results
-        };
+        let prev_pattern_types = query_prev_pattern_types(&tx, &session_node_id);
 
         // Get current pattern types for comparison
         let current_pattern_types: Vec<&str> =
@@ -842,33 +840,8 @@ mod tests {
         )
         .unwrap();
 
-        // 7. Query prev pattern types via CSV tags (same logic as production code)
-        let prev_pattern_types: Vec<String> = {
-            let mut results = Vec::new();
-            let sql = "SELECT n.tags FROM nodes n
-                 JOIN edges e ON e.source = n.id
-                 WHERE n.type = 'pattern'
-                 AND e.relation = 'detected_in'
-                 AND e.target IN (
-                    SELECT e2.source FROM edges e2
-                    WHERE e2.target = ?1 AND e2.relation = 'follows'
-                 )";
-            let mut stmt = conn.prepare(sql).unwrap();
-            let rows = stmt.query_map(rusqlite::params![curr_session_id], |row| {
-                let tags_str: String = row.get(0)?;
-                Ok(tags_str)
-            })
-            .unwrap();
-            for r in rows.flatten() {
-                for tag in r.split(',') {
-                    let tag = tag.trim().trim_matches('"');
-                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
-                        results.push(tag.to_string());
-                    }
-                }
-            }
-            results
-        };
+        // 7. Query prev pattern types via shared helper
+        let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
 
         // Should find exactly the one pattern type from prev session
         assert_eq!(prev_pattern_types.len(), 1, "should find one previous pattern type");
@@ -1044,33 +1017,8 @@ mod tests {
         )
         .unwrap();
 
-        // 3. Query prev pattern types via CSV tags (same logic as production code)
-        let prev_pattern_types: Vec<String> = {
-            let mut results = Vec::new();
-            let sql = "SELECT n.tags FROM nodes n
-                 JOIN edges e ON e.source = n.id
-                 WHERE n.type = 'pattern'
-                 AND e.relation = 'detected_in'
-                 AND e.target IN (
-                    SELECT e2.source FROM edges e2
-                    WHERE e2.target = ?1 AND e2.relation = 'follows'
-                 )";
-            let mut stmt = conn.prepare(sql).unwrap();
-            let rows = stmt.query_map(rusqlite::params![curr_session_id], |row| {
-                let tags_str: String = row.get(0)?;
-                Ok(tags_str)
-            })
-            .unwrap();
-            for r in rows.flatten() {
-                for tag in r.split(',') {
-                    let tag = tag.trim().trim_matches('"');
-                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
-                        results.push(tag.to_string());
-                    }
-                }
-            }
-            results
-        };
+        // 3. Query prev pattern types via shared helper
+        let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
 
         assert_eq!(prev_pattern_types.len(), 1);
         assert_eq!(prev_pattern_types[0], "thrashing");
