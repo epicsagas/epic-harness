@@ -77,6 +77,12 @@ pub struct EvolutionConfig {
     /// Minimum number of session observations before a skill can be promoted.
     /// Prevents premature skill creation from single successes.
     pub gated_promotion_min: u64,
+
+    /// Score degradation threshold that triggers rollback (e.g. 0.05 = 5% drop).
+    pub rollback_degradation: f64,
+
+    /// If best_score is below this floor, always rollback on stagnation.
+    pub rollback_best_floor: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -168,6 +174,8 @@ impl Default for EvolutionConfig {
             stagnation_limit: 3,
             improvement_threshold: 0.02,
             gated_promotion_min: 2,
+            rollback_degradation: 0.05,
+            rollback_best_floor: 0.90,
         }
     }
 }
@@ -331,6 +339,13 @@ improvement_threshold = 0.02
 # Prevents premature skill creation from single successes.
 # A skill must be observed this many times across sessions before being created.
 gated_promotion_min = 2
+
+# Score degradation threshold that triggers evolved-skill rollback.
+# 0.05 = 5% drop from best_score triggers rollback.
+# rollback_degradation = 0.05
+
+# If best_score is below this floor, always rollback on stagnation.
+# rollback_best_floor = 0.90
 
 # ── Pattern detection (power-user) ──────────────────
 # These thresholds control when failure patterns are detected.

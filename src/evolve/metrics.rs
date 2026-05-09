@@ -56,7 +56,7 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
         // Rollback decision still uses absolute best_score
         let best = metrics.best_score.unwrap_or(0.0);
         let degradation = best - current_score;
-        if degradation > 0.05 || best < 0.90 {
+        if degradation > CONFIG.evolution.rollback_degradation || best < CONFIG.evolution.rollback_best_floor {
             let backup = evolved_backup_dir();
             if backup.is_dir() {
                 let evolved = evolved_dir();
