@@ -77,8 +77,9 @@ pub fn graph_path() -> PathBuf {
         .join("graph.json")
 }
 
-pub fn validate_node_id(id: &str) -> bool {
-    // UUID v4 strict: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx
+/// Validate a UUID v4 string (strict format: xxxxxxxx-xxxx-4xxx-[89ab]xxx-xxxxxxxxxxxx).
+/// Applies to both node IDs and edge IDs.
+pub fn validate_uuid(id: &str) -> bool {
     let b = id.as_bytes();
     b.len() == 36
         && b[8] == b'-'
@@ -90,6 +91,12 @@ pub fn validate_node_id(id: &str) -> bool {
         && b.iter()
             .enumerate()
             .all(|(i, &c)| matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit())
+}
+
+/// Backward-compatible alias. Prefer [`validate_uuid`] for clarity.
+#[deprecated(note = "use validate_uuid instead — applies to both nodes and edges")]
+pub fn validate_node_id(id: &str) -> bool {
+    validate_uuid(id)
 }
 
 // ── UUID ─────────────────────────────────────────────

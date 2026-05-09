@@ -11,7 +11,7 @@ pub fn write_node(node: &Node) -> io::Result<()> {
     write_node_conn(&conn, node)
 }
 
-pub(crate) fn write_node_conn(conn: &Connection, node: &Node) -> io::Result<()> {
+pub fn write_node_conn(conn: &Connection, node: &Node) -> io::Result<()> {
     let fm = &node.frontmatter;
     conn.execute(
         "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at)
@@ -67,6 +67,11 @@ pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {
     let conn = super::open_db()?;
+    delete_node_file_conn(&conn, id)
+}
+
+/// Delete a node using an existing connection (for use with shared state).
+pub fn delete_node_file_conn(conn: &Connection, id: &str) -> io::Result<()> {
     conn.execute("DELETE FROM nodes WHERE id = ?1", params![id])
         .map_err(io::Error::other)?;
     Ok(())

@@ -82,6 +82,11 @@ pub fn read_edges_limit(limit: usize) -> Vec<Edge> {
 
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
     let conn = super::open_db()?;
+    delete_edge_by_id_conn(&conn, edge_id)
+}
+
+/// Delete an edge using an existing connection (for use with shared state).
+pub fn delete_edge_by_id_conn(conn: &Connection, edge_id: &str) -> io::Result<()> {
     conn.execute("DELETE FROM edges WHERE id = ?1", params![edge_id])
         .map_err(io::Error::other)?;
     Ok(())
@@ -89,6 +94,11 @@ pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
 
 pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
     let conn = super::open_db()?;
+    remove_edges_for_node_conn(&conn, node_id)
+}
+
+/// Remove edges for a node using an existing connection (for use with shared state).
+pub fn remove_edges_for_node_conn(conn: &Connection, node_id: &str) -> io::Result<()> {
     conn.execute(
         "DELETE FROM edges WHERE source = ?1 OR target = ?1",
         params![node_id],

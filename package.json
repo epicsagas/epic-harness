@@ -32,5 +32,9 @@
     "README.md",
     "LICENSE"
   ],
-  "scripts": {}
+  "scripts": {},
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.1",
+    "@types/d3": "^7.4.3"
+  }
 }

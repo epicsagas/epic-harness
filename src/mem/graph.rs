@@ -180,9 +180,8 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
         .unwrap_or_default()
 }
 
-/// Compute aggregate stats for the `/api/stats` endpoint.
-pub fn compute_stats() -> io::Result<serde_json::Value> {
-    let conn = open_db()?;
+/// Compute aggregate stats for the `/api/stats` endpoint using an existing connection.
+pub fn compute_stats_conn(conn: &Connection) -> io::Result<serde_json::Value> {
     let total_nodes: i64 = conn
         .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
         .unwrap_or(0);
@@ -211,6 +210,12 @@ pub fn compute_stats() -> io::Result<serde_json::Value> {
         "avg_importance": (avg_importance * 100.0).round() / 100.0,
         "by_type": serde_json::Value::Object(by_type),
     }))
+}
+
+/// Compute aggregate stats for the `/api/stats` endpoint.
+pub fn compute_stats() -> io::Result<serde_json::Value> {
+    let conn = open_db()?;
+    compute_stats_conn(&conn)
 }
 
 /// BFS traversal from `start_id` to all reachable nodes via a SQL recursive CTE.

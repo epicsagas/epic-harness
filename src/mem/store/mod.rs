@@ -24,7 +24,7 @@ pub use types::{Edge, IndexNode, Node, NodeFrontmatter, importance_for_type};
 
 // ── Re-exports: util ─────────────────────────────────
 
-pub use util::{atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, validate_node_id};
+pub use util::{atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, validate_node_id, validate_uuid};
 
 #[cfg(test)]
 pub(crate) use util::parse_iso_to_secs;
@@ -36,19 +36,20 @@ pub(crate) use schema::init_schema;
 
 // ── Re-exports: node ─────────────────────────────────
 
+#[allow(unused_imports)]
 pub use node::{
-    delete_node_file, list_node_ids, parse_node, read_node, read_node_conn, read_nodes_conn,
-    serialize_node, write_node,
+    delete_node_file, delete_node_file_conn, list_node_ids, parse_node, read_node, read_node_conn,
+    read_nodes_conn, serialize_node, write_node,
 };
 
-pub(crate) use node::write_node_conn;
+pub use node::write_node_conn;
 
 // ── Re-exports: edge ─────────────────────────────────
 
 #[allow(unused_imports)]
 pub use edge::{
-    append_edge, append_edge_conn, delete_edge_by_id, read_edges, read_edges_conn,
-    remove_edges_for_node,
+    append_edge, append_edge_conn, delete_edge_by_id, delete_edge_by_id_conn, read_edges,
+    read_edges_conn, remove_edges_for_node, remove_edges_for_node_conn,
 };
 
 // ── Re-exports: index ────────────────────────────────
