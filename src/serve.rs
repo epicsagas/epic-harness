@@ -1,11 +1,11 @@
 //! serve.rs — Web dashboard for orchestration state and memory graph
 //! Serves a single-page Svelte dashboard at http://localhost:{port}
 
-use tiny_http::{Response, Server, Method, Header};
+use tiny_http::{Header, Method, Response, Server};
 
 use crate::hooks::common;
-use crate::orchestrate::state as orch;
 use crate::mem::{graph, store};
+use crate::orchestrate::state as orch;
 
 const DEFAULT_PORT: u16 = 7700;
 
@@ -28,12 +28,13 @@ pub fn run_serve(port: Option<u16>) -> i32 {
     for request in server.incoming_requests() {
         let url = request.url().to_string();
         let method = request.method().clone();
-        
+
         let response = match (method, url.as_str()) {
-            (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(DASHBOARD_HTML).with_header(
-                Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
-            ),
-            
+            (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(
+                DASHBOARD_HTML,
+            )
+            .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
+
             // ── Orchestration API ───────────────────────────
             (Method::Get, "/api/run") => {
                 let harness_dir = common::harness_dir();
@@ -43,7 +44,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 };
                 json_response(&body)
             }
-            
+
             (Method::Get, "/api/events") => {
                 let harness_dir = common::harness_dir();
                 let run = orch::read_run(&harness_dir);
@@ -62,7 +63,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 };
                 json_response(&body)
             }
-            
+
             (Method::Get, "/api/stats") => {
                 let body = match graph::compute_stats() {
                     Ok(v) => v.to_string(),
@@ -73,22 +74,30 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Memory API (Nodes) ───────────────────────────
             (Method::Get, "/api/nodes") => {
-                let nodes = store::read_all_nodes_conn(&store::open_db().unwrap()).unwrap_or_default();
-                let results: Vec<serde_json::Value> = nodes.into_iter().map(|n| {
-                    serde_json::json!({
-                        "id": n.frontmatter.id,
-                        "type": n.frontmatter.node_type,
-                        "title": n.frontmatter.title,
-                        "tags": n.frontmatter.tags,
-                        "projects": n.frontmatter.projects,
-                        "updated": n.frontmatter.updated
+                let nodes =
+                    store::read_all_nodes_conn(&store::open_db().unwrap()).unwrap_or_default();
+                let results: Vec<serde_json::Value> = nodes
+                    .into_iter()
+                    .map(|n| {
+                        serde_json::json!({
+                            "id": n.frontmatter.id,
+                            "type": n.frontmatter.node_type,
+                            "title": n.frontmatter.title,
+                            "tags": n.frontmatter.tags,
+                            "projects": n.frontmatter.projects,
+                            "updated": n.frontmatter.updated
+                        })
                     })
-                }).collect();
+                    .collect();
                 json_response(&serde_json::to_string(&results).unwrap_or_else(|_| "[]".into()))
             }
-            
+
             (Method::Get, url) if url.starts_with("/api/nodes/") => {
-                let id = url.trim_start_matches("/api/nodes/").split('?').next().unwrap_or("");
+                let id = url
+                    .trim_start_matches("/api/nodes/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("");
                 let body = match store::read_node(id) {
                     Ok(node) => {
                         let v = serde_json::json!({
@@ -105,7 +114,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                             "body": node.body
                         });
                         v.to_string()
-                    },
+                    }
                     Err(_) => "{\"error\":\"not found\"}".into(),
                 };
                 json_response(&body)
@@ -113,17 +122,26 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Memory API (Search) ──────────────────────────
             (Method::Get, url) if url.starts_with("/api/search") => {
-                let query = url.split("q=").nth(1).unwrap_or("").split('&').next().unwrap_or("");
+                let query = url
+                    .split("q=")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split('&')
+                    .next()
+                    .unwrap_or("");
                 let decoded = percent_decode(query);
                 let nodes = store::search_nodes(&decoded, 20);
-                let results: Vec<serde_json::Value> = nodes.into_iter().map(|n| {
-                    serde_json::json!({
-                        "id": n.frontmatter.id,
-                        "title": n.frontmatter.title,
-                        "type": n.frontmatter.node_type,
-                        "snippet": n.body.chars().take(160).collect::<String>()
+                let results: Vec<serde_json::Value> = nodes
+                    .into_iter()
+                    .map(|n| {
+                        serde_json::json!({
+                            "id": n.frontmatter.id,
+                            "title": n.frontmatter.title,
+                            "type": n.frontmatter.node_type,
+                            "snippet": n.body.chars().take(160).collect::<String>()
+                        })
                     })
-                }).collect();
+                    .collect();
                 let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
                 json_response(&body)
             }
@@ -146,13 +164,20 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             // ── CORS & Other ────────────────────────────────
-            (Method::Options, _) => {
-                Response::from_string("{}").with_status_code(204)
-                    .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
-                    .with_header(Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, PUT, DELETE, OPTIONS").unwrap())
-                    .with_header(Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap())
-            }
-            
+            (Method::Options, _) => Response::from_string("{}")
+                .with_status_code(204)
+                .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
+                .with_header(
+                    Header::from_bytes(
+                        b"Access-Control-Allow-Methods",
+                        b"GET, POST, PUT, DELETE, OPTIONS",
+                    )
+                    .unwrap(),
+                )
+                .with_header(
+                    Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
+                ),
+
             _ => Response::from_string("Not Found").with_status_code(404),
         };
         let _ = request.respond(response);
