@@ -160,10 +160,22 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 
     // 8b-2. Resolution nodes: patterns resolved since last session
     if !session_node_id.is_empty() {
-        // Find patterns from the previous session via the follows edge
-        let prev_patterns: Vec<String> = {
+        // Find pattern types from the previous session via the follows edge.
+        // Tags are stored as CSV, so extract the pattern_type tag by filtering
+        // out the generic "auto" and "pattern" tags.
+        let prev_pattern_types: Vec<String> = {
             let mut results = Vec::new();
-            let sql = "SELECT n.title FROM nodes n
+            let sql = "SELECT DISTINCT trim(value) FROM nodes n
+                 JOIN edges e ON e.source = n.id,
+                 json_each('[' || replace(replace(n.tags, '\",\"', '\",\"'), '\"', '\"') || ']') AS j
+                 WHERE n.type = 'pattern'
+                 AND e.relation = 'detected_in'
+                 AND e.target IN (
+                    SELECT e2.source FROM edges e2
+                    WHERE e2.target = ?1 AND e2.relation = 'follows'
+                 )";
+            // Fallback: tags are CSV, use LIKE to find non-generic tags
+            let sql_csv = "SELECT n.tags FROM nodes n
                  JOIN edges e ON e.source = n.id
                  WHERE n.type = 'pattern'
                  AND e.relation = 'detected_in'
@@ -171,11 +183,23 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     SELECT e2.source FROM edges e2
                     WHERE e2.target = ?1 AND e2.relation = 'follows'
                  )";
-            if let Ok(mut stmt) = tx.prepare(sql) {
-                let rows = stmt.query_map(rusqlite::params![session_node_id], |row| row.get(0));
+            if let Ok(mut stmt) = tx.prepare(sql_csv) {
+                let rows = stmt.query_map(rusqlite::params![session_node_id], |row| {
+                    let tags_str: String = row.get(0)?;
+                    Ok(tags_str)
+                });
                 if let Ok(iter) = rows {
                     for r in iter.flatten() {
-                        results.push(r);
+                        // CSV tags: "auto,repeated_same_error" → extract non-generic
+                        for tag in r.split(',') {
+                            let tag = tag.trim().trim_matches('"');
+                            if !tag.is_empty()
+                                && tag != "auto"
+                                && tag != "pattern"
+                            {
+                                results.push(tag.to_string());
+                            }
+                        }
                     }
                 }
             }
@@ -187,16 +211,10 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
             patterns.iter().map(|p| p.pattern_type.as_str()).collect();
 
         // For each previous pattern, check if the same type exists in current session
-        for prev_title in &prev_patterns {
-            // Extract pattern type from title format "{slug}: {type} ({count}x)"
-            let pattern_type = prev_title
-                .split(": ")
-                .nth(1)
-                .and_then(|s| s.split(" (").next())
-                .unwrap_or("");
+        for pattern_type in &prev_pattern_types {
 
             if !pattern_type.is_empty()
-                && !current_pattern_types.contains(&pattern_type)
+                && !current_pattern_types.contains(&pattern_type.as_str())
             {
                 let title = format!("{}: resolved {} (auto)", slug, pattern_type);
                 let body = format!(
@@ -832,10 +850,10 @@ mod tests {
         )
         .unwrap();
 
-        // 7. Now simulate the resolution logic: query prev patterns
-        let prev_patterns: Vec<String> = {
+        // 7. Query prev pattern types via CSV tags (same logic as production code)
+        let prev_pattern_types: Vec<String> = {
             let mut results = Vec::new();
-            let sql = "SELECT n.title FROM nodes n
+            let sql = "SELECT n.tags FROM nodes n
                  JOIN edges e ON e.source = n.id
                  WHERE n.type = 'pattern'
                  AND e.relation = 'detected_in'
@@ -844,32 +862,34 @@ mod tests {
                     WHERE e2.target = ?1 AND e2.relation = 'follows'
                  )";
             let mut stmt = conn.prepare(sql).unwrap();
-            let rows = stmt.query_map(rusqlite::params![curr_session_id], |row| row.get(0)).unwrap();
+            let rows = stmt.query_map(rusqlite::params![curr_session_id], |row| {
+                let tags_str: String = row.get(0)?;
+                Ok(tags_str)
+            })
+            .unwrap();
             for r in rows.flatten() {
-                results.push(r);
+                for tag in r.split(',') {
+                    let tag = tag.trim().trim_matches('"');
+                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
+                        results.push(tag.to_string());
+                    }
+                }
             }
             results
         };
 
-        // Should find exactly the one pattern from prev session
-        assert_eq!(prev_patterns.len(), 1, "should find one previous pattern");
-        assert!(
-            prev_patterns[0].contains("repeated_same_error"),
-            "pattern title should contain the pattern type"
+        // Should find exactly the one pattern type from prev session
+        assert_eq!(prev_pattern_types.len(), 1, "should find one previous pattern type");
+        assert_eq!(
+            prev_pattern_types[0], "repeated_same_error",
+            "pattern type should be extracted from tags"
         );
 
         // 8. Simulate resolution creation (no current patterns = resolved)
         let current_pattern_types: Vec<&str> = vec![]; // empty = no patterns in current session
 
-        for prev_title in &prev_patterns {
-            let pattern_type = prev_title
-                .split(": ")
-                .nth(1)
-                .and_then(|s| s.split(" (").next())
-                .unwrap_or("");
-
-            assert_eq!(pattern_type, "repeated_same_error");
-            assert!(!current_pattern_types.contains(&pattern_type));
+        for pattern_type in &prev_pattern_types {
+            assert!(!current_pattern_types.contains(&pattern_type.as_str()));
 
             let title = format!("{}: resolved {} (auto)", slug, pattern_type);
             let resolution_id = store::new_uuid();
@@ -1032,10 +1052,10 @@ mod tests {
         )
         .unwrap();
 
-        // 3. Query prev patterns and simulate the resolution check
-        let prev_patterns: Vec<String> = {
+        // 3. Query prev pattern types via CSV tags (same logic as production code)
+        let prev_pattern_types: Vec<String> = {
             let mut results = Vec::new();
-            let sql = "SELECT n.title FROM nodes n
+            let sql = "SELECT n.tags FROM nodes n
                  JOIN edges e ON e.source = n.id
                  WHERE n.type = 'pattern'
                  AND e.relation = 'detected_in'
@@ -1044,27 +1064,31 @@ mod tests {
                     WHERE e2.target = ?1 AND e2.relation = 'follows'
                  )";
             let mut stmt = conn.prepare(sql).unwrap();
-            let rows = stmt.query_map(rusqlite::params![curr_session_id], |row| row.get(0)).unwrap();
+            let rows = stmt.query_map(rusqlite::params![curr_session_id], |row| {
+                let tags_str: String = row.get(0)?;
+                Ok(tags_str)
+            })
+            .unwrap();
             for r in rows.flatten() {
-                results.push(r);
+                for tag in r.split(',') {
+                    let tag = tag.trim().trim_matches('"');
+                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
+                        results.push(tag.to_string());
+                    }
+                }
             }
             results
         };
 
-        assert_eq!(prev_patterns.len(), 1);
+        assert_eq!(prev_pattern_types.len(), 1);
+        assert_eq!(prev_pattern_types[0], "thrashing");
 
         // 4. Current session has the SAME pattern type -- should NOT create resolution
         let current_pattern_types: Vec<&str> = vec!["thrashing"];
 
-        for prev_title in &prev_patterns {
-            let pattern_type = prev_title
-                .split(": ")
-                .nth(1)
-                .and_then(|s| s.split(" (").next())
-                .unwrap_or("");
-
+        for pattern_type in &prev_pattern_types {
             // The pattern is still present, so resolution should NOT be created
-            assert!(current_pattern_types.contains(&pattern_type));
+            assert!(current_pattern_types.contains(&pattern_type.as_str()));
         }
 
         // 5. Verify no resolution nodes exist

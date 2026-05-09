@@ -47,6 +47,7 @@ fn get_last_action(session_file: &std::path::Path) -> Option<String> {
 
 fn failure_quality(failure_category: Option<&str>) -> f64 {
     match failure_category {
+        None => 0.0, // no failure — should not happen, but safe default
         Some("syntax_error") => 0.3,
         Some("type_error") => 0.4,
         Some("runtime_error") => 0.5,
@@ -56,7 +57,7 @@ fn failure_quality(failure_category: Option<&str>) -> f64 {
         Some("lint_fail") => 0.6,
         Some("timeout") => 0.5,
         Some("not_found") => 0.6,
-        _ => 0.5, // default for unknown failures
+        Some(_) => 0.5, // unknown failure category
     }
 }
 
@@ -1047,8 +1048,8 @@ mod tests {
         assert_eq!(failure_quality(Some("lint_fail")), 0.6);
         assert_eq!(failure_quality(Some("timeout")), 0.5);
         assert_eq!(failure_quality(Some("not_found")), 0.6);
-        // None (no failure) returns default
-        assert_eq!(failure_quality(None), 0.5);
+        // None (no failure) returns 0.0 — not a failure
+        assert_eq!(failure_quality(None), 0.0);
         // Unknown category returns default
         assert_eq!(failure_quality(Some("unknown_category")), 0.5);
     }
