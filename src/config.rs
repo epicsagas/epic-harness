@@ -83,6 +83,10 @@ pub struct EvolutionConfig {
 
     /// If best_score is below this floor, always rollback on stagnation.
     pub rollback_best_floor: f64,
+
+    /// Number of recent sessions averaged for stagnation detection.
+    /// Prevents outlier sessions from permanently gating improvement.
+    pub stagnation_rolling_window: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,6 +180,7 @@ impl Default for EvolutionConfig {
             gated_promotion_min: 2,
             rollback_degradation: 0.05,
             rollback_best_floor: 0.90,
+            stagnation_rolling_window: 3,
         }
     }
 }
@@ -347,6 +352,9 @@ gated_promotion_min = 2
 # If best_score is below this floor, always rollback on stagnation.
 # rollback_best_floor = 0.90
 
+# Number of recent sessions used for rolling-average stagnation check.
+# stagnation_rolling_window = 3
+
 # ── Pattern detection (power-user) ──────────────────
 # These thresholds control when failure patterns are detected.
 # Defaults work well for most projects — only adjust if you have
@@ -435,6 +443,7 @@ mod tests {
         assert_eq!(c.evolution.max_skills, 10);
         assert_eq!(c.evolution.stagnation_limit, 3);
         assert_eq!(c.evolution.gated_promotion_min, 2);
+        assert_eq!(c.evolution.stagnation_rolling_window, 3);
         assert_eq!(c.pattern.repeated_error_min, 3);
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);

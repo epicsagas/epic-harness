@@ -36,7 +36,7 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
     let rolling_avg = if metrics.score_history.is_empty() {
         metrics.best_score.unwrap_or(0.0)
     } else {
-        compute_rolling_avg(&metrics.score_history, 3)
+        compute_rolling_avg(&metrics.score_history, CONFIG.evolution.stagnation_rolling_window)
     };
     let improvement = current_score - rolling_avg;
     if improvement >= CONFIG.evolution.improvement_threshold {
