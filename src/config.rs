@@ -166,8 +166,8 @@ impl Default for EvolutionConfig {
         Self {
             max_skills: 10,
             stagnation_limit: 3,
-            improvement_threshold: 0.05,
-            gated_promotion_min: 3,
+            improvement_threshold: 0.02,
+            gated_promotion_min: 2,
         }
     }
 }
@@ -186,8 +186,8 @@ impl Default for PatternConfig {
             weak_ext_rate: 0.5,
             weak_ext_min_obs: 3,
             high_freq_error_min: 5,
-            graduated_scope_skip: 0.90,
-            graduated_scope_moderate: 0.70,
+            graduated_scope_skip: 0.95,
+            graduated_scope_moderate: 0.80,
         }
     }
 }
@@ -324,13 +324,13 @@ max_skills = 10
 stagnation_limit = 3
 
 # Minimum score improvement ratio to count as "improving".
-# 0.05 = 5% improvement needed per session to avoid stagnation.
-improvement_threshold = 0.05
+# 0.02 = 2% improvement needed per session to avoid stagnation.
+improvement_threshold = 0.02
 
 # Minimum session observations before a skill can be promoted.
 # Prevents premature skill creation from single successes.
 # A skill must be observed this many times across sessions before being created.
-gated_promotion_min = 3
+gated_promotion_min = 2
 
 # ── Pattern detection (power-user) ──────────────────
 # These thresholds control when failure patterns are detected.
@@ -366,8 +366,8 @@ gated_promotion_min = 3
 # ≥ skip  → no skill generation
 # ≥ moderate → only weak-tool proposals
 # < moderate → full seeding
-# graduated_scope_skip = 0.90
-# graduated_scope_moderate = 0.70
+# graduated_scope_skip = 0.95
+# graduated_scope_moderate = 0.80
 
 # ── Instinct learning ───────────────────────────────
 # High-success patterns extracted and promoted across projects.
@@ -419,9 +419,9 @@ mod tests {
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
         assert_eq!(c.evolution.stagnation_limit, 3);
-        assert_eq!(c.evolution.gated_promotion_min, 3);
+        assert_eq!(c.evolution.gated_promotion_min, 2);
         assert_eq!(c.pattern.repeated_error_min, 3);
-        assert_eq!(c.pattern.graduated_scope_skip, 0.90);
+        assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.pattern.weak_ext_min_obs, 3);
         assert_eq!(c.instinct.confidence_threshold, 0.8);
