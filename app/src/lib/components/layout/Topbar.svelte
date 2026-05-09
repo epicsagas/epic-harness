@@ -6,14 +6,18 @@
   let searchQuery = $state('');
   let showResults = $state(false);
   let dropdownEl: HTMLDivElement | undefined = $state();
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  async function handleSearch() {
+  function handleSearch() {
     if (searchQuery.trim().length < 2) {
       showResults = false;
       return;
     }
-    await search(searchQuery);
-    showResults = true;
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      await search(searchQuery);
+      showResults = true;
+    }, 250);
   }
 
   function selectResult(id: string) {

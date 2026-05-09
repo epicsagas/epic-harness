@@ -39,7 +39,8 @@ pub fn search_nodes(
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let nodes = search_nodes_conn(&conn, &query, limit.unwrap_or(20));
+    let nodes = search_nodes_conn(&conn, &query, limit.unwrap_or(20))
+        .map_err(|e| e.to_string())?;
     Ok(nodes
         .into_iter()
         .map(|n| SearchResult {
@@ -60,7 +61,8 @@ pub fn query_nodes(filter: QueryFilter, state: State<'_, AppState>) -> Result<se
         filter.node_type.as_deref(),
         filter.project.as_deref(),
         filter.limit.unwrap_or(200),
-    );
+    )
+    .map_err(|e| e.to_string())?;
     Ok(serde_json::to_value(&nodes).unwrap_or(serde_json::Value::Null))
 }
 
@@ -77,7 +79,7 @@ pub fn recall_nodes(
         project.as_deref(),
         hint.as_deref(),
         limit.unwrap_or(10),
-    );
+    ).map_err(|e| e.to_string())?;
     Ok(scored
         .into_iter()
         .map(|sn| ScoredNodeResponse {

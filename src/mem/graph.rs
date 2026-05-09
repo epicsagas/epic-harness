@@ -7,7 +7,7 @@ use std::io;
 use rusqlite::{Connection, params_from_iter};
 
 use super::store::{
-    atomic_write, graph_path, list_node_ids, open_db, read_edges_conn, read_nodes_conn,
+    atomic_write, graph_path, list_node_ids_conn, open_db, read_edges_conn, read_nodes_conn,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,9 +46,9 @@ const MAX_GRAPH_EDGES: usize = 2000;
 /// Build a `Graph` value from an existing connection.
 /// Reuses the caller's connection — no additional `open_db` call.
 fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
-    let ids = list_node_ids()?; // list_node_ids opens its own connection — that's OK
+    let ids = list_node_ids_conn(conn)?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let nodes = read_nodes_conn(conn, &id_refs)
+    let nodes = read_nodes_conn(conn, &id_refs)?
         .into_iter()
         .map(|node| GraphNode {
             id: node.frontmatter.id,
@@ -58,7 +58,7 @@ fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
             importance: node.frontmatter.importance,
         })
         .collect();
-    let edges = read_edges_conn(conn, MAX_GRAPH_EDGES)
+    let edges = read_edges_conn(conn, MAX_GRAPH_EDGES)?
         .into_iter()
         .map(|e| GraphEdge {
             source: e.source,

@@ -6,7 +6,7 @@ description = "GraphOS Knowledge Graph Desktop Application"
 
 [lib]
 name = "graphos_desktop_lib"
-crate-type = ["staticlib", "cdylib", "lib"]
+crate-type = ["lib"]
 
 [dependencies]
 tauri = { version = "2", features = [] }

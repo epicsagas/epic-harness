@@ -340,7 +340,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         .collect();
 
     if all_new_ids.len() >= 2 {
-        let new_nodes = store::read_nodes_conn(&tx, &all_new_ids);
+        let new_nodes = store::read_nodes_conn(&tx, &all_new_ids).unwrap_or_default();
         for i in 0..new_nodes.len() {
             for j in (i + 1)..new_nodes.len() {
                 let shared: Vec<String> = new_nodes[i]
@@ -449,7 +449,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == session_id && e.target == hub_id && e.relation == "belongs_to");
@@ -515,7 +515,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == prev_id && e.target == curr_id && e.relation == "follows");
@@ -560,7 +560,7 @@ mod tests {
         store::write_node_conn(&conn, &node_b).unwrap();
 
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
-        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids);
+        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids).unwrap();
         assert_eq!(new_nodes.len(), 2);
 
         let shared: Vec<String> = new_nodes[0]
@@ -585,7 +585,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == id_a && e.target == id_b && e.relation == "shares_context");
@@ -630,7 +630,7 @@ mod tests {
         store::write_node_conn(&conn, &node_b).unwrap();
 
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
-        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids);
+        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids).unwrap();
 
         let shared: Vec<String> = new_nodes[0]
             .frontmatter

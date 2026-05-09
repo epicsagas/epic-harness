@@ -452,12 +452,15 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Smart recall — hint = broad engineering context, limit = 30
-    let recalled = store::smart_recall_conn(
+    let recalled = match store::smart_recall_conn(
         &conn,
         project_filter,
         Some("decision pattern error resolution concept"),
         30,
-    );
+    ) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({"error": format!("recall failed: {e}")}),
+    };
 
     // Also pull top decisions/resolutions explicitly (high-value types)
     let decisions = store::query_nodes_conn(
@@ -466,14 +469,14 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
         Some("decision"),
         project_filter,
         10,
-    );
+    ).unwrap_or_default();
     let resolutions = store::query_nodes_conn(
         &conn,
         None,
         Some("resolution"),
         project_filter,
         10,
-    );
+    ).unwrap_or_default();
 
     // Merge and deduplicate by id, prefer higher-importance entry
     let mut seen: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();

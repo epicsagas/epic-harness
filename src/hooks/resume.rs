@@ -381,7 +381,7 @@ pub fn run(_input: &HookInput) -> i32 {
     // 5b. Knowledge graph recall: smart recall with composite scoring
     {
         let slug = project_slug();
-        let scored = store::smart_recall(Some(&slug), None, 10);
+        let scored = store::smart_recall(Some(&slug), None, 10).unwrap_or_default();
         let important: Vec<_> = scored
             .iter()
             .filter(|sn| {

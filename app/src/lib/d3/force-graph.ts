@@ -163,7 +163,11 @@ export function renderForceGraph(opts: GraphRenderOptions) {
   });
 
   return {
-    destroy: () => simulation.stop(),
+    destroy: () => {
+      svg.selectAll('*').remove();
+      svg.on('.zoom', null);
+      simulation.stop();
+    },
     zoomIn: () => svg.transition().duration(300).call(zoom.scaleBy, 1.3),
     zoomOut: () => svg.transition().duration(300).call(zoom.scaleBy, 0.7),
     resetZoom: () => svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity),

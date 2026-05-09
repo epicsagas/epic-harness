@@ -93,12 +93,6 @@ pub fn validate_uuid(id: &str) -> bool {
             .all(|(i, &c)| matches!(i, 8 | 13 | 18 | 23) || c.is_ascii_hexdigit())
 }
 
-/// Backward-compatible alias. Prefer [`validate_uuid`] for clarity.
-#[deprecated(note = "use validate_uuid instead — applies to both nodes and edges")]
-pub fn validate_node_id(id: &str) -> bool {
-    validate_uuid(id)
-}
-
 // ── UUID ─────────────────────────────────────────────
 
 pub fn new_uuid() -> String {

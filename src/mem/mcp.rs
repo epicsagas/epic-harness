@@ -15,7 +15,7 @@ use super::graph::{graph_neighbors_conn, related_nodes_conn};
 use super::store::{
     Node, NodeFrontmatter, importance_for_type, new_uuid, now_iso, open_db, query_nodes_conn,
     read_node_conn, read_nodes_conn, search_nodes_conn, smart_recall_conn, touch_nodes_conn,
-    validate_node_id, write_node_dedup_conn,
+    validate_uuid, write_node_dedup_conn,
 };
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
@@ -179,7 +179,7 @@ fn tool_mem_query(conn: &Connection, args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
-    let nodes = query_nodes_conn(conn, tag, type_filter, project, limit);
+    let nodes = query_nodes_conn(conn, tag, type_filter, project, limit).unwrap_or_default();
     let results: Vec<Value> = nodes
         .iter()
         .map(|node| {
@@ -208,7 +208,7 @@ fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
     };
     let limit = args["limit"].as_u64().unwrap_or(20) as usize;
 
-    let nodes = search_nodes_conn(conn, query, limit);
+    let nodes = search_nodes_conn(conn, query, limit).unwrap_or_default();
 
     // Touch retrieved nodes
     let ids: Vec<String> = nodes.iter().map(|n| n.frontmatter.id.clone()).collect();
@@ -246,7 +246,7 @@ fn tool_mem_related(conn: &Connection, args: &Value) -> Value {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_related requires id" }),
     };
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return json!({ "error": "invalid node id" });
     }
 
@@ -274,7 +274,10 @@ fn tool_mem_context(conn: &Connection, args: &Value) -> Value {
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
     // Use smart_recall for importance-weighted context
-    let scored = smart_recall_conn(conn, project, None, limit);
+    let scored = match smart_recall_conn(conn, project, None, limit) {
+        Ok(s) => s,
+        Err(e) => return json!({"error": format!("recall failed: {e}")}),
+    };
 
     let results: Vec<Value> = scored
         .iter()
@@ -305,7 +308,10 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
     let include_neighbors = args["include_neighbors"].as_bool().unwrap_or(true);
 
     // Phase 1: Smart recall with composite scoring
-    let scored = smart_recall_conn(conn, project, Some(hint), limit);
+    let scored = match smart_recall_conn(conn, project, Some(hint), limit) {
+        Ok(s) => s,
+        Err(e) => return json!({"error": format!("recall failed: {e}")}),
+    };
 
     let mut results: Vec<Value> = scored
         .iter()
@@ -350,6 +356,7 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
                 candidates.iter().cloned().collect();
 
             let neighbor_results: Vec<Value> = read_nodes_conn(conn, &candidate_ids)
+                .unwrap_or_default()
                 .into_iter()
                 .map(|node| {
                     let edge_weight = weight_by_id

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Component } from 'svelte';
   import { currentRoute, addRoute, initRouter } from '$lib/router';
   import { initTheme } from '$lib/stores/theme';
   import Sidebar from '$lib/components/layout/Sidebar.svelte';
@@ -16,10 +17,11 @@
 
   onMount(() => {
     initRouter();
-    initTheme();
+    const cleanup = initTheme();
+    return cleanup;
   });
 
-  const pages: Record<string, any> = {
+  const pages: Record<string, Component> = {
     '/': GlobalInsights,
     '/entity/:id': EntityIntelligence,
     '/explorer': KnowledgeExplorer,
