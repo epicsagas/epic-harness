@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config::CONFIG;
-use crate::shared::{
-    classify::extract_file, evolution::*, helpers::*, obs::ObsRecord, scoring::*,
-};
+use crate::shared::{classify::extract_file, evolution::*, helpers::*, obs::ObsRecord, scoring::*};
 
 // -- Re-export round3 for use by other evolve submodules --
 pub(crate) fn round3(v: f64) -> f64 {

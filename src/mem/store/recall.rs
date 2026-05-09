@@ -111,8 +111,10 @@ pub fn smart_recall_conn(
              WHERE source IN ({ph}) AND target IN ({ph}) GROUP BY target"
         );
         if let Ok(mut stmt) = conn.prepare(&sql) {
-            let base: Vec<&dyn rusqlite::ToSql> =
-                boost_ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let base: Vec<&dyn rusqlite::ToSql> = boost_ids
+                .iter()
+                .map(|s| s as &dyn rusqlite::ToSql)
+                .collect();
             let sql_params: Vec<&dyn rusqlite::ToSql> = base
                 .iter()
                 .copied()
@@ -154,7 +156,10 @@ pub fn smart_recall_conn(
     }
 
     // Touch retrieved nodes (batch)
-    let ids: Vec<String> = scored.iter().map(|sn| sn.node.frontmatter.id.clone()).collect();
+    let ids: Vec<String> = scored
+        .iter()
+        .map(|sn| sn.node.frontmatter.id.clone())
+        .collect();
     touch_nodes_conn(conn, &ids);
 
     Ok(scored)
@@ -164,7 +169,11 @@ pub fn smart_recall_conn(
 ///
 /// Opens its own connection; for repeated calls within a single session prefer
 /// `smart_recall_conn` to reuse an already-open connection.
-pub fn smart_recall(project: Option<&str>, hint: Option<&str>, limit: usize) -> io::Result<Vec<ScoredNode>> {
+pub fn smart_recall(
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> io::Result<Vec<ScoredNode>> {
     let conn = super::open_db()?;
     smart_recall_conn(&conn, project, hint, limit)
 }

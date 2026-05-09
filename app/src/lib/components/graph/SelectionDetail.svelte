@@ -6,6 +6,7 @@
   let saving = $state(false);
   let editTitle = $state('');
   let editBody = $state('');
+  let confirmDelete = $state(false);
 
   function startEdit() {
     if (!$selectedNode) return;
@@ -34,9 +35,23 @@
     }
   }
 
+  function requestDelete() {
+    confirmDelete = true;
+  }
+
+  function cancelDelete() {
+    confirmDelete = false;
+  }
+
   async function handleDelete() {
     if (!$selectedNode) return;
-    await removeNode($selectedNode.id);
+    try {
+      await removeNode($selectedNode.id);
+      confirmDelete = false;
+    } catch (e) {
+      console.error('Failed to delete node:', e);
+      confirmDelete = false;
+    }
   }
 </script>
 
@@ -64,7 +79,7 @@
 
       {#if $selectedNode.tags.length > 0}
         <div class="flex flex-wrap gap-1.5">
-          {#each $selectedNode.tags as tag}
+          {#each $selectedNode.tags as tag (tag)}
             <span class="px-2 py-0.5 bg-surface-container-high rounded-full text-[10px] text-on-surface-variant border border-outline-variant">{tag}</span>
           {/each}
         </div>
@@ -84,22 +99,32 @@
       </div>
     </div>
 
-    <div class="p-4 border-t border-outline-variant flex gap-2">
-      {#if editing}
-        <button onclick={saveEdit} disabled={saving} class="flex-1 px-3 py-2 text-sm rounded-lg border border-primary/50 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50">
-          <span class="material-symbols-outlined text-sm align-middle mr-1">save</span>{saving ? 'Saving...' : 'Save'}
+    {#if confirmDelete}
+      <div class="p-4 border-t border-error/30 bg-error/5">
+        <p class="text-sm text-error mb-3">Delete this node and all connected edges?</p>
+        <div class="flex gap-2">
+          <button onclick={handleDelete} class="flex-1 px-3 py-2 text-sm rounded-lg bg-error text-on-error font-bold hover:opacity-90 transition-colors">Delete</button>
+          <button onclick={cancelDelete} class="flex-1 px-3 py-2 text-sm rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-variant/30 transition-colors">Cancel</button>
+        </div>
+      </div>
+    {:else}
+      <div class="p-4 border-t border-outline-variant flex gap-2">
+        {#if editing}
+          <button onclick={saveEdit} disabled={saving} class="flex-1 px-3 py-2 text-sm rounded-lg border border-primary/50 text-primary hover:bg-primary/10 transition-colors disabled:opacity-50">
+            <span class="material-symbols-outlined text-sm align-middle mr-1">save</span>{saving ? 'Saving...' : 'Save'}
+          </button>
+          <button onclick={cancelEdit} class="px-3 py-2 text-sm rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-variant/30 transition-colors">
+            <span class="material-symbols-outlined text-sm align-middle mr-1">close</span>Cancel
+          </button>
+        {:else}
+          <button onclick={startEdit} class="flex-1 px-3 py-2 text-sm rounded-lg border border-outline-variant text-on-surface hover:bg-surface-variant/30 transition-colors">
+            <span class="material-symbols-outlined text-sm align-middle mr-1">edit</span>Edit
+          </button>
+        {/if}
+        <button onclick={requestDelete} class="px-3 py-2 text-sm rounded-lg border border-error/30 text-error hover:bg-error/10 transition-colors">
+          <span class="material-symbols-outlined text-sm align-middle">delete</span>
         </button>
-        <button onclick={cancelEdit} class="px-3 py-2 text-sm rounded-lg border border-outline-variant text-on-surface-variant hover:bg-surface-variant/30 transition-colors">
-          <span class="material-symbols-outlined text-sm align-middle mr-1">close</span>Cancel
-        </button>
-      {:else}
-        <button onclick={startEdit} class="flex-1 px-3 py-2 text-sm rounded-lg border border-outline-variant text-on-surface hover:bg-surface-variant/30 transition-colors">
-          <span class="material-symbols-outlined text-sm align-middle mr-1">edit</span>Edit
-        </button>
-      {/if}
-      <button onclick={handleDelete} class="px-3 py-2 text-sm rounded-lg border border-error/30 text-error hover:bg-error/10 transition-colors">
-        <span class="material-symbols-outlined text-sm align-middle">delete</span>
-      </button>
-    </div>
+      </div>
+    {/if}
   </div>
 {/if}

@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' /* required for Svelte/Tailwind scoped styles */; img-src 'self' asset: https://asset.localhost; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {

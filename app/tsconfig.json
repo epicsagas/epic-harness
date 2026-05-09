@@ -16,10 +16,8 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
-    "types": ["d3"],
     "paths": {
-      "$lib/*": ["./src/lib/*"],
-      "$lib/components/*": ["./src/lib/components/*"]
+      "$lib/*": ["./src/lib/*"]
     },
     "baseUrl": "."
   },

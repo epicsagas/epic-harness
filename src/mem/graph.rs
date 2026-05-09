@@ -45,7 +45,7 @@ const MAX_GRAPH_EDGES: usize = 2000;
 
 /// Build a `Graph` value from an existing connection.
 /// Reuses the caller's connection — no additional `open_db` call.
-fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
+pub fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
     let ids = list_node_ids_conn(conn)?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let nodes = read_nodes_conn(conn, &id_refs)?

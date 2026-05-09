@@ -7,6 +7,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig({
   plugins: [svelte(), tailwindcss()],
+  base: './',
   resolve: {
     alias: {
       '$lib': path.resolve('./src/lib'),

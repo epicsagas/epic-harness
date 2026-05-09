@@ -4,9 +4,7 @@ use std::fs;
 use serde::{Deserialize, Serialize};
 
 use crate::config::CONFIG;
-use crate::shared::{
-    evolution::*, helpers::*, paths::*, sanitize::sanitize_skill_content,
-};
+use crate::shared::{evolution::*, helpers::*, paths::*, sanitize::sanitize_skill_content};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct PromotionCounter {

@@ -1,11 +1,11 @@
 [workspace]
 members = [".", "src-tauri"]
-resolver = "3"
 
 [package]
 name = "epic-harness"
 version = "0.3.3"
 edition = "2024"
+rust-version = "1.85.0"
 description = "6 commands · auto skills · self-evolving Claude Code harness"
 license = "Apache-2.0"
 repository = "https://github.com/epicsagas/epic-harness"

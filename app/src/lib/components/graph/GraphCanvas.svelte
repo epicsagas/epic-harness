@@ -14,6 +14,7 @@
   let containerEl: HTMLDivElement | undefined = $state();
   let graph: ReturnType<typeof renderForceGraph> | null = null;
   let destroyed = false;
+  let initialized = false;
 
   function rerender() {
     if (destroyed) return;
@@ -33,12 +34,16 @@
         selectNodeById(node.id);
       },
     });
+    initialized = true;
   }
 
   $effect(() => {
-    void $filteredNodes;
-    void $filteredEdges;
-    rerender();
+    // Svelte 5 auto-tracks $filteredNodes and $filteredEdges reads
+    if (!initialized) {
+      rerender();
+    } else if (graph) {
+      graph.updateData($filteredNodes, $filteredEdges);
+    }
   });
 
   onMount(() => {
@@ -51,7 +56,6 @@
     };
   });
 
-  // Public API for parent bind:this
   export function zoomIn() { graph?.zoomIn(); }
   export function zoomOut() { graph?.zoomOut(); }
   export function resetZoom() { graph?.resetZoom(); }

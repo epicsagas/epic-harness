@@ -56,7 +56,7 @@
             ['Project', 'project'],
             ['Resolution', 'resolution'],
             ['Error', 'error'],
-          ] as [label, type]}
+          ] as [label, type] (type)}
             <div class="flex items-center gap-2">
               <span class="w-3 h-3 rounded-full" style="background: {getColor(type)}"></span>
               <span class="text-sm">{label}</span>

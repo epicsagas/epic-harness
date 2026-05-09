@@ -1,5 +1,5 @@
 use crate::state::AppState;
-use epic_harness::mem::graph::{rebuild_graph_json_conn, graph_neighbors_conn};
+use epic_harness::mem::graph::{build_graph_conn, graph_neighbors_conn};
 use epic_harness::mem::store::validate_uuid;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -35,16 +35,43 @@ pub struct NeighborResponse {
 }
 
 #[tauri::command]
-pub fn get_graph(state: State<'_, AppState>) -> Result<GraphResponse, String> {
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let json_str = rebuild_graph_json_conn(&conn).map_err(|e| e.to_string())?;
-    let graph: GraphResponse =
-        serde_json::from_str(&json_str).map_err(|e| format!("Parse error: {e}"))?;
-    Ok(graph)
+pub async fn get_graph(state: State<'_, AppState>) -> Result<GraphResponse, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db
+            .lock()
+            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
+        let graph = build_graph_conn(&conn).map_err(|e| format!("failed to build graph: {e}"))?;
+        Ok(GraphResponse {
+            nodes: graph
+                .nodes
+                .into_iter()
+                .map(|n| GraphNodeResponse {
+                    id: n.id,
+                    title: n.title,
+                    node_type: n.node_type,
+                    tags: n.tags,
+                    importance: n.importance,
+                })
+                .collect(),
+            edges: graph
+                .edges
+                .into_iter()
+                .map(|e| GraphEdgeResponse {
+                    source: e.source,
+                    target: e.target,
+                    relation: e.relation,
+                    weight: e.weight,
+                })
+                .collect(),
+        })
+    })
+    .await
+    .map_err(|e| format!("operation cancelled: {e}"))?
 }
 
 #[tauri::command]
-pub fn get_neighbors(
+pub async fn get_neighbors(
     ids: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<NeighborResponse>, String> {
@@ -53,12 +80,17 @@ pub fn get_neighbors(
             return Err(format!("invalid node id: {id}"));
         }
     }
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let neighbors = graph_neighbors_conn(&conn, &ids);
-    Ok(
-        neighbors
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db
+            .lock()
+            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
+        let neighbors = graph_neighbors_conn(&conn, &ids);
+        Ok(neighbors
             .into_iter()
             .map(|(id, weight)| NeighborResponse { id, weight })
-            .collect(),
-    )
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("operation cancelled: {e}"))?
 }

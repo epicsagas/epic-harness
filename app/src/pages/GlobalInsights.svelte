@@ -97,7 +97,7 @@
       </div>
       <div class="flex-1 overflow-y-auto p-4 space-y-3">
         {#if $stats?.by_type}
-          {#each Object.entries($stats.by_type) as [type, count]}
+          {#each Object.entries($stats.by_type) as [type, count] (type)}
             <div class="flex items-center justify-between p-3 bg-surface-container rounded-lg">
               <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded-full flex items-center justify-center" style="background: {getColor(type)}20; color: {getColor(type)}">

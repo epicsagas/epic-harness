@@ -1,5 +1,6 @@
 <script lang="ts">
   import { addNode } from '$lib/stores/graph';
+  import { NODE_TYPES } from '$lib/api/types';
 
   interface Props {
     onclose: () => void;
@@ -14,7 +15,7 @@
   let project = $state('');
   let submitting = $state(false);
 
-  const types = ['decision', 'resolution', 'concept', 'project', 'pattern', 'error', 'session', 'instinct', 'psychographic'];
+  const types = NODE_TYPES;
 
   async function handleSubmit() {
     if (!title.trim()) return;
@@ -40,7 +41,7 @@
   <div>
     <label class="block text-xs font-bold text-on-surface-variant mb-1">Type</label>
     <select bind:value={type} class="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-on-surface text-sm">
-      {#each types as t}
+      {#each types as t (t)}
         <option value={t}>{t}</option>
       {/each}
     </select>

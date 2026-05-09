@@ -515,7 +515,8 @@ fn handle_post_edge_conn(body: &str, conn: &Connection) -> Result<String, String
 /// Search using a shared connection (avoids per-request open_db).
 fn do_search_conn(query: &str, conn: &Connection) -> Vec<serde_json::Value> {
     use serde_json::json;
-    search_nodes_conn(conn, query, 20).unwrap_or_default()
+    search_nodes_conn(conn, query, 20)
+        .unwrap_or_default()
         .into_iter()
         .map(|n| {
             let snippet: String = n

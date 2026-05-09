@@ -71,6 +71,16 @@ pub fn delete_node_file(id: &str) -> io::Result<()> {
 }
 
 /// Delete a node using an existing connection (for use with shared state).
+/// Check if a node with the given ID exists.
+pub fn node_exists_conn(conn: &Connection, id: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?1)",
+        params![id],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
 pub fn delete_node_file_conn(conn: &Connection, id: &str) -> io::Result<()> {
     conn.execute("DELETE FROM nodes WHERE id = ?1", params![id])
         .map_err(io::Error::other)?;
@@ -78,6 +88,7 @@ pub fn delete_node_file_conn(conn: &Connection, id: &str) -> io::Result<()> {
 }
 
 /// Read all nodes ordered by updated DESC in a single query.
+#[allow(dead_code)] // used by graphos-desktop (Tauri) through public API
 pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC");
     let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;

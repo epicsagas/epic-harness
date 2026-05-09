@@ -58,7 +58,9 @@ pub fn db_path() -> PathBuf {
     if let Ok(root) = std::env::var("HARNESS_ROOT") {
         return PathBuf::from(root).join(".harness").join("memory.db");
     }
-    crate::shared::paths::dirs_home().join(".harness").join("memory.db")
+    crate::shared::paths::dirs_home()
+        .join(".harness")
+        .join("memory.db")
 }
 
 /// Compatibility: returns the .harness directory (parent of db_path).
@@ -154,7 +156,7 @@ pub(crate) fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 pub(crate) fn is_leap(y: u64) -> bool {
-    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
 }
 
 /// Parse ISO 8601 timestamp to seconds since epoch (best-effort).
@@ -184,7 +186,7 @@ fn days_since_epoch(year: u64, month: u64, day: u64) -> u64 {
     let days_from_years = (year as i64 - 1970) * 365 + leaps;
 
     const MONTH_DAYS: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let leap = (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400);
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
     let mut days_from_months: u64 = 0;
     let prior_months = (month.saturating_sub(1) as usize).min(12);
     for (m, &md) in MONTH_DAYS.iter().enumerate().take(prior_months) {

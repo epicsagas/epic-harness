@@ -1,7 +1,5 @@
 use crate::mem::store;
-use crate::shared::{
-    evolution::*, helpers::*, paths::*,
-};
+use crate::shared::{evolution::*, helpers::*, paths::*};
 
 use super::analysis::build_summary;
 
@@ -166,7 +164,9 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         } else {
             1.0
         };
-        if rate >= crate::config::CONFIG.pattern.weak_tool_rate || stats.total < crate::config::CONFIG.pattern.weak_tool_min_obs {
+        if rate >= crate::config::CONFIG.pattern.weak_tool_rate
+            || stats.total < crate::config::CONFIG.pattern.weak_tool_min_obs
+        {
             continue;
         }
         let title = format!("{}: weak tool {} ({:.0}%)", slug, cat, rate * 100.0);

@@ -32,7 +32,7 @@
     <label class="block text-xs font-bold text-on-surface-variant mb-1">Source Node</label>
     <select bind:value={source} class="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-on-surface text-sm">
       <option value="">Select source...</option>
-      {#each $graphData.nodes as n}
+      {#each $graphData.nodes as n (n.id)}
         <option value={n.id}>{n.title || n.id}</option>
       {/each}
     </select>
@@ -42,7 +42,7 @@
     <label class="block text-xs font-bold text-on-surface-variant mb-1">Target Node</label>
     <select bind:value={target} class="w-full bg-surface-container border border-outline-variant rounded-lg px-3 py-2 text-on-surface text-sm">
       <option value="">Select target...</option>
-      {#each $graphData.nodes as n}
+      {#each $graphData.nodes as n (n.id)}
         <option value={n.id}>{n.title || n.id}</option>
       {/each}
     </select>

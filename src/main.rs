@@ -105,7 +105,9 @@ fn main() {
 
     // reflect --context: data collection mode (no stdin needed)
     if subcmd == "reflect" {
-        let has_context = args.iter().any(|a| a == "--context" || a.starts_with("--context="));
+        let has_context = args
+            .iter()
+            .any(|a| a == "--context" || a.starts_with("--context="));
         if has_context {
             // --days <N> or --context=<N> or --context <N>
             let days: u32 = parse_flag_u32(&args, "--days")
@@ -131,7 +133,11 @@ fn main() {
             let sources: Vec<String> = parse_flag_multi(&args, "--source");
 
             std::process::exit(hooks::reflect::run_context(
-                days, since, project, all_projects, sources,
+                days,
+                since,
+                project,
+                all_projects,
+                sources,
             ));
         }
     }
@@ -182,12 +188,16 @@ fn main() {
             eprintln!("  polish       Auto-format and typecheck after file edits");
             eprintln!("  snapshot     Save session state mid-conversation");
             eprintln!("  reflect      Analyze observations and evolve skills (session end)");
-            eprintln!("  reflect --context [OPTIONS]  Collect harness data as JSON for /reflect skill");
+            eprintln!(
+                "  reflect --context [OPTIONS]  Collect harness data as JSON for /reflect skill"
+            );
             eprintln!("    --days <N>           Analysis window in days (default: 30)");
             eprintln!("    --since <YYYYMMDD>   Start date (overrides --days)");
             eprintln!("    --project <slug>     Specific project slug");
             eprintln!("    --all-projects       All projects under ~/.harness/projects/");
-            eprintln!("    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n");
+            eprintln!(
+                "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
+            );
             eprintln!("USER SUBCOMMANDS:");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
@@ -264,7 +274,10 @@ mod tests {
     #[test]
     fn parse_flag_str_space_form() {
         let args = s(&["reflect", "--project", "my-project"]);
-        assert_eq!(parse_flag_str(&args, "--project"), Some("my-project".into()));
+        assert_eq!(
+            parse_flag_str(&args, "--project"),
+            Some("my-project".into())
+        );
     }
 
     #[test]
@@ -277,19 +290,28 @@ mod tests {
     #[test]
     fn parse_flag_multi_single_space() {
         let args = s(&["reflect", "--source", "harness"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), vec!["harness".to_string()]);
+        assert_eq!(
+            parse_flag_multi(&args, "--source"),
+            vec!["harness".to_string()]
+        );
     }
 
     #[test]
     fn parse_flag_multi_repeated_space() {
         let args = s(&["reflect", "--source", "harness", "--source", "alcove"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), vec!["harness".to_string(), "alcove".to_string()]);
+        assert_eq!(
+            parse_flag_multi(&args, "--source"),
+            vec!["harness".to_string(), "alcove".to_string()]
+        );
     }
 
     #[test]
     fn parse_flag_multi_eq_form() {
         let args = s(&["reflect", "--source=claude-session"]);
-        assert_eq!(parse_flag_multi(&args, "--source"), vec!["claude-session".to_string()]);
+        assert_eq!(
+            parse_flag_multi(&args, "--source"),
+            vec!["claude-session".to_string()]
+        );
     }
 
     #[test]

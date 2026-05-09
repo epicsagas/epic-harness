@@ -1,3 +1,10 @@
+export const NODE_TYPES = [
+  'decision', 'resolution', 'concept', 'project',
+  'pattern', 'error', 'session', 'instinct', 'psychographic',
+] as const;
+
+export type NodeType = typeof NODE_TYPES[number];
+
 export interface GraphNode {
   id: string;
   title: string;

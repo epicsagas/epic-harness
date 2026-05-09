@@ -33,7 +33,7 @@
 
         <div class="grid grid-cols-3 gap-4">
           {#if $stats?.by_type}
-            {#each Object.entries($stats.by_type) as [type, count]}
+            {#each Object.entries($stats.by_type) as [type, count] (type)}
               <div class="p-4 rounded-lg border border-outline-variant bg-surface-container-low hover:border-primary/50 transition-colors group">
                 <div class="flex justify-between items-start mb-3">
                   <div class="w-10 h-10 rounded-lg flex items-center justify-center" style="background: {getColor(type)}15">

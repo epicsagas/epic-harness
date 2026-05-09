@@ -76,7 +76,7 @@
             <div class="mt-4">
               <h4 class="text-xs font-bold uppercase text-on-surface-variant mb-2">Tags</h4>
               <div class="flex flex-wrap gap-1.5">
-                {#each $selectedNode.tags as tag}
+                {#each $selectedNode.tags as tag (tag)}
                   <span class="px-2 py-0.5 bg-surface-container-high rounded-full text-[10px] text-on-surface-variant border border-outline-variant">{tag}</span>
                 {/each}
               </div>
@@ -87,7 +87,7 @@
             <div class="mt-4">
               <h4 class="text-xs font-bold uppercase text-on-surface-variant mb-2">Projects</h4>
               <div class="flex flex-wrap gap-1.5">
-                {#each $selectedNode.projects as proj}
+                {#each $selectedNode.projects as proj (proj)}
                   <span class="px-2 py-0.5 bg-primary/10 rounded-full text-[10px] text-primary border border-primary/20">{proj}</span>
                 {/each}
               </div>
@@ -113,7 +113,7 @@
           </h3>
           {#if neighborNodes.length > 0}
             <div class="space-y-2">
-              {#each neighborNodes as n}
+              {#each neighborNodes as n (n.id)}
                 <div class="flex items-center justify-between p-3 bg-surface-container rounded-lg">
                   <div class="flex items-center gap-3">
                     <span class="w-3 h-3 rounded-full shrink-0" style="background: {getColor(n.type)}"></span>

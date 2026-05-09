@@ -1,7 +1,5 @@
 use crate::config::CONFIG;
-use crate::shared::{
-    evolution::*, helpers::*, paths::*,
-};
+use crate::shared::{evolution::*, helpers::*, paths::*};
 
 /// Clamp avg_score to a finite f64 so it serialises as a valid JSON number.
 /// NaN and ±Infinity are both invalid JSON; replace them with 0.0.
