@@ -1,7 +1,8 @@
 use crate::state::AppState;
 use epic_harness::mem::store::{
-    delete_node_file_conn, importance_for_type, new_uuid, now_iso, read_node_conn, read_nodes_conn,
-    remove_edges_for_node_conn, validate_uuid, write_node_conn, Node, NodeFrontmatter,
+    delete_node_file_conn, importance_for_type, new_uuid, now_iso, read_all_nodes_conn,
+    read_node_conn, remove_edges_for_node_conn, validate_uuid, write_node_conn, Node,
+    NodeFrontmatter,
 };
 
 const VALID_NODE_TYPES: &[&str] = &[
@@ -96,16 +97,7 @@ impl From<Node> for NodeDetailResponse {
 #[tauri::command]
 pub fn get_nodes(state: State<'_, AppState>) -> Result<Vec<NodeResponse>, String> {
     let conn = state.db.lock().map_err(|e| e.to_string())?;
-    let ids: Vec<String> = {
-        let mut stmt = conn
-            .prepare("SELECT id FROM nodes ORDER BY updated DESC")
-            .map_err(|e| e.to_string())?;
-        stmt.query_map([], |r| r.get(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .collect()
-    };
-    let nodes = read_nodes_conn(&conn, &ids.iter().map(|s| s.as_str()).collect::<Vec<_>>());
+    let nodes = read_all_nodes_conn(&conn);
     Ok(nodes.iter().map(NodeResponse::from).collect())
 }
 

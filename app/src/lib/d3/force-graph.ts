@@ -17,6 +17,12 @@ export function getColor(type: string): string {
   return TYPE_COLORS[type] ?? '#7D5260';
 }
 
+interface SimNode extends d3.SimulationNodeDatum, GraphNode {}
+
+interface SimLink extends d3.SimulationLinkDatum<SimNode> {
+  label: string;
+}
+
 export interface GraphRenderOptions {
   svgEl: SVGSVGElement;
   width: number;
@@ -41,11 +47,11 @@ export function renderForceGraph(opts: GraphRenderOptions) {
 
   svg.call(zoom);
 
-  const simNodes = nodes.map((n) => ({ ...n }));
+  const simNodes: SimNode[] = nodes.map((n) => ({ ...n }));
 
   const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
 
-  const simLinks = edges
+  const simLinks: SimLink[] = edges
     .filter((e) => nodeMap.has(e.source) && nodeMap.has(e.target))
     .map((e) => ({
       source: e.source,
@@ -74,21 +80,21 @@ export function renderForceGraph(opts: GraphRenderOptions) {
 
   const node = g.append('g')
     .attr('class', 'nodes')
-    .selectAll<SVGGElement, any>('g')
+    .selectAll<SVGGElement, SimNode>('g')
     .data(simNodes)
     .join('g')
     .attr('cursor', 'pointer')
-    .call(d3.drag<SVGGElement, any>()
-      .on('start', (event: d3.D3DragEvent<SVGGElement, any, any>, d: any) => {
+    .call(d3.drag<SVGGElement, SimNode, SimNode>()
+      .on('start', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d) => {
         if (!event.active) simulation.alphaTarget(0.3).restart();
         d.fx = d.x;
         d.fy = d.y;
       })
-      .on('drag', (event: d3.D3DragEvent<SVGGElement, any, any>, d: any) => {
+      .on('drag', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d) => {
         d.fx = event.x;
         d.fy = event.y;
       })
-      .on('end', (event: d3.D3DragEvent<SVGGElement, any, any>, d: any) => {
+      .on('end', (event: d3.D3DragEvent<SVGGElement, SimNode, SimNode>, d) => {
         if (!event.active) simulation.alphaTarget(0);
         d.fx = null;
         d.fy = null;
@@ -97,7 +103,7 @@ export function renderForceGraph(opts: GraphRenderOptions) {
 
   node.append('circle')
     .attr('r', 8)
-    .attr('fill', (d: any) => getColor(d.type))
+    .attr('fill', (d) => getColor(d.type))
     .attr('stroke', '#1C1B1F')
     .attr('stroke-width', 1.5)
     .attr('opacity', 0.9);
@@ -107,33 +113,53 @@ export function renderForceGraph(opts: GraphRenderOptions) {
     .attr('text-anchor', 'middle')
     .attr('fill', '#CAC4D0')
     .attr('font-size', 10)
-    .text((d: any) => {
+    .text((d) => {
       const title = d.title || '';
       return title.length > 20 ? title.slice(0, 20) + '…' : title;
     });
 
-  node.on('click', (_event: any, d: any) => onNodeClick?.(d))
-    .on('mouseenter', (_event: any, d: any) => onNodeHover?.(d))
+  node.on('click', (_event, d) => onNodeClick?.(d))
+    .on('mouseenter', (_event, d) => onNodeHover?.(d))
     .on('mouseleave', () => onNodeHover?.(null));
 
-  const simulation = d3.forceSimulation(simNodes as any)
-    .force('link', d3.forceLink(simLinks).id((d: any) => d.id).distance(80))
+  const simulation = d3.forceSimulation<SimNode>(simNodes)
+    .force('link', d3.forceLink<SimNode, SimLink>(simLinks).id((d) => d.id).distance(80))
     .force('charge', d3.forceManyBody().strength(-120))
     .force('center', d3.forceCenter(width / 2, height / 2))
-    .force('collision', d3.forceCollide().radius(20));
+    .force('collision', d3.forceCollide<SimNode>().radius(20));
 
   simulation.on('tick', () => {
     link
-      .attr('x1', (d: any) => d.source.x)
-      .attr('y1', (d: any) => d.source.y)
-      .attr('x2', (d: any) => d.target.x)
-      .attr('y2', (d: any) => d.target.y);
+      .attr('x1', (d) => {
+        const s = d.source as SimNode;
+        return s.x ?? 0;
+      })
+      .attr('y1', (d) => {
+        const s = d.source as SimNode;
+        return s.y ?? 0;
+      })
+      .attr('x2', (d) => {
+        const t = d.target as SimNode;
+        return t.x ?? 0;
+      })
+      .attr('y2', (d) => {
+        const t = d.target as SimNode;
+        return t.y ?? 0;
+      });
 
     linkLabel
-      .attr('x', (d: any) => (d.source.x + d.target.x) / 2)
-      .attr('y', (d: any) => (d.source.y + d.target.y) / 2);
+      .attr('x', (d) => {
+        const s = d.source as SimNode;
+        const t = d.target as SimNode;
+        return ((s.x ?? 0) + (t.x ?? 0)) / 2;
+      })
+      .attr('y', (d) => {
+        const s = d.source as SimNode;
+        const t = d.target as SimNode;
+        return ((s.y ?? 0) + (t.y ?? 0)) / 2;
+      });
 
-    node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
+    node.attr('transform', (d) => `translate(${d.x ?? 0},${d.y ?? 0})`);
   });
 
   return {

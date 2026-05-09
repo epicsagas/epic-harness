@@ -38,8 +38,8 @@ pub(crate) use schema::init_schema;
 
 #[allow(unused_imports)]
 pub use node::{
-    delete_node_file, delete_node_file_conn, list_node_ids, parse_node, read_node, read_node_conn,
-    read_nodes_conn, serialize_node, write_node,
+    delete_node_file, delete_node_file_conn, list_node_ids, parse_node, read_all_nodes_conn,
+    read_node, read_node_conn, read_nodes_conn, serialize_node, write_node,
 };
 
 pub use node::write_node_conn;

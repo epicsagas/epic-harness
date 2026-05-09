@@ -77,6 +77,18 @@ pub fn delete_node_file_conn(conn: &Connection, id: &str) -> io::Result<()> {
     Ok(())
 }
 
+/// Read all nodes ordered by updated DESC in a single query.
+pub fn read_all_nodes_conn(conn: &Connection) -> Vec<Node> {
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC");
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    stmt.query_map([], super::util::row_to_node)
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+}
+
 pub fn list_node_ids() -> io::Result<Vec<String>> {
     let conn = super::open_db()?;
     let mut stmt = conn

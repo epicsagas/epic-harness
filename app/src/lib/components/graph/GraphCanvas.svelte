@@ -48,6 +48,7 @@
     };
   });
 
+  // Public API for parent bind:this
   export function zoomIn() { graph?.zoomIn(); }
   export function zoomOut() { graph?.zoomOut(); }
   export function resetZoom() { graph?.resetZoom(); }
