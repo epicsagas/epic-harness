@@ -570,6 +570,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn orchestration_returns_none_when_env_not_set() {
         let dir = tempfile::tempdir().expect("tempdir");
         let orch_dir = dir.path().join("orchestrator");
