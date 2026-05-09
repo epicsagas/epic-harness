@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CLI: `mem delete` renamed to `mem remove` (old name works as deprecated alias)
+- CLI: `mem query` renamed to `mem list` (old name works as deprecated alias)
+
 ## [0.3.3] — 2026-05-09
 
 ### Added

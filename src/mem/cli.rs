@@ -18,8 +18,10 @@ use super::store::{
 const SUBCOMMANDS: &[(&str, &str)] = &[
     ("add", "Add a new memory node"),
     ("edit", "Edit an existing node"),
-    ("delete", "Delete a node and its edges"),
-    ("query", "List/filter nodes from the index"),
+    ("remove", "Remove a node and its edges"),
+    ("delete", "[deprecated] Use 'remove' instead"),
+    ("list", "List/filter nodes from the index"),
+    ("query", "[deprecated] Use 'list' instead"),
     ("search", "Full-text search across node files"),
     ("related", "BFS traversal — find related nodes"),
     ("link", "Create a directed edge between two nodes"),
@@ -84,16 +86,16 @@ fn print_subcommand_help(sub: &str) {
             println!("  --body <text>       Replace body content");
             println!("\nOUTPUT: {{\"id\":\"<uuid>\"}}");
         }
-        "delete" => {
-            println!("harness mem delete — Delete a node and its edges\n");
+        "remove" | "delete" => {
+            println!("harness mem remove — Remove a node and its edges\n");
             println!("USAGE:");
-            println!("  harness mem delete <ID>\n");
+            println!("  harness mem remove <ID>\n");
             println!("OUTPUT: {{\"deleted\":\"<uuid>\"}}");
         }
-        "query" => {
-            println!("harness mem query — List/filter nodes from the index\n");
+        "list" | "query" => {
+            println!("harness mem list — List/filter nodes from the index\n");
             println!("USAGE:");
-            println!("  harness mem query [OPTIONS]\n");
+            println!("  harness mem list [OPTIONS]\n");
             println!("OPTIONS:");
             println!("  --tag <tag>         Filter by tag");
             println!("  --type <type>       Filter by node type");
@@ -248,8 +250,18 @@ pub fn dispatch(args: &[String]) -> i32 {
     let result = match sub {
         "add" => cmd_add(&args[1..]),
         "edit" => cmd_edit(&args[1..]),
-        "delete" => cmd_delete(&args[1..]),
-        "query" => cmd_query(&args[1..]),
+        "remove" | "delete" => {
+            if sub == "delete" {
+                eprintln!("[deprecated] 'delete' is deprecated, use 'remove' instead.");
+            }
+            cmd_delete(&args[1..])
+        }
+        "list" | "query" => {
+            if sub == "query" {
+                eprintln!("[deprecated] 'query' is deprecated, use 'list' instead.");
+            }
+            cmd_query(&args[1..])
+        }
         "search" => cmd_search(&args[1..]),
         "related" => cmd_related(&args[1..]),
         "link" => cmd_link(&args[1..]),
