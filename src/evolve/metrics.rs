@@ -1,7 +1,5 @@
 use crate::config::CONFIG;
-use crate::shared::{
-    evolution::*, helpers::*, paths::*,
-};
+use crate::shared::{evolution::*, helpers::*, paths::*};
 
 /// Clamp avg_score to a finite f64 so it serialises as a valid JSON number.
 /// NaN and ±Infinity are both invalid JSON; replace them with 0.0.
@@ -36,7 +34,10 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
     let rolling_avg = if metrics.score_history.is_empty() {
         metrics.best_score.unwrap_or(0.0)
     } else {
-        compute_rolling_avg(&metrics.score_history, CONFIG.evolution.stagnation_rolling_window)
+        compute_rolling_avg(
+            &metrics.score_history,
+            CONFIG.evolution.stagnation_rolling_window,
+        )
     };
     let improvement = current_score - rolling_avg;
     if improvement >= CONFIG.evolution.improvement_threshold {
@@ -56,7 +57,9 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
         // Rollback decision still uses absolute best_score
         let best = metrics.best_score.unwrap_or(0.0);
         let degradation = best - current_score;
-        if degradation > CONFIG.evolution.rollback_degradation || best < CONFIG.evolution.rollback_best_floor {
+        if degradation > CONFIG.evolution.rollback_degradation
+            || best < CONFIG.evolution.rollback_best_floor
+        {
             let backup = evolved_backup_dir();
             if backup.is_dir() {
                 let evolved = evolved_dir();

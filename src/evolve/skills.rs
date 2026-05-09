@@ -4,9 +4,7 @@ use std::fs;
 use serde::{Deserialize, Serialize};
 
 use crate::config::CONFIG;
-use crate::shared::{
-    evolution::*, helpers::*, paths::*, sanitize::sanitize_skill_content,
-};
+use crate::shared::{evolution::*, helpers::*, paths::*, sanitize::sanitize_skill_content};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct PromotionCounter {
@@ -621,7 +619,8 @@ mod tests {
             assert!(
                 !check_promotion("evo-test", &mut counters),
                 "call {} must not be promoted (min={})",
-                i + 1, min
+                i + 1,
+                min
             );
             assert_eq!(counters.counts["evo-test"], (i + 1) as u64);
         }
@@ -629,7 +628,8 @@ mod tests {
         assert!(
             check_promotion("evo-test", &mut counters),
             "call {} must be promoted (min={})",
-            min, min
+            min,
+            min
         );
         assert_eq!(counters.counts["evo-test"], min);
     }

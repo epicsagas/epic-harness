@@ -429,7 +429,7 @@ score = recency(25%) + importance(35%) + access_frequency(15%) + FTS_match(25%)
 epic mem recall "auth refactor" --project my-project   # Smart recall
 epic mem add --title "JWT rotation" --type decision    # Add node
 epic mem search "JWT"                                  # FTS5 search
-epic mem query --type decision --project my-project    # Filter
+epic mem list --type decision --project my-project    # Filter
 epic mem context --project my-project                  # Project context
 epic mem serve                                         # Web UI → :7700 or custom port with --port 8800
 epic mem mcp-install                                   # Register MCP server

@@ -178,7 +178,7 @@ Memory retrieval uses composite scoring instead of simple latest-N:
 | `mem_recall` | Smart contextual recall — hint + project + graph neighbors. Primary tool for proactive memory retrieval. |
 | `mem_add` | Add node with auto-importance by type. Optional explicit importance (0.0–1.0). |
 | `mem_search` | FTS5 keyword search, results ranked by importance. Configurable limit. |
-| `mem_query` | Filter by tag/type/project. Returns importance + access_count. |
+| `mem_list` | Filter by tag/type/project. Returns importance + access_count. |
 | `mem_context` | Project-scoped smart recall (no hint). Use at session start. |
 | `mem_related` | BFS graph traversal from a node ID. |
 

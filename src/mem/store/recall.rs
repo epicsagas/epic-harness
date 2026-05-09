@@ -1,8 +1,9 @@
 //! recall.rs — Smart recall with composite scoring and graph boost
 
 use rusqlite::Connection;
+use std::io;
 
-use super::decay::touch_node_conn;
+use super::decay::touch_nodes_conn;
 use super::search::search_nodes_conn;
 use super::types::{Node, ScoredNode};
 use super::util::{NODE_COLUMNS, parse_iso_to_secs};
@@ -20,7 +21,7 @@ pub fn smart_recall_conn(
     project: Option<&str>,
     hint: Option<&str>,
     limit: usize,
-) -> Vec<ScoredNode> {
+) -> io::Result<Vec<ScoredNode>> {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
@@ -29,7 +30,7 @@ pub fn smart_recall_conn(
     // Gather FTS matches if hint is provided
     let fts_ids: std::collections::HashSet<String> = if let Some(h) = hint {
         if !h.is_empty() {
-            search_nodes_conn(conn, h, limit * 4)
+            search_nodes_conn(conn, h, limit * 4)?
                 .into_iter()
                 .map(|n| n.frontmatter.id.clone())
                 .collect()
@@ -56,10 +57,7 @@ pub fn smart_recall_conn(
          LIMIT {candidate_limit}"
     );
 
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
     let refs: Vec<&dyn rusqlite::ToSql> = param_vals.iter().map(|b| b.as_ref()).collect();
     let candidates: Vec<Node> = stmt
         .query_map(refs.as_slice(), super::util::row_to_node)
@@ -97,11 +95,13 @@ pub fn smart_recall_conn(
 
     // Graph-boost pass: add W_GRAPH * edge_weight_score for edges between top candidates.
     if scored.len() > 1 {
-        let ids: Vec<String> = scored
+        const MAX_GRAPH_BOOST_PARTICIPANTS: usize = 100;
+        let boost_ids: Vec<&str> = scored
             .iter()
-            .map(|sn| sn.node.frontmatter.id.clone())
+            .take(MAX_GRAPH_BOOST_PARTICIPANTS)
+            .map(|sn| sn.node.frontmatter.id.as_str())
             .collect();
-        let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let ph = boost_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         // Sum edge weights for each node connected to other top-scored candidates.
         let sql = format!(
             "SELECT source AS node_id, SUM(weight) AS w FROM edges \
@@ -111,8 +111,10 @@ pub fn smart_recall_conn(
              WHERE source IN ({ph}) AND target IN ({ph}) GROUP BY target"
         );
         if let Ok(mut stmt) = conn.prepare(&sql) {
-            let base: Vec<&dyn rusqlite::ToSql> =
-                ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+            let base: Vec<&dyn rusqlite::ToSql> = boost_ids
+                .iter()
+                .map(|s| s as &dyn rusqlite::ToSql)
+                .collect();
             let sql_params: Vec<&dyn rusqlite::ToSql> = base
                 .iter()
                 .copied()
@@ -153,23 +155,26 @@ pub fn smart_recall_conn(
         }
     }
 
-    // Touch retrieved nodes
-    for sn in &scored {
-        touch_node_conn(conn, &sn.node.frontmatter.id);
-    }
+    // Touch retrieved nodes (batch)
+    let ids: Vec<String> = scored
+        .iter()
+        .map(|sn| sn.node.frontmatter.id.clone())
+        .collect();
+    touch_nodes_conn(conn, &ids);
 
-    scored
+    Ok(scored)
 }
 
 /// Smart recall: returns nodes ranked by composite relevance.
 ///
 /// Opens its own connection; for repeated calls within a single session prefer
 /// `smart_recall_conn` to reuse an already-open connection.
-pub fn smart_recall(project: Option<&str>, hint: Option<&str>, limit: usize) -> Vec<ScoredNode> {
-    let conn = match super::open_db() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
+pub fn smart_recall(
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> io::Result<Vec<ScoredNode>> {
+    let conn = super::open_db()?;
     smart_recall_conn(&conn, project, hint, limit)
 }
 

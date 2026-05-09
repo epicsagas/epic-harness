@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config::CONFIG;
-use crate::shared::{
-    classify::extract_file, evolution::*, helpers::*, obs::ObsRecord, scoring::*,
-};
+use crate::shared::{classify::extract_file, evolution::*, helpers::*, obs::ObsRecord, scoring::*};
 
 // -- Re-export round3 for use by other evolve submodules --
 pub(crate) fn round3(v: f64) -> f64 {
@@ -566,13 +564,7 @@ mod tests {
                 0.8,
                 Some("/src/buggy.ts"),
             ));
-            obs.push(make_obs(
-                "Bash",
-                "bash",
-                "success",
-                0.9,
-                Some("cargo test"),
-            ));
+            obs.push(make_obs("Bash", "bash", "success", 0.9, Some("cargo test")));
         }
         let patterns = detect_patterns(&obs);
         assert!(

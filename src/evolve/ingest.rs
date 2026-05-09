@@ -1,16 +1,11 @@
 use crate::mem::store;
-use crate::shared::{
-    evolution::*, helpers::*, paths::*,
-};
+use crate::shared::{evolution::*, helpers::*, paths::*};
 
 use super::analysis::build_summary;
 
 /// Query pattern types detected in the previous session (the session that the
 /// current session "follows"). Extracts non-generic tags from CSV tag strings.
-pub fn query_prev_pattern_types(
-    conn: &rusqlite::Connection,
-    session_node_id: &str,
-) -> Vec<String> {
+pub fn query_prev_pattern_types(conn: &rusqlite::Connection, session_node_id: &str) -> Vec<String> {
     let mut results = Vec::new();
     let sql = "SELECT n.tags FROM nodes n
          JOIN edges e ON e.source = n.id
@@ -202,10 +197,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 
         // For each previous pattern, check if the same type exists in current session
         for pattern_type in &prev_pattern_types {
-
-            if !pattern_type.is_empty()
-                && !current_pattern_types.contains(&pattern_type.as_str())
-            {
+            if !pattern_type.is_empty() && !current_pattern_types.contains(&pattern_type.as_str()) {
                 let title = format!("{}: resolved {} (auto)", slug, pattern_type);
                 let body = format!(
                     "**Resolved**: Pattern `{}` was detected in the previous session but absent in this session.\n\
@@ -217,11 +209,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                         id: store::new_uuid(),
                         node_type: "resolution".into(),
                         title,
-                        tags: vec![
-                            "auto".into(),
-                            "resolution".into(),
-                            pattern_type.to_string(),
-                        ],
+                        tags: vec!["auto".into(), "resolution".into(), pattern_type.to_string()],
                         projects: vec![slug.clone()],
                         agents: vec![],
                         created: ts.clone(),
@@ -274,7 +262,9 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         } else {
             1.0
         };
-        if rate >= crate::config::CONFIG.pattern.weak_tool_rate || stats.total < crate::config::CONFIG.pattern.weak_tool_min_obs {
+        if rate >= crate::config::CONFIG.pattern.weak_tool_rate
+            || stats.total < crate::config::CONFIG.pattern.weak_tool_min_obs
+        {
             continue;
         }
         let title = format!("{}: weak tool {} ({:.0}%)", slug, cat, rate * 100.0);
@@ -448,7 +438,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         .collect();
 
     if all_new_ids.len() >= 2 {
-        let new_nodes = store::read_nodes_conn(&tx, &all_new_ids);
+        let new_nodes = store::read_nodes_conn(&tx, &all_new_ids).unwrap_or_default();
         for i in 0..new_nodes.len() {
             for j in (i + 1)..new_nodes.len() {
                 let shared: Vec<String> = new_nodes[i]
@@ -557,7 +547,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == session_id && e.target == hub_id && e.relation == "belongs_to");
@@ -623,7 +613,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == prev_id && e.target == curr_id && e.relation == "follows");
@@ -668,7 +658,7 @@ mod tests {
         store::write_node_conn(&conn, &node_b).unwrap();
 
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
-        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids);
+        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids).unwrap();
         assert_eq!(new_nodes.len(), 2);
 
         let shared: Vec<String> = new_nodes[0]
@@ -693,7 +683,7 @@ mod tests {
         };
         store::append_edge_conn(&conn, &edge).unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000);
+        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == id_a && e.target == id_b && e.relation == "shares_context");
@@ -738,7 +728,7 @@ mod tests {
         store::write_node_conn(&conn, &node_b).unwrap();
 
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
-        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids);
+        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids).unwrap();
 
         let shared: Vec<String> = new_nodes[0]
             .frontmatter
@@ -844,7 +834,11 @@ mod tests {
         let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
 
         // Should find exactly the one pattern type from prev session
-        assert_eq!(prev_pattern_types.len(), 1, "should find one previous pattern type");
+        assert_eq!(
+            prev_pattern_types.len(),
+            1,
+            "should find one previous pattern type"
+        );
         assert_eq!(
             prev_pattern_types[0], "repeated_same_error",
             "pattern type should be extracted from tags"
@@ -863,11 +857,7 @@ mod tests {
                     id: resolution_id.clone(),
                     node_type: "resolution".into(),
                     title,
-                    tags: vec![
-                        "auto".into(),
-                        "resolution".into(),
-                        pattern_type.to_string(),
-                    ],
+                    tags: vec!["auto".into(), "resolution".into(), pattern_type.to_string()],
                     projects: vec![slug.into()],
                     created: "2026-01-02T00:00:00Z".into(),
                     updated: "2026-01-02T00:00:00Z".into(),
@@ -916,7 +906,11 @@ mod tests {
             .iter()
             .filter(|e| e.relation == "resolved_in" && e.target == curr_session_id)
             .collect();
-        assert_eq!(resolved_in.len(), 1, "should have exactly one resolved_in edge");
+        assert_eq!(
+            resolved_in.len(),
+            1,
+            "should have exactly one resolved_in edge"
+        );
 
         // Verify the resolution node is linked to the project hub
         let resolution_to_hub: Vec<_> = edges
@@ -924,9 +918,7 @@ mod tests {
             .filter(|e| {
                 e.relation == "belongs_to"
                     && e.target == hub_id
-                    && resolved_in
-                        .iter()
-                        .any(|rie| rie.source == e.source)
+                    && resolved_in.iter().any(|rie| rie.source == e.source)
             })
             .collect();
         assert_eq!(

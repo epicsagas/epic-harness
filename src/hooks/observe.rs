@@ -148,7 +148,8 @@ fn score_read_search(output: &str) -> ScoreDimensions {
     let failure = classify_failure(output);
     static NO_MATCH_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
-    let has_results = failure.is_none() && !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
+    let has_results =
+        failure.is_none() && !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
     ScoreDimensions {
         tool_success: if has_results { 1.0 } else { 0.0 },
         output_quality: if has_results {
@@ -1088,7 +1089,10 @@ mod tests {
             execution_cost: 1.0,
         };
         assert_eq!(dims.tool_success, 0.0);
-        assert_eq!(dims.output_quality, 0.4, "catch-all should use failure_quality");
+        assert_eq!(
+            dims.output_quality, 0.4,
+            "catch-all should use failure_quality"
+        );
     }
 
     // ── bash success with warning still penalized ──
@@ -1108,7 +1112,10 @@ mod tests {
         // When there is a failure, warning penalty should NOT apply
         let dims = score_bash("TypeError: x\nwarning: something", "node main.js");
         assert_eq!(dims.tool_success, 0.0);
-        assert_eq!(dims.output_quality, 0.4, "type_error quality, no warning penalty");
+        assert_eq!(
+            dims.output_quality, 0.4,
+            "type_error quality, no warning penalty"
+        );
     }
 
     // ── edit failure differentiated quality ──────────
@@ -1116,20 +1123,29 @@ mod tests {
     fn edit_failure_gets_differentiated_quality() {
         let dims = score_edit("TypeError: cannot read property of undefined", None, None);
         assert_eq!(dims.tool_success, 0.0);
-        assert_eq!(dims.output_quality, 0.4, "type_error in edit should map to 0.4");
+        assert_eq!(
+            dims.output_quality, 0.4,
+            "type_error in edit should map to 0.4"
+        );
     }
 
     #[test]
     fn edit_syntax_error_quality() {
         let dims = score_edit("SyntaxError: unexpected token", None, None);
         assert_eq!(dims.tool_success, 0.0);
-        assert_eq!(dims.output_quality, 0.3, "syntax_error in edit should map to 0.3");
+        assert_eq!(
+            dims.output_quality, 0.3,
+            "syntax_error in edit should map to 0.3"
+        );
     }
 
     #[test]
     fn edit_no_changes_still_works() {
         let dims = score_edit("no changes made", None, None);
         assert_eq!(dims.tool_success, 1.0);
-        assert_eq!(dims.output_quality, 0.3, "no-changes quality should be preserved");
+        assert_eq!(
+            dims.output_quality, 0.3,
+            "no-changes quality should be preserved"
+        );
     }
 }

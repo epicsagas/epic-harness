@@ -6,9 +6,7 @@ use super::common::*;
 use crate::config::CONFIG;
 use crate::evolve;
 use crate::mem::store;
-use crate::shared::{
-    evolution::*, helpers::*, obs::ObsRecord, paths::*,
-};
+use crate::shared::{evolution::*, helpers::*, obs::ObsRecord, paths::*};
 use crate::telemetry::{SessionTrend, Telemetry};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
@@ -105,7 +103,9 @@ pub fn run_context(
             .into_iter()
             .filter(|f| {
                 let tag = f.replace("session_", "");
-                tag.get(..8).map(|s| s >= cutoff_tag.as_str()).unwrap_or(true)
+                tag.get(..8)
+                    .map(|s| s >= cutoff_tag.as_str())
+                    .unwrap_or(true)
             })
             .collect();
         for f in &filtered {
@@ -152,7 +152,11 @@ pub fn run_context(
         (v * 10000.0).round() / 10000.0
     }
 
-    let avg_score = if scores.is_empty() { 0.0 } else { round3(scores.iter().sum::<f64>() / scores.len() as f64) };
+    let avg_score = if scores.is_empty() {
+        0.0
+    } else {
+        round3(scores.iter().sum::<f64>() / scores.len() as f64)
+    };
     let high_ge09 = scores.iter().filter(|&&s| s >= 0.9).count() as u64;
     let mid_06_09 = scores.iter().filter(|&&s| (0.6..0.9).contains(&s)).count() as u64;
     let low_lt06 = scores.iter().filter(|&&s| s < 0.6).count() as u64;
@@ -205,7 +209,11 @@ pub fn run_context(
         .collect();
     let total_success: u64 = tool_success_map.values().map(|(s, _)| *s).sum();
     let total_calls: u64 = tool_success_map.values().map(|(_, n)| *n).sum();
-    let tool_success_rate = if total_calls == 0 { 0.0 } else { round3(total_success as f64 / total_calls as f64) };
+    let tool_success_rate = if total_calls == 0 {
+        0.0
+    } else {
+        round3(total_success as f64 / total_calls as f64)
+    };
 
     let obs_stats = serde_json::json!({
         "total": total_obs,
@@ -236,11 +244,18 @@ pub fn run_context(
             }
         }
         if let Some(t) = r.get("trend").and_then(|v| v.as_str())
-            && !t.is_empty() {
-                trend_hist.push(t.to_string());
-            }
-        skills_generated += r.get("skills_generated").and_then(|v| v.as_u64()).unwrap_or(0);
-        if r.get("stagnation_triggered").and_then(|v| v.as_bool()).unwrap_or(false) {
+            && !t.is_empty()
+        {
+            trend_hist.push(t.to_string());
+        }
+        skills_generated += r
+            .get("skills_generated")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if r.get("stagnation_triggered")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             stagnation_count += 1;
         }
     }
@@ -252,7 +267,10 @@ pub fn run_context(
         .collect();
     let recent_weak: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        recent_weak.into_iter().filter(|s| seen.insert(s.clone())).collect()
+        recent_weak
+            .into_iter()
+            .filter(|s| seen.insert(s.clone()))
+            .collect()
     };
     let recent_seeded: Vec<String> = recent_evo
         .iter()
@@ -261,7 +279,10 @@ pub fn run_context(
         .collect();
     let recent_seeded: Vec<String> = {
         let mut seen = std::collections::HashSet::new();
-        recent_seeded.into_iter().filter(|s| seen.insert(s.clone())).collect()
+        recent_seeded
+            .into_iter()
+            .filter(|s| seen.insert(s.clone()))
+            .collect()
     };
     let mut pf_sorted: Vec<(String, u64)> = pattern_freq.into_iter().collect();
     pf_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
@@ -286,37 +307,55 @@ pub fn run_context(
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
         let deltas: Vec<f64> = recent.windows(2).map(|w| w[0] - w[1]).collect();
-        if deltas.is_empty() { 0.0 } else { round4(deltas.iter().sum::<f64>() / deltas.len() as f64) }
-    } else { 0.0 };
+        if deltas.is_empty() {
+            0.0
+        } else {
+            round4(deltas.iter().sum::<f64>() / deltas.len() as f64)
+        }
+    } else {
+        0.0
+    };
 
     let score_comparison = if sh.len() >= 10 {
         let first5: f64 = sh.iter().take(5).map(|s| s.avg_score).sum::<f64>() / 5.0;
         let last5: f64 = sh.iter().rev().take(5).map(|s| s.avg_score).sum::<f64>() / 5.0;
-        let dir = if last5 > first5 { "improving" } else if last5 < first5 { "declining" } else { "stable" };
+        let dir = if last5 > first5 {
+            "improving"
+        } else if last5 < first5 {
+            "declining"
+        } else {
+            "stable"
+        };
         Some(serde_json::json!({
             "first_5_avg": round3(first5),
             "last_5_avg": round3(last5),
             "direction": dir,
             "delta": round3(last5 - first5),
         }))
-    } else { None };
+    } else {
+        None
+    };
 
     let skill_attr: serde_json::Map<String, serde_json::Value> = metrics
         .skill_attribution
         .iter()
         .map(|(k, v)| {
-            (k.clone(), serde_json::json!({
-                "sessions_active": v.sessions_active,
-                "avg_score_with": v.avg_score_with,
-                "avg_score_without": v.avg_score_without,
-                "delta": round3(v.avg_score_with - v.avg_score_without),
-            }))
+            (
+                k.clone(),
+                serde_json::json!({
+                    "sessions_active": v.sessions_active,
+                    "avg_score_with": v.avg_score_with,
+                    "avg_score_without": v.avg_score_without,
+                    "delta": round3(v.avg_score_with - v.avg_score_without),
+                }),
+            )
         })
         .collect();
 
-    let latest_dims = sh.last().map(|s| {
-        serde_json::to_value(s.dimension_averages).unwrap_or_default()
-    }).unwrap_or_default();
+    let latest_dims = sh
+        .last()
+        .map(|s| serde_json::to_value(s.dimension_averages).unwrap_or_default())
+        .unwrap_or_default();
 
     let metrics_summary = serde_json::json!({
         "total_sessions": metrics.total_sessions,
@@ -429,7 +468,10 @@ pub fn run_context(
         },
     });
 
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap_or_default()
+    );
     0
 }
 
@@ -452,31 +494,31 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Smart recall — hint = broad engineering context, limit = 30
-    let recalled = store::smart_recall_conn(
+    let recalled = match store::smart_recall_conn(
         &conn,
         project_filter,
         Some("decision pattern error resolution concept"),
         30,
-    );
+    ) {
+        Ok(s) => s,
+        Err(e) => return serde_json::json!({"error": format!("recall failed: {e}")}),
+    };
 
     // Also pull top decisions/resolutions explicitly (high-value types)
     let decisions = store::query_nodes_conn(
         &conn,
-        None,       // tag filter
+        None, // tag filter
         Some("decision"),
         project_filter,
         10,
-    );
-    let resolutions = store::query_nodes_conn(
-        &conn,
-        None,
-        Some("resolution"),
-        project_filter,
-        10,
-    );
+    )
+    .unwrap_or_default();
+    let resolutions = store::query_nodes_conn(&conn, None, Some("resolution"), project_filter, 10)
+        .unwrap_or_default();
 
     // Merge and deduplicate by id, prefer higher-importance entry
-    let mut seen: std::collections::HashMap<String, serde_json::Value> = std::collections::HashMap::new();
+    let mut seen: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
 
     for sn in &recalled {
         let id = sn.node.frontmatter.id.clone();
@@ -493,15 +535,17 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     }
     for node in decisions.iter().chain(resolutions.iter()) {
         let id = node.frontmatter.id.clone();
-        seen.entry(id.clone()).or_insert_with(|| serde_json::json!({
-            "id": id,
-            "type": node.frontmatter.node_type,
-            "title": node.frontmatter.title,
-            "importance": node.frontmatter.importance,
-            "tags": node.frontmatter.tags,
-            "updated": node.frontmatter.updated,
-            "body_preview": node.body.chars().take(200).collect::<String>(),
-        }));
+        seen.entry(id.clone()).or_insert_with(|| {
+            serde_json::json!({
+                "id": id,
+                "type": node.frontmatter.node_type,
+                "title": node.frontmatter.title,
+                "importance": node.frontmatter.importance,
+                "tags": node.frontmatter.tags,
+                "updated": node.frontmatter.updated,
+                "body_preview": node.body.chars().take(200).collect::<String>(),
+            })
+        });
     }
 
     // Sort by importance desc, take top 30
@@ -980,7 +1024,10 @@ mod tests {
         // Approximate check: day 180 should be around June/July 1970
         let (y, m, _d) = epoch_days_to_ymd(180);
         assert_eq!(y, 1970);
-        assert!((6..=7).contains(&m), "month should be June or July, got {m}");
+        assert!(
+            (6..=7).contains(&m),
+            "month should be June or July, got {m}"
+        );
     }
 
     // ── run_context signature ──────────────────────────

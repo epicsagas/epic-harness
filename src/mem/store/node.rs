@@ -11,7 +11,7 @@ pub fn write_node(node: &Node) -> io::Result<()> {
     write_node_conn(&conn, node)
 }
 
-pub(crate) fn write_node_conn(conn: &Connection, node: &Node) -> io::Result<()> {
+pub fn write_node_conn(conn: &Connection, node: &Node) -> io::Result<()> {
     let fm = &node.frontmatter;
     conn.execute(
         "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at)
@@ -41,22 +41,22 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 }
 
 /// Batch-read multiple nodes by ID in a single `WHERE id IN (...)` query.
-pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> Vec<Node> {
+pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> io::Result<Vec<Node>> {
     if ids.is_empty() {
-        return vec![];
+        return Ok(vec![]);
     }
     let ph = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({ph})");
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    stmt.query_map(
-        rusqlite::params_from_iter(ids.iter()),
-        super::util::row_to_node,
-    )
-    .map(|rows| rows.filter_map(|r| r.ok()).collect())
-    .unwrap_or_default()
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map(
+            rusqlite::params_from_iter(ids.iter()),
+            super::util::row_to_node,
+        )
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
 }
 
 pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {
@@ -67,13 +67,46 @@ pub fn read_node_conn(conn: &Connection, id: &str) -> io::Result<Node> {
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {
     let conn = super::open_db()?;
+    delete_node_file_conn(&conn, id)
+}
+
+/// Delete a node using an existing connection (for use with shared state).
+/// Check if a node with the given ID exists.
+pub fn node_exists_conn(conn: &Connection, id: &str) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?1)",
+        params![id],
+        |row| row.get::<_, bool>(0),
+    )
+    .unwrap_or(false)
+}
+
+pub fn delete_node_file_conn(conn: &Connection, id: &str) -> io::Result<()> {
     conn.execute("DELETE FROM nodes WHERE id = ?1", params![id])
         .map_err(io::Error::other)?;
     Ok(())
 }
 
+/// Read all nodes ordered by updated DESC in a single query.
+#[allow(dead_code)] // used by graphos-desktop (Tauri) through public API
+pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC");
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map([], super::util::row_to_node)
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
+}
+
 pub fn list_node_ids() -> io::Result<Vec<String>> {
     let conn = super::open_db()?;
+    list_node_ids_conn(&conn)
+}
+
+/// List all node IDs using an existing connection.
+pub fn list_node_ids_conn(conn: &Connection) -> io::Result<Vec<String>> {
     let mut stmt = conn
         .prepare("SELECT id FROM nodes")
         .map_err(io::Error::other)?;

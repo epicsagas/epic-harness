@@ -11,15 +11,17 @@ use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
     Edge, IndexNode, Node, NodeFrontmatter, append_edge, delete_node_file, importance_for_type,
     list_node_ids, now_iso, parse_node, query_nodes, read_node, remove_edges_for_node,
-    remove_from_index, search_nodes, serialize_node, smart_recall, upsert_index, validate_node_id,
+    remove_from_index, search_nodes, serialize_node, smart_recall, upsert_index, validate_uuid,
     write_node, write_node_dedup,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
     ("add", "Add a new memory node"),
     ("edit", "Edit an existing node"),
-    ("delete", "Delete a node and its edges"),
-    ("query", "List/filter nodes from the index"),
+    ("remove", "Remove a node and its edges"),
+    ("delete", "[deprecated] Use 'remove' instead"),
+    ("list", "List/filter nodes from the index"),
+    ("query", "[deprecated] Use 'list' instead"),
     ("search", "Full-text search across node files"),
     ("related", "BFS traversal — find related nodes"),
     ("link", "Create a directed edge between two nodes"),
@@ -84,16 +86,16 @@ fn print_subcommand_help(sub: &str) {
             println!("  --body <text>       Replace body content");
             println!("\nOUTPUT: {{\"id\":\"<uuid>\"}}");
         }
-        "delete" => {
-            println!("harness mem delete — Delete a node and its edges\n");
+        "remove" | "delete" => {
+            println!("harness mem remove — Remove a node and its edges\n");
             println!("USAGE:");
-            println!("  harness mem delete <ID>\n");
+            println!("  harness mem remove <ID>\n");
             println!("OUTPUT: {{\"deleted\":\"<uuid>\"}}");
         }
-        "query" => {
-            println!("harness mem query — List/filter nodes from the index\n");
+        "list" | "query" => {
+            println!("harness mem list — List/filter nodes from the index\n");
             println!("USAGE:");
-            println!("  harness mem query [OPTIONS]\n");
+            println!("  harness mem list [OPTIONS]\n");
             println!("OPTIONS:");
             println!("  --tag <tag>         Filter by tag");
             println!("  --type <type>       Filter by node type");
@@ -248,8 +250,18 @@ pub fn dispatch(args: &[String]) -> i32 {
     let result = match sub {
         "add" => cmd_add(&args[1..]),
         "edit" => cmd_edit(&args[1..]),
-        "delete" => cmd_delete(&args[1..]),
-        "query" => cmd_query(&args[1..]),
+        "remove" | "delete" => {
+            if sub == "delete" {
+                eprintln!("[deprecated] 'delete' is deprecated, use 'remove' instead.");
+            }
+            cmd_delete(&args[1..])
+        }
+        "list" | "query" => {
+            if sub == "query" {
+                eprintln!("[deprecated] 'query' is deprecated, use 'list' instead.");
+            }
+            cmd_query(&args[1..])
+        }
         "search" => cmd_search(&args[1..]),
         "related" => cmd_related(&args[1..]),
         "link" => cmd_link(&args[1..]),
@@ -377,7 +389,7 @@ fn cmd_edit(args: &[String]) -> io::Result<i32> {
     let id = pos
         .first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "edit requires <id>"))?;
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -414,7 +426,7 @@ fn cmd_delete(args: &[String]) -> io::Result<i32> {
     let id = pos
         .first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "delete requires <id>"))?;
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -503,7 +515,7 @@ fn cmd_related(args: &[String]) -> io::Result<i32> {
     let id = pos
         .first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "related requires <id>"))?;
-    if !validate_node_id(id) {
+    if !validate_uuid(id) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -528,7 +540,7 @@ fn cmd_link(args: &[String]) -> io::Result<i32> {
     }
     let src = &pos[0];
     let dst = &pos[1];
-    if !validate_node_id(src) || !validate_node_id(dst) {
+    if !validate_uuid(src) || !validate_uuid(dst) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "invalid node id",
@@ -852,7 +864,7 @@ fn cmd_context(args: &[String]) -> io::Result<i32> {
     } else {
         Some(project.as_str())
     };
-    let scored = smart_recall(project_opt, None, limit);
+    let scored = smart_recall(project_opt, None, limit).unwrap_or_default();
 
     let results: Vec<serde_json::Value> = scored
         .iter()
@@ -896,7 +908,7 @@ fn cmd_recall(args: &[String]) -> io::Result<i32> {
 
     let project_opt = project.as_deref();
     let hint_opt = Some(hint.as_str());
-    let scored = smart_recall(project_opt, hint_opt, limit);
+    let scored = smart_recall(project_opt, hint_opt, limit)?;
 
     let results: Vec<serde_json::Value> = scored
         .iter()

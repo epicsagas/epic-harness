@@ -536,7 +536,10 @@ vault_path = "/tmp/vault"
 max_docs = 5
 "#;
         let c: HarnessConfig = toml::from_str(toml).unwrap();
-        assert_eq!(c.context.sources, vec!["harness".to_string(), "alcove".to_string()]);
+        assert_eq!(
+            c.context.sources,
+            vec!["harness".to_string(), "alcove".to_string()]
+        );
         assert_eq!(c.context.alcove.vault_path, "/tmp/vault");
         assert_eq!(c.context.alcove.max_docs, 5);
     }

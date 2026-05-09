@@ -329,42 +329,42 @@ fn test_remove_edges_for_node_is_consistent() {
     assert_eq!(remaining[0].id, "edge-unrelated");
 }
 
-// ── validate_node_id + safe_node_path tests ───────────
+// ── validate_uuid tests ───────────
 
 #[test]
-fn test_validate_node_id_valid() {
-    use epic_harness::mem::store::validate_node_id;
+fn test_validate_uuid_valid() {
+    use epic_harness::mem::store::validate_uuid;
 
     // Valid UUID v4
-    assert!(validate_node_id("550e8400-e29b-41d4-a716-446655440000"));
-    assert!(validate_node_id("00000000-0000-4000-8000-000000000000"));
+    assert!(validate_uuid("550e8400-e29b-41d4-a716-446655440000"));
+    assert!(validate_uuid("00000000-0000-4000-8000-000000000000"));
 }
 
 #[test]
-fn test_validate_node_id_invalid() {
-    use epic_harness::mem::store::validate_node_id;
+fn test_validate_uuid_invalid() {
+    use epic_harness::mem::store::validate_uuid;
 
-    assert!(!validate_node_id("../etc/passwd"));
-    assert!(!validate_node_id("../../secret"));
-    assert!(!validate_node_id("short"));
-    assert!(!validate_node_id("550e8400-e29b-41d4-a716-4466554400000")); // 37 chars
-    assert!(!validate_node_id("550e8400/e29b/41d4/a716/446655440000")); // slashes
+    assert!(!validate_uuid("../etc/passwd"));
+    assert!(!validate_uuid("../../secret"));
+    assert!(!validate_uuid("short"));
+    assert!(!validate_uuid("550e8400-e29b-41d4-a716-4466554400000")); // 37 chars
+    assert!(!validate_uuid("550e8400/e29b/41d4/a716/446655440000")); // slashes
 }
 
 #[test]
-fn test_validate_node_id_rejects_traversal() {
-    use epic_harness::mem::store::validate_node_id;
+fn test_validate_uuid_rejects_traversal() {
+    use epic_harness::mem::store::validate_uuid;
 
-    assert!(!validate_node_id("../etc/passwd"));
-    assert!(!validate_node_id("../../secret"));
-    assert!(!validate_node_id("short"));
+    assert!(!validate_uuid("../etc/passwd"));
+    assert!(!validate_uuid("../../secret"));
+    assert!(!validate_uuid("short"));
 }
 
 #[test]
-fn test_validate_node_id_accepts_valid_uuid() {
-    use epic_harness::mem::store::validate_node_id;
+fn test_validate_uuid_accepts_valid_uuid() {
+    use epic_harness::mem::store::validate_uuid;
 
-    assert!(validate_node_id("550e8400-e29b-41d4-a716-446655440000"));
+    assert!(validate_uuid("550e8400-e29b-41d4-a716-446655440000"));
 }
 
 // ── mcp-install tmp file unique name test ─────────────
@@ -564,7 +564,7 @@ fn test_smart_recall() {
     drop(conn);
 
     // Smart recall for myproj should return 2 nodes, highest importance first
-    let results = smart_recall(Some("myproj"), None, 10);
+    let results = smart_recall(Some("myproj"), None, 10).unwrap();
     assert_eq!(results.len(), 2, "should find 2 myproj nodes");
     assert!(
         results[0].score >= results[1].score,
@@ -576,7 +576,7 @@ fn test_smart_recall() {
     );
 
     // Smart recall with hint should boost FTS-matching nodes
-    let with_hint = smart_recall(Some("myproj"), Some("auth"), 10);
+    let with_hint = smart_recall(Some("myproj"), Some("auth"), 10).unwrap();
     assert!(!with_hint.is_empty());
     assert!(
         with_hint[0].node.frontmatter.title.contains("auth"),
@@ -584,7 +584,7 @@ fn test_smart_recall() {
     );
 
     // Other project should only return its own nodes
-    let other = smart_recall(Some("otherproj"), None, 10);
+    let other = smart_recall(Some("otherproj"), None, 10).unwrap();
     assert_eq!(other.len(), 1);
 }
 
@@ -745,7 +745,7 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
     );
 
     // Verify belongs_to edges from session and pattern to hub
-    let edges = read_edges_conn(&conn, 5000);
+    let edges = read_edges_conn(&conn, 5000).unwrap();
     let belongs_edges: Vec<_> = edges
         .iter()
         .filter(|e| e.relation == "belongs_to" && e.target == hub_id)
@@ -941,7 +941,8 @@ fn test_recall_ranks_decisions_above_sessions() {
             let mut yr = 1970u64;
             let mut remaining = days;
             loop {
-                let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
+                let leap =
+                    (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
                 let diy = if leap { 366 } else { 365 };
                 if remaining < diy {
                     break;
@@ -989,7 +990,8 @@ fn test_recall_ranks_decisions_above_sessions() {
             let mut yr = 1970u64;
             let mut remaining = days;
             loop {
-                let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
+                let leap =
+                    (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
                 let diy = if leap { 366 } else { 365 };
                 if remaining < diy {
                     break;
@@ -1067,7 +1069,7 @@ fn test_recall_ranks_decisions_above_sessions() {
     write_node_dedup_conn(&conn, &decision_node, 24).unwrap();
 
     // Call smart_recall_conn with limit=10
-    let results = smart_recall_conn(&conn, Some("proj"), None, 10);
+    let results = smart_recall_conn(&conn, Some("proj"), None, 10).unwrap();
     assert_eq!(results.len(), 6, "should return all 6 nodes");
 
     // Verify decision node appears BEFORE any session node in results

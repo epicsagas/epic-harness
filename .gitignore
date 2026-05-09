@@ -197,6 +197,12 @@ dist
 /debug/
 /target/
 
+# Tauri generated schemas
+src-tauri/gen/
+
+# Tauri frontend build output
+app/dist/
+
 # Plugin binary (auto-installed by setup.sh or cargo install)
 hooks/bin/epic-harness
 

@@ -7,7 +7,7 @@ use std::io;
 use rusqlite::{Connection, params_from_iter};
 
 use super::store::{
-    atomic_write, graph_path, list_node_ids, open_db, read_edges_conn, read_nodes_conn,
+    atomic_write, graph_path, list_node_ids_conn, open_db, read_edges_conn, read_nodes_conn,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,10 +45,10 @@ const MAX_GRAPH_EDGES: usize = 2000;
 
 /// Build a `Graph` value from an existing connection.
 /// Reuses the caller's connection — no additional `open_db` call.
-fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
-    let ids = list_node_ids()?; // list_node_ids opens its own connection — that's OK
+pub fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
+    let ids = list_node_ids_conn(conn)?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let nodes = read_nodes_conn(conn, &id_refs)
+    let nodes = read_nodes_conn(conn, &id_refs)?
         .into_iter()
         .map(|node| GraphNode {
             id: node.frontmatter.id,
@@ -58,7 +58,7 @@ fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
             importance: node.frontmatter.importance,
         })
         .collect();
-    let edges = read_edges_conn(conn, MAX_GRAPH_EDGES)
+    let edges = read_edges_conn(conn, MAX_GRAPH_EDGES)?
         .into_iter()
         .map(|e| GraphEdge {
             source: e.source,
@@ -180,9 +180,8 @@ pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> V
         .unwrap_or_default()
 }
 
-/// Compute aggregate stats for the `/api/stats` endpoint.
-pub fn compute_stats() -> io::Result<serde_json::Value> {
-    let conn = open_db()?;
+/// Compute aggregate stats for the `/api/stats` endpoint using an existing connection.
+pub fn compute_stats_conn(conn: &Connection) -> io::Result<serde_json::Value> {
     let total_nodes: i64 = conn
         .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
         .unwrap_or(0);
@@ -211,6 +210,12 @@ pub fn compute_stats() -> io::Result<serde_json::Value> {
         "avg_importance": (avg_importance * 100.0).round() / 100.0,
         "by_type": serde_json::Value::Object(by_type),
     }))
+}
+
+/// Compute aggregate stats for the `/api/stats` endpoint.
+pub fn compute_stats() -> io::Result<serde_json::Value> {
+    let conn = open_db()?;
+    compute_stats_conn(&conn)
 }
 
 /// BFS traversal from `start_id` to all reachable nodes via a SQL recursive CTE.

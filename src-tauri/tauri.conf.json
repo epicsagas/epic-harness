@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-schema/main/schema.json",
+  "productName": "GraphOS",
+  "version": "0.1.0",
+  "identifier": "com.epicsagas.graphos",
+  "build": {
+    "beforeDevCommand": "pnpm --dir app dev",
+    "beforeBuildCommand": "pnpm --dir app build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../app/dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "GraphOS | Knowledge Graph Intelligence",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' /* required for Svelte/Tailwind scoped styles */; img-src 'self' asset: https://asset.localhost; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

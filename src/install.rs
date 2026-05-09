@@ -14,7 +14,8 @@ static SKILL_SIMPLIFY: &str = include_str!("../registry/skills/simplify/SKILL.md
 static SKILL_TDD: &str = include_str!("../registry/skills/tdd/SKILL.md");
 static SKILL_VERIFY: &str = include_str!("../registry/skills/verify/SKILL.md");
 static SKILL_COUNCIL: &str = include_str!("../registry/skills/council/SKILL.md");
-static SKILL_AGENT_INTROSPECTION: &str = include_str!("../registry/skills/agent-introspection/SKILL.md");
+static SKILL_AGENT_INTROSPECTION: &str =
+    include_str!("../registry/skills/agent-introspection/SKILL.md");
 static SKILL_REFLECT: &str = include_str!("../registry/skills/reflect/SKILL.md");
 static SKILL_DISCOVER: &str = include_str!("../registry/skills/discover/SKILL.md");
 static SKILL_ORCHESTRATE: &str = include_str!("../registry/skills/orchestrate/SKILL.md");
@@ -636,10 +637,7 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
 
 static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     "claude",
-    [(
-        ".claude/settings.json",
-        include_str!("../hooks/hooks.json")
-    ),]
+    [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
 );
 
 // ── Tool config ───────────────────────────────────────────────────────────────
