@@ -64,7 +64,7 @@ pub(crate) fn curate_proposal(proposal: &SkillProposal, existing: &[String]) -> 
     }
 
     // Rule 2: If confidence is too low, skip
-    if proposal.confidence < 0.3 {
+    if proposal.confidence < 0.2 {
         return ProposalAction::Skip;
     }
 
@@ -615,12 +615,23 @@ mod tests {
     #[test]
     fn check_promotion_increments() {
         let mut counters = PromotionCounter::default();
-        assert!(!check_promotion("evo-test", &mut counters));
-        assert_eq!(counters.counts["evo-test"], 1);
-        assert!(!check_promotion("evo-test", &mut counters));
-        assert_eq!(counters.counts["evo-test"], 2);
-        assert!(check_promotion("evo-test", &mut counters));
-        assert_eq!(counters.counts["evo-test"], 3);
+        let min = CONFIG.evolution.gated_promotion_min;
+        // First min-1 calls must return false
+        for i in 0..min.saturating_sub(1) {
+            assert!(
+                !check_promotion("evo-test", &mut counters),
+                "call {} must not be promoted (min={})",
+                i + 1, min
+            );
+            assert_eq!(counters.counts["evo-test"], (i + 1) as u64);
+        }
+        // The min-th call must return true
+        assert!(
+            check_promotion("evo-test", &mut counters),
+            "call {} must be promoted (min={})",
+            min, min
+        );
+        assert_eq!(counters.counts["evo-test"], min);
     }
 
     #[test]
@@ -694,7 +705,7 @@ mod tests {
             name: "evo-new".into(),
             content: "content".into(),
             origin: "pattern".into(),
-            confidence: 0.2,
+            confidence: 0.1,
             rationale: "test".into(),
         };
         assert!(matches!(

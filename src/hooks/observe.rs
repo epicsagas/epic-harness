@@ -45,23 +45,45 @@ fn get_last_action(session_file: &std::path::Path) -> Option<String> {
     rec.action
 }
 
+fn failure_quality(failure_category: Option<&str>) -> f64 {
+    match failure_category {
+        None => 1.0, // no failure means success — callers gate on .is_some()
+        Some("syntax_error") => 0.3,
+        Some("type_error") => 0.4,
+        Some("runtime_error") => 0.5,
+        Some("test_fail") => 0.6,
+        Some("permission_denied") => 0.7,
+        Some("build_fail") => 0.5,
+        Some("lint_fail") => 0.6,
+        Some("timeout") => 0.5,
+        Some("not_found") => 0.6,
+        Some(_) => 0.5, // unknown failure category
+    }
+}
+
 fn score_bash(output: &str, command: &str) -> ScoreDimensions {
     let failure = classify_failure(output);
     let tool_success = if failure.is_none() { 1.0 } else { 0.0 };
 
     let is_empty = output.trim().is_empty();
-    let mut quality: f64 = 1.0;
-    if is_empty && SILENT_OK_CMDS.is_match(command) {
-        quality = 1.0;
+    let mut quality: f64 = if failure.is_some() {
+        failure_quality(failure)
+    } else if is_empty && SILENT_OK_CMDS.is_match(command) {
+        1.0
     } else if is_empty {
-        quality = 0.7;
-    }
-    static WARN_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
-    static DEPREC_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
-    if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
-        quality = (quality - 0.3).max(0.0);
+        0.7
+    } else {
+        1.0
+    };
+    // Warning penalty only applies to successful calls
+    if failure.is_none() {
+        static WARN_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?i)\bwarning\b|\bWARN\b").unwrap());
+        static DEPREC_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?i)\bWARN(ING)?\b.*deprecat").unwrap());
+        if WARN_RE.is_match(output) && !DEPREC_RE.is_match(output) {
+            quality = (quality - 0.3).max(0.0);
+        }
     }
 
     let len = output.len();
@@ -88,17 +110,22 @@ fn score_edit(
     let failure = classify_failure(output);
     let tool_success = if failure.is_none() { 1.0 } else { 0.0 };
 
-    let mut quality: f64 = 1.0;
-    static NO_CHANGE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)no changes|file not found").unwrap());
-    if NO_CHANGE_RE.is_match(output) {
-        quality = 0.3;
-    }
-    if let (Some(prev), Some(curr)) = (prev_action, curr_action)
-        && prev == curr
-    {
-        quality = quality.min(0.7);
-    }
+    let quality = if failure.is_some() {
+        failure_quality(failure)
+    } else {
+        let mut q: f64 = 1.0;
+        static NO_CHANGE_RE: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"(?i)no changes|file not found").unwrap());
+        if NO_CHANGE_RE.is_match(output) {
+            q = 0.3;
+        }
+        if let (Some(prev), Some(curr)) = (prev_action, curr_action)
+            && prev == curr
+        {
+            q = q.min(0.7);
+        }
+        q
+    };
 
     ScoreDimensions {
         tool_success,
@@ -112,18 +139,25 @@ fn score_write(output: &str) -> ScoreDimensions {
     let ok = failure.is_none();
     ScoreDimensions {
         tool_success: if ok { 1.0 } else { 0.0 },
-        output_quality: if ok { 1.0 } else { 0.0 },
+        output_quality: if ok { 1.0 } else { failure_quality(failure) },
         execution_cost: 1.0,
     }
 }
 
 fn score_read_search(output: &str) -> ScoreDimensions {
+    let failure = classify_failure(output);
     static NO_MATCH_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
-    let has_results = !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
+    let has_results = failure.is_none() && !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
     ScoreDimensions {
         tool_success: if has_results { 1.0 } else { 0.0 },
-        output_quality: if has_results { 1.0 } else { 0.5 },
+        output_quality: if has_results {
+            1.0
+        } else if failure.is_some() {
+            failure_quality(failure)
+        } else {
+            0.5
+        },
         execution_cost: 1.0,
     }
 }
@@ -387,15 +421,18 @@ pub fn run(input: &HookInput) -> i32 {
             }
             "write" => score_write(&combined),
             "read" | "glob" | "grep" => score_read_search(&combined),
-            _ => ScoreDimensions {
-                tool_success: if record.failure_category.is_none() {
-                    1.0
-                } else {
-                    0.0
-                },
-                output_quality: 1.0,
-                execution_cost: 1.0,
-            },
+            _ => {
+                let fq = failure_quality(record.failure_category.as_deref());
+                ScoreDimensions {
+                    tool_success: if record.failure_category.is_none() {
+                        1.0
+                    } else {
+                        0.0
+                    },
+                    output_quality: fq,
+                    execution_cost: 1.0,
+                }
+            }
         };
 
         record.dimensions = Some(dims);
@@ -997,5 +1034,102 @@ mod tests {
             result.is_none(),
             "completed agent should not trigger timeout"
         );
+    }
+
+    // ── failure_quality helper ──────────────────────
+    #[test]
+    fn failure_quality_maps_categories() {
+        assert_eq!(failure_quality(Some("syntax_error")), 0.3);
+        assert_eq!(failure_quality(Some("type_error")), 0.4);
+        assert_eq!(failure_quality(Some("runtime_error")), 0.5);
+        assert_eq!(failure_quality(Some("test_fail")), 0.6);
+        assert_eq!(failure_quality(Some("permission_denied")), 0.7);
+        assert_eq!(failure_quality(Some("build_fail")), 0.5);
+        assert_eq!(failure_quality(Some("lint_fail")), 0.6);
+        assert_eq!(failure_quality(Some("timeout")), 0.5);
+        assert_eq!(failure_quality(Some("not_found")), 0.6);
+        // None (no failure) returns 1.0 — success quality
+        assert_eq!(failure_quality(None), 1.0);
+        // Unknown category returns default
+        assert_eq!(failure_quality(Some("unknown_category")), 0.5);
+    }
+
+    // ── bash failure differentiated quality ──────────
+    #[test]
+    fn bash_failure_gets_differentiated_quality() {
+        let dims = score_bash("TypeError: x is not a function", "node main.js");
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.4, "type_error should map to 0.4");
+    }
+
+    #[test]
+    fn bash_syntax_error_quality() {
+        let dims = score_bash("SyntaxError: unexpected token", "node broken.js");
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.3, "syntax_error should map to 0.3");
+    }
+
+    #[test]
+    fn bash_runtime_error_quality() {
+        let dims = score_bash("Error: something went wrong", "node main.js");
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.5, "runtime_error should map to 0.5");
+    }
+
+    // ── other tool failure differentiated quality ───
+    #[test]
+    fn other_tool_failure_gets_differentiated_quality() {
+        // Simulate the catch-all arm logic directly
+        let failure_cat = Some("type_error");
+        let fq = failure_quality(failure_cat.as_deref());
+        let dims = ScoreDimensions {
+            tool_success: if failure_cat.is_none() { 1.0 } else { 0.0 },
+            output_quality: fq,
+            execution_cost: 1.0,
+        };
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.4, "catch-all should use failure_quality");
+    }
+
+    // ── bash success with warning still penalized ──
+    #[test]
+    fn bash_success_with_warning_still_penalized() {
+        let dims = score_bash("warning: unused variable", "cargo build");
+        assert_eq!(dims.tool_success, 1.0);
+        assert!(
+            dims.output_quality < 1.0,
+            "warnings on success should still reduce quality"
+        );
+        assert_eq!(dims.output_quality, 0.7, "1.0 - 0.3 = 0.7");
+    }
+
+    #[test]
+    fn bash_failure_with_warning_not_double_penalized() {
+        // When there is a failure, warning penalty should NOT apply
+        let dims = score_bash("TypeError: x\nwarning: something", "node main.js");
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.4, "type_error quality, no warning penalty");
+    }
+
+    // ── edit failure differentiated quality ──────────
+    #[test]
+    fn edit_failure_gets_differentiated_quality() {
+        let dims = score_edit("TypeError: cannot read property of undefined", None, None);
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.4, "type_error in edit should map to 0.4");
+    }
+
+    #[test]
+    fn edit_syntax_error_quality() {
+        let dims = score_edit("SyntaxError: unexpected token", None, None);
+        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.output_quality, 0.3, "syntax_error in edit should map to 0.3");
+    }
+
+    #[test]
+    fn edit_no_changes_still_works() {
+        let dims = score_edit("no changes made", None, None);
+        assert_eq!(dims.tool_success, 1.0);
+        assert_eq!(dims.output_quality, 0.3, "no-changes quality should be preserved");
     }
 }

@@ -265,12 +265,19 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
     }
 
     // Pattern 3: long_debug_loop
+    // Only consider edit/write operations so that intervening Bash/Read/Grep
+    // calls (which have no file_path) do not break the consecutive-file streak.
     {
+        let edit_only: Vec<_> = scored
+            .iter()
+            .filter(|o| o.tool_category == "edit" || o.tool_category == "write")
+            .collect();
+
         let mut prev_file = String::new();
         let mut run_length = 0u64;
         let mut file_runs: HashMap<String, u64> = HashMap::new();
 
-        for o in &scored {
+        for o in &edit_only {
             let file = extract_file(o.action.as_deref().unwrap_or(""))
                 .unwrap_or("")
                 .to_string();
@@ -544,6 +551,39 @@ mod tests {
         }
         let patterns = detect_patterns(&obs);
         assert!(!patterns.iter().any(|p| p.pattern_type == "long_debug_loop"));
+    }
+
+    #[test]
+    fn detect_long_debug_loop_with_intervening_bash() {
+        // Edit→Bash→Edit→Bash→... on the same file must still be detected
+        // because Bash calls should not break the consecutive-file streak.
+        let mut obs = vec![];
+        for _ in 0..6 {
+            obs.push(make_obs(
+                "Edit",
+                "edit",
+                "success",
+                0.8,
+                Some("/src/buggy.ts"),
+            ));
+            obs.push(make_obs(
+                "Bash",
+                "bash",
+                "success",
+                0.9,
+                Some("cargo test"),
+            ));
+        }
+        let patterns = detect_patterns(&obs);
+        assert!(
+            patterns.iter().any(|p| p.pattern_type == "long_debug_loop"),
+            "expected long_debug_loop to be detected despite intervening Bash calls, got: {patterns:?}"
+        );
+        let loop_pat = patterns
+            .iter()
+            .find(|p| p.pattern_type == "long_debug_loop")
+            .unwrap();
+        assert_eq!(loop_pat.count, 6);
     }
 
     #[test]

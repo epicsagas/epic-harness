@@ -9,6 +9,17 @@ pub fn safe_avg_score(score: f64) -> f64 {
     if score.is_finite() { score } else { 0.0 }
 }
 
+/// Compute the rolling average of `avg_score` from the last `window` entries
+/// in `score_history`. Returns 0.0 when history is empty.
+pub fn compute_rolling_avg(history: &[SessionScoreEntry], window: usize) -> f64 {
+    if history.is_empty() || window == 0 {
+        return 0.0;
+    }
+    let start = history.len().saturating_sub(window);
+    let slice = &history[start..];
+    slice.iter().map(|e| e.avg_score).sum::<f64>() / slice.len() as f64
+}
+
 pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u64) {
     // Returns (should_rollback, improved, rolled_back_count)
     if metrics.total_sessions == 0 || metrics.best_score.is_none() {
@@ -17,10 +28,19 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
         return (false, true, 0);
     }
 
-    let best = metrics.best_score.unwrap_or(0.0);
-    let improvement = current_score - best;
+    // Use rolling 3-session average instead of absolute best_score for the
+    // improvement check. This prevents nearly every session from being flagged
+    // as stagnant when the all-time best was an outlier.
+    // Guard: if score_history is empty (e.g. after migration), fall back to
+    // best_score comparison to avoid treating any positive score as improvement.
+    let rolling_avg = if metrics.score_history.is_empty() {
+        metrics.best_score.unwrap_or(0.0)
+    } else {
+        compute_rolling_avg(&metrics.score_history, CONFIG.evolution.stagnation_rolling_window)
+    };
+    let improvement = current_score - rolling_avg;
     if improvement >= CONFIG.evolution.improvement_threshold {
-        // Improved! Backup evolved skills
+        // Improved over rolling average! Backup evolved skills
         let evolved = evolved_dir();
         let backup = evolved_backup_dir();
         if evolved.is_dir() {
@@ -33,8 +53,10 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
     // No improvement
     metrics.stagnation_count += 1;
     if metrics.stagnation_count >= CONFIG.evolution.stagnation_limit {
+        // Rollback decision still uses absolute best_score
+        let best = metrics.best_score.unwrap_or(0.0);
         let degradation = best - current_score;
-        if degradation > 0.05 || metrics.best_score.unwrap_or(0.0) < 0.90 {
+        if degradation > CONFIG.evolution.rollback_degradation || best < CONFIG.evolution.rollback_best_floor {
             let backup = evolved_backup_dir();
             if backup.is_dir() {
                 let evolved = evolved_dir();
@@ -164,7 +186,18 @@ mod tests {
         metrics.total_sessions = 5;
         metrics.best_score = Some(0.7);
         metrics.stagnation_count = 2;
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.8);
+        // Populate last 3 score_history entries with avg_score 0.70 so the
+        // rolling average is 0.70. current_score=0.80 must beat that by >= threshold.
+        for _ in 0..3 {
+            metrics.score_history.push(SessionScoreEntry {
+                timestamp: "2026-04-09T00:00:00Z".into(),
+                success_rate: 0.70,
+                avg_score: 0.70,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            });
+        }
+        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.80);
         assert!(!rollback);
         assert!(improved);
     }
@@ -175,6 +208,17 @@ mod tests {
         metrics.total_sessions = 5;
         metrics.best_score = Some(0.8);
         metrics.stagnation_count = 0;
+        // Rolling avg from last 3 entries = 0.80. current_score=0.78 is below
+        // that, so stagnation_count should increment.
+        for _ in 0..3 {
+            metrics.score_history.push(SessionScoreEntry {
+                timestamp: "2026-04-09T00:00:00Z".into(),
+                success_rate: 0.80,
+                avg_score: 0.80,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            });
+        }
         let (rollback, improved, _) = check_stagnation(&mut metrics, 0.78);
         assert!(!rollback);
         assert!(!improved);
@@ -306,21 +350,21 @@ mod tests {
 
     #[test]
     fn seeding_scope_skip_when_excellent() {
-        assert_eq!(seeding_scope(0.90), "skip");
         assert_eq!(seeding_scope(0.95), "skip");
+        assert_eq!(seeding_scope(0.97), "skip");
         assert_eq!(seeding_scope(1.00), "skip");
     }
 
     #[test]
     fn seeding_scope_moderate_in_middle_range() {
-        assert_eq!(seeding_scope(0.70), "moderate");
         assert_eq!(seeding_scope(0.80), "moderate");
-        assert_eq!(seeding_scope(0.89), "moderate");
+        assert_eq!(seeding_scope(0.90), "moderate");
+        assert_eq!(seeding_scope(0.94), "moderate");
     }
 
     #[test]
     fn seeding_scope_full_when_low_score() {
-        assert_eq!(seeding_scope(0.69), "full");
+        assert_eq!(seeding_scope(0.79), "full");
         assert_eq!(seeding_scope(0.50), "full");
         assert_eq!(seeding_scope(0.0), "full");
     }
