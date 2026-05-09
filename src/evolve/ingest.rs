@@ -165,17 +165,9 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         // out the generic "auto" and "pattern" tags.
         let prev_pattern_types: Vec<String> = {
             let mut results = Vec::new();
-            let sql = "SELECT DISTINCT trim(value) FROM nodes n
-                 JOIN edges e ON e.source = n.id,
-                 json_each('[' || replace(replace(n.tags, '\",\"', '\",\"'), '\"', '\"') || ']') AS j
-                 WHERE n.type = 'pattern'
-                 AND e.relation = 'detected_in'
-                 AND e.target IN (
-                    SELECT e2.source FROM edges e2
-                    WHERE e2.target = ?1 AND e2.relation = 'follows'
-                 )";
-            // Fallback: tags are CSV, use LIKE to find non-generic tags
-            let sql_csv = "SELECT n.tags FROM nodes n
+            // Tags are stored as CSV, extract the pattern_type tag by filtering
+            // out the generic "auto" and "pattern" tags.
+            let sql = "SELECT n.tags FROM nodes n
                  JOIN edges e ON e.source = n.id
                  WHERE n.type = 'pattern'
                  AND e.relation = 'detected_in'
@@ -183,7 +175,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     SELECT e2.source FROM edges e2
                     WHERE e2.target = ?1 AND e2.relation = 'follows'
                  )";
-            if let Ok(mut stmt) = tx.prepare(sql_csv) {
+            if let Ok(mut stmt) = tx.prepare(sql) {
                 let rows = stmt.query_map(rusqlite::params![session_node_id], |row| {
                     let tags_str: String = row.get(0)?;
                     Ok(tags_str)
