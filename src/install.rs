@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, IsTerminal, Write as IoWrite};
+use std::io::{self, ErrorKind, IsTerminal, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 // ── Canonical sources (single source of truth) ──────────────────────────────
@@ -481,32 +481,64 @@ static GEMINI_FILES: &[(&str, &str)] = integration_files!(
             include_str!("../integrations/gemini/commands/check.md")
         ),
         (
+            "commands/check.toml",
+            include_str!("../integrations/gemini/commands/check.toml")
+        ),
+        (
             "commands/evolve.md",
             include_str!("../integrations/gemini/commands/evolve.md")
+        ),
+        (
+            "commands/evolve.toml",
+            include_str!("../integrations/gemini/commands/evolve.toml")
         ),
         (
             "commands/go.md",
             include_str!("../integrations/gemini/commands/go.md")
         ),
         (
+            "commands/go.toml",
+            include_str!("../integrations/gemini/commands/go.toml")
+        ),
+        (
             "commands/ship.md",
             include_str!("../integrations/gemini/commands/ship.md")
+        ),
+        (
+            "commands/ship.toml",
+            include_str!("../integrations/gemini/commands/ship.toml")
         ),
         (
             "commands/spec.md",
             include_str!("../integrations/gemini/commands/spec.md")
         ),
         (
+            "commands/spec.toml",
+            include_str!("../integrations/gemini/commands/spec.toml")
+        ),
+        (
             "commands/team.md",
             include_str!("../integrations/gemini/commands/team.md")
+        ),
+        (
+            "commands/team.toml",
+            include_str!("../integrations/gemini/commands/team.toml")
         ),
         (
             "commands/discover.md",
             include_str!("../integrations/gemini/commands/discover.md")
         ),
         (
+            "commands/discover.toml",
+            include_str!("../integrations/gemini/commands/discover.toml")
+        ),
+        (
             "commands/orbit.md",
             include_str!("../integrations/gemini/commands/orbit.md")
+        ),
+        (
+            "commands/orbit.toml",
+            include_str!("../integrations/gemini/commands/orbit.toml")
         ),
     ]
 );
@@ -884,6 +916,15 @@ fn write_if_missing(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
     }
     match fs::write(dest, content) {
         Ok(_) => FileStatus::Added,
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+            eprintln!(
+                "\n[harness] WARN: permission denied writing {} — \
+                 grant Full Disk Access to your terminal in System Settings > Privacy & Security, \
+                 or skip global install.",
+                dest.display()
+            );
+            FileStatus::Unchanged
+        }
         Err(e) => {
             eprintln!("\n[harness] ERROR writing {}: {e}", dest.display());
             FileStatus::Unchanged
@@ -929,9 +970,15 @@ fn write_or_sync(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
     }
 
     let unchanged = existed
-        && fs::read_to_string(dest)
-            .map(|existing| existing == content)
-            .unwrap_or(false);
+        && match fs::read_to_string(dest) {
+            Ok(existing) => existing == content,
+            Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+                // File exists but we can't read it (macOS TCC). Assume unchanged —
+                // a terminal with Full Disk Access likely installed it already.
+                return FileStatus::Unchanged;
+            }
+            Err(_) => false,
+        };
 
     if unchanged {
         return FileStatus::Unchanged;
@@ -953,6 +1000,15 @@ fn write_or_sync(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
             } else {
                 FileStatus::Added
             }
+        }
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+            eprintln!(
+                "\n[harness] WARN: permission denied writing {} — \
+                 grant Full Disk Access to your terminal in System Settings > Privacy & Security, \
+                 or skip global install.",
+                dest.display()
+            );
+            FileStatus::Unchanged
         }
         Err(e) => {
             eprintln!("\n[harness] ERROR writing {}: {e}", dest.display());
