@@ -1,0 +1,60 @@
+description = "Complete orbit — autonomous spec through ship in one shot"
+prompt = """
+CRITICAL: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+
+Autonomous pipeline: spec → go → check → ship. All phases run sequentially (Gemini does not support parallel agents).
+
+## Phase Recovery Protocol
+
+At the start of **every response** during an active orbit:
+
+1. Run `ls $HARNESS_DIR/orbit/PIPELINE-*.json 2>/dev/null`
+2. Find the file with `"status": "running"`
+3. Read it. Verify `phase` matches where you left off
+4. **If `phase` is ahead of where you think you are, trust the file** — you may have compacted
+5. **Conflict resolution (crash-mid-update)**: If `phase_history` contains an entry for the current `phase` with a completed timestamp, treat that phase as done and advance to the next phase — `phase_history` wins over the `phase` field when they disagree.
+6. Resume from the resolved phase. Do NOT re-ask mode selection, re-run spec, or re-discover
+7. **Worktree recovery**: If `worktree_name` is set in pipeline state:
+   - Check if worktree still exists: `git worktree list | grep "{worktree_name}"`
+   - If exists: `cd` into the worktree path to continue work
+   - If not found: worktree was cleaned up externally — abort orbit with warning, set `"status": "aborted"`
+
+If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
+
+**Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
+
+**Mode selection** — ask the user:
+1. **Interactive**: User runs `/discover` → `/spec` manually, then says "orbit go"
+2. **Council auto-spec**: 4-voice analysis generates spec, user approves
+
+**Council mode** (if chosen):
+- Ask each voice sequentially: Architect → Skeptic → Pragmatist → Critic
+- Each gets ONLY the request + codebase context (anti-anchoring)
+- Synthesize → generate spec → user approves/rejects
+
+**After spec approved:**
+
+## Step 0: Preflight
+
+Create pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` with phases: mode_select → spec → go → check → ship → evolve.
+
+## Step 3: Go Phase — Build
+
+1. Load spec, extract `goal_slug`
+2. **Git preflight**: verify clean working tree and not on detached HEAD
+3. Plan tasks from Requirements, execute one at a time (TDD: red → green → refactor)
+4. Run full test suite after all tasks
+5. On FAIL: fix and re-check, max 3 retries. After 3, pause for user decision
+
+## Step 6: Ship
+
+1. Gate: verify PASS check report
+2. Clean build, full test suite, linter + formatter
+3. Git hygiene → `gh pr create` with spec + check report → CI watch
+
+**Pipeline state**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — update after each phase.
+
+**Report**: Consolidated phase summary with spec, branch, PR URL, check retries.
+
+"One orbit complete. Run `/evolve` to analyze observations."
+"""
