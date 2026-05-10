@@ -296,10 +296,7 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
             // Full-access agents: remove tools line (all allowed by default).
             // Read-only agents: add permission: with deny rules for edit/write.
             let mut result = canonical
-                .replace(
-                    "tools: [Read, Edit, Write, Bash, Grep, Glob]\n",
-                    "",
-                )
+                .replace("tools: [Read, Edit, Write, Bash, Grep, Glob]\n", "")
                 .replace(
                     "tools: [Read, Grep, Glob, Bash]\n",
                     "permission:\n  edit: deny\n  write: deny\n",
