@@ -272,30 +272,41 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
             result
         }
         "cursor" => {
-            // Add model: inherit before the closing --- of frontmatter
+            // Add model: inherit before the closing --- of frontmatter.
+            // If a model: line already exists, replace it to avoid duplicate keys.
             if let Some(start) = canonical.strip_prefix("---\n")
                 && let Some(end_pos) = start.find("\n---\n")
             {
                 let frontmatter = &start[..end_pos];
                 let body = &start[end_pos + 4..]; // skip \n---\n
-                return format!("---\n{}\nmodel: inherit\n---\n{}", frontmatter, body);
+                let fm = if let Some(mpos) = frontmatter.find("model:") {
+                    let before = &frontmatter[..mpos];
+                    let rest = &frontmatter[mpos..];
+                    let line_end = rest.find('\n').unwrap_or(rest.len());
+                    format!("{}model: inherit{}", before, &rest[line_end..])
+                } else {
+                    format!("{}\nmodel: inherit", frontmatter)
+                };
+                return format!("---\n{}\n---\n{}", fm, body);
             }
             canonical.to_string()
         }
         "opencode" => {
-            // Replace tools array with dict format
+            // OpenCode uses `permission:` with allow/deny, not `tools:` dict.
+            // Full-access agents: remove tools line (all allowed by default).
+            // Read-only agents: add permission: with deny rules for edit/write.
             let mut result = canonical
                 .replace(
-                    "tools: [Read, Edit, Write, Bash, Grep, Glob]",
-                    "tools:\n  read: true\n  edit: true\n  write: true\n  bash: true",
+                    "tools: [Read, Edit, Write, Bash, Grep, Glob]\n",
+                    "",
                 )
                 .replace(
-                    "tools: [Read, Grep, Glob, Bash]",
-                    "tools:\n  write: false\n  edit: false",
+                    "tools: [Read, Grep, Glob, Bash]\n",
+                    "permission:\n  edit: deny\n  write: deny\n",
                 )
                 .replace(
-                    "tools: [Read, Grep, Glob]",
-                    "tools:\n  write: false\n  edit: false\n  bash: false",
+                    "tools: [Read, Grep, Glob]\n",
+                    "permission:\n  edit: deny\n  write: deny\n  bash: deny\n",
                 );
 
             // Add Codex sub-agent addendum (opencode uses same text)
@@ -1998,15 +2009,18 @@ mod tests {
     #[test]
     fn test_transform_agent_opencode_yaml_tools() {
         let result = transform_agent("opencode", "builder", AGENT_BUILDER);
-        assert!(result.contains("tools:\n  read: true\n  edit: true"));
+        // Full-access agent: tools line removed (all allowed by default)
         assert!(!result.contains("tools: [Read"));
+        assert!(!result.contains("tools:\n"));
+        assert!(!result.contains("permission:"));
     }
 
     #[test]
     fn test_transform_agent_opencode_readonly_tools() {
         let result = transform_agent("opencode", "auditor", AGENT_AUDITOR);
-        assert!(result.contains("write: false"));
-        assert!(result.contains("edit: false"));
+        assert!(result.contains("permission:\n  edit: deny\n  write: deny"));
+        assert!(!result.contains("tools: [Read"));
+        assert!(!result.contains("bash: deny")); // auditor has Bash access
     }
 
     #[test]

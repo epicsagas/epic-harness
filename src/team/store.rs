@@ -679,7 +679,7 @@ const DEFAULT_TEAM_MISSION: &str = "Support delivery with operations, documentat
 const DEFAULT_AGENT_OPS: &str = r#"---
 name: ops
 description: CI/CD pipelines, deployment, release management, and infrastructure config
-tools: [Read, Grep, Glob, Bash, Write, Edit]
+tools: [Read, Edit, Write, Bash, Grep, Glob]
 model: sonnet
 skills: [verify, secure]
 ---
@@ -720,7 +720,7 @@ You are the **Ops** agent for the **core** team. Own the delivery pipeline — f
 const DEFAULT_AGENT_SCRIBE: &str = r#"---
 name: scribe
 description: Documentation authoring — READMEs, changelogs, ADRs, API docs, and onboarding guides
-tools: [Read, Grep, Glob, Bash, Write, Edit]
+tools: [Read, Edit, Write, Bash, Grep, Glob]
 model: sonnet
 skills: [document, commit]
 ---
