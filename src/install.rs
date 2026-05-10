@@ -477,64 +477,32 @@ static GEMINI_FILES: &[(&str, &str)] = integration_files!(
             include_str!("../integrations/gemini/GEMINI.md")
         ),
         (
-            "commands/check.md",
-            include_str!("../integrations/gemini/commands/check.md")
-        ),
-        (
             "commands/check.toml",
             include_str!("../integrations/gemini/commands/check.toml")
-        ),
-        (
-            "commands/evolve.md",
-            include_str!("../integrations/gemini/commands/evolve.md")
         ),
         (
             "commands/evolve.toml",
             include_str!("../integrations/gemini/commands/evolve.toml")
         ),
         (
-            "commands/go.md",
-            include_str!("../integrations/gemini/commands/go.md")
-        ),
-        (
             "commands/go.toml",
             include_str!("../integrations/gemini/commands/go.toml")
-        ),
-        (
-            "commands/ship.md",
-            include_str!("../integrations/gemini/commands/ship.md")
         ),
         (
             "commands/ship.toml",
             include_str!("../integrations/gemini/commands/ship.toml")
         ),
         (
-            "commands/spec.md",
-            include_str!("../integrations/gemini/commands/spec.md")
-        ),
-        (
             "commands/spec.toml",
             include_str!("../integrations/gemini/commands/spec.toml")
-        ),
-        (
-            "commands/team.md",
-            include_str!("../integrations/gemini/commands/team.md")
         ),
         (
             "commands/team.toml",
             include_str!("../integrations/gemini/commands/team.toml")
         ),
         (
-            "commands/discover.md",
-            include_str!("../integrations/gemini/commands/discover.md")
-        ),
-        (
             "commands/discover.toml",
             include_str!("../integrations/gemini/commands/discover.toml")
-        ),
-        (
-            "commands/orbit.md",
-            include_str!("../integrations/gemini/commands/orbit.md")
         ),
         (
             "commands/orbit.toml",
@@ -1458,6 +1426,34 @@ fn interactive_menu_fallback() -> Vec<String> {
 
 // ── Canonical file generation ─────────────────────────────────────────────────
 
+/// Convert a Codex prompt .md into a Codex skill SKILL.md format.
+/// Extracts the description from YAML frontmatter and wraps the body.
+fn prompt_to_skill(name: &str, prompt_md: &str) -> String {
+    let (description, body) = if let Some(rest) = prompt_md.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let frontmatter = &rest[..end];
+        let desc = frontmatter
+            .lines()
+            .find_map(|line| line.strip_prefix("description:"))
+            .map(|d| d.trim().trim_matches('"'))
+            .unwrap_or(name);
+        let after = end + 4; // skip \n---
+        let b = if after < rest.len() && rest.as_bytes()[after] == b'\n' {
+            &rest[after + 1..]
+        } else if after < rest.len() {
+            &rest[after..]
+        } else {
+            ""
+        };
+        (desc.to_string(), b.to_string())
+    } else {
+        (name.to_string(), prompt_md.to_string())
+    };
+
+    format!("---\nname: {name}\ndescription: \"{description}\"\n---\n{body}")
+}
+
 /// Generate transformed canonical skill and agent files for a tool.
 /// Returns a Vec of (relative_path, content) pairs.
 fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
@@ -1474,6 +1470,21 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
             for (name, content) in CANONICAL_AGENTS {
                 let transformed = transform_agent(tool, name, content);
                 files.push((format!("agents/{}.md", name), transformed));
+            }
+            // Codex deprecated prompts/ in favor of skills/. Install command prompts
+            // as skills too so they appear as /check, /go, etc. in the Codex UI.
+            if tool == "codex" {
+                for (rel, content) in CODEX_FILES {
+                    if let Some(name) = rel.strip_prefix("prompts/")
+                        && name.ends_with(".md")
+                    {
+                        let skill_name = &name[..name.len() - 3];
+                        files.push((
+                            format!("skills/{}/SKILL.md", skill_name),
+                            prompt_to_skill(skill_name, content),
+                        ));
+                    }
+                }
             }
         }
         "cursor" => {
@@ -2141,7 +2152,12 @@ mod tests {
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"skills/tdd/SKILL.md"));
         assert!(paths.contains(&"agents/builder.md"));
-        assert_eq!(files.len(), 14 + 4); // 14 skills + 4 agents
+        // Command prompts also installed as skills for Codex
+        assert!(paths.contains(&"skills/go/SKILL.md"));
+        assert!(paths.contains(&"skills/orbit/SKILL.md"));
+        assert!(paths.contains(&"skills/check/SKILL.md"));
+        // 14 skills + 4 agents + 8 command-skills (from prompts/)
+        assert_eq!(files.len(), 14 + 4 + 8);
     }
 
     #[test]
