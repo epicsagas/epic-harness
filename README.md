@@ -66,7 +66,8 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 ### Claude Code (recommended)
 
 ```
-/plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+/plugin marketplace add epicsagas/plugins
+/plugin install epic@epicsagas
 ```
 
 Auto-installs the binary and registers all hooks in one step.
