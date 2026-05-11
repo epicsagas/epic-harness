@@ -320,6 +320,7 @@ jobs:
     needs:
       - plan
       - host
+    continue-on-error: true
     if: ${{ needs.plan.outputs.publishing == 'true' && !fromJson(needs.plan.outputs.val).announcement_is_prerelease }}
     runs-on: "ubuntu-22.04"
     steps:
