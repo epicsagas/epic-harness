@@ -43,14 +43,14 @@ tempfile = "3"
 serial_test = "3"
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.gz"
-pkg-fmt = "tgz"
-bin-dir = "{ bin }"
+pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.xz"
+pkg-fmt = "txz"
+bin-dir = "epic-harness-{ target }/{ bin }"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.zip"
 pkg-fmt = "zip"
-bin-dir = "epic-harness.exe"
+bin-dir = "epic-harness-{ target }/epic-harness.exe"
 
 [profile.release]
 opt-level = "s"
