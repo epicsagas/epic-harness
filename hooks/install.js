@@ -8,7 +8,7 @@
 "use strict";
 
 const { execSync, spawnSync } = require("child_process");
-const { createWriteStream, mkdirSync, chmodSync, existsSync } = require("fs");
+const { createWriteStream, mkdirSync, chmodSync, existsSync, readFileSync } = require("fs");
 const { join } = require("path");
 const https = require("https");
 const os = require("os");
@@ -23,8 +23,43 @@ function log(msg) {
 }
 
 function hasCommand(cmd) {
-  const r = spawnSync(cmd, ["--version"], { stdio: "ignore", shell: false });
+  const r = spawnSync(cmd, ["version"], { stdio: "pipe", shell: false });
   return r.status === 0;
+}
+
+function getBinaryVersion() {
+  try {
+    const r = spawnSync(BINARY, ["version"], { stdio: "pipe", shell: false });
+    if (r.status === 0) {
+      const output = r.stdout.toString().trim();
+      const match = output.match(/(\d+\.\d+\.\d+)/);
+      return match ? match[1] : null;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function getPluginVersion() {
+  try {
+    const manifestPath = join(
+      process.env.CLAUDE_PLUGIN_ROOT || "",
+      ".claude-plugin",
+      "plugin.json"
+    );
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    return manifest.version || null;
+  } catch (_) {}
+  return null;
+}
+
+function semverGt(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] > pb[i]) return true;
+    if (pa[i] < pb[i]) return false;
+  }
+  return false;
 }
 
 function downloadFile(url, dest) {
@@ -74,31 +109,49 @@ async function install() {
   }
 }
 
+function seed() {
+  const r = spawnSync(BINARY, ["install", "claude"], { stdio: "inherit" });
+  if (r.status !== 0) process.exit(r.status ?? 1);
+}
+
 async function main() {
-  // 1. Check if binary already exists
-  if (hasCommand(BINARY)) {
-    // Already installed — just seed skills/agents/commands/MCP
-    const r = spawnSync(BINARY, ["install", "claude"], {
-      stdio: "inherit",
-    });
-    if (r.status !== 0) process.exit(r.status ?? 1);
+  const pluginVersion = getPluginVersion();
+
+  // 1. Binary not found — fresh install
+  if (!hasCommand(BINARY)) {
+    log(`${BINARY} not found — installing...`);
+    try {
+      await install();
+    } catch (e) {
+      log(`Install failed: ${e.message}`);
+      log(`Install manually: https://github.com/${REPO}#installation`);
+      process.exit(0); // non-fatal — don't break the session
+    }
+    if (hasCommand(BINARY)) seed();
     return;
   }
 
-  // 2. Install binary
-  log(`${BINARY} not found — installing...`);
-  try {
-    await install();
-  } catch (e) {
-    log(`Install failed: ${e.message}`);
-    log(`Install manually: https://github.com/${REPO}#installation`);
-    process.exit(0); // non-fatal — don't break the session
+  // 2. Binary exists — check version
+  if (pluginVersion) {
+    const binaryVersion = getBinaryVersion();
+    if (binaryVersion && semverGt(pluginVersion, binaryVersion)) {
+      log(`Updating ${BINARY} ${binaryVersion} → ${pluginVersion}...`);
+      try {
+        await install();
+        const newVersion = getBinaryVersion();
+        if (newVersion) {
+          log(`Updated to ${newVersion}`);
+        }
+      } catch (e) {
+        log(`Update failed: ${e.message}`);
+        log(`Continuing with ${binaryVersion}`);
+        // non-fatal — old binary still works
+      }
+    }
   }
 
-  // 3. Seed after install
-  if (hasCommand(BINARY)) {
-    spawnSync(BINARY, ["install", "claude"], { stdio: "inherit" });
-  }
+  // 3. Seed skills/agents/commands/MCP
+  seed();
 }
 
 main().catch((e) => {
