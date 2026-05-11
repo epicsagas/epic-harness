@@ -17,5 +17,9 @@
     "tdd",
     "code-review",
     "automation"
-  ]
+  ],
+  "skills": "./registry/skills/",
+  "commands": "./registry/commands/",
+  "agents": "./registry/agents/",
+  "hooks": "./hooks/hooks.json"
 }
