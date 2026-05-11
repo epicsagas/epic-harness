@@ -64,19 +64,48 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 > **First time?** Read the [Quick Start Guide (5 min)](docs/quickstart.md).
 
 ```bash
-# Claude Code
+# Claude Code plugin (recommended — auto-installs binary + hooks)
 /plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
 
-# Any other tool
-cargo install epic-harness && epic install
+# macOS / Linux — pre-built binary, no Rust required
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+
+# Windows — pre-built binary, no Rust required
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+
+# Homebrew (macOS / Linux)
+brew install epicsagas/tap/epic-harness
+
+# cargo-binstall — pre-built binary via Rust toolchain
+cargo binstall epic-harness
+
+# cargo install — build from source (requires Rust toolchain)
+cargo install epic-harness
 ```
 
-| Environment | Method |
-|-------------|--------|
-| **Claude Code** | Plugin marketplace (above) |
-| **macOS** | `brew install epicsagas/tap/epic-harness` |
-| **Any (with Rust)** | `cargo install epic-harness` |
-| **From source** | `git clone` + `cargo install --path .` |
+Then run the setup wizard:
+
+```bash
+epic install          # Claude Code (default)
+epic install codex    # Codex CLI
+epic install gemini   # Gemini CLI
+```
+
+## Updating
+
+| Method | Command |
+|--------|---------|
+| Homebrew | `brew upgrade epic-harness` |
+| curl installer (macOS/Linux) | Re-run the install script above |
+| PowerShell installer (Windows) | Re-run the install command above |
+| cargo binstall | `cargo binstall epic-harness@latest` |
+| cargo install | `cargo install epic-harness@latest` |
+
+Verify the installed version:
+
+```bash
+epic-harness --version
+```
 
 Prerequisites: **Git**. Source/binary installs also need the [Rust toolchain](https://rustup.rs).
 
