@@ -171,7 +171,9 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "update" => unreachable!(),
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "update" => {
+            unreachable!()
+        }
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0

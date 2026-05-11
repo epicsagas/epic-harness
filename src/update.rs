@@ -78,7 +78,11 @@ fn install_binary() -> Option<PathBuf> {
     };
 
     let status = status.filter(|s| s.success()).or_else(|| {
-        if Command::new("cargo-binstall").arg("--version").output().is_ok() {
+        if Command::new("cargo-binstall")
+            .arg("--version")
+            .output()
+            .is_ok()
+        {
             Command::new("cargo-binstall")
                 .args(["-y", "--no-confirm", CRATE_NAME])
                 .status()
@@ -137,9 +141,16 @@ fn semver_gt(a: &str, b: &str) -> bool {
     let parse = |v: &str| -> Vec<u32> { v.split('.').filter_map(|s| s.parse().ok()).collect() };
     let (av, bv) = (parse(a), parse(b));
     for i in 0..3 {
-        let (ai, bi) = (av.get(i).copied().unwrap_or(0), bv.get(i).copied().unwrap_or(0));
-        if ai > bi { return true; }
-        if ai < bi { return false; }
+        let (ai, bi) = (
+            av.get(i).copied().unwrap_or(0),
+            bv.get(i).copied().unwrap_or(0),
+        );
+        if ai > bi {
+            return true;
+        }
+        if ai < bi {
+            return false;
+        }
     }
     false
 }
@@ -154,11 +165,21 @@ fn detect_install_method() -> InstallMethod {
     let s = exe.to_string_lossy();
 
     if (s.contains("/Cellar/") || s.contains("/opt/homebrew/"))
-        && Command::new("brew").args(["list", CRATE_NAME]).output().map(|o| o.status.success()).unwrap_or(false) {
+        && Command::new("brew")
+            .args(["list", CRATE_NAME])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    {
         return InstallMethod::Brew;
     }
     if s.contains(".cargo")
-        && Command::new("cargo").args(["install", "--list"]).output().map(|o| String::from_utf8_lossy(&o.stdout).contains(CRATE_NAME)).unwrap_or(false) {
+        && Command::new("cargo")
+            .args(["install", "--list"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(CRATE_NAME))
+            .unwrap_or(false)
+    {
         return InstallMethod::Cargo;
     }
     InstallMethod::Unknown
@@ -170,20 +191,48 @@ fn run_upgrade(method: &InstallMethod, latest: &str) -> io::Result<i32> {
     match method {
         InstallMethod::Brew => {
             eprintln!("[epic] Upgrading via Homebrew...");
-            let st = Command::new("brew").args(["upgrade", CRATE_NAME]).status()?;
-            if st.success() { eprintln!("[epic] Updated to {latest}"); } else { eprintln!("[epic] brew upgrade failed — try: brew upgrade {CRATE_NAME}"); }
+            let st = Command::new("brew")
+                .args(["upgrade", CRATE_NAME])
+                .status()?;
+            if st.success() {
+                eprintln!("[epic] Updated to {latest}");
+            } else {
+                eprintln!("[epic] brew upgrade failed — try: brew upgrade {CRATE_NAME}");
+            }
             Ok(st.code().unwrap_or(1))
         }
         InstallMethod::Cargo => {
-            if Command::new("cargo-binstall").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+            if Command::new("cargo-binstall")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+            {
                 eprintln!("[epic] Upgrading via cargo-binstall...");
-                let st = Command::new("cargo").args(["binstall", "-y", "--no-confirm", &format!("{CRATE_NAME}@{latest}")]).status()?;
-                if st.success() { eprintln!("[epic] Updated to {latest}"); } else { eprintln!("[epic] binstall failed — try: cargo binstall {CRATE_NAME}"); }
+                let st = Command::new("cargo")
+                    .args([
+                        "binstall",
+                        "-y",
+                        "--no-confirm",
+                        &format!("{CRATE_NAME}@{latest}"),
+                    ])
+                    .status()?;
+                if st.success() {
+                    eprintln!("[epic] Updated to {latest}");
+                } else {
+                    eprintln!("[epic] binstall failed — try: cargo binstall {CRATE_NAME}");
+                }
                 Ok(st.code().unwrap_or(1))
             } else {
                 eprintln!("[epic] Upgrading via cargo install...");
-                let st = Command::new("cargo").args(["install", &format!("{CRATE_NAME}@{latest}")]).status()?;
-                if st.success() { eprintln!("[epic] Updated to {latest}"); } else { eprintln!("[epic] cargo install failed — try: cargo install {CRATE_NAME}"); }
+                let st = Command::new("cargo")
+                    .args(["install", &format!("{CRATE_NAME}@{latest}")])
+                    .status()?;
+                if st.success() {
+                    eprintln!("[epic] Updated to {latest}");
+                } else {
+                    eprintln!("[epic] cargo install failed — try: cargo install {CRATE_NAME}");
+                }
                 Ok(st.code().unwrap_or(1))
             }
         }
@@ -199,15 +248,24 @@ fn run_upgrade(method: &InstallMethod, latest: &str) -> io::Result<i32> {
 // ── cooldown ────────────────────────────────────────────────────────
 
 fn should_check() -> bool {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-    let last = fs::read_to_string(sync_marker()).ok().and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let last = fs::read_to_string(sync_marker())
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .unwrap_or(0);
     now.saturating_sub(last) >= SYNC_COOLDOWN_SECS
 }
 
 fn touch_sync_marker() {
     let marker = sync_marker();
     let _ = fs::create_dir_all(marker.parent().unwrap_or(Path::new(".")));
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     let _ = fs::write(&marker, now.to_string());
 }
 
@@ -249,11 +307,19 @@ fn start_webui() {
     if Command::new("curl").args(["-sf", &url]).output().is_ok() {
         let browse_url = format!("http://localhost:{port}");
         #[cfg(target_os = "macos")]
-        { let _ = Command::new("open").arg(&browse_url).spawn(); }
+        {
+            let _ = Command::new("open").arg(&browse_url).spawn();
+        }
         #[cfg(target_os = "linux")]
-        { let _ = Command::new("xdg-open").arg(&browse_url).spawn(); }
+        {
+            let _ = Command::new("xdg-open").arg(&browse_url).spawn();
+        }
         #[cfg(target_os = "windows")]
-        { let _ = Command::new("cmd").args(["/c", "start", &browse_url]).spawn(); }
+        {
+            let _ = Command::new("cmd")
+                .args(["/c", "start", &browse_url])
+                .spawn();
+        }
     }
 }
 
@@ -280,7 +346,9 @@ pub fn run(args: &[String]) -> i32 {
                     let method = detect_install_method();
                     eprintln!("[epic] Detected: {}", method.label());
                     match run_upgrade(&method, &latest) {
-                        Ok(c) => { did_update = c == 0; }
+                        Ok(c) => {
+                            did_update = c == 0;
+                        }
                         Err(e) => eprintln!("[epic] Upgrade failed: {e}"),
                     }
                 }
@@ -290,7 +358,11 @@ pub fn run(args: &[String]) -> i32 {
     }
 
     // Re-resolve after potential update
-    let eh = if did_update { resolve_binary().unwrap_or(eh) } else { eh };
+    let eh = if did_update {
+        resolve_binary().unwrap_or(eh)
+    } else {
+        eh
+    };
 
     // --check: report version status only, skip side effects
     if check_only {

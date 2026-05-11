@@ -48,7 +48,8 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run audit
-        run: cargo audit
+        # RUSTSEC-2026-0009: time < 0.3.47 via tauri — ignored until tauri releases a fix
+        run: cargo audit --ignore RUSTSEC-2026-0009
 
   sbom:
     name: Generate SBOM

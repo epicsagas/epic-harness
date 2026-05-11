@@ -698,7 +698,9 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             local_dir: cwd.join(".gemini"),
             root_files: &["GEMINI.md"],
             files: GEMINI_FILES,
-            note: Some("GEMINI.md references ~/.harness/HARNESS.md via @-import. If GEMINI.md already exists, add `@~/.harness/HARNESS.md` manually."),
+            note: Some(
+                "GEMINI.md references ~/.harness/HARNESS.md via @-import. If GEMINI.md already exists, add `@~/.harness/HARNESS.md` manually.",
+            ),
             // Gemini CLI loads skills from ~/.gemini/skills/ — install directly there.
             alt_dir: None,
             alt_prefix: "",
@@ -2247,7 +2249,10 @@ mod tests {
                     if let Some(cmd_hooks) = entry["hooks"].as_array() {
                         for cmd_hook in cmd_hooks {
                             let cmd = cmd_hook["command"].as_str().unwrap_or("");
-                            assert!(!cmd.contains("setup.sh"), "setup.sh must be removed from command: {cmd}");
+                            assert!(
+                                !cmd.contains("setup.sh"),
+                                "setup.sh must be removed from command: {cmd}"
+                            );
                         }
                     }
                 }
