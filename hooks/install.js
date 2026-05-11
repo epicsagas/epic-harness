@@ -78,7 +78,7 @@ async function main() {
   // 1. Check if binary already exists
   if (hasCommand(BINARY)) {
     // Already installed — just seed skills/agents/commands/MCP
-    const r = spawnSync(BINARY, ["install", "claude", "--quiet"], {
+    const r = spawnSync(BINARY, ["install", "claude"], {
       stdio: "inherit",
     });
     if (r.status !== 0) process.exit(r.status ?? 1);
@@ -97,7 +97,7 @@ async function main() {
 
   // 3. Seed after install
   if (hasCommand(BINARY)) {
-    spawnSync(BINARY, ["install", "claude", "--quiet"], { stdio: "inherit" });
+    spawnSync(BINARY, ["install", "claude"], { stdio: "inherit" });
   }
 }
 
