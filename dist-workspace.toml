@@ -13,10 +13,10 @@ installers = ["shell", "powershell"]
 targets = [
   "aarch64-apple-darwin",
   "x86_64-apple-darwin",
-  "x86_64-unknown-linux-musl",
-  "aarch64-unknown-linux-musl",
+  "x86_64-unknown-linux-gnu",
+  "aarch64-unknown-linux-gnu",
   "x86_64-pc-windows-msvc",
 ]
 # Allow dirty (we manage additional jobs in release.yml)
 allow-dirty = ["ci"]
-macos-sign = true
+# macos-sign = true  # CODESIGN_* secrets not yet configured — disabled until cert is set up
