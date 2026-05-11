@@ -153,15 +153,13 @@ fn detect_install_method() -> InstallMethod {
     };
     let s = exe.to_string_lossy();
 
-    if s.contains("/Cellar/") || s.contains("/opt/homebrew/") {
-        if Command::new("brew").args(["list", CRATE_NAME]).output().map(|o| o.status.success()).unwrap_or(false) {
-            return InstallMethod::Brew;
-        }
+    if (s.contains("/Cellar/") || s.contains("/opt/homebrew/"))
+        && Command::new("brew").args(["list", CRATE_NAME]).output().map(|o| o.status.success()).unwrap_or(false) {
+        return InstallMethod::Brew;
     }
-    if s.contains(".cargo") {
-        if Command::new("cargo").args(["install", "--list"]).output().map(|o| String::from_utf8_lossy(&o.stdout).contains(CRATE_NAME)).unwrap_or(false) {
-            return InstallMethod::Cargo;
-        }
+    if s.contains(".cargo")
+        && Command::new("cargo").args(["install", "--list"]).output().map(|o| String::from_utf8_lossy(&o.stdout).contains(CRATE_NAME)).unwrap_or(false) {
+        return InstallMethod::Cargo;
     }
     InstallMethod::Unknown
 }
@@ -266,7 +264,7 @@ pub fn run(args: &[String]) -> i32 {
     let force = args.iter().any(|a| a == "--force");
 
     // ── resolve or install binary ────────────────────────────────
-    let eh = resolve_binary().or_else(|| install_binary());
+    let eh = resolve_binary().or_else(install_binary);
     let eh = match eh {
         Some(p) => p,
         None => return 1,
