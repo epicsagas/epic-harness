@@ -21,10 +21,6 @@ targets = [
 allow-dirty = ["ci"]
 macos-sign = false
 
-# Linux GTK/WebKit system dependencies for Tauri
-[dist.dependencies.apt]
-libgtk-3-dev = '*'
-libwebkit2gtk-4.1-dev = '*'
-libappindicator3-dev = '*'
-librsvg2-dev = '*'
-patchelf = '*'
+# NOTE: Linux GTK/WebKit dependencies are installed via explicit apt-get step in release.yml
+# cargo-dist truncates 'libwebkit2gtk-4.1-dev' to 'libwebkit2gtk-4' (bug) — do NOT use [dist.dependencies.apt]
+# [dist.dependencies.apt] is intentionally omitted; see release.yml 'Install Tauri Linux deps' step
