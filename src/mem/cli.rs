@@ -786,10 +786,6 @@ fn cmd_export(args: &[String]) -> io::Result<i32> {
 }
 
 fn find_epic_harness_binary() -> String {
-    // Prefer the currently-running binary path
-    if let Ok(exe) = std::env::current_exe() {
-        return exe.to_string_lossy().into_owned();
-    }
     "epic-harness".to_string()
 }
 

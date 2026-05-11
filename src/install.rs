@@ -1159,14 +1159,7 @@ fn inject_mcp_claude() {
         return;
     }
 
-    // On Linux, current_exe() may return a path ending in " (deleted)" when the
-    // binary has been replaced since startup.  Verify the path exists before
-    // embedding it in ~/.claude.json; fall back to the binary name on the PATH.
-    let binary = std::env::current_exe()
-        .ok()
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "epic".to_string());
+    let binary = "epic-harness";
 
     json["mcpServers"]["harness-mem"] = serde_json::json!({
         "command": binary,
@@ -1294,13 +1287,7 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 
     let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
 
-    // Use the current running binary path for reliability; fall back to bare name.
-    // Guard against Linux " (deleted)" paths when the binary was replaced at runtime.
-    let binary = std::env::current_exe()
-        .ok()
-        .filter(|p| p.exists())
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "epic".to_string());
+    let binary = "epic-harness";
 
     // opencode uses { "mcp": { "name": { type, command[] } } }
     // Others use { "mcpServers": { "name": { command, args[] } } }

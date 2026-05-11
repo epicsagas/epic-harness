@@ -65,6 +65,11 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
+    if subcmd == "--version" || subcmd == "-v" {
+        eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
+        std::process::exit(0);
+    }
+
     // install / telemetry: skip consent check (they set it).
     if subcmd == "install" {
         let code = install::run(&args[2..]);
@@ -209,7 +214,8 @@ fn main() {
             eprintln!("  uninstall    Remove harness from a supported AI tool");
             eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
             eprintln!("  path         Print the harness data directory");
-            eprintln!("  version      Print version\n");
+            eprintln!("  version      Print version");
+            eprintln!("  --version, -v  Print version\n");
             eprintln!("INSTALL TARGETS:  codex  gemini  cursor  opencode  cline  aider");
             eprintln!("  --local           Install in ./.claude/ instead of ~/.claude/");
             eprintln!("  --target <path>   Override install target directory");
