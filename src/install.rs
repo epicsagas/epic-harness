@@ -1031,7 +1031,7 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
                     continue;
                 };
                 // Plugin bootstrap cmd: when installed globally (not via plugin),
-                // binary is already on PATH — just run resume directly.
+                // binary is already on PATH — drop the install/seed step, just resume.
                 let next = if cmd.contains("setup.sh") || cmd.contains("epic-harness install claude") {
                     "epic-harness resume"
                 } else {
