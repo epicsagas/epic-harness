@@ -59,28 +59,42 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 
 ---
 
-## Install
+## Installation
 
 > **First time?** Read the [Quick Start Guide (5 min)](docs/quickstart.md).
 
-```bash
-# Claude Code plugin (recommended — auto-installs binary + hooks)
+### Claude Code (recommended)
+
+```
 /plugin marketplace add epicsagas/plugins && /plugin install epic@epicsagas
+```
 
-# macOS / Linux — pre-built binary, no Rust required
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+Auto-installs the binary and registers all hooks in one step.
 
-# Windows — pre-built binary, no Rust required
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+### macOS / Linux
 
-# Homebrew (macOS / Linux)
+```bash
 brew install epicsagas/tap/epic-harness
+```
 
-# cargo-binstall — pre-built binary via Rust toolchain
-cargo binstall epic-harness
+No Homebrew? Use the installer script:
 
-# cargo install — build from source (requires Rust toolchain)
-cargo install epic-harness
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+```
+
+### Windows
+
+```powershell
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+```
+
+### Via Rust toolchain
+
+```bash
+cargo binstall epic-harness   # pre-built binary (fast)
+cargo install epic-harness    # build from source
 ```
 
 Then run the setup wizard:
@@ -91,21 +105,7 @@ epic install codex    # Codex CLI
 epic install gemini   # Gemini CLI
 ```
 
-## Updating
-
-| Method | Command |
-|--------|---------|
-| Homebrew | `brew upgrade epic-harness` |
-| curl installer (macOS/Linux) | Re-run the install script above |
-| PowerShell installer (Windows) | Re-run the install command above |
-| cargo binstall | `cargo binstall epic-harness@latest` |
-| cargo install | `cargo install epic-harness@latest` |
-
-Verify the installed version:
-
-```bash
-epic-harness --version
-```
+> `epic-harness --version` to verify. Update with `brew upgrade epic-harness` or re-run the installer script.
 
 Prerequisites: **Git**. Source/binary installs also need the [Rust toolchain](https://rustup.rs).
 
