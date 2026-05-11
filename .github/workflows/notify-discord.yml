@@ -1,0 +1,31 @@
+name: Notify Discord
+on:
+  release:
+    types: [published]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          TAG: ${{ github.event.release.tag_name }}
+          URL: ${{ github.event.release.html_url }}
+          REPO: ${{ github.repository }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          curl -s --max-time 10 -X POST "$DISCORD_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\":[{
+                \"title\":\"$TAG Released\",
+                \"url\":\"$URL\",
+                \"color\":5763719,
+                \"fields\":[
+                  {\"name\":\"Repository\",\"value\":\"$REPO\",\"inline\":true},
+                  {\"name\":\"Prerelease\",\"value\":\"$PRERELEASE\",\"inline\":true}
+                ],
+                \"footer\":{\"text\":\"epic-harness release bot\"}
+              }]
+            }"
