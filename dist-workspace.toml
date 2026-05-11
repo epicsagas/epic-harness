@@ -20,4 +20,3 @@ targets = [
 # Allow dirty (we manage additional jobs in release.yml)
 allow-dirty = ["ci"]
 macos-sign = true
-macos-notarize = true
