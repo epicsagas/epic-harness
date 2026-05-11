@@ -1030,9 +1030,10 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
                 let Some(cmd) = cmd_hook.get_mut("command").and_then(|v| v.as_str()) else {
                     continue;
                 };
-                // setup.sh bootstrap: replace with bare PATH call when CLAUDE_PLUGIN_ROOT not set
-                let next = if cmd.contains("setup.sh") {
-                    "epic-harness update"
+                // Plugin bootstrap cmd: when installed globally (not via plugin),
+                // binary is already on PATH — just run resume directly.
+                let next = if cmd.contains("setup.sh") || cmd.contains("epic-harness install claude") {
+                    "epic-harness resume"
                 } else {
                     cmd
                 };
@@ -2261,10 +2262,10 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_claude_global_hooks_replaces_setup_hook_with_noop() {
+    fn test_sanitize_claude_global_hooks_replaces_bootstrap_with_resume() {
         let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
-        // setup.sh → epic-harness update (PATH-resolvable fallback)
-        assert!(out.contains("epic-harness update"));
+        // plugin bootstrap cmd → epic-harness resume (binary already on PATH when globally installed)
+        assert!(out.contains("epic-harness resume"));
     }
 
     // ── sync_plugin_cache ─────────────────────────────────────────────────────

@@ -7,15 +7,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ${CLAUDE_PLUGIN_ROOT:-.}/hooks/setup.sh",
+            "command": "command -v epic-harness >/dev/null 2>&1 || { if command -v brew >/dev/null 2>&1; then brew install epicsagas/tap/epic-harness; elif command -v cargo-binstall >/dev/null 2>&1; then cargo binstall -y epic-harness; elif command -v cargo >/dev/null 2>&1; then cargo install epic-harness; fi; epic-harness install claude --quiet; }; epic-harness resume",
             "async": true
-          },
-          {
-            "type": "command",
-            "command": "epic-harness resume"
           }
         ],
-        "description": "Bootstrap binary via setup.sh (install + update), then restore session context"
+        "description": "Install binary if missing, seed skills/agents/commands/MCP, restore session context"
       }
     ],
     "PreToolUse": [
