@@ -20,6 +20,11 @@
   ],
   "skills": "./registry/skills/",
   "commands": "./registry/commands/",
-  "agents": "./registry/agents/",
+  "agents": [
+    "./registry/agents/builder.md",
+    "./registry/agents/reviewer.md",
+    "./registry/agents/auditor.md",
+    "./registry/agents/planner.md"
+  ],
   "hooks": "./hooks/hooks.json"
 }
