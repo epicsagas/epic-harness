@@ -415,6 +415,8 @@ macro_rules! integration_files {
     };
 }
 
+static HARNESS_MD: &str = include_str!("../integrations/common/HARNESS.md");
+
 static CODEX_FILES: &[(&str, &str)] = integration_files!(
     "codex",
     [
@@ -696,7 +698,7 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             local_dir: cwd.join(".gemini"),
             root_files: &["GEMINI.md"],
             files: GEMINI_FILES,
-            note: Some("If GEMINI.md already exists, append the section manually."),
+            note: Some("GEMINI.md references ~/.harness/HARNESS.md via @-import. If GEMINI.md already exists, add `@~/.harness/HARNESS.md` manually."),
             // Gemini CLI loads skills from ~/.gemini/skills/ — install directly there.
             alt_dir: None,
             alt_prefix: "",
@@ -1014,7 +1016,6 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
         return content.to_string();
     };
 
-    let prefix = "EH=\"${CLAUDE_PLUGIN_ROOT}/hooks/bin/epic-harness\"; test -x \"$EH\" || ";
     for entries in hooks.values_mut() {
         let Some(entries_arr) = entries.as_array_mut() else {
             continue;
@@ -1027,13 +1028,15 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
                 let Some(cmd) = cmd_hook.get_mut("command").and_then(|v| v.as_str()) else {
                     continue;
                 };
-                let next = if cmd.contains("${CLAUDE_PLUGIN_ROOT}/hooks/setup.sh") {
-                    // Keep SessionStart valid without plugin context.
-                    ":"
+                // setup.sh bootstrap: replace with bare PATH call when CLAUDE_PLUGIN_ROOT not set
+                let next = if cmd.contains("setup.sh") {
+                    "epic-harness update"
                 } else {
-                    cmd.strip_prefix(prefix).unwrap_or(cmd)
+                    cmd
                 };
-                cmd_hook["command"] = serde_json::Value::String(next.to_string());
+                if next != cmd {
+                    cmd_hook["command"] = serde_json::Value::String(next.to_string());
+                }
             }
         }
     }
@@ -1691,36 +1694,47 @@ pub fn run(args: &[String]) -> i32 {
     }
 }
 
-/// Ensure `~/.harness/config.toml` exists. Creates it with the commented default
-/// template if absent. Never overwrites an existing config.
+/// Ensure `~/.harness/config.toml` and `~/.harness/HARNESS.md` exist.
+/// config.toml is write-once (never overwrites user edits).
+/// HARNESS.md uses write_or_sync — updated on binary upgrade, never removed on tool uninstall.
 fn ensure_global_config(dry_run: bool) {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| "/tmp".into());
     let harness_dir = std::path::Path::new(&home).join(".harness");
-    let config_path = harness_dir.join("config.toml");
 
-    if config_path.exists() {
-        return;
+    if !dry_run {
+        let _ = std::fs::create_dir_all(&harness_dir);
     }
-    if dry_run {
-        eprintln!(
-            "[harness] Would create {} with default configuration",
-            config_path.display()
-        );
-        return;
+
+    // config.toml: write-once
+    let config_path = harness_dir.join("config.toml");
+    if !config_path.exists() {
+        if dry_run {
+            eprintln!(
+                "[harness] Would create {} with default configuration",
+                config_path.display()
+            );
+        } else {
+            match std::fs::write(&config_path, crate::config::default_config_template()) {
+                Ok(_) => eprintln!(
+                    "[harness] Created {} with default configuration",
+                    config_path.display()
+                ),
+                Err(e) => eprintln!(
+                    "[harness] Warning: could not create {}: {}",
+                    config_path.display(),
+                    e
+                ),
+            }
+        }
     }
-    let _ = std::fs::create_dir_all(&harness_dir);
-    match std::fs::write(&config_path, crate::config::default_config_template()) {
-        Ok(_) => eprintln!(
-            "[harness] Created {} with default configuration",
-            config_path.display()
-        ),
-        Err(e) => eprintln!(
-            "[harness] Warning: could not create {}: {}",
-            config_path.display(),
-            e
-        ),
+
+    // HARNESS.md: write_or_sync — stays current with binary upgrades
+    let harness_md_path = harness_dir.join("HARNESS.md");
+    let status = write_or_sync(&harness_md_path, HARNESS_MD, dry_run);
+    if matches!(status, FileStatus::Added | FileStatus::Updated) {
+        eprintln!("[harness] Updated {}", harness_md_path.display());
     }
 }
 
@@ -2224,33 +2238,28 @@ mod tests {
     #[test]
     fn test_sanitize_claude_global_hooks_removes_plugin_root_refs() {
         let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
-        assert!(!out.contains("${CLAUDE_PLUGIN_ROOT}"));
         let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // All hook "command" fields must not reference setup.sh
         let hooks = json["hooks"].as_object().unwrap();
-        let mut found_path_fallback = false;
         for entries in hooks.values() {
-            if let Some(entries_arr) = entries.as_array() {
-                for entry in entries_arr {
+            if let Some(arr) = entries.as_array() {
+                for entry in arr {
                     if let Some(cmd_hooks) = entry["hooks"].as_array() {
                         for cmd_hook in cmd_hooks {
-                            if cmd_hook["command"]
-                                .as_str()
-                                .is_some_and(|cmd| cmd.contains("command -v epic-harness"))
-                            {
-                                found_path_fallback = true;
-                            }
+                            let cmd = cmd_hook["command"].as_str().unwrap_or("");
+                            assert!(!cmd.contains("setup.sh"), "setup.sh must be removed from command: {cmd}");
                         }
                     }
                 }
             }
         }
-        assert!(found_path_fallback);
     }
 
     #[test]
     fn test_sanitize_claude_global_hooks_replaces_setup_hook_with_noop() {
         let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
-        assert!(out.contains("\"command\": \":\""));
+        // setup.sh → epic-harness update (PATH-resolvable fallback)
+        assert!(out.contains("epic-harness update"));
     }
 
     // ── sync_plugin_cache ─────────────────────────────────────────────────────

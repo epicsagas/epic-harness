@@ -1,3 +1,4 @@
+<!-- Canonical source: ~/.harness/HARNESS.md (managed by epic-harness). Keep in sync when updating harness instructions. -->
 # epic-harness
 
 **CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.

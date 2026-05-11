@@ -1,3 +1,4 @@
+<!-- Note: For harness commands, auto-behaviors, and hook events, see ~/.harness/HARNESS.md (managed by epic-harness). -->
 # Coding Conventions (epic-harness)
 
 ## Core Rules
