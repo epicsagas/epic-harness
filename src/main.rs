@@ -9,6 +9,7 @@ mod serve;
 mod shared;
 mod team;
 mod telemetry;
+mod update;
 
 use std::env;
 use std::io::{self, IsTerminal, Read};
@@ -81,6 +82,10 @@ fn main() {
     }
     if subcmd == "telemetry" {
         let code = telemetry::run_cli(&args[2..]);
+        std::process::exit(code);
+    }
+    if subcmd == "update" {
+        let code = update::run(&args[2..]);
         std::process::exit(code);
     }
 
@@ -166,7 +171,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" => unreachable!(),
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "update" => unreachable!(),
         "path" => {
             println!("{}", hooks::common::harness_dir().display());
             0
@@ -212,6 +217,7 @@ fn main() {
             );
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");
+            eprintln!("  update       Self-update to the latest release");
             eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
             eprintln!("  path         Print the harness data directory");
             eprintln!("  version      Print version");
