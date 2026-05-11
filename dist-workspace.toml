@@ -19,4 +19,4 @@ targets = [
 ]
 # Allow dirty (we manage additional jobs in release.yml)
 allow-dirty = ["ci"]
-# macos-sign = true  # CODESIGN_* secrets not yet configured — disabled until cert is set up
+macos-sign = true
