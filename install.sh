@@ -29,7 +29,7 @@ if [ -z "${version}" ]; then
 fi
 
 base_url="https://github.com/${REPO}/releases/download/v${version}"
-archive="${BINARY}-${target}.tar.gz"
+archive="epic-harness-${target}.tar.xz"
 url="${base_url}/${archive}"
 sha_url="${base_url}/${archive}.sha256"
 
@@ -47,10 +47,10 @@ curl -fsSL "${sha_url}" -o "${tmpdir}/${archive}.sha256"
     || shasum -a 256 -c "${archive}.sha256") \
     || { echo "Error: SHA-256 verification failed" >&2; exit 1; }
 
-tar -xzf "${tmpdir}/${archive}" -C "${tmpdir}"
+tar -xJf "${tmpdir}/${archive}" -C "${tmpdir}"
 
 mkdir -p "${INSTALL_DIR}"
-mv "${tmpdir}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+mv "${tmpdir}/epic-harness-${target}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 chmod +x "${INSTALL_DIR}/${BINARY}"
 
 # ── Verify ────────────────────────────────────────────────────────────────────
