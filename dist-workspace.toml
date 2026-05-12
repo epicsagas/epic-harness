@@ -11,8 +11,8 @@ ci = "github"
 installers = []
 # shell/powershell installers are hand-written (install.sh / install.ps1) and uploaded as extra-artifacts
 extra-artifacts = [
-  { path = "install.sh",  kind = "installer" },
-  { path = "install.ps1", kind = "installer" },
+  { path = "install.sh",  kind = "installer", build = false },
+  { path = "install.ps1", kind = "installer", build = false },
 ]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
