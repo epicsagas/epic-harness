@@ -25,5 +25,5 @@
     "./registry/agents/reviewer.md",
     "./registry/agents/auditor.md",
     "./registry/agents/planner.md"
-  ],
+  ]
 }
