@@ -9,11 +9,6 @@ cargo-dist-version = "0.31.0"
 ci = "github"
 # The installers to generate for each app
 installers = []
-# shell/powershell installers are hand-written (install.sh / install.ps1) and uploaded as extra-artifacts
-extra-artifacts = [
-  { path = "install.sh",  kind = "installer", build = false },
-  { path = "install.ps1", kind = "installer", build = false },
-]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = [
   "aarch64-apple-darwin",
