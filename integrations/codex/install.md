@@ -29,25 +29,52 @@ cp hooks.json ~/.codex/hooks.json
 cp hooks.json .codex/hooks.json
 ```
 
-### 2. Prompts
+### 2. Skills
 
-Copy the prompt definitions so Codex can invoke them:
+Skills are seeded to `~/.codex/skills/` on `epic-harness install codex`.
+Each skill is a directory with `SKILL.md` + optional `agents/openai.yaml`:
 
-```bash
-# Global
-cp -r prompts/ ~/.codex/prompts/
-
-# Project-local
-cp -r prompts/ .codex/prompts/
+```
+~/.codex/skills/
+├── check/SKILL.md              # /check — verify everything
+├── go/SKILL.md                 # /go — build it
+├── ship/SKILL.md               # /ship — ship it
+├── evolve/SKILL.md             # /evolve — evolve skills
+├── spec/SKILL.md               # /spec — write spec
+├── team/SKILL.md               # /team — manage team
+├── discover/SKILL.md           # /discover — discover context
+├── orbit/SKILL.md              # /orbit — autonomous pipeline
+├── tdd/SKILL.md                # Auto-skill: TDD
+├── secure/SKILL.md             # Auto-skill: security
+├── verify/SKILL.md             # Auto-skill: verification
+├── simplify/SKILL.md           # Auto-skill: simplification
+├── perf/SKILL.md               # Auto-skill: performance
+├── commit/SKILL.md             # Auto-skill: commit
+├── document/SKILL.md           # Auto-skill: documentation
+├── debug/SKILL.md              # Auto-skill: debugging
+├── context/SKILL.md            # Auto-skill: context management
+├── council/SKILL.md            # Auto-skill: multi-voice review
+├── agent-introspection/SKILL.md # Auto-skill: failure recovery
+├── reflect/SKILL.md            # Auto-skill: session reflection
+├── discover/SKILL.md           # Auto-skill: codebase discovery
+├── orchestrate/SKILL.md        # Auto-skill: task orchestration
+├── auditor/SKILL.md            # Sub-agent: security + perf audit
+│   └── agents/openai.yaml
+├── builder/SKILL.md            # Sub-agent: TDD implementation
+│   └── agents/openai.yaml
+├── planner/SKILL.md            # Sub-agent: task planning
+│   └── agents/openai.yaml
+└── reviewer/SKILL.md           # Sub-agent: code review
+    └── agents/openai.yaml
 ```
 
-### 3. Skills
+> **Note**: `prompts/` is deprecated in Codex. All commands and agents are seeded as skills.
 
-> **Coming soon** — skill definitions will be added in a future release.
+### 3. Agents
 
-### 4. Agents
-
-> **Coming soon** — agent definitions will be added in a future release.
+Agents are seeded inside skills with `agents/openai.yaml` metadata (see above).
+Codex also supports standalone TOML agents at `~/.codex/agents/`, but epic-harness
+uses the skill-based approach for unified management.
 
 ## Hook Event Mapping
 

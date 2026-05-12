@@ -195,9 +195,11 @@ fn strip_frontmatter(md: &str) -> &str {
 }
 
 /// Transform a canonical agent for a specific tool.
+/// Only content-level transforms (addendums, platform-specific notes).
+/// Tool/model definitions are intentionally excluded — each platform uses its defaults.
 pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
     match tool {
-        "codex" => {
+        "codex" | "opencode" => {
             let addendum = match name {
                 "builder" => CODEX_AGENT_ADDENDUM_BUILDER,
                 "auditor" => CODEX_AGENT_ADDENDUM_AUDITOR,
@@ -208,20 +210,7 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
             format!("{}{}", canonical.trim_end(), addendum)
         }
         "gemini" => {
-            // Remap tools in frontmatter
-            let mut result = canonical
-                .replace(
-                    "tools: [Read, Edit, Write, Bash, Grep, Glob]",
-                    "tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]",
-                )
-                .replace(
-                    "tools: [Read, Grep, Glob, Bash]",
-                    "tools: [read_file, grep_search, glob, run_shell_command]",
-                )
-                .replace(
-                    "tools: [Read, Grep, Glob]",
-                    "tools: [read_file, grep_search, glob]",
-                );
+            let mut result = canonical.to_string();
 
             // Insert Gemini note after the first heading line
             let note = match name {
@@ -231,7 +220,6 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
                 _ => "",
             };
             if !note.is_empty() {
-                // Insert after first "# " heading line
                 if let Some(pos) = result.find("\n\n## ") {
                     result.insert_str(pos + 1, note);
                 }
@@ -260,7 +248,6 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
                     "### Execution Order\n- Batch 1 (parallel): Task 1, Task 3\n- Batch 2 (sequential): Task 2",
                     "### Execution Order (sequential)\n1. Task 1 \u{2192} Task 3 \u{2192} Task 2",
                 );
-                // Add Gemini note for planner (has unique placement)
                 if let Some(pos) = result.find("\n\n## Process") {
                     result.insert_str(
                         pos + 1,
@@ -269,54 +256,6 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
                 }
             }
 
-            result
-        }
-        "cursor" => {
-            // Add model: inherit before the closing --- of frontmatter.
-            // If a model: line already exists, replace it to avoid duplicate keys.
-            if let Some(start) = canonical.strip_prefix("---\n")
-                && let Some(end_pos) = start.find("\n---\n")
-            {
-                let frontmatter = &start[..end_pos];
-                let body = &start[end_pos + 4..]; // skip \n---\n
-                let fm = if let Some(mpos) = frontmatter.find("model:") {
-                    let before = &frontmatter[..mpos];
-                    let rest = &frontmatter[mpos..];
-                    let line_end = rest.find('\n').unwrap_or(rest.len());
-                    format!("{}model: inherit{}", before, &rest[line_end..])
-                } else {
-                    format!("{}\nmodel: inherit", frontmatter)
-                };
-                return format!("---\n{}\n---\n{}", fm, body);
-            }
-            canonical.to_string()
-        }
-        "opencode" => {
-            // OpenCode uses `permission:` with allow/deny, not `tools:` dict.
-            // Full-access agents: remove tools line (all allowed by default).
-            // Read-only agents: add permission: with deny rules for edit/write.
-            let mut result = canonical
-                .replace("tools: [Read, Edit, Write, Bash, Grep, Glob]\n", "")
-                .replace(
-                    "tools: [Read, Grep, Glob, Bash]\n",
-                    "permission:\n  edit: deny\n  write: deny\n",
-                )
-                .replace(
-                    "tools: [Read, Grep, Glob]\n",
-                    "permission:\n  edit: deny\n  write: deny\n  bash: deny\n",
-                );
-
-            // Add Codex sub-agent addendum (opencode uses same text)
-            let addendum = match name {
-                "builder" => CODEX_AGENT_ADDENDUM_BUILDER,
-                "auditor" => CODEX_AGENT_ADDENDUM_AUDITOR,
-                "planner" => CODEX_AGENT_ADDENDUM_PLANNER,
-                "reviewer" => CODEX_AGENT_ADDENDUM_REVIEWER,
-                _ => "",
-            };
-            if !addendum.is_empty() {
-                result = format!("{}{}", result.trim_end(), addendum);
-            }
             result
         }
         _ => canonical.to_string(),
@@ -429,43 +368,42 @@ static CODEX_FILES: &[(&str, &str)] = integration_files!(
             "config.toml",
             include_str!("../integrations/codex/config.toml")
         ),
-        // Prompts are the Codex slash-command mechanism (~/.codex/prompts/).
-        // Note: Codex marks prompts as deprecated in favour of skills, but they
-        // still provide named /prompts:check etc. shortcuts in the CLI/IDE UI.
-        (
-            "prompts/check.md",
-            include_str!("../integrations/codex/prompts/check.md")
-        ),
-        (
-            "prompts/evolve.md",
-            include_str!("../integrations/codex/prompts/evolve.md")
-        ),
-        (
-            "prompts/go.md",
-            include_str!("../integrations/codex/prompts/go.md")
-        ),
-        (
-            "prompts/ship.md",
-            include_str!("../integrations/codex/prompts/ship.md")
-        ),
-        (
-            "prompts/spec.md",
-            include_str!("../integrations/codex/prompts/spec.md")
-        ),
-        (
-            "prompts/team.md",
-            include_str!("../integrations/codex/prompts/team.md")
-        ),
-        (
-            "prompts/discover.md",
-            include_str!("../integrations/codex/prompts/discover.md")
-        ),
-        (
-            "prompts/orbit.md",
-            include_str!("../integrations/codex/prompts/orbit.md")
-        ),
     ]
 );
+
+/// Codex command-skills: converted from deprecated prompts/ to skills/ format at install time.
+/// Each entry is (skill_name, source_markdown_with_frontmatter).
+static CODEX_COMMAND_SKILLS: &[(&str, &str)] = &[
+    (
+        "check",
+        include_str!("../integrations/codex/prompts/check.md"),
+    ),
+    (
+        "evolve",
+        include_str!("../integrations/codex/prompts/evolve.md"),
+    ),
+    ("go", include_str!("../integrations/codex/prompts/go.md")),
+    (
+        "ship",
+        include_str!("../integrations/codex/prompts/ship.md"),
+    ),
+    (
+        "spec",
+        include_str!("../integrations/codex/prompts/spec.md"),
+    ),
+    (
+        "team",
+        include_str!("../integrations/codex/prompts/team.md"),
+    ),
+    (
+        "discover",
+        include_str!("../integrations/codex/prompts/discover.md"),
+    ),
+    (
+        "orbit",
+        include_str!("../integrations/codex/prompts/orbit.md"),
+    ),
+];
 
 static GEMINI_FILES: &[(&str, &str)] = integration_files!(
     "gemini",
@@ -663,10 +601,6 @@ struct ToolConfig {
     files: &'static [(&'static str, &'static str)],
     /// Extra note shown after install
     note: Option<&'static str>,
-    /// Files whose relative path starts with this prefix are written to `alt_dir` instead of
-    /// `global_dir`. Used to route `skills/` to `~/.agents/skills/` for Codex and Gemini.
-    alt_dir: Option<PathBuf>,
-    alt_prefix: &'static str,
     /// Files that should never be overwritten if they already exist (e.g. config.toml).
     /// Unlike root_files these live inside the tool dir, not in cwd.
     preserve_files: &'static [&'static str],
@@ -685,10 +619,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &[],
             files: CODEX_FILES,
             note: None,
-            // Codex discovers skills from ~/.agents/skills/, not ~/.codex/skills/.
-            // See: https://developers.openai.com/codex/skills
-            alt_dir: Some(PathBuf::from(&home).join(".agents")),
-            alt_prefix: "skills/",
             // config.toml may contain user-customised settings — never overwrite.
             preserve_files: &["config.toml"],
             executable_files: &[],
@@ -701,9 +631,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             note: Some(
                 "GEMINI.md references ~/.harness/HARNESS.md via @-import. If GEMINI.md already exists, add `@~/.harness/HARNESS.md` manually.",
             ),
-            // Gemini CLI loads skills from ~/.gemini/skills/ — install directly there.
-            alt_dir: None,
-            alt_prefix: "",
             preserve_files: &[],
             executable_files: &[],
         }),
@@ -713,8 +640,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &[],
             files: CURSOR_FILES,
             note: Some("Requires Cursor 1.7+"),
-            alt_dir: None,
-            alt_prefix: "",
             preserve_files: &[],
             executable_files: &[],
         }),
@@ -724,8 +649,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &[],
             files: OPENCODE_FILES,
             note: Some("Place plugins/epic-harness.js in your OpenCode plugin directory."),
-            alt_dir: None,
-            alt_prefix: "",
             preserve_files: &[],
             executable_files: &[],
         }),
@@ -741,8 +664,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
                 "Hook scripts have been made executable. \
                  For global hooks, also copy hooks/ to ~/Documents/Cline/Rules/Hooks/.",
             ),
-            alt_dir: None,
-            alt_prefix: "",
             preserve_files: &[],
             executable_files: &[
                 "hooks/PreToolUse",
@@ -762,8 +683,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &[],
             files: AIDER_FILES,
             note: Some("No hook system available. Conventions are loaded via .aider.conf.yml."),
-            alt_dir: None,
-            alt_prefix: "",
             preserve_files: &[".aider.conf.yml"],
             executable_files: &[],
         }),
@@ -776,8 +695,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             note: Some(
                 "Installs hooks in ~/.claude/settings.json and registers harness-mem MCP server in ~/.claude.json.",
             ),
-            alt_dir: None,
-            alt_prefix: "",
             preserve_files: &[],
             executable_files: &[],
         }),
@@ -1450,13 +1367,69 @@ fn prompt_to_skill(name: &str, prompt_md: &str) -> String {
     format!("---\nname: {name}\ndescription: \"{description}\"\n---\n{body}")
 }
 
+/// Generate a minimal `agents/openai.yaml` for a Codex agent-skill.
+/// Only includes interface metadata — no tools, no model, no dependencies.
+fn generate_codex_agent_yaml(name: &str, description: &str) -> String {
+    let display_name = match name {
+        "auditor" => "Auditor",
+        "builder" => "Builder",
+        "planner" => "Planner",
+        "reviewer" => "Reviewer",
+        _ => name,
+    };
+    format!(
+        "interface:\n  display_name: \"{}\"\n  short_description: \"{}\"\npolicy:\n  allow_implicit_invocation: false\n",
+        display_name, description
+    )
+}
+
+/// Extract the description from YAML frontmatter.
+fn extract_description(md: &str) -> String {
+    if let Some(rest) = md.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let frontmatter = &rest[..end];
+        for line in frontmatter.lines() {
+            if let Some(desc) = line.strip_prefix("description:") {
+                return desc.trim().trim_matches('"').to_string();
+            }
+        }
+    }
+    String::new()
+}
+
 /// Generate transformed canonical skill and agent files for a tool.
 /// Returns a Vec of (relative_path, content) pairs.
 fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
     let mut files = Vec::new();
 
     match tool {
-        "codex" | "gemini" => {
+        "codex" => {
+            // Skills: transformed canonical + memory integration
+            for (name, content) in CANONICAL_SKILLS {
+                let transformed = transform_skill(tool, name, content);
+                files.push((format!("skills/{}/SKILL.md", name), transformed));
+            }
+            // Agents: seeded as skills with openai.yaml sub-agent metadata
+            // Codex uses skills/<name>/SKILL.md + skills/<name>/agents/openai.yaml
+            for (name, content) in CANONICAL_AGENTS {
+                let transformed = transform_agent(tool, name, content);
+                files.push((format!("skills/{}/SKILL.md", name), transformed));
+                let description = extract_description(content);
+                let yaml = generate_codex_agent_yaml(name, &description);
+                files.push((format!("skills/{}/agents/openai.yaml", name), yaml));
+            }
+            // Command-skills: converted from deprecated prompts/ to skills/ format.
+            // Prompts are no longer seeded to ~/.codex/prompts/ — skills/ is the
+            // only mechanism. These appear as /check, /go, etc. in the Codex UI.
+            for (name, content) in CODEX_COMMAND_SKILLS {
+                files.push((
+                    format!("skills/{}/SKILL.md", name),
+                    prompt_to_skill(name, content),
+                ));
+            }
+        }
+        "gemini" => {
             // Skills: transformed canonical + memory integration
             for (name, content) in CANONICAL_SKILLS {
                 let transformed = transform_skill(tool, name, content);
@@ -1466,21 +1439,6 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
             for (name, content) in CANONICAL_AGENTS {
                 let transformed = transform_agent(tool, name, content);
                 files.push((format!("agents/{}.md", name), transformed));
-            }
-            // Codex deprecated prompts/ in favor of skills/. Install command prompts
-            // as skills too so they appear as /check, /go, etc. in the Codex UI.
-            if tool == "codex" {
-                for (rel, content) in CODEX_FILES {
-                    if let Some(name) = rel.strip_prefix("prompts/")
-                        && name.ends_with(".md")
-                    {
-                        let skill_name = &name[..name.len() - 3];
-                        files.push((
-                            format!("skills/{}/SKILL.md", skill_name),
-                            prompt_to_skill(skill_name, content),
-                        ));
-                    }
-                }
             }
         }
         "cursor" => {
@@ -1533,19 +1491,6 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         eprintln!("[harness] Note: {note}");
     }
 
-    // Resolve alt_dir for --local installs
-    let alt_target: Option<PathBuf> = cfg.alt_dir.as_ref().map(|global_alt| {
-        if local {
-            cwd.join(
-                global_alt
-                    .file_name()
-                    .unwrap_or(std::ffi::OsStr::new("agents")),
-            )
-        } else {
-            global_alt.clone()
-        }
-    });
-
     // Generate canonical files (transformed skills + agents)
     let canonical = generate_canonical_files(tool);
     let total_files = cfg.files.len() + canonical.len();
@@ -1560,15 +1505,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
             content
         };
 
-        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
-            if let Some(alt) = &alt_target {
-                alt.join(rel)
-            } else if cfg.root_files.contains(rel) {
-                cwd.join(rel)
-            } else {
-                target_dir.join(rel)
-            }
-        } else if cfg.root_files.contains(rel) {
+        let dest = if cfg.root_files.contains(rel) {
             cwd.join(rel)
         } else {
             target_dir.join(rel)
@@ -1590,16 +1527,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 
     // Write generated canonical files (skills + agents)
     for (rel, content) in &canonical {
-        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
-            if let Some(alt) = &alt_target {
-                alt.join(rel)
-            } else {
-                target_dir.join(rel)
-            }
-        } else {
-            target_dir.join(rel)
-        };
-
+        let dest = target_dir.join(rel);
         let status = write_or_sync(&dest, content, dry_run);
         progress.tick(rel, status);
     }
@@ -1769,17 +1697,6 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         &cfg.global_dir
     };
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let alt_target: Option<PathBuf> = cfg.alt_dir.as_ref().map(|global_alt| {
-        if local {
-            cwd.join(
-                global_alt
-                    .file_name()
-                    .unwrap_or(std::ffi::OsStr::new("agents")),
-            )
-        } else {
-            global_alt.clone()
-        }
-    });
 
     let mut removed = 0usize;
     let mut skipped = 0usize;
@@ -1789,14 +1706,7 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let all_files: Vec<(&str, &str)> = cfg.files.to_vec();
 
     for (rel, _) in &all_files {
-        // Resolve destination path (mirrors install logic)
-        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
-            if let Some(alt) = &alt_target {
-                alt.join(rel)
-            } else {
-                target_dir.join(rel)
-            }
-        } else if cfg.root_files.contains(rel) {
+        let dest = if cfg.root_files.contains(rel) {
             cwd.join(rel)
         } else {
             target_dir.join(rel)
@@ -1824,15 +1734,7 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 
     // Also remove canonical generated files
     for (rel, _) in &canonical {
-        let dest = if !cfg.alt_prefix.is_empty() && rel.starts_with(cfg.alt_prefix) {
-            if let Some(alt) = &alt_target {
-                alt.join(rel)
-            } else {
-                target_dir.join(rel)
-            }
-        } else {
-            target_dir.join(rel)
-        };
+        let dest = target_dir.join(rel);
 
         if dest.exists() {
             if !dry_run {
@@ -2051,47 +1953,33 @@ mod tests {
         let result = transform_agent("codex", "builder", AGENT_BUILDER);
         assert!(result.contains("Invoking as a Codex Sub-agent"));
         assert!(result.contains("parallel task execution"));
-    }
-
-    #[test]
-    fn test_transform_agent_gemini_remaps_tools() {
-        let result = transform_agent("gemini", "builder", AGENT_BUILDER);
-        assert!(result.contains(
-            "tools: [read_file, replace, write_file, run_shell_command, grep_search, glob]"
-        ));
-        assert!(!result.contains("tools: [Read, Edit, Write, Bash, Grep, Glob]"));
+        // No tools in frontmatter — platforms use their defaults
+        assert!(!result.contains("tools:"));
     }
 
     #[test]
     fn test_transform_agent_gemini_adds_note() {
         let result = transform_agent("gemini", "builder", AGENT_BUILDER);
         assert!(result.contains("Gemini CLI note"));
+        // No tool remapping — platforms use their defaults
+        assert!(!result.contains("tools: [read_file"));
     }
 
     #[test]
-    fn test_transform_agent_cursor_adds_model_inherit() {
+    fn test_transform_agent_cursor_identity() {
+        // Cursor transform is now identity (no model: inherit injection)
         let result = transform_agent("cursor", "builder", AGENT_BUILDER);
-        assert!(result.contains("model: inherit"));
-        // Verify frontmatter is valid
-        assert!(result.starts_with("---\n"));
-        assert!(result.contains("\nmodel: inherit\n---\n"));
+        assert!(!result.contains("model: inherit"));
+        assert!(!result.contains("tools:"));
     }
 
     #[test]
-    fn test_transform_agent_opencode_yaml_tools() {
+    fn test_transform_agent_opencode_adds_addendum() {
         let result = transform_agent("opencode", "builder", AGENT_BUILDER);
-        // Full-access agent: tools line removed (all allowed by default)
-        assert!(!result.contains("tools: [Read"));
-        assert!(!result.contains("tools:\n"));
+        assert!(result.contains("Invoking as a Codex Sub-agent"));
+        // No permission mapping — platforms use their defaults
         assert!(!result.contains("permission:"));
-    }
-
-    #[test]
-    fn test_transform_agent_opencode_readonly_tools() {
-        let result = transform_agent("opencode", "auditor", AGENT_AUDITOR);
-        assert!(result.contains("permission:\n  edit: deny\n  write: deny"));
-        assert!(!result.contains("tools: [Read"));
-        assert!(!result.contains("bash: deny")); // auditor has Bash access
+        assert!(!result.contains("tools:"));
     }
 
     #[test]
@@ -2158,13 +2046,23 @@ mod tests {
         let files = generate_canonical_files("codex");
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"skills/tdd/SKILL.md"));
-        assert!(paths.contains(&"agents/builder.md"));
+        // Agents are seeded as skills with openai.yaml sub-agent metadata
+        assert!(paths.contains(&"skills/builder/SKILL.md"));
+        assert!(paths.contains(&"skills/builder/agents/openai.yaml"));
+        assert!(paths.contains(&"skills/auditor/SKILL.md"));
+        assert!(paths.contains(&"skills/auditor/agents/openai.yaml"));
+        assert!(paths.contains(&"skills/planner/SKILL.md"));
+        assert!(paths.contains(&"skills/planner/agents/openai.yaml"));
+        assert!(paths.contains(&"skills/reviewer/SKILL.md"));
+        assert!(paths.contains(&"skills/reviewer/agents/openai.yaml"));
+        // No separate agents/ directory — agents are inside skills/
+        assert!(!paths.iter().any(|p| p.starts_with("agents/")));
         // Command prompts also installed as skills for Codex
         assert!(paths.contains(&"skills/go/SKILL.md"));
         assert!(paths.contains(&"skills/orbit/SKILL.md"));
         assert!(paths.contains(&"skills/check/SKILL.md"));
-        // 14 skills + 4 agents + 8 command-skills (from prompts/)
-        assert_eq!(files.len(), 14 + 4 + 8);
+        // 14 skills + (4 agent-skills × 2: SKILL.md + openai.yaml) + 8 command-skills = 30
+        assert_eq!(files.len(), 14 + 4 * 2 + 8);
     }
 
     #[test]
