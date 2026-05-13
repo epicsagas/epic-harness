@@ -217,6 +217,14 @@ Skills trigger automatically based on context. You don't invoke them.
 | **agent-introspection** | 3+ consecutive failures or circular retry pattern |
 | **reflect** | On-demand: are you using AI as a thought amplifier? Cold evidence-based self-assessment |
 
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 15 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+>
+> ```json
+> "skillListingBudgetFraction": 0.02
+> ```
+>
+> Use `0.03` if you have 20+ skills installed.
+
 ---
 
 ## Evolve (Ring 3)
