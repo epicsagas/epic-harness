@@ -2,7 +2,7 @@
 
 > 생성일: 2026-05-07
 > 대상 제품: epic-harness · Episteme · claudy
-> 저장소: Alcove `/Users/hackme/.alcove/docs/epiccounty/reports/`
+> 저장소: Alcove `~/.alcove/docs/epiccounty/reports/`
 
 ---
 
@@ -87,4 +87,4 @@
 
 ---
 
-**저장 경로:** `/Users/hackme/.alcove/docs/epiccounty/reports/`
+**저장 경로:** `~/.alcove/docs/epiccounty/reports/`

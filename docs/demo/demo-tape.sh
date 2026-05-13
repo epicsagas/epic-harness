@@ -232,7 +232,7 @@ echo "$ claudy zai --yolo"
 echo ""
 sleep 1
 
-CLAUDE_CODE_HIDE_ACCOUNT_INFO=1 CLAUDE_HOME="/Users/hackme/workspace" claudy zai --yolo
+CLAUDE_CODE_HIDE_ACCOUNT_INFO=1 CLAUDE_HOME="$HOME/workspace" claudy zai --yolo
 
 # ── Outro (after Claude Code exits) ───────────────────
 cd - > /dev/null
