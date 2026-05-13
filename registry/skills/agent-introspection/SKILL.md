@@ -1,6 +1,6 @@
 ---
 name: agent-introspection
-description: "Use when the agent is stuck in a loop, repeated failures occur, or context seems overwhelming — triggers on 3+ consecutive failures, circular retry patterns, and unproductive debugging sessions."
+description: "Trigger: 3+ consecutive failures, circular retries, or overwhelming context. Breaks loops."
 ---
 
 # Agent Introspection — Systematic Self-Diagnosis

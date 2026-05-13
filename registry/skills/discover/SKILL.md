@@ -1,6 +1,6 @@
 ---
 name: discover
-description: "Use when the user's request is vague, unfocused, or presents a solution without a clear problem — triggers on ambiguous goals, feature requests without context, and unfocused complaints."
+description: "Trigger: vague/unfocused request or solution-without-problem. Reframes goal before acting."
 ---
 
 # Discover — Problem Discovery

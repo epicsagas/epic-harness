@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: "Auto-triggered during active orchestration. Provides coordination protocol: inbox reading, dependency checking, message formatting, and handoff rules for multi-agent execution."
+description: "Trigger: active multi-agent run. Handles inbox reading, dep resolution, message formatting, handoffs."
 ---
 
 # Skill: Orchestrate

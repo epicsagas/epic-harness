@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: "Cold, evidence-based assessment of whether AI is used as a thought amplifier — not just a code executor. Scores 5 dimensions (Thought Amplification, Self-Improvement, Metacognitive Expansion, Prompt Engineering, Execution Efficiency) from harness-native data (obs logs, evolution, metrics, memory). Trigger: /reflect or AI usage self-assessment."
+description: "Trigger: /reflect or AI usage review. Scores 5 dims (amplification/improvement/metacognition/prompts/efficiency) from harness data."
 ---
 
 # Reflect — AI Thought-Amplifier Self-Assessment

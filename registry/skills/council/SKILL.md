@@ -1,6 +1,6 @@
 ---
 name: council
-description: "Use when facing ambiguous decisions with significant trade-offs — triggers on architecture choices, technology selection, and design decisions with no clear right answer."
+description: "Trigger: architecture, tech selection, or design decisions with significant trade-offs and no clear answer."
 ---
 
 # Council — Structured Multi-Voice Decision Making

@@ -1,6 +1,6 @@
 ---
 name: _dispatch
-description: "Core engine. Active at all times. Reads context and auto-invokes the right skill before any response. Triggers confusion protocol on high-risk ambiguity."
+description: "Core router. Always active. Auto-invokes matching skill before every response. Runs confusion protocol on high-risk ambiguity."
 ---
 
 # Skill Dispatch Engine

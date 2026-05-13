@@ -1,6 +1,6 @@
 ---
 name: document
-description: "Use when a public API, function, or module is added or changed — triggers on new exports, signature changes, and module-level additions."
+description: "Trigger: public API/function/module added or changed — new exports, signature changes, module additions."
 ---
 
 # Document — Auto-Documentation

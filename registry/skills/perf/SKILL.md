@@ -1,6 +1,6 @@
 ---
 name: perf
-description: "Use when writing loops, database queries, rendering logic, or data processing — triggers on loop constructs, query builders, list rendering, and batch operations."
+description: "Trigger: loops, DB queries, rendering, or batch ops. Catches N+1, missing indexes, unnecessary re-renders."
 ---
 
 # Perf — Performance Review

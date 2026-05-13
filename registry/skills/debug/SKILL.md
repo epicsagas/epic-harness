@@ -1,6 +1,6 @@
 ---
 name: debug
-description: "Use when a test fails, error occurs, or behavior is unexpected — triggers on test failures, runtime errors, and unexpected outputs."
+description: "Trigger: test failure, runtime error, or unexpected behavior. Systematic root-cause isolation."
 ---
 
 # Debug — Systematic Debugging

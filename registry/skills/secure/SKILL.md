@@ -1,6 +1,6 @@
 ---
 name: secure
-description: "Use when auth, database, API, infrastructure, or secrets-related code is modified — triggers on authentication, SQL queries, API endpoints, environment variables, and infrastructure config."
+description: "Trigger: auth, DB, API, infra, or secrets code touched — SQL, endpoints, env vars, infra config."
 ---
 
 # Secure — Security Review

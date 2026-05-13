@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: "Use when a file exceeds 200 lines, has high complexity, or contains duplication — triggers on large files, deep nesting, and copy-pasted code."
+description: "Trigger: file >200 lines, high complexity, or duplication — deep nesting, copy-paste, god functions."
 ---
 
 # Simplify — Code Simplification

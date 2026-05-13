@@ -1,6 +1,6 @@
 ---
 name: verify
-description: "Pre-completion verification. Use before marking any task done, before /ship, or before reporting success. Build + test + lint must all pass."
+description: "Trigger: before marking done or /ship. Build + test + lint must all pass."
 ---
 
 # Verify — Pre-Completion Check

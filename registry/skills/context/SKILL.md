@@ -1,6 +1,6 @@
 ---
 name: context
-description: "Context window management. Triggers when context > 70%, conversation has many tool calls, or before starting a large new task. Preserves task state to $HARNESS_DIR/sessions/, generates a compaction summary, and relies on the resume hook to reload snapshot + memory + evolved skills."
+description: "Context window manager. Trigger: context >70% or large new task. Snapshots state, compacts, resumes via hook."
 ---
 
 # Context — Context Window Management

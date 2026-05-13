@@ -1,6 +1,6 @@
 ---
 name: commit
-description: "Conventional Commits generator. Triggers when user says commit / save / check in. Runs git status + diff + log in parallel, infers type(scope): description in CC 1.0.0 format, stages only relevant files, and executes the commit. Never uses --no-verify."
+description: "CC 1.0.0 commit generator. Trigger: commit/save. Stages relevant files, infers type(scope): desc, never --no-verify."
 ---
 
 # Commit — Conventional Commits Generator
