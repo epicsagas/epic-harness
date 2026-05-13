@@ -1,5 +1,6 @@
 //! mem/mod.rs — Cross-Agent Unified Memory System
 
+pub mod axum_server;
 pub mod cli;
 pub mod graph;
 pub mod mcp;

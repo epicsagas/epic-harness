@@ -1,4 +1,5 @@
-//! server.rs — tiny_http based REST API server
+//! server.rs — tiny_http based REST API server (legacy; superseded by axum_server.rs)
+#![allow(dead_code)]
 
 use std::cell::RefCell;
 use std::io::{Cursor, Read as _};
@@ -362,6 +363,25 @@ pub fn serve(args: &[String]) -> i32 {
 }
 
 // ── Helpers ───────────────────────────────────────────
+
+/// Public wrapper for axum_server: create a new node using a shared connection.
+pub fn handle_post_node_conn_inner(body: &str, conn: &Connection) -> Result<String, String> {
+    handle_post_node_conn(body, conn)
+}
+
+/// Public wrapper for axum_server: update a node using a shared connection.
+pub fn handle_put_node_conn_inner(id: &str, body: &str, conn: &Connection) -> Result<(), String> {
+    handle_put_node_conn(id, body, conn)
+}
+
+/// Public wrapper for axum_server: create an edge using a shared connection.
+pub fn handle_post_edge_inner(body: &str, conn: &Connection) -> Result<String, String> {
+    use super::store::append_edge_conn;
+    let edge = parse_edge_payload(body)?;
+    let id = edge.id.clone();
+    append_edge_conn(conn, &edge).map_err(|e| e.to_string())?;
+    Ok(id)
+}
 
 /// Create a new node using a shared connection (avoids per-request open_db).
 fn handle_post_node_conn(body: &str, conn: &Connection) -> Result<String, String> {

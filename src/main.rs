@@ -1,4 +1,5 @@
 mod config;
+mod episteme_client;
 mod evolve;
 mod hooks;
 mod install;

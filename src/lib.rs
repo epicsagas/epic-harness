@@ -1,4 +1,5 @@
 pub mod config;
+pub mod episteme_client;
 pub mod evolve;
 pub mod hooks;
 pub mod install;

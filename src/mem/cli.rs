@@ -273,7 +273,7 @@ pub fn dispatch(args: &[String]) -> i32 {
         "recall" => cmd_recall(&args[1..]),
         "mcp" => return super::mcp::run_mcp_server(),
         "mcp-install" => cmd_mcp_install(&args[1..]),
-        "serve" => return super::server::serve(&args[1..]),
+        "serve" => return super::axum_server::serve_axum(&args[1..]),
         "help" | "--help" | "-h" => {
             print_help();
             return 0;

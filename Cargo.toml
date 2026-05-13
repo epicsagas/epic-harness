@@ -38,9 +38,15 @@ uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
 rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
 
+# harness-mem axum server (M1)
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
 [dev-dependencies]
 tempfile = "3"
 serial_test = "3"
+axum-test = "20"
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.xz"

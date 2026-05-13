@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 
 use super::common::*;
 use crate::config::CONFIG;
+use crate::episteme_client::{self, InsightPayload};
 use crate::evolve;
 use crate::mem::store;
 use crate::shared::{evolution::*, helpers::*, obs::ObsRecord, paths::*};
@@ -789,6 +790,14 @@ pub fn run(_input: &HookInput) -> i32 {
     // 8. Memory auto-ingest (knowledge graph)
     let (mem_nodes, mem_edges) = evolve::ingest_to_memory(&analysis, &analysis.failure_patterns);
 
+    // 8.5a. Episteme ingest — send key insights to the knowledge graph
+    // Runs in parallel with instinct extraction via early-return on any failure.
+    // Graceful degradation: Episteme errors are non-fatal.
+    let episteme_ok = ingest_to_episteme(&analysis);
+    if !episteme_ok {
+        hint("reflect", "Episteme: ingest skipped (binary unavailable or error)");
+    }
+
     // 8.5. Instinct extraction and promotion
     let instincts = evolve::extract_instincts(&observations, &analysis);
     let instincts_promoted = if !instincts.is_empty() {
@@ -1006,6 +1015,105 @@ pub fn run(_input: &HookInput) -> i32 {
     );
 
     0
+}
+
+// ── Episteme Integration ────────────────────────────────
+
+/// Ingest session insights into the Episteme knowledge graph via `add_insight`.
+///
+/// Builds a concise natural-language summary and forwards it with metadata.
+/// Returns `true` if the call succeeded (or if there was nothing to ingest),
+/// `false` on any Episteme-side error. Errors are non-fatal by design.
+fn ingest_to_episteme(analysis: &SessionAnalysis) -> bool {
+    // Skip if session had very few observations (not worth persisting)
+    if analysis.total_observations < 3 {
+        return true;
+    }
+
+    let slug = project_slug();
+
+    // Build insight text: concise summary of the session
+    let weak_tools: Vec<String> = analysis
+        .per_tool_stats
+        .iter()
+        .filter(|(_, s)| {
+            s.total >= CONFIG.pattern.weak_tool_min_obs
+                && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate
+        })
+        .map(|(t, s)| {
+            format!(
+                "{} ({:.0}%)",
+                t,
+                s.successes as f64 / s.total as f64 * 100.0
+            )
+        })
+        .collect();
+
+    let pattern_names: Vec<String> = analysis
+        .failure_patterns
+        .iter()
+        .map(|p| format!("{}({}x)", p.pattern_type, p.count))
+        .collect();
+
+    let mut parts: Vec<String> = vec![format!(
+        "Session in `{}`: {:.1}% success rate, avg_score={:.3} ({} observations).",
+        slug,
+        analysis.success_rate * 100.0,
+        analysis.avg_score,
+        analysis.total_observations
+    )];
+
+    if !weak_tools.is_empty() {
+        parts.push(format!("Weak tools: {}.", weak_tools.join(", ")));
+    }
+    if !pattern_names.is_empty() {
+        parts.push(format!("Failure patterns: {}.", pattern_names.join(", ")));
+    }
+    // Top error categories
+    let mut top_errors: Vec<(&String, &u64)> = analysis.per_error_stats.iter().collect();
+    top_errors.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
+    let top_errors: Vec<String> = top_errors
+        .iter()
+        .take(3)
+        .map(|(cat, count)| format!("{cat}({}x)", count))
+        .collect();
+    if !top_errors.is_empty() {
+        parts.push(format!("Top errors: {}.", top_errors.join(", ")));
+    }
+
+    let insight_text = parts.join(" ");
+
+    // Tags: project slug + detected pattern types
+    let mut tags: Vec<String> = vec!["auto".to_string(), "session-reflect".to_string()];
+    for p in &analysis.failure_patterns {
+        tags.push(p.pattern_type.clone());
+    }
+
+    // Confidence: composite_score × pattern density factor
+    let confidence = episteme_client::compute_confidence(
+        analysis.avg_score,
+        analysis.failure_patterns.len(),
+    );
+
+    let payload = InsightPayload {
+        text: insight_text,
+        tags,
+        linked_entities: vec![], // Episteme auto-detects links from text
+        project: slug,
+        confidence,
+    };
+
+    match episteme_client::add_insight(&payload) {
+        Ok(id) => {
+            hint("reflect", &format!("Episteme: insight recorded (id={id})"));
+            true
+        }
+        Err(e) => {
+            // Non-fatal: log but do not abort the hook
+            hint("reflect", &format!("Episteme: {e}"));
+            false
+        }
+    }
 }
 
 // ── Inline tests (kept here: run_context epoch helpers) ──
