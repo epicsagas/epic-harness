@@ -31,8 +31,8 @@ use super::server::{
     handle_put_node_conn_inner,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, open_db, read_index, read_node_conn, remove_edges_for_node,
-    remove_from_index, search_nodes_conn, validate_uuid,
+    delete_edge_by_id, delete_node_file, open_db, read_index, read_node_conn,
+    remove_edges_for_node, remove_from_index, search_nodes_conn, validate_uuid,
 };
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
@@ -202,22 +202,11 @@ async fn handle_list_nodes() -> impl IntoResponse {
     Json(idx.nodes).into_response()
 }
 
-async fn handle_create_node(
-    State(state): State<AppState>,
-    body: String,
-) -> impl IntoResponse {
+async fn handle_create_node(State(state): State<AppState>, body: String) -> impl IntoResponse {
     let conn = state.conn.lock().await;
     match handle_post_node_conn_inner(&body, &conn) {
-        Ok(id) => (
-            StatusCode::CREATED,
-            Json(json!({"id": id})),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e})),
-        )
-            .into_response(),
+        Ok(id) => (StatusCode::CREATED, Json(json!({"id": id}))).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
 }
 
@@ -248,11 +237,7 @@ async fn handle_get_node(
             "body": node.body,
         }))
         .into_response(),
-        Err(e) => (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => (StatusCode::NOT_FOUND, Json(json!({"error": e.to_string()}))).into_response(),
     }
 }
 
@@ -271,11 +256,7 @@ async fn handle_update_node(
     let conn = state.conn.lock().await;
     match handle_put_node_conn_inner(&id, &body, &conn) {
         Ok(_) => Json(json!({"id": id})).into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e})),
-        )
-            .into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
 }
 
@@ -293,22 +274,11 @@ async fn handle_delete_node(Path(id): Path<String>) -> impl IntoResponse {
     Json(json!({"deleted": id})).into_response()
 }
 
-async fn handle_create_edge(
-    State(state): State<AppState>,
-    body: String,
-) -> impl IntoResponse {
+async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl IntoResponse {
     let conn = state.conn.lock().await;
     match handle_post_edge_inner(&body, &conn) {
-        Ok(id) => (
-            StatusCode::CREATED,
-            Json(json!({"edge_id": id})),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": e})),
-        )
-            .into_response(),
+        Ok(id) => (StatusCode::CREATED, Json(json!({"edge_id": id}))).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
 }
 
@@ -431,10 +401,7 @@ mod tests {
             "agents": []
         });
 
-        let create_res = server
-            .post("/api/nodes")
-            .json(&payload)
-            .await;
+        let create_res = server.post("/api/nodes").json(&payload).await;
         assert_eq!(create_res.status_code(), StatusCode::CREATED);
         let body: Value = create_res.json();
         let id = body["id"].as_str().expect("id in response").to_string();

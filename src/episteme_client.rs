@@ -49,10 +49,7 @@ pub fn add_insight(payload: &InsightPayload) -> Result<String, String> {
         .spawn()
         .map_err(|e| format!("failed to spawn episteme ({bin:?}): {e}"))?;
 
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or("could not open episteme stdin")?;
+    let stdin = child.stdin.take().ok_or("could not open episteme stdin")?;
     let stdout = child
         .stdout
         .take()
@@ -95,8 +92,7 @@ pub fn add_insight(payload: &InsightPayload) -> Result<String, String> {
     {
         let mut stdin = stdin;
         let write_msg = |w: &mut dyn IoWrite, v: &serde_json::Value| -> Result<(), String> {
-            let s = serde_json::to_string(v)
-                .map_err(|e| format!("serialize error: {e}"))?;
+            let s = serde_json::to_string(v).map_err(|e| format!("serialize error: {e}"))?;
             writeln!(w, "{s}").map_err(|e| format!("write error: {e}"))
         };
         write_msg(&mut stdin, &init_msg)?;

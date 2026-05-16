@@ -795,7 +795,10 @@ pub fn run(_input: &HookInput) -> i32 {
     // Graceful degradation: Episteme errors are non-fatal.
     let episteme_ok = ingest_to_episteme(&analysis);
     if !episteme_ok {
-        hint("reflect", "Episteme: ingest skipped (binary unavailable or error)");
+        hint(
+            "reflect",
+            "Episteme: ingest skipped (binary unavailable or error)",
+        );
     }
 
     // 8.5. Instinct extraction and promotion
@@ -1090,10 +1093,8 @@ fn ingest_to_episteme(analysis: &SessionAnalysis) -> bool {
     }
 
     // Confidence: composite_score × pattern density factor
-    let confidence = episteme_client::compute_confidence(
-        analysis.avg_score,
-        analysis.failure_patterns.len(),
-    );
+    let confidence =
+        episteme_client::compute_confidence(analysis.avg_score, analysis.failure_patterns.len());
 
     let payload = InsightPayload {
         text: insight_text,
