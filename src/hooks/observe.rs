@@ -422,8 +422,16 @@ pub fn run(input: &HookInput) -> i32 {
             }
             "write" => score_write(&combined),
             "read" => ScoreDimensions {
-                tool_success: if record.failure_category.is_none() { 1.0 } else { 0.0 },
-                output_quality: if record.failure_category.is_none() { 1.0 } else { failure_quality(record.failure_category.as_deref()) },
+                tool_success: if record.failure_category.is_none() {
+                    1.0
+                } else {
+                    0.0
+                },
+                output_quality: if record.failure_category.is_none() {
+                    1.0
+                } else {
+                    failure_quality(record.failure_category.as_deref())
+                },
                 execution_cost: 1.0,
             },
             "glob" | "grep" => score_read_search(&combined),
