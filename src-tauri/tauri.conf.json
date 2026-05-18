@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-schema/main/schema.json",
-  "productName": "GraphOS",
-  "version": "0.1.0",
-  "identifier": "com.epicsagas.graphos",
+  "productName": "Epic Harness",
+  "version": "0.3.11",
+  "identifier": "com.epiccounty.epic-harness",
   "build": {
     "beforeDevCommand": "pnpm --dir app dev",
     "beforeBuildCommand": "pnpm --dir app build",
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "GraphOS | Knowledge Graph Intelligence",
+        "title": "Epic Harness Dashboard",
         "width": 1280,
         "height": 800,
         "minWidth": 900,

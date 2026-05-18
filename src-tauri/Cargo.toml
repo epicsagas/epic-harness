@@ -1,11 +1,11 @@
 [package]
-name = "graphos-desktop"
-version = "0.1.0"
+name = "epic-harness-dashboard"
+version = "0.3.11"
 edition = "2024"
-description = "GraphOS Knowledge Graph Desktop Application"
+description = "Epic Harness AI Agent Dashboard"
 
 [lib]
-name = "graphos_desktop_lib"
+name = "epic_harness_dashboard_lib"
 crate-type = ["lib"]
 
 [dependencies]

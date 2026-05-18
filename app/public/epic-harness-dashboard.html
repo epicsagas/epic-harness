@@ -1,0 +1,2126 @@
+
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Epic-Harness Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface-raised: #1c2333;
+      --fg: #e6edf3;
+      --fg-secondary: #b1bac4;
+      --muted: #6e7681;
+      --border: #30363d;
+      --border-light: #21262d;
+      --accent: #58a6ff;
+      --accent-soft: rgba(88, 166, 255, 0.12);
+      --success: #3fb950;
+      --success-soft: rgba(63, 185, 80, 0.12);
+      --warning: #d29922;
+      --warning-soft: rgba(210, 153, 34, 0.12);
+      --danger: #f85149;
+      --danger-soft: rgba(248, 81, 73, 0.12);
+      --purple: #bc8cff;
+      --purple-soft: rgba(188, 140, 255, 0.12);
+      --teal: #39d98a;
+      --teal-soft: rgba(57, 217, 138, 0.12);
+      --orange: #f0883e;
+      --orange-soft: rgba(240, 136, 62, 0.12);
+      --pink: #f778ba;
+      --pink-soft: rgba(247, 120, 186, 0.12);
+      --cyan: #56d4dd;
+      --cyan-soft: rgba(86, 212, 221, 0.12);
+      --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+      --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+      --radius: 8px;
+      --radius-lg: 12px;
+      --radius-sm: 6px;
+      --transition: 150ms ease;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 14px; }
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      min-height: 100vh;
+    }
+
+    .app-shell { display: flex; min-height: 100vh; }
+
+    /* SIDEBAR */
+    .sidebar {
+      width: 256px;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      position: fixed;
+      top: 0; left: 0; bottom: 0;
+      z-index: 100;
+      transition: transform var(--transition);
+      overflow-y: auto;
+    }
+
+    .sidebar-brand {
+      padding: 20px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      position: sticky; top: 0;
+      background: var(--surface);
+      z-index: 5;
+    }
+
+    .sidebar-brand .logo-icon {
+      width: 32px; height: 32px;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 11px; color: #fff;
+      font-family: var(--font-mono);
+    }
+
+    .sidebar-brand h1 {
+      font-family: var(--font-display);
+      font-size: 15px; font-weight: 600;
+      letter-spacing: -0.01em; color: var(--fg);
+    }
+
+    .sidebar-brand .version {
+      font-family: var(--font-mono);
+      font-size: 10px; color: var(--muted);
+      background: var(--bg);
+      padding: 2px 6px; border-radius: 4px;
+      margin-left: auto;
+    }
+
+    .sidebar-nav { padding: 8px; flex: 1; }
+
+    .nav-section-label {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--muted);
+      padding: 16px 8px 6px;
+      display: flex; align-items: center; gap: 6px;
+    }
+
+    .nav-section-label .ring-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+    }
+
+    .nav-item {
+      display: flex; align-items: center;
+      gap: 10px; padding: 7px 12px;
+      border-radius: var(--radius);
+      color: var(--fg-secondary);
+      text-decoration: none;
+      font-size: 13px; font-weight: 450;
+      transition: all var(--transition);
+      cursor: pointer; margin-bottom: 1px;
+    }
+
+    .nav-item:hover { background: var(--accent-soft); color: var(--fg); }
+    .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+
+    .nav-item .nav-icon {
+      width: 18px; height: 18px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 13px;
+    }
+
+    .nav-item.active .nav-icon { opacity: 1; }
+
+    .nav-item .badge {
+      margin-left: auto;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 10px; font-weight: 600;
+      padding: 1px 6px; border-radius: 10px;
+      min-width: 18px; text-align: center;
+      font-family: var(--font-mono);
+    }
+
+    .sidebar-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+      position: sticky; bottom: 0;
+      background: var(--surface);
+    }
+
+    .sidebar-footer .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--success); flex-shrink: 0;
+    }
+
+    .sidebar-footer .status-text {
+      font-size: 11px; color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    /* MAIN */
+    .main-content { margin-left: 256px; flex: 1; min-width: 0; }
+
+    .topbar {
+      height: 48px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      background: var(--surface);
+      position: sticky; top: 0; z-index: 50;
+    }
+
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+
+    .breadcrumb {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted);
+      font-family: var(--font-mono);
+    }
+
+    .breadcrumb span { color: var(--fg-secondary); }
+
+    .topbar-right { display: flex; align-items: center; gap: 8px; }
+
+    .icon-btn {
+      width: 32px; height: 32px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg-secondary);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; transition: all var(--transition);
+      font-size: 14px;
+    }
+
+    .icon-btn:hover {
+      background: var(--accent-soft);
+      color: var(--fg); border-color: var(--accent);
+    }
+
+    /* SCREENS */
+    .screen { display: none; padding: 24px; animation: fadeIn 0.2s ease; }
+    .screen.active { display: block; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .screen-header { margin-bottom: 24px; }
+    .screen-header h2 {
+      font-family: var(--font-display);
+      font-size: 24px; font-weight: 600;
+      letter-spacing: -0.02em; margin-bottom: 4px;
+    }
+    .screen-header p { color: var(--muted); font-size: 13px; }
+    .screen-header .subtitle-tag {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-family: var(--font-mono); font-size: 11px;
+      padding: 2px 8px; border-radius: 12px;
+      background: var(--accent-soft); color: var(--accent);
+      margin-left: 8px; vertical-align: middle;
+    }
+
+    /* STATS */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px; margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      transition: border-color var(--transition);
+    }
+
+    .stat-card:hover { border-color: var(--accent); }
+
+    .stat-card .stat-label {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 6px;
+      display: flex; align-items: center; gap: 6px;
+    }
+
+    .stat-card .stat-label .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+    }
+
+    .stat-card .stat-value {
+      font-family: var(--font-mono);
+      font-size: 26px; font-weight: 700;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .stat-card .stat-sub {
+      font-family: var(--font-mono);
+      font-size: 11px; color: var(--muted); margin-top: 2px;
+    }
+
+    /* PANEL */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden; margin-bottom: 16px;
+    }
+
+    .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center;
+      justify-content: space-between;
+    }
+
+    .panel-header h3 {
+      font-family: var(--font-display);
+      font-size: 14px; font-weight: 600;
+    }
+
+    .panel-body { padding: 18px; }
+    .panel-header .panel-actions { display: flex; gap: 6px; }
+
+    .chip {
+      font-family: var(--font-mono);
+      font-size: 11px; padding: 3px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent; color: var(--fg-secondary);
+      cursor: pointer; transition: all var(--transition);
+    }
+
+    .chip:hover, .chip.active {
+      background: var(--accent-soft);
+      border-color: var(--accent); color: var(--accent);
+    }
+
+    /* GRID */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .grid-2-1 { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+    .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+
+    /* TABLE */
+    .data-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+
+    .data-table th {
+      text-align: left; padding: 8px 12px;
+      font-weight: 600; font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+    }
+
+    .data-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-light);
+      font-family: var(--font-mono);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tr:hover td { background: var(--accent-soft); }
+
+    /* PILLS */
+    .pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px; border-radius: 12px;
+      font-size: 11px; font-weight: 500;
+      font-family: var(--font-mono);
+    }
+
+    .pill.success { background: var(--success-soft); color: var(--success); }
+    .pill.warning { background: var(--warning-soft); color: var(--warning); }
+    .pill.danger { background: var(--danger-soft); color: var(--danger); }
+    .pill.info { background: var(--accent-soft); color: var(--accent); }
+    .pill.purple { background: var(--purple-soft); color: var(--purple); }
+    .pill.teal { background: var(--teal-soft); color: var(--teal); }
+    .pill.orange { background: var(--orange-soft); color: var(--orange); }
+    .pill.pink { background: var(--pink-soft); color: var(--pink); }
+    .pill.cyan { background: var(--cyan-soft); color: var(--cyan); }
+
+    /* ACTIVITY */
+    .activity-list { list-style: none; }
+    .activity-item {
+      display: flex; gap: 12px; padding: 10px 0;
+      border-bottom: 1px solid var(--border-light); font-size: 12px;
+    }
+    .activity-item:last-child { border-bottom: none; }
+
+    .activity-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      margin-top: 5px; flex-shrink: 0;
+    }
+
+    .activity-content { flex: 1; }
+    .activity-content .activity-title { color: var(--fg); font-weight: 500; margin-bottom: 2px; }
+    .activity-content .activity-time { color: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+
+    /* PROGRESS BAR */
+    .progress-bar {
+      height: 6px; background: var(--border);
+      border-radius: 3px; overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%; border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+
+    /* MINI BARS */
+    .mini-bars { display: flex; align-items: flex-end; gap: 3px; height: 120px; }
+    .mini-bar {
+      width: 6px; border-radius: 2px;
+      background: var(--accent); opacity: 0.6;
+      transition: opacity var(--transition);
+    }
+    .mini-bar:hover { opacity: 1; }
+
+    /* USAGE RING */
+    .usage-ring-container {
+      display: flex; align-items: center;
+      justify-content: center; position: relative;
+    }
+
+    .usage-ring-label { position: absolute; text-align: center; }
+    .usage-ring-label .ring-value {
+      font-family: var(--font-mono); font-size: 20px; font-weight: 700;
+    }
+    .usage-ring-label .ring-text {
+      font-size: 9px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+
+    /* RING MODEL BADGE */
+    .ring-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 16px; border-radius: var(--radius-lg);
+      border: 1px solid var(--border); background: var(--surface);
+      font-size: 12px;
+    }
+
+    .ring-badge .ring-num {
+      font-family: var(--font-mono);
+      font-size: 20px; font-weight: 800;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    .ring-badge .ring-info { line-height: 1.3; }
+    .ring-badge .ring-info .ring-title { font-weight: 600; font-size: 12px; }
+    .ring-badge .ring-info .ring-desc { font-size: 10px; color: var(--muted); }
+
+    /* COMMAND CARD */
+    .cmd-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px; transition: all var(--transition);
+      cursor: default;
+    }
+
+    .cmd-card:hover { border-color: var(--accent); background: var(--surface-raised); }
+
+    .cmd-card .cmd-name {
+      font-family: var(--font-mono); font-size: 15px;
+      font-weight: 700; color: var(--accent); margin-bottom: 6px;
+    }
+
+    .cmd-card .cmd-desc { font-size: 12px; color: var(--fg-secondary); line-height: 1.6; }
+
+    .cmd-card .cmd-tags { margin-top: 10px; display: flex; gap: 4px; flex-wrap: wrap; }
+
+    /* SKILL CARD */
+    .skill-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px; transition: all var(--transition);
+    }
+
+    .skill-card:hover { border-color: var(--purple); }
+
+    .skill-card .skill-name {
+      font-family: var(--font-mono); font-size: 13px;
+      font-weight: 600; color: var(--fg); margin-bottom: 4px;
+    }
+
+    .skill-card .skill-trigger {
+      font-family: var(--font-mono); font-size: 10px;
+      color: var(--muted); margin-bottom: 6px;
+    }
+
+    .skill-card .skill-desc { font-size: 11px; color: var(--fg-secondary); line-height: 1.5; }
+
+    /* PIPELINE VIS */
+    .pipeline-flow {
+      display: flex; align-items: center;
+      gap: 0; overflow-x: auto;
+      padding: 20px 0;
+    }
+
+    .pipeline-stage {
+      display: flex; flex-direction: column;
+      align-items: center; min-width: 100px;
+      text-align: center; position: relative;
+    }
+
+    .pipeline-stage .stage-icon {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; margin-bottom: 8px;
+      border: 2px solid var(--border);
+      background: var(--surface);
+      transition: all var(--transition);
+    }
+
+    .pipeline-stage.completed .stage-icon {
+      border-color: var(--success); background: var(--success-soft);
+    }
+
+    .pipeline-stage.running .stage-icon {
+      border-color: var(--accent); background: var(--accent-soft);
+      animation: pulse 2s infinite;
+    }
+
+    .pipeline-stage.pending .stage-icon { opacity: 0.5; }
+
+    .pipeline-stage .stage-label {
+      font-family: var(--font-mono); font-size: 11px;
+      font-weight: 600; color: var(--fg-secondary);
+    }
+
+    .pipeline-stage .stage-sub {
+      font-size: 10px; color: var(--muted); margin-top: 2px;
+    }
+
+    .pipeline-arrow {
+      width: 40px; height: 2px;
+      background: var(--border); margin: 0 4px;
+      flex-shrink: 0; position: relative;
+      top: -12px;
+    }
+
+    .pipeline-arrow.active { background: var(--accent); }
+    .pipeline-arrow.done { background: var(--success); }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(88, 166, 255, 0.3); }
+      50% { box-shadow: 0 0 0 8px rgba(88, 166, 255, 0); }
+    }
+
+    /* AGENT CARD */
+    .agent-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+    }
+
+    .agent-card .agent-name {
+      font-family: var(--font-display); font-size: 14px;
+      font-weight: 600; margin-bottom: 4px;
+    }
+
+    .agent-card .agent-role {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--accent); margin-bottom: 6px;
+    }
+
+    .agent-card .agent-desc {
+      font-size: 12px; color: var(--fg-secondary); line-height: 1.5;
+    }
+
+    /* INTEGRATION CARD */
+    .integration-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      display: flex; gap: 14px; align-items: flex-start;
+    }
+
+    .integration-card .int-icon {
+      width: 40px; height: 40px;
+      border-radius: var(--radius);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+
+    .integration-card .int-info { flex: 1; }
+    .integration-card .int-name { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+    .integration-card .int-desc { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+    .integration-card .int-assets { display: flex; gap: 4px; flex-wrap: wrap; }
+
+    /* HOOK ROW */
+    .hook-row {
+      display: flex; align-items: center; gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .hook-row:last-child { border-bottom: none; }
+
+    .hook-row .hook-event {
+      font-family: var(--font-mono); font-size: 12px;
+      font-weight: 600; width: 140px; flex-shrink: 0;
+    }
+
+    .hook-row .hook-cmd {
+      font-family: var(--font-mono); font-size: 11px;
+      color: var(--fg-secondary); flex: 1;
+    }
+
+    .hook-row .hook-desc {
+      font-size: 11px; color: var(--muted); width: 200px; flex-shrink: 0;
+    }
+
+    /* SETTINGS */
+    .settings-group { margin-bottom: 24px; }
+    .settings-group-title {
+      font-family: var(--font-display); font-size: 16px;
+      font-weight: 600; margin-bottom: 12px;
+      padding-bottom: 8px; border-bottom: 1px solid var(--border);
+    }
+
+    .setting-row {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border-light);
+    }
+
+    .setting-row:last-child { border-bottom: none; }
+    .setting-info { flex: 1; }
+    .setting-info .setting-name { font-weight: 500; font-size: 13px; margin-bottom: 2px; }
+    .setting-info .setting-desc { font-size: 11px; color: var(--muted); }
+    .setting-control { flex-shrink: 0; margin-left: 24px; }
+
+    .toggle {
+      position: relative; width: 40px; height: 22px;
+      border-radius: 11px; background: var(--border);
+      cursor: pointer; transition: background var(--transition);
+    }
+
+    .toggle.on { background: var(--accent); }
+
+    .toggle::after {
+      content: ''; position: absolute;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #fff; top: 3px; left: 3px;
+      transition: transform var(--transition);
+    }
+
+    .toggle.on::after { transform: translateX(18px); }
+
+    .input-field {
+      font-family: var(--font-mono); font-size: 12px;
+      padding: 6px 10px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg); color: var(--fg);
+      width: 200px; transition: border-color var(--transition);
+    }
+
+    .input-field:focus { outline: none; border-color: var(--accent); }
+
+    .select-field {
+      font-family: var(--font-mono); font-size: 12px;
+      padding: 6px 10px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: var(--bg); color: var(--fg); cursor: pointer;
+    }
+
+    .select-field:focus { outline: none; border-color: var(--accent); }
+
+    .btn {
+      font-family: var(--font-display); font-size: 12px;
+      font-weight: 500; padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: transparent; color: var(--fg-secondary);
+      cursor: pointer; transition: all var(--transition);
+    }
+
+    .btn:hover { border-color: var(--fg-secondary); color: var(--fg); }
+
+    .btn-primary {
+      background: var(--accent); border-color: var(--accent); color: #fff;
+    }
+
+    .btn-primary:hover { background: #79b8ff; border-color: #79b8ff; }
+
+    /* MEMORY NODE LIST */
+    .mem-node {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border-light);
+      font-size: 12px;
+    }
+
+    .mem-node:last-child { border-bottom: none; }
+
+    .mem-node .node-type {
+      font-family: var(--font-mono); font-size: 10px;
+      padding: 2px 8px; border-radius: 10px;
+      font-weight: 600; min-width: 70px; text-align: center;
+    }
+
+    .mem-node .node-title { font-weight: 500; flex: 1; }
+    .mem-node .node-importance { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+    /* GRAPH */
+    .graph-container {
+      background: var(--bg); border-radius: var(--radius);
+      border: 1px solid var(--border);
+      overflow: hidden; position: relative;
+    }
+
+    .graph-canvas {
+      width: 100%; height: 500px;
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+    }
+
+    .graph-node {
+      position: absolute; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 600;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      z-index: 2;
+    }
+
+    .graph-node:hover { transform: scale(1.15); z-index: 3; }
+
+    .graph-node .node-label {
+      position: absolute; bottom: -18px;
+      white-space: nowrap; font-size: 10px;
+      color: var(--fg-secondary); font-weight: 400;
+    }
+
+    .graph-svg {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      pointer-events: none; z-index: 1;
+    }
+
+    .graph-controls {
+      position: absolute; top: 12px; right: 12px;
+      display: flex; gap: 6px; z-index: 10;
+    }
+
+    .graph-legend {
+      display: flex; gap: 16px; padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--muted);
+    }
+
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+    /* RESPONSIVE */
+    .mobile-header {
+      display: none; height: 56px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      align-items: center; padding: 0 16px;
+      justify-content: space-between;
+      position: sticky; top: 0; z-index: 200;
+    }
+
+    .mobile-header .hamburger {
+      width: 36px; height: 36px;
+      background: transparent; border: none;
+      color: var(--fg); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+    }
+
+    .sidebar-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.5); z-index: 99;
+    }
+
+    @media (max-width: 768px) {
+      .mobile-header { display: flex; }
+      .sidebar { transform: translateX(-100%); }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-overlay.open { display: block; }
+      .main-content { margin-left: 0; }
+      .topbar { display: none; }
+      .screen { padding: 16px; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+      .stat-card { padding: 14px; }
+      .stat-card .stat-value { font-size: 20px; }
+      .grid-2, .grid-3, .grid-2-1, .grid-4 { grid-template-columns: 1fr; }
+      .graph-canvas { height: 350px; }
+      .setting-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .setting-control { margin-left: 0; }
+      .pipeline-flow { overflow-x: auto; }
+      .hook-row { flex-direction: column; align-items: flex-start; gap: 4px; }
+      .hook-row .hook-event, .hook-row .hook-desc { width: auto; }
+    }
+
+    @media (max-width: 480px) {
+      .stats-grid { grid-template-columns: 1fr; }
+      .screen-header h2 { font-size: 20px; }
+    }
+
+    /* SEARCH BAR */
+    .search-bar {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 6px 12px;
+      transition: border-color var(--transition);
+    }
+
+    .search-bar:focus-within { border-color: var(--accent); }
+
+    .search-bar input {
+      background: transparent; border: none; outline: none;
+      color: var(--fg); font-size: 12px;
+      font-family: var(--font-mono); width: 180px;
+    }
+
+    .search-bar input::placeholder { color: var(--muted); }
+    .search-bar .search-icon { color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <!-- Mobile Header -->
+  <div class="mobile-header">
+    <button class="hamburger" onclick="toggleSidebar()">&#9776;</button>
+    <span style="font-weight:600;font-size:14px;">epic-harness</span>
+    <span style="width:36px;"></span>
+  </div>
+
+  <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
+  <div class="app-shell">
+    <!-- ==================== SIDEBAR ==================== -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="logo-icon">EH</div>
+        <h1>epic-harness</h1>
+        <span class="version">v0.3.11</span>
+      </div>
+      <nav class="sidebar-nav">
+        <!-- Overview -->
+        <div class="nav-section-label">Overview</div>
+        <a class="nav-item active" data-screen="dashboard" onclick="switchScreen('dashboard')">
+          <span class="nav-icon">&#9632;</span> Dashboard
+        </a>
+        <a class="nav-item" data-screen="orbit" onclick="switchScreen('orbit')">
+          <span class="nav-icon">&#9673;</span> /orbit Pipeline
+          <span class="badge">auto</span>
+        </a>
+
+        <!-- Ring 1: Commands -->
+        <div class="nav-section-label"><span class="ring-dot" style="background:var(--accent)"></span> Ring 1 &middot; Commands</div>
+        <a class="nav-item" data-screen="commands" onclick="switchScreen('commands')">
+          <span class="nav-icon">&#9654;</span> Commands <span class="badge">10</span>
+        </a>
+
+        <!-- Ring 2: Skills -->
+        <div class="nav-section-label"><span class="ring-dot" style="background:var(--purple)"></span> Ring 2 &middot; Auto Skills</div>
+        <a class="nav-item" data-screen="skills" onclick="switchScreen('skills')">
+          <span class="nav-icon">&#10023;</span> Skills <span class="badge">15</span>
+        </a>
+
+        <!-- Ring 2: Agents -->
+        <div class="nav-section-label"><span class="ring-dot" style="background:var(--teal)"></span> Agents</div>
+        <a class="nav-item" data-screen="agents" onclick="switchScreen('agents')">
+          <span class="nav-icon">&#9733;</span> Internal Agents <span class="badge">4</span>
+        </a>
+
+        <!-- Ring 3: Evolution -->
+        <div class="nav-section-label"><span class="ring-dot" style="background:var(--orange)"></span> Ring 3 &middot; Evolution</div>
+        <a class="nav-item" data-screen="evolution" onclick="switchScreen('evolution')">
+          <span class="nav-icon">&#8635;</span> Eval &amp; Evolve
+        </a>
+
+        <!-- Ring 0: Hooks -->
+        <div class="nav-section-label"><span class="ring-dot" style="background:var(--success)"></span> Ring 0 &middot; Autopilot</div>
+        <a class="nav-item" data-screen="hooks" onclick="switchScreen('hooks')">
+          <span class="nav-icon">&#9889;</span> Hooks
+        </a>
+
+        <!-- Data Layer -->
+        <div class="nav-section-label">Data Layer</div>
+        <a class="nav-item" data-screen="memory" onclick="switchScreen('memory')">
+          <span class="nav-icon">&#9670;</span> harness-mem
+        </a>
+        <a class="nav-item" data-screen="integrations" onclick="switchScreen('integrations')">
+          <span class="nav-icon">&#9783;</span> Integrations <span class="badge">6</span>
+        </a>
+
+        <!-- System -->
+        <div class="nav-section-label">System</div>
+        <a class="nav-item" data-screen="settings" onclick="switchScreen('settings')">
+          <span class="nav-icon">&#9881;</span> Settings
+        </a>
+      </nav>
+      <div class="sidebar-footer">
+        <span class="status-dot"></span>
+        <span class="status-text">all systems nominal</span>
+      </div>
+    </aside>
+
+    <!-- ==================== MAIN CONTENT ==================== -->
+    <div class="main-content">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="breadcrumb">
+            epic-harness <span>/</span> <span id="breadcrumb-page">dashboard</span>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <div class="search-bar">
+            <span class="search-icon">&#8981;</span>
+            <input type="text" placeholder="Search..." />
+          </div>
+          <button class="icon-btn" title="Notifications">&#128276;</button>
+        </div>
+      </div>
+
+      <!-- ==================== DASHBOARD SCREEN ==================== -->
+      <div class="screen active" id="screen-dashboard">
+        <div class="screen-header">
+          <h2>Dashboard</h2>
+          <p>4-Ring architecture status &middot; eval scores &middot; system health</p>
+        </div>
+
+        <!-- 4-Ring Status -->
+        <div class="grid-4" style="margin-bottom:24px;">
+          <div class="ring-badge">
+            <div class="ring-num" style="background:var(--success-soft);color:var(--success);">0</div>
+            <div class="ring-info">
+              <div class="ring-title">Autopilot</div>
+              <div class="ring-desc">6 hooks active</div>
+            </div>
+          </div>
+          <div class="ring-badge">
+            <div class="ring-num" style="background:var(--accent-soft);color:var(--accent);">1</div>
+            <div class="ring-info">
+              <div class="ring-title">Commands</div>
+              <div class="ring-desc">10 user commands</div>
+            </div>
+          </div>
+          <div class="ring-badge">
+            <div class="ring-num" style="background:var(--purple-soft);color:var(--purple);">2</div>
+            <div class="ring-info">
+              <div class="ring-title">Auto Skills</div>
+              <div class="ring-desc">15 context-triggered</div>
+            </div>
+          </div>
+          <div class="ring-badge">
+            <div class="ring-num" style="background:var(--orange-soft);color:var(--orange);">3</div>
+            <div class="ring-info">
+              <div class="ring-title">Evolution</div>
+              <div class="ring-desc">observe &#8594; evolve loop</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Key Metrics -->
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label"><span class="dot" style="background:var(--accent)"></span> Eval Score</div>
+            <div class="stat-value">0.78</div>
+            <div class="stat-sub">composite (success 50% + quality 30% + cost 20%)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label"><span class="dot" style="background:var(--purple)"></span> Evolved Skills</div>
+            <div class="stat-value">3</div>
+            <div class="stat-sub">max 10 &middot; stagnation limit 3</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label"><span class="dot" style="background:var(--teal)"></span> Memory Nodes</div>
+            <div class="stat-value">--</div>
+            <div class="stat-sub">SQLite + FTS5 via harness-mem MCP</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label"><span class="dot" style="background:var(--success)"></span> Sessions</div>
+            <div class="stat-value">--</div>
+            <div class="stat-sub">this project</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label"><span class="dot" style="background:var(--warning)"></span> Orbit Runs</div>
+            <div class="stat-value">--</div>
+            <div class="stat-sub">spec &#8594; go &#8594; check &#8594; ship</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label"><span class="dot" style="background:var(--cyan)"></span> Integrations</div>
+            <div class="stat-value">6</div>
+            <div class="stat-sub">Claude Code &middot; Codex &middot; Cursor &middot; Gemini &middot; Cline &middot; Aider</div>
+          </div>
+        </div>
+
+        <!-- Eval Axes + Pattern Detection -->
+        <div class="grid-2" style="margin-bottom:16px;">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Eval Score Axes (3-Axis)</h3>
+              <div class="panel-actions">
+                <button class="chip active">Current</button>
+                <button class="chip">Trend</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div style="display:flex;gap:32px;align-items:center;justify-content:center;">
+                <div class="usage-ring-container">
+                  <svg width="90" height="90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="6"/>
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--accent)" stroke-width="6"
+                            stroke-dasharray="264" stroke-dashoffset="40" stroke-linecap="round"
+                            transform="rotate(-90 50 50)"/>
+                  </svg>
+                  <div class="usage-ring-label">
+                    <div class="ring-value">0.85</div>
+                    <div class="ring-text">Success</div>
+                  </div>
+                </div>
+                <div class="usage-ring-container">
+                  <svg width="90" height="90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="6"/>
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--purple)" stroke-width="6"
+                            stroke-dasharray="264" stroke-dashoffset="106" stroke-linecap="round"
+                            transform="rotate(-90 50 50)"/>
+                  </svg>
+                  <div class="usage-ring-label">
+                    <div class="ring-value">0.60</div>
+                    <div class="ring-text">Quality</div>
+                  </div>
+                </div>
+                <div class="usage-ring-container">
+                  <svg width="90" height="90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--border)" stroke-width="6"/>
+                    <circle cx="50" cy="50" r="42" fill="none" stroke="var(--teal)" stroke-width="6"
+                            stroke-dasharray="264" stroke-dashoffset="145" stroke-linecap="round"
+                            transform="rotate(-90 50 50)"/>
+                  </svg>
+                  <div class="usage-ring-label">
+                    <div class="ring-value">0.45</div>
+                    <div class="ring-text">Cost</div>
+                  </div>
+                </div>
+              </div>
+              <div style="margin-top:16px;font-size:11px;color:var(--muted);text-align:center;font-family:var(--font-mono);">
+                composite = 0.5 &times; success + 0.3 &times; quality + 0.2 &times; cost = <strong style="color:var(--fg)">0.78</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Pattern Detection (4 Types)</h3>
+            </div>
+            <div class="panel-body" style="padding:0;">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Pattern</th><th>Threshold</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td style="color:var(--fg)">repeated_same_error</td>
+                    <td>min 3 consecutive</td>
+                    <td><span class="pill success">clear</span></td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--fg)">fix_then_break</td>
+                    <td>lookahead 3, min 2 cycles</td>
+                    <td><span class="pill success">clear</span></td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--fg)">long_debug_loop</td>
+                    <td>min 5 same file</td>
+                    <td><span class="pill success">clear</span></td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--fg)">thrashing</td>
+                    <td>min 3 edits + 3 errors</td>
+                    <td><span class="pill success">clear</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Activity -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>Recent Activity</h3>
+          </div>
+          <div class="panel-body">
+            <ul class="activity-list">
+              <li class="activity-item">
+                <span class="activity-dot" style="background:var(--success)"></span>
+                <div class="activity-content">
+                  <div class="activity-title">Session restored via <code>epic-harness resume</code></div>
+                  <div class="activity-time">session start</div>
+                </div>
+              </li>
+              <li class="activity-item">
+                <span class="activity-dot" style="background:var(--accent)"></span>
+                <div class="activity-content">
+                  <div class="activity-title">Evolved skills loaded (3 active)</div>
+                  <div class="activity-time">$HARNESS_DIR/evolved/</div>
+                </div>
+              </li>
+              <li class="activity-item">
+                <span class="activity-dot" style="background:var(--purple)"></span>
+                <div class="activity-content">
+                  <div class="activity-title">harness-mem context loaded for project</div>
+                  <div class="activity-time">session start</div>
+                </div>
+              </li>
+              <li class="activity-item">
+                <span class="activity-dot" style="background:var(--warning)"></span>
+                <div class="activity-content">
+                  <div class="activity-title">Polish hook ran: format + typecheck</div>
+                  <div class="activity-time">post-edit</div>
+                </div>
+              </li>
+              <li class="activity-item">
+                <span class="activity-dot" style="background:var(--teal)"></span>
+                <div class="activity-content">
+                  <div class="activity-title">Observe hook recorded tool score</div>
+                  <div class="activity-time">post-tool-use</div>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== ORBIT SCREEN ==================== -->
+      <div class="screen" id="screen-orbit">
+        <div class="screen-header">
+          <h2>/orbit <span class="subtitle-tag">Autonomous Pipeline</span></h2>
+          <p>spec &#8594; go &#8594; check &#8594; ship &#8594; evolve &mdash; single-command spec-to-PR execution</p>
+        </div>
+
+        <!-- Mode Selection -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header"><h3>Entry Mode Selection</h3></div>
+          <div class="panel-body">
+            <div class="grid-3">
+              <div class="cmd-card" style="border-left:3px solid var(--accent);">
+                <div class="cmd-name" style="font-size:13px;">Interactive</div>
+                <div class="cmd-desc">User runs <code>/discover</code> &#8594; <code>/spec</code> manually, then triggers orbit. Best for vague requirements.</div>
+                <div class="cmd-tags" style="margin-top:8px;"><span class="pill info">unclear requirement</span></div>
+              </div>
+              <div class="cmd-card" style="border-left:3px solid var(--purple);">
+                <div class="cmd-name" style="font-size:13px;">Council</div>
+                <div class="cmd-desc">4-voice parallel auto-spec (Architect + Critic + Implementor + QA). Best for complex, multi-stakeholder requirements.</div>
+                <div class="cmd-tags" style="margin-top:8px;"><span class="pill purple">complex requirement</span></div>
+              </div>
+              <div class="cmd-card" style="border-left:3px solid var(--teal);">
+                <div class="cmd-name" style="font-size:13px;">Direct</div>
+                <div class="cmd-desc">Auto-spec and immediately start building. Best for clear, well-defined requirements.</div>
+                <div class="cmd-tags" style="margin-top:8px;"><span class="pill teal">clear requirement</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pipeline Flow -->
+        <div class="panel">
+          <div class="panel-header"><h3>Pipeline Flow</h3></div>
+          <div class="panel-body">
+            <div class="pipeline-flow">
+              <div class="pipeline-stage completed">
+                <div class="stage-icon" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent);">&#9776;</div>
+                <div class="stage-label">spec</div>
+                <div class="stage-sub">REQ + AC</div>
+              </div>
+              <div class="pipeline-arrow done"></div>
+              <div class="pipeline-stage completed">
+                <div class="stage-icon" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent);">&#9654;</div>
+                <div class="stage-label">go</div>
+                <div class="stage-sub">plan+TDD</div>
+              </div>
+              <div class="pipeline-arrow done"></div>
+              <div class="pipeline-stage running">
+                <div class="stage-icon" style="background:var(--success-soft);border-color:var(--success);color:var(--success);">&#10003;</div>
+                <div class="stage-label">check</div>
+                <div class="stage-sub">review+audit</div>
+              </div>
+              <div class="pipeline-arrow"></div>
+              <div class="pipeline-stage pending">
+                <div class="stage-icon">&#128640;</div>
+                <div class="stage-label">ship</div>
+                <div class="stage-sub">PR+CI</div>
+              </div>
+              <div class="pipeline-arrow"></div>
+              <div class="pipeline-stage pending">
+                <div class="stage-icon">&#8635;</div>
+                <div class="stage-label">evolve</div>
+                <div class="stage-sub">auto-analyze</div>
+              </div>
+            </div>
+            <div style="margin-top:12px;font-size:11px;color:var(--muted);font-family:var(--font-mono);display:flex;gap:24px;">
+              <span>check fail &#8594; auto-retry (max 3)</span>
+              <span>3 fails &#8594; pause for human</span>
+              <span>state: <code>$HARNESS_DIR/orbit/PIPELINE-*.json</code></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Orbit State Tracking -->
+        <div class="grid-2" style="margin-top:16px;">
+          <div class="panel">
+            <div class="panel-header"><h3>Pipeline State Schema</h3></div>
+            <div class="panel-body" style="padding:0;">
+              <table class="data-table">
+                <thead><tr><th>Field</th><th>Value</th></tr></thead>
+                <tbody>
+                  <tr><td style="color:var(--muted)">id</td><td style="color:var(--fg)">{timestamp}</td></tr>
+                  <tr><td style="color:var(--muted)">mode</td><td style="color:var(--fg)">interactive | council | direct</td></tr>
+                  <tr><td style="color:var(--muted)">phase</td><td style="color:var(--accent)">mode_select &#8594; spec &#8594; go &#8594; check &#8594; ship</td></tr>
+                  <tr><td style="color:var(--muted)">status</td><td style="color:var(--fg)">running | completed | failed | timeout | aborted</td></tr>
+                  <tr><td style="color:var(--muted)">check_fail_count</td><td style="color:var(--fg)">0..3</td></tr>
+                  <tr><td style="color:var(--muted)">deadline</td><td style="color:var(--fg)">now + 30min</td></tr>
+                  <tr><td style="color:var(--muted)">worktree_name</td><td style="color:var(--fg)">isolated build env</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h3>Safety Mechanisms</h3></div>
+            <div class="panel-body">
+              <ul class="activity-list">
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--success)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Concurrent orbit guard</div>
+                    <div class="activity-time">Only 1 running pipeline at a time</div>
+                  </div>
+                </li>
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--accent)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Deadline enforcement</div>
+                    <div class="activity-time">30-min hard timeout per orbit</div>
+                  </div>
+                </li>
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--warning)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Crash recovery</div>
+                    <div class="activity-time">45-min staleness threshold, phase_history wins</div>
+                  </div>
+                </li>
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--purple)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Worktree safety</div>
+                    <div class="activity-time">Isolated build, state survives worktree loss</div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== COMMANDS SCREEN ==================== -->
+      <div class="screen" id="screen-commands">
+        <div class="screen-header">
+          <h2>Commands <span class="subtitle-tag">Ring 1</span></h2>
+          <p>10 user-invoked slash commands (7 manual + 1 autonomous orbit + 2 utility)</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="cmd-card">
+            <div class="cmd-name">/discover</div>
+            <div class="cmd-desc">Problem discovery. Probes with 5 Whys / JTBD / Fishbone / Socratic techniques (max 3 rounds), then frames a structured problem statement.</div>
+            <div class="cmd-tags"><span class="pill info">analysis</span><span class="pill teal">pre-spec</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/spec</div>
+            <div class="cmd-desc">Converts requirements into numbered Requirements + Acceptance Criteria document (SPEC-{ts}.md). Suggests /team when 3+ requirements.</div>
+            <div class="cmd-tags"><span class="pill info">planning</span><span class="pill purple">REQ+AC</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/go</div>
+            <div class="cmd-desc">Reads approved SPEC, maps Requirements to tasks, executes via TDD subagents (parallel where safe, worktree-isolated when files overlap).</div>
+            <div class="cmd-tags"><span class="pill success">build</span><span class="pill info">TDD</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/check</div>
+            <div class="cmd-desc">Parallel agents (reviewer + auditor + test runner) + scope-based checks (API contract, accessibility, migration safety). PASS/WARN/FAIL per dimension.</div>
+            <div class="cmd-tags"><span class="pill warning">review</span><span class="pill danger">audit</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/ship</div>
+            <div class="cmd-desc">Isolated integration test in fresh worktree, creates PR with spec + check report, watches CI, auto-fixes failures. Suggests /evolve on completion.</div>
+            <div class="cmd-tags"><span class="pill success">deploy</span><span class="pill info">PR+CI</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/evolve</div>
+            <div class="cmd-desc">Analyzes session observation logs to detect failure patterns and weak tools, auto-generates targeted skills. Sub-commands: status, history, cross-project, rollback, reset.</div>
+            <div class="cmd-tags"><span class="pill orange">evolution</span><span class="pill purple">Ring 3</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/team</div>
+            <div class="cmd-desc">Agent team manager. Browse org libraries, hire existing teams, or design new team (3-6 agents). Patterns: Pipeline, Fan-out, Expert-Pool, Producer-Reviewer, Supervisor.</div>
+            <div class="cmd-tags"><span class="pill info">agents</span><span class="pill teal">team-design</span></div>
+          </div>
+          <div class="cmd-card" style="border:2px solid var(--accent);background:var(--surface-raised);">
+            <div class="cmd-name">/orbit</div>
+            <div class="cmd-desc">Autonomous pipeline: spec &#8594; go &#8594; check &#8594; ship &#8594; evolve. Auto-selects mode (Interactive/Council/Direct). Auto-retries check up to 3 times. Runs /evolve on success.</div>
+            <div class="cmd-tags"><span class="pill info">autonomous</span><span class="pill success">end-to-end</span><span class="pill warning">30min deadline</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/status</div>
+            <div class="cmd-desc">Real-time orchestration dashboard. Active agent count, per-agent progress stage, dependency graph, elapsed time, recent event summary.</div>
+            <div class="cmd-tags"><span class="pill info">monitoring</span></div>
+          </div>
+          <div class="cmd-card">
+            <div class="cmd-name">/intervene</div>
+            <div class="cmd-desc">Intervene in active agent orchestration. Pause, cancel, or redirect running agents mid-execution.</div>
+            <div class="cmd-tags"><span class="pill danger">control</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== SKILLS SCREEN ==================== -->
+      <div class="screen" id="screen-skills">
+        <div class="screen-header">
+          <h2>Auto Skills <span class="subtitle-tag">Ring 2</span></h2>
+          <p>15 context-triggered skills + _dispatch core router &middot; static skills always take priority over evolved</p>
+        </div>
+
+        <!-- _dispatch highlight -->
+        <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--accent);">
+          <div class="panel-header"><h3>_dispatch &mdash; Core Router</h3></div>
+          <div class="panel-body">
+            <div class="cmd-desc" style="font-size:13px;">
+              Always active. Auto-invokes matching skill before every response. Runs confusion protocol on high-risk ambiguity.
+              Calls <code>mem_recall</code> with current task context before invoking any skill. Past decisions (importance=0.9) surface first.
+            </div>
+            <div style="margin-top:8px;font-size:11px;color:var(--muted);font-family:var(--font-mono);">
+              dispatch log: <code>$HARNESS_DIR/dispatch/dispatch_YYYYMMDD.jsonl</code>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
+          <div class="skill-card">
+            <div class="skill-name">tdd</div>
+            <div class="skill-trigger">trigger: new feature or bug fix</div>
+            <div class="skill-desc">Enforces Red &#8594; Green &#8594; Refactor. No prod code without failing test first.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">debug</div>
+            <div class="skill-trigger">trigger: test failure, runtime error, unexpected behavior</div>
+            <div class="skill-desc">Systematic root-cause isolation. Never retry without diagnosis.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">verify</div>
+            <div class="skill-trigger">trigger: before marking done or /ship</div>
+            <div class="skill-desc">Build + test + lint must all pass. No exceptions.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">secure</div>
+            <div class="skill-trigger">trigger: auth, DB, API, infra, or secrets code touched</div>
+            <div class="skill-desc">Security checklist for SQL, endpoints, env vars, infra config.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">perf</div>
+            <div class="skill-trigger">trigger: loops, DB queries, rendering, batch ops</div>
+            <div class="skill-desc">Catches N+1, missing indexes, unnecessary re-renders.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">simplify</div>
+            <div class="skill-trigger">trigger: file &gt;200 lines, high complexity, duplication</div>
+            <div class="skill-desc">Deep nesting, copy-paste, god functions. Extract and reduce.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">commit</div>
+            <div class="skill-trigger">trigger: commit/save</div>
+            <div class="skill-desc">CC 1.0.0 commit generator. Stages relevant files, infers type(scope): desc.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">context</div>
+            <div class="skill-trigger">trigger: context &gt;70% or large new task</div>
+            <div class="skill-desc">Snapshots state, compacts, resumes via hook.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">discover</div>
+            <div class="skill-trigger">trigger: vague/unfocused request</div>
+            <div class="skill-desc">Reframes goal before acting. Prevents solution-without-problem.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">council</div>
+            <div class="skill-trigger">trigger: architecture/design decisions with trade-offs</div>
+            <div class="skill-desc">Multi-voice analysis for decisions with no clear answer.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">document</div>
+            <div class="skill-trigger">trigger: public API/module added or changed</div>
+            <div class="skill-desc">Auto-generates documentation for new exports and signature changes.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">reflect</div>
+            <div class="skill-trigger">trigger: /reflect or AI usage review</div>
+            <div class="skill-desc">Scores 5 dims: amplification, improvement, metacognition, prompts, efficiency.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">orchestrate</div>
+            <div class="skill-trigger">trigger: active multi-agent run</div>
+            <div class="skill-desc">Handles inbox reading, dep resolution, message formatting, handoffs.</div>
+          </div>
+          <div class="skill-card">
+            <div class="skill-name">agent-introspection</div>
+            <div class="skill-trigger">trigger: 3+ consecutive failures, circular retries</div>
+            <div class="skill-desc">Breaks loops. Detects overwhelming context and circular patterns.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== AGENTS SCREEN ==================== -->
+      <div class="screen" id="screen-agents">
+        <div class="screen-header">
+          <h2>Internal Agents</h2>
+          <p>4 built-in agents used by /go and /check phases &middot; extendable via /team</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="agent-card">
+            <div class="agent-name">Builder</div>
+            <div class="agent-role">epic:builder</div>
+            <div class="agent-desc">Implements a single task using TDD. Writes test first, then code, then verifies. Used by /go to execute individual requirement tasks.</div>
+            <div style="margin-top:10px;"><span class="pill success">TDD</span><span class="pill info">/go</span></div>
+          </div>
+          <div class="agent-card">
+            <div class="agent-name">Reviewer</div>
+            <div class="agent-role">epic:reviewer</div>
+            <div class="agent-desc">Reviews code for quality, correctness, style, and test coverage. Launched by /check in parallel with auditor and test runner.</div>
+            <div style="margin-top:10px;"><span class="pill warning">review</span><span class="pill info">/check</span></div>
+          </div>
+          <div class="agent-card">
+            <div class="agent-name">Auditor</div>
+            <div class="agent-role">epic:auditor</div>
+            <div class="agent-desc">Audits code for security vulnerabilities and performance issues. Parallel execution with reviewer during /check phase.</div>
+            <div style="margin-top:10px;"><span class="pill danger">security</span><span class="pill info">/check</span></div>
+          </div>
+          <div class="agent-card">
+            <div class="agent-name">Planner</div>
+            <div class="agent-role">epic:planner</div>
+            <div class="agent-desc">Breaks down a goal into ordered, parallelizable tasks with dependencies. Used by /go to create the execution plan from approved spec.</div>
+            <div style="margin-top:10px;"><span class="pill purple">planning</span><span class="pill info">/go</span></div>
+          </div>
+        </div>
+
+        <!-- /team Patterns -->
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-header"><h3>/team Orchestration Patterns</h3></div>
+          <div class="panel-body" style="padding:0;">
+            <table class="data-table">
+              <thead>
+                <tr><th>Pattern</th><th>Agents</th><th>Best For</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--fg)">Pipeline</td>
+                  <td>3-6</td>
+                  <td style="color:var(--fg-secondary)">Sequential handoffs, build &#8594; test &#8594; review</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Fan-out</td>
+                  <td>3-6</td>
+                  <td style="color:var(--fg-secondary)">Parallel independent tasks, then merge</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Expert-Pool</td>
+                  <td>3-6</td>
+                  <td style="color:var(--fg-secondary)">Route to specialist per task type</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Producer-Reviewer</td>
+                  <td>2-3</td>
+                  <td style="color:var(--fg-secondary)">One builds, one reviews, iterate</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Supervisor</td>
+                  <td>3-6</td>
+                  <td style="color:var(--fg-secondary)">Central coordinator dispatches to workers</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== EVOLUTION SCREEN ==================== -->
+      <div class="screen" id="screen-evolution">
+        <div class="screen-header">
+          <h2>Eval &amp; Evolve <span class="subtitle-tag">Ring 3</span></h2>
+          <p>Observe &#8594; Analyze &#8594; Evolve &#8594; Gate &#8594; Reload self-improvement loop</p>
+        </div>
+
+        <!-- Evolution Pipeline -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header"><h3>Evolution Loop</h3></div>
+          <div class="panel-body">
+            <div class="pipeline-flow" style="justify-content:center;">
+              <div class="pipeline-stage completed">
+                <div class="stage-icon" style="background:var(--teal-soft);border-color:var(--teal);color:var(--teal);font-size:14px;">&#128065;</div>
+                <div class="stage-label">Observe</div>
+                <div class="stage-sub">post-tool-use</div>
+              </div>
+              <div class="pipeline-arrow done"></div>
+              <div class="pipeline-stage completed">
+                <div class="stage-icon" style="background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-size:14px;">&#128200;</div>
+                <div class="stage-label">Analyze</div>
+                <div class="stage-sub">session end</div>
+              </div>
+              <div class="pipeline-arrow done"></div>
+              <div class="pipeline-stage running">
+                <div class="stage-icon" style="background:var(--orange-soft);border-color:var(--orange);color:var(--orange);font-size:14px;">&#128736;</div>
+                <div class="stage-label">Evolve</div>
+                <div class="stage-sub">gen skills</div>
+              </div>
+              <div class="pipeline-arrow"></div>
+              <div class="pipeline-stage pending">
+                <div class="stage-icon" style="font-size:14px;">&#10003;</div>
+                <div class="stage-label">Gate</div>
+                <div class="stage-sub">validate</div>
+              </div>
+              <div class="pipeline-arrow"></div>
+              <div class="pipeline-stage pending">
+                <div class="stage-icon" style="font-size:14px;">&#8635;</div>
+                <div class="stage-label">Reload</div>
+                <div class="stage-sub">next session</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Skill Seeding Thresholds -->
+        <div class="grid-2" style="margin-bottom:16px;">
+          <div class="panel">
+            <div class="panel-header"><h3>Skill Seeding Thresholds</h3></div>
+            <div class="panel-body" style="padding:0;">
+              <table class="data-table">
+                <thead><tr><th>Type</th><th>Condition</th><th>Min Observations</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td style="color:var(--fg)">Weak tool</td>
+                    <td>success rate &lt; 0.6</td>
+                    <td>5</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--fg)">Weak file type</td>
+                    <td>success rate &lt; 0.5</td>
+                    <td>3</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--fg)">High-frequency error</td>
+                    <td>5+ occurrences</td>
+                    <td>5</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-header"><h3>Stagnation &amp; Gating</h3></div>
+            <div class="panel-body">
+              <ul class="activity-list">
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--warning)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Stagnation limit: 3 sessions</div>
+                    <div class="activity-time">No improvement &#8594; auto-rollback to best checkpoint</div>
+                  </div>
+                </li>
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--accent)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Improvement threshold: 5%</div>
+                    <div class="activity-time">Trend: improving / stable / declining</div>
+                  </div>
+                </li>
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--success)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Max evolved skills: 10</div>
+                    <div class="activity-time">Static skills always take priority</div>
+                  </div>
+                </li>
+                <li class="activity-item">
+                  <span class="activity-dot" style="background:var(--purple)"></span>
+                  <div class="activity-content">
+                    <div class="activity-title">Validation: frontmatter + body &ge;20 chars</div>
+                    <div class="activity-time">Invalid skills silently removed</div>
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <!-- Skill Attribution -->
+        <div class="panel">
+          <div class="panel-header"><h3>Skill Attribution (A/B Tracking)</h3></div>
+          <div class="panel-body">
+            <div style="font-size:12px;color:var(--fg-secondary);margin-bottom:12px;font-family:var(--font-mono);">
+              metrics.json tracks per-evolved-skill: avg_score_with vs avg_score_without &middot; positive delta = effective
+            </div>
+            <div style="display:flex;gap:16px;font-size:11px;color:var(--muted);font-family:var(--font-mono);">
+              <span>data: <code>$HARNESS_DIR/metrics.json</code></span>
+              <span>history: <code>$HARNESS_DIR/evolution.jsonl</code></span>
+              <span>backup: <code>$HARNESS_DIR/evolved_backup/</code></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== HOOKS SCREEN ==================== -->
+      <div class="screen" id="screen-hooks">
+        <div class="screen-header">
+          <h2>Hooks <span class="subtitle-tag">Ring 0</span></h2>
+          <p>6 Claude Code hooks providing autopilot automation &middot; Rust single binary</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header"><h3>Hook Registry</h3></div>
+          <div class="panel-body">
+            <div class="hook-row">
+              <div class="hook-event" style="color:var(--success);">Session start</div>
+              <div class="hook-cmd"><code>epic-harness resume</code></div>
+              <div class="hook-desc">Restore session + load evolved skills</div>
+              <span class="pill success">active</span>
+            </div>
+            <div class="hook-row">
+              <div class="hook-event" style="color:var(--accent);">Pre tool use</div>
+              <div class="hook-cmd"><code>epic-harness guard</code></div>
+              <div class="hook-desc">Block dangerous shell patterns</div>
+              <span class="pill success">active</span>
+            </div>
+            <div class="hook-row">
+              <div class="hook-event" style="color:var(--purple);">Post tool use</div>
+              <div class="hook-cmd"><code>epic-harness observe</code></div>
+              <div class="hook-desc">Record tool scores (3-axis eval, async)</div>
+              <span class="pill success">active</span>
+            </div>
+            <div class="hook-row">
+              <div class="hook-event" style="color:var(--teal);">Post edit</div>
+              <div class="hook-cmd"><code>epic-harness polish</code></div>
+              <div class="hook-desc">Auto-format + typecheck (feeds into observe)</div>
+              <span class="pill success">active</span>
+            </div>
+            <div class="hook-row">
+              <div class="hook-event" style="color:var(--warning);">Pre compact</div>
+              <div class="hook-cmd"><code>epic-harness snapshot</code></div>
+              <div class="hook-desc">Save session state before compaction</div>
+              <span class="pill success">active</span>
+            </div>
+            <div class="hook-row">
+              <div class="hook-event" style="color:var(--danger);">Session end</div>
+              <div class="hook-cmd"><code>epic-harness reflect</code></div>
+              <div class="hook-desc">Evolve skills + save metrics + merge session obs</div>
+              <span class="pill success">active</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Guard Rules -->
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-header"><h3>Guard Rule Extension</h3></div>
+          <div class="panel-body">
+            <div style="background:var(--bg);border-radius:var(--radius);padding:14px;font-family:var(--font-mono);font-size:11px;line-height:1.8;color:var(--fg-secondary);">
+              <div><span style="color:var(--muted)"># .harness/guard-rules.yaml</span></div>
+              <div><span style="color:var(--danger)">blocked</span>:</div>
+              <div>  <span style="color:var(--accent)">- pattern</span>: <span style="color:var(--teal)">kubectl\s+delete</span></div>
+              <div>    <span style="color:var(--accent)">msg</span>: <span style="color:var(--teal)">kubectl delete blocked</span></div>
+              <div><span style="color:var(--warning)">warned</span>:</div>
+              <div>  <span style="color:var(--accent)">- pattern</span>: <span style="color:var(--teal)">docker\s+system\s+prune</span></div>
+              <div>    <span style="color:var(--accent)">msg</span>: <span style="color:var(--teal)">Docker prune &mdash; check first</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== MEMORY SCREEN ==================== -->
+      <div class="screen" id="screen-memory">
+        <div class="screen-header">
+          <h2>harness-mem <span class="subtitle-tag">WIP</span></h2>
+          <p>Unified knowledge graph &middot; SQLite + FTS5 &middot; MCP server registered as <code>harness-mem</code></p>
+        </div>
+
+        <!-- Memory Schema -->
+        <div class="grid-2" style="margin-bottom:16px;">
+          <div class="panel">
+            <div class="panel-header"><h3>MCP Tools (6)</h3></div>
+            <div class="panel-body" style="padding:0;">
+              <table class="data-table">
+                <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+                <tbody>
+                  <tr>
+                    <td style="color:var(--accent)">mem_recall</td>
+                    <td style="color:var(--fg-secondary)">Smart contextual recall &middot; hint + project + graph neighbors</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--accent)">mem_add</td>
+                    <td style="color:var(--fg-secondary)">Add node with auto-importance by type</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--accent)">mem_search</td>
+                    <td style="color:var(--fg-secondary)">FTS5 keyword search, ranked by importance</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--accent)">mem_query</td>
+                    <td style="color:var(--fg-secondary)">Filter by tag/type/project</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--accent)">mem_context</td>
+                    <td style="color:var(--fg-secondary)">Project-scoped smart recall (session start)</td>
+                  </tr>
+                  <tr>
+                    <td style="color:var(--accent)">mem_related</td>
+                    <td style="color:var(--fg-secondary)">BFS graph traversal from node ID</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header"><h3>Scoring Formula</h3></div>
+            <div class="panel-body">
+              <div style="font-family:var(--font-mono);font-size:12px;line-height:2.2;">
+                <div style="color:var(--fg-secondary);">recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)</div>
+                <div style="margin-top:12px;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="color:var(--muted);width:120px;">recency:</span>
+                    <span style="color:var(--fg)">exponential decay, 30-day half-life</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="color:var(--muted);width:120px;">importance:</span>
+                    <span style="color:var(--fg)">type-based (0.0-1.0)</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="color:var(--muted);width:120px;">access_freq:</span>
+                    <span style="color:var(--fg)">saturates at 20 accesses</span>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <span style="color:var(--muted);width:120px;">FTS_match:</span>
+                    <span style="color:var(--fg)">1.0 bonus via FTS5</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Node Types -->
+        <div class="panel" style="margin-bottom:16px;">
+          <div class="panel-header"><h3>Node Types &amp; Default Importance</h3></div>
+          <div class="panel-body">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <span class="pill" style="background:var(--danger-soft);color:var(--danger);font-size:12px;padding:4px 12px;">decision (0.9)</span>
+              <span class="pill" style="background:var(--orange-soft);color:var(--orange);font-size:12px;padding:4px 12px;">resolution (0.8)</span>
+              <span class="pill" style="background:var(--accent-soft);color:var(--accent);font-size:12px;padding:4px 12px;">concept (0.7)</span>
+              <span class="pill" style="background:var(--teal-soft);color:var(--teal);font-size:12px;padding:4px 12px;">project (0.7)</span>
+              <span class="pill" style="background:var(--purple-soft);color:var(--purple);font-size:12px;padding:4px 12px;">pattern (0.5)</span>
+              <span class="pill" style="background:var(--warning-soft);color:var(--warning);font-size:12px;padding:4px 12px;">error (0.4)</span>
+              <span class="pill" style="background:var(--fg);color:var(--bg);font-size:12px;padding:4px 12px;">session (0.2)</span>
+            </div>
+            <div style="margin-top:12px;font-size:11px;color:var(--muted);font-family:var(--font-mono);">
+              lifecycle: access tracking &#8594; 30d decay (-10%/cycle) &#8594; 180d stale &#8594; <code>pinned</code> tag prevents decay
+            </div>
+          </div>
+        </div>
+
+        <!-- Storage -->
+        <div class="panel">
+          <div class="panel-header"><h3>Storage</h3></div>
+          <div class="panel-body" style="padding:0;">
+            <table class="data-table">
+              <tbody>
+                <tr><td style="color:var(--muted)">Database</td><td style="color:var(--fg)">~/.harness/memory.db (SQLite + FTS5)</td></tr>
+                <tr><td style="color:var(--muted)">MCP Server</td><td style="color:var(--fg)">harness-mem (registered in Claude Code)</td></tr>
+                <tr><td style="color:var(--muted)">Integration</td><td style="color:var(--fg)">_dispatch calls mem_recall before invoking any skill</td></tr>
+                <tr><td style="color:var(--muted)">Status</td><td style="color:var(--warning)">WIP &mdash; under active development</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== INTEGRATIONS SCREEN ==================== -->
+      <div class="screen" id="screen-integrations">
+        <div class="screen-header">
+          <h2>Integrations</h2>
+          <p>6 AI coding tool integrations &middot; configs in <code>integrations/</code></p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;">
+          <div class="integration-card">
+            <div class="int-icon" style="background:var(--accent-soft);color:var(--accent);">&#9889;</div>
+            <div class="int-info">
+              <div class="int-name">Claude Code</div>
+              <div class="int-desc">Primary integration. Hooks + skills + commands + MCP server.</div>
+              <div class="int-assets">
+                <span class="pill info">hooks</span>
+                <span class="pill purple">skills (15)</span>
+                <span class="pill teal">commands (10)</span>
+                <span class="pill orange">agents (4)</span>
+              </div>
+            </div>
+          </div>
+          <div class="integration-card">
+            <div class="int-icon" style="background:var(--success-soft);color:var(--success);">&#128187;</div>
+            <div class="int-info">
+              <div class="int-name">Codex (OpenAI)</div>
+              <div class="int-desc">OpenAI Codex CLI integration.</div>
+              <div class="int-assets">
+                <span class="pill info">hooks.json</span>
+                <span class="pill purple">config.toml</span>
+                <span class="pill teal">prompts (8)</span>
+                <span class="pill orange">skills (7)</span>
+              </div>
+            </div>
+          </div>
+          <div class="integration-card">
+            <div class="int-icon" style="background:var(--purple-soft);color:var(--purple);">&#10148;</div>
+            <div class="int-info">
+              <div class="int-name">Cursor</div>
+              <div class="int-desc">Cursor IDE agent integration.</div>
+              <div class="int-assets">
+                <span class="pill info">hooks.json</span>
+                <span class="pill teal">commands (8)</span>
+                <span class="pill orange">agents (4)</span>
+              </div>
+            </div>
+          </div>
+          <div class="integration-card">
+            <div class="int-icon" style="background:var(--teal-soft);color:var(--teal);">&#10024;</div>
+            <div class="int-info">
+              <div class="int-name">Gemini CLI</div>
+              <div class="int-desc">Google Gemini CLI integration.</div>
+              <div class="int-assets">
+                <span class="pill info">settings.json</span>
+                <span class="pill purple">GEMINI.md</span>
+                <span class="pill teal">commands (8)</span>
+                <span class="pill orange">skills (7)</span>
+              </div>
+            </div>
+          </div>
+          <div class="integration-card">
+            <div class="int-icon" style="background:var(--orange-soft);color:var(--orange);">&#9878;</div>
+            <div class="int-info">
+              <div class="int-name">Cline</div>
+              <div class="int-desc">Cline autonomous coding agent.</div>
+              <div class="int-assets">
+                <span class="pill info">hooks (5 scripts)</span>
+                <span class="pill purple">rules/epic-harness.md</span>
+              </div>
+            </div>
+          </div>
+          <div class="integration-card">
+            <div class="int-icon" style="background:var(--pink-soft);color:var(--pink);">&#127760;</div>
+            <div class="int-info">
+              <div class="int-name">Aider</div>
+              <div class="int-desc">Aider AI pair programming integration.</div>
+              <div class="int-assets">
+                <span class="pill info">.aider.conf.yml</span>
+                <span class="pill purple">CONVENTIONS.md</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Integration Details -->
+        <div class="panel" style="margin-top:16px;">
+          <div class="panel-header"><h3>Shared Resources</h3></div>
+          <div class="panel-body" style="padding:0;">
+            <table class="data-table">
+              <thead><tr><th>Resource</th><th>Count</th><th>Location</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td style="color:var(--fg)">Commands</td>
+                  <td>10</td>
+                  <td style="color:var(--muted)">registry/commands/*.md</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Auto Skills</td>
+                  <td>15 + _dispatch</td>
+                  <td style="color:var(--muted)">registry/skills/*/SKILL.md</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Agents</td>
+                  <td>4</td>
+                  <td style="color:var(--muted)">registry/agents/*.md</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Presets</td>
+                  <td>4 stacks</td>
+                  <td style="color:var(--muted)">registry/presets/{go,node,python,rust}</td>
+                </tr>
+                <tr>
+                  <td style="color:var(--fg)">Hooks Binary</td>
+                  <td>1</td>
+                  <td style="color:var(--muted)">hooks/bin/epic-harness (Rust)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ==================== SETTINGS SCREEN ==================== -->
+      <div class="screen" id="screen-settings">
+        <div class="screen-header" style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <h2>Settings</h2>
+            <p>Review and edit epic-harness configurations</p>
+          </div>
+        </div>
+
+        <div class="grid-2-1">
+          <div>
+            <!-- Eval Weights -->
+            <div class="panel">
+              <div class="panel-header"><h3>Eval Score Weights</h3></div>
+              <div class="panel-body">
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Success Weight</div>
+                      <div class="setting-desc">tool_success axis weight (0/1)</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="0.5" step="0.1" min="0" max="1" style="width:100px;" />
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Quality Weight</div>
+                      <div class="setting-desc">output_quality axis weight (0.0-1.0)</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="0.3" step="0.1" min="0" max="1" style="width:100px;" />
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Cost Weight</div>
+                      <div class="setting-desc">execution_cost axis weight (0.0-1.0)</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="0.2" step="0.1" min="0" max="1" style="width:100px;" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Evolution -->
+            <div class="panel" style="margin-top:16px;">
+              <div class="panel-header"><h3>Evolution Tuning</h3></div>
+              <div class="panel-body">
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Stagnation Limit</div>
+                      <div class="setting-desc">Sessions without improvement before rollback</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="3" style="width:100px;" />
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Improvement Threshold</div>
+                      <div class="setting-desc">Minimum score improvement to count as progress</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="5" style="width:100px;" />
+                      <span style="font-size:11px;color:var(--muted);margin-left:4px;">%</span>
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Max Evolved Skills</div>
+                      <div class="setting-desc">Upper limit for auto-generated skills</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="10" style="width:100px;" />
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Cross-Project Learning</div>
+                      <div class="setting-desc">Share patterns across projects (opt-in)</div>
+                    </div>
+                    <div class="setting-control">
+                      <div class="toggle" onclick="this.classList.toggle('on')"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Pattern Detection -->
+            <div class="panel" style="margin-top:16px;">
+              <div class="panel-header"><h3>Pattern Detection Thresholds</h3></div>
+              <div class="panel-body">
+                <div class="settings-group">
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Repeated Error Min</div>
+                      <div class="setting-desc">Consecutive same error + same hash threshold</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="3" style="width:100px;" />
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Debug Loop Min</div>
+                      <div class="setting-desc">Same file in consecutive operations threshold</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="5" style="width:100px;" />
+                    </div>
+                  </div>
+                  <div class="setting-row">
+                    <div class="setting-info">
+                      <div class="setting-name">Thrashing Min Edits</div>
+                      <div class="setting-desc">Edit&#8596;Error alternating minimum edit count</div>
+                    </div>
+                    <div class="setting-control">
+                      <input class="input-field" type="number" value="3" style="width:100px;" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div>
+            <!-- System Info -->
+            <div class="panel">
+              <div class="panel-header"><h3>System Info</h3></div>
+              <div class="panel-body" style="padding:0;">
+                <table class="data-table">
+                  <tbody>
+                    <tr><td style="color:var(--muted)">Version</td><td style="color:var(--fg)">0.3.11</td></tr>
+                    <tr><td style="color:var(--muted)">Runtime</td><td style="color:var(--fg)">Rust (edition 2024)</td></tr>
+                    <tr><td style="color:var(--muted)">Binary</td><td style="color:var(--fg)">hooks/bin/epic-harness</td></tr>
+                    <tr><td style="color:var(--muted)">Memory DB</td><td style="color:var(--fg)">SQLite + FTS5</td></tr>
+                    <tr><td style="color:var(--muted)">Dashboard</td><td style="color:var(--fg)">Tauri (src-tauri/)</td></tr>
+                    <tr><td style="color:var(--muted)">License</td><td style="color:var(--fg)">Apache-2.0</td></tr>
+                    <tr><td style="color:var(--muted)">CI</td><td style="color:var(--fg)">check + clippy + fmt + test</td></tr>
+                    <tr><td style="color:var(--muted)">Release</td><td style="color:var(--fg)">cargo-dist</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Project Paths -->
+            <div class="panel" style="margin-top:16px;">
+              <div class="panel-header"><h3>Project Data Paths</h3></div>
+              <div class="panel-body" style="padding:0;">
+                <table class="data-table">
+                  <tbody>
+                    <tr><td style="color:var(--muted)">HARNESS_DIR</td><td style="color:var(--fg);font-size:10px;">~/.harness/projects/{slug}/</td></tr>
+                    <tr><td style="color:var(--muted)">Observations</td><td style="color:var(--fg);font-size:10px;">obs/ (JSONL, 3-axis scores)</td></tr>
+                    <tr><td style="color:var(--muted)">Evolved Skills</td><td style="color:var(--fg);font-size:10px;">evolved/ (auto-generated)</td></tr>
+                    <tr><td style="color:var(--muted)">Evolution Backup</td><td style="color:var(--fg);font-size:10px;">evolved_backup/ (best state)</td></tr>
+                    <tr><td style="color:var(--muted)">Sessions</td><td style="color:var(--fg);font-size:10px;">sessions/*.json</td></tr>
+                    <tr><td style="color:var(--muted)">Metrics</td><td style="color:var(--fg);font-size:10px;">metrics.json</td></tr>
+                    <tr><td style="color:var(--muted)">Orbit State</td><td style="color:var(--fg);font-size:10px;">orbit/PIPELINE-*.json</td></tr>
+                    <tr><td style="color:var(--muted)">Dispatch Log</td><td style="color:var(--fg);font-size:10px;">dispatch/dispatch_*.jsonl</td></tr>
+                    <tr><td style="color:var(--muted)">Memory</td><td style="color:var(--fg);font-size:10px;">memory/ (project patterns)</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Cold Start Presets -->
+            <div class="panel" style="margin-top:16px;">
+              <div class="panel-header"><h3>Cold-Start Presets</h3></div>
+              <div class="panel-body">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <span class="pill info">Rust</span>
+                  <span class="pill success">Node.js</span>
+                  <span class="pill warning">Python</span>
+                  <span class="pill purple">Go</span>
+                </div>
+                <div style="margin-top:10px;font-size:11px;color:var(--muted);">
+                  Auto-apply on first session with no evolved skills for detected stacks.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function switchScreen(id) {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      var target = document.getElementById('screen-' + id);
+      if (target) target.classList.add('active');
+
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      var navItem = document.querySelector('.nav-item[data-screen="' + id + '"]');
+      if (navItem) navItem.classList.add('active');
+
+      var labels = {
+        'dashboard': 'dashboard',
+        'orbit': '/orbit pipeline',
+        'commands': 'commands',
+        'skills': 'auto skills',
+        'agents': 'agents',
+        'evolution': 'eval & evolve',
+        'hooks': 'hooks',
+        'memory': 'harness-mem',
+        'integrations': 'integrations',
+        'settings': 'settings'
+      };
+      document.getElementById('breadcrumb-page').textContent = labels[id] || id;
+
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sidebarOverlay').classList.remove('open');
+    }
+
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('open');
+      document.getElementById('sidebarOverlay').classList.toggle('open');
+    }
+  </script>
+</body>
+</html>
