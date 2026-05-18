@@ -28,6 +28,12 @@ pub fn run() {
             commands::search::recall_nodes,
             // Stats
             commands::stats::get_stats,
+            // Harness live data
+            commands::harness::get_harness_metrics,
+            commands::harness::get_orbit_pipelines,
+            commands::harness::get_evolved_skills,
+            commands::harness::get_obs_summary,
+            commands::harness::get_integration_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

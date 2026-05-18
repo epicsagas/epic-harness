@@ -11,6 +11,7 @@
   import Memory from './pages/Memory.svelte';
   import Integrations from './pages/Integrations.svelte';
   import Settings from './pages/Settings.svelte';
+  import Toast from '$lib/components/Toast.svelte';
 
   let currentScreen = $state('dashboard');
   let sidebarOpen = $state(false);
@@ -71,3 +72,4 @@
     </div>
   </div>
 </div>
+<Toast />
