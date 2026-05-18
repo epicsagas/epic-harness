@@ -24,12 +24,11 @@
     } finally {
       loading = false;
     }
-    if (graphData.nodes.length > 0) renderGraph();
   });
 
-  function renderGraph() {
+  function renderGraph(): d3.Simulation<d3.SimulationNodeDatum, undefined> | null {
     const el = svgEl as SVGSVGElement | undefined;
-    if (!el) return;
+    if (!el) return null;
     d3.select(el).selectAll('*').remove();
 
     const width = el.clientWidth || 800;
@@ -102,11 +101,14 @@
                .attr('y', (d: any) => (d.source.y + d.target.y) / 2);
       node.attr('transform', (d: any) => `translate(${d.x},${d.y})`);
     });
+
+    return sim;
   }
 
   $effect(() => {
     if (!loading && graphData.nodes.length > 0 && svgEl) {
-      renderGraph();
+      const sim = renderGraph();
+      return () => { sim?.stop(); };
     }
   });
 </script>

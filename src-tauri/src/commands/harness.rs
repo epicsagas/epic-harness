@@ -1,17 +1,39 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+const MAX_SKILL_MD_BYTES: u64 = 512 * 1024; // 512 KB
+const MAX_SCORE_HISTORY: usize = 200;
+const MAX_EVOLUTION_ENTRIES: usize = 50;
+const MAX_OBS_LINES_PER_FILE: usize = 10_000;
+
+static HARNESS_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
 fn harness_project_dir() -> Result<PathBuf, String> {
-    let output = std::process::Command::new("epic-harness")
-        .arg("path")
-        .output()
-        .map_err(|e| format!("epic-harness not found: {e}"))?;
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        return Err("epic-harness path returned empty".into());
+    HARNESS_DIR
+        .get_or_init(|| {
+            let output = std::process::Command::new("epic-harness")
+                .arg("path")
+                .output()
+                .map_err(|e| format!("epic-harness not found: {e}"))?;
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if path.is_empty() {
+                return Err("epic-harness path returned empty".into());
+            }
+            Ok(PathBuf::from(path))
+        })
+        .clone()
+}
+
+fn tilde_collapse(path: &std::path::Path) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let s = path.to_string_lossy();
+    if !home.is_empty() && s.starts_with(&home) {
+        format!("~{}", &s[home.len()..])
+    } else {
+        s.into_owned()
     }
-    Ok(PathBuf::from(path))
 }
 
 // ── Metrics ──────────────────────────────────────────────────────────────────
@@ -41,13 +63,14 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("parse metrics.json: {e}"))?;
 
-    let scores: Vec<f64> = v["score_history"]
+    let all_scores: Vec<f64> = v["score_history"]
         .as_array()
         .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
         .unwrap_or_default();
-    let count = scores.len() as u32;
-    let avg = if count > 0 {
-        scores.iter().sum::<f64>() / count as f64
+    let total_count = all_scores.len() as u32;
+    let scores: Vec<f64> = all_scores.into_iter().rev().take(MAX_SCORE_HISTORY).collect::<Vec<_>>().into_iter().rev().collect();
+    let avg = if total_count > 0 {
+        scores.iter().sum::<f64>() / scores.len() as f64
     } else {
         0.0
     };
@@ -56,7 +79,7 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
         score_history: scores,
         trend: v["trend"].as_str().unwrap_or("stable").to_string(),
         stagnation_count: v["stagnation_count"].as_u64().unwrap_or(0) as u32,
-        session_count: count,
+        session_count: total_count,
         avg_score: (avg * 1000.0).round() / 1000.0,
         skill_attribution: v["skill_attribution"].clone(),
         score_weights: v["score_weights"].clone(),
@@ -163,7 +186,11 @@ pub async fn get_evolved_skills() -> Result<EvolutionData, String> {
                     .unwrap_or("")
                     .to_string();
                 let skill_md_path = path.join("SKILL.md");
-                let skill_md = fs::read_to_string(&skill_md_path).unwrap_or_default();
+                let skill_md = skill_md_path.metadata()
+                    .ok()
+                    .filter(|m| m.len() <= MAX_SKILL_MD_BYTES)
+                    .and_then(|_| fs::read_to_string(&skill_md_path).ok())
+                    .unwrap_or_default();
                 let created = path
                     .metadata()
                     .ok()
@@ -182,28 +209,36 @@ pub async fn get_evolved_skills() -> Result<EvolutionData, String> {
         }
     }
 
-    // Read evolution history
-    let mut history = Vec::new();
+    // Read evolution history — stream line-by-line, count all but keep only recent entries
+    let mut history: std::collections::VecDeque<serde_json::Value> =
+        std::collections::VecDeque::with_capacity(MAX_EVOLUTION_ENTRIES + 1);
     let mut total_sessions = 0u32;
     let mut patterns = 0u32;
     let evo_path = dir.join("evolution.jsonl");
     if evo_path.exists() {
-        let raw = fs::read_to_string(&evo_path).unwrap_or_default();
-        for line in raw.lines().filter(|l| !l.trim().is_empty()) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                total_sessions += 1;
-                if let Some(arr) = v["patterns"].as_array() {
-                    patterns += arr.len() as u32;
+        use std::io::BufRead;
+        if let Ok(file) = fs::File::open(&evo_path) {
+            for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+                if line.trim().is_empty() { continue; }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    total_sessions += 1;
+                    if let Some(arr) = v["patterns"].as_array() {
+                        patterns += arr.len() as u32;
+                    }
+                    history.push_back(v);
+                    if history.len() > MAX_EVOLUTION_ENTRIES {
+                        history.pop_front();
+                    }
                 }
-                history.push(v);
             }
         }
     }
-    history.reverse(); // newest first
+    // VecDeque is already in order; convert newest-first
+    let history_vec: Vec<_> = history.into_iter().rev().collect();
 
     Ok(EvolutionData {
         evolved_skills: skills,
-        evolution_history: history.into_iter().take(50).collect(),
+        evolution_history: history_vec,
         total_sessions_analyzed: total_sessions,
         patterns_detected: patterns,
     })
@@ -254,7 +289,7 @@ pub async fn get_obs_summary() -> Result<ObsSummary, String> {
         return Ok(ObsSummary::default());
     }
 
-    let mut all_entries: Vec<serde_json::Value> = Vec::new();
+    let mut newest_session_entries: Vec<serde_json::Value> = Vec::new();
     let mut session_files: Vec<(String, PathBuf)> = Vec::new();
 
     let entries = fs::read_dir(&obs_dir).map_err(|e| format!("read obs dir: {e}"))?;
@@ -274,31 +309,45 @@ pub async fn get_obs_summary() -> Result<ObsSummary, String> {
     let mut tool_map: std::collections::HashMap<String, (u32, f64, u32)> =
         std::collections::HashMap::new();
 
-    for (fname, path) in &recent_files {
-        let raw = fs::read_to_string(path).unwrap_or_default();
+    for (idx, (fname, path)) in recent_files.iter().enumerate() {
+        use std::io::BufRead;
         let mut calls = 0u32;
         let mut score_sum = 0.0f64;
         let mut failures = 0u32;
+        let mut session_entries: Vec<serde_json::Value> = Vec::new();
 
-        for line in raw.lines().filter(|l| !l.trim().is_empty()) {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                calls += 1;
-                let score = v["score"].as_f64().unwrap_or(0.0);
-                score_sum += score;
-                if v["result"].as_str() != Some("success") {
-                    failures += 1;
-                }
-                if let Some(tool) = v["tool"].as_str() {
-                    let e = tool_map.entry(tool.to_string()).or_insert((0, 0.0, 0));
-                    e.0 += 1;
-                    e.1 += score;
+        if let Ok(file) = fs::File::open(path) {
+            for line in std::io::BufReader::new(file)
+                .lines()
+                .map_while(Result::ok)
+                .take(MAX_OBS_LINES_PER_FILE)
+            {
+                if line.trim().is_empty() { continue; }
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                    calls += 1;
+                    let score = v["score"].as_f64().unwrap_or(0.0);
+                    score_sum += score;
                     if v["result"].as_str() != Some("success") {
-                        e.2 += 1;
+                        failures += 1;
                     }
+                    if let Some(tool) = v["tool"].as_str() {
+                        let e = tool_map.entry(tool.to_string()).or_insert((0, 0.0, 0));
+                        e.0 += 1;
+                        e.1 += score;
+                        if v["result"].as_str() != Some("success") {
+                            e.2 += 1;
+                        }
+                    }
+                    session_entries.push(v);
                 }
-                all_entries.push(v);
             }
         }
+
+        // Capture the most recent session (idx == 0 = newest) for active_agents
+        if idx == 0 {
+            newest_session_entries = session_entries;
+        }
+        let fname = fname;
 
         let date = fname
             .strip_prefix("session_")
@@ -325,7 +374,7 @@ pub async fn get_obs_summary() -> Result<ObsSummary, String> {
     }
 
     let total_calls: u32 = session_summaries.iter().map(|s| s.tool_calls).sum();
-    let total_score: f64 = all_entries.iter().filter_map(|v| v["score"].as_f64()).sum();
+    let total_score: f64 = session_summaries.iter().map(|s| s.avg_score * s.tool_calls as f64).sum();
     let overall_avg = if total_calls > 0 {
         (total_score / total_calls as f64 * 1000.0).round() / 1000.0
     } else {
@@ -351,8 +400,8 @@ pub async fn get_obs_summary() -> Result<ObsSummary, String> {
         .collect();
     tool_stats.sort_by(|a, b| b.calls.cmp(&a.calls));
 
-    // Active agents: last 5 distinct tools from most recent session
-    let active_agents: Vec<ActiveAgent> = all_entries
+    // Active agents: last 5 entries from the most recent session (newest_session_entries)
+    let active_agents: Vec<ActiveAgent> = newest_session_entries
         .iter()
         .rev()
         .take(5)
@@ -386,7 +435,7 @@ pub struct IntegrationStatus {
 
 #[tauri::command]
 pub async fn get_integration_status() -> Result<Vec<IntegrationStatus>, String> {
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/nonexistent".to_string());
     let checks = vec![
         (
             "Claude Code",
@@ -424,7 +473,7 @@ pub async fn get_integration_status() -> Result<Vec<IntegrationStatus>, String> 
             IntegrationStatus {
                 name: name.to_string(),
                 installed: found.is_some(),
-                config_path: found.cloned(),
+                config_path: found.map(|p| tilde_collapse(std::path::Path::new(p))),
                 version: None,
             }
         })
