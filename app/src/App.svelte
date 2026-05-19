@@ -11,8 +11,8 @@
   import Memory from './pages/Memory.svelte';
   import Integrations from './pages/Integrations.svelte';
   import Settings from './pages/Settings.svelte';
+  import Toast from '$lib/components/Toast.svelte';
 
-  let currentScreen = $state('dashboard');
   let sidebarOpen = $state(false);
 
   const screens: Record<string, any> = {
@@ -41,10 +41,30 @@
     settings: 'settings',
   };
 
+  function screenFromPath(): string {
+    const seg = window.location.pathname.replace(/^\//, '').split('/')[0];
+    return seg in screens ? seg : 'dashboard';
+  }
+
+  let currentScreen = $state(screenFromPath());
+
   function navigate(screen: string) {
+    const path = screen === 'dashboard' ? '/' : `/${screen}`;
+    history.pushState({}, '', path);
     currentScreen = screen;
     sidebarOpen = false;
   }
+
+  function onPopState() {
+    currentScreen = screenFromPath();
+  }
+
+  import { onMount } from 'svelte';
+  onMount(() => {
+    window.addEventListener('popstate', onPopState);
+    currentScreen = screenFromPath();
+    return () => window.removeEventListener('popstate', onPopState);
+  });
 
   let Page = $derived(screens[currentScreen] ?? Dashboard);
 </script>
@@ -71,3 +91,4 @@
     </div>
   </div>
 </div>
+<Toast />

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+  <!--
+    원본 분석:
+    - C의 호: 좌측 반원, 위/아래가 오른쪽으로 수평하게 꺾여서 뻗음 (rounded corner)
+    - C 위쪽 수평선: y≈14, x: 약 40~60 (오른쪽으로 뻗음)
+    - C 아래쪽 수평선: y≈66, x: 약 40~60 (오른쪽으로 뻗음)
+    - C 반원: 중심 (40,40), radius ≈26
+    - H 왼쪽 세로바: x≈46, y: 24~56
+    - H 오른쪽 세로바: x≈62, y: 24~56
+    - H 크로스바: y≈40, x: 46~62
+  -->
+
+  <!-- C shape: 반원 + 위아래 수평 꼬리 (path로 정확히 표현) -->
+  <path
+    d="M 58 14
+       L 40 14
+       Q 14 14 14 40
+       Q 14 66 40 66
+       L 58 66"
+    stroke="#3d4857"
+    stroke-width="6.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  />
+
+  <!-- H 왼쪽 세로바 (C 위아래 꼬리보다 안쪽에서 시작) -->
+  <line x1="46" y1="24" x2="46" y2="56"
+        stroke="#3d4857" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- H 오른쪽 세로바 -->
+  <line x1="63" y1="24" x2="63" y2="56"
+        stroke="#3d4857" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- H 크로스바 -->
+  <line x1="46" y1="40" x2="63" y2="40"
+        stroke="#3d4857" stroke-width="6" stroke-linecap="round"/>
+</svg>

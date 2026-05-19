@@ -1,91 +1,78 @@
-<div class="screen-header">
-  <h2>Auto Skills <span class="subtitle-tag">Ring 2</span></h2>
-  <p>15 context-triggered skills + _dispatch core router &middot; static skills always take priority over evolved</p>
-</div>
+<script lang="ts">
+  import { tStore } from '$lib/i18n.js';
 
-<!-- _dispatch highlight -->
-<div class="panel" style="margin-bottom:16px;border-left:3px solid var(--accent);">
-  <div class="panel-header"><h3>_dispatch &mdash; Core Router</h3></div>
-  <div class="panel-body">
-    <div class="cmd-desc" style="font-size:13px;">
-      Always active. Auto-invokes matching skill before every response. Runs confusion protocol on high-risk ambiguity.
-      Calls <code>mem_recall</code> with current task context before invoking any skill. Past decisions (importance=0.9) surface first.
-    </div>
-    <div style="margin-top:8px;font-size:11px;color:var(--muted);font-family:var(--font-mono);">
-      dispatch log: <code>$HARNESS_DIR/dispatch/dispatch_YYYYMMDD.jsonl</code>
-    </div>
-  </div>
+  type SkillDescKey =
+    | 'skillDispatchDesc' | 'skillTddDesc' | 'skillDebugDesc' | 'skillSecureDesc'
+    | 'skillVerifyDesc' | 'skillSimplifyDesc' | 'skillPerfDesc' | 'skillReviewDesc'
+    | 'skillRefactorDesc' | 'skillMigrateDesc' | 'skillApiDesignDesc' | 'skillDocDesc'
+    | 'skillTestGenDesc' | 'skillCiDesc' | 'skillDeployDesc';
+
+  interface Skill {
+    name: string;
+    descKey: SkillDescKey;
+    special?: boolean;
+  }
+
+  const skills: Skill[] = [
+    { name: '_dispatch', descKey: 'skillDispatchDesc', special: true },
+    { name: 'tdd',       descKey: 'skillTddDesc' },
+    { name: 'debug',     descKey: 'skillDebugDesc' },
+    { name: 'secure',    descKey: 'skillSecureDesc' },
+    { name: 'verify',    descKey: 'skillVerifyDesc' },
+    { name: 'simplify',  descKey: 'skillSimplifyDesc' },
+    { name: 'perf',      descKey: 'skillPerfDesc' },
+    { name: 'review',    descKey: 'skillReviewDesc' },
+    { name: 'refactor',  descKey: 'skillRefactorDesc' },
+    { name: 'migrate',   descKey: 'skillMigrateDesc' },
+    { name: 'api-design',descKey: 'skillApiDesignDesc' },
+    { name: 'doc',       descKey: 'skillDocDesc' },
+    { name: 'test-gen',  descKey: 'skillTestGenDesc' },
+    { name: 'ci',        descKey: 'skillCiDesc' },
+    { name: 'deploy',    descKey: 'skillDeployDesc' },
+  ];
+
+  let copiedSkill = $state<string | null>(null);
+
+  async function copySkill(name: string) {
+    try {
+      await navigator.clipboard.writeText('/' + name);
+      copiedSkill = name;
+      setTimeout(() => { copiedSkill = null; }, 1500);
+    } catch {
+      copiedSkill = null;
+    }
+  }
+</script>
+
+<div class="screen-header">
+  <h2>{$tStore('pageSkills')} <span class="subtitle-tag">Ring 2</span></h2>
+  <p>{$tStore('pageSkillsDesc')}</p>
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
-  <div class="skill-card">
-    <div class="skill-name">tdd</div>
-    <div class="skill-trigger">trigger: new feature or bug fix</div>
-    <div class="skill-desc">Enforces Red &#8594; Green &#8594; Refactor. No prod code without failing test first.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">debug</div>
-    <div class="skill-trigger">trigger: test failure, runtime error, unexpected behavior</div>
-    <div class="skill-desc">Systematic root-cause isolation. Never retry without diagnosis.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">verify</div>
-    <div class="skill-trigger">trigger: before marking done or /ship</div>
-    <div class="skill-desc">Build + test + lint must all pass. No exceptions.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">secure</div>
-    <div class="skill-trigger">trigger: auth, DB, API, infra, or secrets code touched</div>
-    <div class="skill-desc">Security checklist for SQL, endpoints, env vars, infra config.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">perf</div>
-    <div class="skill-trigger">trigger: loops, DB queries, rendering, batch ops</div>
-    <div class="skill-desc">Catches N+1, missing indexes, unnecessary re-renders.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">simplify</div>
-    <div class="skill-trigger">trigger: file &gt;200 lines, high complexity, duplication</div>
-    <div class="skill-desc">Deep nesting, copy-paste, god functions. Extract and reduce.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">commit</div>
-    <div class="skill-trigger">trigger: commit/save</div>
-    <div class="skill-desc">CC 1.0.0 commit generator. Stages relevant files, infers type(scope): desc.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">context</div>
-    <div class="skill-trigger">trigger: context &gt;70% or large new task</div>
-    <div class="skill-desc">Snapshots state, compacts, resumes via hook.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">discover</div>
-    <div class="skill-trigger">trigger: vague/unfocused request</div>
-    <div class="skill-desc">Reframes goal before acting. Prevents solution-without-problem.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">council</div>
-    <div class="skill-trigger">trigger: architecture/design decisions with trade-offs</div>
-    <div class="skill-desc">Multi-voice analysis for decisions with no clear answer.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">document</div>
-    <div class="skill-trigger">trigger: public API/module added or changed</div>
-    <div class="skill-desc">Auto-generates documentation for new exports and signature changes.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">reflect</div>
-    <div class="skill-trigger">trigger: /reflect or AI usage review</div>
-    <div class="skill-desc">Scores 5 dims: amplification, improvement, metacognition, prompts, efficiency.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">orchestrate</div>
-    <div class="skill-trigger">trigger: active multi-agent run</div>
-    <div class="skill-desc">Handles inbox reading, dep resolution, message formatting, handoffs.</div>
-  </div>
-  <div class="skill-card">
-    <div class="skill-name">agent-introspection</div>
-    <div class="skill-trigger">trigger: 3+ consecutive failures, circular retries</div>
-    <div class="skill-desc">Breaks loops. Detects overwhelming context and circular patterns.</div>
-  </div>
+  {#each skills as skill}
+    <div
+      class="skill-card"
+      role="button"
+      tabindex="0"
+      style={skill.special
+        ? 'cursor:pointer;border:1px solid var(--accent);background:var(--surface-raised);transition:box-shadow var(--transition);'
+        : 'cursor:pointer;transition:background var(--transition),box-shadow var(--transition);'}
+      onclick={() => copySkill(skill.name)}
+      onkeydown={(e) => e.key === 'Enter' && copySkill(skill.name)}
+    >
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div class="skill-name" style={skill.special ? 'color:var(--accent);' : ''}>
+          {skill.name}
+          {#if skill.special}
+            <span class="pill info" style="margin-left:6px;font-size:10px;">core router</span>
+          {/if}
+        </div>
+        {#if copiedSkill === skill.name}
+          <span style="font-size:11px;color:var(--success);font-family:var(--font-mono);font-weight:600;">{$tStore('copied')}</span>
+        {/if}
+      </div>
+      <div class="skill-desc">{$tStore(skill.descKey)}</div>
+    </div>
+  {/each}
 </div>

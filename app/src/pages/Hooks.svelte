@@ -1,62 +1,125 @@
-<div class="screen-header">
-  <h2>Hooks <span class="subtitle-tag">Ring 0</span></h2>
-  <p>6 Claude Code hooks providing autopilot automation &middot; Rust single binary</p>
-</div>
+<script lang="ts">
+  import { tStore } from '$lib/i18n.js';
+</script>
 
-<div class="panel">
-  <div class="panel-header"><h3>Hook Registry</h3></div>
-  <div class="panel-body">
-    <div class="hook-row">
-      <div class="hook-event" style="color:var(--success);">Session start</div>
-      <div class="hook-cmd"><code>epic-harness resume</code></div>
-      <div class="hook-desc">Restore session + load evolved skills</div>
-      <span class="pill success">active</span>
-    </div>
-    <div class="hook-row">
-      <div class="hook-event" style="color:var(--accent);">Pre tool use</div>
-      <div class="hook-cmd"><code>epic-harness guard</code></div>
-      <div class="hook-desc">Block dangerous shell patterns</div>
-      <span class="pill success">active</span>
-    </div>
-    <div class="hook-row">
-      <div class="hook-event" style="color:var(--purple);">Post tool use</div>
-      <div class="hook-cmd"><code>epic-harness observe</code></div>
-      <div class="hook-desc">Record tool scores (3-axis eval, async)</div>
-      <span class="pill success">active</span>
-    </div>
-    <div class="hook-row">
-      <div class="hook-event" style="color:var(--teal);">Post edit</div>
-      <div class="hook-cmd"><code>epic-harness polish</code></div>
-      <div class="hook-desc">Auto-format + typecheck (feeds into observe)</div>
-      <span class="pill success">active</span>
-    </div>
-    <div class="hook-row">
-      <div class="hook-event" style="color:var(--warning);">Pre compact</div>
-      <div class="hook-cmd"><code>epic-harness snapshot</code></div>
-      <div class="hook-desc">Save session state before compaction</div>
-      <span class="pill success">active</span>
-    </div>
-    <div class="hook-row">
-      <div class="hook-event" style="color:var(--danger);">Session end</div>
-      <div class="hook-cmd"><code>epic-harness reflect</code></div>
-      <div class="hook-desc">Evolve skills + save metrics + merge session obs</div>
-      <span class="pill success">active</span>
-    </div>
+<div class="page">
+  <div class="page-header">
+    <h1>{$tStore('pageHooks')} <span class="badge">Ring 0</span></h1>
+    <p>{$tStore('pageHooksDesc')}</p>
   </div>
-</div>
 
-<!-- Guard Rules -->
-<div class="panel" style="margin-top:16px;">
-  <div class="panel-header"><h3>Guard Rule Extension</h3></div>
-  <div class="panel-body">
-    <div style="background:var(--bg);border-radius:var(--radius);padding:14px;font-family:var(--font-mono);font-size:11px;line-height:1.8;color:var(--fg-secondary);">
-      <div><span style="color:var(--muted)"># .harness/guard-rules.yaml</span></div>
-      <div><span style="color:var(--danger)">blocked</span>:</div>
-      <div>  <span style="color:var(--accent)">- pattern</span>: <span style="color:var(--teal)">kubectl\s+delete</span></div>
-      <div>    <span style="color:var(--accent)">msg</span>: <span style="color:var(--teal)">kubectl delete blocked</span></div>
-      <div><span style="color:var(--warning)">warned</span>:</div>
-      <div>  <span style="color:var(--accent)">- pattern</span>: <span style="color:var(--teal)">docker\s+system\s+prune</span></div>
-      <div>    <span style="color:var(--accent)">msg</span>: <span style="color:var(--teal)">Docker prune &mdash; check first</span></div>
-    </div>
+  <!-- Hook Registry table -->
+  <div class="card" style="margin-bottom:1rem;">
+    <h3>{$tStore('hookRegistryTitle')}</h3>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{$tStore('colHook')}</th>
+          <th>{$tStore('colCommand')}</th>
+          <th>{$tStore('colTrigger')}</th>
+          <th>{$tStore('colEffect')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td style="color:var(--success, #22c55e); white-space:nowrap;">Session Start</td>
+          <td><code>epic-harness resume</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onSessionStart')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookResumeEffect')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--accent, #6366f1); white-space:nowrap;">Pre Tool Use</td>
+          <td><code>epic-harness guard</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPreTool')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookGuardEffect')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--purple, #a855f7); white-space:nowrap;">Post Tool Use</td>
+          <td><code>epic-harness observe</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPostTool')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookObserveEffect')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--teal, #06b6d4); white-space:nowrap;">Post Edit</td>
+          <td><code>epic-harness polish</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPostEdit')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookPolishEffect')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--warning, #f59e0b); white-space:nowrap;">Pre Compact</td>
+          <td><code>epic-harness snapshot</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPreCompact')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookSnapshotEffect')}</td>
+        </tr>
+        <tr>
+          <td style="color:var(--danger, #ef4444); white-space:nowrap;">Session End</td>
+          <td><code>epic-harness reflect</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onSessionEnd')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookReflectEffect')}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Hook Flow -->
+  <div class="card" style="margin-bottom:1rem;">
+    <h3>{$tStore('hookFlowTitle')}</h3>
+    <pre style="font-family:monospace; font-size:0.82rem; line-height:1.8; color:var(--text-secondary); margin:0; overflow-x:auto;">Session Start  →  [resume]    →  Load Skills
+      |
+ Tool Call     →  [guard]     →  Block/Allow  →  Execute  →  [observe]  →  Score
+      |
+ File Edit     →  [polish]    →  Format + Typecheck
+      |
+ Pre Compact   →  [snapshot]  →  Save State
+      |
+ Session End   →  [reflect]   →  Evolve + Metrics</pre>
+  </div>
+
+  <!-- Guard Rules -->
+  <div class="card" style="margin-bottom:1rem;">
+    <h3>{$tStore('guardRulesTitle')}</h3>
+    <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+      {$tStore('guardRulesDesc')}
+    </p>
+    <pre style="font-family:monospace; font-size:0.8rem; line-height:1.8; padding:0.75rem; background:var(--bg); border-radius:4px; overflow-x:auto; margin:0;"><span style="color:var(--text-secondary);"># .harness/guard-rules.yaml</span>
+<span style="color:var(--danger, #ef4444);">blocked</span>:
+  - <span style="color:var(--accent, #6366f1);">pattern</span>: <span style="color:var(--success, #22c55e);">kubectl\s+delete</span>
+    <span style="color:var(--accent, #6366f1);">msg</span>: <span style="color:var(--success, #22c55e);">kubectl delete blocked — confirm with user first</span>
+  - <span style="color:var(--accent, #6366f1);">pattern</span>: <span style="color:var(--success, #22c55e);">rm\s+-rf\s+/</span>
+    <span style="color:var(--accent, #6366f1);">msg</span>: <span style="color:var(--success, #22c55e);">Dangerous rm blocked</span>
+<span style="color:var(--warning, #f59e0b);">warned</span>:
+  - <span style="color:var(--accent, #6366f1);">pattern</span>: <span style="color:var(--success, #22c55e);">docker\s+system\s+prune</span>
+    <span style="color:var(--accent, #6366f1);">msg</span>: <span style="color:var(--success, #22c55e);">Docker prune — verify intent</span>
+  - <span style="color:var(--accent, #6366f1);">pattern</span>: <span style="color:var(--success, #22c55e);">git\s+push\s+--force</span>
+    <span style="color:var(--accent, #6366f1);">msg</span>: <span style="color:var(--success, #22c55e);">Force push — confirm with team</span></pre>
+  </div>
+
+  <!-- Polish → Observe feedback loop -->
+  <div class="card">
+    <h3>{$tStore('polishFeedbackTitle')}</h3>
+    <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.75rem;">
+      {$tStore('polishFeedbackDesc')}
+    </p>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>{$tStore('colPolishResult')}</th>
+          <th>{$tStore('colFailureType')}</th>
+          <th>{$tStore('colPatternDetection')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{$tStore('polishFormatFail')}</td>
+          <td><code>lint_fail</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('polishFormatFeedDesc')}</td>
+        </tr>
+        <tr>
+          <td>{$tStore('polishTypecheckFail')}</td>
+          <td><code>build_fail</code></td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('polishTypecheckFeedDesc')}</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
 </div>
