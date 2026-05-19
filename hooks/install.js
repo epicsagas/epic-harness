@@ -116,6 +116,7 @@ function seed() {
 
 async function main() {
   const pluginVersion = getPluginVersion();
+  const isPlugin = !!process.env.CLAUDE_PLUGIN_ROOT;
 
   // 1. Binary not found — fresh install
   if (!hasCommand(BINARY)) {
@@ -127,7 +128,8 @@ async function main() {
       log(`Install manually: https://github.com/${REPO}#installation`);
       process.exit(0); // non-fatal — don't break the session
     }
-    if (hasCommand(BINARY)) seed();
+    // Plugin mode: skills/agents auto-discovered from plugin cache, skip manual seeding
+    if (hasCommand(BINARY) && !isPlugin) seed();
     return;
   }
 
@@ -150,8 +152,8 @@ async function main() {
     }
   }
 
-  // 3. Seed skills/agents/commands/MCP
-  seed();
+  // 3. Seed skills/agents/commands/MCP (standalone installs only)
+  if (!isPlugin) seed();
 }
 
 main().catch((e) => {
