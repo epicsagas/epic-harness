@@ -1,29 +1,61 @@
 // Tauri invoke bridge with browser fallback for non-Tauri environments
 
-let _invoke: ((cmd: string, args?: object) => Promise<unknown>) | null = null;
+type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
-async function invoke<T>(cmd: string, args?: object): Promise<T> {
-  if (!_invoke) {
-    try {
-      const mod = await import('@tauri-apps/api/core');
-      _invoke = mod.invoke;
-    } catch {
-      _invoke = browserFallback;
-    }
+let _invoke: InvokeFn | null = null;
+let _invokePromise: Promise<void> | null = null;
+
+function isTauriRuntime(): boolean {
+  // __TAURI_INTERNALS__ is injected by the Tauri runtime into the webview window.
+  // Plain browsers and Vite dev server never have it.
+  return typeof window !== 'undefined' &&
+    !!((window as unknown) as Record<string, unknown>)['__TAURI_INTERNALS__'];
+}
+
+async function resolveInvoke(): Promise<void> {
+  if (!isTauriRuntime()) {
+    _invoke = browserFallback;
+    return;
   }
-  return _invoke(cmd, args) as Promise<T>;
+  try {
+    const mod = await import('@tauri-apps/api/core');
+    _invoke = (cmd, args) => mod.invoke(cmd, args);
+  } catch {
+    _invoke = browserFallback;
+  }
+}
+
+async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!_invoke) {
+    if (!_invokePromise) _invokePromise = resolveInvoke();
+    await _invokePromise;
+  }
+  return _invoke!(cmd, args) as Promise<T>;
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// Real metrics.json schema from epic-harness reflect hook
+export interface ScoreHistoryEntry {
+  timestamp: string;
+  avg_score: number;
+  success_rate: number;
+  observations: number;
+  dimension_averages?: Record<string, number>;
+}
+
 export interface HarnessMetrics {
-  score_history: number[];
-  trend: 'improving' | 'stable' | 'declining';
-  stagnation_count: number;
+  total_sessions: number;
+  avg_success_rate: number;
+  total_evolved_skills: number;
+  last_session: string | null;
+  score_history: ScoreHistoryEntry[];
+  stagnation_count?: number;
+  trend?: string;
+  skill_attribution?: Record<string, unknown>;
+  // derived by getHarnessMetrics()
   session_count: number;
   avg_score: number;
-  skill_attribution: Record<string, unknown>;
-  score_weights: Record<string, unknown>;
 }
 
 export interface OrbitPipeline {
@@ -38,6 +70,7 @@ export interface OrbitPipeline {
   updated_at: string;
   deadline: string | null;
   phase_history: Array<{ phase: string; status: string; completed_at: string }>;
+  _project?: string;
 }
 
 export interface EvolvedSkill {
@@ -113,27 +146,70 @@ export interface IntegrationStatus {
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
-export const getHarnessMetrics = () => invoke<HarnessMetrics>('get_harness_metrics');
+export async function getHarnessMetrics(): Promise<HarnessMetrics> {
+  const raw = await invoke<HarnessMetrics>('get_harness_metrics');
+  if (!raw) throw new Error('metrics.json not found');
+
+  // Derive avg_score from score_history
+  const history = raw.score_history ?? [];
+  const avgScore = history.length > 0
+    ? history.reduce((s, e) => s + (e.avg_score ?? 0), 0) / history.length
+    : 0;
+
+  // Derive trend from last 3 entries
+  let trend: string = raw.trend ?? 'stable';
+  if (!raw.trend && history.length >= 2) {
+    const last = history[history.length - 1].avg_score;
+    const prev = history[history.length - 2].avg_score;
+    const delta = last - prev;
+    trend = delta > 0.01 ? 'improving' : delta < -0.01 ? 'declining' : 'stable';
+  }
+
+  return {
+    ...raw,
+    session_count: raw.total_sessions ?? 0,
+    avg_score: Math.round(avgScore * 1000) / 1000,
+    stagnation_count: raw.stagnation_count ?? 0,
+    trend,
+  };
+}
 export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
 export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills');
 export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary');
 export const getGraph = () => invoke<GraphData>('get_graph');
 export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integration_status');
 
-// ── Mock fallback (browser without Tauri) ─────────────────────────────────────
+// ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
-async function browserFallback(cmd: string): Promise<unknown> {
+async function browserFallback(cmd: string, _args?: Record<string, unknown>): Promise<unknown> {
+  // In Vite dev, fetch real harness data from the local middleware.
+  // Falls back to static mock only if the endpoint fails.
+  if (typeof window !== 'undefined' && window.location.port) {
+    try {
+      const res = await fetch(`/api/harness?cmd=${encodeURIComponent(cmd)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data !== null && data !== undefined && !data.error) return data;
+      }
+    } catch { /* fall through to mock */ }
+  }
   await new Promise(r => setTimeout(r, 200));
   switch (cmd) {
     case 'get_harness_metrics':
       return {
-        score_history: [0.72, 0.75, 0.78, 0.74, 0.82, 0.85, 0.88],
-        trend: 'improving',
+        total_sessions: 42,
+        avg_success_rate: 0.91,
+        total_evolved_skills: 2,
+        last_session: new Date().toISOString(),
+        score_history: [
+          { timestamp: '2026-05-12T04:00:00Z', avg_score: 0.72, success_rate: 0.9, observations: 11 },
+          { timestamp: '2026-05-13T04:00:00Z', avg_score: 0.75, success_rate: 0.92, observations: 14 },
+          { timestamp: '2026-05-14T04:00:00Z', avg_score: 0.82, success_rate: 0.95, observations: 18 },
+        ],
         stagnation_count: 0,
+        trend: 'improving',
         session_count: 42,
-        avg_score: 0.807,
-        skill_attribution: { tdd: { avg_score_with: 0.89, avg_score_without: 0.71 } },
-        score_weights: { success: 0.5, quality: 0.3, cost: 0.2 },
+        avg_score: 0.763,
       } satisfies HarnessMetrics;
 
     case 'get_orbit_pipelines':

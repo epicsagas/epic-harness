@@ -107,11 +107,12 @@ fn main() {
         std::process::exit(code);
     }
     if subcmd == "serve" {
-        let port = args
-            .get(2)
-            .and_then(|a| a.strip_prefix("--port="))
-            .and_then(|p| p.parse::<u16>().ok());
+        let port = parse_flag_u32(&args, "--port").map(|p| p as u16);
         std::process::exit(serve::run_serve(port));
+    }
+    if subcmd == "dashboard" {
+        let port = parse_flag_u32(&args, "--port").map(|p| p as u16);
+        std::process::exit(serve::run_dashboard(port));
     }
 
     // reflect --context: data collection mode (no stdin needed)
@@ -172,7 +173,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "update" => {
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard" | "update" => {
             unreachable!()
         }
         "path" => {
@@ -216,7 +217,10 @@ fn main() {
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
             eprintln!(
-                "  serve        Start orchestration dashboard web server (default port: 7700)"
+                "  dashboard    Open web dashboard in browser (default port: 7700)"
+            );
+            eprintln!(
+                "  serve        Start dashboard web server without opening browser"
             );
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");

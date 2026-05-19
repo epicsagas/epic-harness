@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
+  import { tStore } from '$lib/i18n.js';
 
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
@@ -51,21 +52,21 @@
 </script>
 
 <div class="screen-header">
-  <h2>Internal Agents</h2>
-  <p>4 built-in agents used by /go and /check phases &middot; extendable via /team</p>
+  <h2>{$tStore('pageAgents')}</h2>
+  <p>{$tStore('pageAgentsDesc')}</p>
 </div>
 
 {#if error}
   <div class="panel" style="margin-bottom:16px;">
     <div class="panel-body">
-      <span style="color:var(--danger)">데이터 로드 오류: {error}</span>
+      <span style="color:var(--danger)">{$tStore('loadError')}: {error}</span>
     </div>
   </div>
 {/if}
 
 <!-- Active Agents -->
 <div class="panel" style="margin-bottom:16px;">
-  <div class="panel-header"><h3>현재 활성 에이전트</h3></div>
+  <div class="panel-header"><h3>{$tStore('activeAgents')}</h3></div>
   <div class="panel-body">
     {#if loading}
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
@@ -82,12 +83,12 @@
         {#each obs.active_agents as agent}
           <div class="agent-card" style="flex:1;min-width:200px;">
             <div class="agent-name">{agent.name}</div>
-            <div class="agent-role" style="margin-bottom:6px;">last tool: <code>{agent.last_tool}</code></div>
+            <div class="agent-role" style="margin-bottom:6px;">{$tStore('lastTool')} <code>{agent.last_tool}</code></div>
             <div class="agent-desc" style="font-size:12px;color:var(--fg-secondary);margin-bottom:8px;">
               {truncate(agent.last_action, 50)}
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;">
-              <span class="pill {scorePillClass(agent.score)}">score: {fmtScore(agent.score)}</span>
+              <span class="pill {scorePillClass(agent.score)}">{$tStore('scoreLabel')} {fmtScore(agent.score)}</span>
               <span style="font-size:11px;color:var(--muted);">{relativeTime(agent.timestamp)}</span>
             </div>
           </div>
@@ -96,7 +97,7 @@
     {:else}
       <div style="text-align:center;padding:24px;color:var(--muted);">
         <div style="font-size:28px;margin-bottom:6px;">🤖</div>
-        <div>현재 작업 중인 에이전트 없음</div>
+        <div>{$tStore('noActiveAgent')}</div>
       </div>
     {/if}
   </div>
@@ -107,43 +108,49 @@
   <div class="agent-card">
     <div class="agent-name">Builder</div>
     <div class="agent-role">epic:builder</div>
-    <div class="agent-desc">Implements a single task using TDD. Writes test first, then code, then verifies. Used by /go to execute individual requirement tasks.</div>
+    <div class="agent-desc">{$tStore('agentBuilderDesc')}</div>
     <div style="margin-top:10px;"><span class="pill success">TDD</span><span class="pill info">/go</span></div>
   </div>
   <div class="agent-card">
     <div class="agent-name">Reviewer</div>
     <div class="agent-role">epic:reviewer</div>
-    <div class="agent-desc">Reviews code for quality, correctness, style, and test coverage. Launched by /check in parallel with auditor and test runner.</div>
+    <div class="agent-desc">{$tStore('agentReviewerDesc')}</div>
     <div style="margin-top:10px;"><span class="pill warning">review</span><span class="pill info">/check</span></div>
   </div>
   <div class="agent-card">
     <div class="agent-name">Auditor</div>
     <div class="agent-role">epic:auditor</div>
-    <div class="agent-desc">Audits code for security vulnerabilities and performance issues. Parallel execution with reviewer during /check phase.</div>
+    <div class="agent-desc">{$tStore('agentAuditorDesc')}</div>
     <div style="margin-top:10px;"><span class="pill danger">security</span><span class="pill info">/check</span></div>
   </div>
   <div class="agent-card">
     <div class="agent-name">Planner</div>
     <div class="agent-role">epic:planner</div>
-    <div class="agent-desc">Breaks down a goal into ordered, parallelizable tasks with dependencies. Used by /go to create the execution plan from approved spec.</div>
+    <div class="agent-desc">{$tStore('agentPlannerDesc')}</div>
     <div style="margin-top:10px;"><span class="pill purple">planning</span><span class="pill info">/go</span></div>
   </div>
 </div>
 
-<!-- Low Success Tools (주의 필요) -->
+<!-- Low Success Tools -->
 <div class="panel" style="margin-top:16px;">
-  <div class="panel-header"><h3>/team 패턴 &mdash; 주의 필요 툴 (success_rate &lt; 85%)</h3></div>
+  <div class="panel-header"><h3>{$tStore('lowSuccessTools')}</h3></div>
   <div class="panel-body" style="padding:0;">
     {#if loading}
-      <div style="padding:16px;color:var(--muted);font-size:13px;">로딩 중...</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;">{$tStore('loading')}</div>
     {:else if lowSuccessTools.length === 0}
       <div style="padding:24px;text-align:center;color:var(--success);">
-        <span class="pill success">모든 툴 정상 (success_rate ≥ 85%)</span>
+        <span class="pill success">{$tStore('allToolsOk')}</span>
       </div>
     {:else}
       <table class="data-table">
         <thead>
-          <tr><th>Tool</th><th>Calls</th><th>Success Rate</th><th>Avg Score</th><th>상태</th></tr>
+          <tr>
+            <th>{$tStore('colTool')}</th>
+            <th>{$tStore('colCalls')}</th>
+            <th>{$tStore('colSuccessRate')}</th>
+            <th>{$tStore('colAvgScore')}</th>
+            <th>{$tStore('colStatus')}</th>
+          </tr>
         </thead>
         <tbody>
           {#each lowSuccessTools as stat}
@@ -156,7 +163,7 @@
                 </span>
               </td>
               <td style="font-family:var(--font-mono)">{fmtScore(stat.avg_score)}</td>
-              <td><span class="pill warning">주의 필요</span></td>
+              <td><span class="pill warning">{$tStore('needsAttention')}</span></td>
             </tr>
           {/each}
         </tbody>
@@ -167,37 +174,41 @@
 
 <!-- /team Orchestration Patterns (static) -->
 <div class="panel" style="margin-top:16px;">
-  <div class="panel-header"><h3>/team Orchestration Patterns</h3></div>
+  <div class="panel-header"><h3>{$tStore('teamPatternsTitle')}</h3></div>
   <div class="panel-body" style="padding:0;">
     <table class="data-table">
       <thead>
-        <tr><th>Pattern</th><th>Agents</th><th>Best For</th></tr>
+        <tr>
+          <th>{$tStore('colPattern')}</th>
+          <th>{$tStore('colAgents')}</th>
+          <th>{$tStore('colBestFor')}</th>
+        </tr>
       </thead>
       <tbody>
         <tr>
           <td style="color:var(--fg)">Pipeline</td>
           <td>3-6</td>
-          <td style="color:var(--fg-secondary)">Sequential handoffs, build &#8594; test &#8594; review</td>
+          <td style="color:var(--fg-secondary)">{$tStore('patternPipelineDesc')}</td>
         </tr>
         <tr>
           <td style="color:var(--fg)">Fan-out</td>
           <td>3-6</td>
-          <td style="color:var(--fg-secondary)">Parallel independent tasks, then merge</td>
+          <td style="color:var(--fg-secondary)">{$tStore('patternFanOutDesc')}</td>
         </tr>
         <tr>
           <td style="color:var(--fg)">Expert-Pool</td>
           <td>3-6</td>
-          <td style="color:var(--fg-secondary)">Route to specialist per task type</td>
+          <td style="color:var(--fg-secondary)">{$tStore('patternExpertPoolDesc')}</td>
         </tr>
         <tr>
           <td style="color:var(--fg)">Producer-Reviewer</td>
           <td>2-3</td>
-          <td style="color:var(--fg-secondary)">One builds, one reviews, iterate</td>
+          <td style="color:var(--fg-secondary)">{$tStore('patternProducerReviewerDesc')}</td>
         </tr>
         <tr>
           <td style="color:var(--fg)">Supervisor</td>
           <td>3-6</td>
-          <td style="color:var(--fg-secondary)">Central coordinator dispatches to workers</td>
+          <td style="color:var(--fg-secondary)">{$tStore('patternSupervisorDesc')}</td>
         </tr>
       </tbody>
     </table>
@@ -206,14 +217,20 @@
 
 <!-- Session-based Agent Activity -->
 <div class="panel" style="margin-top:16px;">
-  <div class="panel-header"><h3>세션별 에이전트 활동 요약</h3></div>
+  <div class="panel-header"><h3>{$tStore('sessionActivity')}</h3></div>
   <div class="panel-body" style="padding:0;">
     {#if loading}
-      <div style="padding:16px;color:var(--muted);font-size:13px;">로딩 중...</div>
+      <div style="padding:16px;color:var(--muted);font-size:13px;">{$tStore('loading')}</div>
     {:else if obs && obs.recent_sessions.length > 0}
       <table class="data-table">
         <thead>
-          <tr><th>Session ID</th><th>Date</th><th>Tool Calls</th><th>Avg Score</th><th>Failures</th></tr>
+          <tr>
+            <th>{$tStore('colSessionId')}</th>
+            <th>{$tStore('colDate')}</th>
+            <th>{$tStore('colToolCalls')}</th>
+            <th>{$tStore('colAvgScore')}</th>
+            <th>{$tStore('colFailures')}</th>
+          </tr>
         </thead>
         <tbody>
           {#each obs.recent_sessions as session}
@@ -236,7 +253,7 @@
         </tbody>
       </table>
     {:else}
-      <div style="padding:24px;text-align:center;color:var(--muted);">최근 세션 없음</div>
+      <div style="padding:24px;text-align:center;color:var(--muted);">{$tStore('noRecentSession')}</div>
     {/if}
   </div>
 </div>

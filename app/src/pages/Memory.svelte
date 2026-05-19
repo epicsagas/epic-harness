@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import * as d3 from 'd3';
   import { getGraph, type GraphData, type GraphNode } from '../lib/harness.js';
+  import { tStore } from '$lib/i18n.js';
 
   let graphData = $state<GraphData>({ nodes: [], edges: [] });
   let selectedNode = $state<GraphNode | null>(null);
@@ -26,7 +27,9 @@
     }
   });
 
-  function renderGraph(): d3.Simulation<d3.SimulationNodeDatum, undefined> | null {
+  type SimNode = GraphNode & d3.SimulationNodeDatum;
+
+  function renderGraph(): d3.Simulation<SimNode, undefined> | null {
     const el = svgEl as SVGSVGElement | undefined;
     if (!el) return null;
     d3.select(el).selectAll('*').remove();
@@ -42,7 +45,6 @@
 
     const g = svg.append('g');
 
-    // Arrow marker
     svg.append('defs').append('marker')
       .attr('id', 'arrow')
       .attr('viewBox', '0 -4 8 8')
@@ -51,15 +53,15 @@
       .attr('orient', 'auto')
       .append('path').attr('d', 'M0,-4L8,0L0,4').attr('fill', '#475569');
 
-    const nodes = graphData.nodes.map(n => ({ ...n })) as (GraphNode & d3.SimulationNodeDatum)[];
+    const nodes: SimNode[] = graphData.nodes.map(n => ({ ...n }));
     const nodeById = new Map(nodes.map(n => [n.id, n]));
 
-    type SimLink = { source: GraphNode & d3.SimulationNodeDatum; target: GraphNode & d3.SimulationNodeDatum; relation: string; weight: number };
+    type SimLink = { source: SimNode; target: SimNode; relation: string; weight: number };
     const links: SimLink[] = graphData.edges
       .map(e => ({ source: nodeById.get(e.source), target: nodeById.get(e.target), relation: e.relation, weight: e.weight }))
       .filter((l): l is SimLink => l.source != null && l.target != null);
 
-    const sim = d3.forceSimulation(nodes)
+    const sim = d3.forceSimulation<SimNode>(nodes)
       .force('link', d3.forceLink(links).id((d: any) => d.id).distance(100))
       .force('charge', d3.forceManyBody().strength(-200))
       .force('center', d3.forceCenter(width / 2, height / 2))
@@ -110,6 +112,7 @@
       const sim = renderGraph();
       return () => { sim?.stop(); };
     }
+    return undefined;
   });
 </script>
 
@@ -121,9 +124,20 @@
   </div>
 
   {#if loading}
-    <div class="loading">Loading knowledge graph…</div>
+    <div class="loading">{$tStore('loadingGraph')}</div>
   {:else if error}
     <div class="error-msg">{error}</div>
+  {:else if graphData.nodes.length === 0}
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-body" style="text-align:center;padding:32px;color:var(--muted);">
+        <div style="font-size:32px;margin-bottom:12px;">◆</div>
+        <div style="font-size:14px;font-weight:600;color:var(--fg-secondary);margin-bottom:8px;">{$tStore('memNoData')}</div>
+        <div style="font-size:12px;line-height:1.7;white-space:pre-line;">
+          {$tStore('memWip')}
+          <br><span style="color:var(--muted);font-size:11px;">~/.harness/memory.db (SQLite + FTS5)</span>
+        </div>
+      </div>
+    </div>
   {:else}
     <!-- D3 canvas -->
     <div class="graph-container" style="height: 500px; background: var(--surface); border-radius: 8px; position: relative; overflow: hidden; margin-bottom: 1.5rem;">
@@ -140,7 +154,6 @@
       </div>
     </div>
 
-    <!-- Selected node detail -->
     {#if selectedNode}
       <div class="card" style="margin-bottom:1.5rem;">
         <h3>{selectedNode.title}</h3>
@@ -153,29 +166,29 @@
         </div>
       </div>
     {/if}
+  {/if}
 
-    <!-- MCP Tools table -->
+    <!-- MCP Tools table — always visible -->
     <div class="card">
-      <h3>MCP Tools</h3>
+      <h3>{$tStore('mcpToolsTitle')}</h3>
       <table class="data-table">
-        <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+        <thead><tr><th>{$tStore('colTool')}</th><th>{$tStore('colPurpose')}</th></tr></thead>
         <tbody>
-          <tr><td>mem_recall</td><td>Smart contextual recall — hint + project + graph neighbors</td></tr>
-          <tr><td>mem_add</td><td>Add node with auto-importance by type</td></tr>
-          <tr><td>mem_search</td><td>FTS5 keyword search, results ranked by importance</td></tr>
-          <tr><td>mem_query</td><td>SQL-level query for advanced filtering</td></tr>
-          <tr><td>mem_context</td><td>Project-scoped smart recall (no hint)</td></tr>
-          <tr><td>mem_related</td><td>BFS graph traversal from a node ID</td></tr>
+          <tr><td>mem_recall</td><td>{$tStore('memRecallDesc')}</td></tr>
+          <tr><td>mem_add</td><td>{$tStore('memAddDesc')}</td></tr>
+          <tr><td>mem_search</td><td>{$tStore('memSearchDesc')}</td></tr>
+          <tr><td>mem_query</td><td>{$tStore('memQueryDesc')}</td></tr>
+          <tr><td>mem_context</td><td>{$tStore('memContextDesc')}</td></tr>
+          <tr><td>mem_related</td><td>{$tStore('memRelatedDesc')}</td></tr>
         </tbody>
       </table>
     </div>
 
     <!-- Scoring formula -->
     <div class="card" style="margin-top:1rem;">
-      <h3>Smart Recall Scoring</h3>
+      <h3>{$tStore('smartRecallScoringTitle')}</h3>
       <code style="display:block; padding:0.75rem; background:var(--bg); border-radius:4px; font-size:0.85rem;">
         score = recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)
       </code>
     </div>
-  {/if}
 </div>

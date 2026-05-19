@@ -60,13 +60,20 @@ function lowSuccessTools(obs: ObsSummary, threshold = 0.85) {
 // ── mock data ─────────────────────────────────────────────────────────────────
 
 const mockMetrics: HarnessMetrics = {
-  score_history: [0.72, 0.75, 0.82],
+  total_sessions: 42,
+  avg_success_rate: 0.91,
+  total_evolved_skills: 2,
+  last_session: '2026-05-18T09:48:57Z',
+  score_history: [
+    { timestamp: '2026-05-12T04:00:00Z', avg_score: 0.72, success_rate: 0.9, observations: 11 },
+    { timestamp: '2026-05-13T04:00:00Z', avg_score: 0.75, success_rate: 0.92, observations: 14 },
+    { timestamp: '2026-05-14T04:00:00Z', avg_score: 0.82, success_rate: 0.95, observations: 18 },
+  ],
   trend: 'improving',
   stagnation_count: 0,
   session_count: 42,
-  avg_score: 0.807,
+  avg_score: 0.763,
   skill_attribution: {},
-  score_weights: {},
 };
 
 const mockObs: ObsSummary = {

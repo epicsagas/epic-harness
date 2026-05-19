@@ -13,8 +13,26 @@ static HARNESS_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 fn harness_project_dir() -> Result<PathBuf, String> {
     HARNESS_DIR
         .get_or_init(|| {
+            // Run epic-harness from the repo root (parent of src-tauri), not the
+            // Tauri process CWD, so the slug resolves to the real project dir.
+            let repo_root = std::env::current_exe()
+                .ok()
+                .and_then(|p| {
+                    // exe is at target/…/epic-harness-dashboard; walk up to find
+                    // the directory that contains src-tauri/
+                    let mut dir = p.parent()?.to_path_buf();
+                    loop {
+                        if dir.join("src-tauri").exists() {
+                            return Some(dir);
+                        }
+                        dir = dir.parent()?.to_path_buf();
+                    }
+                })
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
             let output = std::process::Command::new("epic-harness")
                 .arg("path")
+                .current_dir(&repo_root)
                 .output()
                 .map_err(|e| format!("epic-harness not found: {e}"))?;
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -63,13 +81,21 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
     let v: serde_json::Value =
         serde_json::from_str(&raw).map_err(|e| format!("parse metrics.json: {e}"))?;
 
+    // score_history entries are objects: {timestamp, avg_score, ...}
+    // extract avg_score from each entry (fall back to plain f64 for older format)
     let all_scores: Vec<f64> = v["score_history"]
         .as_array()
-        .map(|a| a.iter().filter_map(|x| x.as_f64()).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| {
+                    x["avg_score"].as_f64().or_else(|| x.as_f64())
+                })
+                .collect()
+        })
         .unwrap_or_default();
-    let total_count = all_scores.len() as u32;
-    let scores: Vec<f64> = all_scores.into_iter().rev().take(MAX_SCORE_HISTORY).collect::<Vec<_>>().into_iter().rev().collect();
-    let avg = if total_count > 0 {
+    let total_count = v["total_sessions"].as_u64().unwrap_or(all_scores.len() as u64) as u32;
+    let scores: Vec<f64> = all_scores.iter().rev().take(MAX_SCORE_HISTORY).copied().collect::<Vec<_>>().into_iter().rev().collect();
+    let avg = if !scores.is_empty() {
         scores.iter().sum::<f64>() / scores.len() as f64
     } else {
         0.0

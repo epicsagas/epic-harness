@@ -2,9 +2,15 @@ PLUGIN_CACHE := $(HOME)/.claude/plugins/cache/epicsagas/epic/0.1.0/hooks/bin/epi
 CARGO_BIN    := $(HOME)/.cargo/bin/epic-harness
 HOOKS_BIN    := hooks/bin/epic-harness
 
-.PHONY: build install gen-skills gen-skills-dry lint-skills demo-record demo-gif demo-clean
+.PHONY: build install dashboard-build gen-skills gen-skills-dry lint-skills demo-record demo-gif demo-clean
 
-build:
+# Build the Svelte dashboard and copy into assets/ (called automatically by build.rs during cargo build)
+dashboard-build:
+	cd app && npm install --prefer-offline && npm run build
+	cp app/dist/index.html assets/dashboard.html
+	@echo "dashboard built → assets/dashboard.html"
+
+build: dashboard-build
 	cargo build --release
 
 install: build

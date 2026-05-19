@@ -1,35 +1,38 @@
 <script lang="ts">
+  import { tStore } from '$lib/i18n.js';
+
+  type CommandKey =
+    | 'cmdDiscoverDesc' | 'cmdSpecDesc' | 'cmdGoDesc' | 'cmdCheckDesc' | 'cmdShipDesc'
+    | 'cmdEvolveDesc' | 'cmdTeamDesc' | 'cmdOrbitDesc' | 'cmdGitCcDesc' | 'cmdGitDesc';
+
   interface Command {
     cmd: string;
-    desc: string;
+    descKey: CommandKey;
     ring: number;
   }
 
   const commands: Command[] = [
-    { cmd: 'discover', desc: 'Explore and define the problem before specifying a solution', ring: 1 },
-    { cmd: 'spec', desc: 'Define requirements before coding', ring: 1 },
-    { cmd: 'go', desc: 'Build with auto-plan + TDD', ring: 1 },
-    { cmd: 'check', desc: 'Review + security audit + tests', ring: 1 },
-    { cmd: 'ship', desc: 'Create PR, verify CI, merge', ring: 1 },
-    { cmd: 'evolve', desc: 'Inspect or trigger skill evolution', ring: 3 },
-    { cmd: 'team', desc: 'Generate project-specific agent team', ring: 1 },
-    { cmd: 'orbit', desc: 'Autonomous spec→ship pipeline', ring: 1 },
-    { cmd: 'git-cc', desc: 'Conventional commit with auto type selection', ring: 0 },
-    { cmd: 'git', desc: 'Cross-repo git operations (sync/bump/tags)', ring: 0 },
+    { cmd: 'discover', descKey: 'cmdDiscoverDesc', ring: 1 },
+    { cmd: 'spec',     descKey: 'cmdSpecDesc',     ring: 1 },
+    { cmd: 'go',       descKey: 'cmdGoDesc',        ring: 1 },
+    { cmd: 'check',    descKey: 'cmdCheckDesc',     ring: 1 },
+    { cmd: 'ship',     descKey: 'cmdShipDesc',      ring: 1 },
+    { cmd: 'evolve',   descKey: 'cmdEvolveDesc',    ring: 3 },
+    { cmd: 'team',     descKey: 'cmdTeamDesc',      ring: 1 },
+    { cmd: 'orbit',    descKey: 'cmdOrbitDesc',     ring: 1 },
+    { cmd: 'git-cc',   descKey: 'cmdGitCcDesc',     ring: 0 },
+    { cmd: 'git',      descKey: 'cmdGitDesc',       ring: 0 },
   ];
 
-  let copied = $state<string | null>(null);
+  let copiedCmd = $state<string | null>(null);
 
   async function copyCmd(cmd: string) {
     try {
       await navigator.clipboard.writeText('/' + cmd);
-      copied = cmd;
-      setTimeout(() => {
-        copied = null;
-      }, 1500);
+      copiedCmd = cmd;
+      setTimeout(() => { copiedCmd = null; }, 1500);
     } catch {
-      // Clipboard API unavailable (non-secure context)
-      copied = null;
+      copiedCmd = null;
     }
   }
 
@@ -41,12 +44,12 @@
 </script>
 
 <div class="screen-header">
-  <h2>Commands <span class="subtitle-tag">Ring 1</span></h2>
-  <p>10 user-invoked slash commands — click any card to copy</p>
+  <h2>{$tStore('pageCommands')} <span class="subtitle-tag">Ring 1</span></h2>
+  <p>{$tStore('pageCommandsDesc')}</p>
 </div>
 
 <div class="grid-2">
-  {#each commands as { cmd, desc, ring }}
+  {#each commands as { cmd, descKey, ring }}
     <div
       class="cmd-card"
       role="button"
@@ -57,11 +60,11 @@
     >
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
         <div class="cmd-name">/{cmd}</div>
-        {#if copied === cmd}
-          <span style="font-size:11px;color:var(--success);font-family:var(--font-mono);font-weight:600;">Copied!</span>
+        {#if copiedCmd === cmd}
+          <span style="font-size:11px;color:var(--success);font-family:var(--font-mono);font-weight:600;">{$tStore('copied')}</span>
         {/if}
       </div>
-      <div class="cmd-desc">{desc}</div>
+      <div class="cmd-desc">{$tStore(descKey)}</div>
       <div class="cmd-tags" style="margin-top:8px;">
         <span class={ringClass(ring)}>Ring {ring}</span>
       </div>

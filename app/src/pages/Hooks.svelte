@@ -1,57 +1,61 @@
+<script lang="ts">
+  import { tStore } from '$lib/i18n.js';
+</script>
+
 <div class="page">
   <div class="page-header">
-    <h1>Hooks <span class="badge">Ring 0</span></h1>
-    <p>6 Claude Code hooks providing autopilot automation · Rust single binary</p>
+    <h1>{$tStore('pageHooks')} <span class="badge">Ring 0</span></h1>
+    <p>{$tStore('pageHooksDesc')}</p>
   </div>
 
   <!-- Hook Registry table -->
   <div class="card" style="margin-bottom:1rem;">
-    <h3>Hook Registry</h3>
+    <h3>{$tStore('hookRegistryTitle')}</h3>
     <table class="data-table">
       <thead>
         <tr>
-          <th>Hook</th>
-          <th>Command</th>
-          <th>Trigger</th>
-          <th>Effect</th>
+          <th>{$tStore('colHook')}</th>
+          <th>{$tStore('colCommand')}</th>
+          <th>{$tStore('colTrigger')}</th>
+          <th>{$tStore('colEffect')}</th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td style="color:var(--success, #22c55e); white-space:nowrap;">Session Start</td>
           <td><code>epic-harness resume</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">세션 시작 시</td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Restore session + load evolved skills</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onSessionStart')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookResumeEffect')}</td>
         </tr>
         <tr>
           <td style="color:var(--accent, #6366f1); white-space:nowrap;">Pre Tool Use</td>
           <td><code>epic-harness guard</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">모든 툴 호출 전</td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Block dangerous shell patterns</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPreTool')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookGuardEffect')}</td>
         </tr>
         <tr>
           <td style="color:var(--purple, #a855f7); white-space:nowrap;">Post Tool Use</td>
           <td><code>epic-harness observe</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">툴 호출 후 (async)</td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Record 3-axis scores to obs JSONL</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPostTool')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookObserveEffect')}</td>
         </tr>
         <tr>
           <td style="color:var(--teal, #06b6d4); white-space:nowrap;">Post Edit</td>
           <td><code>epic-harness polish</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">파일 편집 후</td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Auto-format + typecheck</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPostEdit')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookPolishEffect')}</td>
         </tr>
         <tr>
           <td style="color:var(--warning, #f59e0b); white-space:nowrap;">Pre Compact</td>
           <td><code>epic-harness snapshot</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">컨텍스트 압축 전</td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Save session state to sessions/</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onPreCompact')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookSnapshotEffect')}</td>
         </tr>
         <tr>
           <td style="color:var(--danger, #ef4444); white-space:nowrap;">Session End</td>
           <td><code>epic-harness reflect</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">세션 종료 시</td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Evolve skills + save metrics</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('onSessionEnd')}</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('hookReflectEffect')}</td>
         </tr>
       </tbody>
     </table>
@@ -59,7 +63,7 @@
 
   <!-- Hook Flow -->
   <div class="card" style="margin-bottom:1rem;">
-    <h3>Hook Flow</h3>
+    <h3>{$tStore('hookFlowTitle')}</h3>
     <pre style="font-family:monospace; font-size:0.82rem; line-height:1.8; color:var(--text-secondary); margin:0; overflow-x:auto;">Session Start  →  [resume]    →  Load Skills
       |
  Tool Call     →  [guard]     →  Block/Allow  →  Execute  →  [observe]  →  Score
@@ -73,9 +77,9 @@
 
   <!-- Guard Rules -->
   <div class="card" style="margin-bottom:1rem;">
-    <h3>Guard Rules Extension</h3>
+    <h3>{$tStore('guardRulesTitle')}</h3>
     <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-      Add custom block/warn rules via <code>.harness/guard-rules.yaml</code> in your project root.
+      {$tStore('guardRulesDesc')}
     </p>
     <pre style="font-family:monospace; font-size:0.8rem; line-height:1.8; padding:0.75rem; background:var(--bg); border-radius:4px; overflow-x:auto; margin:0;"><span style="color:var(--text-secondary);"># .harness/guard-rules.yaml</span>
 <span style="color:var(--danger, #ef4444);">blocked</span>:
@@ -92,24 +96,28 @@
 
   <!-- Polish → Observe feedback loop -->
   <div class="card">
-    <h3>Polish → Observe Feedback</h3>
+    <h3>{$tStore('polishFeedbackTitle')}</h3>
     <p style="font-size:0.82rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-      Polish hook results auto-record into the observe pipeline.
+      {$tStore('polishFeedbackDesc')}
     </p>
     <table class="data-table">
       <thead>
-        <tr><th>Polish result</th><th>Failure type recorded</th><th>Pattern detection</th></tr>
+        <tr>
+          <th>{$tStore('colPolishResult')}</th>
+          <th>{$tStore('colFailureType')}</th>
+          <th>{$tStore('colPatternDetection')}</th>
+        </tr>
       </thead>
       <tbody>
         <tr>
-          <td>Format failure</td>
+          <td>{$tStore('polishFormatFail')}</td>
           <td><code>lint_fail</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Feeds repeated_same_error detector</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('polishFormatFeedDesc')}</td>
         </tr>
         <tr>
-          <td>Typecheck failure</td>
+          <td>{$tStore('polishTypecheckFail')}</td>
           <td><code>build_fail</code></td>
-          <td style="color:var(--text-secondary); font-size:0.82rem;">Feeds fix_then_break detector</td>
+          <td style="color:var(--text-secondary); font-size:0.82rem;">{$tStore('polishTypecheckFeedDesc')}</td>
         </tr>
       </tbody>
     </table>

@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getHarnessMetrics, getObsSummary } from '../lib/harness.js';
   import type { HarnessMetrics, ObsSummary } from '../lib/harness.js';
+  import { tStore } from '$lib/i18n.js';
 
   let metrics = $state<HarnessMetrics | null>(null);
   let obs = $state<ObsSummary | null>(null);
@@ -52,8 +53,8 @@
 </script>
 
 <div class="screen-header">
-  <h2>Dashboard</h2>
-  <p>4-Ring architecture status &middot; eval scores &middot; system health</p>
+  <h2>{$tStore('pageDashboard')}</h2>
+  <p>{$tStore('pageDashboardDesc')}</p>
 </div>
 
 <!-- 4-Ring Status (static) -->
@@ -62,28 +63,28 @@
     <div class="ring-num" style="background:var(--success-soft);color:var(--success);">0</div>
     <div class="ring-info">
       <div class="ring-title">Autopilot</div>
-      <div class="ring-desc">6 hooks active</div>
+      <div class="ring-desc">{$tStore('ring0Desc')}</div>
     </div>
   </div>
   <div class="ring-badge">
     <div class="ring-num" style="background:var(--accent-soft);color:var(--accent);">1</div>
     <div class="ring-info">
       <div class="ring-title">Commands</div>
-      <div class="ring-desc">10 user commands</div>
+      <div class="ring-desc">{$tStore('ring1Desc')}</div>
     </div>
   </div>
   <div class="ring-badge">
     <div class="ring-num" style="background:var(--purple-soft);color:var(--purple);">2</div>
     <div class="ring-info">
       <div class="ring-title">Auto Skills</div>
-      <div class="ring-desc">15 context-triggered</div>
+      <div class="ring-desc">{$tStore('ring2Desc')}</div>
     </div>
   </div>
   <div class="ring-badge">
     <div class="ring-num" style="background:var(--orange-soft);color:var(--orange);">3</div>
     <div class="ring-info">
       <div class="ring-title">Evolution</div>
-      <div class="ring-desc">observe &#8594; evolve loop</div>
+      <div class="ring-desc">{$tStore('ring3Desc')}</div>
     </div>
   </div>
 </div>
@@ -91,7 +92,7 @@
 {#if error}
   <div class="panel" style="margin-bottom:16px;">
     <div class="panel-body">
-      <span style="color:var(--danger)">데이터 로드 오류: {error}</span>
+      <span style="color:var(--danger)">{$tStore('loadError')}: {error}</span>
     </div>
   </div>
 {/if}
@@ -100,69 +101,69 @@
 <div class="stats-grid">
   <!-- Sessions -->
   <div class="stat-card">
-    <div class="stat-label"><span class="dot" style="background:var(--success)"></span> Sessions</div>
+    <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('statSessions')}</div>
     {#if loading}
       <div class="stat-value skeleton" style="width:40px;height:28px;border-radius:4px;background:var(--border);"></div>
     {:else}
       <div class="stat-value">{metrics?.session_count ?? '--'}</div>
     {/if}
-    <div class="stat-sub">this project</div>
+    <div class="stat-sub">{$tStore('statSessionsSub')}</div>
   </div>
   <!-- Avg Score -->
   <div class="stat-card">
-    <div class="stat-label"><span class="dot" style="background:var(--accent)"></span> Avg Score</div>
+    <div class="stat-label"><span class="dot" style="background:var(--accent)"></span> {$tStore('statAvgScore')}</div>
     {#if loading}
       <div class="stat-value skeleton" style="width:60px;height:28px;border-radius:4px;background:var(--border);"></div>
     {:else}
       <div class="stat-value">{metrics ? fmtScore(metrics.avg_score) : '--'}</div>
     {/if}
-    <div class="stat-sub">composite (success 50% + quality 30% + cost 20%)</div>
+    <div class="stat-sub">{$tStore('statAvgScoreSub')}</div>
   </div>
   <!-- Trend -->
   <div class="stat-card">
-    <div class="stat-label"><span class="dot" style="background:var(--teal)"></span> Trend</div>
+    <div class="stat-label"><span class="dot" style="background:var(--teal)"></span> {$tStore('statTrend')}</div>
     {#if loading}
       <div class="stat-value skeleton" style="width:80px;height:28px;border-radius:4px;background:var(--border);"></div>
     {:else}
       <div class="stat-value">
         {#if metrics}
-          <span class="pill {trendPillClass(metrics.trend)}">{metrics.trend}</span>
+          <span class="pill {trendPillClass(metrics.trend ?? 'stable')}">{metrics.trend ?? 'stable'}</span>
         {:else}
           --
         {/if}
       </div>
     {/if}
-    <div class="stat-sub">session-over-session</div>
+    <div class="stat-sub">{$tStore('statTrendSub')}</div>
   </div>
   <!-- Stagnation -->
   <div class="stat-card">
-    <div class="stat-label"><span class="dot" style="background:var(--warning)"></span> Stagnation</div>
+    <div class="stat-label"><span class="dot" style="background:var(--warning)"></span> {$tStore('statStagnation')}</div>
     {#if loading}
       <div class="stat-value skeleton" style="width:30px;height:28px;border-radius:4px;background:var(--border);"></div>
     {:else}
       <div class="stat-value">{metrics?.stagnation_count ?? '--'}</div>
     {/if}
-    <div class="stat-sub">limit 3 &middot; auto-rollback on exceed</div>
+    <div class="stat-sub">{$tStore('statStagnationSub')}</div>
   </div>
   <!-- Total Calls -->
   <div class="stat-card">
-    <div class="stat-label"><span class="dot" style="background:var(--purple)"></span> Total Calls</div>
+    <div class="stat-label"><span class="dot" style="background:var(--purple)"></span> {$tStore('statTotalCalls')}</div>
     {#if loading}
       <div class="stat-value skeleton" style="width:50px;height:28px;border-radius:4px;background:var(--border);"></div>
     {:else}
       <div class="stat-value">{obs?.total_tool_calls ?? '--'}</div>
     {/if}
-    <div class="stat-sub">recent sessions combined</div>
+    <div class="stat-sub">{$tStore('statTotalCallsSub')}</div>
   </div>
   <!-- Failures -->
   <div class="stat-card">
-    <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> Failures</div>
+    <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> {$tStore('statFailures')}</div>
     {#if loading}
       <div class="stat-value skeleton" style="width:30px;height:28px;border-radius:4px;background:var(--border);"></div>
     {:else}
       <div class="stat-value">{obs ? totalFailures : '--'}</div>
     {/if}
-    <div class="stat-sub">recent_sessions 합산</div>
+    <div class="stat-sub">{$tStore('failuresSub')}</div>
   </div>
 </div>
 
@@ -170,7 +171,7 @@
 <div class="grid-2" style="margin-bottom:16px;">
   <div class="panel">
     <div class="panel-header">
-      <h3>Eval Score</h3>
+      <h3>{$tStore('evalScoreTitle')}</h3>
     </div>
     <div class="panel-body">
       <div style="display:flex;gap:32px;align-items:center;justify-content:center;">
@@ -191,7 +192,7 @@
                 {metrics ? fmtScore(metrics.avg_score) : '--'}
               {/if}
             </div>
-            <div class="ring-text">Avg Score</div>
+            <div class="ring-text">{$tStore('statAvgScore')}</div>
           </div>
         </div>
       </div>
@@ -206,15 +207,20 @@
 
   <div class="panel">
     <div class="panel-header">
-      <h3>Tool Stats (Top 5)</h3>
+      <h3>{$tStore('toolStatsTitle')}</h3>
     </div>
     <div class="panel-body" style="padding:0;">
       {#if loading}
-        <div style="padding:16px;color:var(--muted);font-size:13px;">로딩 중...</div>
+        <div style="padding:16px;color:var(--muted);font-size:13px;">{$tStore('loading')}</div>
       {:else}
         <table class="data-table">
           <thead>
-            <tr><th>Tool</th><th>Calls</th><th>Success</th><th>Avg Score</th></tr>
+            <tr>
+              <th>{$tStore('colTool')}</th>
+              <th>{$tStore('colCalls')}</th>
+              <th>{$tStore('colSuccessRate')}</th>
+              <th>{$tStore('colAvgScore')}</th>
+            </tr>
           </thead>
           <tbody>
             {#each topTools as stat}
@@ -229,7 +235,7 @@
                 <td style="font-family:var(--font-mono)">{fmtScore(stat.avg_score)}</td>
               </tr>
             {:else}
-              <tr><td colspan="4" style="color:var(--muted);">데이터 없음</td></tr>
+              <tr><td colspan="4" style="color:var(--muted);">{$tStore('noData')}</td></tr>
             {/each}
           </tbody>
         </table>
@@ -241,7 +247,7 @@
 <!-- Activity Log -->
 <div class="panel">
   <div class="panel-header">
-    <h3>Recent Activity</h3>
+    <h3>{$tStore('recentActivityTitle')}</h3>
   </div>
   <div class="panel-body">
     {#if loading}
@@ -263,10 +269,10 @@
             </span>
             <div class="activity-content">
               <div class="activity-title">
-                Session <code>{session.session_id}</code>
-                &mdash; {session.tool_calls} calls, avg score {fmtScore(session.avg_score)}
+                {$tStore('sessionLabel')} <code>{session.session_id}</code>
+                &mdash; {session.tool_calls} {$tStore('callsAvgScore')} {fmtScore(session.avg_score)}
                 {#if session.failures > 0}
-                  <span class="pill danger" style="margin-left:6px;">{session.failures} failures</span>
+                  <span class="pill danger" style="margin-left:6px;">{session.failures} {$tStore('failuresLabel')}</span>
                 {/if}
               </div>
               <div class="activity-time">{session.date}</div>
@@ -275,7 +281,7 @@
         {/each}
       </ul>
     {:else}
-      <p style="color:var(--muted);font-size:13px;">최근 세션 없음</p>
+      <p style="color:var(--muted);font-size:13px;">{$tStore('recentSessionNone')}</p>
     {/if}
   </div>
 </div>

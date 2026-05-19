@@ -25,6 +25,9 @@
   --pink-soft: rgba(247, 120, 186, 0.12);
   --cyan: #56d4dd;
   --cyan-soft: rgba(86, 212, 221, 0.12);
+  /* aliases for pages that use --text-secondary naming */
+  --text-secondary: #b1bac4;
+  --surface-2: #1c2333;
   --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
   --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -798,3 +801,70 @@ body {
 
 .search-bar input::placeholder { color: var(--muted); }
 .search-bar .search-icon { color: var(--muted); font-size: 14px; }
+
+/* SHARED PAGE LAYOUT (Memory, Integrations, Settings, etc.) */
+.page {
+  padding: 24px;
+  max-width: 1100px;
+}
+
+.page-header {
+  margin-bottom: 24px;
+}
+
+.page-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+
+.page-header p {
+  font-size: 13px;
+  color: var(--fg-secondary);
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--surface-raised);
+  color: var(--fg-secondary);
+  border: 1px solid var(--border);
+}
+
+.badge-outline {
+  background: transparent;
+}
+
+.badge-wip {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: transparent;
+}
+
+.loading {
+  padding: 32px;
+  text-align: center;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.error-msg {
+  padding: 16px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: var(--radius);
+  font-size: 13px;
+}
