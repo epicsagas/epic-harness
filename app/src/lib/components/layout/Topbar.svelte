@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getLang, setLang } from '$lib/i18n.js';
+  import { getLang, setLang, LANGS, type Lang } from '$lib/i18n.js';
 
   interface Props {
     currentLabel: string;
@@ -33,12 +33,13 @@
     <!-- Language selector -->
     <select
       value={getLang()}
-      onchange={(e) => setLang((e.target as HTMLSelectElement).value as 'ko' | 'en')}
+      onchange={(e) => setLang((e.target as HTMLSelectElement).value as Lang)}
       style={SEL}
-      title="Language / 언어"
+      title="Language"
     >
-      <option value="ko">🇰🇷 한국어</option>
-      <option value="en">🇺🇸 English</option>
+      {#each LANGS as l}
+        <option value={l.code}>{l.flag} {l.label}</option>
+      {/each}
     </select>
 
     <!-- GitHub Star -->
