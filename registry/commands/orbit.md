@@ -84,11 +84,6 @@ At the start of every step (Step 3 through Step 7):
 1. Read `deadline` from pipeline state
 2. If `now > deadline`: set `"status": "timeout"`, report to user, **STOP**
 3. Default deadline is 30 minutes from `started_at`. User may override by editing the field.
-**Orchestration setup (if EPIC_ORCHESTRATION enabled):**
-If `EPIC_ORCHESTRATION=enabled`:
-1. Generate an `orchestration_id` (same as pipeline id)
-2. Add `orchestration_id` field to the pipeline JSON
-3. The Rust `orchestrate` hook will use this ID to link pipeline state to orchestrator state
 
 **Orchestration setup (if EPIC_ORCHESTRATION enabled):**
 If `EPIC_ORCHESTRATION=enabled`:
@@ -183,13 +178,24 @@ Write spec immediately — no council, no discovery.
 
 **Otherwise:** derive `goal_slug`, Requirements, and AC directly from the request.
 
-Write `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`. Show as FYI → **proceed immediately to Step 3**.
+Write `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`. Show as FYI.
+
+**Checkpoint — write before proceeding:**
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" --arg spec "$HARNESS_DIR/specs/SPEC-{timestamp}.md" \
+  '.phase = "go" | .spec_file = $spec | .updated_at = $now |
+   .phase_history += [{"phase": "spec", "status": "complete", "completed_at": $now}]' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
+
+Proceed immediately to Step 3.
 
 ---
 
 ## Step 3: Go Phase
 
-Update state: `"phase": "go"`.
+Update state: `"phase": "go"` — already written by the spec checkpoint above.
 
 1. Load spec: `ls -t $HARNESS_DIR/specs/SPEC-*.md | head -1` — extract `goal_slug`, R1…, AC1…
 
@@ -258,13 +264,27 @@ When `orchestration_id` is present in pipeline state:
 2. The Go Phase reads `$HARNESS_DIR/orchestrator/run.json` for real-time agent status instead of waiting for background notifications
 3. After Go Phase completes, include orchestration metrics in the Go Report
 
-Push `{"phase": "go", "status": "complete"}` to `phase_history` → **Step 4**.
+**Checkpoint — write before proceeding to Step 4:**
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" \
+  '.phase = "check" | .updated_at = $now |
+   .phase_history += [{"phase": "go", "status": "complete", "completed_at": $now}]' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 ---
 
 ## Step 4: Check Phase
 
-Update state: `"phase": "check"`.
+State is already `"phase": "check"` from the go checkpoint. Set `check_report` path now:
+```bash
+CHECK_REPORT="$HARNESS_DIR/orbit/CHECK-${PIPELINE_ID}.md"
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" --arg report "$CHECK_REPORT" \
+  '.check_report = $report | .updated_at = $now' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 ```bash
 git diff --stat $(git merge-base HEAD main)
@@ -306,9 +326,19 @@ When orchestration is active:
 1. [blocker or warning]
 ```
 
-**Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`** — this is a separate file, not embedded in JSON. Set `"check_report": "$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md"` in pipeline state. This ensures the report survives context compaction.
+**Collect agent results before writing the report.** After all 3 background agents complete, synthesize their outputs into the Check Report. Do NOT write the file until all agents have reported back — a partial report is worse than no report for crash recovery.
+
+Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md` — this is a separate file, not embedded in JSON. The `check_report` path was already set in pipeline state at the start of this step.
 
 > **Security note:** `pipeline_id` used in the filename must contain only `a-z`, `0-9`, `-`, `_`. Replace any other characters with `-` before constructing the path. This prevents path traversal via a malformed pipeline ID.
+
+**Checkpoint — confirm report written:**
+```bash
+[ -f "$CHECK_REPORT" ] || (echo "ERROR: Check report not written. Do not proceed." && exit 1)
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" '.updated_at = $now' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 → **Step 5**.
 
@@ -318,9 +348,27 @@ When orchestration is active:
 
 | Result | Action |
 |--------|--------|
-| All PASS + all AC ✅ | Push `{"phase": "check", "status": "pass"}` → **Step 6** |
-| WARN | Log warnings, auto-proceed → **Step 6** |
-| FAIL or AC missing | Increment `check_fail_count` |
+| All PASS + all AC ✅ | Write checkpoint (check: pass) → **Step 6** |
+| WARN | Write checkpoint (check: warn), auto-proceed → **Step 6** |
+| FAIL or AC missing | Increment `check_fail_count`, write checkpoint |
+
+**Checkpoint on PASS or WARN:**
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" --arg verdict "pass" \
+  '.phase = "ship" | .updated_at = $now |
+   .phase_history += [{"phase": "check", "status": $verdict, "completed_at": $now}]' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
+
+**Checkpoint on FAIL (increment counter):**
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" \
+  '.check_fail_count += 1 | .updated_at = $now |
+   .phase_history += [{"phase": "check", "status": "fail", "completed_at": $now}]' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 **On FAIL — if `check_fail_count < 3`:**
 1. Read Action Items from check report
@@ -442,7 +490,14 @@ fi
 - Ready to merge: YES/NO
 ```
 
-Push `{"phase": "ship", "status": "complete"}` to `phase_history`.
+**Checkpoint — write before exiting worktree:**
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" \
+  '.phase = "complete" | .updated_at = $now |
+   .phase_history += [{"phase": "ship", "status": "complete", "completed_at": $now}]' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 **6e. Exit worktree:** Call `ExitWorktree` with `action: "keep"` (preserve worktree and branch until user merges the PR — branch is needed for PR head). The session returns to the original working directory. Pipeline state, specs, and check reports are already in `$HARNESS_DIR` (shared).
 
@@ -452,7 +507,13 @@ Push `{"phase": "ship", "status": "complete"}` to `phase_history`.
 
 ## Step 7: Orbit Complete
 
-Update state: `"phase": "complete"`, `"status": "complete"`.
+State is already `"phase": "complete"` from the ship checkpoint. Write final status:
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" \
+  '.status = "complete" | .updated_at = $now' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 **Consolidated Report:**
 ```
@@ -497,7 +558,14 @@ Update state: `"phase": "complete"`, `"status": "complete"`.
 - Trend: {improving | stable | declining}
 ```
 
-Push `{"phase": "evolve", "status": "complete"}` to `phase_history`.
+**Checkpoint — final write:**
+```bash
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+jq --arg now "$NOW" \
+  '.updated_at = $now |
+   .phase_history += [{"phase": "evolve", "status": "complete", "completed_at": $now}]' \
+  "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
+```
 
 **Orbit + Evolve complete. The next session starts smarter.**
 
@@ -518,3 +586,7 @@ Push `{"phase": "evolve", "status": "complete"}` to `phase_history`.
 - Losing worktree reference between phases (worktree_name missing from pipeline state)
 - Forgetting to exit worktree before orbit complete (leaves session in wrong directory)
 - Entering worktree without saving original_cwd (can't find state files after)
+- Skipping a phase checkpoint jq write — if context compacts mid-orbit, the phase will re-run
+- Launching background check agents before setting `check_report` path in pipeline state
+- Writing check report before all agents have completed — partial reports cause wrong verdicts
+- Skipping `updated_at` refresh — stale timestamp triggers false crash recovery after 45 minutes

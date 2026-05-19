@@ -78,6 +78,14 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 
 Auto-installs the binary and registers all hooks in one step.
 
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+Skills and agents are available immediately — no further steps needed.
+
 ### macOS / Linux
 
 ```bash

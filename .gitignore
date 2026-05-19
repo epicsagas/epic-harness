@@ -280,6 +280,8 @@ $RECYCLE.BIN/
 
 .claude/
 .agents/
+!.agents/
+!.agents/plugins/
 .collet/
 .harness/
 .cursor/
