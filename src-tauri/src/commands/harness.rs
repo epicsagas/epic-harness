@@ -102,14 +102,22 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
         .as_array()
         .map(|a| {
             a.iter()
-                .filter_map(|x| {
-                    x["avg_score"].as_f64().or_else(|| x.as_f64())
-                })
+                .filter_map(|x| x["avg_score"].as_f64().or_else(|| x.as_f64()))
                 .collect()
         })
         .unwrap_or_default();
-    let total_count = v["total_sessions"].as_u64().unwrap_or(all_scores.len() as u64) as u32;
-    let scores: Vec<f64> = all_scores.iter().rev().take(MAX_SCORE_HISTORY).copied().collect::<Vec<_>>().into_iter().rev().collect();
+    let total_count = v["total_sessions"]
+        .as_u64()
+        .unwrap_or(all_scores.len() as u64) as u32;
+    let scores: Vec<f64> = all_scores
+        .iter()
+        .rev()
+        .take(MAX_SCORE_HISTORY)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
     let avg = if !scores.is_empty() {
         scores.iter().sum::<f64>() / scores.len() as f64
     } else {
@@ -120,9 +128,17 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
     let avg_success_rate = v["avg_success_rate"].as_f64().unwrap_or_else(|| {
         let rates: Vec<f64> = v["score_history"]
             .as_array()
-            .map(|a| a.iter().filter_map(|x| x["success_rate"].as_f64()).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x["success_rate"].as_f64())
+                    .collect()
+            })
             .unwrap_or_default();
-        if rates.is_empty() { avg } else { rates.iter().sum::<f64>() / rates.len() as f64 }
+        if rates.is_empty() {
+            avg
+        } else {
+            rates.iter().sum::<f64>() / rates.len() as f64
+        }
     });
 
     // total_evolved_skills: count evolved/ directory entries via the metrics field or default 0
@@ -212,10 +228,7 @@ pub async fn get_orbit_pipelines() -> Result<Vec<OrbitPipeline>, String> {
             started_at: v["started_at"].as_str().unwrap_or("").to_string(),
             updated_at: v["updated_at"].as_str().unwrap_or("").to_string(),
             deadline: v["deadline"].as_str().map(str::to_string),
-            phase_history: v["phase_history"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default(),
+            phase_history: v["phase_history"].as_array().cloned().unwrap_or_default(),
         });
     }
 
@@ -259,7 +272,8 @@ pub async fn get_evolved_skills() -> Result<EvolutionData, String> {
                     .unwrap_or("")
                     .to_string();
                 let skill_md_path = path.join("SKILL.md");
-                let skill_md = skill_md_path.metadata()
+                let skill_md = skill_md_path
+                    .metadata()
                     .ok()
                     .filter(|m| m.len() <= MAX_SKILL_MD_BYTES)
                     .and_then(|_| fs::read_to_string(&skill_md_path).ok())
@@ -292,7 +306,9 @@ pub async fn get_evolved_skills() -> Result<EvolutionData, String> {
         use std::io::BufRead;
         if let Ok(file) = fs::File::open(&evo_path) {
             for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-                if line.trim().is_empty() { continue; }
+                if line.trim().is_empty() {
+                    continue;
+                }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     total_sessions += 1;
                     if let Some(arr) = v["patterns"].as_array() {
@@ -395,7 +411,9 @@ pub async fn get_obs_summary() -> Result<ObsSummary, String> {
                 .map_while(Result::ok)
                 .take(MAX_OBS_LINES_PER_FILE)
             {
-                if line.trim().is_empty() { continue; }
+                if line.trim().is_empty() {
+                    continue;
+                }
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     calls += 1;
                     let score = v["score"].as_f64().unwrap_or(0.0);
@@ -447,7 +465,10 @@ pub async fn get_obs_summary() -> Result<ObsSummary, String> {
     }
 
     let total_calls: u32 = session_summaries.iter().map(|s| s.tool_calls).sum();
-    let total_score: f64 = session_summaries.iter().map(|s| s.avg_score * s.tool_calls as f64).sum();
+    let total_score: f64 = session_summaries
+        .iter()
+        .map(|s| s.avg_score * s.tool_calls as f64)
+        .sum();
     let overall_avg = if total_calls > 0 {
         (total_score / total_calls as f64 * 1000.0).round() / 1000.0
     } else {
@@ -517,26 +538,11 @@ pub async fn get_integration_status() -> Result<Vec<IntegrationStatus>, String> 
                 format!("{home}/.claude.json"),
             ],
         ),
-        (
-            "Codex",
-            vec![format!("{home}/.codex/config.toml")],
-        ),
-        (
-            "Gemini CLI",
-            vec![format!("{home}/.gemini/settings.json")],
-        ),
-        (
-            "Cursor",
-            vec![format!("{home}/.cursor/mcp.json")],
-        ),
-        (
-            "Cline",
-            vec![format!("{home}/.vscode/extensions")],
-        ),
-        (
-            "Aider",
-            vec![format!("{home}/.aider.conf.yml")],
-        ),
+        ("Codex", vec![format!("{home}/.codex/config.toml")]),
+        ("Gemini CLI", vec![format!("{home}/.gemini/settings.json")]),
+        ("Cursor", vec![format!("{home}/.cursor/mcp.json")]),
+        ("Cline", vec![format!("{home}/.vscode/extensions")]),
+        ("Aider", vec![format!("{home}/.aider.conf.yml")]),
     ];
 
     let results = checks

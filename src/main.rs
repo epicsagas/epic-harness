@@ -173,7 +173,8 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard" | "update" => {
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
+        | "update" => {
             unreachable!()
         }
         "path" => {
@@ -216,12 +217,8 @@ fn main() {
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
-            eprintln!(
-                "  dashboard    Open web dashboard in browser (default port: 7700)"
-            );
-            eprintln!(
-                "  serve        Start dashboard web server without opening browser"
-            );
+            eprintln!("  dashboard    Open web dashboard in browser (default port: 7700)");
+            eprintln!("  serve        Start dashboard web server without opening browser");
             eprintln!("  install      Install harness into a supported AI tool");
             eprintln!("  uninstall    Remove harness from a supported AI tool");
             eprintln!("  update       Self-update to the latest release");

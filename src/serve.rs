@@ -48,7 +48,10 @@ fn open_browser(url: &str) -> bool {
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open").arg(url).spawn().is_ok()
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .is_ok()
     }
     #[cfg(target_os = "windows")]
     {
@@ -301,7 +304,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                             .map(|e| {
                                 let name = e.file_name().to_string_lossy().to_string();
                                 let skill_md_path = e.path().join("SKILL.md");
-                                let skill_md = fs::read_to_string(&skill_md_path).unwrap_or_default();
+                                let skill_md =
+                                    fs::read_to_string(&skill_md_path).unwrap_or_default();
                                 serde_json::json!({
                                     "name": name,
                                     "skill_md": skill_md,
@@ -363,12 +367,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             let mut files: Vec<_> = fs::read_dir(&obs_dir)
                 .map(|rd| {
                     rd.filter_map(|e| e.ok())
-                        .filter(|e| {
-                            e.path()
-                                .extension()
-                                .and_then(|x| x.to_str())
-                                == Some("jsonl")
-                        })
+                        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -385,8 +384,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 if let Ok(content) = fs::read_to_string(entry.path()) {
                     for line in content.lines().filter(|l| !l.is_empty()) {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                            let tool =
-                                v["tool"].as_str().unwrap_or("unknown").to_string();
+                            let tool = v["tool"].as_str().unwrap_or("unknown").to_string();
                             let is_success = v["result"].as_str() == Some("success")
                                 || v["tool_success"].as_bool() == Some(true);
                             let score = v["score"]
@@ -461,8 +459,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 tool_stats
                     .iter()
                     .map(|t| {
-                        t["avg_score"].as_f64().unwrap_or(0.0)
-                            * t["calls"].as_f64().unwrap_or(0.0)
+                        t["avg_score"].as_f64().unwrap_or(0.0) * t["calls"].as_f64().unwrap_or(0.0)
                     })
                     .sum::<f64>()
                     / total as f64
@@ -497,10 +494,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                                         serde_json::from_str::<serde_json::Value>(&content)
                                     {
                                         v["_project"] = serde_json::Value::String(
-                                            proj_entry
-                                                .file_name()
-                                                .to_string_lossy()
-                                                .to_string(),
+                                            proj_entry.file_name().to_string_lossy().to_string(),
                                         );
                                         all.push(v);
                                     }
@@ -543,8 +537,9 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             ]);
             integrations.to_string()
         }
-        "get_graph" => graph::rebuild_graph_json()
-            .unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into()),
+        "get_graph" => {
+            graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
+        }
         _ => "null".into(),
     }
 }

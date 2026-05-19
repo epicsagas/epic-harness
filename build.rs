@@ -23,7 +23,12 @@ fn main() {
     }
 
     // Use pnpm (lockfile-based, reproducible). Fall back to npm if pnpm is not installed.
-    let pm = if Command::new("pnpm").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+    let pm = if Command::new("pnpm")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
         "pnpm"
     } else {
         "npm"
@@ -41,7 +46,9 @@ fn main() {
             .current_dir(&app_dir)
             .status();
         if status.map(|s| !s.success()).unwrap_or(true) {
-            eprintln!("cargo:warning={pm} install failed — dashboard will use existing assets/dashboard.html");
+            eprintln!(
+                "cargo:warning={pm} install failed — dashboard will use existing assets/dashboard.html"
+            );
             return;
         }
     }
@@ -62,7 +69,11 @@ fn main() {
                 eprintln!("cargo:warning={pm} build succeeded but dist/index.html not found");
             }
         }
-        Ok(_) => eprintln!("cargo:warning={pm} run build failed — dashboard will use existing assets/dashboard.html"),
-        Err(e) => eprintln!("cargo:warning=Could not run {pm}: {e} — dashboard will use existing assets/dashboard.html"),
+        Ok(_) => eprintln!(
+            "cargo:warning={pm} run build failed — dashboard will use existing assets/dashboard.html"
+        ),
+        Err(e) => eprintln!(
+            "cargo:warning=Could not run {pm}: {e} — dashboard will use existing assets/dashboard.html"
+        ),
     }
 }
