@@ -286,3 +286,6 @@ $RECYCLE.BIN/
 .harness/
 .cursor/
 .gemini/
+
+# Build artifacts
+assets/dashboard.html
