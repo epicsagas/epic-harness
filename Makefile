@@ -6,7 +6,7 @@ HOOKS_BIN    := hooks/bin/epic-harness
 
 # Build the Svelte dashboard and copy into assets/ (called automatically by build.rs during cargo build)
 dashboard-build:
-	cd app && npm install --prefer-offline && npm run build
+	cd app && pnpm install --frozen-lockfile && pnpm run build
 	cp app/dist/index.html assets/dashboard.html
 	@echo "dashboard built → assets/dashboard.html"
 

@@ -7,12 +7,22 @@ const MAX_SKILL_MD_BYTES: u64 = 512 * 1024; // 512 KB
 const MAX_SCORE_HISTORY: usize = 200;
 const MAX_EVOLUTION_ENTRIES: usize = 50;
 const MAX_OBS_LINES_PER_FILE: usize = 10_000;
+const MAX_ORBIT_PIPELINES: usize = 100;
 
 static HARNESS_DIR: OnceLock<Result<PathBuf, String>> = OnceLock::new();
 
 fn harness_project_dir() -> Result<PathBuf, String> {
     HARNESS_DIR
         .get_or_init(|| {
+            // Allow explicit override via HARNESS_DIR env var (useful for installed
+            // binaries and macOS app bundles where exe-relative path detection fails).
+            if let Ok(explicit) = std::env::var("HARNESS_DIR") {
+                let p = PathBuf::from(explicit.trim());
+                if p.exists() {
+                    return Ok(p);
+                }
+            }
+
             // Run epic-harness from the repo root (parent of src-tauri), not the
             // Tauri process CWD, so the slug resolves to the real project dir.
             let repo_root = std::env::current_exe()
@@ -65,6 +75,11 @@ pub struct HarnessMetrics {
     pub avg_score: f64,
     pub skill_attribution: serde_json::Value,
     pub score_weights: serde_json::Value,
+    // Fields expected by the TS HarnessMetrics interface
+    pub total_sessions: u32,
+    pub avg_success_rate: f64,
+    pub total_evolved_skills: u32,
+    pub last_session: Option<String>,
 }
 
 #[tauri::command]
@@ -101,6 +116,21 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
         0.0
     };
 
+    // avg_success_rate: prefer explicit field, else derive from score_history success_rate entries
+    let avg_success_rate = v["avg_success_rate"].as_f64().unwrap_or_else(|| {
+        let rates: Vec<f64> = v["score_history"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|x| x["success_rate"].as_f64()).collect())
+            .unwrap_or_default();
+        if rates.is_empty() { avg } else { rates.iter().sum::<f64>() / rates.len() as f64 }
+    });
+
+    // total_evolved_skills: count evolved/ directory entries via the metrics field or default 0
+    let total_evolved_skills = v["total_evolved_skills"].as_u64().unwrap_or(0) as u32;
+
+    // last_session: ISO timestamp of the most recent session
+    let last_session = v["last_session"].as_str().map(str::to_string);
+
     Ok(HarnessMetrics {
         score_history: scores,
         trend: v["trend"].as_str().unwrap_or("stable").to_string(),
@@ -109,6 +139,10 @@ pub async fn get_harness_metrics() -> Result<HarnessMetrics, String> {
         avg_score: (avg * 1000.0).round() / 1000.0,
         skill_attribution: v["skill_attribution"].clone(),
         score_weights: v["score_weights"].clone(),
+        total_sessions: total_count,
+        avg_success_rate: (avg_success_rate * 1000.0).round() / 1000.0,
+        total_evolved_skills,
+        last_session,
     })
 }
 
@@ -137,15 +171,28 @@ pub async fn get_orbit_pipelines() -> Result<Vec<OrbitPipeline>, String> {
         return Ok(vec![]);
     }
 
-    let mut pipelines = Vec::new();
-    let entries = fs::read_dir(&orbit_dir).map_err(|e| format!("read orbit dir: {e}"))?;
+    // Collect file names first so we can sort and limit before reading file contents,
+    // avoiding unbounded I/O when pipelines accumulate over many sessions.
+    let mut pipeline_files: Vec<(String, std::path::PathBuf)> = fs::read_dir(&orbit_dir)
+        .map_err(|e| format!("read orbit dir: {e}"))?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name().and_then(|n| n.to_str())?.to_string();
+            if name.starts_with("PIPELINE-") && name.ends_with(".json") {
+                Some((name, path))
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if !name.starts_with("PIPELINE-") || !name.ends_with(".json") {
-            continue;
-        }
+    // Sort descending by filename (encodes timestamp) then cap to avoid excessive I/O
+    pipeline_files.sort_by(|a, b| b.0.cmp(&a.0));
+    pipeline_files.truncate(MAX_ORBIT_PIPELINES);
+
+    let mut pipelines = Vec::with_capacity(pipeline_files.len());
+    for (_, path) in pipeline_files {
         let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
             Err(_) => continue,
@@ -172,7 +219,7 @@ pub async fn get_orbit_pipelines() -> Result<Vec<OrbitPipeline>, String> {
         });
     }
 
-    // Sort newest first
+    // Already sorted descending by filename; stable sort by started_at for accuracy
     pipelines.sort_by(|a, b| b.started_at.cmp(&a.started_at));
     Ok(pipelines)
 }

@@ -182,16 +182,17 @@ export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integ
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
 async function browserFallback(cmd: string, _args?: Record<string, unknown>): Promise<unknown> {
-  // In Vite dev, fetch real harness data from the local middleware.
-  // Falls back to static mock only if the endpoint fails.
-  if (typeof window !== 'undefined' && window.location.port) {
+  // In Vite dev, the harnessApiPlugin middleware serves real harness data at /api/harness.
+  // Attempt it first; fall through to static mock only on network error or missing data.
+  // The middleware is configured in vite.config.ts and only applies during `vite dev` (apply: 'serve').
+  if (typeof window !== 'undefined') {
     try {
       const res = await fetch(`/api/harness?cmd=${encodeURIComponent(cmd)}`);
       if (res.ok) {
-        const data = await res.json();
-        if (data !== null && data !== undefined && !data.error) return data;
+        const data: unknown = await res.json();
+        if (data !== null && data !== undefined && !(data as Record<string, unknown>).error) return data;
       }
-    } catch { /* fall through to mock */ }
+    } catch { /* fall through to static mock */ }
   }
   await new Promise(r => setTimeout(r, 200));
   switch (cmd) {

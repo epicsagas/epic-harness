@@ -22,20 +22,32 @@ fn main() {
         return;
     }
 
+    // Use pnpm (lockfile-based, reproducible). Fall back to npm if pnpm is not installed.
+    let pm = if Command::new("pnpm").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+        "pnpm"
+    } else {
+        "npm"
+    };
+
     // Install deps if node_modules missing
     if !app_dir.join("node_modules").exists() {
-        let status = Command::new("npm")
-            .args(["install", "--prefer-offline"])
+        let install_args: &[&str] = if pm == "pnpm" {
+            &["install", "--frozen-lockfile"]
+        } else {
+            &["ci"]
+        };
+        let status = Command::new(pm)
+            .args(install_args)
             .current_dir(&app_dir)
             .status();
         if status.map(|s| !s.success()).unwrap_or(true) {
-            eprintln!("cargo:warning=npm install failed — dashboard will use existing assets/dashboard.html");
+            eprintln!("cargo:warning={pm} install failed — dashboard will use existing assets/dashboard.html");
             return;
         }
     }
 
     // Build the Svelte app
-    let status = Command::new("npm")
+    let status = Command::new(pm)
         .args(["run", "build"])
         .current_dir(&app_dir)
         .status();
@@ -47,10 +59,10 @@ fn main() {
                     eprintln!("cargo:warning=Failed to copy dashboard.html: {e}");
                 }
             } else {
-                eprintln!("cargo:warning=npm build succeeded but dist/index.html not found");
+                eprintln!("cargo:warning={pm} build succeeded but dist/index.html not found");
             }
         }
-        Ok(_) => eprintln!("cargo:warning=npm run build failed — dashboard will use existing assets/dashboard.html"),
-        Err(e) => eprintln!("cargo:warning=Could not run npm: {e} — dashboard will use existing assets/dashboard.html"),
+        Ok(_) => eprintln!("cargo:warning={pm} run build failed — dashboard will use existing assets/dashboard.html"),
+        Err(e) => eprintln!("cargo:warning=Could not run {pm}: {e} — dashboard will use existing assets/dashboard.html"),
     }
 }
