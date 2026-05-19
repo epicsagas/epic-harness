@@ -113,7 +113,7 @@
             </td>
           </tr>
           <tr><td style="color:var(--text-secondary)">{$tStore('labelStagnationCount')}</td><td>{metrics?.stagnation_count ?? '—'}</td></tr>
-          <tr><td style="color:var(--text-secondary)">{$tStore('labelVersion')}</td><td>0.3.11</td></tr>
+          <tr><td style="color:var(--text-secondary)">{$tStore('labelVersion')}</td><td>0.4.0</td></tr>
         </tbody>
       </table>
     </div>

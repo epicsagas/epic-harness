@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicoverbruggen/tauri-v2-schema/main/schema.json",
   "productName": "Epic Harness",
-  "version": "0.3.11",
+  "version": "0.4.0",
   "identifier": "com.epiccounty.epic-harness",
   "build": {
     "beforeDevCommand": "pnpm --dir app dev",
