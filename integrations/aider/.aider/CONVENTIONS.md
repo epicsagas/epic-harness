@@ -22,7 +22,7 @@
 
 ## Workflow
 
-- **Problem first**: For vague or unfocused requests, use `/discover` to frame the problem before `/spec`.
+- **Problem first**: For vague or unfocused requests, the `spec` auto-skill will help frame requirements before coding.
 - Before claiming a task done: build passes, tests pass, lint passes.
 - After editing a file: check for type errors and run relevant tests immediately.
 - When debugging a loop: stop after 3 attempts and re-read the error message.

@@ -32,7 +32,7 @@ cp hooks.json .codex/hooks.json
 ### 2. Skills
 
 Skills are seeded to `~/.codex/skills/` on `epic-harness install codex`.
-Each skill is a directory with `SKILL.md` + optional `agents/openai.yaml`:
+Each skill is a directory with `SKILL.md`:
 
 ```
 ~/.codex/skills/
@@ -58,14 +58,7 @@ Each skill is a directory with `SKILL.md` + optional `agents/openai.yaml`:
 ├── reflect/SKILL.md            # Auto-skill: session reflection
 ├── discover/SKILL.md           # Auto-skill: codebase discovery
 ├── orchestrate/SKILL.md        # Auto-skill: task orchestration
-├── auditor/SKILL.md            # Sub-agent: security + perf audit
-│   └── agents/openai.yaml
-├── builder/SKILL.md            # Sub-agent: TDD implementation
-│   └── agents/openai.yaml
-├── planner/SKILL.md            # Sub-agent: task planning
-│   └── agents/openai.yaml
-└── reviewer/SKILL.md           # Sub-agent: code review
-    └── agents/openai.yaml
+(No standalone agent files — all agent knowledge absorbed into skills)
 ```
 
 > **Note**: `prompts/` is deprecated in Codex. All commands and agents are seeded as skills.

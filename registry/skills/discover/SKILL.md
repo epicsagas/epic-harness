@@ -1,9 +1,16 @@
 ---
 name: discover
-description: "Trigger: vague/unfocused request or solution-without-problem. Reframes goal before acting."
+description: "Trigger: vague/unfocused request or solution-without-problem. Also invoked via /discover command. Reframes goal before acting."
+modes:
+  - auto   # auto-triggered on vague/unfocused requests
+  - /discover  # explicit invocation
 ---
 
 # Discover — Problem Discovery
+
+You are starting the **Discover** phase. Your job is to help the user articulate what problem they are actually trying to solve, before jumping to solutions or specs.
+
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
 ## Iron Law
 
@@ -11,19 +18,24 @@ NO SPEC WITHOUT A PROBLEM STATEMENT. Building the wrong thing well is worse than
 
 ## Process
 
-### 0. Recall
+### Step 0: Prerequisites
 
+- Resolve harness directory: `HARNESS_DIR=$(epic-harness path)`
+- Read any existing context (CLAUDE.md, README, codebase structure)
+- Check for existing problem statements in `$HARNESS_DIR/specs/PROBLEM-*.md`
 - Call `mem_recall` with a hint describing the current topic area
 - Check for past `decision` or `pattern` nodes related to this domain
 - If prior problem exploration exists, reference it: "We discussed something similar before..."
+- If existing PROBLEM files are found, review them — the user may be continuing prior work
 
 **Why**: Past context prevents re-exploring ground already covered. The knowledge graph connects today's vague request to yesterday's decisions.
 
-### 1. Listen
+### Step 1: Listen
 
-- Repeat the user's original statement back in your own words
-- Ask: "Is that the core of it, or is there more?"
-- Identify which category the request falls into:
+Read the user's request carefully. Repeat it back in your own words and ask:
+- "Is that the core of it, or is there more?"
+
+Categorize the request:
 
 | Category | Signal | Example |
 |----------|--------|---------|
@@ -35,11 +47,22 @@ NO SPEC WITHOUT A PROBLEM STATEMENT. Building the wrong thing well is worse than
 
 **Why**: Categorization determines the probing technique. Misreading the category leads to wrong questions.
 
-### 2. Probe
+### Step 2: Probe
 
 Select the technique based on the category identified in Step 1. Ask **max 3 questions per round**, run **max 3 rounds**. If the user can't answer or says "I'm not sure", proceed to Frame with what you have.
 
 #### Technique Selection
+
+| User signal | Technique | Core question |
+|---|---|---|
+| Names a solution ("Add Redis") | **5 Whys** | "What's happening that makes you need this?" → repeat |
+| Describes a feature without why | **JTBD** | "What situation makes you need this? What would 'done' look like?" |
+| "Everything is broken" | **Fishbone** | "Which area: People / Process / Technology / Data / Environment?" |
+| Vague or contradictory | **Socratic** | "What specifically do you mean by 'X'?" |
+| Has a vision but no path | **Done looks like** | "When this works perfectly, what do you see?" |
+| Uncertain assumptions | **Assumption map** | "What must be true for this to work?" |
+
+#### Detailed Technique Reference
 
 **5 Whys** — when the user presents a solution without a problem:
 ```
@@ -91,15 +114,17 @@ Work backwards from the concrete end state.
 ```
 Shaky assumptions become prerequisites.
 
+Each round should narrow the space. If after 2 rounds you have enough to frame, don't force a third.
+
 **Why**: The right technique extracts the real problem in 2-3 rounds instead of 10 random questions. Technique mismatch wastes rounds and frustrates the user.
 
-### 3. Frame
+### Step 3: Frame
 
 Synthesize everything into a structured problem statement:
 
 > **[Who]** experiences **[observable problem]** when **[trigger condition]**, resulting in **[quantified impact]**. The desired state is **[measurable outcome]**.
 
-Then capture supporting context:
+Capture supporting context:
 - **Root cause** (from 5 Whys) or **Job story** (from JTBD)
 - **Constraints**: timeline, technology, scale, compatibility
 - **Assumptions**: what must be true, which are uncertain
@@ -109,24 +134,39 @@ Show the frame to the user and ask: "Does this capture the problem accurately?"
 
 **Why**: A written problem statement is testable. If you can't write one, you haven't discovered the problem yet.
 
-### 4. Transition
+### Step 4: Save
 
-Once the problem statement is confirmed:
+Once confirmed, save the problem statement:
 
-1. Save to `$HARNESS_DIR/specs/PROBLEM-{timestamp}.md` (see Output format below)
-2. Tell the user: **"Problem defined. Run `/spec` to turn this into a buildable specification."**
+```bash
+mkdir -p "$HARNESS_DIR/specs"
+```
+
+Write to `$HARNESS_DIR/specs/PROBLEM-{timestamp}.md` (see Output Format below).
+
+If the user realizes there are multiple problems during probing, address them one at a time. Each problem gets its own file.
+
+### Step 5: Transition
+
+Tell the user: **"Problem defined. Run `/spec` to turn this into a buildable specification."**
 
 If the user wants to explore further (e.g., they realize there are actually 3 problems), loop back to Step 2 with the new angle.
 
-**Why**: The transition from problem → spec is natural but explicit. The user owns the decision to move forward.
+**Why**: The transition from problem to spec is natural but explicit. The user owns the decision to move forward.
 
 ## When to Trigger
 
+**Auto-trigger** (no command needed):
 - User's request lacks a clear problem or goal
 - User names a technology/solution without explaining why
 - User describes symptoms without identifying the underlying issue
 - User says "I don't know where to start" or equivalent
 - Request is so broad it could mean 3+ different things
+
+**Explicit invocation** (`/discover`):
+- User wants to formally start the discover phase for a new project or feature
+- User wants to re-explore a problem before re-specifying
+- Continuation from a previous discovery session
 
 ## Anti-Rationalization
 
@@ -153,14 +193,14 @@ Before claiming the problem is defined, show ALL of these:
 
 ## Red Flags
 
-- Jumping to solutions before understanding the problem
-- Asking more than 3 questions in a single round (overwhelming the user)
+- Jumping to solutions or code during the discovery conversation
+- Asking more than 3 questions per round (overwhelming the user)
 - Running more than 3 rounds without attempting a frame (analysis paralysis)
 - Ignoring when the user says "I'm not sure" — that IS information
 - Producing a problem statement the user didn't confirm
 - Confusing symptoms with root causes
 - Framing the problem so broadly it could mean anything ("improve the system")
-- Skipping this step and going straight to `/spec` for non-trivial work
+- Skipping discovery for non-trivial, ambiguous work
 
 ## Output Format
 

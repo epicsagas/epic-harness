@@ -19,24 +19,16 @@ static SKILL_AGENT_INTROSPECTION: &str =
 static SKILL_REFLECT: &str = include_str!("../registry/skills/reflect/SKILL.md");
 static SKILL_DISCOVER: &str = include_str!("../registry/skills/discover/SKILL.md");
 static SKILL_ORCHESTRATE: &str = include_str!("../registry/skills/orchestrate/SKILL.md");
+static SKILL_SPEC: &str = include_str!("../registry/skills/spec/SKILL.md");
+static SKILL_GO: &str = include_str!("../registry/skills/go/SKILL.md");
+static SKILL_CHECK: &str = include_str!("../registry/skills/check/SKILL.md");
+static SKILL_SHIP: &str = include_str!("../registry/skills/ship/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
-static CMD_CHECK: &str = include_str!("../registry/commands/check.md");
 static CMD_EVOLVE: &str = include_str!("../registry/commands/evolve.md");
-static CMD_GO: &str = include_str!("../registry/commands/go.md");
-static CMD_SHIP: &str = include_str!("../registry/commands/ship.md");
-static CMD_SPEC: &str = include_str!("../registry/commands/spec.md");
 static CMD_TEAM: &str = include_str!("../registry/commands/team.md");
-static CMD_DISCOVER: &str = include_str!("../registry/commands/discover.md");
 static CMD_ORBIT: &str = include_str!("../registry/commands/orbit.md");
-static CMD_INTERVENE: &str = include_str!("../registry/commands/intervene.md");
-static CMD_STATUS: &str = include_str!("../registry/commands/status.md");
 
 static SKILL_DISPATCH: &str = include_str!("../registry/skills/_dispatch/SKILL.md");
-
-static AGENT_AUDITOR: &str = include_str!("../registry/agents/auditor.md");
-static AGENT_BUILDER: &str = include_str!("../registry/agents/builder.md");
-static AGENT_PLANNER: &str = include_str!("../registry/agents/planner.md");
-static AGENT_REVIEWER: &str = include_str!("../registry/agents/reviewer.md");
 
 static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("commit", SKILL_COMMIT),
@@ -53,13 +45,10 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("reflect", SKILL_REFLECT),
     ("discover", SKILL_DISCOVER),
     ("orchestrate", SKILL_ORCHESTRATE),
-];
-
-static CANONICAL_AGENTS: &[(&str, &str)] = &[
-    ("auditor", AGENT_AUDITOR),
-    ("builder", AGENT_BUILDER),
-    ("planner", AGENT_PLANNER),
-    ("reviewer", AGENT_REVIEWER),
+    ("spec", SKILL_SPEC),
+    ("go", SKILL_GO),
+    ("check", SKILL_CHECK),
+    ("ship", SKILL_SHIP),
 ];
 
 // ── Per-skill Memory Integration sections (appended for codex) ──────────────
@@ -163,13 +152,6 @@ fn mem_section_for_skill(name: &str) -> &'static str {
     }
 }
 
-// ── Per-tool agent addendums ─────────────────────────────────────────────────
-
-static CODEX_AGENT_ADDENDUM_BUILDER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nTo launch this agent for a task, pass the task description and context as the sub-agent prompt. Independent builder tasks can be launched in parallel using Codex's parallel task execution.\n";
-static CODEX_AGENT_ADDENDUM_AUDITOR: &str = "\n\n## Invoking as a Codex Sub-agent\n\nLaunch this agent as a parallel Codex task alongside the Reviewer and Test runner during `/check`. Pass the list of changed files and the git diff as context.\n";
-static CODEX_AGENT_ADDENDUM_PLANNER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nInvoke this agent at the start of `/go` to produce the task breakdown. The output plan drives which builder sub-agents to launch and in what order.\n";
-static CODEX_AGENT_ADDENDUM_REVIEWER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nLaunch this agent as a parallel Codex task alongside the Auditor and Test runner during `/check`. Pass the list of changed files and the git diff as context.\n";
-
 // ── Transform functions ─────────────────────────────────────────────────────
 
 /// Strip YAML frontmatter from a markdown document, returning just the body.
@@ -188,25 +170,6 @@ fn strip_frontmatter(md: &str) -> &str {
         return "";
     }
     md
-}
-
-/// Transform a canonical agent for a specific tool.
-/// Only content-level transforms (addendums, platform-specific notes).
-/// Tool/model definitions are intentionally excluded — each platform uses its defaults.
-pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String {
-    match tool {
-        "codex" | "opencode" => {
-            let addendum = match name {
-                "builder" => CODEX_AGENT_ADDENDUM_BUILDER,
-                "auditor" => CODEX_AGENT_ADDENDUM_AUDITOR,
-                "planner" => CODEX_AGENT_ADDENDUM_PLANNER,
-                "reviewer" => CODEX_AGENT_ADDENDUM_REVIEWER,
-                _ => "",
-            };
-            format!("{}{}", canonical.trim_end(), addendum)
-        }
-        _ => canonical.to_string(),
-    }
 }
 
 /// Transform a canonical skill for a specific tool.
@@ -328,29 +291,12 @@ static CODEX_FILES: &[(&str, &str)] = integration_files!(
 /// Each entry is (skill_name, source_markdown_with_frontmatter).
 static CODEX_COMMAND_SKILLS: &[(&str, &str)] = &[
     (
-        "check",
-        include_str!("../integrations/codex/prompts/check.md"),
-    ),
-    (
         "evolve",
         include_str!("../integrations/codex/prompts/evolve.md"),
-    ),
-    ("go", include_str!("../integrations/codex/prompts/go.md")),
-    (
-        "ship",
-        include_str!("../integrations/codex/prompts/ship.md"),
-    ),
-    (
-        "spec",
-        include_str!("../integrations/codex/prompts/spec.md"),
     ),
     (
         "team",
         include_str!("../integrations/codex/prompts/team.md"),
-    ),
-    (
-        "discover",
-        include_str!("../integrations/codex/prompts/discover.md"),
     ),
     (
         "orbit",
@@ -370,32 +316,12 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
             include_str!("../integrations/cursor/rules/harness-context.mdc")
         ),
         (
-            "commands/check.md",
-            include_str!("../integrations/cursor/commands/check.md")
-        ),
-        (
             "commands/evolve.md",
             include_str!("../integrations/cursor/commands/evolve.md")
         ),
         (
-            "commands/go.md",
-            include_str!("../integrations/cursor/commands/go.md")
-        ),
-        (
-            "commands/ship.md",
-            include_str!("../integrations/cursor/commands/ship.md")
-        ),
-        (
-            "commands/spec.md",
-            include_str!("../integrations/cursor/commands/spec.md")
-        ),
-        (
             "commands/team.md",
             include_str!("../integrations/cursor/commands/team.md")
-        ),
-        (
-            "commands/discover.md",
-            include_str!("../integrations/cursor/commands/discover.md")
         ),
         (
             "commands/orbit.md",
@@ -408,32 +334,12 @@ static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
     "opencode",
     [
         (
-            "commands/check.md",
-            include_str!("../integrations/opencode/commands/check.md")
-        ),
-        (
             "commands/evolve.md",
             include_str!("../integrations/opencode/commands/evolve.md")
         ),
         (
-            "commands/go.md",
-            include_str!("../integrations/opencode/commands/go.md")
-        ),
-        (
-            "commands/ship.md",
-            include_str!("../integrations/opencode/commands/ship.md")
-        ),
-        (
-            "commands/spec.md",
-            include_str!("../integrations/opencode/commands/spec.md")
-        ),
-        (
             "commands/team.md",
             include_str!("../integrations/opencode/commands/team.md")
-        ),
-        (
-            "commands/discover.md",
-            include_str!("../integrations/opencode/commands/discover.md")
         ),
         (
             "commands/orbit.md",
@@ -614,7 +520,7 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &[],
             files: ANTIGRAVITY_FILES,
             note: Some(
-                "Antigravity extension installed with skills, commands, agents, hooks, and harness-mem MCP.",
+                "Antigravity extension installed with skills, commands, hooks, and harness-mem MCP.",
             ),
             preserve_files: &[],
             executable_files: &[],
@@ -902,7 +808,7 @@ fn sanitize_claude_global_hooks(content: &str) -> String {
 
 // ── MCP injection ─────────────────────────────────────────────────────────────
 
-/// Syncs canonical commands/skills/agents into every discovered Claude Code
+/// Syncs canonical commands/skills into every discovered Claude Code
 /// plugin cache directory (`~/.claude/plugins/cache/epicsagas/epic/*/`).
 ///
 /// Called on `epic install claude` so the locally-installed binary always
@@ -926,16 +832,9 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
     };
 
     let files: &[(&str, &str)] = &[
-        ("commands/check.md", CMD_CHECK),
         ("commands/evolve.md", CMD_EVOLVE),
-        ("commands/go.md", CMD_GO),
-        ("commands/ship.md", CMD_SHIP),
-        ("commands/spec.md", CMD_SPEC),
         ("commands/team.md", CMD_TEAM),
-        ("commands/discover.md", CMD_DISCOVER),
         ("commands/orbit.md", CMD_ORBIT),
-        ("commands/intervene.md", CMD_INTERVENE),
-        ("commands/status.md", CMD_STATUS),
         ("skills/_dispatch/SKILL.md", SKILL_DISPATCH),
         ("skills/commit/SKILL.md", SKILL_COMMIT),
         ("skills/context/SKILL.md", SKILL_CONTEXT),
@@ -954,10 +853,10 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
         ("skills/reflect/SKILL.md", SKILL_REFLECT),
         ("skills/discover/SKILL.md", SKILL_DISCOVER),
         ("skills/orchestrate/SKILL.md", SKILL_ORCHESTRATE),
-        ("agents/auditor.md", AGENT_AUDITOR),
-        ("agents/builder.md", AGENT_BUILDER),
-        ("agents/planner.md", AGENT_PLANNER),
-        ("agents/reviewer.md", AGENT_REVIEWER),
+        ("skills/spec/SKILL.md", SKILL_SPEC),
+        ("skills/go/SKILL.md", SKILL_GO),
+        ("skills/check/SKILL.md", SKILL_CHECK),
+        ("skills/ship/SKILL.md", SKILL_SHIP),
     ];
 
     let mut synced = 0u32;
@@ -1271,6 +1170,35 @@ fn interactive_menu_fallback() -> Vec<String> {
 
 // ── Canonical file generation ─────────────────────────────────────────────────
 
+/// Remove legacy command/agent files from a previous installation.
+/// Called during install to clean up files that were absorbed into skills.
+fn cleanup_legacy_files(target_dir: &Path) {
+    let legacy_commands = [
+        "discover",
+        "spec",
+        "go",
+        "check",
+        "ship",
+        "intervene",
+        "status",
+    ];
+    let legacy_agents = ["builder", "reviewer", "auditor", "planner"];
+    for name in &legacy_commands {
+        let path = target_dir.join(format!("commands/{}.md", name));
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    for name in &legacy_agents {
+        let path = target_dir.join(format!("agents/{}.md", name));
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
+// ── Canonical file generation helpers ─────────────────────────────────────────
+
 /// Convert a Codex prompt .md into a Codex skill SKILL.md format.
 /// Extracts the description from YAML frontmatter and wraps the body.
 fn prompt_to_skill(name: &str, prompt_md: &str) -> String {
@@ -1322,38 +1250,7 @@ fn prompt_to_antigravity_command(_name: &str, prompt_md: &str) -> String {
     format!("prompt = '''\n{}\n'''\n", body.trim())
 }
 
-/// Generate a minimal `agents/openai.yaml` for a Codex agent-skill.
-/// Only includes interface metadata — no tools, no model, no dependencies.
-fn generate_codex_agent_yaml(name: &str, description: &str) -> String {
-    let display_name = match name {
-        "auditor" => "Auditor",
-        "builder" => "Builder",
-        "planner" => "Planner",
-        "reviewer" => "Reviewer",
-        _ => name,
-    };
-    format!(
-        "interface:\n  display_name: \"{}\"\n  short_description: \"{}\"\npolicy:\n  allow_implicit_invocation: false\n",
-        display_name, description
-    )
-}
-
-/// Extract the description from YAML frontmatter.
-fn extract_description(md: &str) -> String {
-    if let Some(rest) = md.strip_prefix("---")
-        && let Some(end) = rest.find("\n---")
-    {
-        let frontmatter = &rest[..end];
-        for line in frontmatter.lines() {
-            if let Some(desc) = line.strip_prefix("description:") {
-                return desc.trim().trim_matches('"').to_string();
-            }
-        }
-    }
-    String::new()
-}
-
-/// Generate transformed canonical skill and agent files for a tool.
+/// Generate transformed canonical skill files for a tool.
 /// Returns a Vec of (relative_path, content) pairs.
 fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
     let mut files = Vec::new();
@@ -1365,18 +1262,9 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
                 let transformed = transform_skill(tool, name, content);
                 files.push((format!("skills/{}/SKILL.md", name), transformed));
             }
-            // Agents: seeded as skills with openai.yaml sub-agent metadata
-            // Codex uses skills/<name>/SKILL.md + skills/<name>/agents/openai.yaml
-            for (name, content) in CANONICAL_AGENTS {
-                let transformed = transform_agent(tool, name, content);
-                files.push((format!("skills/{}/SKILL.md", name), transformed));
-                let description = extract_description(content);
-                let yaml = generate_codex_agent_yaml(name, &description);
-                files.push((format!("skills/{}/agents/openai.yaml", name), yaml));
-            }
             // Command-skills: converted from deprecated prompts/ to skills/ format.
             // Prompts are no longer seeded to ~/.codex/prompts/ — skills/ is the
-            // only mechanism. These appear as /check, /go, etc. in the Codex UI.
+            // only mechanism. These appear as /evolve, /team, /orbit in the Codex UI.
             for (name, content) in CODEX_COMMAND_SKILLS {
                 files.push((
                     format!("skills/{}/SKILL.md", name),
@@ -1390,29 +1278,15 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
                 "rules/harness-skills.mdc".to_string(),
                 build_cursor_skills_mdc(),
             ));
-            // Agents: transformed canonical
-            for (name, content) in CANONICAL_AGENTS {
-                let transformed = transform_agent(tool, name, content);
-                files.push((format!("agents/{}.md", name), transformed));
-            }
         }
         "opencode" => {
-            // Agents only (no skills for opencode)
-            for (name, content) in CANONICAL_AGENTS {
-                let transformed = transform_agent(tool, name, content);
-                files.push((format!("agents/{}.md", name), transformed));
-            }
+            // No canonical files for opencode (only static command files)
         }
         "antigravity" => {
             // Skills: skills/{name}/SKILL.md
             for (name, content) in CANONICAL_SKILLS {
                 let transformed = transform_skill(tool, name, content);
                 files.push((format!("skills/{}/SKILL.md", name), transformed));
-            }
-            // Agents: agents/{name}.md (sub-agents are preview — no yaml metadata yet)
-            for (name, content) in CANONICAL_AGENTS {
-                let transformed = transform_agent(tool, name, content);
-                files.push((format!("agents/{}.md", name), transformed));
             }
             // Commands: commands/harness/{name}.toml (Antigravity custom commands)
             for (name, content) in CODEX_COMMAND_SKILLS {
@@ -1453,7 +1327,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         eprintln!("[harness] Note: {note}");
     }
 
-    // Generate canonical files (transformed skills + agents)
+    // Generate canonical skill files
     let canonical = generate_canonical_files(tool);
     let total_files = cfg.files.len() + canonical.len();
     let mut progress = Progress::new(tool, total_files, dry_run);
@@ -1487,7 +1361,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         progress.tick(rel, status);
     }
 
-    // Write generated canonical files (skills + agents)
+    // Write generated canonical skill files
     for (rel, content) in &canonical {
         let dest = target_dir.join(rel);
         let status = write_or_sync(&dest, content, dry_run);
@@ -1537,6 +1411,11 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     // create org state in ~/.harness/orgs/.
     if !dry_run && tool == "claude" {
         crate::team::store::install_default_team_if_needed("epic");
+    }
+
+    // Clean up legacy command/agent files from previous installations.
+    if !dry_run {
+        cleanup_legacy_files(target_dir);
     }
 
     0
@@ -1908,34 +1787,6 @@ mod tests {
         assert_eq!(strip_frontmatter(md), "# Title\n\nBody");
     }
 
-    // ── transform_agent ──────────────────────────────────────────────────────
-
-    #[test]
-    fn test_transform_agent_codex_adds_addendum() {
-        let result = transform_agent("codex", "builder", AGENT_BUILDER);
-        assert!(result.contains("Invoking as a Codex Sub-agent"));
-        assert!(result.contains("parallel task execution"));
-        // No tools in frontmatter — platforms use their defaults
-        assert!(!result.contains("tools:"));
-    }
-
-    #[test]
-    fn test_transform_agent_cursor_identity() {
-        // Cursor transform is now identity (no model: inherit injection)
-        let result = transform_agent("cursor", "builder", AGENT_BUILDER);
-        assert!(!result.contains("model: inherit"));
-        assert!(!result.contains("tools:"));
-    }
-
-    #[test]
-    fn test_transform_agent_opencode_adds_addendum() {
-        let result = transform_agent("opencode", "builder", AGENT_BUILDER);
-        assert!(result.contains("Invoking as a Codex Sub-agent"));
-        // No permission mapping — platforms use their defaults
-        assert!(!result.contains("permission:"));
-        assert!(!result.contains("tools:"));
-    }
-
     // ── transform_skill ──────────────────────────────────────────────────────
 
     #[test]
@@ -1993,23 +1844,19 @@ mod tests {
         let files = generate_canonical_files("codex");
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"skills/tdd/SKILL.md"));
-        // Agents are seeded as skills with openai.yaml sub-agent metadata
-        assert!(paths.contains(&"skills/builder/SKILL.md"));
-        assert!(paths.contains(&"skills/builder/agents/openai.yaml"));
-        assert!(paths.contains(&"skills/auditor/SKILL.md"));
-        assert!(paths.contains(&"skills/auditor/agents/openai.yaml"));
-        assert!(paths.contains(&"skills/planner/SKILL.md"));
-        assert!(paths.contains(&"skills/planner/agents/openai.yaml"));
-        assert!(paths.contains(&"skills/reviewer/SKILL.md"));
-        assert!(paths.contains(&"skills/reviewer/agents/openai.yaml"));
-        // No separate agents/ directory — agents are inside skills/
-        assert!(!paths.iter().any(|p| p.starts_with("agents/")));
-        // Command prompts also installed as skills for Codex
+        // Consolidated skills (absorbed from commands)
+        assert!(paths.contains(&"skills/spec/SKILL.md"));
         assert!(paths.contains(&"skills/go/SKILL.md"));
-        assert!(paths.contains(&"skills/orbit/SKILL.md"));
         assert!(paths.contains(&"skills/check/SKILL.md"));
-        // 14 skills + (4 agent-skills × 2: SKILL.md + openai.yaml) + 8 command-skills = 30
-        assert_eq!(files.len(), 14 + 4 * 2 + 8);
+        assert!(paths.contains(&"skills/ship/SKILL.md"));
+        // Remaining command-skills
+        assert!(paths.contains(&"skills/orbit/SKILL.md"));
+        assert!(paths.contains(&"skills/evolve/SKILL.md"));
+        assert!(paths.contains(&"skills/team/SKILL.md"));
+        // No agents directory
+        assert!(!paths.iter().any(|p| p.starts_with("agents/")));
+        // 18 canonical skills + 3 command-skills = 21
+        assert_eq!(files.len(), 18 + 3);
     }
 
     #[test]
@@ -2017,15 +1864,14 @@ mod tests {
         let files = generate_canonical_files("cursor");
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"rules/harness-skills.mdc"));
-        assert!(paths.contains(&"agents/builder.md"));
-        // Cursor: 1 mdc + 4 agents
-        assert_eq!(files.len(), 1 + 4);
+        // Cursor: 1 mdc only (no agents)
+        assert_eq!(files.len(), 1);
     }
 
     #[test]
     fn test_generate_canonical_files_opencode() {
         let files = generate_canonical_files("opencode");
-        assert_eq!(files.len(), 4); // agents only
+        assert!(files.is_empty()); // no canonical files for opencode
     }
 
     #[test]
@@ -2049,7 +1895,7 @@ mod tests {
     #[test]
     fn test_generate_canonical_files_antigravity() {
         let files = generate_canonical_files("antigravity");
-        // 14 skills (12 canonical + discover + orchestrate) + 4 agents + 8 commands = 26
+        // 18 canonical skills + 3 command-skills = 21
         assert!(
             !files.is_empty(),
             "antigravity should generate canonical files"
@@ -2061,24 +1907,24 @@ mod tests {
             .filter(|(p, _)| p.starts_with("skills/"))
             .collect();
         assert!(
-            skill_files.len() >= 12,
-            "expected at least 12 skill files, got {}",
+            skill_files.len() >= 16,
+            "expected at least 16 skill files, got {}",
             skill_files.len()
         );
 
-        // Verify agents
+        // Verify no agents
         let agent_files: Vec<_> = files
             .iter()
             .filter(|(p, _)| p.starts_with("agents/") && p.ends_with(".md"))
             .collect();
-        assert_eq!(agent_files.len(), 4, "expected 4 agent files");
+        assert!(agent_files.is_empty(), "expected no agent files");
 
         // Verify commands
         let cmd_files: Vec<_> = files
             .iter()
             .filter(|(p, _)| p.starts_with("commands/harness/") && p.ends_with(".toml"))
             .collect();
-        assert_eq!(cmd_files.len(), 8, "expected 8 command files");
+        assert_eq!(cmd_files.len(), 3, "expected 3 command files");
 
         // Verify all command files are valid TOML (start with prompt = ''')
         for (path, content) in &cmd_files {

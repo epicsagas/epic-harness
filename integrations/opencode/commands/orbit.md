@@ -289,8 +289,8 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 
 **Orchestration-aware Check:**
 When orchestration is active:
-1. The reviewer agent reads `$HARNESS_DIR/orchestrator/` for agent activity history
-2. The auditor checks for concurrent write conflicts logged in agent streams
+1. The check:code mode reads `$HARNESS_DIR/orchestrator/` for agent activity history
+2. The check:security mode checks for concurrent write conflicts logged in agent streams
 3. Include orchestration-specific metrics in the Check Report
 
 **Check Report:**

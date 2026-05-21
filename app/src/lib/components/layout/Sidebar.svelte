@@ -20,7 +20,7 @@
       ringDot: true,
       dotColor: 'var(--accent)',
       items: [
-        { id: 'commands', icon: '▶', label: 'Commands', badge: '10' },
+        { id: 'commands', icon: '▶', label: 'Commands', badge: '3' },
       ],
     },
     {
@@ -28,7 +28,7 @@
       ringDot: true,
       dotColor: 'var(--purple)',
       items: [
-        { id: 'skills', icon: '✧', label: 'Skills', badge: '15' },
+        { id: 'skills', icon: '✧', label: 'Skills', badge: '19' },
       ],
     },
     {
@@ -36,7 +36,7 @@
       ringDot: true,
       dotColor: 'var(--teal)',
       items: [
-        { id: 'agents', icon: '★', label: 'Internal Agents', badge: '4' },
+        { id: 'agents', icon: '★', label: 'Live Agents', badge: 'live' },
       ],
     },
     {

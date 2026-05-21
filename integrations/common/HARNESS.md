@@ -6,14 +6,34 @@
 
 | Command | Purpose |
 |---------|---------|
-| `/discover` | Explore and define the problem before specifying a solution |
-| `/spec` | Define requirements before coding |
-| `/go` | Build with auto-plan + TDD |
-| `/check` | Review + security audit + tests |
-| `/ship` | Create PR, verify CI, merge |
 | `/evolve` | Inspect or trigger skill evolution |
 | `/team` | Generate project-specific agent team |
 | `/orbit` | Autonomous spec→ship pipeline |
+
+## Auto Skills
+
+These skills activate automatically based on context signals:
+
+| Skill | Purpose |
+|-------|---------|
+| `spec` | Define requirements before coding |
+| `go` | Build with auto-plan + TDD |
+| `check` | Review + security audit + tests |
+| `ship` | Create PR, verify CI, merge |
+| `tdd` | New feature or bug fix — Red → Green → Refactor |
+| `debug` | Test failure, runtime error, unexpected behavior |
+| `secure` | Auth, DB, API, or secrets code touched |
+| `verify` | Before marking done or shipping |
+| `document` | Public API/function/module added or changed |
+| `perf` | Loops, DB queries, rendering, or batch ops |
+| `simplify` | File >200 lines, high complexity, or duplication |
+| `council` | Architecture decisions with significant trade-offs |
+| `commit` | Conventional Commits generation |
+| `context` | Session restoration from snapshots |
+| `discover` | Problem discovery — 5 Whys, JTBD, Socratic |
+| `orchestrate` | Multi-agent orchestration status and control |
+| `agent-introspection` | Failure recovery on 3+ consecutive errors |
+| `reflect` | AI usage review and scoring |
 
 ## Session Start
 
@@ -68,10 +88,10 @@ Anti-patterns: vague messages, wrong type, staging unrelated files, using `--no-
 
 ## Orbit — Autonomous Pipeline
 
-Chains `/spec → /go → /check → /ship` in one session.
+Chains `spec → go → check → ship` skills in one session.
 
 **Two modes:**
-- **Interactive**: user runs `/discover` → `/spec`, then triggers orbit
+- **Interactive**: user describes the problem, then spec/go/check/ship skills fire automatically
 - **Council auto-spec**: 4-voice council generates spec; user approves or rejects
 
 After spec approved, runs autonomously. On FAIL: auto-fix and re-check, max 3 cycles. Pauses for human input if all 3 fail.
