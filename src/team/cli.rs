@@ -304,7 +304,11 @@ fn installed_tool_agents_dir(tool: &str) -> Option<PathBuf> {
     }
     let parent = match tool {
         "codex" => home.join(".codex"),
-        "antigravity" => home.join(".gemini").join("config").join("plugins").join("epic"),
+        "antigravity" => home
+            .join(".gemini")
+            .join("config")
+            .join("plugins")
+            .join("epic"),
         "cursor" => home.join(".cursor"),
         "opencode" => home.join(".config").join("opencode"),
         _ => return None,

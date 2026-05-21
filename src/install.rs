@@ -341,7 +341,6 @@ static CODEX_COMMAND_SKILLS: &[(&str, &str)] = &[
     ),
 ];
 
-
 static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     "cursor",
     [
