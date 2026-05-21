@@ -2050,11 +2050,21 @@ mod tests {
     fn test_generate_canonical_files_antigravity() {
         let files = generate_canonical_files("antigravity");
         // 14 skills (12 canonical + discover + orchestrate) + 4 agents + 8 commands = 26
-        assert!(!files.is_empty(), "antigravity should generate canonical files");
+        assert!(
+            !files.is_empty(),
+            "antigravity should generate canonical files"
+        );
 
         // Verify skills
-        let skill_files: Vec<_> = files.iter().filter(|(p, _)| p.starts_with("skills/")).collect();
-        assert!(skill_files.len() >= 12, "expected at least 12 skill files, got {}", skill_files.len());
+        let skill_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("skills/"))
+            .collect();
+        assert!(
+            skill_files.len() >= 12,
+            "expected at least 12 skill files, got {}",
+            skill_files.len()
+        );
 
         // Verify agents
         let agent_files: Vec<_> = files
