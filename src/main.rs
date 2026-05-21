@@ -226,7 +226,7 @@ fn main() {
             eprintln!("  path         Print the harness data directory");
             eprintln!("  version      Print version");
             eprintln!("  --version, -v  Print version\n");
-            eprintln!("INSTALL TARGETS:  codex  gemini  cursor  opencode  cline  aider");
+            eprintln!("INSTALL TARGETS:  codex  antigravity  cursor  opencode  cline  aider");
             eprintln!("  --local           Install in ./.claude/ instead of ~/.claude/");
             eprintln!("  --target <path>   Override install target directory");
             eprintln!("  --dry-run         Preview without writing\n");

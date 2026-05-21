@@ -523,11 +523,11 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                     "version": null
                 },
                 {
-                    "name": "Gemini CLI",
+                    "name": "Antigravity",
                     "installed": std::path::Path::new(&home)
-                        .join(".gemini/settings.json")
+                        .join(".gemini/config/mcp_config.json")
                         .exists(),
-                    "config_path": null,
+                    "config_path": "~/.gemini/config/mcp_config.json",
                     "version": null
                 },
                 { "name": "Codex",  "installed": false, "config_path": null, "version": null },

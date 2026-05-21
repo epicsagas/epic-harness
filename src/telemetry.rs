@@ -297,7 +297,7 @@ pub fn write_consent(level: ConsentLevel) {
 ///
 /// If consent has never been set, automatically enables telemetry and prints a
 /// one-time opt-out notice to stderr. This covers existing users who won't run
-/// `install` again, and hook-less agents (Codex, Gemini CLI, etc.).
+/// `install` again, and hook-less agents (Codex, Antigravity, etc.).
 pub fn ensure_consent_or_set_default() {
     if read_consent_raw().is_none() {
         write_consent(ConsentLevel::On);

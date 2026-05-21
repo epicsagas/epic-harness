@@ -115,7 +115,7 @@ cargo install epic-harness    # सोर्स से बिल्ड
 ```bash
 epic install          # Claude Code (डिफ़ॉल्ट)
 epic install codex    # Codex CLI
-epic install gemini   # Gemini CLI
+epic install gemini   # Antigravity
 ```
 
 > `epic-harness --version` सत्यापित करने के लिए। `brew upgrade epic-harness` या इंस्टॉलर स्क्रिप्ट दोबारा चलाकर अपडेट करें।
@@ -137,7 +137,7 @@ Claude Code में, `hooks/setup.sh` सेशन स्टार्ट प�
 
 ```bash
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install gemini       # Antigravity  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ आवश्यक)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -398,7 +398,7 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ पूर्ण | ✓ 8 कमांड (incl. /orbit) | ✓ 11 स्किल्स | ✓ 4 |
 | **Codex CLI** | ✓ पूर्ण¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ आंशिक² | ✓ 8 कमांड (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Antigravity** | ✓ आंशिक² | ✓ 8 कमांड (incl. /orbit) | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ पूर्ण³ | ✓ 8 कमांड (incl. /orbit) | ✓ rules के माध्यम से | ✓ 4 |
 | **OpenCode** | ✓ आंशिक⁴ | ✓ 8 कमांड (incl. /orbit) | — | ✓ 4 |
 | **Cline** | ✓ पूर्ण⁵ | — | — | — |

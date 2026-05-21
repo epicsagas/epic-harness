@@ -115,7 +115,7 @@ cargo install epic-harness    # ソースからビルド
 ```bash
 epic install          # Claude Code（デフォルト）
 epic install codex    # Codex CLI
-epic install gemini   # Gemini CLI
+epic install gemini   # Antigravity
 ```
 
 > `epic-harness --version` で確認。`brew upgrade epic-harness` またはインストーラースクリプトの再実行で更新。
@@ -137,7 +137,7 @@ Claude Codeでは、`hooks/setup.sh` がセッション開始時に自動実行�
 
 ```bash
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install gemini       # Antigravity  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+が必要)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -398,7 +398,7 @@ epic team delete backend --global      # orgストアから永久に削除
 |------|-------------|----------|--------|----------|
 | **Claude Code** | ✓ フル | ✓ 8コマンド（/orbitを含む） | ✓ 11スキル | ✓ 4 |
 | **Codex CLI** | ✓ フル¹ | ✓ 8プロンプト（/orbitを含む） | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ 部分² | ✓ 8コマンド（/orbitを含む） | ✓ 7 | ✓ 4 |
+| **Antigravity** | ✓ 部分² | ✓ 8コマンド（/orbitを含む） | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ フル³ | ✓ 8コマンド（/orbitを含む） | ✓ ルール経由 | ✓ 4 |
 | **OpenCode** | ✓ 部分⁴ | ✓ 8コマンド（/orbitを含む） | — | ✓ 4 |
 | **Cline** | ✓ フル⁵ | — | — | — |

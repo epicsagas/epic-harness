@@ -12,7 +12,7 @@ Running `epic-harness install <tool>` **automatically** injects
 
 | Tool | Settings file | Auto-registered |
 |------|--------------|-----------------|
-| gemini | `~/.gemini/settings.json` | ✓ |
+| antigravity | `~/.gemini/config/mcp_config.json` | ✓ |
 | cursor | `~/.cursor/mcp.json` | ✓ |
 | opencode | `~/.config/opencode/config.json` | ✓ |
 | codex | n/a (no mcpServers concept) | — |
@@ -57,7 +57,7 @@ The resulting entry in `~/.claude/settings.json`:
 }
 ```
 
-### Gemini CLI — `~/.gemini/settings.json`
+### Antigravity — `~/.gemini/config/mcp_config.json`
 
 ```json
 {

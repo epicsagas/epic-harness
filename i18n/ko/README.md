@@ -115,7 +115,7 @@ cargo install epic-harness    # 소스에서 빌드
 ```bash
 epic install          # Claude Code (기본값)
 epic install codex    # Codex CLI
-epic install gemini   # Gemini CLI
+epic install gemini   # Antigravity
 ```
 
 > `epic-harness --version`으로 확인. 업데이트는 `brew upgrade epic-harness` 또는 인스톨러 스크립트 재실행.
@@ -137,7 +137,7 @@ Claude Code에서는 세션 시작 시 `hooks/setup.sh`가 자동 실행되어 �
 
 ```bash
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install gemini       # Antigravity  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ 필요)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -398,7 +398,7 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 |------|-----------|--------|------|---------|
 | **Claude Code** | ✓ 전체 | ✓ 8개 명령어 (/orbit 포함) | ✓ 11개 스킬 | ✓ 4개 |
 | **Codex CLI** | ✓ 전체¹ | ✓ 8개 프롬프트 (/orbit 포함) | ✓ 7개 | ✓ 4개 |
-| **Gemini CLI** | ✓ 부분² | ✓ 8개 명령어 (/orbit 포함) | ✓ 7개 | ✓ 4개 |
+| **Antigravity** | ✓ 부분² | ✓ 8개 명령어 (/orbit 포함) | ✓ 7개 | ✓ 4개 |
 | **Cursor** | ✓ 전체³ | ✓ 8개 명령어 (/orbit 포함) | ✓ 규칙 경유 | ✓ 4개 |
 | **OpenCode** | ✓ 부분⁴ | ✓ 8개 명령어 (/orbit 포함) | — | ✓ 4개 |
 | **Cline** | ✓ 전체⁵ | — | — | — |

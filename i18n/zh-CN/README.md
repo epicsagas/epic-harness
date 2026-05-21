@@ -115,7 +115,7 @@ cargo install epic-harness    # 从源码构建
 ```bash
 epic install          # Claude Code（默认）
 epic install codex    # Codex CLI
-epic install gemini   # Gemini CLI
+epic install gemini   # Antigravity
 ```
 
 > 使用 `epic-harness --version` 验证。通过 `brew upgrade epic-harness` 或重新运行安装脚本来更新。
@@ -137,7 +137,7 @@ epic install gemini   # Gemini CLI
 
 ```bash
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install gemini       # Antigravity  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -398,7 +398,7 @@ epic team delete backend --global      # 从组织存储中永久删除
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ 完整 | ✓ 8 条命令（含 /orbit） | ✓ 11 个技能 | ✓ 4 |
 | **Codex CLI** | ✓ 完整¹ | ✓ 8 个提示（含 /orbit） | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ 部分² | ✓ 8 条命令（含 /orbit） | ✓ 7 | ✓ 4 |
+| **Antigravity** | ✓ 部分² | ✓ 8 条命令（含 /orbit） | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ 完整³ | ✓ 8 条命令（含 /orbit） | ✓ 通过 rules | ✓ 4 |
 | **OpenCode** | ✓ 部分⁴ | ✓ 8 条命令（含 /orbit） | — | ✓ 4 |
 | **Cline** | ✓ 完整⁵ | — | — | — |

@@ -115,7 +115,7 @@ Luego ejecuta el asistente de configuración:
 ```bash
 epic install          # Claude Code (predeterminado)
 epic install codex    # Codex CLI
-epic install gemini   # Gemini CLI
+epic install gemini   # Antigravity
 ```
 
 > `epic-harness --version` para verificar. Actualiza con `brew upgrade epic-harness` o vuelve a ejecutar el script de instalación.
@@ -137,7 +137,7 @@ En Claude Code, `hooks/setup.sh` se ejecuta automáticamente al inicio de la ses
 
 ```bash
 epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
+epic install gemini       # Antigravity  → ~/.gemini/
 epic install cursor       # Cursor      → ~/.cursor/ (requiere Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -398,7 +398,7 @@ Todas las herramientas comparten el mismo directorio de datos `~/.harness/projec
 |-------------|-------------|----------|-------------|---------|
 | **Claude Code** | ✓ Completo | ✓ 8 comandos (incl. /orbit) | ✓ 11 habilidades | ✓ 4 |
 | **Codex CLI** | ✓ Completo¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ Parcial² | ✓ 8 comandos (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Antigravity** | ✓ Parcial² | ✓ 8 comandos (incl. /orbit) | ✓ 7 | ✓ 4 |
 | **Cursor** | ✓ Completo³ | ✓ 8 comandos (incl. /orbit) | ✓ vía rules | ✓ 4 |
 | **OpenCode** | ✓ Parcial⁴ | ✓ 8 comandos (incl. /orbit) | — | ✓ 4 |
 | **Cline** | ✓ Completo⁵ | — | — | — |

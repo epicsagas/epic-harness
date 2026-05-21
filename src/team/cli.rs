@@ -304,7 +304,7 @@ fn installed_tool_agents_dir(tool: &str) -> Option<PathBuf> {
     }
     let parent = match tool {
         "codex" => home.join(".codex"),
-        "gemini" => home.join(".gemini"),
+        "antigravity" => home.join(".gemini").join("config").join("plugins").join("epic"),
         "cursor" => home.join(".cursor"),
         "opencode" => home.join(".config").join("opencode"),
         _ => return None,
@@ -406,10 +406,10 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
     }
 
     // Also sync to other installed tools with tool-specific transforms.
-    // This writes agent files to ~/.codex/agents/, ~/.gemini/agents/, etc.
+    // This writes agent files to ~/.codex/agents/, ~/.gemini/config/plugins/epic/agents/, etc.
     // when those directories exist.  Print a notice for each tool synced so
     // the user can see which tools were updated.
-    let other_tools = ["codex", "gemini", "cursor", "opencode"];
+    let other_tools = ["codex", "antigravity", "cursor", "opencode"];
     for tool in &other_tools {
         if let Some(agents_dir) = installed_tool_agents_dir(tool) {
             let tool_team_dir = agents_dir.join(team);
