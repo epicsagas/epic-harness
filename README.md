@@ -134,9 +134,9 @@ cargo install epic-harness    # build from source
 Then run the setup wizard:
 
 ```bash
-epic install          # Claude Code (default)
-epic install codex    # Codex CLI
-epic install gemini   # Gemini CLI
+epic install               # Claude Code (default)
+epic install codex         # Codex CLI
+epic install antigravity   # Antigravity
 ```
 
 > `epic-harness --version` to verify. Update with `brew upgrade epic-harness` or re-run the installer script.
@@ -157,16 +157,16 @@ On Claude Code, `hooks/setup.sh` auto-runs on session start and installs the bin
 ### Other tools
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Gemini CLI  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (requires Cursor 1.7+)
+epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (requires Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # Interactive menu
 ```
 
-Integration files are **synced** from the binary: missing or outdated files are written. `GEMINI.md` and `AGENTS.md` are only created when absent.
+Integration files are **synced** from the binary: missing or outdated files are written. `AGENTS.md` is only created when absent.
 
 ### Verify
 
@@ -427,13 +427,13 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ Full | ✓ 8 commands (incl. /orbit) | ✓ 11 skills | ✓ 4 |
 | **Codex CLI** | ✓ Full¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Gemini CLI** | ✓ Partial² | ✓ 8 commands (incl. /orbit) | ✓ 7 | ✓ 4 |
+| **Antigravity** | ✓ Partial² | ✓ 8 commands (incl. /orbit) | ✓ 7 | — |
 | **Cursor** | ✓ Full³ | ✓ 8 commands (incl. /orbit) | ✓ via rules | ✓ 4 |
 | **OpenCode** | ✓ Partial⁴ | ✓ 8 commands (incl. /orbit) | — | ✓ 4 |
 | **Cline** | ✓ Full⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Guard at `BeforeModel` level · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
+¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
 ---
 
