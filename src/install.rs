@@ -62,7 +62,7 @@ static CANONICAL_AGENTS: &[(&str, &str)] = &[
     ("reviewer", AGENT_REVIEWER),
 ];
 
-// ── Per-skill Memory Integration sections (appended for codex/gemini) ───────
+// ── Per-skill Memory Integration sections (appended for codex) ──────────────
 
 static MEM_SECTION_COMMIT: &str = "";
 static MEM_SECTION_CONTEXT: &str = r#"
@@ -170,10 +170,6 @@ static CODEX_AGENT_ADDENDUM_AUDITOR: &str = "\n\n## Invoking as a Codex Sub-agen
 static CODEX_AGENT_ADDENDUM_PLANNER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nInvoke this agent at the start of `/go` to produce the task breakdown. The output plan drives which builder sub-agents to launch and in what order.\n";
 static CODEX_AGENT_ADDENDUM_REVIEWER: &str = "\n\n## Invoking as a Codex Sub-agent\n\nLaunch this agent as a parallel Codex task alongside the Auditor and Test runner during `/check`. Pass the list of changed files and the git diff as context.\n";
 
-static GEMINI_AGENT_NOTE_BUILDER: &str = "\n> **Gemini CLI note**: Agents run sequentially, not in parallel. Complete this task fully before\n> the next agent or task begins.\n";
-static GEMINI_AGENT_NOTE_AUDITOR: &str = "\n> **Gemini CLI note**: Agents run sequentially. This auditor runs after the reviewer completes.\n";
-static GEMINI_AGENT_NOTE_REVIEWER: &str = "\n> **Gemini CLI note**: Agents run sequentially. This reviewer runs after the build task completes,\n> before the auditor.\n";
-
 // ── Transform functions ─────────────────────────────────────────────────────
 
 /// Strip YAML frontmatter from a markdown document, returning just the body.
@@ -209,55 +205,6 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
             };
             format!("{}{}", canonical.trim_end(), addendum)
         }
-        "gemini" => {
-            let mut result = canonical.to_string();
-
-            // Insert Gemini note after the first heading line
-            let note = match name {
-                "builder" => GEMINI_AGENT_NOTE_BUILDER,
-                "auditor" => GEMINI_AGENT_NOTE_AUDITOR,
-                "reviewer" => GEMINI_AGENT_NOTE_REVIEWER,
-                _ => "",
-            };
-            if !note.is_empty() {
-                if let Some(pos) = result.find("\n\n## ") {
-                    result.insert_str(pos + 1, note);
-                }
-            }
-
-            // Planner: rewrite parallelization references for sequential execution
-            if name == "planner" {
-                result = result.replace(
-                    "description: \"Breaks down a goal into ordered, parallelizable tasks with dependencies.\"",
-                    "description: \"Breaks down a goal into ordered, sequential tasks with dependencies.\"",
-                );
-                result = result.replace(
-                    "5. **Parallelize**: Mark independent tasks that can run concurrently",
-                    "5. **Sequence**: Order all tasks for sequential execution, grouping independent ones together",
-                );
-                result = result.replace(
-                    "   - Parallel: yes\n",
-                    "   - Could parallelize: yes (but will run sequentially)\n",
-                );
-                result = result.replace("   - Parallel: no\n", "   - Could parallelize: no\n");
-                result = result.replace(
-                    "   - Parallel: yes (with Task 1)\n",
-                    "   - Could parallelize: yes (but will run sequentially, after Task 2)\n",
-                );
-                result = result.replace(
-                    "### Execution Order\n- Batch 1 (parallel): Task 1, Task 3\n- Batch 2 (sequential): Task 2",
-                    "### Execution Order (sequential)\n1. Task 1 \u{2192} Task 3 \u{2192} Task 2",
-                );
-                if let Some(pos) = result.find("\n\n## Process") {
-                    result.insert_str(
-                        pos + 1,
-                        "\n> **Gemini CLI note**: Gemini CLI runs agents sequentially, not in parallel. Design plans with\n> clear sequential ordering. Mark which tasks could theoretically run in parallel as context for\n> the executor, but assume they will run one at a time.\n",
-                    );
-                }
-            }
-
-            result
-        }
         _ => canonical.to_string(),
     }
 }
@@ -265,7 +212,7 @@ pub(crate) fn transform_agent(tool: &str, name: &str, canonical: &str) -> String
 /// Transform a canonical skill for a specific tool.
 fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
     match tool {
-        "codex" | "gemini" => {
+        "codex" => {
             let mut result = canonical.to_string();
 
             // For context skill: apply inline mem-integration edits
@@ -290,7 +237,7 @@ fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
                 );
             }
 
-            // Minor text normalizations that codex/gemini versions applied
+            // Minor text normalizations
             if name == "tdd" || name == "verify" {
                 result = result.replace("subagents", "sub-agents");
                 result = result.replace("subagent", "sub-agent");
@@ -304,17 +251,6 @@ fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
                     let insert_at = 3 + pos + 5;
                     result.insert_str(insert_at, critical_line);
                 }
-            }
-
-            // Gemini: minor text tweak for tdd
-            if tool == "gemini" && name == "tdd" {
-                result = result.replace("- `/go` sub-agents: always", "- `/go` tasks: always");
-            }
-            if tool == "gemini" && name == "context" {
-                result = result.replace(
-                    "the `resume` hook will reload:",
-                    "the `resume` hook (BeforeAgent) will reload:",
-                );
             }
 
             // Append Memory Integration section
@@ -405,51 +341,6 @@ static CODEX_COMMAND_SKILLS: &[(&str, &str)] = &[
     ),
 ];
 
-static GEMINI_FILES: &[(&str, &str)] = integration_files!(
-    "gemini",
-    [
-        (
-            "settings.json",
-            include_str!("../integrations/gemini/settings.json")
-        ),
-        (
-            "GEMINI.md",
-            include_str!("../integrations/gemini/GEMINI.md")
-        ),
-        (
-            "commands/check.toml",
-            include_str!("../integrations/gemini/commands/check.toml")
-        ),
-        (
-            "commands/evolve.toml",
-            include_str!("../integrations/gemini/commands/evolve.toml")
-        ),
-        (
-            "commands/go.toml",
-            include_str!("../integrations/gemini/commands/go.toml")
-        ),
-        (
-            "commands/ship.toml",
-            include_str!("../integrations/gemini/commands/ship.toml")
-        ),
-        (
-            "commands/spec.toml",
-            include_str!("../integrations/gemini/commands/spec.toml")
-        ),
-        (
-            "commands/team.toml",
-            include_str!("../integrations/gemini/commands/team.toml")
-        ),
-        (
-            "commands/discover.toml",
-            include_str!("../integrations/gemini/commands/discover.toml")
-        ),
-        (
-            "commands/orbit.toml",
-            include_str!("../integrations/gemini/commands/orbit.toml")
-        ),
-    ]
-);
 
 static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     "cursor",
@@ -588,6 +479,22 @@ static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
 );
 
+// Antigravity: plugin.json marker + rules (no subagent support yet).
+// Installed to ~/.gemini/config/plugins/epic/ (global) or .agents/plugins/epic/ (local).
+static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
+    "antigravity",
+    [
+        (
+            "plugin.json",
+            include_str!("../integrations/antigravity/plugin.json")
+        ),
+        (
+            "rules/epic-harness.md",
+            include_str!("../integrations/antigravity/rules/epic-harness.md")
+        ),
+    ]
+);
+
 // ── Tool config ───────────────────────────────────────────────────────────────
 
 struct ToolConfig {
@@ -595,7 +502,7 @@ struct ToolConfig {
     global_dir: PathBuf,
     /// Destination directory override for --local
     local_dir: PathBuf,
-    /// Files that live at project root, not inside the tool dir (e.g. GEMINI.md, AGENTS.md)
+    /// Files that live at project root (e.g. AGENTS.md)
     root_files: &'static [&'static str],
     /// Files embedded in the binary
     files: &'static [(&'static str, &'static str)],
@@ -621,17 +528,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             note: None,
             // config.toml may contain user-customised settings — never overwrite.
             preserve_files: &["config.toml"],
-            executable_files: &[],
-        }),
-        "gemini" => Some(ToolConfig {
-            global_dir: PathBuf::from(&home).join(".gemini"),
-            local_dir: cwd.join(".gemini"),
-            root_files: &["GEMINI.md"],
-            files: GEMINI_FILES,
-            note: Some(
-                "GEMINI.md references ~/.harness/HARNESS.md via @-import. If GEMINI.md already exists, add `@~/.harness/HARNESS.md` manually.",
-            ),
-            preserve_files: &[],
             executable_files: &[],
         }),
         "cursor" => Some(ToolConfig {
@@ -684,6 +580,23 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             files: AIDER_FILES,
             note: Some("No hook system available. Conventions are loaded via .aider.conf.yml."),
             preserve_files: &[".aider.conf.yml"],
+            executable_files: &[],
+        }),
+        // Antigravity: plugin bundle at ~/.gemini/config/plugins/epic/ (global)
+        // or .agents/plugins/epic/ (local). No subagent support yet.
+        "antigravity" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home)
+                .join(".gemini")
+                .join("config")
+                .join("plugins")
+                .join("epic"),
+            local_dir: cwd.join(".agents").join("plugins").join("epic"),
+            root_files: &[],
+            files: ANTIGRAVITY_FILES,
+            note: Some(
+                "Antigravity plugin installed. Subagent support is not yet available in Antigravity.",
+            ),
+            preserve_files: &[],
             executable_files: &[],
         }),
         // Claude Code: install hooks into ~/.claude/settings.json + MCP injection via inject_mcp_claude().
@@ -791,7 +704,7 @@ enum FileStatus {
 
 // ── Install logic ─────────────────────────────────────────────────────────────
 
-/// Root-only files (GEMINI.md, AGENTS.md): never overwrite — user may have edited or merged.
+/// Root-only files (e.g. AGENTS.md): never overwrite — user may have edited or merged.
 /// Returns the FileStatus so the caller can update progress.
 fn write_if_missing(dest: &Path, content: &str, dry_run: bool) -> FileStatus {
     if dest.exists() {
@@ -1192,7 +1105,6 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 
     let settings_path = match tool {
         "codex" => None, // Codex uses hooks.json, no mcpServers concept
-        "gemini" => Some(target_dir.join("settings.json")),
         "cursor" => Some(target_dir.join("mcp.json")),
         "opencode" => Some(target_dir.join("opencode.json")),
         "cline" => None, // Cline MCP is configured per-workspace, not via global install
@@ -1262,7 +1174,7 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 const TOOLS: &[(&str, &str)] = &[
     ("claude", "Claude Code"),
     ("codex", "OpenAI Codex CLI"),
-    ("gemini", "Google Gemini CLI"),
+    ("antigravity", "Google Antigravity"),
     ("cursor", "Cursor IDE"),
     ("opencode", "OpenCode"),
     ("cline", "Cline (VS Code)"),
@@ -1429,18 +1341,6 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
                 ));
             }
         }
-        "gemini" => {
-            // Skills: transformed canonical + memory integration
-            for (name, content) in CANONICAL_SKILLS {
-                let transformed = transform_skill(tool, name, content);
-                files.push((format!("skills/{}/SKILL.md", name), transformed));
-            }
-            // Agents: transformed canonical
-            for (name, content) in CANONICAL_AGENTS {
-                let transformed = transform_agent(tool, name, content);
-                files.push((format!("agents/{}.md", name), transformed));
-            }
-        }
         "cursor" => {
             // Skills: concatenated into harness-skills.mdc
             files.push((
@@ -1474,7 +1374,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, gemini, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, antigravity, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -1615,7 +1515,7 @@ pub fn run(args: &[String]) -> i32 {
 
         Some("--list" | "list") => {
             println!(
-                "Available integrations: claude, codex, gemini, cursor, opencode, cline, aider"
+                "Available integrations: claude, codex, antigravity, cursor, opencode, cline, aider"
             );
             0
         }
@@ -1679,7 +1579,7 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, gemini, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, antigravity, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -1712,7 +1612,7 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
             target_dir.join(rel)
         };
 
-        // Never auto-delete root files (e.g. GEMINI.md) — user may have edited them.
+        // Never auto-delete root files — user may have edited them.
         if cfg.root_files.contains(rel) {
             eprintln!("  skip  {}", dest.display());
             skipped += 1;
@@ -1806,7 +1706,7 @@ pub fn run_uninstall(args: &[String]) -> i32 {
         }
         Some("--list" | "list") => {
             println!(
-                "Available integrations: claude, codex, gemini, cursor, opencode, cline, aider"
+                "Available integrations: claude, codex, antigravity, cursor, opencode, cline, aider"
             );
             0
         }
@@ -1958,14 +1858,6 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_agent_gemini_adds_note() {
-        let result = transform_agent("gemini", "builder", AGENT_BUILDER);
-        assert!(result.contains("Gemini CLI note"));
-        // No tool remapping — platforms use their defaults
-        assert!(!result.contains("tools: [read_file"));
-    }
-
-    #[test]
     fn test_transform_agent_cursor_identity() {
         // Cursor transform is now identity (no model: inherit injection)
         let result = transform_agent("cursor", "builder", AGENT_BUILDER);
@@ -1980,13 +1872,6 @@ mod tests {
         // No permission mapping — platforms use their defaults
         assert!(!result.contains("permission:"));
         assert!(!result.contains("tools:"));
-    }
-
-    #[test]
-    fn test_transform_agent_gemini_planner_sequential() {
-        let result = transform_agent("gemini", "planner", AGENT_PLANNER);
-        assert!(result.contains("sequential"));
-        assert!(result.contains("Could parallelize"));
     }
 
     // ── transform_skill ──────────────────────────────────────────────────────

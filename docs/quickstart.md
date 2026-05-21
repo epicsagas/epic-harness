@@ -22,7 +22,7 @@ Or manually:
 git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
 ```
 
-The Rust binary handles all hooks. If you also want to install for other tools (Codex, Gemini, Cursor, OpenCode, Cline, Aider), run `epic install` for an interactive menu.
+The Rust binary handles all hooks. If you also want to install for other tools (Codex, Antigravity, Cursor, OpenCode, Cline, Aider), run `epic install` for an interactive menu.
 
 ## First Session
 

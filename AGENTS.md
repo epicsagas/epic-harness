@@ -16,7 +16,7 @@
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
 - `integrations/` — Per-tool integration files (6 tools):
   - `codex/` — hooks.json, config.toml, prompts/(8), skills/(7), agents/(4)
-  - `gemini/` — settings.json, GEMINI.md, commands/(8), skills/(7), agents/(4)
+  - `antigravity/` — plugin.json, rules/(1)
   - `cursor/` — hooks.json, commands/(8), agents/(4)
   - `opencode/` — commands/(8), agents/(4), plugins/epic-harness.js
   - `cline/` — hooks/(5 scripts), rules/epic-harness.md
