@@ -262,6 +262,23 @@ fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
 
             result
         }
+        "antigravity" => {
+            let mut result = canonical.to_string();
+
+            // Text normalizations
+            if name == "tdd" || name == "verify" {
+                result = result.replace("subagents", "sub-agents");
+                result = result.replace("subagent", "sub-agent");
+            }
+
+            // Append Memory Integration section (same as codex)
+            let mem_section = mem_section_for_skill(name);
+            if !mem_section.is_empty() {
+                result = format!("{}{}", result.trim_end(), mem_section);
+            }
+
+            result
+        }
         _ => canonical.to_string(),
     }
 }
@@ -478,18 +495,22 @@ static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
 );
 
-// Antigravity: plugin.json marker + rules (no subagent support yet).
+// Antigravity: gemini-extension.json manifest + context + hooks.
 // Installed to ~/.gemini/config/plugins/epic/ (global) or .agents/plugins/epic/ (local).
 static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
     "antigravity",
     [
         (
-            "plugin.json",
-            include_str!("../integrations/antigravity/plugin.json")
+            "gemini-extension.json",
+            include_str!("../integrations/antigravity/gemini-extension.json")
         ),
         (
-            "rules/epic-harness.md",
-            include_str!("../integrations/antigravity/rules/epic-harness.md")
+            "GEMINI.md",
+            include_str!("../integrations/antigravity/GEMINI.md")
+        ),
+        (
+            "hooks/hooks.json",
+            include_str!("../integrations/antigravity/hooks/hooks.json")
         ),
     ]
 );
@@ -581,8 +602,8 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             preserve_files: &[".aider.conf.yml"],
             executable_files: &[],
         }),
-        // Antigravity: plugin bundle at ~/.gemini/config/plugins/epic/ (global)
-        // or .agents/plugins/epic/ (local). No subagent support yet.
+        // Antigravity: gemini-extension bundle at ~/.gemini/config/plugins/epic/ (global)
+        // or .agents/plugins/epic/ (local). Skills, commands, agents, hooks, MCP included.
         "antigravity" => Some(ToolConfig {
             global_dir: PathBuf::from(&home)
                 .join(".gemini")
@@ -593,7 +614,7 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             root_files: &[],
             files: ANTIGRAVITY_FILES,
             note: Some(
-                "Antigravity plugin installed. Subagent support is not yet available in Antigravity.",
+                "Antigravity extension installed with skills, commands, agents, hooks, and harness-mem MCP.",
             ),
             preserve_files: &[],
             executable_files: &[],
@@ -1278,6 +1299,29 @@ fn prompt_to_skill(name: &str, prompt_md: &str) -> String {
     format!("---\nname: {name}\ndescription: \"{description}\"\n---\n{body}")
 }
 
+/// Convert a Codex prompt markdown file to an Antigravity custom command (TOML).
+/// Antigravity commands use `commands/{group}/{name}.toml` with a `prompt` field.
+fn prompt_to_antigravity_command(_name: &str, prompt_md: &str) -> String {
+    // Strip frontmatter — the body is the prompt content.
+    let body = if let Some(rest) = prompt_md.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let after = end + 4;
+        if after < rest.len() && rest.as_bytes()[after] == b'\n' {
+            &rest[after + 1..]
+        } else if after < rest.len() {
+            &rest[after..]
+        } else {
+            ""
+        }
+    } else {
+        prompt_md
+    };
+
+    // TOML: escape triple quotes inside the prompt by using single-quoted raw string.
+    format!("prompt = '''\n{}\n'''\n", body.trim())
+}
+
 /// Generate a minimal `agents/openai.yaml` for a Codex agent-skill.
 /// Only includes interface metadata — no tools, no model, no dependencies.
 fn generate_codex_agent_yaml(name: &str, description: &str) -> String {
@@ -1357,6 +1401,25 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
             for (name, content) in CANONICAL_AGENTS {
                 let transformed = transform_agent(tool, name, content);
                 files.push((format!("agents/{}.md", name), transformed));
+            }
+        }
+        "antigravity" => {
+            // Skills: skills/{name}/SKILL.md
+            for (name, content) in CANONICAL_SKILLS {
+                let transformed = transform_skill(tool, name, content);
+                files.push((format!("skills/{}/SKILL.md", name), transformed));
+            }
+            // Agents: agents/{name}.md (sub-agents are preview — no yaml metadata yet)
+            for (name, content) in CANONICAL_AGENTS {
+                let transformed = transform_agent(tool, name, content);
+                files.push((format!("agents/{}.md", name), transformed));
+            }
+            // Commands: commands/harness/{name}.toml (Antigravity custom commands)
+            for (name, content) in CODEX_COMMAND_SKILLS {
+                files.push((
+                    format!("commands/harness/{}.toml", name),
+                    prompt_to_antigravity_command(name, content),
+                ));
             }
         }
         // cline, aider: no canonical files to generate
@@ -1981,6 +2044,66 @@ mod tests {
     fn test_generate_canonical_files_aider_empty() {
         let files = generate_canonical_files("aider");
         assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_generate_canonical_files_antigravity() {
+        let files = generate_canonical_files("antigravity");
+        // 14 skills (12 canonical + discover + orchestrate) + 4 agents + 8 commands = 26
+        assert!(!files.is_empty(), "antigravity should generate canonical files");
+
+        // Verify skills
+        let skill_files: Vec<_> = files.iter().filter(|(p, _)| p.starts_with("skills/")).collect();
+        assert!(skill_files.len() >= 12, "expected at least 12 skill files, got {}", skill_files.len());
+
+        // Verify agents
+        let agent_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("agents/") && p.ends_with(".md"))
+            .collect();
+        assert_eq!(agent_files.len(), 4, "expected 4 agent files");
+
+        // Verify commands
+        let cmd_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("commands/harness/") && p.ends_with(".toml"))
+            .collect();
+        assert_eq!(cmd_files.len(), 8, "expected 8 command files");
+
+        // Verify all command files are valid TOML (start with prompt = ''')
+        for (path, content) in &cmd_files {
+            assert!(
+                content.starts_with("prompt = '''"),
+                "command {} should start with TOML prompt field",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn test_prompt_to_antigravity_command() {
+        let input = "\
+---
+description: \"Run tests and verify\"
+---
+
+# /check — Verify
+
+Run all tests.
+";
+        let result = prompt_to_antigravity_command("check", input);
+        assert!(
+            result.starts_with("prompt = '''"),
+            "should start with TOML prompt field"
+        );
+        assert!(
+            result.contains("# /check — Verify"),
+            "should contain body content"
+        );
+        assert!(
+            !result.contains("description:"),
+            "should not contain frontmatter"
+        );
     }
 
     #[test]
