@@ -32,12 +32,24 @@ A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skil
 
 ![Demo](./docs/demo/demo.gif)
 
-### Web Dashboard — 10-screen real-time metrics
+### Web Dashboard — auto-launches on session start
+
+10-screen real-time metrics for eval scores, tool stats, orbit pipelines, evolved skills, and hook health. Opens automatically with the first Claude Code session — no manual setup needed.
 
 <p align="center">
   <img src="./assets/dashboard.png" alt="Dashboard" width="49%" />
   <img src="./assets/dashboard-orbit.png" alt="Orbit Pipeline" width="49%" />
 </p>
+
+```bash
+# Auto-launches on first session (default: http://localhost:7700)
+# Configure port or disable in ~/.harness/config.toml:
+[dashboard]
+port = 7700       # set to 0 to disable auto-launch
+auto_open = true  # open browser on first session
+```
+
+Screens: **Dashboard** · /orbit Pipeline · Commands (10) · Skills (15) · Agents (4) · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -521,7 +533,7 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 
 Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ days → tagged `stale`, excluded from recall. `pinned` tag prevents decay.
 
-> **Web UI**: The graph visualization is actively being improved — clustering, neighbor highlighting, and offline fallback landed recently. More enhancements in progress.
+> **WIP**: harness-mem is under active development. CLI, MCP server, Web UI, and auto-recording pipeline are not yet fully functional. Do not rely on this feature in production.
 
 ---
 

@@ -16,6 +16,7 @@ pub struct HarnessConfig {
     pub pattern: PatternConfig,
     pub instinct: InstinctConfig,
     pub context: ContextConfig,
+    pub dashboard: DashboardConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -236,6 +237,26 @@ impl Default for AlcoveConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct DashboardConfig {
+    /// Port for the dashboard web server (default: 7700).
+    /// Set to 0 to disable auto-launch on session start.
+    pub port: u16,
+
+    /// Automatically open the dashboard browser on first session start.
+    pub auto_open: bool,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            port: 7700,
+            auto_open: true,
+        }
+    }
+}
+
 // ── Global Config Instance ──────────────────────────
 
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
@@ -425,6 +446,15 @@ vault_path = ""
 projects = []
 # Maximum number of documents to collect.
 max_docs = 20
+
+# ── Dashboard ─────────────────────────────────────────
+[dashboard]
+# Port for the dashboard web server.
+# Set to 0 to disable auto-launch on session start.
+# port = 7700
+
+# Automatically open the browser on first session start.
+# auto_open = true
 "#
 }
 

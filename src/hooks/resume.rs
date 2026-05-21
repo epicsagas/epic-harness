@@ -1,8 +1,10 @@
 use std::fs;
 use std::io::ErrorKind;
+use std::net::TcpStream;
 use std::path::Path;
 
 use super::common::*;
+use crate::config::CONFIG;
 use crate::mem::store;
 use crate::telemetry::Telemetry;
 
@@ -463,10 +465,108 @@ pub fn run(_input: &HookInput) -> i32 {
         hint("resume", &summary);
     }
 
-    // 10. Telemetry — session_started event (consent already ensured in main.rs)
+    // 10. Auto-launch dashboard (exactly one instance across all sessions)
+    spawn_dashboard_once();
+
+    // 11. Telemetry — session_started event (consent already ensured in main.rs)
     Telemetry::init().track_session_started();
 
     0
+}
+
+// ── Dashboard Auto-Launch ──────────────────────────────
+
+/// Check if the dashboard server is already running by attempting a TCP connect.
+fn is_dashboard_running(port: u16) -> bool {
+    TcpStream::connect(format!("127.0.0.1:{port}")).is_ok()
+}
+
+/// Spawn the dashboard server exactly once using a filesystem lock.
+///
+/// Uses `dashboard.lock` under the harness dir with atomic `create_new` to
+/// prevent races across concurrent sessions. If we win the lock and no server
+/// is listening, we spawn `epic-harness serve` in the background and open the
+/// browser. The lock file is advisory — stale locks are cleaned up when the
+/// port is free.
+///
+/// Port and auto-open are configurable via `~/.harness/config.toml` `[dashboard]`.
+/// Set `port = 0` to disable auto-launch entirely.
+fn spawn_dashboard_once() {
+    let port = CONFIG.dashboard.port;
+    if port == 0 {
+        return;
+    }
+
+    if is_dashboard_running(port) {
+        return;
+    }
+
+    let lock = harness_dir().join("dashboard.lock");
+
+    // Stale lock cleanup: if the lock exists but port is free, remove it.
+    if lock.exists() {
+        let _ = fs::remove_file(&lock);
+    }
+
+    if !acquire_session_lock(&lock) {
+        // Another session won the race — give it a moment to bind the port.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        return;
+    }
+
+    // Double-check after acquiring lock (another process may have started between checks).
+    if is_dashboard_running(port) {
+        return;
+    }
+
+    match std::process::Command::new("epic-harness")
+        .arg("serve")
+        .arg(format!("--port={port}"))
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(_) => {
+            // Wait briefly for the server to bind.
+            let mut bound = false;
+            for _ in 0..10 {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if is_dashboard_running(port) {
+                    bound = true;
+                    break;
+                }
+            }
+            if bound {
+                let url = format!("http://localhost:{port}");
+                hint("resume", &format!("Dashboard → {url}"));
+                if CONFIG.dashboard.auto_open {
+                    open_browser_bg(&url);
+                }
+            } else {
+                hint("resume", "Dashboard server start timed out");
+            }
+        }
+        Err(e) => {
+            hint("resume", &format!("Dashboard spawn failed: {e}"));
+        }
+    }
+}
+
+fn open_browser_bg(url: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("cmd")
+            .args(["/c", "start", url])
+            .spawn();
+    }
 }
 
 // ── Orchestration State Restoration ──────────────────
