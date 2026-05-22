@@ -47,6 +47,17 @@ Decompose the spec into an execution plan.
 
 5. Show the plan. Get user confirmation (or auto-proceed if in `/orbit`).
 
+6. **Identify risks**: For each task, list potential failure modes:
+   ```
+   ### Risks
+   - {risk}: {mitigation}
+   ```
+
+7. **Create feature branch** (standalone invocation only — `/orbit` handles this in Step 3):
+   ```bash
+   git checkout -b feature/{goal_slug}
+   ```
+
 ### Execution Order Format
 
 ```

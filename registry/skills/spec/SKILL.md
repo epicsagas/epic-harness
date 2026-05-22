@@ -84,3 +84,4 @@ After saving:
 - Assuming requirements that weren't stated
 - Producing a 3-page spec for a 1-line change
 - Acceptance criteria that cannot be verified by a test or observation
+- Skipping this phase for non-trivial features

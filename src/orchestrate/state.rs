@@ -126,7 +126,9 @@ pub fn control_file(base: &Path) -> PathBuf {
 }
 
 pub fn agent_dir(base: &Path, agent_id: &str) -> PathBuf {
-    debug_assert!(validate_agent_id(agent_id), "invalid agent_id: {agent_id}");
+    if !validate_agent_id(agent_id) {
+        return orchestrator_dir(base).join("agents").join("_invalid");
+    }
     orchestrator_dir(base).join("agents").join(agent_id)
 }
 
@@ -333,14 +335,14 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
 
 #[cfg(not(unix))]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    // No advisory file locking on non-Unix platforms.
-    // Concurrent cross-session writes to run.json may interleave.
-    eprintln!(
-        "[harness] warning: file locking unavailable on this platform — \
-         concurrent agent spawns may race on {}",
-        lock_path.display()
-    );
-    // Use create_new for basic mutual exclusion (fails if another process won)
+    use std::sync::OnceLock;
+    static WARNED: OnceLock<()> = OnceLock::new();
+    WARNED.get_or_init(|| {
+        eprintln!(
+            "[harness] warning: file locking unavailable on this platform — \
+             concurrent agent spawns may race"
+        );
+    });
     fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -366,7 +368,7 @@ pub fn upsert_agent_to_run(
 
     // Acquire advisory lock to prevent concurrent write races
     let lock_path = orch_dir.join("run.json.lock");
-    let _lock = acquire_lock(&lock_path);
+    let _lock = acquire_lock(&lock_path)?;
 
     let now = crate::shared::helpers::now_iso();
 
@@ -460,6 +462,10 @@ pub fn upsert_agent_to_run(
 /// - Complete runs older than 1 hour: remove agent status directories
 /// - Running runs older than 2 hours: mark as complete, then clean
 pub fn auto_cleanup_stale_runs(base: &Path) {
+    let orch_dir = orchestrator_dir(base);
+    let lock_path = orch_dir.join("run.json.lock");
+    let _lock = acquire_lock(&lock_path);
+
     let Some(run) = read_run(base) else {
         return;
     };

@@ -76,7 +76,7 @@
 <div class="sidebar-brand">
   <div class="logo-icon">EH</div>
   <h1>epic-harness</h1>
-  <span class="version">v0.4.0</span>
+  <span class="version">v0.4.1</span>
 </div>
 
 <nav class="sidebar-nav">

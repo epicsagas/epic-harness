@@ -155,17 +155,17 @@
           <div class="stat-sub">{$tStore('orchRunSub')}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--info)"></span> Active</div>
+          <div class="stat-label"><span class="dot" style="background:var(--info)"></span> {$tStore('activeLabel')}</div>
           <div class="stat-value">{activeCount}</div>
-          <div class="stat-sub">of {run.agents.length} agents</div>
+          <div class="stat-sub">{$tStore('ofAgents')(run.agents.length)}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--success)"></span> Completed</div>
+          <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('completedLabel')}</div>
           <div class="stat-value">{completedCount}</div>
           <div class="stat-sub">{$tStore('doneLabel')}</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> Failed</div>
+          <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> {$tStore('failedStatusLabel')}</div>
           <div class="stat-value">{failedCount}</div>
           <div class="stat-sub">{$tStore('failedLabel')}</div>
         </div>
@@ -190,7 +190,7 @@
               ></div>
             </div>
             <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);">
-              <span>ID: <code>{agent.id}</code></span>
+              <span>{$tStore('agentIdLabel')} <code>{agent.id}</code></span>
               {#if status}
                 <span>{$tStore('heartbeatLabel')} {relativeTime(status.last_heartbeat)}</span>
               {:else if agent.completed_at}

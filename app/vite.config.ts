@@ -49,7 +49,11 @@ function harnessApiPlugin(): Plugin {
         const match = (req.url ?? '').match(/^\/([^/]+)\/status$/);
         if (!match) { res.end(JSON.stringify(null)); return; }
         const agentId = match[1];
-        const statusPath = path.join(harnessDir, 'orchestrator', 'agents', agentId, 'status.json');
+        // Validate agentId: only alphanumeric, dash, underscore (path traversal defense)
+        if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) { res.end(JSON.stringify(null)); return; }
+        const agentsBase = path.resolve(harnessDir, 'orchestrator', 'agents');
+        const statusPath = path.resolve(agentsBase, agentId, 'status.json');
+        if (!statusPath.startsWith(agentsBase + path.sep)) { res.end(JSON.stringify(null)); return; }
         if (!fs.existsSync(statusPath)) { res.end(JSON.stringify(null)); return; }
         try { res.end(fs.readFileSync(statusPath, 'utf8')); }
         catch { res.end(JSON.stringify(null)); }
