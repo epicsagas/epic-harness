@@ -322,32 +322,42 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
         .read(true)
         .write(true)
         .open(lock_path)?;
-    // Non-blocking exclusive lock — if contended, fall back to blocking
-    // (hooks are sequential within a session, contention is cross-session)
+    // Advisory exclusive lock via flock(2).
+    // Uses raw syscall binding to avoid the `libc` crate dependency.
+    // SAFETY: fd is a valid open file descriptor.
     use std::os::unix::io::AsRawFd;
     let fd = file.as_raw_fd();
-    let result = unsafe { libc::flock(fd, libc::LOCK_EX) };
+    let result = unsafe { flock(fd, LOCK_EX) };
     if result != 0 {
         return Err(io::Error::last_os_error());
     }
     Ok(file)
 }
 
+#[cfg(unix)]
+const LOCK_EX: i32 = 2; // LOCK_EX from sys/file.h
+
+/// Raw flock(2) binding — avoids pulling in the `libc` crate.
+/// Only used on Unix for advisory file locking.
+#[cfg(unix)]
+unsafe fn flock(fd: i32, operation: i32) -> i32 {
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    unsafe { flock(fd, operation) }
+}
+
 #[cfg(not(unix))]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    use std::sync::OnceLock;
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        eprintln!(
-            "[harness] warning: file locking unavailable on this platform — \
-             concurrent agent spawns may race"
-        );
-    });
+    // TODO: No advisory file locking on non-Unix platforms.
+    // This is a best-effort placeholder — concurrent agent spawns may race.
+    // For production use on Windows, consider `fs4` or `file-lock` crate.
     fs::OpenOptions::new()
-        .create_new(true)
+        .create(true)
+        .truncate(false)
+        .read(true)
         .write(true)
         .open(lock_path)
-        .or_else(|_| fs::File::open(lock_path))
 }
 
 /// Upsert an agent into an auto-created run.json.
@@ -392,13 +402,17 @@ pub fn upsert_agent_to_run(
     let a_dir = agent_dir(base, agent_id);
     fs::create_dir_all(&a_dir)?;
 
+    let mut changed = false;
     if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
-        existing.status = status.clone();
-        if status == AgentStatus::Done {
-            existing.completed_at = Some(now.clone());
-        }
-        if status == AgentStatus::Running && existing.started_at.is_none() {
-            existing.started_at = Some(now.clone());
+        if existing.status != status {
+            existing.status = status.clone();
+            if status == AgentStatus::Done {
+                existing.completed_at = Some(now.clone());
+            }
+            if status == AgentStatus::Running && existing.started_at.is_none() {
+                existing.started_at = Some(now.clone());
+            }
+            changed = true;
         }
     } else {
         run.agents.push(AgentDef {
@@ -418,6 +432,11 @@ pub fn upsert_agent_to_run(
                 None
             },
         });
+        changed = true;
+    }
+
+    if !changed {
+        return Ok(agent_id.to_string());
     }
 
     // Check if all agents are done

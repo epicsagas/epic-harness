@@ -37,8 +37,6 @@ toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
 rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
-libc = "0.2"
-
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }
