@@ -28,40 +28,48 @@ fn orch_base() -> std::path::PathBuf {
     common::harness_dir()
 }
 
-/// Pre-invocation hook logic.
+/// Pre-invocation hook logic (returns exit code, errors logged to stderr).
 ///
 /// Always: record agent as "running" in orchestrator state (agent tracking).
 /// Full orchestration only: check control directives, read inbox, update heartbeat.
 pub fn run_pre(input: &HookInput) -> i32 {
+    run_pre_checked(input).unwrap_or_else(|e| {
+        eprintln!("[harness] orchestrate run_pre error: {e}");
+        0
+    })
+}
+
+/// Pre-invocation hook logic (returns Result for callers that want error handling).
+pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
     let tool = input.tool_name.as_deref().unwrap_or("");
     if tool.to_lowercase() != "agent" {
-        return 0;
+        return Ok(0);
     }
 
     let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
-        None => return 0,
+        None => return Ok(0),
     };
 
     // Runtime validation (debug_assert compiles out in release)
     if !orch_state::validate_agent_id(&agent_id) {
-        return 0;
+        return Ok(0);
     }
 
     // Always: record agent as running (agent tracking — no EPIC_ORCHESTRATION gate)
     let (description, subagent_type) = extract_agent_meta(input);
-    let _ = orch_state::upsert_agent_to_run(
+    orch_state::upsert_agent_to_run(
         &base,
         &agent_id,
         &description,
         &subagent_type,
         orch_state::AgentStatus::Running,
-    );
+    )?;
 
     // Full orchestration: control, inbox, heartbeat
     if !is_full_orchestration() {
-        return 0;
+        return Ok(0);
     }
 
     // Check control directive
@@ -83,7 +91,7 @@ pub fn run_pre(input: &HookInput) -> i32 {
                     if let Some(msg) = &directive.message {
                         hint("orchestrator", &format!("Reason: {}", msg));
                     }
-                    return 2; // block the tool call
+                    return Ok(2); // block the tool call
                 }
                 ControlAction::Cancel => {
                     hint(
@@ -93,7 +101,7 @@ pub fn run_pre(input: &HookInput) -> i32 {
                             agent_id, directive.generation
                         ),
                     );
-                    return 2;
+                    return Ok(2);
                 }
                 ControlAction::Redirect => {
                     if let Some(msg) = &directive.message {
@@ -132,28 +140,36 @@ pub fn run_pre(input: &HookInput) -> i32 {
         let _ = orch_state::write_agent_status(&base, &agent_id, &status);
     }
 
-    0
+    Ok(0)
 }
 
-/// Post-invocation hook logic.
+/// Post-invocation hook logic (returns exit code, errors logged to stderr).
 ///
 /// Always: record agent completion in orchestrator state (agent tracking).
 /// Full orchestration only: append events, evaluate dependencies, inbox notifications.
 pub fn run_post(input: &HookInput) -> i32 {
+    run_post_checked(input).unwrap_or_else(|e| {
+        eprintln!("[harness] orchestrate run_post error: {e}");
+        0
+    })
+}
+
+/// Post-invocation hook logic (returns Result for callers that want error handling).
+pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
     let tool = input.tool_name.as_deref().unwrap_or("");
     if tool.to_lowercase() != "agent" {
-        return 0;
+        return Ok(0);
     }
 
     let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
-        None => return 0,
+        None => return Ok(0),
     };
 
     // Runtime validation (debug_assert compiles out in release)
     if !orch_state::validate_agent_id(&agent_id) {
-        return 0;
+        return Ok(0);
     }
 
     // Extract output text
@@ -163,17 +179,17 @@ pub fn run_post(input: &HookInput) -> i32 {
     // Always: update agent status in run.json (agent tracking — no gate)
     let final_status = new_status.clone().unwrap_or(orch_state::AgentStatus::Done);
     let (description, subagent_type) = extract_agent_meta(input);
-    let _ = orch_state::upsert_agent_to_run(
+    orch_state::upsert_agent_to_run(
         &base,
         &agent_id,
         &description,
         &subagent_type,
         final_status.clone(),
-    );
+    )?;
 
     // Full orchestration: events, dependency evaluation, inbox notifications
     if !is_full_orchestration() {
-        return 0;
+        return Ok(0);
     }
 
     // Append event
@@ -226,7 +242,7 @@ pub fn run_post(input: &HookInput) -> i32 {
         let _ = orch_state::write_run(&base, &run);
     }
 
-    0
+    Ok(0)
 }
 
 /// Extract the agent ID from hook input.

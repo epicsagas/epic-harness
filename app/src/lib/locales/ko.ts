@@ -26,7 +26,6 @@ export default {
   sessionLabel: '세션', callsAvgScore: '호출, 평균 점수', failuresLabel: '실패',
   recentSessionNone: '최근 세션 없음', failuresSub: 'recent_sessions 합산',
   pageAgents: '내부 에이전트',
-  pageAgentsDesc: '/go 및 /check 페이즈에서 사용되는 4개의 내장 에이전트 · /team으로 확장 가능',
   pageAgentsLive: '라이브 에이전트',
   pageAgentsLiveDesc: '활성 코딩 툴 오케스트레이션에서 실시간 에이전트 스폰 현황',
   liveAgentStatus: '오케스트레이터 실행',

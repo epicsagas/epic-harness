@@ -16,7 +16,7 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
@@ -131,7 +131,7 @@ Após instalar o binário, execute `epic install` (ou `epic install claude`) par
 3. Registrar o servidor MCP (harness-mem) para o Claude Code
 4. Criar `~/.harness/config.toml` com valores padrão, se ausente
 
-No Claude Code, `hooks/setup.sh` é executado automaticamente no início da sessão e instala o binário se estiver ausente. Nenhuma etapa manual é necessária após o clone inicial.
+No Claude Code, `hooks/install.js` é executado automaticamente no início da sessão e instala o binário se estiver ausente. Nenhuma etapa manual é necessária após o clone inicial.
 
 ### Outras ferramentas
 

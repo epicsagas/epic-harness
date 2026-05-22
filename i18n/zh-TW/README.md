@@ -16,7 +16,7 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
@@ -131,7 +131,7 @@ epic install gemini   # Antigravity
 3. 為 Claude Code 註冊 MCP 伺服器（harness-mem）
 4. 若不存在，則建立含預設值的 `~/.harness/config.toml`
 
-在 Claude Code 中，`hooks/setup.sh` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
+在 Claude Code 中，`hooks/install.js` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
 
 ### 其他工具
 

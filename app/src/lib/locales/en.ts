@@ -26,7 +26,6 @@ export default {
   sessionLabel: 'Session', callsAvgScore: 'calls, avg score', failuresLabel: 'failures',
   recentSessionNone: 'No recent sessions', failuresSub: 'combined from recent sessions',
   pageAgents: 'Internal Agents',
-  pageAgentsDesc: '4 built-in agents used by /go and /check phases · extendable via /team',
   pageAgentsLive: 'Live Agents',
   pageAgentsLiveDesc: 'Real-time agent spawn status from active coding tool orchestration',
   liveAgentStatus: 'Orchestrator Run',

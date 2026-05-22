@@ -33,6 +33,28 @@ function harnessApiPlugin(): Plugin {
     apply: 'serve',
     configureServer(server) {
       const harnessDir = getHarnessDir();
+
+      // Agent tracking routes for the live Agents tab
+      server.middlewares.use('/api/run', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (!harnessDir) { res.end(JSON.stringify(null)); return; }
+        const runPath = path.join(harnessDir, 'orchestrator', 'run.json');
+        if (!fs.existsSync(runPath)) { res.end(JSON.stringify(null)); return; }
+        try { res.end(fs.readFileSync(runPath, 'utf8')); }
+        catch { res.end(JSON.stringify(null)); }
+      });
+      server.middlewares.use('/api/agents', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (!harnessDir) { res.end(JSON.stringify(null)); return; }
+        const match = (req.url ?? '').match(/^\/([^/]+)\/status$/);
+        if (!match) { res.end(JSON.stringify(null)); return; }
+        const agentId = match[1];
+        const statusPath = path.join(harnessDir, 'orchestrator', 'agents', agentId, 'status.json');
+        if (!fs.existsSync(statusPath)) { res.end(JSON.stringify(null)); return; }
+        try { res.end(fs.readFileSync(statusPath, 'utf8')); }
+        catch { res.end(JSON.stringify(null)); }
+      });
+
       server.middlewares.use('/api/harness', (req, res) => {
         const cmd = new URL(req.url ?? '/', 'http://localhost').searchParams.get('cmd') ?? '';
         res.setHeader('Content-Type', 'application/json');

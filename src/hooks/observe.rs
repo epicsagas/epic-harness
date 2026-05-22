@@ -217,10 +217,14 @@ fn track_agent_spawn(input: &HookInput) {
 
     if has_output {
         // PostToolUse: agent completed — let orchestrate::run_post handle it
-        let _ = orchestrate::run_post(input);
+        if let Err(e) = orchestrate::run_post_checked(input) {
+            eprintln!("[harness] agent track post error: {e}");
+        }
     } else {
         // PreToolUse: agent starting — let orchestrate::run_pre handle it
-        let _ = orchestrate::run_pre(input);
+        if let Err(e) = orchestrate::run_pre_checked(input) {
+            eprintln!("[harness] agent track pre error: {e}");
+        }
     }
 }
 

@@ -308,10 +308,40 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
         .all(|a| a.status == AgentStatus::Done || a.status == AgentStatus::Failed)
 }
 
+/// Acquire an exclusive advisory file lock on `path`.
+/// Returns the locked file handle (holds the lock until dropped).
+#[cfg(unix)]
+fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    // Non-blocking exclusive lock — if contended, fall back to blocking
+    // (hooks are sequential within a session, contention is cross-session)
+    use std::os::unix::io::AsRawFd;
+    let fd = file.as_raw_fd();
+    let result = unsafe { libc::flock(fd, libc::LOCK_EX) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+    // Fallback: just open the file (no locking on non-Unix)
+    fs::File::open(lock_path)
+}
+
 /// Upsert an agent into an auto-created run.json.
 ///
 /// If `run.json` does not exist, creates a new auto-run with id `auto-{timestamp}`.
 /// If it exists, adds the agent or updates its status.
+/// Uses advisory file locking to prevent TOCTOU races during concurrent agent spawns.
 /// Returns the agent ID used.
 pub fn upsert_agent_to_run(
     base: &Path,
@@ -322,6 +352,10 @@ pub fn upsert_agent_to_run(
 ) -> io::Result<String> {
     let orch_dir = orchestrator_dir(base);
     fs::create_dir_all(&orch_dir)?;
+
+    // Acquire advisory lock to prevent concurrent write races
+    let lock_path = orch_dir.join("run.json.lock");
+    let _lock = acquire_lock(&lock_path);
 
     let now = crate::shared::helpers::now_iso();
 
@@ -444,22 +478,10 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     }
 }
 
-/// Parse an ISO-8601 timestamp to epoch seconds (approximate).
+/// Parse an ISO-8601 timestamp to epoch seconds.
+/// Reuses the accurate `days_since_epoch` logic from mem::store::util.
 fn epoch_secs_from_iso(iso: &str) -> u64 {
-    let digits: Vec<u64> = iso
-        .split(|c: char| !c.is_ascii_digit())
-        .filter(|p| !p.is_empty())
-        .filter_map(|p| p.parse().ok())
-        .collect();
-    if digits.len() < 6 {
-        return 0;
-    }
-    // Approximate: ignore leap years, DST, etc.
-    let (y, mo, d, h, mi, s) = (
-        digits[0], digits[1], digits[2], digits[3], digits[4], digits[5],
-    );
-    let days_since_epoch = (y - 1970) * 365 + (y - 1969) / 4 + (mo - 1) * 30 + d;
-    days_since_epoch * 86400 + h * 3600 + mi * 60 + s
+    crate::mem::store::parse_iso_to_secs(iso)
 }
 
 /// Current time as approximate epoch seconds.

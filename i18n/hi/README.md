@@ -16,7 +16,7 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
@@ -131,7 +131,7 @@ epic install gemini   # Antigravity
 3. Claude Code के लिए MCP सर्वर (harness-mem) रजिस्टर करें
 4. यदि अनुपस्थित हो तो `~/.harness/config.toml` डिफ़ॉल्ट के साथ बनाएं
 
-Claude Code में, `hooks/setup.sh` सेशन स्टार्ट पर ऑटो-चलता है और यदि बाइनरी गायब हो तो इंस्टॉल करता है। प्रारंभिक क्लोन के बाद कोई मैन्युअल चरण आवश्यक नहीं।
+Claude Code में, `hooks/install.js` सेशन स्टार्ट पर ऑटो-चलता है और यदि बाइनरी गायब हो तो इंस्टॉल करता है। प्रारंभिक क्लोन के बाद कोई मैन्युअल चरण आवश्यक नहीं।
 
 ### अन्य टूल्स
 

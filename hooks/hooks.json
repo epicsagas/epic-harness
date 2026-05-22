@@ -24,18 +24,6 @@
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "epic-harness observe",
-            "async": true,
-            "timeout": 5
-          }
-        ],
-        "description": "Track agent spawns in real-time (records 'running' state before execution)"
       }
     ],
     "PostToolUse": [
