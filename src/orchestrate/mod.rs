@@ -18,6 +18,11 @@ pub fn is_enabled() -> bool {
     std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled")
 }
 
+/// Full orchestration (control directives, inbox, dependency evaluation).
+fn is_full_orchestration() -> bool {
+    is_enabled()
+}
+
 /// Return the orchestrator base directory (uses harness_dir).
 fn orch_base() -> std::path::PathBuf {
     common::harness_dir()
@@ -25,12 +30,11 @@ fn orch_base() -> std::path::PathBuf {
 
 /// Pre-invocation hook logic.
 ///
-/// 1. Check EPIC_ORCHESTRATION env var -- if not "enabled", no-op.
-/// 2. Read control.json -- if action is "pause" for this agent, output hint.
-/// 3. Read agent inbox -- output unread messages as hints.
-/// 4. Update agent status.json heartbeat timestamp.
+/// Always: record agent as "running" in orchestrator state (agent tracking).
+/// Full orchestration only: check control directives, read inbox, update heartbeat.
 pub fn run_pre(input: &HookInput) -> i32 {
-    if !is_enabled() {
+    let tool = input.tool_name.as_deref().unwrap_or("");
+    if tool.to_lowercase() != "agent" {
         return 0;
     }
 
@@ -39,6 +43,26 @@ pub fn run_pre(input: &HookInput) -> i32 {
         Some(id) => id,
         None => return 0,
     };
+
+    // Runtime validation (debug_assert compiles out in release)
+    if !orch_state::validate_agent_id(&agent_id) {
+        return 0;
+    }
+
+    // Always: record agent as running (agent tracking — no EPIC_ORCHESTRATION gate)
+    let (description, subagent_type) = extract_agent_meta(input);
+    let _ = orch_state::upsert_agent_to_run(
+        &base,
+        &agent_id,
+        &description,
+        &subagent_type,
+        orch_state::AgentStatus::Running,
+    );
+
+    // Full orchestration: control, inbox, heartbeat
+    if !is_full_orchestration() {
+        return 0;
+    }
 
     // Check control directive
     if let Some(directive) = orch_state::read_control(&base) {
@@ -113,13 +137,11 @@ pub fn run_pre(input: &HookInput) -> i32 {
 
 /// Post-invocation hook logic.
 ///
-/// 1. Parse the Agent tool output to extract state.
-/// 2. Append event to stream.jsonl.
-/// 3. Update status.json with new state.
-/// 4. If agent is DONE, evaluate dependency graph.
-/// 5. If all agents are done/failed, update run.json status.
+/// Always: record agent completion in orchestrator state (agent tracking).
+/// Full orchestration only: append events, evaluate dependencies, inbox notifications.
 pub fn run_post(input: &HookInput) -> i32 {
-    if !is_enabled() {
+    let tool = input.tool_name.as_deref().unwrap_or("");
+    if tool.to_lowercase() != "agent" {
         return 0;
     }
 
@@ -129,9 +151,30 @@ pub fn run_post(input: &HookInput) -> i32 {
         None => return 0,
     };
 
+    // Runtime validation (debug_assert compiles out in release)
+    if !orch_state::validate_agent_id(&agent_id) {
+        return 0;
+    }
+
     // Extract output text
     let output = resolve_output(input);
     let new_status = orch_state::parse_agent_state(&output);
+
+    // Always: update agent status in run.json (agent tracking — no gate)
+    let final_status = new_status.clone().unwrap_or(orch_state::AgentStatus::Done);
+    let (description, subagent_type) = extract_agent_meta(input);
+    let _ = orch_state::upsert_agent_to_run(
+        &base,
+        &agent_id,
+        &description,
+        &subagent_type,
+        final_status.clone(),
+    );
+
+    // Full orchestration: events, dependency evaluation, inbox notifications
+    if !is_full_orchestration() {
+        return 0;
+    }
 
     // Append event
     let event = AgentEvent {
@@ -145,55 +188,42 @@ pub fn run_post(input: &HookInput) -> i32 {
     };
     let _ = orch_state::append_event(&base, &agent_id, &event);
 
-    // Update agent status
-    if let Some(status) = new_status.clone() {
-        if let Some(mut agent_status) = orch_state::read_agent_status(&base, &agent_id) {
-            agent_status.status = status.clone();
-            agent_status.last_heartbeat = now_iso();
-            if status == AgentStatus::Done {
-                agent_status.phase = "complete".to_string();
-                agent_status.progress = 1.0;
+    // Evaluate dependency graph if agent is done
+    if final_status == AgentStatus::Done
+        && let Some(mut run) = orch_state::read_run(&base)
+    {
+        // Update agent status in run
+        for agent in &mut run.agents {
+            if agent.id == agent_id {
+                agent.status = AgentStatus::Done;
+                agent.completed_at = Some(now_iso());
             }
-            let _ = orch_state::write_agent_status(&base, &agent_id, &agent_status);
         }
 
-        // If agent is done, evaluate dependency graph
-        if status == AgentStatus::Done
-            && let Some(mut run) = orch_state::read_run(&base)
-        {
-            // Update agent status in run
+        // Evaluate deps
+        let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
+        for ub_id in &unblocked {
+            let msg = InboxMessage {
+                from: "orchestrator".to_string(),
+                timestamp: now_iso(),
+                message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
+            };
+            let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
+
+            // Update run agent status
             for agent in &mut run.agents {
-                if agent.id == agent_id {
-                    agent.status = AgentStatus::Done;
-                    agent.completed_at = Some(now_iso());
+                if agent.id == *ub_id {
+                    agent.status = AgentStatus::Pending;
                 }
             }
-
-            // Evaluate deps
-            let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
-            for ub_id in &unblocked {
-                let msg = InboxMessage {
-                    from: "orchestrator".to_string(),
-                    timestamp: now_iso(),
-                    message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
-                };
-                let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
-
-                // Update run agent status
-                for agent in &mut run.agents {
-                    if agent.id == *ub_id {
-                        agent.status = AgentStatus::Pending;
-                    }
-                }
-            }
-
-            // Check if run is complete
-            if orch_state::is_run_complete(&run) {
-                run.status = orch_state::RunStatus::Complete;
-            }
-            run.updated_at = now_iso();
-            let _ = orch_state::write_run(&base, &run);
         }
+
+        // Check if run is complete
+        if orch_state::is_run_complete(&run) {
+            run.status = orch_state::RunStatus::Complete;
+        }
+        run.updated_at = now_iso();
+        let _ = orch_state::write_run(&base, &run);
     }
 
     0
@@ -228,6 +258,28 @@ fn extract_agent_id(input: &HookInput) -> Option<String> {
                 .and_then(|v| v.as_str())
                 .map(String::from)
         })
+}
+
+/// Extract agent metadata from tool input (description + subagent_type).
+/// Truncates description to 120 chars to limit secret exposure.
+fn extract_agent_meta(input: &HookInput) -> (String, String) {
+    let desc: String = input
+        .tool_input
+        .as_ref()
+        .and_then(|v| v.get("description"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .chars()
+        .take(120)
+        .collect();
+    let sub_type = input
+        .tool_input
+        .as_ref()
+        .and_then(|v| v.get("subagent_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("general-purpose")
+        .to_string();
+    (desc, sub_type)
 }
 
 /// Resolve the output text from hook input.

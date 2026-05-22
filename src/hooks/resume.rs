@@ -465,6 +465,9 @@ pub fn run(_input: &HookInput) -> i32 {
         hint("resume", &summary);
     }
 
+    // 9a. Clean up stale auto-tracked agent runs (complete > 1h, running > 2h)
+    crate::orchestrate::state::auto_cleanup_stale_runs(&harness_dir());
+
     // 10. Auto-launch dashboard (exactly one instance across all sessions)
     spawn_dashboard_once();
 
@@ -581,15 +584,20 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
         return None;
     }
 
-    // Only activate when EPIC_ORCHESTRATION is enabled
-    if std::env::var("EPIC_ORCHESTRATION").unwrap_or_default() != "enabled" {
-        return None;
-    }
-
     let run_json = std::fs::read_to_string(&run_path).ok()?;
     let run: serde_json::Value = serde_json::from_str(&run_json).ok()?;
 
-    if run["status"].as_str()? != "running" {
+    let status = run["status"].as_str().unwrap_or("");
+    let run_id = run["id"].as_str().unwrap_or("unknown");
+    let is_auto_run = run_id.starts_with("auto-");
+
+    // Full orchestration runs: only activate when EPIC_ORCHESTRATION is enabled
+    // Auto-tracked runs: always show (no gate)
+    if !is_auto_run && std::env::var("EPIC_ORCHESTRATION").unwrap_or_default() != "enabled" {
+        return None;
+    }
+
+    if status != "running" {
         return None;
     }
 
@@ -613,7 +621,6 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
         }
     }
 
-    let run_id = run["id"].as_str().unwrap_or("unknown");
     Some(format!(
         "## Orchestration State Restored\nRun ID: {}\nStatus: running\nAgents:\n{}",
         run_id,

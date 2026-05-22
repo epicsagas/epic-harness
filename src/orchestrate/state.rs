@@ -308,6 +308,168 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
         .all(|a| a.status == AgentStatus::Done || a.status == AgentStatus::Failed)
 }
 
+/// Upsert an agent into an auto-created run.json.
+///
+/// If `run.json` does not exist, creates a new auto-run with id `auto-{timestamp}`.
+/// If it exists, adds the agent or updates its status.
+/// Returns the agent ID used.
+pub fn upsert_agent_to_run(
+    base: &Path,
+    agent_id: &str,
+    description: &str,
+    subagent_type: &str,
+    status: AgentStatus,
+) -> io::Result<String> {
+    let orch_dir = orchestrator_dir(base);
+    fs::create_dir_all(&orch_dir)?;
+
+    let now = crate::shared::helpers::now_iso();
+
+    let mut run = match read_run(base) {
+        Some(r) => r,
+        None => OrchestrationRun {
+            id: {
+                let compact = now.replace(['-', ':'], "").replace('T', "-");
+                let truncated: String = compact.chars().take(19).collect();
+                format!("auto-{truncated}")
+            },
+            status: RunStatus::Running,
+            agents: Vec::new(),
+            dependency_graph: HashMap::new(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        },
+    };
+
+    // Ensure agent directory exists
+    let a_dir = agent_dir(base, agent_id);
+    fs::create_dir_all(&a_dir)?;
+
+    if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
+        existing.status = status.clone();
+        if status == AgentStatus::Done {
+            existing.completed_at = Some(now.clone());
+        }
+        if status == AgentStatus::Running && existing.started_at.is_none() {
+            existing.started_at = Some(now.clone());
+        }
+    } else {
+        run.agents.push(AgentDef {
+            id: agent_id.to_string(),
+            role: subagent_type.to_string(),
+            task: description.to_string(),
+            satisfies: Vec::new(),
+            status: status.clone(),
+            started_at: if status == AgentStatus::Running {
+                Some(now.clone())
+            } else {
+                None
+            },
+            completed_at: if status == AgentStatus::Done {
+                Some(now.clone())
+            } else {
+                None
+            },
+        });
+    }
+
+    // Check if all agents are done
+    if is_run_complete(&run) {
+        run.status = RunStatus::Complete;
+    }
+    run.updated_at = now;
+    write_run(base, &run)?;
+
+    // Also write the agent status file for the dashboard
+    let status_file = AgentStatusFile {
+        agent_id: agent_id.to_string(),
+        phase: if status == AgentStatus::Done {
+            "complete".to_string()
+        } else if status == AgentStatus::Running {
+            "running".to_string()
+        } else {
+            "pending".to_string()
+        },
+        progress: if status == AgentStatus::Done {
+            1.0
+        } else {
+            0.0
+        },
+        last_heartbeat: crate::shared::helpers::now_iso(),
+        status,
+    };
+    write_agent_status(base, agent_id, &status_file)?;
+
+    Ok(agent_id.to_string())
+}
+
+/// Clean up stale auto-generated runs.
+///
+/// - Complete runs older than 1 hour: remove agent status directories
+/// - Running runs older than 2 hours: mark as complete, then clean
+pub fn auto_cleanup_stale_runs(base: &Path) {
+    let Some(run) = read_run(base) else {
+        return;
+    };
+
+    // Only auto-cleanup auto-generated runs
+    if !run.id.starts_with("auto-") {
+        return;
+    }
+
+    let now_epoch = epoch_secs_from_iso(&run.updated_at);
+    let current_epoch = epoch_secs_now();
+
+    let stale_complete =
+        run.status == RunStatus::Complete && current_epoch.saturating_sub(now_epoch) > 3600; // 1 hour
+    let stale_running =
+        run.status == RunStatus::Running && current_epoch.saturating_sub(now_epoch) > 7200; // 2 hours
+
+    if !stale_complete && !stale_running {
+        return;
+    }
+
+    // Mark as complete if running
+    if stale_running {
+        let mut run = run;
+        run.status = RunStatus::Complete;
+        run.updated_at = crate::shared::helpers::now_iso();
+        let _ = write_run(base, &run);
+    }
+
+    // Clean up agent directories
+    let agents_dir = orchestrator_dir(base).join("agents");
+    if agents_dir.is_dir() {
+        let _ = fs::remove_dir_all(&agents_dir);
+    }
+}
+
+/// Parse an ISO-8601 timestamp to epoch seconds (approximate).
+fn epoch_secs_from_iso(iso: &str) -> u64 {
+    let digits: Vec<u64> = iso
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+        .filter_map(|p| p.parse().ok())
+        .collect();
+    if digits.len() < 6 {
+        return 0;
+    }
+    // Approximate: ignore leap years, DST, etc.
+    let (y, mo, d, h, mi, s) = (
+        digits[0], digits[1], digits[2], digits[3], digits[4], digits[5],
+    );
+    let days_since_epoch = (y - 1970) * 365 + (y - 1969) / 4 + (mo - 1) * 30 + d;
+    days_since_epoch * 86400 + h * 3600 + mi * 60 + s
+}
+
+/// Current time as approximate epoch seconds.
+fn epoch_secs_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+}
+
 /// Parse the agent output to extract the terminal state.
 /// Looks for known status patterns in the output text.
 pub fn parse_agent_state(output: &str) -> Option<AgentStatus> {

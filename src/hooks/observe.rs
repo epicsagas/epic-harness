@@ -204,6 +204,26 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
     check_agent_timeout_with_dir(agent_id, &orch_dir)
 }
 
+/// Track agent spawn/completion via the orchestrate module.
+///
+/// Called on every Agent tool invocation in the observe hook (both PreToolUse and PostToolUse).
+/// - PreToolUse: `tool_output` is None → record "running" state
+/// - PostToolUse: `tool_output` exists → parse output and record final state
+fn track_agent_spawn(input: &HookInput) {
+    use crate::orchestrate;
+
+    let has_output =
+        input.tool_output.is_some() || input.tool_response.is_some() || input.tool_result.is_some();
+
+    if has_output {
+        // PostToolUse: agent completed — let orchestrate::run_post handle it
+        let _ = orchestrate::run_post(input);
+    } else {
+        // PreToolUse: agent starting — let orchestrate::run_pre handle it
+        let _ = orchestrate::run_pre(input);
+    }
+}
+
 /// Testable variant that accepts an explicit orchestrator directory.
 fn check_agent_timeout_with_dir(agent_id: &str, orch_dir: &std::path::Path) -> Option<String> {
     if std::env::var("EPIC_ORCHESTRATION").as_deref() != Ok("enabled") {
@@ -476,20 +496,22 @@ pub fn run(input: &HookInput) -> i32 {
     // fact-based verification instead of generic "are you sure?" prompts.
     generate_investigation_hints(input.tool_name.as_deref().unwrap_or(""), action.as_deref());
 
-    // Agent timeout detection: when EPIC_ORCHESTRATION is enabled and the
-    // current tool is an Agent call, check if the agent has exceeded the
-    // timeout threshold. This is gated by the env var so it adds zero
-    // latency to non-orchestration sessions.
+    // Agent tracking: record spawn/completion to orchestrator state for
+    // dashboard display. Always active — no EPIC_ORCHESTRATION gate.
     let tool_name_lower = input.tool_name.as_deref().unwrap_or("").to_lowercase();
-    if tool_name_lower == "agent"
-        && let Some(agent_id) = input
+    if tool_name_lower == "agent" {
+        track_agent_spawn(input);
+
+        // Timeout detection still gated by EPIC_ORCHESTRATION
+        if let Some(agent_id) = input
             .tool_input
             .as_ref()
             .and_then(|v| v.get("agent_id"))
             .and_then(|v| v.as_str())
-        && let Some(timeout_msg) = check_agent_timeout(agent_id)
-    {
-        hint("agent-timeout", &timeout_msg);
+            && let Some(timeout_msg) = check_agent_timeout(agent_id)
+        {
+            hint("agent-timeout", &timeout_msg);
+        }
     }
 
     0
