@@ -52,7 +52,7 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
         None => return Ok(0),
     };
 
-    // Runtime validation (debug_assert compiles out in release)
+    // Runtime validation — always active (not gated by debug_assert)
     if !orch_state::validate_agent_id(&agent_id) {
         return Ok(0);
     }
@@ -167,7 +167,7 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
         None => return Ok(0),
     };
 
-    // Runtime validation (debug_assert compiles out in release)
+    // Runtime validation — always active (not gated by debug_assert)
     if !orch_state::validate_agent_id(&agent_id) {
         return Ok(0);
     }
@@ -277,6 +277,7 @@ fn extract_agent_id(input: &HookInput) -> Option<String> {
 }
 
 /// Extract agent metadata from tool input (description + subagent_type).
+/// Falls back to `prompt` first line when `description` is absent.
 /// Truncates description to 120 chars to limit secret exposure.
 fn extract_agent_meta(input: &HookInput) -> (String, String) {
     let desc: String = input
@@ -284,7 +285,17 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .as_ref()
         .and_then(|v| v.get("description"))
         .and_then(|v| v.as_str())
-        .unwrap_or("")
+        .map(String::from)
+        .or_else(|| {
+            // Fallback: use first line of prompt
+            input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("prompt"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.lines().next().unwrap_or(s).to_string())
+        })
+        .unwrap_or_default()
         .chars()
         .take(120)
         .collect();
@@ -455,6 +466,74 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(resolve_output(&input), "## Status: BLOCKED");
+    }
+
+    #[test]
+    fn extract_agent_meta_from_description() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "description": "Build the auth module",
+                "prompt": "Full prompt text here"
+            })),
+            ..Default::default()
+        };
+        let (desc, sub_type) = extract_agent_meta(&input);
+        assert_eq!(desc, "Build the auth module");
+        assert_eq!(sub_type, "general-purpose");
+    }
+
+    #[test]
+    fn extract_agent_meta_falls_back_to_prompt() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "prompt": "Review the code changes\nThis is a longer prompt"
+            })),
+            ..Default::default()
+        };
+        let (desc, _) = extract_agent_meta(&input);
+        assert_eq!(desc, "Review the code changes");
+    }
+
+    #[test]
+    fn extract_agent_meta_truncates_long_prompt() {
+        let long_desc = "x".repeat(200);
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "description": long_desc
+            })),
+            ..Default::default()
+        };
+        let (desc, _) = extract_agent_meta(&input);
+        assert_eq!(desc.len(), 120);
+    }
+
+    #[test]
+    fn extract_agent_meta_empty_when_no_fields() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({})),
+            ..Default::default()
+        };
+        let (desc, sub_type) = extract_agent_meta(&input);
+        assert!(desc.is_empty());
+        assert_eq!(sub_type, "general-purpose");
+    }
+
+    #[test]
+    fn extract_agent_meta_uses_subagent_type() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "description": "Test task",
+                "subagent_type": "code-reviewer"
+            })),
+            ..Default::default()
+        };
+        let (_, sub_type) = extract_agent_meta(&input);
+        assert_eq!(sub_type, "code-reviewer");
     }
 
     #[test]

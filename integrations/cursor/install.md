@@ -74,7 +74,7 @@ Condensed TDD, secure, verify, simplify, and perf rules will be available as a s
 
 ## 4. Install Slash Commands
 
-Custom slash commands expose the six epic-harness commands inside Cursor's Composer.
+Custom slash commands expose the three top-level epic-harness commands inside Cursor’s Composer.
 
 Each command file uses YAML frontmatter with **`name`** (kebab-case identifier, same as the file stem) and **`description`** (one-line summary). [Cursor’s command format](https://cursor.com/docs/reference/plugins) expects both; if `name` is missing, the slash menu may show only `(user)` instead of your description.
 
@@ -84,27 +84,17 @@ cp integrations/cursor/commands/*.md .cursor/commands/
 ```
 
 After installation, the following commands are available in Cursor Composer:
-- `/spec` — Define what to build
-- `/go` — Build it (TDD + sub-agents)
-- `/check` — Verify everything (review + audit + tests)
-- `/ship` — Create PR and watch CI
+- `/orbit` — Autonomous spec→ship pipeline
 - `/evolve` — Manage skill evolution
 - `/team` — Design a project-specific agent team
+
+The remaining workflow steps (spec, go, check, ship, discover) are **auto-triggered skills** — they activate based on context signals without manual invocation.
 
 ---
 
 ## 5. Install Agents (Future)
 
-> **Note:** Agents will be available in a future release. For now, use the built-in agent capabilities. The `/go` and `/check` commands work without custom agent files by delegating to Cursor's native sub-agent system.
-
-<!-- Coming in a future release:
-Sub-agent definitions for use with Cursor's sub-agent system or manual invocation. Each file includes `model: inherit` so the subagent follows the parent composer model ([Cursor subagents](https://cursor.com/docs/subagents)).
-
-```bash
-mkdir -p .cursor/agents
-cp integrations/cursor/agents/*.md .cursor/agents/
-```
--->
+> **Note:** Agent knowledge is now embedded within skills (builder, reviewer, auditor, planner modes). No standalone agent files are needed. Use the built-in agent capabilities in Cursor's Composer.
 
 ---
 
@@ -130,13 +120,10 @@ Start a new Cursor session. The Composer should load harness context from `$HARN
 ├── rules/
 │   └── harness-context.mdc   # Session start context + auto-behaviors
 ├── commands/
-│   ├── spec.md
-│   ├── go.md
-│   ├── check.md
-│   ├── ship.md
+│   ├── orbit.md
 │   ├── evolve.md
 │   └── team.md
-└── (agents/ coming in a future release)
+└── (skills auto-trigger based on context — no manual files needed)
 ```
 
 ---
