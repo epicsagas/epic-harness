@@ -241,8 +241,9 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 ),
 
             // ── SPA fallback: serve index.html for any non-API GET route ──
-            (Method::Get, _) => Response::from_string(DASHBOARD_HTML)
-                .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
+            (Method::Get, _) => Response::from_string(DASHBOARD_HTML).with_header(
+                Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
+            ),
 
             _ => Response::from_string("Not Found").with_status_code(404),
         };

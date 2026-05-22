@@ -537,7 +537,8 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
                 if is_running {
                     // Check heartbeat staleness
                     let heartbeat = status["last_heartbeat"].as_str().unwrap_or("");
-                    let heartbeat_age = current_epoch.saturating_sub(epoch_secs_from_iso(heartbeat));
+                    let heartbeat_age =
+                        current_epoch.saturating_sub(epoch_secs_from_iso(heartbeat));
                     if heartbeat_age < 1800 {
                         continue; // still active
                     }
