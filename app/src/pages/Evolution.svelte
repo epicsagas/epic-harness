@@ -102,6 +102,27 @@
     return ts.slice(0, 10);
   }
 
+  function extractSkillDesc(md: string): string {
+    if (!md) return '—';
+    const lines = md.split('\n');
+    let inFrontmatter = false;
+    let closedFrontmatter = false;
+    for (const line of lines) {
+      if (!closedFrontmatter) {
+        if (line.trim() === '---' && !inFrontmatter) { inFrontmatter = true; continue; }
+        if (line.trim() === '---' && inFrontmatter) { inFrontmatter = false; closedFrontmatter = true; continue; }
+        continue;
+      }
+      if (line.startsWith('#')) return line.replace(/^#+\s*/, '').trim();
+    }
+    for (const line of lines) {
+      if (line.startsWith('#')) return line.replace(/^#+\s*/, '').trim();
+    }
+    const descMatch = md.match(/^description:\s*"(.+)"/m);
+    if (descMatch) return descMatch[1];
+    return '—';
+  }
+
   let pollInterval: ReturnType<typeof setInterval>;
   onMount(() => {
     load();
@@ -166,7 +187,7 @@
           {#each data.evolved_skills as skill}
             <div class="skill-card">
               <div class="skill-name" style="color:var(--orange);">{skill.name}</div>
-              <div class="skill-desc" style="margin-top:4px;">{skill.skill_md.split('\n')[0].replace(/^#\s*/, '')}</div>
+              <div class="skill-desc" style="margin-top:4px;">{extractSkillDesc(skill.skill_md)}</div>
               <div style="margin-top:8px;font-size:11px;color:var(--muted);font-family:var(--font-mono);">
                 {dateOnly(skill.created_at)}
               </div>

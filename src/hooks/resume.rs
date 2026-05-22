@@ -78,6 +78,28 @@ fn apply_cold_start_presets(stacks: &[&str]) -> u32 {
                 "evo-rs-care",
                 include_str!("../../registry/presets/rust/evo-rs-care.md"),
             )],
+            "Java/Kotlin" => &[
+                (
+                    "evo-java-care",
+                    include_str!("../../registry/presets/java/evo-java-care.md"),
+                ),
+                (
+                    "evo-kt-care",
+                    include_str!("../../registry/presets/kotlin/evo-kt-care.md"),
+                ),
+            ],
+            "Java (Maven)" => &[(
+                "evo-java-care",
+                include_str!("../../registry/presets/java/evo-java-care.md"),
+            )],
+            "Ruby" => &[(
+                "evo-rb-care",
+                include_str!("../../registry/presets/ruby/evo-rb-care.md"),
+            )],
+            "PHP" => &[(
+                "evo-php-care",
+                include_str!("../../registry/presets/php/evo-php-care.md"),
+            )],
             _ => continue,
         };
 

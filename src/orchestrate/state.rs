@@ -461,12 +461,13 @@ pub fn upsert_agent_to_run(
 ///
 /// - Complete runs older than 1 hour: remove agent status directories
 /// - Running runs older than 2 hours: mark as complete, then clean
+/// - Individual agents with stale heartbeat (>30 min): mark as done
 pub fn auto_cleanup_stale_runs(base: &Path) {
     let orch_dir = orchestrator_dir(base);
     let lock_path = orch_dir.join("run.json.lock");
     let _lock = acquire_lock(&lock_path);
 
-    let Some(run) = read_run(base) else {
+    let Some(mut run) = read_run(base) else {
         return;
     };
 
@@ -475,28 +476,55 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
         return;
     }
 
-    let now_epoch = epoch_secs_from_iso(&run.updated_at);
     let current_epoch = epoch_secs_now();
+    let now = crate::shared::helpers::now_iso();
 
+    // Mark individual stale agents as done (heartbeat > 30 min ago)
+    let mut any_agent_cleaned = false;
+    for agent in &mut run.agents {
+        if agent.status != AgentStatus::Running {
+            continue;
+        }
+        let stale = agent.started_at.as_ref().is_none_or(|started| {
+            current_epoch.saturating_sub(epoch_secs_from_iso(started)) > 1800 // 30 min
+        });
+        if stale {
+            agent.status = AgentStatus::Done;
+            agent.completed_at = Some(now.clone());
+            any_agent_cleaned = true;
+        }
+    }
+
+    // Check run-level staleness
+    let run_epoch = epoch_secs_from_iso(&run.updated_at);
     let stale_complete =
-        run.status == RunStatus::Complete && current_epoch.saturating_sub(now_epoch) > 3600; // 1 hour
+        run.status == RunStatus::Complete && current_epoch.saturating_sub(run_epoch) > 3600;
     let stale_running =
-        run.status == RunStatus::Running && current_epoch.saturating_sub(now_epoch) > 7200; // 2 hours
+        run.status == RunStatus::Running && current_epoch.saturating_sub(run_epoch) > 7200;
 
-    if !stale_complete && !stale_running {
+    // Also mark as complete if all agents are now done
+    if run.status == RunStatus::Running && is_run_complete(&run) {
+        run.status = RunStatus::Complete;
+        any_agent_cleaned = true;
+    }
+
+    if any_agent_cleaned {
+        run.updated_at = now;
+        let _ = write_run(base, &run);
+    }
+
+    if !stale_complete && !stale_running && !any_agent_cleaned {
         return;
     }
 
-    // Mark as complete if running
+    // Mark as complete if running and stale
     if stale_running {
-        let mut run = run;
         run.status = RunStatus::Complete;
         run.updated_at = crate::shared::helpers::now_iso();
         let _ = write_run(base, &run);
     }
 
-    // Clean up agent directories — selectively remove only stale ones
-    // to preserve active agent state files during concurrent sessions.
+    // Clean up agent directories — selectively remove only non-running ones
     let agents_dir = orchestrator_dir(base).join("agents");
     if agents_dir.is_dir()
         && let Ok(entries) = fs::read_dir(&agents_dir)
@@ -507,7 +535,12 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
                 let status: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
                 let is_running = status["status"].as_str() == Some("running");
                 if is_running {
-                    continue; // preserve active agent directories
+                    // Check heartbeat staleness
+                    let heartbeat = status["last_heartbeat"].as_str().unwrap_or("");
+                    let heartbeat_age = current_epoch.saturating_sub(epoch_secs_from_iso(heartbeat));
+                    if heartbeat_age < 1800 {
+                        continue; // still active
+                    }
                 }
             }
             let _ = fs::remove_dir_all(entry.path());

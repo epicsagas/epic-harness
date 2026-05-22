@@ -34,6 +34,16 @@ function harnessApiPlugin(): Plugin {
     configureServer(server) {
       const harnessDir = getHarnessDir();
 
+      // SPA fallback: serve index.html for non-API, non-static GET requests
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? '/';
+        if (req.method === 'GET' && !url.startsWith('/api/') && !url.includes('.')) {
+          req.url = '/index.html';
+          // Let Vite's built-in middleware handle the rewritten URL
+        }
+        next();
+      });
+
       // Agent tracking routes for the live Agents tab
       server.middlewares.use('/api/run', (_req, res) => {
         res.setHeader('Content-Type', 'application/json');
