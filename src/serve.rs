@@ -488,17 +488,16 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                     if let Ok(files) = fs::read_dir(&orbit_dir) {
                         for f in files.filter_map(|e| e.ok()) {
                             let fname = f.file_name().to_string_lossy().to_string();
-                            if fname.starts_with("PIPELINE-") && fname.ends_with(".json") {
-                                if let Ok(content) = fs::read_to_string(f.path()) {
-                                    if let Ok(mut v) =
-                                        serde_json::from_str::<serde_json::Value>(&content)
-                                    {
-                                        v["_project"] = serde_json::Value::String(
-                                            proj_entry.file_name().to_string_lossy().to_string(),
-                                        );
-                                        all.push(v);
-                                    }
-                                }
+                            if fname.starts_with("PIPELINE-")
+                                && fname.ends_with(".json")
+                                && let Ok(content) = fs::read_to_string(f.path())
+                                && let Ok(mut v) =
+                                    serde_json::from_str::<serde_json::Value>(&content)
+                            {
+                                v["_project"] = serde_json::Value::String(
+                                    proj_entry.file_name().to_string_lossy().to_string(),
+                                );
+                                all.push(v);
                             }
                         }
                     }

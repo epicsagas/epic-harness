@@ -165,10 +165,10 @@ pub fn compute_confidence(avg_score: f64, pattern_count: usize) -> f64 {
 /// 3. Sibling directory of the current executable
 fn resolve_episteme_bin() -> Result<String, String> {
     // 1. Env override
-    if let Ok(bin) = std::env::var("EPISTEME_BIN") {
-        if !bin.is_empty() {
-            return Ok(bin);
-        }
+    if let Ok(bin) = std::env::var("EPISTEME_BIN")
+        && !bin.is_empty()
+    {
+        return Ok(bin);
     }
 
     // 2. PATH lookup
@@ -177,17 +177,17 @@ fn resolve_episteme_bin() -> Result<String, String> {
     }
 
     // 3. Sibling to current exe
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("episteme");
-            if candidate.exists() {
-                return Ok(candidate.to_string_lossy().into_owned());
-            }
-            // Windows
-            let candidate_exe = dir.join("episteme.exe");
-            if candidate_exe.exists() {
-                return Ok(candidate_exe.to_string_lossy().into_owned());
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join("episteme");
+        if candidate.exists() {
+            return Ok(candidate.to_string_lossy().into_owned());
+        }
+        // Windows
+        let candidate_exe = dir.join("episteme.exe");
+        if candidate_exe.exists() {
+            return Ok(candidate_exe.to_string_lossy().into_owned());
         }
     }
 
