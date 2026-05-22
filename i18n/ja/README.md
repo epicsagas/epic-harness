@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 8つのコマンド、1つの自律パイプライン、自動トリガースキル、あなたの失敗から学習します。</p></blockquote>
+<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 3個のコマンド、19個のスキル、1つの自律パイプライン、自動トリガースキル、あなたの失敗から学習します。</p></blockquote>
 
 <p align="center"><b>覚えるべき操作は少なく。キーストローク当たりの知性は高く。セッションを重ねるほどスマートに。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Claude Codeプラグインで、**30以上のコマンドを8つに置き換え**、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。
+Claude Codeプラグインで、**30以上のコマンドを3個のコマンド + 19個の自動トリガースキルに統合**し、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "ログインAPIにJWT認証を追加"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-もちろん、手動で段階的に進めることも可能です:
+パイプラインスキルを直接呼び出すこともできます:
 
 ```bash
 /spec "ログインAPIにJWT認証を追加"   # 要件を明確化 → SPEC-*.md
@@ -127,7 +127,7 @@ epic install gemini   # Antigravity
 バイナリをインストールした後、`epic install`（または `epic install claude`）を実行して:
 
 1. `~/.harness/` ディレクトリ構造を作成
-2. コマンド、スキル、エージェントをツールの設定ディレクトリに同期
+2. コマンド、スキルをツールの設定ディレクトリに同期
 3. Claude CodeにMCPサーバー（harness-mem）を登録
 4. 不在の場合、デフォルト設定で `~/.harness/config.toml` を作成
 
@@ -163,13 +163,10 @@ Claude Codeセッション内: `/evolve status`
 | コマンド | 機能 |
 |---------|------|
 | `/orbit` | **完全自律パイプライン**: spec → go → check → ship → evolve を一括実行 |
-| `/discover` | まず問題を定義する — 5 Whys、JTBD、ソクラテス的質問法（最大3ラウンド） |
-| `/spec` | 要件を番号付き R + AC ドキュメントに変換、`SPEC-{timestamp}.md` として保存 |
-| `/go` | 自動計画 → TDDサブエージェント → ワークツリー分離による並列実行 → AC検証 |
-| `/check` | 並列レビュー + セキュリティ監査 + テスト、スコープベースの追加機能あり（API契約、アクセシビリティ、マイグレーション安全性） |
-| `/ship` | クリーンなワークツリーで分離されたプレフライトテスト → フルチェックレポート付きPR → CI監視 + 自動修正 |
 | `/team` | orgのライブラリを閲覧、既存チームを雇用、または新規設計（3–6エージェント、`.claude/agents/` に同期） |
 | `/evolve` | 手動進化トリガー — セッション分析、ダッシュボード表示、スキル有効性確認、ロールバック |
+
+パイプラインステージ（`/spec`、`/go`、`/check`、`/ship`、`/discover`）は**スキル**になりました — コンテキストに応じて自動トリガーされるか、名前で直接呼び出せます。従来のコマンド名はエイリアスルーティングで引き続き動作します。
 
 ---
 
@@ -216,6 +213,10 @@ flowchart TD
 
 | スキル | トリガー条件 |
 |-------|-------------|
+| **spec** | 要件の定義が必要な時 — 番号付きR + ACドキュメントに変換 |
+| **go** | ビルドフェーズ — 自動計画 → TDDサブエージェント → 並列実行 → AC検証 |
+| **check** | レビューフェーズ — 並列コードレビュー + セキュリティ監査 + テスト、スコープ別追加項目 |
+| **ship** | 出荷フェーズ — 分離テスト → チェックレポート付きPR → CI監視 + 自動修正 |
 | **tdd** | 新機能の実装またはバグ修正 |
 | **debug** | テスト失敗またはランタイムエラー |
 | **discover** | 曖昧なリクエスト、問題のないソリューション、焦点の定まらない不満 |
@@ -228,6 +229,8 @@ flowchart TD
 | **council** | 曖昧なアーキテクチャまたは設計の決定 |
 | **agent-introspection** | 3回以上の連続失敗または循環リトライパターン |
 | **reflect** | オンデマンド: AIを思考増幅器として使っているか? 冷徹な証拠ベースの自己評価 |
+| **orchestrate** | マルチエージェントオーケストレーションステータスとライブエージェント制御 |
+| **commit** | Conventional Commits生成 — git diffから自動生成 |
 
 ---
 
@@ -396,11 +399,11 @@ epic team delete backend --global      # orgストアから永久に削除
 
 | ツール | Ring 0 フック | コマンド | スキル | エージェント |
 |------|-------------|----------|--------|----------|
-| **Claude Code** | ✓ フル | ✓ 8コマンド（/orbitを含む） | ✓ 11スキル | ✓ 4 |
-| **Codex CLI** | ✓ フル¹ | ✓ 8プロンプト（/orbitを含む） | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ 部分² | ✓ 8コマンド（/orbitを含む） | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ フル³ | ✓ 8コマンド（/orbitを含む） | ✓ ルール経由 | ✓ 4 |
-| **OpenCode** | ✓ 部分⁴ | ✓ 8コマンド（/orbitを含む） | — | ✓ 4 |
+| **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 19スキル | Live |
+| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 19 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 19 | — |
+| **Cursor** | ✓ フル³ | ✓ 3コマンド（/orbitを含む） | ✓ ルール経由 | Live |
+| **OpenCode** | ✓ 部分⁴ | ✓ 3コマンド（/orbitを含む） | — | — |
 | **Cline** | ✓ フル⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1(spec) --> c2(go) --> c3(check) --> c4(ship) --> c5(evolve)
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

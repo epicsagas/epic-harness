@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 8 कमांड, 1 स्वायत्त पाइपलाइन, ऑटो-ट्रिगर स्किल्स, आपकी विफलताओं से सीखता है।</p></blockquote>
+<blockquote><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 3 कमांड्स, 19 स्किल्स, 1 स्वायत्त पाइपलाइन, आपकी विफलताओं से सीखता है।</p></blockquote>
 
 <p align="center"><b>याद रखने के लिए कम। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता। हर सेशन के साथ और स्मार्ट।</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक Claude Code प्लगइन जो **30+ कमांड को 8 से बदलता है**, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**।
+एक Claude Code प्लगइन जो **30+ कमांड्स + 19 ऑटो-ट्रिगर स्किल्स में समेकित** करता है, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "लॉगिन API में JWT auth जोड़ो"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-या मैन्युअली स्टेप-बाय-स्टेप आगे बढ़ें:
+या पाइपलाइन स्किल्स को सीधे इनवोक करें:
 
 ```bash
 /spec "Add JWT auth to the login API"   # आवश्यकताएँ स्पष्ट करता है → SPEC-*.md
@@ -127,7 +127,7 @@ epic install gemini   # Antigravity
 बाइनरी इंस्टॉल करने के बाद, `epic install` (या `epic install claude`) चलाएं:
 
 1. `~/.harness/` डायरेक्टरी संरचना बनाएं
-2. कमांड, स्किल्स और एजेंट को टूल के कॉन्फिग डायरेक्टरी में सिंक करें
+2. कमांड और स्किल्स को टूल के कॉन्फिग डायरेक्टरी में सिंक करें
 3. Claude Code के लिए MCP सर्वर (harness-mem) रजिस्टर करें
 4. यदि अनुपस्थित हो तो `~/.harness/config.toml` डिफ़ॉल्ट के साथ बनाएं
 
@@ -163,13 +163,10 @@ Claude Code सेशन के अंदर: `/evolve status`
 | कमांड | यह क्या करता है |
 |---------|-------------|
 | `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: spec → go → check → ship → evolve एक ही शॉट में |
-| `/discover` | पहले समस्या को समझें — 5 Whys, JTBD, सुकराती प्रश्न (अधिकतम 3 राउंड) |
-| `/spec` | आवश्यकताओं को क्रमांकित R + AC दस्तावेज़ में बदलें, `SPEC-{timestamp}.md` के रूप में सहेजा जाता है |
-| `/go` | ऑटो-प्लान → TDD subagents → worktree आइसोलेशन के साथ समानांतर निष्पादन → AC सत्यापन |
-| `/check` | समानांतर review + सुरक्षा audit + tests, स्कोप-आधारित अतिरिक्त (API contract, accessibility, migration safety) |
-| `/ship` | क्लीन worktree में isolated pre-flight test → पूर्ण चेक रिपोर्ट के साथ PR → CI watch + auto-fix |
 | `/team` | ऑर्ग लाइब्रेरी ब्राउज़ करें, मौजूदा टीमों को हायर करें, या नई डिज़ाइन करें (3–6 एजेंट, `.claude/agents/` में सिंक) |
 | `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर — सेशन विश्लेषण, डैशबोर्ड देखें, स्किल प्रभावशीलता निरीक्षण, rollback |
+
+पाइपलाइन चरण (`/spec`, `/go`, `/check`, `/ship`, `/discover`) अब **स्किल्स** हैं — संदर्भ के आधार पर ऑटो-ट्रिगर होते हैं या नाम से इनवोक किए जा सकते हैं। पुराने कमांड नाम अलियास राउटिंग के माध्यम से काम करते हैं।
 
 ---
 
@@ -216,6 +213,10 @@ flowchart TD
 
 | स्किल | कब ट्रिगर होती है |
 |-------|--------------|
+| **spec** | आवश्यकताओं को परिभाषित करने की आवश्यकता — क्रमांकित R + AC दस्तावेज़ में रूपांतरित करता है |
+| **go** | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन → AC सत्यापन |
+| **check** | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट, स्कोप-आधारित अतिरिक्त |
+| **ship** | शिपिंग चरण — आइसोलेटेड टेस्ट → पूर्ण चेक रिपोर्ट के साथ PR → CI मॉनिटरिंग + ऑटो-फिक्स |
 | **tdd** | नई फीचर इम्प्लीमेंटेशन या बग फिक्स |
 | **debug** | टेस्ट विफलता या runtime error |
 | **discover** | अस्पष्ट अनुरोध, समस्या के बिना समाधान, अनफोकस्ड शिकायत |
@@ -228,6 +229,8 @@ flowchart TD
 | **council** | अस्पष्ट architectural या design निर्णय |
 | **agent-introspection** | 3+ लगातार विफलताएं या circular retry पैटर्न |
 | **reflect** | ऑन-डिमांड: क्या आप AI को विचार एम्पलीफायर के रूप में उपयोग कर रहे हैं? ठंडे साक्ष्य-आधारित स्व-मूल्यांकन |
+| **orchestrate** | मल्टी-एजेंट ऑर्केस्ट्रेशन स्टेटस और लाइव एजेंट नियंत्रण |
+| **commit** | Conventional Commits जनरेशन — git diff से ऑटो-जनरेट किया गया |
 
 ---
 
@@ -396,11 +399,11 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 
 | टूल | Ring 0 Hooks | कमांड | स्किल्स | एजेंट |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 8 कमांड (incl. /orbit) | ✓ 11 स्किल्स | ✓ 4 |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ आंशिक² | ✓ 8 कमांड (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ पूर्ण³ | ✓ 8 कमांड (incl. /orbit) | ✓ rules के माध्यम से | ✓ 4 |
-| **OpenCode** | ✓ आंशिक⁴ | ✓ 8 कमांड (incl. /orbit) | — | ✓ 4 |
+| **Claude Code** | ✓ पूर्ण | ✓ 3 कमांड (incl. /orbit) | ✓ 19 स्किल्स | Live |
+| **Codex CLI** | ✓ पूर्ण¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ आंशिक² | ✓ 3 कमांड (incl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ पूर्ण³ | ✓ 3 कमांड (incl. /orbit) | ✓ rules के माध्यम से | Live |
+| **OpenCode** | ✓ आंशिक⁴ | ✓ 3 कमांड (incl. /orbit) | — | — |
 | **Cline** | ✓ पूर्ण⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

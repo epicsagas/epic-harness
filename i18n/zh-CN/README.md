@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 8 条命令、1 条自主流水线、自动触发技能，从你的失败中学习。</p></blockquote>
+<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 3 个命令、19 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
 
 <p align="center"><b>更少的记忆负担。每次按键更多的智能。每次会话都在变得更聪明。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个 Claude Code 插件，**将 30+ 条命令精简为 8 条**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
+一个 Claude Code 插件，**将 30+ 条命令整合为 3 个命令 + 19 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 → spec 已批准 → go（TDD 子智能体） → check（通过） → ship（PR + CI） → evolve
 ```
 
-或者手动逐步执行：
+也可以直接调用管道技能：
 
 ```bash
 /spec "为登录 API 添加 JWT 认证"   # 明确需求 → SPEC-*.md
@@ -127,7 +127,7 @@ epic install gemini   # Antigravity
 安装二进制文件后，运行 `epic install`（或 `epic install claude`）来：
 
 1. 创建 `~/.harness/` 目录结构
-2. 同步命令、技能和智能体到工具的配置目录
+2. 同步命令和技能到工具的配置目录
 3. 注册 MCP 服务器（harness-mem）用于 Claude Code
 4. 如不存在则创建带默认值的 `~/.harness/config.toml`
 
@@ -163,13 +163,10 @@ ls ~/.harness/              # 数据目录存在
 | 命令 | 功能说明 |
 |---------|-------------|
 | `/orbit` | **完整自主流水线**：一次性完成 spec → go → check → ship → evolve |
-| `/discover` | 先框定问题 — 5 Whys、JTBD、苏格拉底式提问（最多 3 轮） |
-| `/spec` | 将需求转化为带编号的 R + AC 文档，保存为 `SPEC-{timestamp}.md` |
-| `/go` | 自动规划 → TDD 子智能体 → 并行执行（worktree 隔离） → AC 验证 |
-| `/check` | 并行审查 + 安全审计 + 测试，附带基于范围的额外检查（API 契约、无障碍、迁移安全） |
-| `/ship` | 在干净 worktree 中隔离预检测试 → 带完整检查报告的 PR → CI 监控 + 自动修复 |
 | `/team` | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
 | `/evolve` | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
+
+管道阶段（`/spec`、`/go`、`/check`、`/ship`、`/discover`）现在是**技能** — 根据上下文自动触发，也可以按名称直接调用。旧命令名通过别名路由继续有效。
 
 ---
 
@@ -216,6 +213,12 @@ flowchart TD
 
 | 技能 | 触发时机 |
 |-------|--------------|
+| **spec** | 需要定义需求时 — 转换为编号的 R + AC 文档 |
+| **go** | 构建阶段 — 自动规划 → TDD子代理 → 并行执行 → AC验证 |
+| **check** | 审查阶段 — 并行代码审查 + 安全审计 + 测试，按范围附加检查 |
+| **ship** | 发布阶段 — 隔离测试 → 包含完整检查报告的PR → CI监控 + 自动修复 |
+| **orchestrate** | 多代理编排状态和实时代理控制 |
+| **commit** | 约定式提交生成 — 从 git diff 自动生成 |
 | **tdd** | 新功能实现或 Bug 修复 |
 | **debug** | 测试失败或运行时错误 |
 | **discover** | 需求模糊、没有明确问题的解决方案、缺乏焦点的抱怨 |
@@ -396,11 +399,11 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 | 工具 | Ring 0 Hooks | 命令 | 技能 | 智能体 |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 8 条命令（含 /orbit） | ✓ 11 个技能 | ✓ 4 |
-| **Codex CLI** | ✓ 完整¹ | ✓ 8 个提示（含 /orbit） | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ 部分² | ✓ 8 条命令（含 /orbit） | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ 完整³ | ✓ 8 条命令（含 /orbit） | ✓ 通过 rules | ✓ 4 |
-| **OpenCode** | ✓ 部分⁴ | ✓ 8 条命令（含 /orbit） | — | ✓ 4 |
+| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 19 个技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 7 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 7 | — |
+| **Cursor** | ✓ 完整³ | ✓ 3 条命令（含 /orbit） | ✓ 通过 rules | Live |
+| **OpenCode** | ✓ 部分⁴ | ✓ 3 条命令（含 /orbit） | — | — |
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

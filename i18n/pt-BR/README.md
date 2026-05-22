@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Um harness de agente de codificação IA autoevolutivo — 8 comandos, 1 pipeline autônomo, habilidades de ativação automática, aprende com seus erros.</p></blockquote>
+<blockquote><p align="center">Um harness de agente de codificação IA autoevolutivo — 3 comandos, 19 skills, 1 pipeline autônomo, habilidades de ativação automática, aprende com seus erros.</p></blockquote>
 
 <p align="center"><b>Menos para memorizar. Mais inteligência por tecla pressionada. Fica mais inteligente a cada sessão.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Um plugin do Claude Code que **substitui mais de 30 comandos por 8**, **ativa habilidades automaticamente** com base no que você está fazendo, e **evolui novas habilidades** a partir dos seus próprios padrões de falha.
+Um plugin do Claude Code que consolida tudo em **3 comandos + 19 skills de acionamento automático**, **ativa habilidades automaticamente** com base no que você está fazendo, e **evolui novas habilidades** a partir dos seus próprios padrões de falha.
 
 <p align="center">
   <img src="../../assets/features.png" alt="funcionalidades do epic harness" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "Adicionar autenticação JWT à API de login"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-Ou avance passo a passo manualmente:
+Ou invoque as skills do pipeline diretamente:
 
 ```bash
 /spec "Adicionar autenticação JWT à API de login"   # clarifica requisitos → SPEC-*.md
@@ -127,7 +127,7 @@ Pré-requisitos: **Git**. Instalações via código-fonte/binário também preci
 Após instalar o binário, execute `epic install` (ou `epic install claude`) para:
 
 1. Criar a estrutura de diretórios `~/.harness/`
-2. Sincronizar comandos, habilidades e agentes no diretório de configuração da ferramenta
+2. Sincronizar comandos e habilidades no diretório de configuração da ferramenta
 3. Registrar o servidor MCP (harness-mem) para o Claude Code
 4. Criar `~/.harness/config.toml` com valores padrão, se ausente
 
@@ -163,13 +163,10 @@ Dentro de uma sessão do Claude Code: `/evolve status`
 | Comando | O que faz |
 |---------|-----------|
 | `/orbit` | **Pipeline autônomo completo**: spec → go → check → ship → evolve em uma única execução |
-| `/discover` | Enquadre o problema primeiro — 5 Porquês, JTBD, questionamento socrático (máx. 3 rodadas) |
-| `/spec` | Converte requisitos em um documento numerado de R + AC, salvo como `SPEC-{timestamp}.md` |
-| `/go` | Planejamento automático → subagentes TDD → execução paralela com isolamento de worktree → verificação de AC |
-| `/check` | Revisão paralela + auditoria de segurança + testes, com extras baseados em escopo (contrato de API, acessibilidade, segurança de migração) |
-| `/ship` | Teste de pré-voo isolado em worktree limpa → PR com relatório de verificação completo → monitoramento de CI + correção automática |
 | `/team` | Navegue pelas bibliotecas da organização, contrate equipes existentes ou crie novas (3–6 agentes, sincronizados em `.claude/agents/`) |
 | `/evolve` | Gatilho manual de evolução — analise sessões, visualize o painel, inspecione a efetividade das habilidades, rollback |
+
+Os estágios do pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) agora são **skills** — acionados automaticamente pelo contexto ou invocáveis pelo nome. Os nomes antigos de comandos continuam funcionando via roteamento de alias.
 
 ---
 
@@ -216,6 +213,10 @@ As habilidades são ativadas automaticamente com base no contexto. Você não as
 
 | Habilidade | Ativa quando |
 |------------|-------------|
+| **spec** | Precisa definir requisitos — converte em documento R + AC numerado |
+| **go** | Fase de build — planejamento automático → sub-agentes TDD → execução paralela → verificação AC |
+| **check** | Fase de revisão — revisão de código paralela + auditoria de segurança + testes com extras por escopo |
+| **ship** | Fase de entrega — teste isolado → PR com relatório completo → monitoramento CI + auto-fix |
 | **tdd** | Implementação de nova funcionalidade ou correção de bug |
 | **debug** | Falha de teste ou erro em tempo de execução |
 | **discover** | Solicitação vaga, solução sem problema, reclamação sem foco |
@@ -228,6 +229,8 @@ As habilidades são ativadas automaticamente com base no contexto. Você não as
 | **council** | Decisões arquiteturais ou de design ambíguas |
 | **agent-introspection** | 3+ falhas consecutivas ou padrão de retry circular |
 | **reflect** | Sob demanda: você está usando a IA como amplificador de pensamento? Autoavaliação baseada em evidências |
+| **orchestrate** | Status de orquestração multi-agente e controle de agentes em tempo real |
+| **commit** | Geração de Conventional Commits — criado automaticamente a partir do git diff |
 
 ---
 
@@ -396,11 +399,11 @@ Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projec
 
 | Ferramenta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
 |------------|-------------|----------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 8 comandos (incl. /orbit) | ✓ 11 habilidades | ✓ 4 |
-| **Codex CLI** | ✓ Completo¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ Parcial² | ✓ 8 comandos (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Completo³ | ✓ 8 comandos (incl. /orbit) | ✓ via rules | ✓ 4 |
-| **OpenCode** | ✓ Parcial⁴ | ✓ 8 comandos (incl. /orbit) | — | ✓ 4 |
+| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 19 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ Completo³ | ✓ 3 comandos (incl. /orbit) | ✓ via rules | Live |
+| **OpenCode** | ✓ Parcial⁴ | ✓ 3 comandos (incl. /orbit) | — | — |
 | **Cline** | ✓ Completo⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

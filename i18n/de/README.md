@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Ein selbstentwickelndes KI-Coding-Agent-Harness — 8 Befehle, 1 autonome Pipeline, automatisch ausgelöste Skills, lernt aus Ihren Fehlern.</p></blockquote>
+<blockquote><p align="center">Ein selbstentwickelndes KI-Coding-Agent-Harness — 3 Befehle, 19 Skills, 1 autonome Pipeline, automatisch ausgelöste Skills, lernt aus Ihren Fehlern.</p></blockquote>
 
 <p align="center"><b>Weniger zu merken. Mehr Intelligenz pro Tastendruck. Wird mit jeder Session intelligenter.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Ein Claude Code Plugin, das **30+ Befehle durch 8 ersetzt**, **Skills automatisch auslöst** basierend auf dem, was Sie gerade tun, und **neue Skills entwickelt** aus Ihren eigenen Fehlermustern.
+Ein Claude Code Plugin, das **3 Befehle + 19 automatisch ausgelöste Skills konsolidiert**, **Skills automatisch auslöst** basierend auf dem, was Sie gerade tun, und **neue Skills entwickelt** aus Ihren eigenen Fehlermustern.
 
 <p align="center">
   <img src="../../assets/features.png" alt="Epic Harness Funktionen" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "JWT-Auth zur Login-API hinzufügen"
 → spec genehmigt → go (TDD-Subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-Oder Schritt für Schritt manuell:
+Oder Pipeline-Skills direkt aufrufen:
 
 ```bash
 /spec "JWT-Auth zur Login-API hinzufügen"   # klärt Anforderungen → SPEC-*.md
@@ -127,7 +127,7 @@ Voraussetzungen: **Git**. Quellcode-/Binary-Installationen benötigen zusätzlic
 Nach der Installation des Binaries führen Sie `epic install` (oder `epic install claude`) aus, um:
 
 1. Die Verzeichnisstruktur `~/.harness/` zu erstellen
-2. Befehle, Skills und Agents in das Konfigurationsverzeichnis des Tools zu synchronisieren
+2. Befehle und Skills in das Konfigurationsverzeichnis des Tools zu synchronisieren
 3. Den MCP-Server (harness-mem) für Claude Code zu registrieren
 4. `~/.harness/config.toml` mit Standardeinstellungen zu erstellen, falls nicht vorhanden
 
@@ -163,13 +163,10 @@ In einer Claude Code-Session: `/evolve status`
 | Befehl | Was er macht |
 |---------|-------------|
 | `/orbit` | **Vollständig autonome Pipeline**: spec → go → check → ship → evolve in einem Durchlauf |
-| `/discover` | Zuerst das Problem Rahmen — 5-Whys, JTBD, Sokratisches Fragen (max. 3 Runden) |
-| `/spec` | Anforderungen in ein nummeriertes R + AC-Dokument umwandeln, gespeichert als `SPEC-{timestamp}.md` |
-| `/go` | Automatische Planung → TDD-Subagents → parallele Ausführung mit Worktree-Isolation → AC-Verifikation |
-| `/check` | Paralleles Review + Sicherheitsaudit + Tests, mit bereichsbasierten Extras (API-Vertrag, Barrierefreiheit, Migrationssicherheit) |
-| `/ship` | Isolierter Preflight-Test in einem sauberen Worktree → PR mit vollem Prüfbericht → CI-Überwachung + Auto-Fix |
 | `/team` | Organisations-Bibliotheken durchsuchen, bestehende Teams einbinden oder neue entwerfen (3–6 Agents, synchronisiert zu `.claude/agents/`) |
 | `/evolve` | Manueller Evolutions-Trigger — Sessions analysieren, Dashboard anzeigen, Skill-Effektivität prüfen, Rollback durchführen |
+
+Pipeline-Stufen (`/spec`, `/go`, `/check`, `/ship`, `/discover`) sind jetzt **Skills** — werden kontextbasiert automatisch ausgelöst oder können namentlich aufgerufen werden. Alte Befehlsnamen funktionieren weiterhin über Alias-Routing.
 
 ---
 
@@ -216,6 +213,12 @@ Skills werden automatisch basierend auf dem Kontext ausgelöst. Sie rufen sie ni
 
 | Skill | Wird ausgelöst wenn |
 |-------|---------------------|
+| **spec** | Anforderungen müssen definiert werden — konvertiert zu nummeriertem R + AC Dokument |
+| **go** | Build-Phase — automatische Planung → TDD-Subagenten → parallele Ausführung → AC-Verifizierung |
+| **check** | Review-Phase — paralleles Code-Review + Sicherheitsaudit + Tests mit scope-basierten Extras |
+| **ship** | Versand-Phase — isolierter Test → PR mit vollem Check-Report → CI-Überwachung + Auto-Fix |
+| **orchestrate** | Multi-Agent-Orchestrierungsstatus und Live-Agent-Steuerung |
+| **commit** | Conventional Commits Generierung — automatisch aus git diff |
 | **tdd** | Neues Feature-Implementation oder Bug-Fix |
 | **debug** | Testfehler oder Laufzeitfehler |
 | **discover** | Vage Anfrage, Lösung ohne Problem, unfokussierte Beschwerde |
@@ -396,11 +399,11 @@ Alle Tools teilen dasselbe `~/.harness/projects/{slug}/`-Datenverzeichnis.
 
 | Tool | Ring 0 Hooks | Befehle | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Vollständig | ✓ 8 Befehle (inkl. /orbit) | ✓ 11 Skills | ✓ 4 |
-| **Codex CLI** | ✓ Vollständig¹ | ✓ 8 Prompts (inkl. /orbit) | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ Teilweise² | ✓ 8 Befehle (inkl. /orbit) | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Vollständig³ | ✓ 8 Befehle (inkl. /orbit) | ✓ über Rules | ✓ 4 |
-| **OpenCode** | ✓ Teilweise⁴ | ✓ 8 Befehle (inkl. /orbit) | — | ✓ 4 |
+| **Claude Code** | ✓ Vollständig | ✓ 3 Befehle (inkl. /orbit) | ✓ 19 Skills | Live |
+| **Codex CLI** | ✓ Vollständig¹ | ✓ 3 Prompts (inkl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ Teilweise² | ✓ 3 Befehle (inkl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ Vollständig³ | ✓ 3 Befehle (inkl. /orbit) | ✓ über Rules | Live |
+| **OpenCode** | ✓ Teilweise⁴ | ✓ 3 Befehle (inkl. /orbit) | — | — |
 | **Cline** | ✓ Vollständig⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manuell)")
+        c6("/team")
+        c7("/evolve (manuell)")
     end
 
     subgraph R2["Ring 2 — Auto-Skills (kontextgesteuert)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (selbstverbessernd)"]
