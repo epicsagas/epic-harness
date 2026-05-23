@@ -1,10 +1,10 @@
 ---
-description: "Autonomous pipeline: spec → go → check → ship → evolve in one shot. Selects mode automatically — Interactive (vague requirement, user runs /discover+/spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs /evolve automatically on PR+CI success."
+description: "Autonomous pipeline that orchestrates skills: spec → go → check → ship → evolve in one shot. Selects mode automatically — Interactive (vague requirement, user runs discover+spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs evolve automatically on PR+CI success."
 ---
 
 # /orbit — Complete Orbit
 
-Full autonomous pipeline: spec → go → check → ship → evolve in one shot.
+Autonomous pipeline that orchestrates skills: spec → go → check → ship → evolve in one shot.
 
 ## Phase Recovery Protocol
 
@@ -97,7 +97,7 @@ If `EPIC_ORCHESTRATION=enabled`:
 
 > **Orbit Mode — how clear and complex is the requirement?**
 >
-> **1. Interactive** — Ambiguous or vague. You run `/discover` → `/spec`, then say "orbit go".
+> **1. Interactive** — Ambiguous or vague. You run **discover** → **spec** skills, then say "orbit go".
 > **2. Council** — Clear but complex (architecture, trade-offs, multiple concerns). 4-voice council auto-generates spec and proceeds.
 > **3. Direct** — Clear and simple. Spec written immediately, build starts now.
 
@@ -110,11 +110,11 @@ Do NOT proceed until the user picks a mode. Record: `"mode": "interactive" | "co
 ## Step 2A: Interactive Mode
 
 Tell the user:
-> "Run `/discover` to frame the problem, then `/spec` to define what to build. Say **orbit go** when the spec is saved with `status: approved`."
+> "Run **discover** to frame the problem, then **spec** to define what to build. Say **orbit go** when the spec is saved with `status: approved`."
 
 **STOP and wait.** On resume:
 1. `ls -t $HARNESS_DIR/specs/SPEC-*.md | head -1` — find latest spec
-2. Verify `status: approved` in frontmatter. If not, tell user to finish `/spec` first.
+2. Verify `status: approved` in frontmatter. If not, tell user to finish **spec** first.
 3. Extract `goal_slug` → proceed to **Step 3**.
 
 ---
@@ -123,7 +123,7 @@ Tell the user:
 
 **2B-1** — If the user hasn't described what to build, ask now.
 
-**2B-2** — Launch 4 subagents in parallel (`run_in_background: true`). Each receives ONLY the user's request + relevant codebase context. No cross-contamination.
+**2B-2** — Launch 4 parallel voices via skill execution (`run_in_background: true`). Each receives ONLY the user's request + relevant codebase context. No cross-contamination.
 
 | Voice | Focus |
 |-------|-------|
@@ -230,13 +230,14 @@ Enter an isolated git worktree so other sessions can freely switch branches with
    Task 1: [desc] — satisfies: R1 — depends on: none    — modifies: [files]
    Task 2: [desc] — satisfies: R2 — depends on: Task 1  — modifies: [files]
    ```
-4. Execute via subagents (Agent tool) — **all inside the worktree**:
-   - TDD: write test first → implement → green
+4. Execute via skill execution modes — **all inside the worktree**:
+   - **go:plan** — task planning and dependency mapping
+   - **go:build** — TDD: write test first → implement → green
    - `debug` skill on test failure; `verify` skill before done
    - `run_in_background: true` for independent tasks
-   - `isolation: "worktree"` only if parallel tasks modify overlapping files (nested worktree for subagent-level conflict)
+   - `isolation: "worktree"` only if parallel tasks modify overlapping files
 
-**Subagent states:**
+**Skill execution states:**
 
 | State | Action |
 |-------|--------|
@@ -255,13 +256,13 @@ Enter an isolated git worktree so other sessions can freely switch branches with
 - Requirements: R1 ✅, R2 ✅, ...
 - AC verified: AC1 ✅, AC2 ✅, ...
 - Tests: X/Y passing
-- Subagents: X DONE, Y CONCERNS, Z BLOCKED
+- Skill executions: X DONE, Y CONCERNS, Z BLOCKED
 ```
 
 **Orchestration-aware Go Phase:**
 When `orchestration_id` is present in pipeline state:
-1. Delegate agent management to the orchestrator — the `/go` command's orchestration extensions handle this
-2. The Go Phase reads `$HARNESS_DIR/orchestrator/run.json` for real-time agent status instead of waiting for background notifications
+1. Delegate execution management to the orchestrator — the **go** skill's orchestration extensions handle this
+2. The Go Phase reads `$HARNESS_DIR/orchestrator/run.json` for real-time execution status instead of waiting for background notifications
 3. After Go Phase completes, include orchestration metrics in the Go Report
 
 **Checkpoint — write before proceeding to Step 4:**
@@ -293,10 +294,10 @@ git diff --name-only $(git merge-base HEAD main)
 
 Classify changed files by scope: API · Frontend · Backend · Database · Infra · Docs · Tests.
 
-**Launch 3 core agents in parallel** (`run_in_background: true`):
-1. **Reviewer** — code quality, logic, style, test coverage, spec Requirements coverage
-2. **Auditor** — security (OWASP Top 10) + performance (N+1, leaks)
-3. **Test runner** — full test suite, AC verification, coverage delta
+**Launch 3 core skill execution modes in parallel** (`run_in_background: true`):
+1. **check:code** — code quality, logic, style, test coverage, spec Requirements coverage
+2. **check:security** — security (OWASP Top 10) + performance (N+1, leaks)
+3. **check:test** — full test suite, AC verification, coverage delta
 
 **Conditional scope checks:**
 - API: contract testing, request validation
@@ -306,8 +307,8 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 
 **Orchestration-aware Check:**
 When orchestration is active:
-1. The reviewer agent reads `$HARNESS_DIR/orchestrator/` for agent activity history
-2. The auditor checks for concurrent write conflicts logged in agent streams
+1. The **check:code** execution reads `$HARNESS_DIR/orchestrator/` for activity history
+2. The **check:security** execution checks for concurrent write conflicts logged in execution streams
 3. Include orchestration-specific metrics in the Check Report
 
 **Check Report:**
@@ -326,7 +327,7 @@ When orchestration is active:
 1. [blocker or warning]
 ```
 
-**Collect agent results before writing the report.** After all 3 background agents complete, synthesize their outputs into the Check Report. Do NOT write the file until all agents have reported back — a partial report is worse than no report for crash recovery.
+**Collect execution results before writing the report.** After all 3 background skill executions complete, synthesize their outputs into the Check Report. Do NOT write the file until all executions have reported back — a partial report is worse than no report for crash recovery.
 
 Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md` — this is a separate file, not embedded in JSON. The `check_report` path was already set in pipeline state at the start of this step.
 
@@ -373,7 +374,7 @@ jq --arg now "$NOW" \
 **On FAIL — if `check_fail_count < 3`:**
 1. Read Action Items from check report
 2. Plan targeted fix tasks per blocker
-3. Execute via subagents (TDD + debug + verify)
+3. Execute via skill execution modes (TDD + debug + verify)
 4. Return to **Step 4**
 
 **On FAIL — if `check_fail_count >= 3`:** set `"status": "paused"`.
@@ -388,7 +389,7 @@ On PASS or WARN:
 2. Preserve orchestrator state directory for /status and /evolve analysis
 On FAIL:
 1. Keep orchestrator state for debugging
-2. Include agent stream data in Action Items for targeted fixes
+2. Include execution stream data in Action Items for targeted fixes
 
 ---
 
@@ -431,13 +432,7 @@ gh pr create --title "<goal from spec>" --body "$(cat <<'EOF'
 **Orchestration data in PR:**
 Include in PR body:
 - Orchestration ID
-- Agent count and final states
-- Total orchestration elapsed time
-
-**Orchestration data in PR:**
-Include in PR body:
-- Orchestration ID
-- Agent count and final states
+- Skill execution count and final states
 - Total orchestration elapsed time
 
 ## Test Plan
@@ -533,7 +528,7 @@ jq --arg now "$NOW" \
 | Check | PASS     | {check_fail_count}|
 | Ship  | complete | 0                |
 
-| Orchestration | {enabled/disabled} | {agent_count} agents |
+| Orchestration | {enabled/disabled} | {execution_count} skill executions |
 
 ### Key Decisions
 {from council/direct synthesis}
@@ -587,6 +582,6 @@ jq --arg now "$NOW" \
 - Forgetting to exit worktree before orbit complete (leaves session in wrong directory)
 - Entering worktree without saving original_cwd (can't find state files after)
 - Skipping a phase checkpoint jq write — if context compacts mid-orbit, the phase will re-run
-- Launching background check agents before setting `check_report` path in pipeline state
-- Writing check report before all agents have completed — partial reports cause wrong verdicts
+- Launching background check skill executions before setting `check_report` path in pipeline state
+- Writing check report before all skill executions have completed — partial reports cause wrong verdicts
 - Skipping `updated_at` refresh — stale timestamp triggers false crash recovery after 45 minutes

@@ -338,21 +338,20 @@ pub fn run(args: &[String]) -> i32 {
 
     // ── auto-update check (cooled down) ─────────────────────────
     let mut did_update = false;
-    if !check_only && (force || should_check()) {
-        if let Some(cur) = current_version() {
-            if let Some(latest) = latest_github_version() {
-                if semver_gt(&latest, &cur) {
-                    eprintln!("[epic] Update available: {cur} → {latest}");
-                    let method = detect_install_method();
-                    eprintln!("[epic] Detected: {}", method.label());
-                    match run_upgrade(&method, &latest) {
-                        Ok(c) => {
-                            did_update = c == 0;
-                        }
-                        Err(e) => eprintln!("[epic] Upgrade failed: {e}"),
-                    }
-                }
+    if !check_only
+        && (force || should_check())
+        && let Some(cur) = current_version()
+        && let Some(latest) = latest_github_version()
+        && semver_gt(&latest, &cur)
+    {
+        eprintln!("[epic] Update available: {cur} → {latest}");
+        let method = detect_install_method();
+        eprintln!("[epic] Detected: {}", method.label());
+        match run_upgrade(&method, &latest) {
+            Ok(c) => {
+                did_update = c == 0;
             }
+            Err(e) => eprintln!("[epic] Upgrade failed: {e}"),
         }
         touch_sync_marker();
     }

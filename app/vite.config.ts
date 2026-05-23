@@ -33,6 +33,42 @@ function harnessApiPlugin(): Plugin {
     apply: 'serve',
     configureServer(server) {
       const harnessDir = getHarnessDir();
+
+      // SPA fallback: serve index.html for non-API, non-static GET requests
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? '/';
+        if (req.method === 'GET' && !url.startsWith('/api/') && !url.includes('.')) {
+          req.url = '/index.html';
+          // Let Vite's built-in middleware handle the rewritten URL
+        }
+        next();
+      });
+
+      // Agent tracking routes for the live Agents tab
+      server.middlewares.use('/api/run', (_req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (!harnessDir) { res.end(JSON.stringify(null)); return; }
+        const runPath = path.join(harnessDir, 'orchestrator', 'run.json');
+        if (!fs.existsSync(runPath)) { res.end(JSON.stringify(null)); return; }
+        try { res.end(fs.readFileSync(runPath, 'utf8')); }
+        catch { res.end(JSON.stringify(null)); }
+      });
+      server.middlewares.use('/api/agents', (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (!harnessDir) { res.end(JSON.stringify(null)); return; }
+        const match = (req.url ?? '').match(/^\/([^/]+)\/status$/);
+        if (!match) { res.end(JSON.stringify(null)); return; }
+        const agentId = match[1];
+        // Validate agentId: only alphanumeric, dash, underscore (path traversal defense)
+        if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) { res.end(JSON.stringify(null)); return; }
+        const agentsBase = path.resolve(harnessDir, 'orchestrator', 'agents');
+        const statusPath = path.resolve(agentsBase, agentId, 'status.json');
+        if (!statusPath.startsWith(agentsBase + path.sep)) { res.end(JSON.stringify(null)); return; }
+        if (!fs.existsSync(statusPath)) { res.end(JSON.stringify(null)); return; }
+        try { res.end(fs.readFileSync(statusPath, 'utf8')); }
+        catch { res.end(JSON.stringify(null)); }
+      });
+
       server.middlewares.use('/api/harness', (req, res) => {
         const cmd = new URL(req.url ?? '/', 'http://localhost').searchParams.get('cmd') ?? '';
         res.setHeader('Content-Type', 'application/json');

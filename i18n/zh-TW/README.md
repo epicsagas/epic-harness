@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一個自我進化的 AI 程式設計智能體框架 — 8 條命令、1 條自主流水線、自動觸發技能，從你的失敗中學習。</p></blockquote>
+<blockquote><p align="center">一個自我進化的 AI 程式設計智能體框架 — 3 條命令、19 個技能、1 條自主流水線，從你的失敗中學習。</p></blockquote>
 
 <p align="center"><b>需要記憶的更少。每次按鍵的智慧含量更高。每次會話都變得更聰明。</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一個 Claude Code 外掛，**用 8 條命令取代 30+ 條命令**，**根據你正在做的事情自動觸發技能**，並**從你自己的失敗模式中進化出新技能**。
+一個 Claude Code 外掛，將 30+ 條命令整合為 **3 條命令 + 19 個自動觸發技能**，**根據你正在做的事情自動觸發技能**，並**從你自己的失敗模式中進化出新技能**。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 功能" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-也可以手動分步執行：
+也可以直接呼叫管道技能：
 
 ```bash
 /spec "為登入 API 新增 JWT 驗證"   # 釐清需求 → SPEC-*.md
@@ -127,11 +127,11 @@ epic install gemini   # Antigravity
 安裝二進位檔案後，執行 `epic install`（或 `epic install claude`）以：
 
 1. 建立 `~/.harness/` 目錄結構
-2. 將命令、技能和智能體同步到工具的設定目錄
+2. 將命令和技能同步到工具的設定目錄
 3. 為 Claude Code 註冊 MCP 伺服器（harness-mem）
 4. 若不存在，則建立含預設值的 `~/.harness/config.toml`
 
-在 Claude Code 中，`hooks/setup.sh` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
+在 Claude Code 中，`hooks/install.js` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
 
 ### 其他工具
 
@@ -163,13 +163,10 @@ ls ~/.harness/              # 資料目錄存在
 | 命令 | 功能 |
 |---------|-------------|
 | `/orbit` | **完整自主流水線**：spec → go → check → ship → evolve 一次執行 |
-| `/discover` | 先定義問題 — 五問法、JTBD、蘇格拉底式提問（最多 3 輪） |
-| `/spec` | 將需求轉換為帶編號的需求與驗收標準文件，儲存為 `SPEC-{timestamp}.md` |
-| `/go` | 自動規劃 → TDD 子智能體 → 使用工作樹隔離的平行執行 → 驗收標準驗證 |
-| `/check` | 平行程式碼審查 + 安全審計 + 測試，根據範圍附加額外檢查（API 合約、無障礙、遷移安全性） |
-| `/ship` | 在乾淨工作樹中進行隔離預飛行測試 → 附帶完整檢查報告的 PR → CI 監控 + 自動修復 |
 | `/team` | 瀏覽組織庫、聘請現有團隊，或設計新團隊（3-6 個智能體，同步到 `.claude/agents/`） |
 | `/evolve` | 手動進化觸發 — 分析工作階段、查看儀表板、檢查技能效果、回滾 |
+
+管道階段（`/spec`、`/go`、`/check`、`/ship`、`/discover`）現在是**技能** — 根據上下文自動觸發，也可以按名稱直接呼叫。舊命令名透過別名路由繼續有效。
 
 ---
 
@@ -216,6 +213,10 @@ flowchart TD
 
 | 技能 | 觸發時機 |
 |-------|--------------|
+| **spec** | 需要定義需求時 — 轉換為編號的 R + AC 文件 |
+| **go** | 建構階段 — 自動規劃 → TDD子代理 → 平行執行 → AC驗證 |
+| **check** | 審查階段 — 平行程式碼審查 + 安全稽核 + 測試，按範圍附加檢查 |
+| **ship** | 發佈階段 — 隔離測試 → 包含完整檢查報告的PR → CI監控 + 自動修復 |
 | **tdd** | 新功能實作或錯誤修復 |
 | **debug** | 測試失敗或執行時期錯誤 |
 | **discover** | 模糊的請求、先給出解決方案而無問題描述、無焦點的抱怨 |
@@ -227,7 +228,9 @@ flowchart TD
 | **context** | 上下文視窗使用超過 70% |
 | **council** | 模糊的架構或設計決策 |
 | **agent-introspection** | 連續 3 次以上失敗或循環重試模式 |
-| **reflect** | 按需觸發：你是否將 AI 作為思考放大器？基於冷证据的自我評估 |
+| **reflect** | 按需 `/reflect`：人類自我評估 — 「我是否將 AI 作為思考放大器？」基於 hook 收集資料的 5 維評估 |
+| **orchestrate** | 多代理編排狀態和即時代理控制 |
+| **commit** | 約定式提交生成 — 從 git diff 自動生成 |
 
 ---
 
@@ -331,7 +334,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | Edit 執行後 | 自動格式化（Biome/Prettier/ruff/gofmt）+ 型別檢查 |
 | **observe** | 每次工具呼叫 | 記錄到 `~/.harness/projects/{slug}/obs/`，用於進化 |
 | **snapshot** | 壓縮前 | 將狀態儲存到 `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | 工作階段結束 | 分析失敗、播種進化技能、門控、提取直覺 |
+| **reflect** | 工作階段結束 | 自動進化引擎：失敗分析、技能播種、指標更新、記憶匯入。為 `/reflect` 技能提供資料 |
 
 Polish 回饋至 observe：格式化失敗 → `lint_fail`，TypeScript 錯誤 → `build_fail`。即使錯誤來自 polish，Edit→Error 抖振也會被偵測到。
 
@@ -396,11 +399,11 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 
 | 工具 | Ring 0 掛鉤 | 命令 | 技能 | 智能體 |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 8 條命令（含 /orbit） | ✓ 11 個技能 | ✓ 4 |
-| **Codex CLI** | ✓ 完整¹ | ✓ 8 條提示詞（含 /orbit） | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ 部分² | ✓ 8 條命令（含 /orbit） | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ 完整³ | ✓ 8 條命令（含 /orbit） | ✓ 透過規則 | ✓ 4 |
-| **OpenCode** | ✓ 部分⁴ | ✓ 8 條命令（含 /orbit） | — | ✓ 4 |
+| **Claude Code** | ✓ 完整 | ✓ 3 條命令（含 /orbit） | ✓ 19 個技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 條提示詞（含 /orbit） | ✓ 19 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 條命令（含 /orbit） | ✓ 19 | — |
+| **Cursor** | ✓ 完整³ | ✓ 3 條命令（含 /orbit） | ✓ 19 | Live |
+| **OpenCode** | ✓ 部分⁴ | ✓ 3 條命令（含 /orbit） | — | — |
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

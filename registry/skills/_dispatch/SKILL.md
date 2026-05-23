@@ -23,12 +23,27 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User wants to commit changes | **commit** |
 | Context window > 70% used | **context** |
 | User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
-| User shares code for review, mentions code smells, or asks to refactor/analyze | **episteme** → `analyze_code` + `suggest_refactorings` → feed results into `/orbit` Direct |
+| User shares code for review, mentions code smells, or asks to refactor/analyze | **episteme** → `analyze_code` + `suggest_refactorings` → feed results into **go:plan** mode |
 | User invokes `/reflect`, asks about AI usage quality, "am I using AI well", "thought amplifier", or requests AI usage self-assessment | **reflect** |
 | Session start (project has harness-mem psychographic node) | Call `mem_query` type=psychographic → apply 5-dimension profile to all subsequent skill dispatch |
 | Orchestration run active (`$HARNESS_DIR/orchestrator/run.json` exists with status "running") | **orchestrate** |
 | Agent tool output received with inter-agent message | **orchestrate** |
 | User runs `/intervene` | **orchestrate** |
+| 요구사항 정의 필요, 스펙 없음 | **spec** |
+| 빌드/구현 시작, 스펙 승인됨 | **go** |
+| 리뷰/감사/테스트 필요 | **check** |
+| PR 생성 / CI / 배포 준비 | **ship** |
+
+## Alias Routing
+
+Users can still type legacy command names. Map them:
+- `/spec` → invoke skill **spec** directly
+- `/go` → invoke skill **go** directly
+- `/check` → invoke skill **check** directly
+- `/ship` → invoke skill **ship** directly
+- `/discover` → invoke skill **discover** directly
+- `/intervene` → invoke skill **orchestrate** (intervene mode)
+- `/status` → invoke skill **orchestrate** (status mode)
 
 ## Loop Transition Signals
 
@@ -55,7 +70,7 @@ When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exist
 
 - **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/check`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
 - **Dispatch skills normally** — tdd, debug, verify, secure, perf, simplify, document, context all fire as usual within each phase
-- **episteme pre-analysis**: if episteme `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to Step 2C as spec material — skip mode selection entirely and enter Direct Build
+- **episteme pre-analysis**: if episteme `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to **go:plan** as spec material — skip mode selection entirely and enter Direct Build
 - **After orbit completes** (`status: complete` or `status: aborted`) — resume normal dispatch behavior
 
 **Orbit Recovery on Session Resume**: When a session resumes (after context compaction or crash) and an active pipeline is detected:

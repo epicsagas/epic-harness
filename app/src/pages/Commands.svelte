@@ -2,8 +2,7 @@
   import { tStore } from '$lib/i18n.js';
 
   type CommandKey =
-    | 'cmdDiscoverDesc' | 'cmdSpecDesc' | 'cmdGoDesc' | 'cmdCheckDesc' | 'cmdShipDesc'
-    | 'cmdEvolveDesc' | 'cmdTeamDesc' | 'cmdOrbitDesc' | 'cmdGitCcDesc' | 'cmdGitDesc';
+    | 'cmdOrbitDesc' | 'cmdEvolveDesc' | 'cmdTeamDesc';
 
   interface Command {
     cmd: string;
@@ -12,16 +11,9 @@
   }
 
   const commands: Command[] = [
-    { cmd: 'discover', descKey: 'cmdDiscoverDesc', ring: 1 },
-    { cmd: 'spec',     descKey: 'cmdSpecDesc',     ring: 1 },
-    { cmd: 'go',       descKey: 'cmdGoDesc',        ring: 1 },
-    { cmd: 'check',    descKey: 'cmdCheckDesc',     ring: 1 },
-    { cmd: 'ship',     descKey: 'cmdShipDesc',      ring: 1 },
-    { cmd: 'evolve',   descKey: 'cmdEvolveDesc',    ring: 3 },
-    { cmd: 'team',     descKey: 'cmdTeamDesc',      ring: 1 },
-    { cmd: 'orbit',    descKey: 'cmdOrbitDesc',     ring: 1 },
-    { cmd: 'git-cc',   descKey: 'cmdGitCcDesc',     ring: 0 },
-    { cmd: 'git',      descKey: 'cmdGitDesc',       ring: 0 },
+    { cmd: 'orbit',    descKey: 'cmdOrbitDesc',    ring: 1 },
+    { cmd: 'evolve',   descKey: 'cmdEvolveDesc',   ring: 3 },
+    { cmd: 'team',     descKey: 'cmdTeamDesc',     ring: 1 },
   ];
 
   let copiedCmd = $state<string | null>(null);
@@ -45,7 +37,7 @@
 
 <div class="screen-header">
   <h2>{$tStore('pageCommands')} <span class="subtitle-tag">Ring 1</span></h2>
-  <p>{$tStore('pageCommandsDesc')}</p>
+  <p>{$tStore('pageCommandsDesc3')}</p>
 </div>
 
 <div class="grid-2">

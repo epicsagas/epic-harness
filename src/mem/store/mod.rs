@@ -24,10 +24,10 @@ pub use types::{Edge, IndexNode, Node, NodeFrontmatter, importance_for_type};
 
 // ── Re-exports: util ─────────────────────────────────
 
-pub use util::{atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, validate_uuid};
-
-#[cfg(test)]
-pub(crate) use util::parse_iso_to_secs;
+pub use util::{
+    atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, parse_iso_to_secs,
+    validate_uuid,
+};
 
 // ── Re-exports: schema ───────────────────────────────
 

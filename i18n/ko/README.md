@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 8개 명령어, 1개 자율 파이프라인, 자동 트리거 스킬, 실패로부터 학습.</p></blockquote>
+<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 19개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
 
 <p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**30개 이상의 명령어를 8개로 대체**하고, 현재 작업 맥락에 따라 **스킬을 자동으로 트리거**하며, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
+**30개 이상의 명령어를 3개 명령어 + 19개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "로그인 API에 JWT 인증 추가"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-원하면 수동으로 단계별 진행도 가능합니다:
+원하면 파이프라인 스킬을 직접 호출할 수도 있습니다:
 
 ```bash
 /spec "로그인 API에 JWT 인증 추가"   # 요구사항 명확화 → SPEC-*.md
@@ -127,11 +127,11 @@ epic install gemini   # Antigravity
 바이너리 설치 후 `epic install` (또는 `epic install claude`)을 실행하면:
 
 1. `~/.harness/` 디렉토리 구조 생성
-2. 명령어, 스킬, 에이전트를 도구 설정 디렉토리에 동기화
+2. 명령어와 스킬을 도구 설정 디렉토리에 동기화
 3. Claude Code용 MCP 서버(harness-mem) 등록
 4. `~/.harness/config.toml` 기본값으로 생성 (없는 경우)
 
-Claude Code에서는 세션 시작 시 `hooks/setup.sh`가 자동 실행되어 바이너리가 없으면 설치합니다. 초기 클론 이후 수동 작업이 필요 없습니다.
+Claude Code에서는 세션 시작 시 `hooks/install.js`가 자동 실행되어 바이너리가 없으면 설치합니다. 초기 클론 이후 수동 작업이 필요 없습니다.
 
 ### 다른 도구
 
@@ -163,13 +163,10 @@ Claude Code 세션 안에서: `/evolve status`
 | 명령어 | 기능 |
 |--------|------|
 | `/orbit` | **전체 자율 파이프라인**: spec → go → check → ship → evolve을 한 번에 실행 |
-| `/discover` | 먼저 문제를 정의 — 5 Whys, JTBD, 소크라테스식 질문 (최대 3라운드) |
-| `/spec` | 요구사항을 번호가 매겨진 R + AC 문서로 변환, `SPEC-{timestamp}.md`로 저장 |
-| `/go` | 자동 계획 → TDD 서브에이전트 → worktree 격리 병렬 실행 → AC 검증 |
-| `/check` | 병렬 리뷰 + 보안 감사 + 테스트, 범위 기반 추가 항목 (API 계약, 접근성, 마이그레이션 안전성) |
-| `/ship` | 깨끗한 worktree에서 격리 사전 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
 | `/team` | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
 | `/evolve` | 수동 진화 트리거 — 세션 분석, 대시보드 보기, 스킬 효과 검사, 롤백 |
+
+파이프라인 단계(`/spec`, `/go`, `/check`, `/ship`, `/discover`)는 이제 **스킬**입니다 — 컨텍스트에 따라 자동 트리거되거나 이름으로 직접 호출할 수 있습니다. 기존 명령어 이름은 별칭 라우팅으로 계속 작동합니다.
 
 ---
 
@@ -216,6 +213,10 @@ flowchart TD
 
 | 스킬 | 트리거 조건 |
 |------|------------|
+| **spec** | 요구사항 정의 필요 — 번호가 매겨진 R + AC 문서로 변환 |
+| **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
+| **check** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
+| **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
 | **tdd** | 새로운 기능 구현 또는 버그 수정 |
 | **debug** | 테스트 실패 또는 런타임 에러 |
 | **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 |
@@ -226,8 +227,10 @@ flowchart TD
 | **verify** | `/go` 또는 `/ship` 완료 전 |
 | **context** | 컨텍스트 윈도우 사용률 > 70% |
 | **council** | 모호한 아키텍처 또는 설계 결정 |
+| **orchestrate** | 멀티 에이전트 오케스트레이션 상태 및 라이브 에이전트 제어 |
 | **agent-introspection** | 3회 이상 연속 실패 또는 순환 재시도 패턴 |
-| **reflect** | 온디맨드: AI를 사고 증폭기로 활용하고 있는가? 냉정한 증거 기반 자기 평가 |
+| **reflect** | 온디맨드 `/reflect`: 휴먼 자기 평가 — "AI를 사고 증폭기로 잘 쓰고 있는가?" 훅이 수집한 데이터로 5차원 증거 기반 평가 |
+| **commit** | Conventional Commits 생성 — git diff에서 자동 생성 |
 
 ---
 
@@ -331,7 +334,7 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 | **polish** | Edit 후 | 자동 포맷 (Biome/Prettier/ruff/gofmt) + 타입체크 |
 | **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 로깅 |
 | **snapshot** | compact 전 | `~/.harness/projects/{slug}/sessions/`에 상태 저장 |
-| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트, instinct 추출 |
+| **reflect** | 세션 종료 | 자동 진화 엔진: 실패 분석, 진화 스킬 시딩, 메트릭 업데이트, 메모리 인제스트. `/reflect` 스킬에 데이터 제공 |
 
 polish는 observe로 피드백됩니다: 포맷 실패 → `lint_fail`, TypeScript 에러 → `build_fail`. Edit→Error 쓰래싱은 에러가 polish에서 발생해도 감지됩니다.
 
@@ -396,11 +399,11 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 | 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
 |------|-----------|--------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 8개 명령어 (/orbit 포함) | ✓ 11개 스킬 | ✓ 4개 |
-| **Codex CLI** | ✓ 전체¹ | ✓ 8개 프롬프트 (/orbit 포함) | ✓ 7개 | ✓ 4개 |
-| **Antigravity** | ✓ 부분² | ✓ 8개 명령어 (/orbit 포함) | ✓ 7개 | ✓ 4개 |
-| **Cursor** | ✓ 전체³ | ✓ 8개 명령어 (/orbit 포함) | ✓ 규칙 경유 | ✓ 4개 |
-| **OpenCode** | ✓ 부분⁴ | ✓ 8개 명령어 (/orbit 포함) | — | ✓ 4개 |
+| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 19개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 19개 | — |
+| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 19개 | — |
+| **Cursor** | ✓ 전체³ | ✓ 3개 명령어 (/orbit 포함) | ✓ 규칙 경유 | Live |
+| **OpenCode** | ✓ 부분⁴ | ✓ 3개 명령어 (/orbit 포함) | — | — |
 | **Cline** | ✓ 전체⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — 진화 (자기 개선)"]

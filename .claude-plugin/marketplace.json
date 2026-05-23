@@ -5,13 +5,13 @@
     "url": "https://github.com/epicsagas"
   },
   "metadata": {
-    "description": "8 commands, auto-trigger skills, self-evolving agent harness for Claude Code."
+    "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness for Claude Code."
   },
   "plugins": [
     {
       "name": "epic",
       "source": "./",
-      "description": "8 commands, auto-trigger skills, self-evolving agent harness."
+      "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness."
     }
   ]
 }

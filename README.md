@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">A self-evolving AI coding agent harness — 8 commands, 1 autonomous pipeline, auto-trigger skills, learns from your failures.</p></blockquote>
+<blockquote><p align="center">A self-evolving AI coding agent harness — 3 commands, 19 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
 
 <p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A Claude Code plugin that **replaces 30+ commands with 8**, **auto-triggers skills** based on what you're doing, and **evolves new skills** from your own failure patterns.
+A Claude Code plugin that **consolidates 30+ commands into 3 commands + 19 auto-trigger skills**, and **evolves new skills** from your own failure patterns.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # set to 0 to disable auto-launch
 auto_open = true  # open browser on first session
 ```
 
-Screens: **Dashboard** · /orbit Pipeline · Commands (10) · Skills (15) · Agents (4) · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (19) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -62,7 +62,7 @@ $ /orbit "Add JWT auth to the login API"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-Or step through manually:
+Or invoke pipeline skills directly:
 
 ```bash
 /spec "Add JWT auth to the login API"   # clarifies requirements → SPEC-*.md
@@ -148,11 +148,11 @@ Prerequisites: **Git**. Source/binary installs also need the [Rust toolchain](ht
 After installing the binary, run `epic install` (or `epic install claude`) to:
 
 1. Create `~/.harness/` directory structure
-2. Sync commands, skills, and agents to the tool's config directory
+2. Sync commands and skills to the tool's config directory
 3. Register the MCP server (harness-mem) for Claude Code
 4. Create `~/.harness/config.toml` with defaults if absent
 
-On Claude Code, `hooks/setup.sh` auto-runs on session start and installs the binary if missing. No manual step needed after the initial clone.
+On Claude Code, `hooks/install.js` auto-runs on session start and installs the binary if missing. No manual step needed after the initial clone.
 
 ### Other tools
 
@@ -184,13 +184,10 @@ Inside a Claude Code session: `/evolve status`
 | Command | What it does |
 |---------|-------------|
 | `/orbit` | **Full autonomous pipeline**: spec → go → check → ship → evolve in one shot |
-| `/discover` | Frame the problem first — 5 Whys, JTBD, Socratic questioning (max 3 rounds) |
-| `/spec` | Convert requirements into a numbered R + AC document, saved as `SPEC-{timestamp}.md` |
-| `/go` | Auto-plan → TDD subagents → parallel execution with worktree isolation → AC verification |
-| `/check` | Parallel review + security audit + tests, with scope-based extras (API contract, accessibility, migration safety) |
-| `/ship` | Isolated pre-flight test in a clean worktree → PR with full check report → CI watch + auto-fix |
 | `/team` | Browse org libraries, hire existing teams, or design new ones (3–6 agents, synced to `.claude/agents/`) |
 | `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, inspect skill effectiveness, rollback |
+
+Pipeline stages (`/spec`, `/go`, `/check`, `/ship`, `/discover`) are now **skills** — they auto-trigger via context or can be invoked by name. Legacy command names still work via alias routing.
 
 ---
 
@@ -237,6 +234,10 @@ Skills trigger automatically based on context. You don't invoke them.
 
 | Skill | Triggers when |
 |-------|--------------|
+| **spec** | Requirements need defining — converts to numbered R + AC document |
+| **go** | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
+| **check** | Review phase — parallel code review + security audit + tests with scope extras |
+| **ship** | Shipping phase — isolated test → PR with full check report → CI watch + auto-fix |
 | **tdd** | New feature implementation or bug fix |
 | **debug** | Test failure or runtime error |
 | **discover** | Vague request, solution without a problem, unfocused complaint |
@@ -247,10 +248,12 @@ Skills trigger automatically based on context. You don't invoke them.
 | **verify** | Before completing `/go` or `/ship` |
 | **context** | Context window > 70% |
 | **council** | Ambiguous architectural or design decisions |
+| **orchestrate** | Multi-agent orchestration status and live agent intervention |
 | **agent-introspection** | 3+ consecutive failures or circular retry pattern |
-| **reflect** | On-demand: are you using AI as a thought amplifier? Cold evidence-based self-assessment |
+| **reflect** | On-demand `/reflect`: evidence-based human self-assessment — "Am I using AI as a thought amplifier?" Scores 5 dimensions from hook-collected data |
+| **commit** | Conventional Commits generation — auto-generates from git diff |
 
-> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 15 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 19 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -360,7 +363,7 @@ Run invisibly on every session. Single Rust binary (`epic-harness`) with subcomm
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
+| **reflect** | Session end | Auto-evolution engine: analyze failures, seed evolved skills, update metrics, ingest to memory. Feeds `/reflect` skill with data |
 
 Polish feeds back into observe: format failure → `lint_fail`, TypeScript error → `build_fail`. Edit→Error thrashing gets detected even when errors come from polish.
 
@@ -425,11 +428,11 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 8 commands (incl. /orbit) | ✓ 11 skills | ✓ 4 |
-| **Codex CLI** | ✓ Full¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ Partial² | ✓ 8 commands (incl. /orbit) | ✓ 7 | — |
-| **Cursor** | ✓ Full³ | ✓ 8 commands (incl. /orbit) | ✓ via rules | ✓ 4 |
-| **OpenCode** | ✓ Partial⁴ | ✓ 8 commands (incl. /orbit) | — | ✓ 4 |
+| **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 19 skills | Live |
+| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ Full³ | ✓ 3 commands (incl. /orbit) | ✓ via rules | Live |
+| **OpenCode** | ✓ Partial⁴ | ✓ 3 commands (incl. /orbit) | — | — |
 | **Cline** | ✓ Full⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -450,15 +453,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

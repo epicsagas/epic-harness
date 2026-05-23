@@ -240,6 +240,19 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
                 ),
 
+            // ── SPA fallback: serve index.html for non-API, non-static-asset GET routes ──
+            (Method::Get, url)
+                if !url.starts_with("/api/")
+                    && !url.contains('.')
+                    && !url.starts_with("/favicon")
+                    && !url.starts_with("/robots")
+                    && !url.starts_with("/sitemap") =>
+            {
+                Response::from_string(DASHBOARD_HTML).with_header(
+                    Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
+                )
+            }
+
             _ => Response::from_string("Not Found").with_status_code(404),
         };
         let _ = request.respond(response);
@@ -488,17 +501,16 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                     if let Ok(files) = fs::read_dir(&orbit_dir) {
                         for f in files.filter_map(|e| e.ok()) {
                             let fname = f.file_name().to_string_lossy().to_string();
-                            if fname.starts_with("PIPELINE-") && fname.ends_with(".json") {
-                                if let Ok(content) = fs::read_to_string(f.path()) {
-                                    if let Ok(mut v) =
-                                        serde_json::from_str::<serde_json::Value>(&content)
-                                    {
-                                        v["_project"] = serde_json::Value::String(
-                                            proj_entry.file_name().to_string_lossy().to_string(),
-                                        );
-                                        all.push(v);
-                                    }
-                                }
+                            if fname.starts_with("PIPELINE-")
+                                && fname.ends_with(".json")
+                                && let Ok(content) = fs::read_to_string(f.path())
+                                && let Ok(mut v) =
+                                    serde_json::from_str::<serde_json::Value>(&content)
+                            {
+                                v["_project"] = serde_json::Value::String(
+                                    proj_entry.file_name().to_string_lossy().to_string(),
+                                );
+                                all.push(v);
                             }
                         }
                     }

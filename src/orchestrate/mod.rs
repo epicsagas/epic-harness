@@ -18,27 +18,59 @@ pub fn is_enabled() -> bool {
     std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled")
 }
 
+/// Full orchestration (control directives, inbox, dependency evaluation).
+fn is_full_orchestration() -> bool {
+    is_enabled()
+}
+
 /// Return the orchestrator base directory (uses harness_dir).
 fn orch_base() -> std::path::PathBuf {
     common::harness_dir()
 }
 
-/// Pre-invocation hook logic.
+/// Pre-invocation hook logic (returns exit code, errors logged to stderr).
 ///
-/// 1. Check EPIC_ORCHESTRATION env var -- if not "enabled", no-op.
-/// 2. Read control.json -- if action is "pause" for this agent, output hint.
-/// 3. Read agent inbox -- output unread messages as hints.
-/// 4. Update agent status.json heartbeat timestamp.
+/// Always: record agent as "running" in orchestrator state (agent tracking).
+/// Full orchestration only: check control directives, read inbox, update heartbeat.
 pub fn run_pre(input: &HookInput) -> i32 {
-    if !is_enabled() {
-        return 0;
+    run_pre_checked(input).unwrap_or_else(|e| {
+        eprintln!("[harness] orchestrate run_pre error: {e}");
+        0
+    })
+}
+
+/// Pre-invocation hook logic (returns Result for callers that want error handling).
+pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
+    let tool = input.tool_name.as_deref().unwrap_or("");
+    if tool.to_lowercase() != "agent" {
+        return Ok(0);
     }
 
     let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
-        None => return 0,
+        None => return Ok(0),
     };
+
+    // Runtime validation — always active (not gated by debug_assert)
+    if !orch_state::validate_agent_id(&agent_id) {
+        return Ok(0);
+    }
+
+    // Always: record agent as running (agent tracking — no EPIC_ORCHESTRATION gate)
+    let (description, subagent_type) = extract_agent_meta(input);
+    orch_state::upsert_agent_to_run(
+        &base,
+        &agent_id,
+        &description,
+        &subagent_type,
+        orch_state::AgentStatus::Running,
+    )?;
+
+    // Full orchestration: control, inbox, heartbeat
+    if !is_full_orchestration() {
+        return Ok(0);
+    }
 
     // Check control directive
     if let Some(directive) = orch_state::read_control(&base) {
@@ -59,7 +91,7 @@ pub fn run_pre(input: &HookInput) -> i32 {
                     if let Some(msg) = &directive.message {
                         hint("orchestrator", &format!("Reason: {}", msg));
                     }
-                    return 2; // block the tool call
+                    return Ok(2); // block the tool call
                 }
                 ControlAction::Cancel => {
                     hint(
@@ -69,7 +101,7 @@ pub fn run_pre(input: &HookInput) -> i32 {
                             agent_id, directive.generation
                         ),
                     );
-                    return 2;
+                    return Ok(2);
                 }
                 ControlAction::Redirect => {
                     if let Some(msg) = &directive.message {
@@ -108,30 +140,57 @@ pub fn run_pre(input: &HookInput) -> i32 {
         let _ = orch_state::write_agent_status(&base, &agent_id, &status);
     }
 
-    0
+    Ok(0)
 }
 
-/// Post-invocation hook logic.
+/// Post-invocation hook logic (returns exit code, errors logged to stderr).
 ///
-/// 1. Parse the Agent tool output to extract state.
-/// 2. Append event to stream.jsonl.
-/// 3. Update status.json with new state.
-/// 4. If agent is DONE, evaluate dependency graph.
-/// 5. If all agents are done/failed, update run.json status.
+/// Always: record agent completion in orchestrator state (agent tracking).
+/// Full orchestration only: append events, evaluate dependencies, inbox notifications.
 pub fn run_post(input: &HookInput) -> i32 {
-    if !is_enabled() {
-        return 0;
+    run_post_checked(input).unwrap_or_else(|e| {
+        eprintln!("[harness] orchestrate run_post error: {e}");
+        0
+    })
+}
+
+/// Post-invocation hook logic (returns Result for callers that want error handling).
+pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
+    let tool = input.tool_name.as_deref().unwrap_or("");
+    if tool.to_lowercase() != "agent" {
+        return Ok(0);
     }
 
     let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
-        None => return 0,
+        None => return Ok(0),
     };
+
+    // Runtime validation — always active (not gated by debug_assert)
+    if !orch_state::validate_agent_id(&agent_id) {
+        return Ok(0);
+    }
 
     // Extract output text
     let output = resolve_output(input);
     let new_status = orch_state::parse_agent_state(&output);
+
+    // Always: update agent status in run.json (agent tracking — no gate)
+    let final_status = new_status.clone().unwrap_or(orch_state::AgentStatus::Done);
+    let (description, subagent_type) = extract_agent_meta(input);
+    orch_state::upsert_agent_to_run(
+        &base,
+        &agent_id,
+        &description,
+        &subagent_type,
+        final_status.clone(),
+    )?;
+
+    // Full orchestration: events, dependency evaluation, inbox notifications
+    if !is_full_orchestration() {
+        return Ok(0);
+    }
 
     // Append event
     let event = AgentEvent {
@@ -145,58 +204,45 @@ pub fn run_post(input: &HookInput) -> i32 {
     };
     let _ = orch_state::append_event(&base, &agent_id, &event);
 
-    // Update agent status
-    if let Some(status) = new_status.clone() {
-        if let Some(mut agent_status) = orch_state::read_agent_status(&base, &agent_id) {
-            agent_status.status = status.clone();
-            agent_status.last_heartbeat = now_iso();
-            if status == AgentStatus::Done {
-                agent_status.phase = "complete".to_string();
-                agent_status.progress = 1.0;
+    // Evaluate dependency graph if agent is done
+    if final_status == AgentStatus::Done
+        && let Some(mut run) = orch_state::read_run(&base)
+    {
+        // Update agent status in run
+        for agent in &mut run.agents {
+            if agent.id == agent_id {
+                agent.status = AgentStatus::Done;
+                agent.completed_at = Some(now_iso());
             }
-            let _ = orch_state::write_agent_status(&base, &agent_id, &agent_status);
         }
 
-        // If agent is done, evaluate dependency graph
-        if status == AgentStatus::Done
-            && let Some(mut run) = orch_state::read_run(&base)
-        {
-            // Update agent status in run
+        // Evaluate deps
+        let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
+        for ub_id in &unblocked {
+            let msg = InboxMessage {
+                from: "orchestrator".to_string(),
+                timestamp: now_iso(),
+                message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
+            };
+            let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
+
+            // Update run agent status
             for agent in &mut run.agents {
-                if agent.id == agent_id {
-                    agent.status = AgentStatus::Done;
-                    agent.completed_at = Some(now_iso());
+                if agent.id == *ub_id {
+                    agent.status = AgentStatus::Pending;
                 }
             }
-
-            // Evaluate deps
-            let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
-            for ub_id in &unblocked {
-                let msg = InboxMessage {
-                    from: "orchestrator".to_string(),
-                    timestamp: now_iso(),
-                    message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
-                };
-                let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
-
-                // Update run agent status
-                for agent in &mut run.agents {
-                    if agent.id == *ub_id {
-                        agent.status = AgentStatus::Pending;
-                    }
-                }
-            }
-
-            // Check if run is complete
-            if orch_state::is_run_complete(&run) {
-                run.status = orch_state::RunStatus::Complete;
-            }
-            run.updated_at = now_iso();
-            let _ = orch_state::write_run(&base, &run);
         }
+
+        // Check if run is complete
+        if orch_state::is_run_complete(&run) {
+            run.status = orch_state::RunStatus::Complete;
+        }
+        run.updated_at = now_iso();
+        let _ = orch_state::write_run(&base, &run);
     }
 
-    0
+    Ok(0)
 }
 
 /// Extract the agent ID from hook input.
@@ -229,6 +275,43 @@ fn extract_agent_id(input: &HookInput) -> Option<String> {
                 .map(String::from)
         })
 }
+
+/// Extract agent metadata from tool input (description + subagent_type).
+/// Falls back to `prompt` first line when `description` is absent.
+/// Truncates description to 120 chars to limit secret exposure.
+fn extract_agent_meta(input: &HookInput) -> (String, String) {
+    let desc: String = input
+        .tool_input
+        .as_ref()
+        .and_then(|v| v.get("description"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| {
+            // Fallback: use first line of prompt
+            input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("prompt"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.lines().next().unwrap_or(s).to_string())
+        })
+        .unwrap_or_default()
+        .chars()
+        .take(120)
+        .collect();
+    let desc = mask_secrets(&desc);
+    let sub_type = input
+        .tool_input
+        .as_ref()
+        .and_then(|v| v.get("subagent_type"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("general-purpose")
+        .to_string();
+    (desc, sub_type)
+}
+
+// mask_secrets is unified in shared/sanitize.rs — same coverage across all modules
+use crate::shared::sanitize::mask_secrets;
 
 /// Resolve the output text from hook input.
 fn resolve_output(input: &HookInput) -> String {
@@ -387,6 +470,74 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(resolve_output(&input), "## Status: BLOCKED");
+    }
+
+    #[test]
+    fn extract_agent_meta_from_description() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "description": "Build the auth module",
+                "prompt": "Full prompt text here"
+            })),
+            ..Default::default()
+        };
+        let (desc, sub_type) = extract_agent_meta(&input);
+        assert_eq!(desc, "Build the auth module");
+        assert_eq!(sub_type, "general-purpose");
+    }
+
+    #[test]
+    fn extract_agent_meta_falls_back_to_prompt() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "prompt": "Review the code changes\nThis is a longer prompt"
+            })),
+            ..Default::default()
+        };
+        let (desc, _) = extract_agent_meta(&input);
+        assert_eq!(desc, "Review the code changes");
+    }
+
+    #[test]
+    fn extract_agent_meta_truncates_long_prompt() {
+        let long_desc = "x".repeat(200);
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "description": long_desc
+            })),
+            ..Default::default()
+        };
+        let (desc, _) = extract_agent_meta(&input);
+        assert_eq!(desc.len(), 120);
+    }
+
+    #[test]
+    fn extract_agent_meta_empty_when_no_fields() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({})),
+            ..Default::default()
+        };
+        let (desc, sub_type) = extract_agent_meta(&input);
+        assert!(desc.is_empty());
+        assert_eq!(sub_type, "general-purpose");
+    }
+
+    #[test]
+    fn extract_agent_meta_uses_subagent_type() {
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({
+                "description": "Test task",
+                "subagent_type": "code-reviewer"
+            })),
+            ..Default::default()
+        };
+        let (_, sub_type) = extract_agent_meta(&input);
+        assert_eq!(sub_type, "code-reviewer");
     }
 
     #[test]

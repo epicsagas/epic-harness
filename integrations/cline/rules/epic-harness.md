@@ -22,14 +22,34 @@ Use these in your Cline chat:
 
 | Command | Purpose |
 |---------|---------|
-| `/discover` | Explore and define the problem before specifying a solution |
-| `/spec` | Define requirements before coding |
-| `/go` | Build with auto-plan + TDD sub-agents |
-| `/check` | Parallel review + security + tests |
-| `/ship` | Create PR, verify CI, merge |
 | `/evolve` | Inspect or trigger skill evolution |
 | `/team` | Generate project-specific agent team |
 | `/orbit` | Autonomous spec→ship pipeline with council or interactive mode |
+
+## Auto Skills
+
+These skills activate automatically based on context signals:
+
+| Skill | Purpose |
+|-------|---------|
+| `spec` | Define requirements before coding |
+| `go` | Build with auto-plan + TDD sub-agents |
+| `check` | Parallel review + security + tests |
+| `ship` | Create PR, verify CI, merge |
+| `tdd` | New feature or bug fix — Red → Green → Refactor |
+| `debug` | Test failure, runtime error, unexpected behavior |
+| `secure` | Auth, DB, API, or secrets code touched |
+| `verify` | Before marking done or shipping |
+| `document` | Public API/function/module added or changed |
+| `perf` | Loops, DB queries, rendering, or batch ops |
+| `simplify` | File >200 lines, high complexity, or duplication |
+| `council` | Architecture decisions with significant trade-offs |
+| `commit` | Conventional Commits generation |
+| `context` | Session restoration from snapshots |
+| `discover` | Problem discovery — 5 Whys, JTBD, Socratic |
+| `orchestrate` | Multi-agent orchestration status and control |
+| `agent-introspection` | Failure recovery on 3+ consecutive errors |
+| `reflect` | Human-triggered: "Am I using AI as a thought amplifier?" 5-dimension evidence-based self-assessment consuming hook-produced data |
 
 ## ~/.harness/projects/{slug}/ Directory
 
@@ -66,7 +86,7 @@ Anti-patterns to reject:
 Chains spec → go → check → ship in a single session.
 
 **Two modes:**
-- **Interactive**: User runs `/discover` and `/spec` manually, then says "orbit go" to start autonomous execution
+- **Interactive**: User describes the problem, then spec/go/check/ship skills fire automatically
 - **Council auto-spec**: 4-voice council (Architect, Skeptic, Pragmatist, Critic) analyzes the request and generates a spec. User approves or rejects.
 
 **After spec approved**, runs autonomously:

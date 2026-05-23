@@ -5,8 +5,8 @@ members = [".", "src-tauri"]
 name = "epic-harness"
 version = "0.4.1"
 edition = "2024"
-rust-version = "1.85.0"
-description = "6 commands · auto skills · self-evolving Claude Code harness"
+rust-version = "1.95.0"
+description = "3 commands + 19 auto-trigger skills + self-evolving agent harness"
 license = "Apache-2.0"
 repository = "https://github.com/epicsagas/epic-harness"
 homepage = "https://github.com/epicsagas/epic-harness"
@@ -37,7 +37,6 @@ toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
 rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
-
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }

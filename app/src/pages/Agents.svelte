@@ -1,21 +1,40 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { tStore } from '$lib/i18n.js';
+  import { getOrchestratorRun, getOrchestratorAgentStatus } from '../lib/harness.js';
+  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
-  import { tStore } from '$lib/i18n.js';
 
+  let run = $state<OrchestrationRun | null>(null);
+  let agentStatuses = $state<Map<string, OrchAgentStatus>>(new Map());
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
 
-  const lowSuccessTools = $derived(
-    obs ? obs.tool_stats.filter(t => t.success_rate < 0.85) : []
-  );
-
   async function load() {
     try {
       error = null;
-      obs = await getObsSummary();
+      const [orchRun, orchObs] = await Promise.all([
+        getOrchestratorRun(),
+        getObsSummary(),
+      ]);
+      run = orchRun;
+      obs = orchObs;
+
+      // Load per-agent statuses
+      if (orchRun && orchRun.agents) {
+        const statusMap = new Map<string, OrchAgentStatus>();
+        await Promise.all(
+          orchRun.agents.map(async (agent) => {
+            try {
+              const status = await getOrchestratorAgentStatus(agent.id);
+              if (status) statusMap.set(agent.id, status);
+            } catch { /* skip missing */ }
+          })
+        );
+        agentStatuses = statusMap;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -25,20 +44,62 @@
 
   onMount(() => {
     load();
-    const id = setInterval(load, 30000);
+    const id = setInterval(() => {
+      if (!document.hidden) load();
+    }, 5000);
     return () => clearInterval(id);
   });
 
-  function truncate(s: string, len: number): string {
-    return s.length > len ? s.slice(0, len) + '…' : s;
+  function statusPillClass(status: string): string {
+    switch (status) {
+      case 'running': return 'info';
+      case 'done': return 'success';
+      case 'failed': return 'danger';
+      case 'blocked': return 'warning';
+      default: return 'info';
+    }
+  }
+
+  function runStatusPillClass(status: string): string {
+    switch (status) {
+      case 'running': return 'info';
+      case 'complete': return 'success';
+      case 'aborted': return 'danger';
+      case 'paused': return 'warning';
+      default: return 'info';
+    }
   }
 
   function relativeTime(ts: string): string {
+    if (!ts) return '--';
     const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (diff < 0) return 'just now';
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
     return `${Math.floor(diff / 3600)}h ago`;
   }
+
+  function progressPercent(agent: OrchAgentDef): number {
+    const status = agentStatuses.get(agent.id);
+    if (status) return Math.round(status.progress * 100);
+    if (agent.status === 'done') return 100;
+    return 0;
+  }
+
+  const activeCount = $derived(
+    run ? run.agents.filter(a => a.status === 'running').length : 0
+  );
+  const completedCount = $derived(
+    run ? run.agents.filter(a => a.status === 'done').length : 0
+  );
+  const failedCount = $derived(
+    run ? run.agents.filter(a => a.status === 'failed').length : 0
+  );
+
+  // Low success tools from obs
+  const lowSuccessTools = $derived(
+    obs ? obs.tool_stats.filter(t => t.success_rate < 0.85) : []
+  );
 
   function scorePillClass(score: number): string {
     if (score >= 0.9) return 'success';
@@ -52,8 +113,8 @@
 </script>
 
 <div class="screen-header">
-  <h2>{$tStore('pageAgents')}</h2>
-  <p>{$tStore('pageAgentsDesc')}</p>
+  <h2>{$tStore('pageAgentsLive')}</h2>
+  <p>{$tStore('pageAgentsLiveDesc')}</p>
 </div>
 
 {#if error}
@@ -64,11 +125,11 @@
   </div>
 {/if}
 
-<!-- Active Agents -->
-<div class="panel" style="margin-bottom:16px;">
-  <div class="panel-header"><h3>{$tStore('activeAgents')}</h3></div>
-  <div class="panel-body">
-    {#if loading}
+<!-- Orchestration Run Status -->
+{#if loading}
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header"><h3>{$tStore('liveAgentStatus')}</h3></div>
+    <div class="panel-body">
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
         {#each [1, 2] as _}
           <div class="agent-card" style="flex:1;min-width:200px;">
@@ -78,58 +139,121 @@
           </div>
         {/each}
       </div>
-    {:else if obs && obs.active_agents.length > 0}
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        {#each obs.active_agents as agent}
-          <div class="agent-card" style="flex:1;min-width:200px;">
-            <div class="agent-name">{agent.name}</div>
-            <div class="agent-role" style="margin-bottom:6px;">{$tStore('lastTool')} <code>{agent.last_tool}</code></div>
+    </div>
+  </div>
+{:else if run}
+  <!-- Active Orchestration Run -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header">
+      <h3>{$tStore('liveAgentStatus')}</h3>
+      <span class="pill {runStatusPillClass(run.status)}" style="margin-left:8px;">{run.status}</span>
+    </div>
+    <div class="panel-body">
+      <!-- Run Summary -->
+      <div class="stats-grid" style="margin-bottom:16px;">
+        <div class="stat-card">
+          <div class="stat-label"><span class="dot" style="background:var(--accent)"></span> {$tStore('runIdLabel')}</div>
+          <div class="stat-value" style="font-family:var(--font-mono);font-size:14px;">{run.id}</div>
+          <div class="stat-sub">{$tStore('orchRunSub')}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label"><span class="dot" style="background:var(--info)"></span> {$tStore('activeLabel')}</div>
+          <div class="stat-value">{activeCount}</div>
+          <div class="stat-sub">{$tStore('ofAgents')(run.agents.length)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('completedLabel')}</div>
+          <div class="stat-value">{completedCount}</div>
+          <div class="stat-sub">{$tStore('doneLabel')}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> {$tStore('failedStatusLabel')}</div>
+          <div class="stat-value">{failedCount}</div>
+          <div class="stat-sub">{$tStore('failedLabel')}</div>
+        </div>
+      </div>
+
+      <!-- Agent Cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
+        {#each run.agents as agent}
+          {@const status = agentStatuses.get(agent.id)}
+          <div class="agent-card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div class="agent-name">{agent.role}</div>
+              <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
+            </div>
             <div class="agent-desc" style="font-size:12px;color:var(--fg-secondary);margin-bottom:8px;">
-              {truncate(agent.last_action, 50)}
+              {agent.task}
             </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;">
-              <span class="pill {scorePillClass(agent.score)}">{$tStore('scoreLabel')} {fmtScore(agent.score)}</span>
-              <span style="font-size:11px;color:var(--muted);">{relativeTime(agent.timestamp)}</span>
+            <!-- Progress bar -->
+            <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px;">
+              <div
+                style="height:100%;border-radius:4px;transition:width 0.5s ease;background:{agent.status === 'done' ? 'var(--success)' : agent.status === 'failed' ? 'var(--danger)' : 'var(--accent)'};width:{progressPercent(agent)}%;"
+              ></div>
             </div>
+            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);">
+              <span>{$tStore('agentIdLabel')} <code>{agent.id}</code></span>
+              {#if status}
+                <span>{$tStore('heartbeatLabel')} {relativeTime(status.last_heartbeat)}</span>
+              {:else if agent.completed_at}
+                <span>{$tStore('completedAtLabel')} {relativeTime(agent.completed_at)}</span>
+              {/if}
+            </div>
+            {#if agent.satisfies.length > 0}
+              <div style="margin-top:6px;">
+                {#each agent.satisfies as req}
+                  <span class="pill info" style="font-size:10px;margin-right:4px;">{req}</span>
+                {/each}
+              </div>
+            {/if}
           </div>
         {/each}
       </div>
-    {:else}
-      <div style="text-align:center;padding:24px;color:var(--muted);">
-        <div style="font-size:28px;margin-bottom:6px;">🤖</div>
-        <div>{$tStore('noActiveAgent')}</div>
-      </div>
-    {/if}
-  </div>
-</div>
 
-<!-- Internal Agent Cards (static) -->
-<div class="grid-2">
-  <div class="agent-card">
-    <div class="agent-name">Builder</div>
-    <div class="agent-role">epic:builder</div>
-    <div class="agent-desc">{$tStore('agentBuilderDesc')}</div>
-    <div style="margin-top:10px;"><span class="pill success">TDD</span><span class="pill info">/go</span></div>
+      <!-- Dependency Graph -->
+      {#if Object.keys(run.dependency_graph).length > 0}
+        <div style="margin-top:16px;">
+          <h4 style="margin-bottom:8px;font-size:13px;color:var(--fg-secondary);">{$tStore('depGraphTitle')}</h4>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>{$tStore('colAgentId')}</th>
+                <th>{$tStore('colDependsOn')}</th>
+                <th>{$tStore('colStatus')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each Object.entries(run.dependency_graph) as [agentId, deps]}
+                {@const agentDef = run!.agents.find(a => a.id === agentId)}
+                <tr>
+                  <td style="font-family:var(--font-mono);font-size:11px;">{agentId}</td>
+                  <td style="font-family:var(--font-mono);font-size:11px;color:var(--fg-secondary);">{deps.join(', ')}</td>
+                  <td>
+                    {#if agentDef}
+                      <span class="pill {statusPillClass(agentDef.status)}">{agentDef.status}</span>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+    </div>
   </div>
-  <div class="agent-card">
-    <div class="agent-name">Reviewer</div>
-    <div class="agent-role">epic:reviewer</div>
-    <div class="agent-desc">{$tStore('agentReviewerDesc')}</div>
-    <div style="margin-top:10px;"><span class="pill warning">review</span><span class="pill info">/check</span></div>
+{:else}
+  <!-- No active orchestration -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header"><h3>{$tStore('liveAgentStatus')}</h3></div>
+    <div class="panel-body">
+      <div style="text-align:center;padding:40px 24px;">
+        <div style="font-size:48px;margin-bottom:12px;opacity:0.3;">&#9734;</div>
+        <div style="font-size:15px;color:var(--fg);margin-bottom:6px;">{$tStore('noActiveOrchestration')}</div>
+        <div style="font-size:13px;color:var(--muted);">{$tStore('noActiveOrchestrationHint')}</div>
+      </div>
+    </div>
   </div>
-  <div class="agent-card">
-    <div class="agent-name">Auditor</div>
-    <div class="agent-role">epic:auditor</div>
-    <div class="agent-desc">{$tStore('agentAuditorDesc')}</div>
-    <div style="margin-top:10px;"><span class="pill danger">security</span><span class="pill info">/check</span></div>
-  </div>
-  <div class="agent-card">
-    <div class="agent-name">Planner</div>
-    <div class="agent-role">epic:planner</div>
-    <div class="agent-desc">{$tStore('agentPlannerDesc')}</div>
-    <div style="margin-top:10px;"><span class="pill purple">planning</span><span class="pill info">/go</span></div>
-  </div>
-</div>
+{/if}
 
 <!-- Low Success Tools -->
 <div class="panel" style="margin-top:16px;">
@@ -172,50 +296,7 @@
   </div>
 </div>
 
-<!-- /team Orchestration Patterns (static) -->
-<div class="panel" style="margin-top:16px;">
-  <div class="panel-header"><h3>{$tStore('teamPatternsTitle')}</h3></div>
-  <div class="panel-body" style="padding:0;">
-    <table class="data-table">
-      <thead>
-        <tr>
-          <th>{$tStore('colPattern')}</th>
-          <th>{$tStore('colAgents')}</th>
-          <th>{$tStore('colBestFor')}</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td style="color:var(--fg)">Pipeline</td>
-          <td>3-6</td>
-          <td style="color:var(--fg-secondary)">{$tStore('patternPipelineDesc')}</td>
-        </tr>
-        <tr>
-          <td style="color:var(--fg)">Fan-out</td>
-          <td>3-6</td>
-          <td style="color:var(--fg-secondary)">{$tStore('patternFanOutDesc')}</td>
-        </tr>
-        <tr>
-          <td style="color:var(--fg)">Expert-Pool</td>
-          <td>3-6</td>
-          <td style="color:var(--fg-secondary)">{$tStore('patternExpertPoolDesc')}</td>
-        </tr>
-        <tr>
-          <td style="color:var(--fg)">Producer-Reviewer</td>
-          <td>2-3</td>
-          <td style="color:var(--fg-secondary)">{$tStore('patternProducerReviewerDesc')}</td>
-        </tr>
-        <tr>
-          <td style="color:var(--fg)">Supervisor</td>
-          <td>3-6</td>
-          <td style="color:var(--fg-secondary)">{$tStore('patternSupervisorDesc')}</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- Session-based Agent Activity -->
+<!-- Session Activity -->
 <div class="panel" style="margin-top:16px;">
   <div class="panel-header"><h3>{$tStore('sessionActivity')}</h3></div>
   <div class="panel-body" style="padding:0;">

@@ -7,7 +7,7 @@ Self-evolving agent harness with 4-ring automation.
 ## 4-Ring Model
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
-- **Ring 1 (Commands)**: 8 slash commands via `/harness:discover`, `/harness:spec`, etc.
+- **Ring 1 (Commands)**: 3 slash commands via `/harness:orbit`, `/harness:evolve`, `/harness:team`
 - **Ring 2 (Auto Skills)**: Context-triggered skills fire automatically
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
 
@@ -17,11 +17,6 @@ All commands are namespaced under `/harness:` (e.g., `/harness:orbit`).
 
 | Command | Purpose |
 |---------|---------|
-| `/harness:discover` | Problem discovery (5 Whys / JTBD / Fishbone) |
-| `/harness:spec` | Generate spec with Requirements + Acceptance Criteria |
-| `/harness:go` | Build phase — plan tasks, execute with TDD |
-| `/harness:check` | Parallel review + audit + test verification |
-| `/harness:ship` | Integration test → PR → CI watch |
 | `/harness:evolve` | Analyze session observations, auto-evolve skills |
 | `/harness:team` | Agent team design and management |
 | `/harness:orbit` | Full autonomous pipeline (spec → go → check → ship) |
@@ -30,6 +25,10 @@ All commands are namespaced under `/harness:` (e.g., `/harness:orbit`).
 
 These skills activate automatically when relevant context is detected:
 
+- **spec**: Generate spec with Requirements + Acceptance Criteria
+- **go**: Build phase — plan tasks, execute with TDD
+- **check**: Parallel review + audit + test verification
+- **ship**: Integration test → PR → CI watch
 - **tdd**: New feature or bug fix — Red → Green → Refactor
 - **debug**: Test failure, runtime error, unexpected behavior
 - **secure**: Auth, DB, API, or secrets code touched
@@ -41,6 +40,9 @@ These skills activate automatically when relevant context is detected:
 - **commit**: Conventional Commits generation
 - **context**: Session restoration from snapshots
 - **reflect**: AI usage review and scoring
+- **discover**: Problem discovery — 5 Whys, JTBD, Socratic
+- **orchestrate**: Multi-agent orchestration status and control
+- **agent-introspection**: Failure recovery on 3+ consecutive errors
 
 ## Hooks
 

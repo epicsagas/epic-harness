@@ -126,7 +126,9 @@ pub fn control_file(base: &Path) -> PathBuf {
 }
 
 pub fn agent_dir(base: &Path, agent_id: &str) -> PathBuf {
-    debug_assert!(validate_agent_id(agent_id), "invalid agent_id: {agent_id}");
+    if !validate_agent_id(agent_id) {
+        return orchestrator_dir(base).join("agents").join("_invalid");
+    }
     orchestrator_dir(base).join("agents").join(agent_id)
 }
 
@@ -306,6 +308,309 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
     run.agents
         .iter()
         .all(|a| a.status == AgentStatus::Done || a.status == AgentStatus::Failed)
+}
+
+/// Acquire an exclusive advisory file lock on `path`.
+/// Returns the locked file handle (holds the lock until dropped).
+/// Uses non-blocking flock with retries to avoid blocking hooks.
+///
+/// **Tradeoff**: Binds flock(2) directly via `extern "C"` instead of depending on
+/// the `libc` crate. This avoids a transitive dependency but requires that the
+/// platform's C library exports `flock` with the standard signature — true for
+/// macOS, Linux, and all BSDs. If this ever causes link issues, switch to
+/// `fs4` or `file-lock` crate (one line change in Cargo.toml + here).
+#[cfg(unix)]
+fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    // Advisory exclusive lock via flock(2) — non-blocking with retries.
+    // Uses raw syscall binding to avoid the `libc` crate dependency.
+    // SAFETY: fd is a valid open file descriptor.
+    use std::os::unix::io::AsRawFd;
+    let fd = file.as_raw_fd();
+    const MAX_RETRIES: u32 = 10;
+    const RETRY_DELAY_MS: u64 = 50;
+    for _ in 0..MAX_RETRIES {
+        let result = unsafe { flock(fd, LOCK_EX | LOCK_NB) };
+        if result == 0 {
+            return Ok(file);
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::WouldBlock {
+            return Err(err);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "failed to acquire lock after retries",
+    ))
+}
+
+#[cfg(unix)]
+const LOCK_EX: i32 = 2; // LOCK_EX from sys/file.h
+#[cfg(unix)]
+const LOCK_NB: i32 = 4; // LOCK_NB from sys/file.h
+
+/// Raw flock(2) binding — avoids pulling in the `libc` crate.
+/// Only used on Unix for advisory file locking.
+#[cfg(unix)]
+unsafe fn flock(fd: i32, operation: i32) -> i32 {
+    unsafe extern "C" {
+        fn flock(fd: i32, operation: i32) -> i32;
+    }
+    unsafe { flock(fd, operation) }
+}
+
+/// No-op lock for non-Unix platforms. Advisory file locking (flock) is Unix-only.
+/// On Windows, concurrent agent spawns may produce rare write races on run.json.
+/// Impact is limited: auto-tracked runs are ephemeral and self-heal on next session.
+#[cfg(not(unix))]
+fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+    fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)
+}
+
+/// Upsert an agent into an auto-created run.json.
+///
+/// If `run.json` does not exist, creates a new auto-run with id `auto-{timestamp}`.
+/// If it exists, adds the agent or updates its status.
+/// Uses advisory file locking to prevent TOCTOU races during concurrent agent spawns.
+/// Returns the agent ID used.
+pub fn upsert_agent_to_run(
+    base: &Path,
+    agent_id: &str,
+    description: &str,
+    subagent_type: &str,
+    status: AgentStatus,
+) -> io::Result<String> {
+    let orch_dir = orchestrator_dir(base);
+    fs::create_dir_all(&orch_dir)?;
+
+    // Acquire advisory lock to prevent concurrent write races
+    let lock_path = orch_dir.join("run.json.lock");
+    let _lock = acquire_lock(&lock_path)?;
+
+    let now = crate::shared::helpers::now_iso();
+
+    let mut run = match read_run(base) {
+        Some(r) => r,
+        None => OrchestrationRun {
+            id: {
+                let compact = now.replace(['-', ':'], "").replace('T', "-");
+                let truncated: String = compact.chars().take(19).collect();
+                format!("auto-{truncated}")
+            },
+            status: RunStatus::Running,
+            agents: Vec::new(),
+            dependency_graph: HashMap::new(),
+            created_at: now.clone(),
+            updated_at: now.clone(),
+        },
+    };
+
+    // Ensure agent directory exists
+    let a_dir = agent_dir(base, agent_id);
+    fs::create_dir_all(&a_dir)?;
+
+    let mut changed = false;
+    if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
+        if existing.status != status {
+            existing.status = status.clone();
+            if status == AgentStatus::Done {
+                existing.completed_at = Some(now.clone());
+            }
+            if status == AgentStatus::Running && existing.started_at.is_none() {
+                existing.started_at = Some(now.clone());
+            }
+            changed = true;
+        }
+    } else {
+        run.agents.push(AgentDef {
+            id: agent_id.to_string(),
+            role: subagent_type.to_string(),
+            task: description.to_string(),
+            satisfies: Vec::new(),
+            status: status.clone(),
+            started_at: if status == AgentStatus::Running {
+                Some(now.clone())
+            } else {
+                None
+            },
+            completed_at: if status == AgentStatus::Done {
+                Some(now.clone())
+            } else {
+                None
+            },
+        });
+        changed = true;
+    }
+
+    if !changed {
+        return Ok(agent_id.to_string());
+    }
+
+    // Check if all agents are done
+    if is_run_complete(&run) {
+        run.status = RunStatus::Complete;
+    }
+    run.updated_at = now.clone();
+    write_run(base, &run)?;
+
+    // Write agent status file for dashboard only when status meaningfully changes
+    // (skip on repeated "running" updates to reduce I/O during heartbeat cycles)
+    let should_write_status = match read_agent_status(base, agent_id) {
+        Some(existing) => existing.status != status,
+        None => true, // first time — always write
+    };
+    if should_write_status {
+        let status_file = AgentStatusFile {
+            agent_id: agent_id.to_string(),
+            phase: if status == AgentStatus::Done {
+                "complete".to_string()
+            } else if status == AgentStatus::Running {
+                "running".to_string()
+            } else {
+                "pending".to_string()
+            },
+            progress: if status == AgentStatus::Done {
+                1.0
+            } else {
+                0.0
+            },
+            last_heartbeat: now,
+            status,
+        };
+        write_agent_status(base, agent_id, &status_file)?;
+    }
+
+    Ok(agent_id.to_string())
+}
+
+/// Clean up stale auto-generated runs.
+///
+/// - Complete runs older than 1 hour: remove agent status directories
+/// - Running runs older than 2 hours: mark as complete, then clean
+/// - Individual agents with stale heartbeat (>30 min): mark as done
+pub fn auto_cleanup_stale_runs(base: &Path) {
+    let orch_dir = orchestrator_dir(base);
+    let lock_path = orch_dir.join("run.json.lock");
+    let _lock = match acquire_lock(&lock_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[harness] cleanup: failed to acquire lock: {e}");
+            return;
+        }
+    };
+
+    let Some(mut run) = read_run(base) else {
+        return;
+    };
+
+    // Only auto-cleanup auto-generated runs
+    if !run.id.starts_with("auto-") {
+        return;
+    }
+
+    let current_epoch = epoch_secs_now();
+    let now = crate::shared::helpers::now_iso();
+
+    // Mark individual stale agents as done (heartbeat > 30 min ago)
+    let mut any_agent_cleaned = false;
+    for agent in &mut run.agents {
+        if agent.status != AgentStatus::Running {
+            continue;
+        }
+        let stale = agent.started_at.as_ref().is_none_or(|started| {
+            current_epoch.saturating_sub(epoch_secs_from_iso(started)) > 1800 // 30 min
+        });
+        if stale {
+            agent.status = AgentStatus::Done;
+            agent.completed_at = Some(now.clone());
+            any_agent_cleaned = true;
+        }
+    }
+
+    // Check run-level staleness
+    let run_epoch = epoch_secs_from_iso(&run.updated_at);
+    let stale_complete =
+        run.status == RunStatus::Complete && current_epoch.saturating_sub(run_epoch) > 3600;
+    let stale_running =
+        run.status == RunStatus::Running && current_epoch.saturating_sub(run_epoch) > 7200;
+
+    // Also mark as complete if all agents are now done
+    if run.status == RunStatus::Running && is_run_complete(&run) {
+        run.status = RunStatus::Complete;
+        any_agent_cleaned = true;
+    }
+
+    if any_agent_cleaned {
+        run.updated_at = now;
+        let _ = write_run(base, &run);
+    }
+
+    if !stale_complete && !stale_running && !any_agent_cleaned {
+        return;
+    }
+
+    // Mark as complete if running and stale
+    if stale_running {
+        run.status = RunStatus::Complete;
+        run.updated_at = crate::shared::helpers::now_iso();
+        let _ = write_run(base, &run);
+    }
+
+    // Clean up agent directories — selectively remove only non-running ones
+    let agents_dir = orchestrator_dir(base).join("agents");
+    if agents_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(&agents_dir)
+    {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name == "_invalid" {
+                continue;
+            }
+            let status_path = entry.path().join("status.json");
+            if let Ok(content) = fs::read_to_string(&status_path) {
+                let status: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
+                let is_running = status["status"].as_str() == Some("running");
+                if is_running {
+                    // Check heartbeat staleness
+                    let heartbeat = status["last_heartbeat"].as_str().unwrap_or("");
+                    let heartbeat_age =
+                        current_epoch.saturating_sub(epoch_secs_from_iso(heartbeat));
+                    if heartbeat_age < 1800 {
+                        continue; // still active
+                    }
+                }
+            }
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+/// Parse an ISO-8601 timestamp to epoch seconds.
+/// Reuses the accurate `days_since_epoch` logic from mem::store::util.
+fn epoch_secs_from_iso(iso: &str) -> u64 {
+    crate::mem::store::parse_iso_to_secs(iso)
+}
+
+/// Current time as approximate epoch seconds.
+fn epoch_secs_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 /// Parse the agent output to extract the terminal state.

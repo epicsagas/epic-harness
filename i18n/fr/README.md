@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 8 commandes, 1 pipeline autonome, competences a declenchement automatique, apprend de vos echecs.</p></blockquote>
+<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 3 commandes, 19 skills, 1 pipeline autonome, competences a declenchement automatique, apprend de vos echecs.</p></blockquote>
 
 <p align="center"><b>Moins a memoriser. Plus d'intelligence par frappe. Devient plus intelligent a chaque session.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin Claude Code qui **remplace plus de 30 commandes par 8**, **declenche automatiquement des competences** en fonction de ce que vous faites, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
+Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 19 skills a declenchement automatique**, **declenche automatiquement des competences** en fonction de ce que vous faites, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
 
 <p align="center">
   <img src="./assets/features.png" alt="fonctionnalites epic harness" width="100%" />
@@ -49,7 +49,7 @@ $ /orbit "Add JWT auth to the login API"
 → spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
-Ou procedez etape par etape manuellement :
+Ou invoquer les skills du pipeline directement :
 
 ```bash
 /spec "Add JWT auth to the login API"   # clarifie les exigences → SPEC-*.md
@@ -127,11 +127,11 @@ Prerequis : **Git**. Les installations depuis les sources/binaires necessitent e
 Apres avoir installe le binaire, executez `epic install` (ou `epic install claude`) pour :
 
 1. Creer la structure de repertoire `~/.harness/`
-2. Synchroniser les commandes, competences et agents vers le repertoire de configuration de l'outil
+2. Synchroniser les commandes et competences vers le repertoire de configuration de l'outil
 3. Enregistrer le serveur MCP (harness-mem) pour Claude Code
 4. Creer `~/.harness/config.toml` avec les valeurs par defaut s'il est absent
 
-Sur Claude Code, `hooks/setup.sh` s'execute automatiquement au demarrage de la session et installe le binaire s'il est manquant. Aucune etape manuelle necessaire apres le clone initial.
+Sur Claude Code, `hooks/install.js` s'execute automatiquement au demarrage de la session et installe le binaire s'il est manquant. Aucune etape manuelle necessaire apres le clone initial.
 
 ### Autres outils
 
@@ -163,13 +163,10 @@ Dans une session Claude Code : `/evolve status`
 | Commande | Ce qu'elle fait |
 |----------|----------------|
 | `/orbit` | **Pipeline autonome complet** : spec → go → check → ship → evolve en une seule execution |
-| `/discover` | Cadrez d'abord le probleme — 5 Pourquois, JTBD, questionnement socratique (3 tours max) |
-| `/spec` | Convertit les exigences en document numerote R + AC, enregistre sous `SPEC-{timestamp}.md` |
-| `/go` | Planification automatique → sous-agents TDD → execution parallele avec isolation worktree → verification AC |
-| `/check` | Revue parallele + audit de securite + tests, avec extras bases sur le perimetre (contrat API, accessibilite, securite de migration) |
-| `/ship` | Test de pre-vol isole dans un worktree propre → PR avec rapport de controle complet → surveillance CI + correction automatique |
 | `/team` | Parcourir les bibliotheques d'organisation, recruter des equipes existantes ou en concevoir de nouvelles (3–6 agents, synchronises vers `.claude/agents/`) |
 | `/evolve` | Declencheur d'evolution manuelle — analyser les sessions, voir le tableau de bord, inspecter l'efficacite des competences, restaurer |
+
+Les étapes du pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) sont maintenant des **skills** — déclenchées automatiquement selon le contexte ou appelables par nom. Les anciens noms de commandes fonctionnent toujours via le routage par alias.
 
 ---
 
@@ -216,6 +213,10 @@ Les competences se declenchent automatiquement en fonction du contexte. Vous ne 
 
 | Competence | Se declenche quand |
 |-----------|-------------------|
+| **spec** | Besoin de definir les exigences — convertit en document R + AC numerote |
+| **go** | Phase de build — planification auto → sous-agents TDD → execution parallele → verification AC |
+| **check** | Phase de review — revue de code parallele + audit de securite + tests avec extras par scope |
+| **ship** | Phase de livraison — test isole → PR avec rapport complet → surveillance CI + auto-fix |
 | **tdd** | Implementation d'une nouvelle fonctionnalite ou correction de bug |
 | **debug** | Echec de test ou erreur d'execution |
 | **discover** | Demande vague, solution sans probleme, plainte imprecise |
@@ -227,7 +228,9 @@ Les competences se declenchent automatiquement en fonction du contexte. Vous ne 
 | **context** | Fenetre de contexte > 70 % |
 | **council** | Decisions architecturales ou de conception ambigues |
 | **agent-introspection** | 3+ echecs consecutifs ou schema de reessai circulaire |
-| **reflect** | A la demande : utilisez-vous l'IA comme amplificateur de pensee ? Auto-evaluation basee sur des preuves froides |
+| **reflect** | A la demande `/reflect` : auto-évaluation humaine — "Est-ce que j'utilise l'IA comme amplificateur de pensée ?" 5 dimensions à partir des données du hook |
+| **orchestrate** | Statut d'orchestration multi-agent et controle des agents en direct |
+| **commit** | Generation Conventional Commits — cree automatiquement depuis git diff |
 
 ---
 
@@ -331,7 +334,7 @@ S'executent de maniere invisible a chaque session. Binaire Rust unique (`epic-ha
 | **polish** | Apres Edit | Formatage automatique (Biome/Prettier/ruff/gofmt) + verification de types |
 | **observe** | Chaque utilisation d'outil | Journaliser vers `~/.harness/projects/{slug}/obs/` pour l'evolution |
 | **snapshot** | Avant compactage | Sauvegarder l'etat vers `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fin de session | Analyser les echecs, seeding des competences evoluees, controle, extraire les instincts |
+| **reflect** | Fin de session | Moteur d'évolution auto : analyse des échecs, seeding de skills, mise à jour des métriques, ingest mémoire. Nourrit `/reflect` |
 
 Polish alimente observe : echec de formatage → `lint_fail`, erreur TypeScript → `build_fail`. Le va-et-vient Edition→Erreur est detecte meme lorsque les erreurs proviennent de polish.
 
@@ -396,11 +399,11 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 
 | Outil | Hooks Ring 0 | Commandes | Competences | Agents |
 |-------|-------------|-----------|-------------|--------|
-| **Claude Code** | ✓ Complet | ✓ 8 commandes (incl. /orbit) | ✓ 11 competences | ✓ 4 |
-| **Codex CLI** | ✓ Complet¹ | ✓ 8 prompts (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Antigravity** | ✓ Partiel² | ✓ 8 commandes (incl. /orbit) | ✓ 7 | ✓ 4 |
-| **Cursor** | ✓ Complet³ | ✓ 8 commandes (incl. /orbit) | ✓ via regles | ✓ 4 |
-| **OpenCode** | ✓ Partiel⁴ | ✓ 8 commandes (incl. /orbit) | — | ✓ 4 |
+| **Claude Code** | ✓ Complet | ✓ 3 commandes (incl. /orbit) | ✓ 19 competences | Live |
+| **Codex CLI** | ✓ Complet¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ Partiel² | ✓ 3 commandes (incl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ Complet³ | ✓ 3 commandes (incl. /orbit) | ✓ 19 | Live |
+| **OpenCode** | ✓ Partiel⁴ | ✓ 3 commandes (incl. /orbit) | — | — |
 | **Cline** | ✓ Complet⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
@@ -421,15 +424,15 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("/discover") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship") --> c6("/evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manuel)")
+        c6("/team")
+        c7("/evolve (manuel)")
     end
 
     subgraph R2["Ring 2 — Competences automatiques (declenchement contextuel)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (auto-amelioration)"]

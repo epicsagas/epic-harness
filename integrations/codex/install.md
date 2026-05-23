@@ -32,18 +32,15 @@ cp hooks.json .codex/hooks.json
 ### 2. Skills
 
 Skills are seeded to `~/.codex/skills/` on `epic-harness install codex`.
-Each skill is a directory with `SKILL.md` + optional `agents/openai.yaml`:
+Each skill is a directory with `SKILL.md`:
 
 ```
 ~/.codex/skills/
-├── check/SKILL.md              # /check — verify everything
-├── go/SKILL.md                 # /go — build it
-├── ship/SKILL.md               # /ship — ship it
-├── evolve/SKILL.md             # /evolve — evolve skills
-├── spec/SKILL.md               # /spec — write spec
-├── team/SKILL.md               # /team — manage team
-├── discover/SKILL.md           # /discover — discover context
-├── orbit/SKILL.md              # /orbit — autonomous pipeline
+├── check/SKILL.md              # check — verify everything
+├── go/SKILL.md                 # go — build it
+├── ship/SKILL.md               # ship — ship it
+├── spec/SKILL.md               # spec — write spec
+├── discover/SKILL.md           # discover — discover context
 ├── tdd/SKILL.md                # Auto-skill: TDD
 ├── secure/SKILL.md             # Auto-skill: security
 ├── verify/SKILL.md             # Auto-skill: verification
@@ -56,16 +53,8 @@ Each skill is a directory with `SKILL.md` + optional `agents/openai.yaml`:
 ├── council/SKILL.md            # Auto-skill: multi-voice review
 ├── agent-introspection/SKILL.md # Auto-skill: failure recovery
 ├── reflect/SKILL.md            # Auto-skill: session reflection
-├── discover/SKILL.md           # Auto-skill: codebase discovery
 ├── orchestrate/SKILL.md        # Auto-skill: task orchestration
-├── auditor/SKILL.md            # Sub-agent: security + perf audit
-│   └── agents/openai.yaml
-├── builder/SKILL.md            # Sub-agent: TDD implementation
-│   └── agents/openai.yaml
-├── planner/SKILL.md            # Sub-agent: task planning
-│   └── agents/openai.yaml
-└── reviewer/SKILL.md           # Sub-agent: code review
-    └── agents/openai.yaml
+(No standalone agent files — all agent knowledge absorbed into skills)
 ```
 
 > **Note**: `prompts/` is deprecated in Codex. All commands and agents are seeded as skills.
@@ -109,7 +98,7 @@ All per-project harness data lives in `$HARNESS_DIR/` at your project root:
 ├── sessions/     # Session snapshots
 ├── obs/          # Tool usage observations (JSONL)
 ├── evolved/      # Auto-evolved skills
-├── specs/        # /spec output
+├── specs/        # spec skill output
 ├── team/         # /team output
 └── metrics.json  # Aggregate stats and score history
 ```

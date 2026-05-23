@@ -1,13 +1,12 @@
 # epic-harness
 
-7 commands + 1 autonomous pipeline + auto-trigger skills + self-evolving agent harness.
+3 commands + 19 auto-trigger skills + self-evolving agent harness.
 
 ## Structure
 
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
-  - `commands/` — 8 slash commands (discover, spec, go, check, ship, team, evolve, orbit)
-  - `skills/` — 12 auto skills + _dispatch engine
-  - `agents/` — 4 internal agents (builder, reviewer, auditor, planner)
+  - `commands/` — 3 slash commands (orbit, evolve, team)
+  - `skills/` — 19 auto skills (including spec, go, check, ship, discover, orchestrate) + _dispatch engine
   - `presets/` — Cold-start skill templates
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
@@ -15,17 +14,17 @@
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
 - `integrations/` — Per-tool integration files (6 tools):
-  - `codex/` — hooks.json, config.toml, prompts/(8), skills/(7), agents/(4)
-  - `antigravity/` — gemini-extension.json, GEMINI.md, hooks/hooks.json, skills/(14), agents/(4), commands/(8)
-  - `cursor/` — hooks.json, commands/(8), agents/(4)
-  - `opencode/` — commands/(8), agents/(4), plugins/epic-harness.js
+  - `codex/` — hooks.json, config.toml, prompts/(3), skills/(19)
+  - `antigravity/` — gemini-extension.json, GEMINI.md, hooks/hooks.json, skills/(19), commands/(3)
+  - `cursor/` — hooks.json, commands/(3), rules/
+  - `opencode/` — commands/(3), plugins/epic-harness.js
   - `cline/` — hooks/(5 scripts), rules/epic-harness.md
   - `aider/` — .aider.conf.yml, .aider/CONVENTIONS.md
 
 ## Architecture: 4-Ring Model
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
-- **Ring 1 (Commands)**: 8 user-invoked commands (7 manual + 1 autonomous orbit pipeline)
+- **Ring 1 (Commands)**: 3 user-invoked commands (orbit, evolve, team)
 - **Ring 2 (Auto Skills)**: Context-triggered skills fire automatically
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
 

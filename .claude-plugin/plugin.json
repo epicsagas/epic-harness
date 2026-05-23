@@ -1,7 +1,7 @@
 {
   "name": "epic",
   "version": "0.4.1",
-  "description": "8 commands, auto-trigger skills, self-evolving agent harness. Less to remember, more automation.",
+  "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness. Less to remember, more automation.",
   "author": {
     "name": "epicsagas",
     "url": "https://github.com/epicsagas"
@@ -19,11 +19,5 @@
     "automation"
   ],
   "skills": "./registry/skills/",
-  "commands": "./registry/commands/",
-  "agents": [
-    "./registry/agents/builder.md",
-    "./registry/agents/reviewer.md",
-    "./registry/agents/auditor.md",
-    "./registry/agents/planner.md"
-  ]
+  "commands": "./registry/commands/"
 }

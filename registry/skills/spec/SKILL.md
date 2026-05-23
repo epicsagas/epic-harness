@@ -1,10 +1,9 @@
 ---
-description: "Spec phase. Run after /discover (or when the problem is already clear). Converts user requirements into a numbered Requirements + Acceptance Criteria document saved as SPEC-{timestamp}.md. Prompts /team suggestion when 3+ requirements are detected."
+name: spec
+description: "Spec phase. Converts user requirements into a numbered Requirements + Acceptance Criteria document saved as SPEC-{timestamp}.md. Prompts /team suggestion when 3+ requirements are detected."
 ---
 
-# /spec — Define What to Build
-
-You are starting the **Spec** phase. Your job is to extract a clear, actionable specification from the user's request.
+# Spec — Define What to Build
 
 **CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
@@ -64,9 +63,25 @@ After saving:
    - If a team is already linked: skip this hint.
 2. Tell the user: **"Spec saved. Run `/go` to start building."**
 
+## Anti-Rationalization
+
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|-------------------|
+| "It's a small change, I'll just code it" | Small changes still have wrong assumptions | Write the spec — it takes 2 minutes |
+| "I'll refine the spec after coding" | Spec after code is documentation, not planning | Spec first, code second |
+| "The user didn't give me enough detail" | Then ask — don't invent requirements | Ask focused questions, max 3 at a time |
+
+## Evidence Required
+
+- [ ] Spec file exists at `$HARNESS_DIR/specs/SPEC-{timestamp}.md`
+- [ ] Frontmatter has `status: approved`
+- [ ] Every Requirement has at least one Acceptance Criterion
+- [ ] ACs are observable (can be tested or verified)
+
 ## Red Flags
+
 - Writing code before the spec is approved
 - Assuming requirements that weren't stated
 - Producing a 3-page spec for a 1-line change
-- Skipping this phase for non-trivial features
 - Acceptance criteria that cannot be verified by a test or observation
+- Skipping this phase for non-trivial features
