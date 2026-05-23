@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI: `mem delete` renamed to `mem remove` (old name works as deprecated alias)
 - CLI: `mem query` renamed to `mem list` (old name works as deprecated alias)
 
+## [0.4.2] — 2026-05-24
+
+### Added
+- Antigravity (Gemini CLI fork) integration: extension manifest, hooks, skills, commands
+- `_dispatch` skill: core router that auto-invokes matching skills on context signals
+- `agent-introspection` skill: failure recovery on 3+ consecutive errors
+- `reflect` skill: 5-dimension evidence-based self-assessment
+- `orchestrate` skill: multi-agent orchestration status and control
+- `discover` skill: problem discovery via 5 Whys, JTBD, Socratic method
+- `context` skill: session restoration from snapshots
+
+### Changed
+- Consolidated `commands/`, `skills/`, `agents/` into unified `registry/` structure (#26)
+- Replaced gemini-cli integration with antigravity plugin
+- Fixed 16 accuracy issues across skills, commands, presets, and integrations
+- Optimized 12 skill/command description fields (~236 tokens saved)
+- Fixed `_dispatch` and `reflect` referencing non-existent `mem_query` → `mem_list`
+- Fixed `orchestrate` inbox path accuracy
+- Fixed `orbit` evolve trigger logic for CI failures
+- Fixed `evolve` cross-project path and `resume.ts` → `resume.rs`
+- All preset skills now include required `## Red Flags` section
+- Added 4 structural sections (Process, Anti-Rationalization, Evidence Required, Red Flags) to `_dispatch`
+
+### Fixed
+- Orchestrate test race condition with `serial_test::serial`
+- ARM64 Linux CI build failure: lowered `rust-version` to 1.87.0
+- ARM64 CI runner updated to `ubuntu-24.04-arm` via cargo-dist custom runners
+
 ## [0.3.3] — 2026-05-09
 
 ### Added
