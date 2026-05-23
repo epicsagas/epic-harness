@@ -1,0 +1,7 @@
+name: CodeQL config
+paths-ignore:
+  - app/**
+  - docs/**
+  - i18n/**
+  - integrations/**
+  - assets/**
