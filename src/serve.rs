@@ -240,11 +240,16 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
                 ),
 
-            // ── SPA fallback: serve index.html for any non-API GET route ──
-            (Method::Get, url) if !url.starts_with("/api/") => Response::from_string(
-                DASHBOARD_HTML,
-            )
-            .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
+            // ── SPA fallback: serve index.html for non-API, non-static-asset GET routes ──
+            (Method::Get, url)
+                if !url.starts_with("/api/")
+                    && !url.contains('.')
+                    && !url.starts_with("/favicon") =>
+            {
+                Response::from_string(DASHBOARD_HTML).with_header(
+                    Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
+                )
+            }
 
             _ => Response::from_string("Not Found").with_status_code(404),
         };

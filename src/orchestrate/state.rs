@@ -312,6 +312,7 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 
 /// Acquire an exclusive advisory file lock on `path`.
 /// Returns the locked file handle (holds the lock until dropped).
+/// Uses non-blocking flock with retries to avoid blocking hooks.
 #[cfg(unix)]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -322,20 +323,34 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
         .read(true)
         .write(true)
         .open(lock_path)?;
-    // Advisory exclusive lock via flock(2).
+    // Advisory exclusive lock via flock(2) — non-blocking with retries.
     // Uses raw syscall binding to avoid the `libc` crate dependency.
     // SAFETY: fd is a valid open file descriptor.
     use std::os::unix::io::AsRawFd;
     let fd = file.as_raw_fd();
-    let result = unsafe { flock(fd, LOCK_EX) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
+    const MAX_RETRIES: u32 = 10;
+    const RETRY_DELAY_MS: u64 = 50;
+    for _ in 0..MAX_RETRIES {
+        let result = unsafe { flock(fd, LOCK_EX | LOCK_NB) };
+        if result == 0 {
+            return Ok(file);
+        }
+        let err = io::Error::last_os_error();
+        if err.kind() != io::ErrorKind::WouldBlock {
+            return Err(err);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
     }
-    Ok(file)
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "failed to acquire lock after retries",
+    ))
 }
 
 #[cfg(unix)]
 const LOCK_EX: i32 = 2; // LOCK_EX from sys/file.h
+#[cfg(unix)]
+const LOCK_NB: i32 = 4; // LOCK_NB from sys/file.h
 
 /// Raw flock(2) binding — avoids pulling in the `libc` crate.
 /// Only used on Unix for advisory file locking.
@@ -349,9 +364,11 @@ unsafe fn flock(fd: i32, operation: i32) -> i32 {
 
 #[cfg(not(unix))]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    // TODO: No advisory file locking on non-Unix platforms.
-    // This is a best-effort placeholder — concurrent agent spawns may race.
-    // For production use on Windows, consider `fs4` or `file-lock` crate.
+    // No advisory file locking on non-Unix platforms.
+    // Concurrent agent spawns may race on Windows.
+    eprintln!(
+        "[harness] warning: file locking not available on this platform — concurrent writes may race"
+    );
     fs::OpenOptions::new()
         .create(true)
         .truncate(false)
@@ -484,7 +501,13 @@ pub fn upsert_agent_to_run(
 pub fn auto_cleanup_stale_runs(base: &Path) {
     let orch_dir = orchestrator_dir(base);
     let lock_path = orch_dir.join("run.json.lock");
-    let _lock = acquire_lock(&lock_path);
+    let _lock = match acquire_lock(&lock_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[harness] cleanup: failed to acquire lock: {e}");
+            return;
+        }
+    };
 
     let Some(mut run) = read_run(base) else {
         return;

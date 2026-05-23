@@ -29,9 +29,6 @@ pub use util::{
     validate_uuid,
 };
 
-#[cfg(test)]
-pub(crate) use util::parse_iso_to_secs as _parse_iso_to_secs;
-
 // ── Re-exports: schema ───────────────────────────────
 
 #[cfg(test)]
