@@ -369,16 +369,19 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn is_enabled_defaults_to_false() {
         with_env(None, || assert!(!is_enabled()));
     }
 
     #[test]
+    #[serial_test::serial]
     fn is_enabled_true_when_set() {
         with_env(Some("enabled"), || assert!(is_enabled()));
     }
 
     #[test]
+    #[serial_test::serial]
     fn is_enabled_false_for_other_values() {
         with_env(Some("true"), || assert!(!is_enabled()));
     }
