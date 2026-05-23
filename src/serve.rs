@@ -244,7 +244,9 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             (Method::Get, url)
                 if !url.starts_with("/api/")
                     && !url.contains('.')
-                    && !url.starts_with("/favicon") =>
+                    && !url.starts_with("/favicon")
+                    && !url.starts_with("/robots")
+                    && !url.starts_with("/sitemap") =>
             {
                 Response::from_string(DASHBOARD_HTML).with_header(
                     Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),

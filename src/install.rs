@@ -1172,7 +1172,8 @@ fn interactive_menu_fallback() -> Vec<String> {
 
 /// Remove legacy command/agent files from a previous installation.
 /// Called during install to clean up files that were absorbed into skills.
-fn cleanup_legacy_files(target_dir: &Path) {
+/// Returns the number of removed files for migration reporting.
+fn cleanup_legacy_files(target_dir: &Path) -> u32 {
     let legacy_commands = [
         "discover",
         "spec",
@@ -1183,18 +1184,22 @@ fn cleanup_legacy_files(target_dir: &Path) {
         "status",
     ];
     let legacy_agents = ["builder", "reviewer", "auditor", "planner"];
+    let mut removed = 0u32;
     for name in &legacy_commands {
         let path = target_dir.join(format!("commands/{}.md", name));
         if path.exists() {
             let _ = std::fs::remove_file(&path);
+            removed += 1;
         }
     }
     for name in &legacy_agents {
         let path = target_dir.join(format!("agents/{}.md", name));
         if path.exists() {
             let _ = std::fs::remove_file(&path);
+            removed += 1;
         }
     }
+    removed
 }
 
 // ── Canonical file generation helpers ─────────────────────────────────────────
@@ -1415,7 +1420,12 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 
     // Clean up legacy command/agent files from previous installations.
     if !dry_run {
-        cleanup_legacy_files(target_dir);
+        let removed = cleanup_legacy_files(target_dir);
+        if removed > 0 {
+            eprintln!(
+                "[harness] Removed {removed} legacy file(s) (commands/agents absorbed into skills in v0.4)"
+            );
+        }
     }
 
     0

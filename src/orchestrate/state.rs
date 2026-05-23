@@ -313,6 +313,12 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 /// Acquire an exclusive advisory file lock on `path`.
 /// Returns the locked file handle (holds the lock until dropped).
 /// Uses non-blocking flock with retries to avoid blocking hooks.
+///
+/// **Tradeoff**: Binds flock(2) directly via `extern "C"` instead of depending on
+/// the `libc` crate. This avoids a transitive dependency but requires that the
+/// platform's C library exports `flock` with the standard signature — true for
+/// macOS, Linux, and all BSDs. If this ever causes link issues, switch to
+/// `fs4` or `file-lock` crate (one line change in Cargo.toml + here).
 #[cfg(unix)]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -362,13 +368,11 @@ unsafe fn flock(fd: i32, operation: i32) -> i32 {
     unsafe { flock(fd, operation) }
 }
 
+/// No-op lock for non-Unix platforms. Advisory file locking (flock) is Unix-only.
+/// On Windows, concurrent agent spawns may produce rare write races on run.json.
+/// Impact is limited: auto-tracked runs are ephemeral and self-heal on next session.
 #[cfg(not(unix))]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    // No advisory file locking on non-Unix platforms.
-    // Concurrent agent spawns may race on Windows.
-    eprintln!(
-        "[harness] warning: file locking not available on this platform — concurrent writes may race"
-    );
     fs::OpenOptions::new()
         .create(true)
         .truncate(false)

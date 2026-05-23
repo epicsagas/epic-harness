@@ -44,7 +44,9 @@
 
   onMount(() => {
     load();
-    const id = setInterval(load, 5000); // Refresh every 5s for live view
+    const id = setInterval(() => {
+      if (!document.hidden) load();
+    }, 5000);
     return () => clearInterval(id);
   });
 
