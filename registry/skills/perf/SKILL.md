@@ -5,6 +5,13 @@ description: "Trigger: loops, DB queries, rendering, or batch ops. Catches N+1, 
 
 # Perf — Performance Review
 
+## Process
+
+1. Identify performance-sensitive code paths from the diff (loops, queries, rendering, batch ops)
+2. Run the Checklist below, marking each item as pass, fail, or N/A with reason
+3. For each failure, cite the file and line number with a one-line fix hint
+4. Report findings using the Evidence Required section
+
 ## When to Trigger
 - Database queries inside loops
 - Large data set processing

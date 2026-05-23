@@ -299,6 +299,7 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .chars()
         .take(120)
         .collect();
+    let desc = mask_secrets(&desc);
     let sub_type = input
         .tool_input
         .as_ref()
@@ -307,6 +308,15 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .unwrap_or("general-purpose")
         .to_string();
     (desc, sub_type)
+}
+
+/// Mask common secret patterns in a string.
+fn mask_secrets(s: &str) -> String {
+    let re = regex::Regex::new(
+        r"(sk-[a-zA-Z0-9]{10,}|Bearer\s+[a-zA-Z0-9\-._~+/]+=*|private_key\s*[:=]\s*\S+)",
+    )
+    .unwrap();
+    re.replace_all(s, "<REDACTED>").into_owned()
 }
 
 /// Resolve the output text from hook input.

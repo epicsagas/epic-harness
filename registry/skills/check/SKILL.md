@@ -59,6 +59,10 @@ Launch all 3 modes with `run_in_background: true`.
 
 ## Mode: check:code (Review)
 
+### Constraints
+- Be specific — cite file and line number for every finding
+- Suggest fixes, don't just flag problems — every finding needs a one-line fix hint
+
 ### Review Dimensions
 
 1. **Correctness**: Does the code do what it claims? Edge cases handled?
@@ -85,6 +89,10 @@ Launch all 3 modes with `run_in_background: true`.
 ---
 
 ## Mode: check:security (Audit)
+
+### Constraints
+- False positives are better than false negatives for security
+- Always check `.env` files are in `.gitignore`
 
 ### Security Checklist (OWASP Top 10)
 

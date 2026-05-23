@@ -549,6 +549,10 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
         && let Ok(entries) = fs::read_dir(&agents_dir)
     {
         for entry in entries.flatten() {
+            let name = entry.file_name();
+            if name == "_invalid" {
+                continue;
+            }
             let status_path = entry.path().join("status.json");
             if let Ok(content) = fs::read_to_string(&status_path) {
                 let status: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();

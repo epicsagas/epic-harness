@@ -11,6 +11,10 @@ modes:
 
 **CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
+## Process
+
+Each mode follows its own step sequence below. In auto mode: check state → read inbox → check control → check deps → execute → hand off. In status mode: check state → read agents → render dashboard. In intervene mode: check state → parse command → write directive → confirm.
+
 ## Mode: auto (default)
 
 Triggered automatically when an active multi-agent orchestration is detected.

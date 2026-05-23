@@ -9,6 +9,13 @@ description: "Trigger: auth, DB, API, infra, or secrets code touched — SQL, en
 
 NO DEPLOYMENT WITHOUT SECURITY REVIEW OF ALL CHANGED FILES. Every code change is a potential attack vector.
 
+## Process
+
+1. Identify security-relevant changes from the diff (auth, DB, API, infra, secrets)
+2. Run the Checklist below, marking each item as pass, fail, or N/A with reason
+3. For each failure, cite the file and line number with severity (CRITICAL/HIGH/MEDIUM)
+4. Report findings using the Evidence Required section
+
 ## When to Trigger
 - Authentication or authorization code changed
 - Database queries written or modified
