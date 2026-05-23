@@ -7,19 +7,8 @@ use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
-static MASK_BEARER: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
-static MASK_SK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
-static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret)[=:]\s*\S+").unwrap()
-});
-
-pub fn mask_secrets(s: &str) -> String {
-    let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
-    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-    let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
-    s.into_owned()
-}
+// mask_secrets is now in shared/sanitize.rs — re-exported via common
+use crate::hooks::common::mask_secrets;
 
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()

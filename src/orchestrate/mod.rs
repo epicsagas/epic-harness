@@ -310,17 +310,8 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
     (desc, sub_type)
 }
 
-static SECRETS_RE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-    regex::Regex::new(
-        r"(sk-[a-zA-Z0-9]{10,}|Bearer\s+[a-zA-Z0-9\-._~+/]+=*|private_key\s*[:=]\s*\S+)",
-    )
-    .unwrap()
-});
-
-/// Mask common secret patterns in a string.
-fn mask_secrets(s: &str) -> String {
-    SECRETS_RE.replace_all(s, "<REDACTED>").into_owned()
-}
+// mask_secrets is unified in shared/sanitize.rs — same coverage across all modules
+use crate::shared::sanitize::mask_secrets;
 
 /// Resolve the output text from hook input.
 fn resolve_output(input: &HookInput) -> String {
