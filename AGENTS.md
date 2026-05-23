@@ -30,7 +30,7 @@
 
 ## /orbit — Autonomous Pipeline
 
-Single-command spec-to-PR execution with two entry modes.
+Single-command spec-to-PR execution with three entry modes.
 
 ```mermaid
 flowchart TD
@@ -120,7 +120,7 @@ Reflect merges all same-day session files for analysis.
 
 ## Cold-Start Presets
 
-On first session with no evolved skills, stack-appropriate preset skills auto-apply for detected stacks (Node.js/Go/Python/Rust).
+On first session with no evolved skills, stack-appropriate preset skills auto-apply for detected stacks (Go, Java, Kotlin, Node.js, PHP, Python, Ruby, Rust).
 
 ## Guard Rule Extension
 
@@ -208,6 +208,7 @@ _dispatch skill calls `mem_recall` with current task context before invoking any
 - `evolved/` — Auto-evolved skills (pattern/tool/filetype/error based)
 - `evolved_backup/` — Best-state backup (for stagnation rollback)
 - `team/` — /team outputs
+- `orchestrator/` — Multi-agent orchestration state (run.json, control.json, agents/{id}/)
 - `dispatch/` — Skill dispatch logs (JSONL)
 - `orbit/` — /orbit pipeline state files (PIPELINE-*.json)
 - `metrics.json` — Aggregate stats (score_history, trend, stagnation_count, skill_attribution)

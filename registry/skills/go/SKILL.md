@@ -1,6 +1,6 @@
 ---
 name: go
-description: "Go phase. Reads the approved SPEC file, maps Requirements to tasks (plan), executes via TDD (build), and integrates results verifying all Acceptance Criteria."
+description: "Go phase. Reads approved SPEC, maps requirements to tasks, executes via TDD, integrates verifying acceptance criteria."
 ---
 
 # Go — Build It
@@ -21,7 +21,7 @@ This skill has 3 internal modes that run sequentially:
 
 Decompose the spec into an execution plan.
 
-### Process
+## Process
 
 1. **Load the spec:**
    ```bash

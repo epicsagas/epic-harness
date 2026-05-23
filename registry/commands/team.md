@@ -1,5 +1,5 @@
 ---
-description: "Agent team manager. Browse org libraries (epic org list/show), hire existing teams (epic team link), or interactively design a new team (3–6 agents, Pipeline/Fan-out/Expert-Pool/Producer-Reviewer/Supervisor pattern). Syncs agents to .claude/agents/ and registers them for /go to use."
+description: "Agent team manager. Browse org libraries, hire existing teams, or design new team (3-6 agents, 5 patterns). Syncs to .claude/agents/ for /go."
 ---
 
 # /team — Design Your Agent Team

@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: "Trigger: active multi-agent run. Handles inbox reading, dep resolution, message formatting, handoffs. Also provides status dashboard and intervention control via internal modes."
+description: "Trigger: active multi-agent run. Manages inbox, dependency resolution, message formatting, and agent handoffs."
 modes:
   - auto       # auto-triggered during active orchestration
   - status     # /status — read-only orchestration dashboard
@@ -185,7 +185,7 @@ For `resume`, set action to "resume" and target to the agent_id.
 **Additional actions by type:**
 
 - **cancel all**: Also update `$HARNESS_DIR/orchestrator/run.json` status to "aborted"
-- **redirect**: Also append the new instruction to the target agent's `$HARNESS_DIR/orchestrator/inbox/{agent_id}.jsonl` as a new line: `{"type": "redirect", "instruction": "{new_instruction}", "at": "{ISO-8601}"}`
+- **redirect**: Also append the new instruction to the target agent's `$HARNESS_DIR/orchestrator/agents/{agent_id}/inbox.jsonl` as a new line: `{"type": "redirect", "instruction": "{new_instruction}", "at": "{ISO-8601}"}`
 - **cancel {agent_id}**: Also update the agent's status in run.json to "cancelled"
 
 ### Step 4: Confirm

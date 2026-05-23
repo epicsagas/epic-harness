@@ -1,6 +1,6 @@
 ---
 name: check
-description: "Check phase. Launches parallel review (code quality + security + tests) with scope-based extras (API contract, accessibility, migration safety). Outputs PASS/WARN/FAIL per dimension with spec coverage verification."
+description: "Check phase. Parallel review: code quality + security + tests. Outputs PASS/WARN/FAIL per dimension. Validates spec coverage."
 ---
 
 # Check — Verify Everything

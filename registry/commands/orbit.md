@@ -1,5 +1,5 @@
 ---
-description: "Autonomous pipeline that orchestrates skills: spec → go → check → ship → evolve in one shot. Selects mode automatically — Interactive (vague requirement, user runs discover+spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs evolve automatically on PR+CI success."
+description: "Autonomous spec→go→check→ship→evolve pipeline. Auto-selects mode: Interactive, Council, or Direct. Retries failed checks (max 3). Auto-evolves on success."
 ---
 
 # /orbit — Complete Orbit
@@ -540,7 +540,7 @@ jq --arg now "$NOW" \
 
 ### Step 7a: Evolve (Auto)
 
-**Always run** — regardless of CI status (PASS / FAIL / N/A). Evolve on every completed orbit:
+**Run on every completed orbit** — only when CI passed or CI is not applicable (N/A). On CI FAIL, skip evolve and note the failure for the next session:
 1. Read `$HARNESS_DIR/obs/` session logs
 2. Read `$HARNESS_DIR/metrics.json` + `evolution.jsonl`
 3. Detect failure patterns, weak tools, weak file types

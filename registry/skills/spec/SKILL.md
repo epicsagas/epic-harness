@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "Spec phase. Converts user requirements into a numbered Requirements + Acceptance Criteria document saved as SPEC-{timestamp}.md. Prompts /team suggestion when 3+ requirements are detected."
+description: "Spec phase. Converts user requirements into numbered Requirements + Acceptance Criteria document. Suggests /team for 3+ requirements."
 ---
 
 # Spec — Define What to Build

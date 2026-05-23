@@ -1,6 +1,6 @@
 ---
 name: discover
-description: "Trigger: vague/unfocused request or solution-without-problem. Also invoked via /discover command. Reframes goal before acting."
+description: "Trigger: vague/unfocused request or solution-without-problem. Reframes goal before coding."
 modes:
   - auto   # auto-triggered on vague/unfocused requests
   - /discover  # explicit invocation

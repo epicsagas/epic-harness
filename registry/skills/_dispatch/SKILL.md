@@ -25,7 +25,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User request is vague, unfocused, or presents a solution without a clear problem | **discover** |
 | User shares code for review, mentions code smells, or asks to refactor/analyze | **episteme** → `analyze_code` + `suggest_refactorings` → feed results into **go:plan** mode |
 | User invokes `/reflect`, asks about AI usage quality, "am I using AI well", "thought amplifier", or requests AI usage self-assessment | **reflect** |
-| Session start (project has harness-mem psychographic node) | Call `mem_query` type=psychographic → apply 5-dimension profile to all subsequent skill dispatch |
+| Session start (project has harness-mem psychographic node) | Call `mem_list` type=psychographic → apply 5-dimension profile to all subsequent skill dispatch |
 | Orchestration run active (`$HARNESS_DIR/orchestrator/run.json` exists with status "running") | **orchestrate** |
 | Agent tool output received with inter-agent message | **orchestrate** |
 | User runs `/intervene` | **orchestrate** |
@@ -177,7 +177,7 @@ When user preference data is available in harness-mem (psychographic nodes), ada
 
 ### How to use
 
-1. At session start, call `mem_query` with type=psychographic to load profile
+1. At session start, call `mem_list` with type=psychographic to load profile
 2. If no profile exists, use defaults: moderate/balanced/standard/collaborative/balanced
 3. Apply profile dimensions to skill selection and execution parameters:
 
@@ -195,3 +195,39 @@ Store profiles using `mem_add` with:
 - tags: ["psychographic", "profile", project slug]
 - body: YAML-formatted 5-dimension values
 - importance: 0.8 (high — guides all behavior)
+
+## Process
+
+1. On every user message, scan the Dispatch Rules table for matching context signals
+2. For each match, invoke the corresponding skill BEFORE responding or taking action
+3. If multiple skills match, invoke all of them (order: secure > debug > tdd > others)
+4. Log every dispatch to `$HARNESS_DIR/dispatch/dispatch_YYYYMMDD.jsonl`
+5. Check `$HARNESS_DIR/evolved/` for project-specific skills that supplement static skills
+6. Apply psychographic profile dimensions to skill selection (if profile exists)
+7. If orbit is active, suppress normal phase transition prompts — orbit manages its own phases
+
+## Anti-Rationalization
+
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|-------------------|
+| "I'll invoke skills after responding" | Skills must run BEFORE action to prevent mistakes | Always dispatch first, respond second |
+| "The skill isn't relevant enough" | Even 1% relevance means invoke it | Err on the side of invoking; skills are cheap |
+| "I can skip the confusion protocol" | Wrong guesses cause hours of rework | Stop and present options on ambiguity |
+| "Evolved skills override static ones" | Static skills are authoritative | Static > evolved; evolved only supplements |
+
+## Evidence Required
+
+- [ ] Every dispatch logged to `$HARNESS_DIR/dispatch/dispatch_YYYYMMDD.jsonl`
+- [ ] Matching skill invoked before response
+- [ ] Confusion protocol triggered on high-risk ambiguity
+- [ ] Evolved skills checked at session start
+- [ ] Orbit mode override respected when pipeline is active
+
+## Red Flags
+
+- Responding without dispatching a matching skill first
+- Skipping the confusion protocol on architecture or data model decisions
+- Not logging dispatches (breaks evolution analysis)
+- Treating evolved skills as authoritative over static skills
+- Issuing phase transition prompts during an active orbit
+- Not checking psychographic profile at session start when harness-mem is active

@@ -1,6 +1,6 @@
 ---
 name: reflect
-description: "On-demand: human self-assessment of AI usage quality. Scores 5 dimensions from hook-collected session data. Not an agent performance review."
+description: "On-demand human self-assessment of AI usage quality. Scores 5 dimensions from session data. Not agent performance review."
 ---
 
 # Reflect — Human AI-Usage Self-Assessment
@@ -41,8 +41,8 @@ python3 -c "import json; m=json.load(open('$HARNESS_DIR/metrics.json')); print('
 Query harness-mem (if active):
 ```
 mem_recall(hint="AI usage patterns decisions metacognition", limit=8)
-mem_query(type="decision", limit=5)
-mem_query(type="pattern", limit=5)
+mem_list(type="decision", limit=5)
+mem_list(type="pattern", limit=5)
 ```
 
 ### Step 1 — 5-Dimension Reflection

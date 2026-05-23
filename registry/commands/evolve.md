@@ -1,5 +1,5 @@
 ---
-description: "Evolution engine. Analyzes session observation logs to detect failure patterns and weak tools, then auto-generates targeted skills in $HARNESS_DIR/evolved/. Sub-commands: /evolve (run now), /evolve status (dashboard), /evolve history (trend + skill attribution), /evolve cross-project, /evolve rollback, /evolve reset."
+description: "Evolution engine. Analyzes session observation logs to detect failure patterns and weak tools, then auto-generates targeted skills. Sub-commands: run, status, history, cross-project, rollback, reset."
 ---
 
 # /evolve — Manual Evolution Trigger
@@ -83,7 +83,7 @@ Read `$HARNESS_DIR/dispatch/dispatch_*.jsonl`, then display:
 
 ### `/evolve cross-project` — Cross-project patterns (#2)
 
-Read `~/.harness-global/patterns.jsonl`, then display:
+Read `~/.harness/global_patterns.jsonl`, then display:
 ```
 ## Cross-Project Patterns
 
@@ -125,7 +125,7 @@ Seed (auto-generate targeted skills)
     ↓ 4 seeding paths: pattern / weak tool / weak file type / high-freq error
 Gate (validate: format, dedup, cap of 10)
     ↓ Stagnation check: 3 sessions no improvement → rollback to best checkpoint
-Reload (next session resume.ts reports metrics + loads evolved skills)
+Reload (next session resume.rs reports metrics + loads evolved skills)
 ```
 
 ## Scoring System

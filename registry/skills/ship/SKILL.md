@@ -1,6 +1,6 @@
 ---
 name: ship
-description: "Ship phase. Runs isolated integration test in a fresh worktree, creates a PR with full spec + check report in the body, watches CI, and auto-fixes failures."
+description: "Ship phase. Isolated integration test in fresh worktree, PR creation, CI monitoring, auto-fix on failure."
 ---
 
 # Ship — Ship It

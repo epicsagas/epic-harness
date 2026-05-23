@@ -63,13 +63,6 @@ cp integrations/cursor/rules/harness-context.mdc .cursor/rules/
 
 These rules replace the `session-start` hook (which Cursor does not expose) by injecting harness context into every session automatically.
 
-<!-- Coming in a future release:
-```bash
-cp integrations/cursor/rules/harness-skills.mdc .cursor/rules/
-```
-Condensed TDD, secure, verify, simplify, and perf rules will be available as a separate `harness-skills.mdc` rule file in a future release.
--->
-
 ---
 
 ## 4. Install Slash Commands

@@ -1,6 +1,6 @@
 ---
 name: secure
-description: "Trigger: auth, DB, API, infra, or secrets code touched — SQL, endpoints, env vars, infra config."
+description: "Trigger: auth, DB, API, infra, or secrets code touched — security checklist."
 ---
 
 # Secure — Security Review
