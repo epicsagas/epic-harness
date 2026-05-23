@@ -228,7 +228,7 @@ Les competences se declenchent automatiquement en fonction du contexte. Vous ne 
 | **context** | Fenetre de contexte > 70 % |
 | **council** | Decisions architecturales ou de conception ambigues |
 | **agent-introspection** | 3+ echecs consecutifs ou schema de reessai circulaire |
-| **reflect** | A la demande : utilisez-vous l'IA comme amplificateur de pensee ? Auto-evaluation basee sur des preuves froides |
+| **reflect** | A la demande `/reflect` : auto-évaluation humaine — "Est-ce que j'utilise l'IA comme amplificateur de pensée ?" 5 dimensions à partir des données du hook |
 | **orchestrate** | Statut d'orchestration multi-agent et controle des agents en direct |
 | **commit** | Generation Conventional Commits — cree automatiquement depuis git diff |
 
@@ -334,7 +334,7 @@ S'executent de maniere invisible a chaque session. Binaire Rust unique (`epic-ha
 | **polish** | Apres Edit | Formatage automatique (Biome/Prettier/ruff/gofmt) + verification de types |
 | **observe** | Chaque utilisation d'outil | Journaliser vers `~/.harness/projects/{slug}/obs/` pour l'evolution |
 | **snapshot** | Avant compactage | Sauvegarder l'etat vers `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fin de session | Analyser les echecs, seeding des competences evoluees, controle, extraire les instincts |
+| **reflect** | Fin de session | Moteur d'évolution auto : analyse des échecs, seeding de skills, mise à jour des métriques, ingest mémoire. Nourrit `/reflect` |
 
 Polish alimente observe : echec de formatage → `lint_fail`, erreur TypeScript → `build_fail`. Le va-et-vient Edition→Erreur est detecte meme lorsque les erreurs proviennent de polish.
 

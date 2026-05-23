@@ -1,9 +1,22 @@
 ---
 name: reflect
-description: "Trigger: /reflect or AI usage review. Scores 5 dims (amplification/improvement/metacognition/prompts/efficiency) from harness data."
+description: "On-demand: human self-assessment of AI usage quality. Scores 5 dimensions from hook-collected session data. Not an agent performance review."
 ---
 
-# Reflect — AI Thought-Amplifier Self-Assessment
+# Reflect — Human AI-Usage Self-Assessment
+
+This skill is for **you** (the human) to reflect on how well you're leveraging AI as a thought amplifier — not a review of agent performance.
+
+**Data source**: The `reflect` hook (session-end) automatically collects observations, analyzes patterns, and updates `metrics.json`. This skill consumes that hook-produced data to produce a human-readable self-assessment.
+
+```
+Hook (auto)                    Skill (on-demand /reflect)
+─────────────                  ──────────────────────────
+observe → obs/*.jsonl  ──→     epic-harness reflect --context 30
+evolve → metrics.json  ──→     5-dimension scorecard
+seed → evolved skills  ──→     Action items for the human
+ingest → memory graph  ──→     Trend analysis
+```
 
 ## Iron Law
 

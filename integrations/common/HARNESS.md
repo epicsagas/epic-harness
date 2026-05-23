@@ -33,7 +33,7 @@ These skills activate automatically based on context signals:
 | `discover` | Problem discovery — 5 Whys, JTBD, Socratic |
 | `orchestrate` | Multi-agent orchestration status and control |
 | `agent-introspection` | Failure recovery on 3+ consecutive errors |
-| `reflect` | AI usage review and scoring |
+| `reflect` | Human-triggered: "Am I using AI as a thought amplifier?" 5-dimension evidence-based self-assessment consuming hook-produced data |
 
 ## Session Start
 
@@ -64,7 +64,7 @@ At the beginning of every session:
 | Post tool use | `epic-harness observe` | Record tool scores (async) |
 | Post edit | `epic-harness polish` | Auto-format + typecheck |
 | Pre compact | `epic-harness snapshot` | Save session state |
-| Session end | `epic-harness reflect` | Evolve skills + save metrics |
+| Session end | `epic-harness reflect` | Analyze failures, seed evolved skills, update metrics, ingest to memory |
 
 ## Harness Memory
 

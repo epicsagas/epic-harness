@@ -228,7 +228,7 @@ flowchart TD
 | **context** | Context window > 70% |
 | **council** | अस्पष्ट architectural या design निर्णय |
 | **agent-introspection** | 3+ लगातार विफलताएं या circular retry पैटर्न |
-| **reflect** | ऑन-डिमांड: क्या आप AI को विचार एम्पलीफायर के रूप में उपयोग कर रहे हैं? ठंडे साक्ष्य-आधारित स्व-मूल्यांकन |
+| **reflect** | ऑन-डिमांड `/reflect`: मानव स्व-मूल्यांकन — "क्या मैं AI को विचार एम्पलीफायर के रूप में उपयोग कर रहा हूँ?" हुक-संग्रहित डेटा से 5-आयामी मूल्यांकन |
 | **orchestrate** | मल्टी-एजेंट ऑर्केस्ट्रेशन स्टेटस और लाइव एजेंट नियंत्रण |
 | **commit** | Conventional Commits जनरेशन — git diff से ऑटो-जनरेट किया गया |
 
@@ -334,7 +334,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | Edit के बाद | ऑटो-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | हर टूल उपयोग | `~/.harness/projects/{slug}/obs/` में log करें एवोल्यूशन के लिए |
 | **snapshot** | compact से पहले | `~/.harness/projects/{slug}/sessions/` में state save करें |
-| **reflect** | सेशन एंड | विफलताओं का विश्लेषण, evolved skills seed, gate, instincts निकालें |
+| **reflect** | सेशन एंड | स्वचालित विकास इंजन: विफलता विश्लेषण, स्किल सीडिंग, मेट्रिक्स अपडेट, मेमोरी इंजेस्ट। `/reflect` स्किल को डेटा प्रदान करता है |
 
 Polish observe में फीडबैक देता है: format विफलता → `lint_fail`, TypeScript error → `build_fail`। Edit→Error thrashing तब भी detect होता है जब errors polish से आते हैं।
 

@@ -49,7 +49,7 @@ These skills activate automatically based on context signals:
 | `discover` | Problem discovery — 5 Whys, JTBD, Socratic |
 | `orchestrate` | Multi-agent orchestration status and control |
 | `agent-introspection` | Failure recovery on 3+ consecutive errors |
-| `reflect` | AI usage review and scoring |
+| `reflect` | Human-triggered: "Am I using AI as a thought amplifier?" 5-dimension evidence-based self-assessment consuming hook-produced data |
 
 ## ~/.harness/projects/{slug}/ Directory
 

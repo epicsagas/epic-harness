@@ -250,7 +250,7 @@ Skills trigger automatically based on context. You don't invoke them.
 | **council** | Ambiguous architectural or design decisions |
 | **orchestrate** | Multi-agent orchestration status and live agent intervention |
 | **agent-introspection** | 3+ consecutive failures or circular retry pattern |
-| **reflect** | On-demand: are you using AI as a thought amplifier? Cold evidence-based self-assessment |
+| **reflect** | On-demand `/reflect`: evidence-based human self-assessment — "Am I using AI as a thought amplifier?" Scores 5 dimensions from hook-collected data |
 | **commit** | Conventional Commits generation — auto-generates from git diff |
 
 > **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 19 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
@@ -363,7 +363,7 @@ Run invisibly on every session. Single Rust binary (`epic-harness`) with subcomm
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
+| **reflect** | Session end | Auto-evolution engine: analyze failures, seed evolved skills, update metrics, ingest to memory. Feeds `/reflect` skill with data |
 
 Polish feeds back into observe: format failure → `lint_fail`, TypeScript error → `build_fail`. Edit→Error thrashing gets detected even when errors come from polish.
 

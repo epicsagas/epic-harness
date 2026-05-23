@@ -230,7 +230,7 @@ flowchart TD
 | **context** | 上下文窗口超过 70% |
 | **council** | 存在歧义的架构或设计决策 |
 | **agent-introspection** | 连续 3+ 次失败或循环重试模式 |
-| **reflect** | 按需：你是否在将 AI 作为思维放大器？基于事实的冷静自我评估 |
+| **reflect** | 按需 `/reflect`：人类自我评估 — "我是否将 AI 作为思维放大器？" 基于 hook 收集数据的 5 维评估 |
 
 ---
 
@@ -334,7 +334,7 @@ observe（100% 确认）→ extract_instincts() → instinct 节点（置信度 
 | **polish** | Edit 之后 | 自动格式化（Biome/Prettier/ruff/gofmt）+ 类型检查 |
 | **observe** | 每次工具使用 | 记录到 `~/.harness/projects/{slug}/obs/` 用于进化 |
 | **snapshot** | compact 之前 | 保存状态到 `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | 会话结束 | 分析失败、播种进化技能、门控、提取 instincts |
+| **reflect** | 会话结束 | 自动进化引擎：失败分析、技能播种、指标更新、记忆导入。为 `/reflect` 技能提供数据 |
 
 Polish 反馈到 observe：格式化失败 → `lint_fail`，TypeScript 错误 → `build_fail`。编辑→错误交替模式即使在错误来自 polish 时也能被检测到。
 

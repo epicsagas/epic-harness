@@ -228,7 +228,7 @@ flowchart TD
 | **context** | コンテキストウィンドウが70%超 |
 | **council** | 曖昧なアーキテクチャまたは設計の決定 |
 | **agent-introspection** | 3回以上の連続失敗または循環リトライパターン |
-| **reflect** | オンデマンド: AIを思考増幅器として使っているか? 冷徹な証拠ベースの自己評価 |
+| **reflect** | オンデマンド `/reflect`: 人間の自己評価 — 「AIを思考増幅器として使いこなしているか?」フック収集データによる5次元評価 |
 | **orchestrate** | マルチエージェントオーケストレーションステータスとライブエージェント制御 |
 | **commit** | Conventional Commits生成 — git diffから自動生成 |
 
@@ -334,7 +334,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | 編集後 | 自動フォーマット（Biome/Prettier/ruff/gofmt）+ 型チェック |
 | **observe** | すべてのツール使用時 | `~/.harness/projects/{slug}/obs/` にログを記録（進化用） |
 | **snapshot** | compact前 | `~/.harness/projects/{slug}/sessions/` に状態を保存 |
-| **reflect** | セッション終了 | 失敗を分析、進化スキルをシード、ゲート、本能を抽出 |
+| **reflect** | セッション終了 | 自動進化エンジン: 失敗分析、スキルシード、メトリクス更新、メモリインジェスト。`/reflect` スキルにデータを提供 |
 
 Polishはobserveにフィードバックします: フォーマット失敗 → `lint_fail`、TypeScriptエラー → `build_fail`。polishからエラーが来る場合でも、Edit→Errorスラッシングが検出されます。
 

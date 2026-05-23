@@ -230,7 +230,7 @@ Las habilidades se activan automáticamente según el contexto. No las invocas t
 | **orchestrate** | Estado de orquestación multi-agente y control de agentes en tiempo real |
 | **commit** | Generación de Conventional Commits — creado automáticamente desde git diff |
 | **agent-introspection** | 3+ fallos consecutivos o patrón de reintentos circular |
-| **reflect** | Bajo demanda: ¿estás usando la IA como amplificador del pensamiento? Autoevaluación fría basada en evidencia |
+| **reflect** | Bajo demanda `/reflect`: autoevaluación humana — "¿Estoy usando la IA como amplificador del pensamiento?" 5 dimensiones con datos del hook |
 
 ---
 
@@ -334,7 +334,7 @@ Se ejecutan de forma invisible en cada sesión. Binario único de Rust (`epic-ha
 | **polish** | Después de Edit | Autoformatear (Biome/Prettier/ruff/gofmt) + verificación de tipos |
 | **observe** | Cada uso de herramienta | Registrar en `~/.harness/projects/{slug}/obs/` para evolución |
 | **snapshot** | Antes de compactar | Guardar estado en `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fin de sesión | Analizar fallos, sembrar habilidades evolucionadas, gate, extraer instintos |
+| **reflect** | Fin de sesión | Motor de evolución automática: análisis de fallos, seeding de skills, métricas, ingest a memoria. Alimenta `/reflect` |
 
 Polish retroalimenta en observe: fallo de formato → `lint_fail`, error de TypeScript → `build_fail`. El thrashing Edit→Error se detecta incluso cuando los errores provienen de polish.
 

@@ -229,7 +229,7 @@ flowchart TD
 | **council** | 모호한 아키텍처 또는 설계 결정 |
 | **orchestrate** | 멀티 에이전트 오케스트레이션 상태 및 라이브 에이전트 제어 |
 | **agent-introspection** | 3회 이상 연속 실패 또는 순환 재시도 패턴 |
-| **reflect** | 온디맨드: AI를 사고 증폭기로 활용하고 있는가? 냉정한 증거 기반 자기 평가 |
+| **reflect** | 온디맨드 `/reflect`: 휴먼 자기 평가 — "AI를 사고 증폭기로 잘 쓰고 있는가?" 훅이 수집한 데이터로 5차원 증거 기반 평가 |
 | **commit** | Conventional Commits 생성 — git diff에서 자동 생성 |
 
 ---
@@ -334,7 +334,7 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 | **polish** | Edit 후 | 자동 포맷 (Biome/Prettier/ruff/gofmt) + 타입체크 |
 | **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 로깅 |
 | **snapshot** | compact 전 | `~/.harness/projects/{slug}/sessions/`에 상태 저장 |
-| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트, instinct 추출 |
+| **reflect** | 세션 종료 | 자동 진화 엔진: 실패 분석, 진화 스킬 시딩, 메트릭 업데이트, 메모리 인제스트. `/reflect` 스킬에 데이터 제공 |
 
 polish는 observe로 피드백됩니다: 포맷 실패 → `lint_fail`, TypeScript 에러 → `build_fail`. Edit→Error 쓰래싱은 에러가 polish에서 발생해도 감지됩니다.
 

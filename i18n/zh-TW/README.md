@@ -228,7 +228,7 @@ flowchart TD
 | **context** | 上下文視窗使用超過 70% |
 | **council** | 模糊的架構或設計決策 |
 | **agent-introspection** | 連續 3 次以上失敗或循環重試模式 |
-| **reflect** | 按需觸發：你是否將 AI 作為思考放大器？基於冷证据的自我評估 |
+| **reflect** | 按需 `/reflect`：人類自我評估 — 「我是否將 AI 作為思考放大器？」基於 hook 收集資料的 5 維評估 |
 | **orchestrate** | 多代理編排狀態和即時代理控制 |
 | **commit** | 約定式提交生成 — 從 git diff 自動生成 |
 
@@ -334,7 +334,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | Edit 執行後 | 自動格式化（Biome/Prettier/ruff/gofmt）+ 型別檢查 |
 | **observe** | 每次工具呼叫 | 記錄到 `~/.harness/projects/{slug}/obs/`，用於進化 |
 | **snapshot** | 壓縮前 | 將狀態儲存到 `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | 工作階段結束 | 分析失敗、播種進化技能、門控、提取直覺 |
+| **reflect** | 工作階段結束 | 自動進化引擎：失敗分析、技能播種、指標更新、記憶匯入。為 `/reflect` 技能提供資料 |
 
 Polish 回饋至 observe：格式化失敗 → `lint_fail`，TypeScript 錯誤 → `build_fail`。即使錯誤來自 polish，Edit→Error 抖振也會被偵測到。
 

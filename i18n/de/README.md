@@ -230,7 +230,7 @@ Skills werden automatisch basierend auf dem Kontext ausgelöst. Sie rufen sie ni
 | **context** | Context-Fenster > 70% |
 | **council** | Mehrdeutige Architektur- oder Designentscheidungen |
 | **agent-introspection** | 3+ aufeinanderfolgende Fehler oder kreisförmiges Wiederholungsmuster |
-| **reflect** | Auf Abruf: Nutzen Sie KI als Gedankenverstärker? Kalte, evidenzbasierte Selbsteinschätzung |
+| **reflect** | Auf Abruf `/reflect`: menschliche Selbsteinschätzung — "Nutze ich KI als Gedankenverstärker?" 5-dimensionale Bewertung aus Hook-Daten |
 
 ---
 
@@ -334,7 +334,7 @@ Laufen unsichtbar bei jeder Session. Ein einzelnes Rust-Binary (`epic-harness`) 
 | **polish** | Nach Edit | Auto-Formatierung (Biome/Prettier/ruff/gofmt) + Typprüfung |
 | **observe** | Jede Tool-Nutzung | In `~/.harness/projects/{slug}/obs/` für Evolution protokollieren |
 | **snapshot** | Vor Compact | Zustand in `~/.harness/projects/{slug}/sessions/` speichern |
-| **reflect** | Session-Ende | Fehler analysieren, entwickelte Skills seeden, prüfen, Instincts extrahieren |
+| **reflect** | Session-Ende | Auto-Evolutions-Engine: Fehleranalyse, Skill-Seeding, Metriken aktualisieren, Memory-Ingest. Liefert Daten für `/reflect` |
 
 Polish meldet Ergebnisse zurück an observe: Formatierungsfehler → `lint_fail`, TypeScript-Fehler → `build_fail`. Edit→Error-Thrashing wird sogar erkannt, wenn die Fehler aus polish stammen.
 
