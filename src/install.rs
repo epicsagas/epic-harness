@@ -1853,7 +1853,10 @@ mod tests {
             .iter()
             .filter(|(p, _)| p.starts_with("commands/"))
             .collect();
-        assert!(cmd_files.is_empty(), "expected no command files (unified into skills)");
+        assert!(
+            cmd_files.is_empty(),
+            "expected no command files (unified into skills)"
+        );
     }
 
     #[test]
