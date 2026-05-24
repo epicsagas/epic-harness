@@ -1,4 +1,5 @@
 ---
+name: evolve
 description: "Trigger skill evolution manually — analyze observations, evolve skills, show status, or rollback"
 ---
 
@@ -35,7 +36,6 @@ Read `$HARNESS_DIR/metrics.json` and `$HARNESS_DIR/evolution.jsonl`, then displa
 ### Score History (last 5 sessions)
 | Session | Success Rate | Avg Score | Observations | Tool Success | Output Quality |
 |---------|-------------|-----------|--------------|-------------|---------------|
-(read score_history array, show dimension_averages for each)
 
 ### Evolved Skills
 (list $HARNESS_DIR/evolved/*/SKILL.md with name and description from frontmatter)
@@ -57,46 +57,21 @@ Read `$HARNESS_DIR/evolution.jsonl` (full history), then display:
 ## Evolution History
 
 ### Trend Over Time
-(Plot success_rate over all sessions — use text sparkline or table)
-
 | Session # | Date | Success Rate | Avg Score | Skills | Patterns |
 |-----------|------|-------------|-----------|--------|----------|
-(each row = one evolution.jsonl entry)
 
 ### Cumulative Pattern Frequency
-(Aggregate all failure_patterns across all sessions)
 | Pattern | Total Count | First Seen | Last Seen |
 |---------|-------------|------------|-----------|
 
 ### Skill Effectiveness
-Read `$HARNESS_DIR/metrics.json` → `skill_attribution`, then display:
 | Skill | Sessions Active | Avg Score With | Avg Score Without | Delta |
 |-------|----------------|----------------|-------------------|-------|
-(highlight positive delta = effective, negative = consider removing)
 
 ### Dispatch Analysis
-Read `$HARNESS_DIR/dispatch/dispatch_*.jsonl`, then display:
 | Skill | Times Invoked | Top Trigger Signals |
 |-------|--------------|---------------------|
 ```
-
-### `/evolve cross-project` — Cross-project patterns
-
-Read `~/.harness-global/patterns.jsonl`, then display:
-```
-## Cross-Project Patterns
-
-### Weak Tools Across Projects
-| Tool | Projects Affected | Frequency |
-|------|-------------------|-----------|
-
-### Common Error Patterns
-| Error Type | Projects | Total Occurrences |
-|------------|----------|-------------------|
-```
-
-To opt-in: create `$HARNESS_DIR/.cross-project-enabled` file.
-To opt-out: remove it.
 
 ### `/evolve rollback` — Undo last evolution
 1. If `$HARNESS_DIR/evolved_backup/` exists, restore it to `$HARNESS_DIR/evolved/`
@@ -110,9 +85,6 @@ To opt-out: remove it.
 3. Confirm with user first
 
 ## How Evolution Works
-
-The evolution loop runs automatically at session end (via `reflect` hook).
-This command lets you trigger it manually or inspect the state.
 
 ```
 Observe (PostToolUse — multi-dimensional scoring)

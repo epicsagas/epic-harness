@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 3 个命令、19 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
+<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 22 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
 
 <p align="center"><b>更少的记忆负担。每次按键更多的智能。每次会话都在变得更聪明。</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个 Claude Code 插件，**将 30+ 条命令整合为 3 个命令 + 19 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
+一个 Claude Code 插件，**将 30+ 条命令整合为 22 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
@@ -164,15 +164,20 @@ ls ~/.harness/              # 数据目录存在
 
 ---
 
-## 命令
+## 管道技能（Ring 1）
 
-| 命令 | 功能说明 |
+| 技能 | 功能说明 |
 |---------|-------------|
-| `/orbit` | **完整自主流水线**：一次性完成 spec → go → check → ship → evolve |
-| `/team` | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
-| `/evolve` | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
+| **discover** | 问题发现 — 5 Whys、JTBD、Socratic 方法 |
+| **spec** | 需求定义 — 转换为编号的 R + AC 文档 |
+| **go** | 构建阶段 — 自动规划 → TDD 子智能体 → 并行执行 → AC 验证 |
+| **check** | 审查阶段 — 并行代码审查 + 安全审计 + 测试 |
+| **ship** | 发布阶段 — 隔离测试 → PR → CI 监控 + 自动修复 |
+| **evolve** | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
+| **team** | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
+| **orchestrate** | 多智能体编排状态和实时智能体控制 |
 
-管道阶段（`/spec`、`/go`、`/check`、`/ship`、`/discover`）现在是**技能** — 根据上下文自动触发，也可以按名称直接调用。旧命令名通过别名路由继续有效。
+`/orbit` 将 `discover → spec → go → check → ship → evolve` 封装为一次自主执行。`/team` 和 `/evolve` 可单独调用。所有技能根据上下文自动触发，也可以按名称直接调用。
 
 ---
 
@@ -213,21 +218,15 @@ flowchart TD
 
 ---
 
-## 自动技能（Ring 2）
+## 质量门（Ring 2）
 
 技能根据上下文自动触发。你不需要手动调用它们。
 
 | 技能 | 触发时机 |
 |-------|--------------|
-| **spec** | 需要定义需求时 — 转换为编号的 R + AC 文档 |
-| **go** | 构建阶段 — 自动规划 → TDD子代理 → 并行执行 → AC验证 |
-| **check** | 审查阶段 — 并行代码审查 + 安全审计 + 测试，按范围附加检查 |
-| **ship** | 发布阶段 — 隔离测试 → 包含完整检查报告的PR → CI监控 + 自动修复 |
-| **orchestrate** | 多代理编排状态和实时代理控制 |
 | **commit** | 约定式提交生成 — 从 git diff 自动生成 |
 | **tdd** | 新功能实现或 Bug 修复 |
 | **debug** | 测试失败或运行时错误 |
-| **discover** | 需求模糊、没有明确问题的解决方案、缺乏焦点的抱怨 |
 | **secure** | 涉及认证 / 数据库 / API / 密钥代码 |
 | **perf** | 循环、查询、渲染、批量操作 |
 | **simplify** | 文件超过 200 行或圈复杂度过高 |
@@ -403,15 +402,15 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 所有工具共享相同的 `~/.harness/projects/{slug}/` 数据目录。
 
-| 工具 | Ring 0 Hooks | 命令 | 技能 | 智能体 |
-|------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 19 个技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 7 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 7 | — |
-| **Cursor** | ✓ 完整³ | ✓ 3 条命令（含 /orbit） | ✓ 通过 rules | Live |
-| **OpenCode** | ✓ 部分⁴ | ✓ 3 条命令（含 /orbit） | — | — |
-| **Cline** | ✓ 完整⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| 工具 | Ring 0 Hooks | 技能 | 智能体 |
+|------|-------------|--------|--------|
+| **Claude Code** | ✓ 完整 | ✓ 22 个技能（含 /orbit） | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 7 | — |
+| **Antigravity** | ✓ 部分² | ✓ 7 | — |
+| **Cursor** | ✓ 完整³ | ✓ 通过 rules | Live |
+| **OpenCode** | ✓ 部分⁴ | — | — |
+| **Cline** | ✓ 完整⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² Guard 在 `BeforeModel` 级别 · ³ Cursor 1.7+ · ⁴ JS 插件 · ⁵ 5 个 hook 脚本 · ⁶ 仅 Conventions
 
@@ -426,19 +425,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commands (you call these)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
         end
-        c6("/team")
-        c7("/evolve (manual)")
+        c7("/team (manual)")
+        c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

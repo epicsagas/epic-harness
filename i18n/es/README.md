@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un arnés de agente de codificación IA autoevolutivo — 3 comandos, 19 skills, 1 pipeline autónomo, habilidades de activación automática, aprende de tus fallos.</p></blockquote>
+<blockquote><p align="center">Un arnés de agente de codificación IA autoevolutivo — 22 skills, 1 pipeline autónomo, habilidades de activación automática, aprende de tus fallos.</p></blockquote>
 
 <p align="center"><b>Menos que memorizar. Más inteligencia por tecla pulsada. Se vuelve más inteligente cada sesión.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin de Claude Code que **consolida más de 30 comandos en 3 comandos + 19 skills de activación automática consolidados**, **activa habilidades automáticamente** según lo que estés haciendo, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo.
+Un plugin de Claude Code que **consolida más de 30 comandos en 22 skills de activación automática consolidados**, **activa habilidades automáticamente** según lo que estés haciendo, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo.
 
 <p align="center">
   <img src="../../assets/features.png" alt="características de epic harness" width="100%" />
@@ -164,15 +164,22 @@ Dentro de una sesión de Claude Code: `/evolve status`
 
 ---
 
-## Comandos
+## Pipeline Skills (Ring 1)
 
-| Comando | Qué hace |
-|---------|----------|
-| `/orbit` | **Pipeline autónomo completo**: spec → go → check → ship → evolve en una sola ejecución |
-| `/team` | Explorar librerías de la organización, contratar equipos existentes o diseñar nuevos (3–6 agentes, sincronizados a `.claude/agents/`) |
-| `/evolve` | Disparador manual de evolución — analizar sesiones, ver panel, inspeccionar efectividad de habilidades, rollback |
+8 habilidades que gestionan el ciclo de vida completo de desarrollo. Invocadas directamente o agrupadas automáticamente por `/orbit`.
 
-Las etapas del pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) ahora son **skills** — se activan automáticamente según el contexto o se pueden invocar por nombre. Los nombres antiguos de comandos siguen funcionando mediante enrutamiento de alias.
+| Habilidad | Qué hace |
+|-----------|----------|
+| **discover** | Reframing del problema — 5 Whys, JTBD, diálogo socrático |
+| **spec** | Define requisitos — convierte a documento R + AC numerado |
+| **go** | Fase de build — planificación automática → sub-agentes TDD → ejecución paralela → verificación AC |
+| **check** | Fase de revisión — revisión de código paralela + auditoría de seguridad + tests con extras por ámbito |
+| **ship** | Fase de entrega — test aislado → PR con informe completo → monitorización CI + auto-fix |
+| **evolve** | Motor de auto-mejora — analizar sesiones, generar habilidades, métricas de efectividad, rollback |
+| **/orbit** | Envoltorio autónomo — ejecuta discover → spec → go → check → ship → evolve en una sola invocación |
+| **/team** | Explorar librerías de la organización, contratar equipos existentes o diseñar nuevos (3–6 agentes, sincronizados a `.claude/agents/`) |
+
+Todas las habilidades del pipeline se activan automáticamente según el contexto o se pueden invocar por nombre. Los nombres antiguos de comandos siguen funcionando mediante enrutamiento de alias.
 
 ---
 
@@ -213,26 +220,21 @@ Estado persistido en `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobreviv
 
 ---
 
-## Habilidades Automáticas (Ring 2)
+## Quality Gates (Ring 2)
 
 Las habilidades se activan automáticamente según el contexto. No las invocas tú.
 
 | Habilidad | Se activa cuando |
 |-----------|-----------------|
-| **spec** | Necesita definir requisitos — convierte a documento R + AC numerado |
-| **go** | Fase de build — planificación automática → sub-agentes TDD → ejecución paralela → verificación AC |
-| **check** | Fase de revisión — revisión de código paralela + auditoría de seguridad + tests con extras por ámbito |
-| **ship** | Fase de entrega — test aislado → PR con informe completo → monitorización CI + auto-fix |
 | **tdd** | Implementación de nueva funcionalidad o corrección de errores |
 | **debug** | Fallo de prueba o error en tiempo de ejecución |
-| **discover** | Solicitud vaga, solución sin problema, queja desenfocada |
 | **secure** | Código de auth / BD / API / secrets modificado |
 | **perf** | Bucles, consultas, renderizado, operaciones por lotes |
 | **simplify** | Archivo > 200 líneas o alta complejidad ciclomática |
-| **document** | API pública añadida o firma modificada |
 | **verify** | Antes de completar `/go` o `/ship` |
-| **context** | Ventana de contexto > 70% |
 | **council** | Decisiones arquitectónicas o de diseño ambiguas |
+| **document** | API pública añadida o firma modificada |
+| **context** | Ventana de contexto > 70% |
 | **orchestrate** | Estado de orquestación multi-agente y control de agentes en tiempo real |
 | **commit** | Generación de Conventional Commits — creado automáticamente desde git diff |
 | **agent-introspection** | 3+ fallos consecutivos o patrón de reintentos circular |
@@ -403,15 +405,15 @@ Estrategia de fusión: los agentes modificados solicitan confirmación (predeter
 
 Todas las herramientas comparten el mismo directorio de datos `~/.harness/projects/{slug}/`.
 
-| Herramienta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
-|-------------|-------------|----------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 19 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 19 | — |
-| **Cursor** | ✓ Completo³ | ✓ 3 comandos (incl. /orbit) | ✓ vía rules | Live |
-| **OpenCode** | ✓ Parcial⁴ | ✓ 3 comandos (incl. /orbit) | — | — |
-| **Cline** | ✓ Completo⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| Herramienta | Ring 0 Hooks | Habilidades | Agentes |
+|-------------|-------------|-------------|---------|
+| **Claude Code** | ✓ Completo | ✓ 22 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 22 | — |
+| **Antigravity** | ✓ Parcial² | ✓ 22 | — |
+| **Cursor** | ✓ Completo³ | ✓ vía rules | Live |
+| **OpenCode** | ✓ Parcial⁴ | — | — |
+| **Cline** | ✓ Completo⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² Guard al nivel `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Solo convenciones
 
@@ -426,19 +428,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commands (you call these)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
         end
-        c6("/team")
-        c7("/evolve (manual)")
+        c7("/team")
+        c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council) --- s8(document) --- s9(context) --- s10(orchestrate) --- s11(commit) --- s12(agent-introspection) --- s13(reflect) --- s14(discover)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

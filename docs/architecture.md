@@ -22,7 +22,7 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commands (user-invoked)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit["  /orbit  (autonomous)"]
             direction LR
@@ -33,7 +33,7 @@ flowchart TB
         c7("/evolve")
     end
 
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
         s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
@@ -51,9 +51,9 @@ flowchart TB
 
 ```
 Ring 0 (Invisible)     resume · guard · polish · observe · snapshot · reflect
-Ring 1 (User-Invoked)  /discover → /spec → /go → /check → /ship  ← wrapped by /orbit
+Ring 1 (Pipeline)      /discover → /spec → /go → /check → /ship  ← wrapped by /orbit
                        /team  /evolve
-Ring 2 (Auto-Trigger)  tdd · debug · discover · secure · perf · simplify · document · verify · context · council · agent-introspection
+Ring 2 (Quality Gates) tdd · debug · secure · perf · simplify · document · verify · context · council · agent-introspection
 Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills → gate → reload
 ```
 
@@ -63,12 +63,12 @@ Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills �
 |-------------|------|-------------|
 | Ring 0 → Ring 3 | observe → reflect | Every tool call observation becomes evolution data |
 | Ring 3 → Ring 2 | evolved → dispatch | Evolved skills join auto-skills in the next session |
-| Ring 1 → Ring 2 | /go → tdd, verify | Skills auto-trigger during command execution |
-| Ring 0 → Ring 1 | resume → /go | Session restore provides context for commands |
+| Ring 1 → Ring 2 | /go → tdd, verify | Skills auto-trigger during pipeline execution |
+| Ring 0 → Ring 1 | resume → /go | Session restore provides context for pipelines |
 
 ### Ring 1: /orbit — Autonomous Pipeline
 
-`/orbit` wraps the Ring 1 manual pipeline into a single autonomous execution. It does not add new capabilities — it orchestrates existing commands.
+`/orbit` wraps spec→go→check→ship into a single autonomous execution. It orchestrates existing skills.
 
 ```mermaid
 flowchart TD
@@ -330,17 +330,20 @@ Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node 
 
 ```
 epic-harness/
-├── commands/          # Ring 1: 8 slash commands
-│   ├── discover.md
-│   ├── spec.md
-│   ├── go.md
-│   ├── check.md
-│   ├── ship.md
-│   ├── orbit.md       ← autonomous pipeline wrapper
-│   ├── team.md
-│   └── evolve.md
-├── skills/            # Ring 2: 8 auto skills + dispatch
+├── skills/            # 22 skills (8 pipeline + 14 quality + dispatch)
 │   ├── _dispatch/SKILL.md    ← central dispatcher
+│   │
+│   │── Ring 1: Pipeline Skills (8)
+│   ├── discover/SKILL.md
+│   ├── spec/SKILL.md
+│   ├── go/SKILL.md
+│   ├── check/SKILL.md
+│   ├── ship/SKILL.md
+│   ├── orbit/SKILL.md
+│   ├── evolve/SKILL.md
+│   └── team/SKILL.md
+│
+│   │── Ring 2: Quality Gates (13)
 │   ├── tdd/SKILL.md
 │   ├── debug/SKILL.md
 │   ├── secure/SKILL.md
@@ -348,7 +351,12 @@ epic-harness/
 │   ├── simplify/SKILL.md
 │   ├── document/SKILL.md
 │   ├── verify/SKILL.md
-│   └── context/SKILL.md
+│   ├── context/SKILL.md
+│   ├── council/SKILL.md
+│   ├── reflect/SKILL.md
+│   ├── commit/SKILL.md
+│   ├── orchestrate/SKILL.md
+│   └── agent-introspection/SKILL.md
 ├── agents/            # Internal agents (used by /go, /check)
 │   ├── builder.md
 │   ├── reviewer.md
@@ -359,10 +367,10 @@ epic-harness/
 │   ├── bin/
 │   │   └── epic-harness  ← Rust single binary
 ├── integrations/      # Per-tool integration files
-│   ├── codex/         # hooks.json, config.toml, prompts/(8), skills/(7), agents/(4)
-│   ├── antigravity/   # plugin.json, rules/(1)
-│   ├── cursor/        # hooks.json, commands/(8), agents/(4)
-│   ├── opencode/      # commands/(8), agents/(4), plugins/epic-harness.js
+│   ├── codex/         # hooks.json, config.toml
+│   ├── antigravity/   # gemini-extension.json, GEMINI.md, hooks/
+│   ├── cursor/        # hooks.json, rules/
+│   ├── opencode/      # plugins/epic-harness.js
 │   ├── cline/         # hooks/(5 scripts), rules/epic-harness.md
 │   └── aider/         # .aider.conf.yml, .aider/CONVENTIONS.md
 ├── references/        # Checklists

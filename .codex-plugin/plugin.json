@@ -1,7 +1,7 @@
 {
   "name": "epic",
-  "version": "0.4.3",
-  "description": "8 commands, auto-trigger skills, self-evolving agent harness. Less to remember, more automation.",
+  "version": "0.4.4",
+  "description": "Auto-trigger skills + self-evolving agent harness. Includes orbit, evolve, team, tdd, check, ship and more.",
   "author": {
     "name": "epicsagas",
     "url": "https://github.com/epicsagas"
@@ -19,17 +19,10 @@
     "automation"
   ],
   "skills": "./registry/skills/",
-  "commands": "./registry/commands/",
-  "agents": [
-    "./registry/agents/builder.md",
-    "./registry/agents/reviewer.md",
-    "./registry/agents/auditor.md",
-    "./registry/agents/planner.md"
-  ],
   "interface": {
     "displayName": "Epic Harness",
-    "shortDescription": "Autonomous agent harness — 8 power commands, self-evolving skills.",
-    "longDescription": "Epic Harness gives you 8 slash commands, auto-trigger quality skills (TDD, security, simplify, perf), and a self-evolving skill engine. Less to remember, more automation.",
+    "shortDescription": "Autonomous agent harness — auto-trigger skills, self-evolving engine.",
+    "longDescription": "Epic Harness provides auto-trigger quality skills (TDD, security, simplify, perf), pipeline skills (orbit, evolve, team), and a self-evolving skill engine. Less to remember, more automation.",
     "developerName": "epicsagas",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

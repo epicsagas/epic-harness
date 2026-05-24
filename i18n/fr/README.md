@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 3 commandes, 19 skills, 1 pipeline autonome, competences a declenchement automatique, apprend de vos echecs.</p></blockquote>
+<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 22 skills, 1 pipeline autonome, competences a declenchement automatique, apprend de vos echecs.</p></blockquote>
 
 <p align="center"><b>Moins a memoriser. Plus d'intelligence par frappe. Devient plus intelligent a chaque session.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 19 skills a declenchement automatique**, **declenche automatiquement des competences** en fonction de ce que vous faites, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
+Un plugin Claude Code qui **consolide plus de 30 commandes en 22 skills a declenchement automatique**, **declenche automatiquement des competences** en fonction de ce que vous faites, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
 
 <p align="center">
   <img src="./assets/features.png" alt="fonctionnalites epic harness" width="100%" />
@@ -164,15 +164,20 @@ Dans une session Claude Code : `/evolve status`
 
 ---
 
-## Commandes
+## Pipeline Skills (Ring 1)
 
-| Commande | Ce qu'elle fait |
-|----------|----------------|
-| `/orbit` | **Pipeline autonome complet** : spec → go → check → ship → evolve en une seule execution |
-| `/team` | Parcourir les bibliotheques d'organisation, recruter des equipes existantes ou en concevoir de nouvelles (3–6 agents, synchronises vers `.claude/agents/`) |
-| `/evolve` | Declencheur d'evolution manuelle — analyser les sessions, voir le tableau de bord, inspecter l'efficacite des competences, restaurer |
+| Skill | Ce qu'elle fait |
+|-------|-----------------|
+| **discover** | Clarifie les exigences — 5 Pourquoi, JTBD, socratique |
+| **spec** | Definit les exigences — convertit en document R + AC numerote |
+| **go** | Phase de build — planification auto → sous-agents TDD → execution parallele → verification AC |
+| **check** | Phase de review — revue de code parallele + audit de securite + tests avec extras par scope |
+| **ship** | Phase de livraison — test isole → PR avec rapport complet → surveillance CI + auto-fix |
+| **evolve** | Declencheur d'evolution — analyser les sessions, voir le tableau de bord, inspecter l'efficacite des competences, restaurer |
+| **/orbit** | **Pipeline autonome complet** : discover → spec → go → check → ship → evolve en une seule execution |
+| **/team** | Parcourir les bibliotheques d'organisation, recruter des equipes existantes ou en concevoir de nouvelles (3–6 agents, synchronises vers `.claude/agents/`) |
 
-Les étapes du pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) sont maintenant des **skills** — déclenchées automatiquement selon le contexte ou appelables par nom. Les anciens noms de commandes fonctionnent toujours via le routage par alias.
+Les etapes du pipeline (`discover`, `spec`, `go`, `check`, `ship`, `evolve`) sont des **skills** — declenchees automatiquement selon le contexte ou appelables par nom. `/orbit` encapsule l'ensemble du pipeline en une seule execution autonome.
 
 ---
 
@@ -213,26 +218,21 @@ Etat persiste dans `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survit a l
 
 ---
 
-## Competences automatiques (Ring 2)
+## Quality Gates — Ring 2 (declenchement contextuel)
 
 Les competences se declenchent automatiquement en fonction du contexte. Vous ne les invoquez pas.
 
 | Competence | Se declenche quand |
 |-----------|-------------------|
-| **spec** | Besoin de definir les exigences — convertit en document R + AC numerote |
-| **go** | Phase de build — planification auto → sous-agents TDD → execution parallele → verification AC |
-| **check** | Phase de review — revue de code parallele + audit de securite + tests avec extras par scope |
-| **ship** | Phase de livraison — test isole → PR avec rapport complet → surveillance CI + auto-fix |
 | **tdd** | Implementation d'une nouvelle fonctionnalite ou correction de bug |
 | **debug** | Echec de test ou erreur d'execution |
-| **discover** | Demande vague, solution sans probleme, plainte imprecise |
 | **secure** | Code d'auth / BDD / API / secrets modifie |
 | **perf** | Boucles, requetes, rendu, operations par lot |
 | **simplify** | Fichier > 200 lignes ou complexite cyclomatique elevee |
-| **document** | API publique ajoutee ou signature modifiee |
 | **verify** | Avant de completer `/go` ou `/ship` |
-| **context** | Fenetre de contexte > 70 % |
 | **council** | Decisions architecturales ou de conception ambigues |
+| **document** | API publique ajoutee ou signature modifiee |
+| **context** | Fenetre de contexte > 70 % |
 | **agent-introspection** | 3+ echecs consecutifs ou schema de reessai circulaire |
 | **reflect** | A la demande `/reflect` : auto-évaluation humaine — "Est-ce que j'utilise l'IA comme amplificateur de pensée ?" 5 dimensions à partir des données du hook |
 | **orchestrate** | Statut d'orchestration multi-agent et controle des agents en direct |
@@ -403,15 +403,15 @@ Strategie de fusion : les agents modifies invitent (par defaut : conserver l'exi
 
 Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{slug}/`.
 
-| Outil | Hooks Ring 0 | Commandes | Competences | Agents |
-|-------|-------------|-----------|-------------|--------|
-| **Claude Code** | ✓ Complet | ✓ 3 commandes (incl. /orbit) | ✓ 19 competences | Live |
-| **Codex CLI** | ✓ Complet¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ Partiel² | ✓ 3 commandes (incl. /orbit) | ✓ 19 | — |
-| **Cursor** | ✓ Complet³ | ✓ 3 commandes (incl. /orbit) | ✓ 19 | Live |
-| **OpenCode** | ✓ Partiel⁴ | ✓ 3 commandes (incl. /orbit) | — | — |
-| **Cline** | ✓ Complet⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| Outil | Hooks Ring 0 | Competences | Agents |
+|-------|-------------|-------------|--------|
+| **Claude Code** | ✓ Complet | ✓ 22 competences | Live |
+| **Codex CLI** | ✓ Complet¹ | ✓ 22 | — |
+| **Antigravity** | ✓ Partiel² | ✓ 22 | — |
+| **Cursor** | ✓ Complet³ | ✓ 22 | Live |
+| **OpenCode** | ✓ Partiel⁴ | — | — |
+| **Cline** | ✓ Complet⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² Guard au niveau `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
 
@@ -426,19 +426,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commandes (vous les appelez)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
         end
-        c6("/team")
-        c7("/evolve (manuel)")
+        c7("/team")
+        c8("/evolve (manuel)")
     end
 
-    subgraph R2["Ring 2 — Competences automatiques (declenchement contextuel)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (auto-amelioration)"]

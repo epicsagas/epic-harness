@@ -23,10 +23,10 @@ static SKILL_SPEC: &str = include_str!("../registry/skills/spec/SKILL.md");
 static SKILL_GO: &str = include_str!("../registry/skills/go/SKILL.md");
 static SKILL_CHECK: &str = include_str!("../registry/skills/check/SKILL.md");
 static SKILL_SHIP: &str = include_str!("../registry/skills/ship/SKILL.md");
+static SKILL_ORBIT: &str = include_str!("../registry/skills/orbit/SKILL.md");
+static SKILL_EVOLVE: &str = include_str!("../registry/skills/evolve/SKILL.md");
+static SKILL_TEAM: &str = include_str!("../registry/skills/team/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
-static CMD_EVOLVE: &str = include_str!("../registry/commands/evolve.md");
-static CMD_TEAM: &str = include_str!("../registry/commands/team.md");
-static CMD_ORBIT: &str = include_str!("../registry/commands/orbit.md");
 
 static SKILL_DISPATCH: &str = include_str!("../registry/skills/_dispatch/SKILL.md");
 
@@ -49,6 +49,9 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("go", SKILL_GO),
     ("check", SKILL_CHECK),
     ("ship", SKILL_SHIP),
+    ("orbit", SKILL_ORBIT),
+    ("evolve", SKILL_EVOLVE),
+    ("team", SKILL_TEAM),
 ];
 
 // ── Per-skill Memory Integration sections (appended for codex) ──────────────
@@ -286,23 +289,6 @@ static CODEX_FILES: &[(&str, &str)] = integration_files!(
         ),
     ]
 );
-
-/// Codex command-skills: converted from deprecated prompts/ to skills/ format at install time.
-/// Each entry is (skill_name, source_markdown_with_frontmatter).
-static CODEX_COMMAND_SKILLS: &[(&str, &str)] = &[
-    (
-        "evolve",
-        include_str!("../integrations/codex/prompts/evolve.md"),
-    ),
-    (
-        "team",
-        include_str!("../integrations/codex/prompts/team.md"),
-    ),
-    (
-        "orbit",
-        include_str!("../integrations/codex/prompts/orbit.md"),
-    ),
-];
 
 static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     "cursor",
@@ -832,9 +818,6 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
     };
 
     let files: &[(&str, &str)] = &[
-        ("commands/evolve.md", CMD_EVOLVE),
-        ("commands/team.md", CMD_TEAM),
-        ("commands/orbit.md", CMD_ORBIT),
         ("skills/_dispatch/SKILL.md", SKILL_DISPATCH),
         ("skills/commit/SKILL.md", SKILL_COMMIT),
         ("skills/context/SKILL.md", SKILL_CONTEXT),
@@ -857,6 +840,9 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
         ("skills/go/SKILL.md", SKILL_GO),
         ("skills/check/SKILL.md", SKILL_CHECK),
         ("skills/ship/SKILL.md", SKILL_SHIP),
+        ("skills/orbit/SKILL.md", SKILL_ORBIT),
+        ("skills/evolve/SKILL.md", SKILL_EVOLVE),
+        ("skills/team/SKILL.md", SKILL_TEAM),
     ];
 
     let mut synced = 0u32;
@@ -1204,55 +1190,6 @@ fn cleanup_legacy_files(target_dir: &Path) -> u32 {
 
 /// Convert a Codex prompt .md into a Codex skill SKILL.md format.
 /// Extracts the description from YAML frontmatter and wraps the body.
-fn prompt_to_skill(name: &str, prompt_md: &str) -> String {
-    let (description, body) = if let Some(rest) = prompt_md.strip_prefix("---")
-        && let Some(end) = rest.find("\n---")
-    {
-        let frontmatter = &rest[..end];
-        let desc = frontmatter
-            .lines()
-            .find_map(|line| line.strip_prefix("description:"))
-            .map(|d| d.trim().trim_matches('"'))
-            .unwrap_or(name);
-        let after = end + 4; // skip \n---
-        let b = if after < rest.len() && rest.as_bytes()[after] == b'\n' {
-            &rest[after + 1..]
-        } else if after < rest.len() {
-            &rest[after..]
-        } else {
-            ""
-        };
-        (desc.to_string(), b.to_string())
-    } else {
-        (name.to_string(), prompt_md.to_string())
-    };
-
-    format!("---\nname: {name}\ndescription: \"{description}\"\n---\n{body}")
-}
-
-/// Convert a Codex prompt markdown file to an Antigravity custom command (TOML).
-/// Antigravity commands use `commands/{group}/{name}.toml` with a `prompt` field.
-fn prompt_to_antigravity_command(_name: &str, prompt_md: &str) -> String {
-    // Strip frontmatter — the body is the prompt content.
-    let body = if let Some(rest) = prompt_md.strip_prefix("---")
-        && let Some(end) = rest.find("\n---")
-    {
-        let after = end + 4;
-        if after < rest.len() && rest.as_bytes()[after] == b'\n' {
-            &rest[after + 1..]
-        } else if after < rest.len() {
-            &rest[after..]
-        } else {
-            ""
-        }
-    } else {
-        prompt_md
-    };
-
-    // TOML: escape triple quotes inside the prompt by using single-quoted raw string.
-    format!("prompt = '''\n{}\n'''\n", body.trim())
-}
-
 /// Generate transformed canonical skill files for a tool.
 /// Returns a Vec of (relative_path, content) pairs.
 fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
@@ -1264,15 +1201,6 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
             for (name, content) in CANONICAL_SKILLS {
                 let transformed = transform_skill(tool, name, content);
                 files.push((format!("skills/{}/SKILL.md", name), transformed));
-            }
-            // Command-skills: converted from deprecated prompts/ to skills/ format.
-            // Prompts are no longer seeded to ~/.codex/prompts/ — skills/ is the
-            // only mechanism. These appear as /evolve, /team, /orbit in the Codex UI.
-            for (name, content) in CODEX_COMMAND_SKILLS {
-                files.push((
-                    format!("skills/{}/SKILL.md", name),
-                    prompt_to_skill(name, content),
-                ));
             }
         }
         "cursor" => {
@@ -1290,13 +1218,6 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
             for (name, content) in CANONICAL_SKILLS {
                 let transformed = transform_skill(tool, name, content);
                 files.push((format!("skills/{}/SKILL.md", name), transformed));
-            }
-            // Commands: commands/harness/{name}.toml (Antigravity custom commands)
-            for (name, content) in CODEX_COMMAND_SKILLS {
-                files.push((
-                    format!("commands/harness/{}.toml", name),
-                    prompt_to_antigravity_command(name, content),
-                ));
             }
         }
         // cline, aider: no canonical files to generate
@@ -1903,7 +1824,7 @@ mod tests {
     #[test]
     fn test_generate_canonical_files_antigravity() {
         let files = generate_canonical_files("antigravity");
-        // 18 canonical skills + 3 command-skills = 21
+        // 22 canonical skills (no separate commands — all unified as skills)
         assert!(
             !files.is_empty(),
             "antigravity should generate canonical files"
@@ -1915,8 +1836,8 @@ mod tests {
             .filter(|(p, _)| p.starts_with("skills/"))
             .collect();
         assert!(
-            skill_files.len() >= 16,
-            "expected at least 16 skill files, got {}",
+            skill_files.len() >= 21,
+            "expected at least 21 skill files, got {}",
             skill_files.len()
         );
 
@@ -1927,47 +1848,12 @@ mod tests {
             .collect();
         assert!(agent_files.is_empty(), "expected no agent files");
 
-        // Verify commands
+        // Verify no commands (unified into skills)
         let cmd_files: Vec<_> = files
             .iter()
-            .filter(|(p, _)| p.starts_with("commands/harness/") && p.ends_with(".toml"))
+            .filter(|(p, _)| p.starts_with("commands/"))
             .collect();
-        assert_eq!(cmd_files.len(), 3, "expected 3 command files");
-
-        // Verify all command files are valid TOML (start with prompt = ''')
-        for (path, content) in &cmd_files {
-            assert!(
-                content.starts_with("prompt = '''"),
-                "command {} should start with TOML prompt field",
-                path
-            );
-        }
-    }
-
-    #[test]
-    fn test_prompt_to_antigravity_command() {
-        let input = "\
----
-description: \"Run tests and verify\"
----
-
-# /check — Verify
-
-Run all tests.
-";
-        let result = prompt_to_antigravity_command("check", input);
-        assert!(
-            result.starts_with("prompt = '''"),
-            "should start with TOML prompt field"
-        );
-        assert!(
-            result.contains("# /check — Verify"),
-            "should contain body content"
-        );
-        assert!(
-            !result.contains("description:"),
-            "should not contain frontmatter"
-        );
+        assert!(cmd_files.is_empty(), "expected no command files (unified into skills)");
     }
 
     #[test]

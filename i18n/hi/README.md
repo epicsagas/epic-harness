@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 3 कमांड्स, 19 स्किल्स, 1 स्वायत्त पाइपलाइन, आपकी विफलताओं से सीखता है।</p></blockquote>
+<blockquote><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 22 स्किल्स, 1 स्वायत्त पाइपलाइन, आपकी विफलताओं से सीखता है।</p></blockquote>
 
 <p align="center"><b>याद रखने के लिए कम। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता। हर सेशन के साथ और स्मार्ट।</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक Claude Code प्लगइन जो **30+ कमांड्स + 19 ऑटो-ट्रिगर स्किल्स में समेकित** करता है, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**।
+एक Claude Code प्लगइन जो **22 स्किल्स में समेकित** करता है, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -164,15 +164,18 @@ Claude Code सेशन के अंदर: `/evolve status`
 
 ---
 
-## कमांड
+## पाइपलाइन स्किल्स (Ring 1)
 
-| कमांड | यह क्या करता है |
+| स्किल | यह क्या करता है |
 |---------|-------------|
-| `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: spec → go → check → ship → evolve एक ही शॉट में |
-| `/team` | ऑर्ग लाइब्रेरी ब्राउज़ करें, मौजूदा टीमों को हायर करें, या नई डिज़ाइन करें (3–6 एजेंट, `.claude/agents/` में सिंक) |
+| `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: discover → spec → go → check → ship → evolve एक ही शॉट में |
+| `/discover` | अस्पष्ट अनुरोधों को स्पष्ट करता है — 5 Whys, JTBD, Socratic |
+| `/spec` | आवश्यकताओं को परिभाषित करता है — क्रमांकित R + AC दस्तावेज़ |
+| `/go` | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन |
+| `/check` | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट |
+| `/ship` | शिपिंग चरण — आइसोलेटेड टेस्ट → PR → CI मॉनिटरिंग + ऑटो-फिक्स |
 | `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर — सेशन विश्लेषण, डैशबोर्ड देखें, स्किल प्रभावशीलता निरीक्षण, rollback |
-
-पाइपलाइन चरण (`/spec`, `/go`, `/check`, `/ship`, `/discover`) अब **स्किल्स** हैं — संदर्भ के आधार पर ऑटो-ट्रिगर होते हैं या नाम से इनवोक किए जा सकते हैं। पुराने कमांड नाम अलियास राउटिंग के माध्यम से काम करते हैं।
+| `/team` | ऑर्ग लाइब्रेरी ब्राउज़ करें, मौजूदा टीमों को हायर करें, या नई डिज़ाइन करें (3–6 एजेंट, `.claude/agents/` में सिंक) |
 
 ---
 
@@ -213,26 +216,21 @@ flowchart TD
 
 ---
 
-## ऑटो स्किल्स (Ring 2)
+## क्वालिटी गेट्स (Ring 2)
 
 स्किल्स संदर्भ के आधार पर स्वचालित रूप से ट्रिगर होती हैं। आप उन्हें बुलाते नहीं हैं।
 
 | स्किल | कब ट्रिगर होती है |
 |-------|--------------|
-| **spec** | आवश्यकताओं को परिभाषित करने की आवश्यकता — क्रमांकित R + AC दस्तावेज़ में रूपांतरित करता है |
-| **go** | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन → AC सत्यापन |
-| **check** | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट, स्कोप-आधारित अतिरिक्त |
-| **ship** | शिपिंग चरण — आइसोलेटेड टेस्ट → पूर्ण चेक रिपोर्ट के साथ PR → CI मॉनिटरिंग + ऑटो-फिक्स |
 | **tdd** | नई फीचर इम्प्लीमेंटेशन या बग फिक्स |
 | **debug** | टेस्ट विफलता या runtime error |
-| **discover** | अस्पष्ट अनुरोध, समस्या के बिना समाधान, अनफोकस्ड शिकायत |
 | **secure** | Auth / DB / API / secrets कोड छूा गया |
 | **perf** | लूप, क्वेरी, रेंडरिंग, batch operations |
 | **simplify** | फ़ाइल > 200 लाइनें या उच्च cyclomatic complexity |
-| **document** | सार्वजनिक API जोड़ा गया या signature बदली |
 | **verify** | `/go` या `/ship` पूरा करने से पहले |
-| **context** | Context window > 70% |
 | **council** | अस्पष्ट architectural या design निर्णय |
+| **document** | सार्वजनिक API जोड़ा गया या signature बदली |
+| **context** | Context window > 70% |
 | **agent-introspection** | 3+ लगातार विफलताएं या circular retry पैटर्न |
 | **reflect** | ऑन-डिमांड `/reflect`: मानव स्व-मूल्यांकन — "क्या मैं AI को विचार एम्पलीफायर के रूप में उपयोग कर रहा हूँ?" हुक-संग्रहित डेटा से 5-आयामी मूल्यांकन |
 | **orchestrate** | मल्टी-एजेंट ऑर्केस्ट्रेशन स्टेटस और लाइव एजेंट नियंत्रण |
@@ -403,15 +401,15 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 
 सभी टूल एक ही `~/.harness/projects/{slug}/` डेटा डायरेक्टरी साझा करते हैं।
 
-| टूल | Ring 0 Hooks | कमांड | स्किल्स | एजेंट |
-|------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 3 कमांड (incl. /orbit) | ✓ 19 स्किल्स | Live |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ आंशिक² | ✓ 3 कमांड (incl. /orbit) | ✓ 19 | — |
-| **Cursor** | ✓ पूर्ण³ | ✓ 3 कमांड (incl. /orbit) | ✓ rules के माध्यम से | Live |
-| **OpenCode** | ✓ आंशिक⁴ | ✓ 3 कमांड (incl. /orbit) | — | — |
-| **Cline** | ✓ पूर्ण⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| टूल | Ring 0 Hooks | स्किल्स | एजेंट |
+|------|-------------|--------|--------|
+| **Claude Code** | ✓ पूर्ण | ✓ 22 स्किल्स | Live |
+| **Codex CLI** | ✓ पूर्ण¹ | ✓ 22 | — |
+| **Antigravity** | ✓ आंशिक² | ✓ 22 | — |
+| **Cursor** | ✓ पूर्ण³ | ✓ rules के माध्यम से | Live |
+| **OpenCode** | ✓ आंशिक⁴ | — | — |
+| **Cline** | ✓ पूर्ण⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
 
@@ -426,19 +424,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commands (you call these)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
         end
-        c6("/team")
-        c7("/evolve (manual)")
+        c7("/team")
+        c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council) --- s8(document) --- s9(context) --- s10(agent-introspection) --- s11(reflect) --- s12(orchestrate) --- s13(commit)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -448,7 +446,7 @@ flowchart TB
 
     R0 -->|"observe every tool call"| R3
     R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger skills"| R2
+    R1 -->|"auto-trigger quality gates"| R2
     R0 -->|"resume: restore context"| R1
 ```
 

@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 3個のコマンド、19個のスキル、1つの自律パイプライン、自動トリガースキル、あなたの失敗から学習します。</p></blockquote>
+<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 22個のスキル、1つの自律パイプライン、自動トリガースキル、あなたの失敗から学習します。</p></blockquote>
 
 <p align="center"><b>覚えるべき操作は少なく。キーストローク当たりの知性は高く。セッションを重ねるほどスマートに。</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Claude Codeプラグインで、**30以上のコマンドを3個のコマンド + 19個の自動トリガースキルに統合**し、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。
+Claude Codeプラグインで、**30以上のコマンドを22個のスキルに統合**し、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -164,15 +164,20 @@ Claude Codeセッション内: `/evolve status`
 
 ---
 
-## コマンド
+## パイプラインスキル（Ring 1）
 
-| コマンド | 機能 |
-|---------|------|
-| `/orbit` | **完全自律パイプライン**: spec → go → check → ship → evolve を一括実行 |
-| `/team` | orgのライブラリを閲覧、既存チームを雇用、または新規設計（3–6エージェント、`.claude/agents/` に同期） |
-| `/evolve` | 手動進化トリガー — セッション分析、ダッシュボード表示、スキル有効性確認、ロールバック |
+| スキル | 機能 |
+|-------|------|
+| **/orbit** | **完全自律パイプライン**: discover → spec → go → check → ship → evolve を一括実行 |
+| **discover** | 曖昧なリクエストを明確化 — 5 Whys、JTBD、ソクラテス対話 |
+| **spec** | 要件を番号付きR + ACドキュメントに変換 |
+| **go** | 自動計画 → TDDサブエージェント → 並列実行 → AC検証 |
+| **check** | 並列コードレビュー + セキュリティ監査 + テスト |
+| **ship** | 分離テスト → チェックレポート付きPR → CI監視 + 自動修正 |
+| **evolve** | 手動進化トリガー — セッション分析、ダッシュボード表示、スキル有効性確認、ロールバック |
+| **team** | orgのライブラリを閲覧、既存チームを雇用、または新規設計（3–6エージェント、`.claude/agents/` に同期） |
 
-パイプラインステージ（`/spec`、`/go`、`/check`、`/ship`、`/discover`）は**スキル**になりました — コンテキストに応じて自動トリガーされるか、名前で直接呼び出せます。従来のコマンド名はエイリアスルーティングで引き続き動作します。
+`discover` → `spec` → `go` → `check` → `ship` → `evolve` は `/orbit` でラップされます。`team` と `evolve` は手動呼び出しです。
 
 ---
 
@@ -213,30 +218,19 @@ flowchart TD
 
 ---
 
-## 自動スキル（Ring 2）
+## 品質ゲート（Ring 2）
 
 スキルはコンテキストに基づいて自動的にトリガーされます。手動で呼び出す必要はありません。
 
 | スキル | トリガー条件 |
 |-------|-------------|
-| **spec** | 要件の定義が必要な時 — 番号付きR + ACドキュメントに変換 |
-| **go** | ビルドフェーズ — 自動計画 → TDDサブエージェント → 並列実行 → AC検証 |
-| **check** | レビューフェーズ — 並列コードレビュー + セキュリティ監査 + テスト、スコープ別追加項目 |
-| **ship** | 出荷フェーズ — 分離テスト → チェックレポート付きPR → CI監視 + 自動修正 |
 | **tdd** | 新機能の実装またはバグ修正 |
 | **debug** | テスト失敗またはランタイムエラー |
-| **discover** | 曖昧なリクエスト、問題のないソリューション、焦点の定まらない不満 |
 | **secure** | auth / DB / API / シークレットのコードに触れた場合 |
 | **perf** | ループ、クエリ、レンダリング、バッチ操作 |
 | **simplify** | ファイルが200行超または高サイクロマティック複雑度 |
-| **document** | パブリックAPIの追加またはシグネチャ変更 |
 | **verify** | `/go` または `/ship` 完了前 |
-| **context** | コンテキストウィンドウが70%超 |
 | **council** | 曖昧なアーキテクチャまたは設計の決定 |
-| **agent-introspection** | 3回以上の連続失敗または循環リトライパターン |
-| **reflect** | オンデマンド `/reflect`: 人間の自己評価 — 「AIを思考増幅器として使いこなしているか?」フック収集データによる5次元評価 |
-| **orchestrate** | マルチエージェントオーケストレーションステータスとライブエージェント制御 |
-| **commit** | Conventional Commits生成 — git diffから自動生成 |
 
 ---
 
@@ -403,15 +397,15 @@ epic team delete backend --global      # orgストアから永久に削除
 
 すべてのツールが同じ `~/.harness/projects/{slug}/` データディレクトリを共有します。
 
-| ツール | Ring 0 フック | コマンド | スキル | エージェント |
-|------|-------------|----------|--------|----------|
-| **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 19スキル | Live |
-| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 19 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 19 | — |
-| **Cursor** | ✓ フル³ | ✓ 3コマンド（/orbitを含む） | ✓ ルール経由 | Live |
-| **OpenCode** | ✓ 部分⁴ | ✓ 3コマンド（/orbitを含む） | — | — |
-| **Cline** | ✓ フル⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| ツール | Ring 0 フック | スキル | エージェント |
+|------|-------------|--------|----------|
+| **Claude Code** | ✓ フル | ✓ 22スキル | Live |
+| **Codex CLI** | ✓ フル¹ | ✓ 22 | — |
+| **Antigravity** | ✓ 部分² | ✓ 22 | — |
+| **Cursor** | ✓ フル³ | ✓ ルール経由 | Live |
+| **OpenCode** | ✓ 部分⁴ | — | — |
+| **Cline** | ✓ フル⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² `BeforeModel` レベルでのガード · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
 
@@ -426,19 +420,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commands (you call these)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1(spec) --> c2(go) --> c3(check) --> c4(ship) --> c5(evolve)
+            c1(discover) --> c2(spec) --> c3(go) --> c4(check) --> c5(ship) --> c6(evolve)
         end
-        c6("/team")
-        c7("/evolve (manual)")
+        c7("/team")
+        c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

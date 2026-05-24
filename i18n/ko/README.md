@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 19개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
+<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 22개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
 
 <p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**30개 이상의 명령어를 3개 명령어 + 19개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
+**30개 이상의 명령어를 22개 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -164,15 +164,20 @@ Claude Code 세션 안에서: `/evolve status`
 
 ---
 
-## 명령어
+## 파이프라인 스킬 (Ring 1)
 
-| 명령어 | 기능 |
-|--------|------|
-| `/orbit` | **전체 자율 파이프라인**: spec → go → check → ship → evolve을 한 번에 실행 |
-| `/team` | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
-| `/evolve` | 수동 진화 트리거 — 세션 분석, 대시보드 보기, 스킬 효과 검사, 롤백 |
+| 스킬 | 기능 |
+|------|------|
+| **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 — 5 Whys, JTBD, Socratic |
+| **spec** | 요구사항 정의 — 번호가 매겨진 R + AC 문서로 변환 |
+| **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
+| **check** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
+| **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
+| **evolve** | 진화 — 자동 세션 분석, 패턴 감지, 스킬 시딩, 메트릭 업데이트 |
+| **/team** | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
+| **/evolve** | 수동 진화 트리거 — 대시보드 보기, 스킬 효과 검사, 롤백 |
 
-파이프라인 단계(`/spec`, `/go`, `/check`, `/ship`, `/discover`)는 이제 **스킬**입니다 — 컨텍스트에 따라 자동 트리거되거나 이름으로 직접 호출할 수 있습니다. 기존 명령어 이름은 별칭 라우팅으로 계속 작동합니다.
+파이프라인 스킬은 `/orbit`으로 한 번에 실행되거나 개별적으로 직접 호출할 수 있습니다. `/team`과 `/evolve`는 수동 전용입니다.
 
 ---
 
@@ -213,24 +218,19 @@ flowchart TD
 
 ---
 
-## 자동 스킬 (Ring 2)
+## 품질 게이트 (Ring 2)
 
-스킬은 컨텍스트에 따라 자동으로 트리거됩니다. 직접 호출할 필요가 없습니다.
+품질 게이트 스킬은 컨텍스트에 따라 자동으로 트리거됩니다. 직접 호출할 필요가 없습니다.
 
 | 스킬 | 트리거 조건 |
 |------|------------|
-| **spec** | 요구사항 정의 필요 — 번호가 매겨진 R + AC 문서로 변환 |
-| **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
-| **check** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
-| **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
 | **tdd** | 새로운 기능 구현 또는 버그 수정 |
 | **debug** | 테스트 실패 또는 런타임 에러 |
-| **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 |
 | **secure** | 인증/DB/API/시크릿 코드 수정 시 |
 | **perf** | 루프, 쿼리, 렌더링, 배치 작업 |
 | **simplify** | 파일이 200줄 초과이거나 순환 복잡도가 높을 때 |
-| **document** | 퍼블릭 API 추가 또는 서명 변경 |
 | **verify** | `/go` 또는 `/ship` 완료 전 |
+| **document** | 퍼블릭 API 추가 또는 서명 변경 |
 | **context** | 컨텍스트 윈도우 사용률 > 70% |
 | **council** | 모호한 아키텍처 또는 설계 결정 |
 | **orchestrate** | 멀티 에이전트 오케스트레이션 상태 및 라이브 에이전트 제어 |
@@ -403,15 +403,15 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 모든 도구가 동일한 `~/.harness/projects/{slug}/` 데이터 디렉토리를 공유합니다.
 
-| 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
-|------|-----------|--------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 19개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 19개 | — |
-| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 19개 | — |
-| **Cursor** | ✓ 전체³ | ✓ 3개 명령어 (/orbit 포함) | ✓ 규칙 경유 | Live |
-| **OpenCode** | ✓ 부분⁴ | ✓ 3개 명령어 (/orbit 포함) | — | — |
-| **Cline** | ✓ 전체⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| 도구 | Ring 0 훅 | 스킬 | 에이전트 |
+|------|-----------|------|---------|
+| **Claude Code** | ✓ 전체 | ✓ 22개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 22개 | — |
+| **Antigravity** | ✓ 부분² | ✓ 22개 | — |
+| **Cursor** | ✓ 전체³ | ✓ 규칙 경유 | Live |
+| **OpenCode** | ✓ 부분⁴ | — | — |
+| **Cline** | ✓ 전체⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² `BeforeModel` 레벨에서 guard 실행 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
@@ -426,19 +426,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — 명령어 (직접 호출)"]
+    subgraph R1["Ring 1 — 파이프라인 스킬 (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
         end
-        c6("/team")
-        c7("/evolve (manual)")
+        c7("/team")
+        c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
+    subgraph R2["Ring 2 — 품질 게이트 (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — 진화 (자기 개선)"]

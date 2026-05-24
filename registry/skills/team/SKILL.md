@@ -1,10 +1,11 @@
 ---
+name: team
 description: "Design or update an org-level agent team — cross-project, append-merge"
 ---
 
 # /team — Agent Team Design
 
-This command is a thin wrapper around the `epic team` CLI.
+This skill is a thin wrapper around the `epic team` CLI.
 
 **Run in terminal:**
 ```

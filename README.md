@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">A self-evolving AI coding agent harness — 3 commands, 19 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
+<blockquote><p align="center">A self-evolving AI coding agent harness — 22 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
 
 <p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A Claude Code plugin that **consolidates 30+ commands into 3 commands + 19 auto-trigger skills**, and **evolves new skills** from your own failure patterns.
+A Claude Code plugin with **22 skills (8 pipeline + 14 quality gates)**, a **self-evolving engine**, and a **single-command autonomous pipeline** that ships features from spec to PR.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # set to 0 to disable auto-launch
 auto_open = true  # open browser on first session
 ```
 
-Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (19) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+Screens: **Dashboard** · /orbit Pipeline · Skills (22) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -177,15 +177,20 @@ Inside a Claude Code session: `/evolve status`
 
 ---
 
-## Commands
+## Pipeline Skills (Ring 1)
 
-| Command | What it does |
-|---------|-------------|
+8 skills that orchestrate multi-step workflows. Invoke with `/skill-name` or let `/orbit` chain them.
+
+| Skill | What it does |
+|-------|-------------|
 | `/orbit` | **Full autonomous pipeline**: spec → go → check → ship → evolve in one shot |
-| `/team` | Browse org libraries, hire existing teams, or design new ones (3–6 agents, synced to `.claude/agents/`) |
-| `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, inspect skill effectiveness, rollback |
-
-Pipeline stages (`/spec`, `/go`, `/check`, `/ship`, `/discover`) are now **skills** — they auto-trigger via context or can be invoked by name. Legacy command names still work via alias routing.
+| `/discover` | Problem discovery — 5 Whys, JTBD, Socratic questioning |
+| `/spec` | Define requirements — converts to numbered R + AC document |
+| `/go` | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
+| `/check` | Review phase — parallel code review + security audit + tests |
+| `/ship` | Shipping phase — isolated test → PR with full check report → CI watch |
+| `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, rollback |
+| `/team` | Browse org libraries, hire existing teams, or design new ones |
 
 ---
 
@@ -226,19 +231,14 @@ State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives c
 
 ---
 
-## Auto Skills (Ring 2)
+## Quality Gates (Ring 2)
 
-Skills trigger automatically based on context. You don't invoke them.
+14 skills that auto-trigger based on context. You don't invoke them.
 
 | Skill | Triggers when |
 |-------|--------------|
-| **spec** | Requirements need defining — converts to numbered R + AC document |
-| **go** | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
-| **check** | Review phase — parallel code review + security audit + tests with scope extras |
-| **ship** | Shipping phase — isolated test → PR with full check report → CI watch + auto-fix |
 | **tdd** | New feature implementation or bug fix |
 | **debug** | Test failure or runtime error |
-| **discover** | Vague request, solution without a problem, unfocused complaint |
 | **secure** | Auth / DB / API / secrets code touched |
 | **perf** | Loops, queries, rendering, batch operations |
 | **simplify** | File > 200 lines or high cyclomatic complexity |
@@ -251,7 +251,7 @@ Skills trigger automatically based on context. You don't invoke them.
 | **reflect** | On-demand `/reflect`: evidence-based human self-assessment — "Am I using AI as a thought amplifier?" Scores 5 dimensions from hook-collected data |
 | **commit** | Conventional Commits generation — auto-generates from git diff |
 
-> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 19 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 22 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -424,15 +424,15 @@ Merge strategy: changed agents prompt (default: keep existing, backup to `.histo
 
 All tools share the same `~/.harness/projects/{slug}/` data directory.
 
-| Tool | Ring 0 Hooks | Commands | Skills | Agents |
-|------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 19 skills | Live |
-| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 19 | — |
-| **Cursor** | ✓ Full³ | ✓ 3 commands (incl. /orbit) | ✓ via rules | Live |
-| **OpenCode** | ✓ Partial⁴ | ✓ 3 commands (incl. /orbit) | — | — |
-| **Cline** | ✓ Full⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
+| Tool | Ring 0 Hooks | Skills | Agents |
+|------|-------------|--------|--------|
+| **Claude Code** | ✓ Full | ✓ 22 (pipeline + quality) | Live |
+| **Codex CLI** | ✓ Full¹ | ✓ 22 | — |
+| **Antigravity** | ✓ Partial² | ✓ 22 | — |
+| **Cursor** | ✓ Full³ | ✓ via rules | Live |
+| **OpenCode** | ✓ Partial⁴ | — | — |
+| **Cline** | ✓ Full⁵ | — | — |
+| **Aider** | —⁶ | — | — |
 
 ¹ Plugin marketplace · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
@@ -447,19 +447,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Commands (you call these)"]
+    subgraph R1["Ring 1 — Pipeline Skills (8)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
         end
-        c6("/team")
-        c7("/evolve (manual)")
+        c7("/team")
+        c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]

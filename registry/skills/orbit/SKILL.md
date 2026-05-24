@@ -1,4 +1,5 @@
 ---
+name: orbit
 description: "Complete orbit — autonomous spec through ship. Choose interactive or council mode, then hands-off until PR."
 ---
 
@@ -26,8 +27,6 @@ At the start of **every response** during an active orbit:
 If no file with `"status": "running"` exists, orbit was not started or has completed. Do not invent one.
 
 **Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
-
-> **Worktree crash safety**: Pipeline state (`PIPELINE-*.json`), spec files, and check reports live in `$HARNESS_DIR` (shared across worktrees — same git remote → same project slug). They survive worktree loss. If the worktree was cleaned up externally during a crash, abort the orbit and warn the user.
 
 ## Step 0: Preflight
 
@@ -69,7 +68,7 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 ## Step 2B: Council Auto-Spec
 
 1. Gather the user's request (ask if not stated)
-2. Launch 4 parallel Codex sub-agents (Architect, Skeptic, Pragmatist, Critic) — each receives ONLY the request + codebase context, NOT the full conversation (anti-anchoring)
+2. Launch 4 parallel sub-agents (Architect, Skeptic, Pragmatist, Critic) — each receives ONLY the request + codebase context, NOT the full conversation (anti-anchoring)
 3. Synthesize: list agreement/disagreement, produce recommended approach
 4. Generate spec at `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: pending`
 5. Present to user: **Approve / Modify / Reject**
@@ -83,19 +82,14 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
    [ -z "$(git status --porcelain)" ] || (echo "ERROR: Dirty working tree or untracked files. Commit or stash first." && exit 1)
    git symbolic-ref -q HEAD || (echo "ERROR: Detached HEAD. Checkout a branch first." && exit 1)
    ```
-3. **Worktree isolation**: Create an isolated git worktree so other sessions can freely switch branches:
+3. **Worktree isolation**: Create an isolated git worktree:
    ```bash
    git worktree add .claude/worktrees/orbit-{goal_slug} -b orbit-{goal_slug} origin/{default-branch}
    cd .claude/worktrees/orbit-{goal_slug}
    ```
-   - Record `worktree_name` as `orbit-{goal_slug}` and `original_cwd` in pipeline state
-   - All subsequent phases (go/check/ship) execute inside the worktree
-   - State files remain accessible: `$HARNESS_DIR` resolves to the same project directory (same git remote → same project slug)
-
-   > **Why worktree?** Orbit pipelines can run for 30+ minutes. Without isolation, switching branches in another session corrupts the in-progress work — uncommitted changes, branch state, and file edits collide. Worktree isolation guarantees the orbit operates on its own copy of the repo.
+   - Record `worktree_name` and `original_cwd` in pipeline state
 4. Plan tasks from Requirements (R1, R2...)
-5. Execute with Codex sub-agents — TDD, debug on failure, verify before done
-   - All execution happens inside the worktree
+5. Execute with sub-agents — TDD, debug on failure, verify before done
 6. Handle states: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
 7. Integrate: full test suite, verify ACs
 
@@ -103,7 +97,7 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 
 1. Gather scope via `git diff --stat`
 2. Classify changed files (API, Frontend, DB, Backend, Tests, Infra)
-3. Launch parallel Codex sub-agents: Reviewer, Auditor, Test runner (+ scope-specific)
+3. Launch parallel sub-agents: Reviewer, Auditor, Test runner (+ scope-specific)
 4. Synthesize Check Report: Quality/Security/Performance PASS/WARN/FAIL + Spec Coverage
 5. **PRESERVE check report** in pipeline state `check_report` field
 
@@ -118,19 +112,14 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 ## Step 6: Ship
 
 1. **Gate**: verify PASS check report exists
-2. **Integration verification** — run directly in worktree (already isolated from main tree):
+2. **Integration verification** — run directly in worktree:
    - Clean build artifacts first: `cargo clean` / `npm run clean` / equivalent
    - Full build from scratch · complete test suite · linter + formatter
    - Fail → STOP. Do NOT create PR.
 3. **Git hygiene**: conventional commits, rebase, squash fixups
 4. **Create PR** via `gh pr create` with spec + check report in body
 5. **CI watch** via `gh pr checks --watch`, auto-fix failures
-6. **Exit worktree**: Return to original directory and keep the worktree (needed for PR head):
-   ```bash
-   cd {original_cwd}
-   # Worktree preserved — branch is needed for PR
-   ```
-   Record worktree status in pipeline state.
+6. **Exit worktree**: Return to original directory and keep the worktree
 
 ## Step 7: Report
 
@@ -153,8 +142,6 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 | Ship | complete | 0 |
 ```
 
-"One orbit complete. Run `/evolve` to analyze observations."
-
 ## Red Flags
 - Starting without user mode selection
 - Proceeding without spec approval
@@ -163,6 +150,4 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 - Shipping with FAIL in security checks
 - Losing check report between phases
 - Creating branch with dirty working tree
-- Losing worktree reference between phases (`worktree_name` missing from pipeline state)
-- Forgetting to exit worktree before orbit complete (leaves session in wrong directory)
-- Entering worktree without saving `original_cwd` (can't find state files after)
+- Losing worktree reference between phases
