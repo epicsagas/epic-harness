@@ -223,9 +223,11 @@ When creating a new release tag, update ALL of the following to the same version
 
 | File | Field | Example |
 |------|-------|---------|
-| `Cargo.toml` | `version = "x.y.z"` | `0.3.3` |
-| `package.json` | `"version": "x.y.z"` | `0.3.3` |
-| `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.3.3` |
-| Git tag | `vx.y.z` | `v0.3.3` |
+| `Cargo.toml` | `version = "x.y.z"` | `0.4.3` |
+| `package.json` | `"version": "x.y.z"` | `0.4.3` |
+| `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
+| `.codex-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
+| `integrations/antigravity/gemini-extension.json` | `"version": "x.y.z"` | `0.4.3` |
+| Git tag | `vx.y.z` | `v0.4.3` |
 
-All four must match before tagging.
+All six must match before tagging.
