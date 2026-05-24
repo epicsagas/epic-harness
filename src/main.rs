@@ -235,8 +235,33 @@ fn main() {
         }
     };
 
-    // Passthrough stdin to stdout (Claude Code hook contract)
-    print!("{stdin_buf}");
+    // stdout output varies by host protocol:
+    // - Claude Code: stdin passthrough (original contract)
+    // - Codex/Antigravity: event-specific JSON (detected via hook_event_name)
+    if input.hook_event_name.is_some() {
+        // Codex / Antigravity protocol
+        match subcmd {
+            "guard" if exit_code == 2 => {
+                // PreToolUse block: explicit deny JSON so Codex never ignores the block
+                println!(r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#);
+            }
+            "guard" | "observe" | "polish" => {
+                // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
+            }
+            "resume" => {
+                // SessionStart: plain text on stdout = developer context.
+                // hint() already writes to stderr; no extra stdout needed.
+            }
+            "reflect" => {
+                // Stop: MUST output JSON — plain text is invalid for this event.
+                println!(r#"{{"continue":true}}"#);
+            }
+            _ => {}
+        }
+    } else {
+        // Claude Code: stdin passthrough contract
+        print!("{stdin_buf}");
+    }
 
     std::process::exit(exit_code);
 }

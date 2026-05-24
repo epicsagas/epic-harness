@@ -15,6 +15,10 @@ pub struct HookInput {
     pub conversation_summary: Option<String>,
     pub pending_tasks: Option<Vec<String>>,
     pub context_usage: Option<f64>,
+    /// Codex/Antigravity hook event name (e.g. "SessionStart", "PreToolUse").
+    /// When present, stdout follows the Codex hook protocol instead of Claude
+    /// Code's stdin-passthrough contract.
+    pub hook_event_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
