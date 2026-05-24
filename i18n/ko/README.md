@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -84,6 +84,14 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 
 바이너리를 자동 설치하고 모든 훅을 한 번에 등록합니다.
 
+### Antigravity
+
+```bash
+gemini plugin marketplace add epicsagas/plugins
+```
+
+스킬과 명령어가 즉시 사용 가능합니다.
+
 ### macOS / Linux
 
 ```bash
@@ -113,9 +121,8 @@ cargo install epic-harness    # 소스에서 빌드
 그 다음 설정 마법사를 실행하세요:
 
 ```bash
-epic install          # Claude Code (기본값)
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install antigravity   # Antigravity
+epic install cursor         # Cursor IDE
 ```
 
 > `epic-harness --version`으로 확인. 업데이트는 `brew upgrade epic-harness` 또는 인스톨러 스크립트 재실행.
@@ -136,9 +143,8 @@ Claude Code에서는 세션 시작 시 `hooks/install.js`가 자동 실행되어
 ### 다른 도구
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ 필요)
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ 필요)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -407,7 +413,7 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 | **Cline** | ✓ 전체⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요 · ² `BeforeModel` 레벨에서 guard 실행 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
+¹ Plugin marketplace · ² `BeforeModel` 레벨에서 guard 실행 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
 ---
 
@@ -488,7 +494,7 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 | `mem_recall` | 힌트 + 프로젝트 + 그래프 이웃을 활용한 스마트 컨텍스트 리콜 |
 | `mem_add` | 유형별 자동 중요도로 노드 추가 (또는 명시적 0.0–1.0) |
 | `mem_search` | 키워드 검색 (전체 텍스트), 중요도 순 정렬 |
-| `mem_query` | 태그/유형/프로젝트별 필터 |
+| `mem_query` | 태그/유형/프로젝트별 필터 — `mem_list`의 별칭 |
 | `mem_context` | 프로젝트 범위 스마트 리콜 (힌트 없음) |
 | `mem_related` | 노드 ID에서 그래프 탐색 (연결된 지식 발견) |
 

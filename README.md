@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -97,13 +97,13 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 
 Auto-installs the binary and registers all hooks in one step.
 
-### Codex CLI
+### Antigravity
 
 ```bash
-codex plugin marketplace add epicsagas/plugins
+gemini plugin marketplace add epicsagas/plugins
 ```
 
-Skills and agents are available immediately — no further steps needed.
+Skills and commands are available immediately.
 
 ### macOS / Linux
 
@@ -134,9 +134,8 @@ cargo install epic-harness    # build from source
 Then run the setup wizard:
 
 ```bash
-epic install               # Claude Code (default)
-epic install codex         # Codex CLI
 epic install antigravity   # Antigravity
+epic install cursor         # Cursor IDE
 ```
 
 > `epic-harness --version` to verify. Update with `brew upgrade epic-harness` or re-run the installer script.
@@ -157,7 +156,6 @@ On Claude Code, `hooks/install.js` auto-runs on session start and installs the b
 ### Other tools
 
 ```bash
-epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
 epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (requires Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
@@ -436,7 +434,7 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | **Cline** | ✓ Full⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
+¹ Plugin marketplace · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
 ---
 
@@ -517,7 +515,7 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 | `mem_recall` | Smart contextual recall with hint + project + graph neighbors |
 | `mem_add` | Add node with auto-importance by type (or explicit 0.0–1.0) |
 | `mem_search` | Keyword search (full-text), ranked by importance |
-| `mem_query` | Filter by tag/type/project |
+| `mem_query` | Filter by tag/type/project — alias for `mem_list` |
 | `mem_context` | Project-scoped smart recall (no hint) |
 | `mem_related` | Graph traversal from a node ID (finds connected knowledge) |
 

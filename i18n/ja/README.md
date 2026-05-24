@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -84,6 +84,14 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 
 バイナリを自動インストールし、すべてのフックを一度に登録します。
 
+### Antigravity
+
+```bash
+gemini plugin marketplace add epicsagas/plugins
+```
+
+スキルとコマンドがすぐに利用可能です。
+
 ### macOS / Linux
 
 ```bash
@@ -113,9 +121,8 @@ cargo install epic-harness    # ソースからビルド
 その後、セットアップウィザードを実行:
 
 ```bash
-epic install          # Claude Code（デフォルト）
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install antigravity   # Antigravity
+epic install cursor         # Cursor IDE
 ```
 
 > `epic-harness --version` で確認。`brew upgrade epic-harness` またはインストーラースクリプトの再実行で更新。
@@ -136,9 +143,8 @@ Claude Codeでは、`hooks/install.js` がセッション開始時に自動実�
 ### その他のツール
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+が必要)
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+が必要)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -407,7 +413,7 @@ epic team delete backend --global      # orgストアから永久に削除
 | **Cline** | ✓ フル⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` で `codex_hooks = true` · ² `BeforeModel` レベルでのガード · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
+¹ Plugin marketplace · ² `BeforeModel` レベルでのガード · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
 
 ---
 
@@ -488,7 +494,7 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
 | `mem_recall` | ヒント + プロジェクト + グラフ隣接ノードによるスマートコンテキストリコール |
 | `mem_add` | タイプ別自動重要度でノードを追加（または明示的な0.0–1.0） |
 | `mem_search` | キーワード検索（全文）、重要度でランク付け |
-| `mem_query` | タグ/タイプ/プロジェクトでフィルター |
+| `mem_query` | タグ/タイプ/プロジェクトでフィルター — `mem_list` のエイリアス |
 | `mem_context` | プロジェクトスコープのスマートリコール（ヒントなし） |
 | `mem_related` | ノードIDからのグラフトラバーサル（接続された知識を検索） |
 

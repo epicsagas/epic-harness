@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -84,6 +84,14 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 
 一步完成二進位安裝和所有掛鉤註冊。
 
+### Antigravity
+
+```bash
+gemini plugin marketplace add epicsagas/plugins
+```
+
+技能和命令立即可用。
+
 ### macOS / Linux
 
 ```bash
@@ -113,9 +121,8 @@ cargo install epic-harness    # 從原始碼建置
 然後執行安裝精靈：
 
 ```bash
-epic install          # Claude Code（預設）
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install antigravity   # Antigravity
+epic install cursor         # Cursor IDE
 ```
 
 > 執行 `epic-harness --version` 驗證安裝。使用 `brew upgrade epic-harness` 或重新執行安裝腳本進行更新。
@@ -136,9 +143,8 @@ epic install gemini   # Antigravity
 ### 其他工具
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -407,7 +413,7 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` 在 `~/.codex/config.toml` · ² 守衛在 `BeforeModel` 級別 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
+¹ Plugin marketplace · ² 守衛在 `BeforeModel` 級別 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
 
 ---
 
@@ -488,7 +494,7 @@ epic mem export --out ./docs/memory                    # 匯出為 Markdown
 | `mem_recall` | 基於提示 + 專案 + 圖鄰居的智慧上下文檢索 |
 | `mem_add` | 按類型自動設定重要性新增節點（或顯式 0.0–1.0） |
 | `mem_search` | 關鍵字搜尋（全文），按重要性排序 |
-| `mem_query` | 按標籤/類型/專案過濾 |
+| `mem_query` | 按標籤/類型/專案過濾 — `mem_list` 的別名 |
 | `mem_context` | 專案範圍的智慧檢索（無提示） |
 | `mem_related` | 從節點 ID 進行圖遍歷（發現關聯知識） |
 

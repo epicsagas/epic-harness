@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -84,6 +84,14 @@ Apres la fin de la session, la **boucle evolve** analyse ce qui a echoue, genere
 
 Installe automatiquement le binaire et enregistre tous les hooks en une seule etape.
 
+### Antigravity
+
+```bash
+gemini plugin marketplace add epicsagas/plugins
+```
+
+Les competences et commandes sont disponibles immediatement.
+
 ### macOS / Linux
 
 ```bash
@@ -113,9 +121,8 @@ cargo install epic-harness    # compilation depuis les sources
 Puis executez l'assistant de configuration :
 
 ```bash
-epic install          # Claude Code (par defaut)
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install antigravity   # Antigravity
+epic install cursor         # Cursor IDE
 ```
 
 > `epic-harness --version` pour verifier. Mettez a jour avec `brew upgrade epic-harness` ou re-executez le script d'installation.
@@ -136,9 +143,8 @@ Sur Claude Code, `hooks/install.js` s'execute automatiquement au demarrage de la
 ### Autres outils
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (necessite Cursor 1.7+)
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (necessite Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -407,7 +413,7 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 | **Cline** | ✓ Complet⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` dans `~/.codex/config.toml` · ² Guard au niveau `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
+¹ Plugin marketplace · ² Guard au niveau `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
 
 ---
 
@@ -488,7 +494,7 @@ epic mem export --out ./docs/memory                    # Exporter en Markdown
 | `mem_recall` | Rappel contextuel intelligent avec indice + projet + voisins du graphe |
 | `mem_add` | Ajouter un noeud avec auto-importance par type (ou explicite 0.0–1.0) |
 | `mem_search` | Recherche par mot-cle (texte integral), classe par importance |
-| `mem_query` | Filtrer par tag/type/projet |
+| `mem_query` | Filtrer par tag/type/projet — alias de `mem_list` |
 | `mem_context` | Rappel contextuel intelligent par projet (sans indice) |
 | `mem_related` | Traversee de graphe depuis un ID de noeud (trouve les connaissances connectees) |
 

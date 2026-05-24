@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.95+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -84,6 +84,14 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 
 बाइनरी ऑटो-इंस्टॉल करता है और सभी hooks को एक ही चरण में रजिस्टर करता है।
 
+### Antigravity
+
+```bash
+gemini plugin marketplace add epicsagas/plugins
+```
+
+Skills और commands तुरंत उपलब्ध हैं।
+
 ### macOS / Linux
 
 ```bash
@@ -113,9 +121,8 @@ cargo install epic-harness    # सोर्स से बिल्ड
 फिर सेटअप विज़ार्ड चलाएं:
 
 ```bash
-epic install          # Claude Code (डिफ़ॉल्ट)
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install antigravity   # Antigravity
+epic install cursor         # Cursor IDE
 ```
 
 > `epic-harness --version` सत्यापित करने के लिए। `brew upgrade epic-harness` या इंस्टॉलर स्क्रिप्ट दोबारा चलाकर अपडेट करें।
@@ -136,9 +143,8 @@ Claude Code में, `hooks/install.js` सेशन स्टार्ट प
 ### अन्य टूल्स
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ आवश्यक)
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ आवश्यक)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -407,7 +413,7 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 | **Cline** | ✓ पूर्ण⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` में `codex_hooks = true` · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
+¹ Plugin marketplace · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
 
 ---
 
@@ -488,7 +494,7 @@ epic mem export --out ./docs/memory                    # Markdown में expo
 | `mem_recall` | hint + project + graph neighbors के साथ स्मार्ट contextual recall |
 | `mem_add` | type के अनुसार auto-importance (या explicit 0.0–1.0) के साथ नोड जोड़ें |
 | `mem_search` | keyword खोज (full-text), importance के अनुसार ranked |
-| `mem_query` | tag/type/project द्वारा फ़िल्टर |
+| `mem_query` | tag/type/project द्वारा फ़िल्टर — `mem_list` का उपनाम |
 | `mem_context` | प्रोजेक्ट-scoped स्मार्ट recall (कोई hint नहीं) |
 | `mem_related` | नोड ID से graph traversal (connected knowledge ढूंढता है) |
 

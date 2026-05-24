@@ -1091,8 +1091,6 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 // ── Interactive menu ──────────────────────────────────────────────────────────
 
 const TOOLS: &[(&str, &str)] = &[
-    ("claude", "Claude Code"),
-    ("codex", "OpenAI Codex CLI"),
     ("antigravity", "Google Antigravity"),
     ("cursor", "Cursor IDE"),
     ("opencode", "OpenCode"),
