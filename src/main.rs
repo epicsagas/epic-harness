@@ -243,7 +243,9 @@ fn main() {
         match subcmd {
             "guard" if exit_code == 2 => {
                 // PreToolUse block: explicit deny JSON so Codex never ignores the block
-                println!(r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#);
+                println!(
+                    r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#
+                );
             }
             "guard" | "observe" | "polish" => {
                 // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
