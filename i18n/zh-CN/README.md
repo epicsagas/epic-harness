@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 22 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
+<blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 22 个技能、自主流水线、自我进化引擎。</p></blockquote>
 
-<p align="center"><b>更少的记忆负担。每次按键更多的智能。每次会话都在变得更聪明。</b></p>
+<p align="center"><b>一个框架，六个 AI 工具。从规格到 PR 自主执行。每次会话都更智能。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | 简体中文 | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个 Claude Code 插件，**将 30+ 条命令整合为 22 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
+一个多工具 AI 智能体框架，拥有 **22 个技能（8 流水线 + 14 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Antigravity、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />

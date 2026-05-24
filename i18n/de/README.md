@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Ein selbstentwickelndes KI-Coding-Agent-Harness — 22 Skills, 1 autonome Pipeline, automatisch ausgelöste Skills, lernt aus Ihren Fehlern.</p></blockquote>
+<blockquote><p align="center">Ein Multi-Tool-KI-Agenten-Harness, das aus jeder Session lernt — 22 Skills, autonome Pipelines und eine selbstentwickelnde Engine.</p></blockquote>
 
-<p align="center"><b>Weniger zu merken. Mehr Intelligenz pro Tastendruck. Wird mit jeder Session intelligenter.</b></p>
+<p align="center"><b>Ein Harness, sechs KI-Tools. Autonom von Spec bis PR. Intelligenter nach jeder Session.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Ein Claude Code Plugin, das **22 automatisch ausgelöste Skills konsolidiert**, **Skills automatisch auslöst** basierend auf dem, was Sie gerade tun, und **neue Skills entwickelt** aus Ihren eigenen Fehlermustern.
+Ein Multi-Tool-KI-Agenten-Harness mit **22 Skills (8 Pipeline + 14 Quality Gates)**, einer **selbstentwickelnden Engine**, **einheitlichem Speicher** und einer **autonomen Ein-Befehl-Pipeline** (`/orbit`). Funktioniert mit Claude Code, Codex, Antigravity, Cursor, OpenCode und Cline — alle teilen dasselbe `~/.harness/` Datenverzeichnis. Nach jeder Session analysiert die Evolve-Schleife Fehler, generiert gezielte Skills und lädt sie beim nächsten Mal.
 
 <p align="center">
   <img src="../../assets/features.png" alt="Epic Harness Funktionen" width="100%" />

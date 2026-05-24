@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 22個のスキル、1つの自律パイプライン、自動トリガースキル、あなたの失敗から学習します。</p></blockquote>
+<blockquote><p align="center">すべてのセッションから学習するマルチツールAIエージェントハーネス — 22のスキル、自律パイプライン、自己進化エンジン。</p></blockquote>
 
-<p align="center"><b>覚えるべき操作は少なく。キーストローク当たりの知性は高く。セッションを重ねるほどスマートに。</b></p>
+<p align="center"><b>1つのハーネス、6つのAIツール。スペックからPRまで自律実行。セッションを重ねるほどスマートに。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Claude Codeプラグインで、**30以上のコマンドを22個のスキルに統合**し、現在の作業内容に基づいて**スキルを自動トリガー**し、自分の失敗パターンから**新しいスキルを進化**させます。
+**22のスキル（8パイプライン + 14品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Antigravity、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />

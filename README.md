@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">A self-evolving AI coding agent harness — 22 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
+<blockquote><p align="center">A multi-tool AI agent harness that learns from every session — 22 skills, autonomous pipelines, and a self-evolving engine.</p></blockquote>
 
-<p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
+<p align="center"><b>One harness, six AI tools. Autonomous from spec to PR. Smarter every session.</b></p>
 
 <p align="center">
 <a href="README.md">English</a> | <a href="i18n/ja/README.md">日本語</a> | <a href="i18n/ko/README.md">한국어</a> | <a href="i18n/de/README.md">Deutsch</a> | <a href="i18n/fr/README.md">Français</a> | <a href="i18n/zh-CN/README.md">简体中文</a> | <a href="i18n/zh-TW/README.md">繁體中文</a> | <a href="i18n/pt-BR/README.md">Português</a> | <a href="i18n/es/README.md">Español</a> | <a href="i18n/hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A Claude Code plugin with **22 skills (8 pipeline + 14 quality gates)**, a **self-evolving engine**, and a **single-command autonomous pipeline** that ships features from spec to PR.
+A multi-tool AI agent harness with **22 skills (8 pipeline + 14 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Antigravity, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />

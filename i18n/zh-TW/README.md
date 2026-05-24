@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一個自我進化的 AI 程式設計智能體框架 — 22 個技能、1 條自主流水線，從你的失敗中學習。</p></blockquote>
+<blockquote><p align="center">從每次工作階段中學習的多工具 AI 智慧型代理框架 — 22 個技能、自主流水線、自我進化引擎。</p></blockquote>
 
-<p align="center"><b>需要記憶的更少。每次按鍵的智慧含量更高。每次會話都變得更聰明。</b></p>
+<p align="center"><b>一個框架，六個 AI 工具。從規格到 PR 自主執行。每次工作階段都更智慧。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一個 Claude Code 外掛，將 30+ 條命令整合為 **22 個自動觸發技能**，**根據你正在做的事情自動觸發技能**，並**從你自己的失敗模式中進化出新技能**。
+一個多工具 AI 智慧型代理框架，擁有 **22 個技能（8 流水線 + 14 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Antigravity、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 功能" width="100%" />

@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un arnés de agente de codificación IA autoevolutivo — 22 skills, 1 pipeline autónomo, habilidades de activación automática, aprende de tus fallos.</p></blockquote>
+<blockquote><p align="center">Un arnés de agente IA multiherramienta que aprende de cada sesión — 22 skills, pipelines autónomos y motor autoevolutivo.</p></blockquote>
 
-<p align="center"><b>Menos que memorizar. Más inteligencia por tecla pulsada. Se vuelve más inteligente cada sesión.</b></p>
+<p align="center"><b>Un arnés, seis herramientas IA. Autónomo del spec al PR. Más inteligente cada sesión.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin de Claude Code que **consolida más de 30 comandos en 22 skills de activación automática consolidados**, **activa habilidades automáticamente** según lo que estés haciendo, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo.
+Un arnés de agente IA multiherramienta con **22 skills (8 pipeline + 14 quality gates)**, un **motor autoevolutivo**, **memoria unificada** y una **pipeline autónoma de un solo comando** (`/orbit`). Funciona con Claude Code, Codex, Antigravity, Cursor, OpenCode y Cline — todos compartiendo el mismo directorio `~/.harness/`. Después de cada sesión, el bucle de evolución analiza fallos, genera skills dirigidos y los carga en la próxima sesión.
 
 <p align="center">
   <img src="../../assets/features.png" alt="características de epic harness" width="100%" />

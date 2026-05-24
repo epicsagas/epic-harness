@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 22 स्किल्स, 1 स्वायत्त पाइपलाइन, आपकी विफलताओं से सीखता है।</p></blockquote>
+<blockquote><p align="center">हर सेशन से सीखने वाला मल्टी-टूल AI एजेंट हार्नेस — 22 स्किल्स, स्वायत्त पाइपलाइन, और स्व-विकास इंजन।</p></blockquote>
 
-<p align="center"><b>याद रखने के लिए कम। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता। हर सेशन के साथ और स्मार्ट।</b></p>
+<p align="center"><b>एक हार्नेस, छह AI टूल। स्पेक से PR तक स्वायत्त। हर सेशन के साथ और स्मार्ट।</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक Claude Code प्लगइन जो **22 स्किल्स में समेकित** करता है, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**।
+एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **22 स्किल्स (8 पाइपलाइन + 14 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Antigravity, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />

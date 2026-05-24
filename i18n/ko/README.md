@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 22개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
+<blockquote><p align="center">모든 세션에서 학습하는 멀티툴 AI 에이전트 하네스 — 22개 스킬, 자율 파이프라인, 자기 진화 엔진.</p></blockquote>
 
-<p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
+<p align="center"><b>하나의 하네스, 6개 AI 툴. 스펙에서 PR까지 자율 실행. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**30개 이상의 명령어를 22개 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
+**22개 스킬(8 파이프라인 + 14 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Antigravity, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
