@@ -10,6 +10,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - CLI: `mem delete` renamed to `mem remove` (old name works as deprecated alias)
 - CLI: `mem query` renamed to `mem list` (old name works as deprecated alias)
+- README: rewrite top description for multi-tool positioning (Claude Code + Codex CLI + Gemini CLI)
+- Install docs: remove "recommended" wording for neutrality
+- Remove Antigravity integration, add Codex CLI plugin description
+
+## [0.4.4] — 2026-05-25
+
+### Changed
+- Unified all commands into skills, removing the separate command layer
+
+## [0.4.3] — 2026-05-25
+
+### Fixed
+- Hooks: use event-specific stdout for codex/antigravity protocol compatibility
+
+### Changed
+- README updated for v0.4.2 release
+- Codex removed from install wizard
 
 ## [0.4.2] — 2026-05-24
 
