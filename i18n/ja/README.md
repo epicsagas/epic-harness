@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**22のスキル（8パイプライン + 14品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Antigravity、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
+**22のスキル（8パイプライン + 14品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -84,13 +84,13 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 
 バイナリを自動インストールし、すべてのフックを一度に登録します。
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-スキルとコマンドがすぐに利用可能です。
+22のスキルをすべて自動インストールし、フックを登録します。追加の手順なしですぐに利用可能です。`codex plugin update epic@epicsagas` で更新できます。
 
 ### macOS / Linux
 
@@ -121,7 +121,6 @@ cargo install epic-harness    # ソースからビルド
 その後、セットアップウィザードを実行:
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -143,7 +142,6 @@ Claude Codeでは、`hooks/install.js` がセッション開始時に自動実�
 ### その他のツール
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+が必要)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -151,7 +149,7 @@ epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # インタラクティブメニュー
 ```
 
-統合ファイルはバイナリから**同期**されます: 欠落または古いファイルが書き込まれます。`GEMINI.md` と `AGENTS.md` は不在の場合のみ作成されます。
+統合ファイルはバイナリから**同期**されます: 欠落または古いファイルが書き込まれます。`AGENTS.md` は不在の場合のみ作成されます。
 
 ### 確認
 
@@ -401,13 +399,12 @@ epic team delete backend --global      # orgストアから永久に削除
 |------|-------------|--------|----------|
 | **Claude Code** | ✓ フル | ✓ 22スキル | Live |
 | **Codex CLI** | ✓ フル¹ | ✓ 22 | — |
-| **Antigravity** | ✓ 部分² | ✓ 22 | — |
 | **Cursor** | ✓ フル³ | ✓ ルール経由 | Live |
 | **OpenCode** | ✓ 部分⁴ | — | — |
 | **Cline** | ✓ フル⁵ | — | — |
 | **Aider** | —⁶ | — | — |
 
-¹ Plugin marketplace · ² `BeforeModel` レベルでのガード · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
+¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
 
 ---
 

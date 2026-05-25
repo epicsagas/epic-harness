@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A multi-tool AI agent harness with **22 skills (8 pipeline + 14 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Antigravity, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
+A multi-tool AI agent harness with **22 skills (8 pipeline + 14 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -97,13 +97,15 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 
 Auto-installs the binary and registers all hooks in one step.
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-Skills and commands are available immediately.
+Auto-installs all 22 skills and registers hooks. Available immediately — no further steps needed.
+
+Updates with `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -134,7 +136,6 @@ cargo install epic-harness    # build from source
 Then run the setup wizard:
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -156,7 +157,6 @@ On Claude Code, `hooks/install.js` auto-runs on session start and installs the b
 ### Other tools
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (requires Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -428,13 +428,12 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 |------|-------------|--------|--------|
 | **Claude Code** | ✓ Full | ✓ 22 (pipeline + quality) | Live |
 | **Codex CLI** | ✓ Full¹ | ✓ 22 | — |
-| **Antigravity** | ✓ Partial² | ✓ 22 | — |
 | **Cursor** | ✓ Full³ | ✓ via rules | Live |
 | **OpenCode** | ✓ Partial⁴ | — | — |
 | **Cline** | ✓ Full⁵ | — | — |
 | **Aider** | —⁶ | — | — |
 
-¹ Plugin marketplace · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
+¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
 ---
 

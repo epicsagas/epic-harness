@@ -2,7 +2,7 @@
 
 <blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 22 个技能、自主流水线、自我进化引擎。</p></blockquote>
 
-<p align="center"><b>一个框架，六个 AI 工具。从规格到 PR 自主执行。每次会话都更智能。</b></p>
+<p align="center"><b>一个框架，五个 AI 工具。从规格到 PR 自主执行。每次会话都更智能。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | 简体中文 | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-5_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个多工具 AI 智能体框架，拥有 **22 个技能（8 流水线 + 14 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Antigravity、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
+一个多工具 AI 智能体框架，拥有 **22 个技能（8 流水线 + 14 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
@@ -84,13 +84,13 @@ $ /orbit "为登录 API 添加 JWT 认证"
 
 自动安装二进制文件并一步注册所有 hooks。
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-技能和命令立即可用。
+自动安装全部 22 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
 
 ### macOS / Linux
 
@@ -121,8 +121,8 @@ cargo install epic-harness    # 从源码构建
 然后运行安装向导：
 
 ```bash
-epic install antigravity   # Antigravity
-epic install cursor         # Cursor IDE
+epic install codex        # Codex CLI
+epic install cursor       # Cursor IDE
 ```
 
 > 使用 `epic-harness --version` 验证。通过 `brew upgrade epic-harness` 或重新运行安装脚本来更新。
@@ -143,7 +143,6 @@ epic install cursor         # Cursor IDE
 ### 其他工具
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -406,13 +405,12 @@ epic team delete backend --global      # 从组织存储中永久删除
 |------|-------------|--------|--------|
 | **Claude Code** | ✓ 完整 | ✓ 22 个技能（含 /orbit） | Live |
 | **Codex CLI** | ✓ 完整¹ | ✓ 7 | — |
-| **Antigravity** | ✓ 部分² | ✓ 7 | — |
-| **Cursor** | ✓ 完整³ | ✓ 通过 rules | Live |
-| **OpenCode** | ✓ 部分⁴ | — | — |
-| **Cline** | ✓ 完整⁵ | — | — |
-| **Aider** | —⁶ | — | — |
+| **Cursor** | ✓ 完整² | ✓ 通过 rules | Live |
+| **OpenCode** | ✓ 部分³ | — | — |
+| **Cline** | ✓ 完整⁴ | — | — |
+| **Aider** | —⁵ | — | — |
 
-¹ Plugin marketplace · ² Guard 在 `BeforeModel` 级别 · ³ Cursor 1.7+ · ⁴ JS 插件 · ⁵ 5 个 hook 脚本 · ⁶ 仅 Conventions
+¹ Plugin marketplace · ² Cursor 1.7+ · ³ JS 插件 · ⁴ 5 个 hook 脚本 · ⁵ 仅 Conventions
 
 ---
 

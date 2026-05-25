@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **22 स्किल्स (8 पाइपलाइन + 14 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Antigravity, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
+एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **22 स्किल्स (8 पाइपलाइन + 14 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -84,13 +84,13 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 
 बाइनरी ऑटो-इंस्टॉल करता है और सभी hooks को एक ही चरण में रजिस्टर करता है।
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-Skills और commands तुरंत उपलब्ध हैं।
+सभी 22 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
 
 ### macOS / Linux
 
@@ -121,7 +121,6 @@ cargo install epic-harness    # सोर्स से बिल्ड
 फिर सेटअप विज़ार्ड चलाएं:
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -143,7 +142,6 @@ Claude Code में, `hooks/install.js` सेशन स्टार्ट प
 ### अन्य टूल्स
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ आवश्यक)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -405,13 +403,12 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 |------|-------------|--------|--------|
 | **Claude Code** | ✓ पूर्ण | ✓ 22 स्किल्स | Live |
 | **Codex CLI** | ✓ पूर्ण¹ | ✓ 22 | — |
-| **Antigravity** | ✓ आंशिक² | ✓ 22 | — |
 | **Cursor** | ✓ पूर्ण³ | ✓ rules के माध्यम से | Live |
 | **OpenCode** | ✓ आंशिक⁴ | — | — |
 | **Cline** | ✓ पूर्ण⁵ | — | — |
 | **Aider** | —⁶ | — | — |
 
-¹ Plugin marketplace · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
+¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
 
 ---
 

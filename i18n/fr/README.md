@@ -2,7 +2,7 @@
 
 <blockquote><p align="center">Un harnais d'agent IA multi-outil qui apprend de chaque session — 22 skills, pipelines autonomes et moteur auto-evolutif.</p></blockquote>
 
-<p align="center"><b>Un harnais, six outils IA. Autonome du spec au PR. Plus intelligent a chaque session.</b></p>
+<p align="center"><b>Un harnais, cinq outils IA. Autonome du spec au PR. Plus intelligent a chaque session.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="./README.md">Francais</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Portugues</a> | <a href="../es/README.md">Espanol</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -18,11 +18,11 @@
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
   <img alt="Version" src="https://img.shields.io/badge/version-0.4.4-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Tools" src="https://img.shields.io/badge/tools-5_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un harnais d'agent IA multi-outil avec **22 skills (8 pipeline + 14 quality gates)**, un **moteur auto-evolutif**, une **memoire unifiee** et une **pipeline autonome en une commande** (`/orbit`). Compatible avec Claude Code, Codex, Antigravity, Cursor, OpenCode et Cline — tous partageant le meme repertoire `~/.harness/`. Apres chaque session, la boucle d'evolution analyse les echecs, genere des skills cibles et les charge pour la prochaine session.
+Un harnais d'agent IA multi-outil avec **22 skills (8 pipeline + 14 quality gates)**, un **moteur auto-evolutif**, une **memoire unifiee** et une **pipeline autonome en une commande** (`/orbit`). Compatible avec Claude Code, Codex, Cursor, OpenCode et Cline — tous partageant le meme repertoire `~/.harness/`. Apres chaque session, la boucle d'evolution analyse les echecs, genere des skills cibles et les charge pour la prochaine session.
 
 <p align="center">
   <img src="./assets/features.png" alt="fonctionnalites epic harness" width="100%" />
@@ -84,13 +84,14 @@ Apres la fin de la session, la **boucle evolve** analyse ce qui a echoue, genere
 
 Installe automatiquement le binaire et enregistre tous les hooks en une seule etape.
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-Les competences et commandes sont disponibles immediatement.
+Installe automatiquement les 22 competences et enregistre les hooks. Disponible immediatement — aucune etape supplementaire necessaire.
+Mise a jour avec `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -121,7 +122,6 @@ cargo install epic-harness    # compilation depuis les sources
 Puis executez l'assistant de configuration :
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -143,7 +143,6 @@ Sur Claude Code, `hooks/install.js` s'execute automatiquement au demarrage de la
 ### Autres outils
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (necessite Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -151,7 +150,7 @@ epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # Menu interactif
 ```
 
-Les fichiers d'integration sont **synchronises** depuis le binaire : les fichiers manquants ou obsoletes sont ecrits. `GEMINI.md` et `AGENTS.md` ne sont crees que lorsqu'ils sont absents.
+Les fichiers d'integration sont **synchronises** depuis le binaire : les fichiers manquants ou obsoletes sont ecrits. `AGENTS.md` n'est cree que lorsqu'il est absent.
 
 ### Verifier
 
@@ -407,13 +406,12 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 |-------|-------------|-------------|--------|
 | **Claude Code** | ✓ Complet | ✓ 22 competences | Live |
 | **Codex CLI** | ✓ Complet¹ | ✓ 22 | — |
-| **Antigravity** | ✓ Partiel² | ✓ 22 | — |
-| **Cursor** | ✓ Complet³ | ✓ 22 | Live |
-| **OpenCode** | ✓ Partiel⁴ | — | — |
-| **Cline** | ✓ Complet⁵ | — | — |
-| **Aider** | —⁶ | — | — |
+| **Cursor** | ✓ Complet² | ✓ 22 | Live |
+| **OpenCode** | ✓ Partiel³ | — | — |
+| **Cline** | ✓ Complet⁴ | — | — |
+| **Aider** | —⁵ | — | — |
 
-¹ Plugin marketplace · ² Guard au niveau `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
+¹ Plugin marketplace · ² Cursor 1.7+ · ³ Plugin JS · ⁴ 5 scripts de hook · ⁵ Conventions uniquement
 
 ---
 

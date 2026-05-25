@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一個多工具 AI 智慧型代理框架，擁有 **22 個技能（8 流水線 + 14 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Antigravity、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
+一個多工具 AI 智慧型代理框架，擁有 **22 個技能（8 流水線 + 14 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 功能" width="100%" />
@@ -84,13 +84,14 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 
 一步完成二進位安裝和所有掛鉤註冊。
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-技能和命令立即可用。
+自動安裝全部 22 個技能並註冊掛鉤。安裝後立即可用，無需額外步驟。
+使用 `codex plugin update epic@epicsagas` 進行更新。
 
 ### macOS / Linux
 
@@ -121,7 +122,6 @@ cargo install epic-harness    # 從原始碼建置
 然後執行安裝精靈：
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -143,7 +143,6 @@ epic install cursor         # Cursor IDE
 ### 其他工具
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -409,13 +408,12 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 |------|-------------|--------|--------|
 | **Claude Code** | ✓ 完整 | ✓ 22 個技能 | Live |
 | **Codex CLI** | ✓ 完整¹ | ✓ 22 | — |
-| **Antigravity** | ✓ 部分² | ✓ 22 | — |
 | **Cursor** | ✓ 完整³ | ✓ 22 | Live |
 | **OpenCode** | ✓ 部分⁴ | — | — |
 | **Cline** | ✓ 完整⁵ | — | — |
 | **Aider** | —⁶ | — | — |
 
-¹ Plugin marketplace · ² 守衛在 `BeforeModel` 級別 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
+¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
 
 ---
 

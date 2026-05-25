@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un arnés de agente IA multiherramienta con **22 skills (8 pipeline + 14 quality gates)**, un **motor autoevolutivo**, **memoria unificada** y una **pipeline autónoma de un solo comando** (`/orbit`). Funciona con Claude Code, Codex, Antigravity, Cursor, OpenCode y Cline — todos compartiendo el mismo directorio `~/.harness/`. Después de cada sesión, el bucle de evolución analiza fallos, genera skills dirigidos y los carga en la próxima sesión.
+Un arnés de agente IA multiherramienta con **22 skills (8 pipeline + 14 quality gates)**, un **motor autoevolutivo**, **memoria unificada** y una **pipeline autónoma de un solo comando** (`/orbit`). Funciona con Claude Code, Codex, Cursor, OpenCode y Cline — todos compartiendo el mismo directorio `~/.harness/`. Después de cada sesión, el bucle de evolución analiza fallos, genera skills dirigidos y los carga en la próxima sesión.
 
 <p align="center">
   <img src="../../assets/features.png" alt="características de epic harness" width="100%" />
@@ -84,13 +84,14 @@ Al cerrar la sesión, el **bucle evolve** analiza qué falló, genera habilidade
 
 Instala automáticamente el binario y registra todos los hooks en un solo paso.
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-Las habilidades y comandos están disponibles inmediatamente.
+Instala automáticamente las 22 habilidades y registra los hooks. Disponibles inmediatamente — no se necesitan pasos adicionales.
+Se actualiza con `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -121,7 +122,6 @@ cargo install epic-harness    # compilar desde el código fuente
 Luego ejecuta el asistente de configuración:
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -143,7 +143,6 @@ En Claude Code, `hooks/install.js` se ejecuta automáticamente al inicio de la s
 ### Otras herramientas
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (requiere Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -409,13 +408,12 @@ Todas las herramientas comparten el mismo directorio de datos `~/.harness/projec
 |-------------|-------------|-------------|---------|
 | **Claude Code** | ✓ Completo | ✓ 22 habilidades | Live |
 | **Codex CLI** | ✓ Completo¹ | ✓ 22 | — |
-| **Antigravity** | ✓ Parcial² | ✓ 22 | — |
 | **Cursor** | ✓ Completo³ | ✓ vía rules | Live |
 | **OpenCode** | ✓ Parcial⁴ | — | — |
 | **Cline** | ✓ Completo⁵ | — | — |
 | **Aider** | —⁶ | — | — |
 
-¹ Plugin marketplace · ² Guard al nivel `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Solo convenciones
+¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Solo convenciones
 
 ---
 

@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**22개 스킬(8 파이프라인 + 14 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Antigravity, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
+**22개 스킬(8 파이프라인 + 14 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -84,13 +84,15 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 
 바이너리를 자동 설치하고 모든 훅을 한 번에 등록합니다.
 
-### Antigravity
+### Codex CLI
 
 ```bash
-gemini plugin marketplace add epicsagas/plugins
+codex plugin marketplace add epicsagas/plugins
 ```
 
-스킬과 명령어가 즉시 사용 가능합니다.
+22개 스킬 전체를 자동 설치하고 훅을 등록합니다. 추가 설정 없이 바로 사용할 수 있습니다.
+
+`codex plugin update epic@epicsagas`로 업데이트합니다.
 
 ### macOS / Linux
 
@@ -121,7 +123,6 @@ cargo install epic-harness    # 소스에서 빌드
 그 다음 설정 마법사를 실행하세요:
 
 ```bash
-epic install antigravity   # Antigravity
 epic install cursor         # Cursor IDE
 ```
 
@@ -143,7 +144,6 @@ Claude Code에서는 세션 시작 시 `hooks/install.js`가 자동 실행되어
 ### 다른 도구
 
 ```bash
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ 필요)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -407,13 +407,12 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 |------|-----------|------|---------|
 | **Claude Code** | ✓ 전체 | ✓ 22개 스킬 | Live |
 | **Codex CLI** | ✓ 전체¹ | ✓ 22개 | — |
-| **Antigravity** | ✓ 부분² | ✓ 22개 | — |
 | **Cursor** | ✓ 전체³ | ✓ 규칙 경유 | Live |
 | **OpenCode** | ✓ 부분⁴ | — | — |
 | **Cline** | ✓ 전체⁵ | — | — |
 | **Aider** | —⁶ | — | — |
 
-¹ Plugin marketplace · ² `BeforeModel` 레벨에서 guard 실행 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
+¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
 ---
 
