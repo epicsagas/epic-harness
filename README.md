@@ -88,7 +88,7 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 
 > **First time?** Read the [Quick Start Guide (5 min)](docs/quickstart.md).
 
-### Claude Code (recommended)
+### Claude Code
 
 ```
 /plugin marketplace add epicsagas/plugins
