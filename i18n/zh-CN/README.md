@@ -110,13 +110,13 @@ brew install epicsagas/tap/epic-harness
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
 ### 通过 Rust 工具链
@@ -129,7 +129,6 @@ cargo install epic-harness    # 从源码构建
 然后运行安装向导：
 
 ```bash
-epic install codex        # Codex CLI
 epic install cursor       # Cursor IDE
 ```
 
