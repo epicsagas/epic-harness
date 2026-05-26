@@ -1874,15 +1874,17 @@ mod tests {
     #[test]
     fn test_hook_consistency_across_platforms() {
         // Commands required by every platform that supports them:
-        //   guard   — PreToolUse safety gate    (not available on Antigravity)
-        //   observe — PostToolUse recording      (all platforms)
-        //   polish  — PostToolUse format/lint    (not available on Antigravity)
-        //   reflect — Session end evolution       (all platforms)
-        //   resume  — Session start restore      (not available on Cursor)
+        //   guard    — PreToolUse safety gate    (not available on Antigravity)
+        //   observe  — PostToolUse recording      (all platforms)
+        //   polish   — PostToolUse format/lint    (not available on Antigravity)
+        //   reflect  — Session end evolution       (all platforms)
+        //   resume   — Session start restore       (all except Antigravity)
+        //   snapshot — PreCompact state save       (Claude Code, Cursor)
         let universal = vec!["observe", "reflect"];
         let pre_tool = ["Claude Code", "Codex", "Cursor"];
         let post_edit = ["Claude Code", "Codex", "Cursor"];
-        let session_start = ["Claude Code", "Codex", "Antigravity"];
+        let session_start = ["Claude Code", "Codex", "Cursor", "Antigravity"];
+        let pre_compact = ["Claude Code", "Cursor"];
 
         let platforms: &[(&str, &str)] = &[
             ("Claude Code", include_str!("../hooks/hooks.json")),
@@ -1897,32 +1899,34 @@ mod tests {
         for (name, json) in platforms {
             let cmds = extract_harness_commands(json);
 
-            // Every platform must have observe + reflect
             for req in &universal {
                 assert!(
                     cmds.iter().any(|c| c == *req),
                     "{name} hooks missing required command '{req}'. Found: {cmds:?}"
                 );
             }
-            // Platforms with PreToolUse must have guard
             if pre_tool.contains(name) {
                 assert!(
                     cmds.iter().any(|c| c == "guard"),
                     "{name} hooks missing 'guard'. Found: {cmds:?}"
                 );
             }
-            // Platforms with PostToolUse-Edit must have polish
             if post_edit.contains(name) {
                 assert!(
                     cmds.iter().any(|c| c == "polish"),
                     "{name} hooks missing 'polish'. Found: {cmds:?}"
                 );
             }
-            // Platforms with session start must have resume
             if session_start.contains(name) {
                 assert!(
                     cmds.iter().any(|c| c == "resume"),
                     "{name} hooks missing 'resume'. Found: {cmds:?}"
+                );
+            }
+            if pre_compact.contains(name) {
+                assert!(
+                    cmds.iter().any(|c| c == "snapshot"),
+                    "{name} hooks missing 'snapshot'. Found: {cmds:?}"
                 );
             }
         }

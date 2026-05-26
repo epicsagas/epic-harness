@@ -1,6 +1,12 @@
 {
   "version": 1,
   "hooks": {
+    "sessionStart": [
+      {
+        "matcher": "*",
+        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic-harness not found, skipping resume'"
+      }
+    ],
     "preToolUse": [
       {
         "matcher": "Shell",
@@ -25,6 +31,12 @@
         "matcher": "*",
         "command": "EH=$(command -v epic-harness 2>/dev/null); SLUG=$(basename \"$(pwd)\" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g'); test -n \"$EH\" && \"$EH\" mem-observe --project \"$SLUG\" --agent cursor || true",
         "async": true
+      }
+    ],
+    "preCompact": [
+      {
+        "matcher": "*",
+        "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || echo '[harness] epic-harness not found, skipping snapshot'"
       }
     ],
     "sessionEnd": [
