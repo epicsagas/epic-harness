@@ -1,6 +1,0 @@
-{
-  "harness-mem": {
-    "command": "epic-harness",
-    "args": ["mem", "mcp"]
-  }
-}
