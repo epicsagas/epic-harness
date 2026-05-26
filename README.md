@@ -105,6 +105,14 @@ codex plugin marketplace add epicsagas/plugins
 
 Skills and agents are available immediately — no further steps needed.
 
+### Antigravity (Gemini CLI)
+
+```bash
+agy plugins install https://github.com/epicsagas/epic-harness
+```
+
+Auto-installs the plugin (skills, agents, commands, hooks) and registers it on next session start.
+
 ### macOS / Linux
 
 ```bash

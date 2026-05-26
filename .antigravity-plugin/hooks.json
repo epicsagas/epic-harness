@@ -1,0 +1,14 @@
+{
+  "epic-bootstrap": {
+    "PreInvocation": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ~/.gemini/antigravity-cli/plugins/epic/hooks/install.js"
+          }
+        ]
+      }
+    ]
+  }
+}
