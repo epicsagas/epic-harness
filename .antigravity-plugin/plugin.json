@@ -1,5 +1,6 @@
 {
   "name": "epic",
   "hooks": "./integrations/antigravity/hooks/hooks.json",
+  "skills": "./registry/skills/",
   "mcpServers": "./.antigravity-plugin/mcp_config.json"
 }
