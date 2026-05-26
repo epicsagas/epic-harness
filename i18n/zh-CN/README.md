@@ -92,6 +92,14 @@ codex plugin marketplace add epicsagas/plugins
 
 自动安装全部 22 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
 
+### Antigravity (Gemini CLI)
+
+```bash
+agy plugins install https://github.com/epicsagas/epic-harness
+```
+
+自动安装插件（技能、代理、命令、钩子）并在下次会话启动时注册。
+
 ### macOS / Linux
 
 ```bash

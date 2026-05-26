@@ -94,6 +94,14 @@ codex plugin marketplace add epicsagas/plugins
 
 `codex plugin update epic@epicsagas`로 업데이트합니다.
 
+### Antigravity (Gemini CLI)
+
+```bash
+agy plugins install https://github.com/epicsagas/epic-harness
+```
+
+플러그인(스킬, 에이전트, 명령어, 훅)을 자동 설치하고 다음 세션 시작 시 등록합니다.
+
 ### macOS / Linux
 
 ```bash
