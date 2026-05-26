@@ -1,3 +1,10 @@
 {
-  "name": "epic"
+  "manifest_version": "1.0",
+  "name": "epic",
+  "version": "0.4.4",
+  "description": "22 auto-trigger skills + self-evolving agent harness for Antigravity",
+  "hooks": "./hooks.json",
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "mcp_servers": "./config/mcp_servers.json"
 }
