@@ -1853,4 +1853,78 @@ mod tests {
         sync_plugin_cache(&home_str, true);
         let _ = fs::remove_dir_all(base_dir);
     }
+
+    /// Extract all epic-harness subcommands referenced in a JSON string.
+    /// Handles both direct (`epic-harness cmd`) and shell-variable patterns
+    /// (`\"$EH\" cmd` as it appears in raw JSON source).
+    fn extract_harness_commands(json: &str) -> Vec<String> {
+        let re = regex::Regex::new(
+            r#"(?:epic-harness\s+|\\?"\$EH\\?"\s+)(\w+)"#,
+        )
+        .unwrap();
+        let mut cmds: Vec<String> = re
+            .captures_iter(json)
+            .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
+            .collect();
+        cmds.sort();
+        cmds.dedup();
+        cmds
+    }
+
+    #[test]
+    fn test_hook_consistency_across_platforms() {
+        // Commands required by every platform that supports them:
+        //   guard   — PreToolUse safety gate    (not available on Antigravity)
+        //   observe — PostToolUse recording      (all platforms)
+        //   polish  — PostToolUse format/lint    (not available on Antigravity)
+        //   reflect — Session end evolution       (all platforms)
+        //   resume  — Session start restore      (not available on Cursor)
+        let universal = vec!["observe", "reflect"];
+        let pre_tool = ["Claude Code", "Codex", "Cursor"];
+        let post_edit = ["Claude Code", "Codex", "Cursor"];
+        let session_start = ["Claude Code", "Codex", "Antigravity"];
+
+        let platforms: &[(&str, &str)] = &[
+            ("Claude Code", include_str!("../hooks/hooks.json")),
+            ("Codex", include_str!("../integrations/codex/hooks.json")),
+            ("Cursor", include_str!("../integrations/cursor/hooks.json")),
+            (
+                "Antigravity",
+                include_str!("../integrations/antigravity/hooks/hooks.json"),
+            ),
+        ];
+
+        for (name, json) in platforms {
+            let cmds = extract_harness_commands(json);
+
+            // Every platform must have observe + reflect
+            for req in &universal {
+                assert!(
+                    cmds.iter().any(|c| c == *req),
+                    "{name} hooks missing required command '{req}'. Found: {cmds:?}"
+                );
+            }
+            // Platforms with PreToolUse must have guard
+            if pre_tool.contains(name) {
+                assert!(
+                    cmds.iter().any(|c| c == "guard"),
+                    "{name} hooks missing 'guard'. Found: {cmds:?}"
+                );
+            }
+            // Platforms with PostToolUse-Edit must have polish
+            if post_edit.contains(name) {
+                assert!(
+                    cmds.iter().any(|c| c == "polish"),
+                    "{name} hooks missing 'polish'. Found: {cmds:?}"
+                );
+            }
+            // Platforms with session start must have resume
+            if session_start.contains(name) {
+                assert!(
+                    cmds.iter().any(|c| c == "resume"),
+                    "{name} hooks missing 'resume'. Found: {cmds:?}"
+                );
+            }
+        }
+    }
 }

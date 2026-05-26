@@ -1,64 +1,25 @@
 {
-  "version": 1,
-  "hooks": {
-    "SessionStart": [
+  "epic-harness": {
+    "PreInvocation": [
       {
-        "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic-harness not found'"
+            "command": "epic-harness resume"
           }
         ]
       }
     ],
-    "PreToolUse": [
+    "PostInvocation": [
       {
-        "matcher": "run_shell_command",
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic-harness not found'"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "run_shell_command",
-        "hooks": [
+            "command": "epic-harness observe"
+          },
           {
             "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic-harness not found'"
-          }
-        ]
-      },
-      {
-        "matcher": "edit_file",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
-          }
-        ]
-      },
-      {
-        "matcher": "write_file",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic-harness not found'"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "EH=$(command -v epic-harness 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic-harness not found'"
+            "command": "epic-harness reflect"
           }
         ]
       }
