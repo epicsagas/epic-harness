@@ -284,18 +284,6 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
             "rules/harness-context.mdc",
             include_str!("../integrations/cursor/rules/harness-context.mdc")
         ),
-        (
-            "commands/evolve.md",
-            include_str!("../integrations/cursor/commands/evolve.md")
-        ),
-        (
-            "commands/team.md",
-            include_str!("../integrations/cursor/commands/team.md")
-        ),
-        (
-            "commands/orbit.md",
-            include_str!("../integrations/cursor/commands/orbit.md")
-        ),
     ]
 );
 
@@ -1111,6 +1099,9 @@ fn cleanup_legacy_files(target_dir: &Path) -> u32 {
         "ship",
         "intervene",
         "status",
+        "orbit",
+        "evolve",
+        "team",
     ];
     let legacy_agents = ["builder", "reviewer", "auditor", "planner"];
     let mut removed = 0u32;
@@ -1149,7 +1140,12 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
             }
         }
         "cursor" => {
-            // Skills: concatenated into harness-skills.mdc
+            // Skills: individual SKILL.md in .cursor/skills/ + consolidated rules
+            for (name, content) in CANONICAL_SKILLS {
+                let transformed = transform_skill(tool, name, content);
+                files.push((format!("skills/{}/SKILL.md", name), transformed));
+            }
+            // Also keep the consolidated rules file for auto-trigger quality skills
             files.push((
                 "rules/harness-skills.mdc".to_string(),
                 build_cursor_skills_mdc(),
@@ -1731,8 +1727,9 @@ mod tests {
         let files = generate_canonical_files("cursor");
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"rules/harness-skills.mdc"));
-        // Cursor: 1 mdc only (no agents)
-        assert_eq!(files.len(), 1);
+        // Cursor: individual skills + consolidated mdc
+        assert!(files.len() >= 22);
+        assert!(paths.iter().any(|p| p.contains("skills/") && p.contains("SKILL.md")));
     }
 
     #[test]

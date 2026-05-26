@@ -4,7 +4,7 @@
 
 ## Requirements
 
-- **Cursor 1.7 or later** — hooks (`preToolUse`, `postToolUse`, `sessionEnd`) and custom slash commands require Cursor 1.7+
+- **Cursor 1.7 or later** — hooks (`preToolUse`, `postToolUse`, `sessionEnd`) and skills require Cursor 1.7+
 - **epic-harness binary** in `PATH`
 
 ---
@@ -61,27 +61,26 @@ mkdir -p .cursor/rules
 cp integrations/cursor/rules/harness-context.mdc .cursor/rules/
 ```
 
-These rules replace the `session-start` hook (which Cursor does not expose) by injecting harness context into every session automatically.
+These rules replace the `session-start` hook by injecting harness context into every session automatically.
 
 ---
 
-## 4. Install Slash Commands
+## 4. Install Skills
 
-Custom slash commands expose the three top-level epic-harness commands inside Cursor’s Composer.
-
-Each command file uses YAML frontmatter with **`name`** (kebab-case identifier, same as the file stem) and **`description`** (one-line summary). [Cursor’s command format](https://cursor.com/docs/reference/plugins) expects both; if `name` is missing, the slash menu may show only `(user)` instead of your description.
+Skills provide both auto-triggered quality gates and user-invoked pipeline workflows.
 
 ```bash
-mkdir -p .cursor/commands
-cp integrations/cursor/commands/*.md .cursor/commands/
+mkdir -p .cursor/rules .cursor/skills
+epic-harness install cursor --local
 ```
 
-After installation, the following commands are available in Cursor Composer:
-- `/orbit` — Autonomous spec→ship pipeline
-- `/evolve` — Manage skill evolution
-- `/team` — Design a project-specific agent team
+This generates:
+- `.cursor/skills/{name}/SKILL.md` — 21 individual skills (orbit, evolve, team, tdd, secure, etc.)
+- `.cursor/rules/harness-skills.mdc` — Consolidated quality skills for auto-trigger
 
-The remaining workflow steps (spec, go, check, ship, discover) are **auto-triggered skills** — they activate based on context signals without manual invocation.
+After installation, the following skills are available:
+- **Pipeline skills** (user-invoked): orbit, evolve, team, discover, spec, go, check, ship
+- **Quality skills** (auto-triggered): tdd, secure, verify, simplify, perf, document, reflect, etc.
 
 ---
 
@@ -93,12 +92,12 @@ The remaining workflow steps (spec, go, check, ship, discover) are **auto-trigge
 
 ## Install command behavior
 
-`epic-harness install cursor` (and `--local`) **writes or updates** every embedded integration file (`hooks.json`, `rules/`, `commands/`, `agents/`) so it matches the binary. Files that already match are left unchanged. This fixes the case where an older or empty `hooks.json` existed and would previously have been skipped entirely.
+`epic-harness install cursor` (and `--local`) **writes or updates** every embedded integration file (`hooks.json`, `rules/`, `skills/`) so it matches the binary. Files that already match are left unchanged. Legacy commands (`commands/*.md`) are automatically cleaned up.
 
 ## 6. Verify Installation
 
 ```bash
-ls .cursor/hooks.json .cursor/rules/ .cursor/commands/
+ls .cursor/hooks.json .cursor/rules/ .cursor/skills/
 ```
 
 Start a new Cursor session. The Composer should load harness context from `$HARNESS_DIR/memory/` and report any evolved skills from `$HARNESS_DIR/evolved/`.
@@ -111,12 +110,14 @@ Start a new Cursor session. The Composer should load harness context from `$HARN
 .cursor/
 ├── hooks.json          # Hook event → epic-harness subcommand mapping
 ├── rules/
-│   └── harness-context.mdc   # Session start context + auto-behaviors
-├── commands/
-│   ├── orbit.md
-│   ├── evolve.md
-│   └── team.md
-└── (skills auto-trigger based on context — no manual files needed)
+│   ├── harness-context.mdc   # Session start context + auto-behaviors
+│   └── harness-skills.mdc    # Consolidated quality skills (auto-trigger)
+├── skills/
+│   ├── orbit/SKILL.md
+│   ├── evolve/SKILL.md
+│   ├── team/SKILL.md
+│   ├── tdd/SKILL.md
+│   └── ... (21 skills total)
 ```
 
 ---
@@ -136,7 +137,7 @@ Agents are not yet available for the Cursor integration. They will be added in a
 Confirm `.mdc` files are in `.cursor/rules/` (not a subdirectory). Restart Cursor to pick up new rule files.
 
 **Commands not appearing**
-Confirm `.md` files are in `.cursor/commands/`. In Composer, type `/` to see available custom commands.
+Commands were migrated to skills in v0.4.4. Run `epic-harness install cursor --local` to clean up legacy command files and install skills instead.
 
 ---
 
