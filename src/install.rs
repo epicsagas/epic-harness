@@ -228,23 +228,6 @@ fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
 
             result
         }
-        "antigravity" => {
-            let mut result = canonical.to_string();
-
-            // Text normalizations
-            if name == "tdd" || name == "verify" {
-                result = result.replace("subagents", "sub-agents");
-                result = result.replace("subagent", "sub-agent");
-            }
-
-            // Append Memory Integration section (same as codex)
-            let mem_section = mem_section_for_skill(name);
-            if !mem_section.is_empty() {
-                result = format!("{}{}", result.trim_end(), mem_section);
-            }
-
-            result
-        }
         _ => canonical.to_string(),
     }
 }
@@ -387,26 +370,6 @@ static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
 );
 
-// Antigravity: gemini-extension.json manifest + context + hooks.
-// Installed to ~/.gemini/config/plugins/epic/ (global) or .agents/plugins/epic/ (local).
-static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
-    "antigravity",
-    [
-        (
-            "gemini-extension.json",
-            include_str!("../integrations/antigravity/gemini-extension.json")
-        ),
-        (
-            "GEMINI.md",
-            include_str!("../integrations/antigravity/GEMINI.md")
-        ),
-        (
-            "hooks/hooks.json",
-            include_str!("../integrations/antigravity/hooks/hooks.json")
-        ),
-    ]
-);
-
 // ── Tool config ───────────────────────────────────────────────────────────────
 
 struct ToolConfig {
@@ -492,23 +455,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             files: AIDER_FILES,
             note: Some("No hook system available. Conventions are loaded via .aider.conf.yml."),
             preserve_files: &[".aider.conf.yml"],
-            executable_files: &[],
-        }),
-        // Antigravity: gemini-extension bundle at ~/.gemini/config/plugins/epic/ (global)
-        // or .agents/plugins/epic/ (local). Skills, commands, agents, hooks, MCP included.
-        "antigravity" => Some(ToolConfig {
-            global_dir: PathBuf::from(&home)
-                .join(".gemini")
-                .join("config")
-                .join("plugins")
-                .join("epic"),
-            local_dir: cwd.join(".agents").join("plugins").join("epic"),
-            root_files: &[],
-            files: ANTIGRAVITY_FILES,
-            note: Some(
-                "Antigravity extension installed with skills, commands, hooks, and harness-mem MCP.",
-            ),
-            preserve_files: &[],
             executable_files: &[],
         }),
         // Claude Code: install hooks into ~/.claude/settings.json + MCP injection via inject_mcp_claude().
@@ -1077,7 +1023,6 @@ fn inject_mcp(tool: &str, target_dir: &Path) {
 // ── Interactive menu ──────────────────────────────────────────────────────────
 
 const TOOLS: &[(&str, &str)] = &[
-    ("antigravity", "Google Antigravity"),
     ("cursor", "Cursor IDE"),
     ("opencode", "OpenCode"),
     ("cline", "Cline (VS Code)"),
@@ -1213,13 +1158,6 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
         "opencode" => {
             // No canonical files for opencode (only static command files)
         }
-        "antigravity" => {
-            // Skills: skills/{name}/SKILL.md
-            for (name, content) in CANONICAL_SKILLS {
-                let transformed = transform_skill(tool, name, content);
-                files.push((format!("skills/{}/SKILL.md", name), transformed));
-            }
-        }
         // cline, aider: no canonical files to generate
         _ => {}
     }
@@ -1234,7 +1172,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, antigravity, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -1385,7 +1323,7 @@ pub fn run(args: &[String]) -> i32 {
 
         Some("--list" | "list") => {
             println!(
-                "Available integrations: claude, codex, antigravity, cursor, opencode, cline, aider"
+                "Available integrations: claude, codex, cursor, opencode, cline, aider"
             );
             0
         }
@@ -1449,7 +1387,7 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, antigravity, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -1576,7 +1514,7 @@ pub fn run_uninstall(args: &[String]) -> i32 {
         }
         Some("--list" | "list") => {
             println!(
-                "Available integrations: claude, codex, antigravity, cursor, opencode, cline, aider"
+                "Available integrations: claude, codex, cursor, opencode, cline, aider"
             );
             0
         }
@@ -1819,44 +1757,6 @@ mod tests {
     fn test_generate_canonical_files_aider_empty() {
         let files = generate_canonical_files("aider");
         assert!(files.is_empty());
-    }
-
-    #[test]
-    fn test_generate_canonical_files_antigravity() {
-        let files = generate_canonical_files("antigravity");
-        // 22 canonical skills (no separate commands — all unified as skills)
-        assert!(
-            !files.is_empty(),
-            "antigravity should generate canonical files"
-        );
-
-        // Verify skills
-        let skill_files: Vec<_> = files
-            .iter()
-            .filter(|(p, _)| p.starts_with("skills/"))
-            .collect();
-        assert!(
-            skill_files.len() >= 21,
-            "expected at least 21 skill files, got {}",
-            skill_files.len()
-        );
-
-        // Verify no agents
-        let agent_files: Vec<_> = files
-            .iter()
-            .filter(|(p, _)| p.starts_with("agents/") && p.ends_with(".md"))
-            .collect();
-        assert!(agent_files.is_empty(), "expected no agent files");
-
-        // Verify no commands (unified into skills)
-        let cmd_files: Vec<_> = files
-            .iter()
-            .filter(|(p, _)| p.starts_with("commands/"))
-            .collect();
-        assert!(
-            cmd_files.is_empty(),
-            "expected no command files (unified into skills)"
-        );
     }
 
     #[test]

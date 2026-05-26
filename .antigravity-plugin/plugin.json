@@ -3,8 +3,7 @@
   "name": "epic",
   "version": "0.4.4",
   "description": "22 auto-trigger skills + self-evolving agent harness for Antigravity",
-  "hooks": "./hooks.json",
-  "skills": "./skills/",
-  "agents": "./agents/",
-  "mcp_servers": "./config/mcp_servers.json"
+  "hooks": "./integrations/antigravity/hooks/hooks.json",
+  "skills": "./registry/skills/",
+  "mcp_servers": "./integrations/antigravity/gemini-extension.json"
 }
