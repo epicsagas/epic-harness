@@ -1318,9 +1318,7 @@ pub fn run(args: &[String]) -> i32 {
         }
 
         Some("--list" | "list") => {
-            println!(
-                "Available integrations: claude, codex, cursor, opencode, cline, aider"
-            );
+            println!("Available integrations: claude, codex, cursor, opencode, cline, aider");
             0
         }
 
@@ -1509,9 +1507,7 @@ pub fn run_uninstall(args: &[String]) -> i32 {
             exit
         }
         Some("--list" | "list") => {
-            println!(
-                "Available integrations: claude, codex, cursor, opencode, cline, aider"
-            );
+            println!("Available integrations: claude, codex, cursor, opencode, cline, aider");
             0
         }
         Some(tool) => uninstall_tool(tool, local, dry_run),
@@ -1729,7 +1725,11 @@ mod tests {
         assert!(paths.contains(&"rules/harness-skills.mdc"));
         // Cursor: individual skills + consolidated mdc
         assert!(files.len() >= 22);
-        assert!(paths.iter().any(|p| p.contains("skills/") && p.contains("SKILL.md")));
+        assert!(
+            paths
+                .iter()
+                .any(|p| p.contains("skills/") && p.contains("SKILL.md"))
+        );
     }
 
     #[test]
@@ -1855,10 +1855,7 @@ mod tests {
     /// Handles both direct (`epic-harness cmd`) and shell-variable patterns
     /// (`\"$EH\" cmd` as it appears in raw JSON source).
     fn extract_harness_commands(json: &str) -> Vec<String> {
-        let re = regex::Regex::new(
-            r#"(?:epic-harness\s+|\\?"\$EH\\?"\s+)(\w+)"#,
-        )
-        .unwrap();
+        let re = regex::Regex::new(r#"(?:epic-harness\s+|\\?"\$EH\\?"\s+)(\w+)"#).unwrap();
         let mut cmds: Vec<String> = re
             .captures_iter(json)
             .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
