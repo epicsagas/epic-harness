@@ -387,7 +387,7 @@ static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
 );
 
-// Antigravity: gemini-extension.json manifest + context.
+// Antigravity: gemini-extension.json manifest + context + hooks.
 // Installed to ~/.gemini/config/plugins/epic/ (global) or .agents/plugins/epic/ (local).
 static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
     "antigravity",
@@ -399,6 +399,10 @@ static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
         (
             "GEMINI.md",
             include_str!("../integrations/antigravity/GEMINI.md")
+        ),
+        (
+            "hooks/hooks.json",
+            include_str!("../integrations/antigravity/hooks/hooks.json")
         ),
     ]
 );
