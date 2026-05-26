@@ -387,7 +387,7 @@ static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
     [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
 );
 
-// Antigravity: gemini-extension.json manifest + context + hooks.
+// Antigravity: modular manifest + context + config files.
 // Installed to ~/.gemini/config/plugins/epic/ (global) or .agents/plugins/epic/ (local).
 static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
     "antigravity",
@@ -401,8 +401,20 @@ static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
             include_str!("../integrations/antigravity/GEMINI.md")
         ),
         (
-            "hooks/hooks.json",
-            include_str!("../integrations/antigravity/hooks/hooks.json")
+            "config/hooks.json",
+            include_str!("../integrations/antigravity/config/hooks.json")
+        ),
+        (
+            "config/mcp_servers.json",
+            include_str!("../integrations/antigravity/config/mcp_servers.json")
+        ),
+        (
+            "config/skills.json",
+            include_str!("../integrations/antigravity/config/skills.json")
+        ),
+        (
+            "config/agents.json",
+            include_str!("../integrations/antigravity/config/agents.json")
         ),
     ]
 );
@@ -1168,6 +1180,7 @@ fn cleanup_legacy_files(target_dir: &Path) -> u32 {
         "status",
     ];
     let legacy_agents = ["builder", "reviewer", "auditor", "planner"];
+    let legacy_paths = ["hooks/hooks.json"];
     let mut removed = 0u32;
     for name in &legacy_commands {
         let path = target_dir.join(format!("commands/{}.md", name));
@@ -1178,6 +1191,13 @@ fn cleanup_legacy_files(target_dir: &Path) -> u32 {
     }
     for name in &legacy_agents {
         let path = target_dir.join(format!("agents/{}.md", name));
+        if path.exists() {
+            let _ = std::fs::remove_file(&path);
+            removed += 1;
+        }
+    }
+    for rel in &legacy_paths {
+        let path = target_dir.join(rel);
         if path.exists() {
             let _ = std::fs::remove_file(&path);
             removed += 1;
