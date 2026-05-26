@@ -18,5 +18,7 @@
     "code-review",
     "automation"
   ],
-  "skills": "./registry/skills/"
+  "skills": "./registry/skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./registry/mcp.json"
 }
