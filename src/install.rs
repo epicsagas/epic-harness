@@ -26,10 +26,6 @@ static SKILL_SHIP: &str = include_str!("../registry/skills/ship/SKILL.md");
 static SKILL_ORBIT: &str = include_str!("../registry/skills/orbit/SKILL.md");
 static SKILL_EVOLVE: &str = include_str!("../registry/skills/evolve/SKILL.md");
 static SKILL_TEAM: &str = include_str!("../registry/skills/team/SKILL.md");
-// _dispatch is Claude Code only, not installed to other tools
-
-static SKILL_DISPATCH: &str = include_str!("../registry/skills/_dispatch/SKILL.md");
-
 static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("commit", SKILL_COMMIT),
     ("context", SKILL_CONTEXT),
@@ -258,21 +254,6 @@ macro_rules! integration_files {
 
 static HARNESS_MD: &str = include_str!("../integrations/common/HARNESS.md");
 
-static CODEX_FILES: &[(&str, &str)] = integration_files!(
-    "codex",
-    [
-        (
-            "hooks.json",
-            include_str!("../integrations/codex/hooks.json")
-        ),
-        // config.toml: enables codex_hooks (off by default without this).
-        (
-            "config.toml",
-            include_str!("../integrations/codex/config.toml")
-        ),
-    ]
-);
-
 static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     "cursor",
     [
@@ -353,11 +334,6 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
     ]
 );
 
-static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
-    "claude",
-    [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
-);
-
 // ── Tool config ───────────────────────────────────────────────────────────────
 
 struct ToolConfig {
@@ -383,16 +359,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     match tool {
-        "codex" => Some(ToolConfig {
-            global_dir: PathBuf::from(&home).join(".codex"),
-            local_dir: cwd.join(".codex"),
-            root_files: &[],
-            files: CODEX_FILES,
-            note: None,
-            // config.toml may contain user-customised settings — never overwrite.
-            preserve_files: &["config.toml"],
-            executable_files: &[],
-        }),
         "cursor" => Some(ToolConfig {
             global_dir: PathBuf::from(&home).join(".cursor"),
             local_dir: cwd.join(".cursor"),
@@ -443,18 +409,6 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             files: AIDER_FILES,
             note: Some("No hook system available. Conventions are loaded via .aider.conf.yml."),
             preserve_files: &[".aider.conf.yml"],
-            executable_files: &[],
-        }),
-        // Claude Code: install hooks into ~/.claude/settings.json + MCP injection via inject_mcp_claude().
-        "claude" => Some(ToolConfig {
-            global_dir: PathBuf::from(&home),
-            local_dir: cwd.clone(),
-            root_files: &[],
-            files: CLAUDE_FILES,
-            note: Some(
-                "Installs hooks in ~/.claude/settings.json and registers harness-mem MCP server in ~/.claude.json.",
-            ),
-            preserve_files: &[],
             executable_files: &[],
         }),
         _ => None,
@@ -682,272 +636,13 @@ fn make_executable(path: &Path) {
     }
 }
 
-/// Claude global settings hooks do not run in a plugin context, so
-/// `${CLAUDE_PLUGIN_ROOT}` is unavailable there.
-fn sanitize_claude_global_hooks(content: &str) -> String {
-    let mut json: serde_json::Value = match serde_json::from_str(content) {
-        Ok(v) => v,
-        Err(_) => return content.to_string(),
-    };
-
-    let Some(hooks) = json.get_mut("hooks").and_then(|v| v.as_object_mut()) else {
-        return content.to_string();
-    };
-
-    for entries in hooks.values_mut() {
-        let Some(entries_arr) = entries.as_array_mut() else {
-            continue;
-        };
-        for entry in entries_arr {
-            let Some(cmd_hooks) = entry.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
-                continue;
-            };
-            for cmd_hook in cmd_hooks {
-                let Some(cmd) = cmd_hook.get_mut("command").and_then(|v| v.as_str()) else {
-                    continue;
-                };
-                // Plugin bootstrap cmd: when installed globally (not via plugin),
-                // binary is already on PATH — drop the install/seed step, just resume.
-                let next = if cmd.contains("setup.sh")
-                    || cmd.contains("install.js")
-                    || cmd.contains("epic-harness install claude")
-                {
-                    "epic-harness resume"
-                } else {
-                    cmd
-                };
-                if next != cmd {
-                    cmd_hook["command"] = serde_json::Value::String(next.to_string());
-                }
-            }
-        }
-    }
-
-    serde_json::to_string_pretty(&json).unwrap_or_else(|_| content.to_string())
-}
-
-// ── MCP injection ─────────────────────────────────────────────────────────────
-
-/// Syncs canonical commands/skills into every discovered Claude Code
-/// plugin cache directory (`~/.claude/plugins/cache/epicsagas/epic/*/`).
-///
-/// Called on `epic install claude` so the locally-installed binary always
-/// keeps the cache in sync without waiting for an npm publish.
-fn sync_plugin_cache(home: &str, dry_run: bool) {
-    let cache_base = std::path::Path::new(home).join(".claude/plugins/cache/epicsagas/epic");
-
-    let entries = match fs::read_dir(&cache_base) {
-        Ok(e) => e,
-        Err(_) => {
-            return; // Claude Code not installed — skip silently
-        }
-    };
-
-    // symlink 탈출 방어: cache_base를 한 번 canonicalize (루프 밖)
-    let cache_base_canon = match cache_base.canonicalize() {
-        Ok(p) => p,
-        Err(_) => {
-            return; // Claude Code not installed — skip silently
-        }
-    };
-
-    let files: &[(&str, &str)] = &[
-        ("skills/_dispatch/SKILL.md", SKILL_DISPATCH),
-        ("skills/commit/SKILL.md", SKILL_COMMIT),
-        ("skills/context/SKILL.md", SKILL_CONTEXT),
-        ("skills/debug/SKILL.md", SKILL_DEBUG),
-        ("skills/document/SKILL.md", SKILL_DOCUMENT),
-        ("skills/perf/SKILL.md", SKILL_PERF),
-        ("skills/secure/SKILL.md", SKILL_SECURE),
-        ("skills/simplify/SKILL.md", SKILL_SIMPLIFY),
-        ("skills/tdd/SKILL.md", SKILL_TDD),
-        ("skills/verify/SKILL.md", SKILL_VERIFY),
-        ("skills/council/SKILL.md", SKILL_COUNCIL),
-        (
-            "skills/agent-introspection/SKILL.md",
-            SKILL_AGENT_INTROSPECTION,
-        ),
-        ("skills/reflect/SKILL.md", SKILL_REFLECT),
-        ("skills/discover/SKILL.md", SKILL_DISCOVER),
-        ("skills/orchestrate/SKILL.md", SKILL_ORCHESTRATE),
-        ("skills/spec/SKILL.md", SKILL_SPEC),
-        ("skills/go/SKILL.md", SKILL_GO),
-        ("skills/check/SKILL.md", SKILL_CHECK),
-        ("skills/ship/SKILL.md", SKILL_SHIP),
-        ("skills/orbit/SKILL.md", SKILL_ORBIT),
-        ("skills/evolve/SKILL.md", SKILL_EVOLVE),
-        ("skills/team/SKILL.md", SKILL_TEAM),
-    ];
-
-    let mut synced = 0u32;
-    for entry in entries.flatten() {
-        let version_dir = entry.path();
-        if !version_dir.is_dir() {
-            continue;
-        }
-        // symlink 탈출 방어: version_dir를 canonicalize 후 cache_base 내부인지 검증
-        let version_dir = match version_dir.canonicalize() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        if !version_dir.starts_with(&cache_base_canon) {
-            eprintln!(
-                "[harness] skipping suspicious cache entry: {}",
-                version_dir.display()
-            );
-            continue;
-        }
-        for (rel, content) in files {
-            let dest = version_dir.join(rel);
-            let status = write_or_sync(&dest, content, dry_run);
-            if matches!(status, FileStatus::Updated | FileStatus::Added) {
-                synced += 1;
-            }
-        }
-    }
-
-    if dry_run {
-        eprintln!("[harness] dry-run: would sync plugin cache files");
-    } else {
-        eprintln!("[harness] plugin cache synced ({synced} files updated)");
-    }
-}
-
-/// Injects `mcpServers.harness-mem` into `~/.claude.json`.
-/// Claude Code uses this file (not ~/.claude/settings.json) for global app state including MCP.
-fn inject_mcp_claude() {
-    let Some(home) = std::env::var_os("HOME") else {
-        eprintln!("[harness] Could not determine home directory — skipping Claude MCP injection.");
-        return;
-    };
-    let claude_json = std::path::Path::new(&home).join(".claude.json");
-
-    let raw = if claude_json.exists() {
-        fs::read_to_string(&claude_json).unwrap_or_else(|_| "{}".to_string())
-    } else {
-        "{}".to_string()
-    };
-
-    let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
-
-    if json["mcpServers"]["harness-mem"].is_object() {
-        eprintln!(
-            "[harness] mcpServers.harness-mem already registered in ~/.claude.json — skipping."
-        );
-        return;
-    }
-
-    let binary = "epic-harness";
-
-    json["mcpServers"]["harness-mem"] = serde_json::json!({
-        "command": binary,
-        "args": ["mem", "mcp"]
-    });
-
-    let out = match serde_json::to_string_pretty(&json) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
-            return;
-        }
-    };
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let tmp =
-        claude_json.with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
-    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
-        eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
-    } else {
-        let _ = fs::remove_file(&tmp); // clean up tmp on failure
-        eprintln!("[harness] Failed to write ~/.claude.json");
-    }
-}
-
-/// Removes `mcpServers.harness-mem` from `~/.claude.json`.
-/// Mirror of `inject_mcp_claude()` — called by `uninstall_tool` for the "claude" tool.
-fn remove_mcp_claude(dry_run: bool) {
-    let Some(home) = std::env::var_os("HOME") else {
-        eprintln!("[harness] Could not determine home directory — skipping Claude MCP removal.");
-        return;
-    };
-    let claude_json = std::path::Path::new(&home).join(".claude.json");
-
-    if !claude_json.exists() {
-        eprintln!("[harness] ~/.claude.json not found — nothing to remove.");
-        return;
-    }
-
-    let raw = match fs::read_to_string(&claude_json) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[harness] Failed to read ~/.claude.json: {e}");
-            return;
-        }
-    };
-
-    let mut json: serde_json::Value = match serde_json::from_str(&raw) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("[harness] Failed to parse ~/.claude.json: {e}");
-            return;
-        }
-    };
-
-    if json["mcpServers"].get("harness-mem").is_none() {
-        eprintln!(
-            "[harness] mcpServers.harness-mem not found in ~/.claude.json — nothing to remove."
-        );
-        return;
-    }
-
-    if dry_run {
-        eprintln!("[harness] (dry-run) would remove mcpServers.harness-mem from ~/.claude.json");
-        return;
-    }
-
-    if let Some(servers) = json["mcpServers"].as_object_mut() {
-        servers.remove("harness-mem");
-    }
-
-    let out = match serde_json::to_string_pretty(&json) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
-            return;
-        }
-    };
-    let nonce = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    let tmp =
-        claude_json.with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
-    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
-        eprintln!("[harness] Removed mcpServers.harness-mem from ~/.claude.json");
-    } else {
-        let _ = fs::remove_file(&tmp); // clean up tmp on failure
-        eprintln!("[harness] Failed to write ~/.claude.json");
-    }
-}
-
 /// Injects `mcpServers.harness-mem` into the tool's settings JSON file.
 /// Registers `epic-harness mem mcp` as the MCP server command (no Node.js required).
 /// Silently skips if the settings file doesn't exist or already has the entry.
 fn inject_mcp(tool: &str, target_dir: &Path) {
-    // Claude Code stores MCP config in ~/.claude.json (global app state), not settings.json
-    if tool == "claude" {
-        inject_mcp_claude();
-        return;
-    }
-
     let settings_path = match tool {
-        "codex" => None, // Codex uses hooks.json, no mcpServers concept
         "cursor" => Some(target_dir.join("mcp.json")),
         "opencode" => Some(target_dir.join("opencode.json")),
-        "cline" => None, // Cline MCP is configured per-workspace, not via global install
-        "aider" => None, // No MCP support
         _ => None,
     };
 
@@ -1168,7 +863,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -1191,14 +886,6 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let mut progress = Progress::new(tool, total_files, dry_run);
 
     for (rel, content) in cfg.files {
-        let effective_content;
-        let content = if tool == "claude" && *rel == ".claude/settings.json" {
-            effective_content = sanitize_claude_global_hooks(content);
-            effective_content.as_str()
-        } else {
-            content
-        };
-
         let dest = if cfg.root_files.contains(rel) {
             cwd.join(rel)
         } else {
@@ -1233,42 +920,6 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         inject_mcp(tool, target_dir);
     } else {
         eprintln!("[harness] dry-run: would inject mcpServers.harness-mem into {tool} settings");
-    }
-
-    // Codex-specific: warn if config.toml exists but codex_hooks is not enabled.
-    if tool == "codex" {
-        let config_path = target_dir.join("config.toml");
-        if config_path.exists() {
-            let ok = fs::read_to_string(&config_path)
-                .map(|s| s.contains("codex_hooks"))
-                .unwrap_or(false);
-            if !ok {
-                eprintln!();
-                eprintln!(
-                    "[harness] WARNING: ~/.codex/config.toml exists but does not enable hooks."
-                );
-                eprintln!("[harness] Hooks are OFF by default. Add these lines to enable them:");
-                eprintln!();
-                eprintln!("    [features]");
-                eprintln!("    codex_hooks = true");
-                eprintln!();
-                eprintln!("[harness] Then restart Codex for the change to take effect.");
-            }
-        }
-    }
-
-    // Sync plugin cache for Claude Code (keeps commands/skills/agents up-to-date
-    // without requiring an npm publish for every change).
-    if tool == "claude" {
-        let home = std::env::var("HOME").unwrap_or_default();
-        sync_plugin_cache(&home, dry_run);
-    }
-
-    // Seed the default epic org/team on first install (idempotent).
-    // Restricted to `epic install claude` — other tools should not implicitly
-    // create org state in ~/.harness/orgs/.
-    if !dry_run && tool == "claude" {
-        crate::team::store::install_default_team_if_needed("epic");
     }
 
     // Clean up legacy command/agent files from previous installations.
@@ -1381,17 +1032,11 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: cursor, opencode, cline, aider"
             );
             return 1;
         }
     };
-
-    // Claude Code: no files to remove — only MCP entry in ~/.claude.json.
-    if tool == "claude" {
-        remove_mcp_claude(dry_run);
-        return 0;
-    }
 
     let target_dir = if local {
         &cfg.local_dir
@@ -1794,135 +1439,5 @@ mod tests {
         assert!(v["hooks"]["PreToolUse"].is_array());
         assert!(v["hooks"]["SessionStart"].is_null());
         let _ = fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn test_sanitize_claude_global_hooks_removes_plugin_root_refs() {
-        let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
-        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
-        // All hook "command" fields must not reference setup.sh
-        let hooks = json["hooks"].as_object().unwrap();
-        for entries in hooks.values() {
-            if let Some(arr) = entries.as_array() {
-                for entry in arr {
-                    if let Some(cmd_hooks) = entry["hooks"].as_array() {
-                        for cmd_hook in cmd_hooks {
-                            let cmd = cmd_hook["command"].as_str().unwrap_or("");
-                            assert!(
-                                !cmd.contains("setup.sh"),
-                                "setup.sh must be removed from command: {cmd}"
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_sanitize_claude_global_hooks_replaces_bootstrap_with_resume() {
-        let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
-        // plugin bootstrap cmd → epic-harness resume (binary already on PATH when globally installed)
-        assert!(out.contains("epic-harness resume"));
-    }
-
-    // ── sync_plugin_cache ─────────────────────────────────────────────────────
-
-    #[test]
-    fn test_sync_plugin_cache_no_panic_on_missing_dir() {
-        // HOME을 존재하지 않는 임시 경로로 설정 → cache_base 없음 → silent return
-        let fake_home = std::env::temp_dir().join(format!("epic_test_no_cache_{}", rand_suffix()));
-        // 디렉토리를 만들지 않아야 함 — cache_base read_dir 실패해야 함
-        let home_str = fake_home.to_string_lossy().to_string();
-        // dry_run=true 로 호출 — 패닉 없이 즉시 반환되어야 함
-        sync_plugin_cache(&home_str, true);
-        // 여기까지 도달하면 성공
-    }
-
-    #[test]
-    fn test_sync_plugin_cache_no_panic_on_empty_cache_dir() {
-        // cache_base 디렉토리는 존재하지만 version 서브디렉토리가 없는 경우
-        let base_dir = tmp_dir();
-        let cache_base = base_dir.join(".claude/plugins/cache/epicsagas/epic");
-        fs::create_dir_all(&cache_base).unwrap();
-        let home_str = base_dir.to_string_lossy().to_string();
-        // 패닉 없이 종료되어야 함
-        sync_plugin_cache(&home_str, true);
-        let _ = fs::remove_dir_all(base_dir);
-    }
-
-    /// Extract all epic-harness subcommands referenced in a JSON string.
-    /// Handles both direct (`epic-harness cmd`) and shell-variable patterns
-    /// (`\"$EH\" cmd` as it appears in raw JSON source).
-    fn extract_harness_commands(json: &str) -> Vec<String> {
-        let re = regex::Regex::new(r#"(?:epic-harness\s+|\\?"\$EH\\?"\s+)(\w+)"#).unwrap();
-        let mut cmds: Vec<String> = re
-            .captures_iter(json)
-            .filter_map(|c| c.get(1).map(|m| m.as_str().to_string()))
-            .collect();
-        cmds.sort();
-        cmds.dedup();
-        cmds
-    }
-
-    #[test]
-    fn test_hook_consistency_across_platforms() {
-        // Commands required by every platform that supports them:
-        //   guard    — PreToolUse safety gate    (not available on Antigravity)
-        //   observe  — PostToolUse recording      (all platforms)
-        //   polish   — PostToolUse format/lint    (not available on Antigravity)
-        //   reflect  — Session end evolution       (all platforms)
-        //   resume   — Session start restore       (all except Antigravity)
-        //   snapshot — PreCompact state save       (Claude Code, Cursor)
-        let universal = vec!["observe", "reflect"];
-        let pre_tool = ["Claude Code", "Codex", "Cursor"];
-        let post_edit = ["Claude Code", "Codex", "Cursor"];
-        let session_start = ["Claude Code", "Codex", "Cursor", "Antigravity"];
-        let pre_compact = ["Claude Code", "Cursor"];
-
-        let platforms: &[(&str, &str)] = &[
-            ("Claude Code", include_str!("../hooks/hooks.json")),
-            ("Codex", include_str!("../integrations/codex/hooks.json")),
-            ("Cursor", include_str!("../integrations/cursor/hooks.json")),
-            (
-                "Antigravity",
-                include_str!("../integrations/antigravity/hooks/hooks.json"),
-            ),
-        ];
-
-        for (name, json) in platforms {
-            let cmds = extract_harness_commands(json);
-
-            for req in &universal {
-                assert!(
-                    cmds.iter().any(|c| c == *req),
-                    "{name} hooks missing required command '{req}'. Found: {cmds:?}"
-                );
-            }
-            if pre_tool.contains(name) {
-                assert!(
-                    cmds.iter().any(|c| c == "guard"),
-                    "{name} hooks missing 'guard'. Found: {cmds:?}"
-                );
-            }
-            if post_edit.contains(name) {
-                assert!(
-                    cmds.iter().any(|c| c == "polish"),
-                    "{name} hooks missing 'polish'. Found: {cmds:?}"
-                );
-            }
-            if session_start.contains(name) {
-                assert!(
-                    cmds.iter().any(|c| c == "resume"),
-                    "{name} hooks missing 'resume'. Found: {cmds:?}"
-                );
-            }
-            if pre_compact.contains(name) {
-                assert!(
-                    cmds.iter().any(|c| c == "snapshot"),
-                    "{name} hooks missing 'snapshot'. Found: {cmds:?}"
-                );
-            }
-        }
     }
 }

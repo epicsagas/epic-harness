@@ -19,6 +19,6 @@
     "automation"
   ],
   "skills": "./registry/skills/",
-  "hooks": "./hooks/hooks.json",
+  "hooks": "./.claude-plugin/hooks.json",
   "mcpServers": "./registry/mcp.json"
 }
