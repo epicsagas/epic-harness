@@ -84,11 +84,39 @@ function downloadFile(url, dest) {
   });
 }
 
+const CARGO_PKG = "epic-harness";
+
 async function install() {
   const platform = os.platform(); // 'darwin' | 'linux' | 'win32'
 
+  // macOS: prefer Homebrew if available
+  if (platform === "darwin") {
+    const hasBrew = spawnSync("brew", ["--version"], { stdio: "pipe", shell: false }).status === 0;
+    if (hasBrew) {
+      log("Homebrew detected — installing via brew tap...");
+      const r = spawnSync("brew", ["install", "epicsagas/tap/epic-harness"], {
+        stdio: "inherit",
+        shell: false,
+      });
+      if (r.status === 0) return;
+      log("Brew install failed, trying next method...");
+    }
+  }
+
+  // All platforms: try cargo-binstall (pre-built binary, fast)
+  const hasBinstall = spawnSync("cargo", ["binstall", "--version"], { stdio: "pipe", shell: false }).status === 0;
+  if (hasBinstall) {
+    log("cargo-binstall detected — installing...");
+    const r = spawnSync("cargo", ["binstall", CARGO_PKG, "--no-confirm"], {
+      stdio: "inherit",
+      shell: false,
+    });
+    if (r.status === 0) return;
+    log("cargo-binstall failed, falling back to installer script...");
+  }
+
+  // Fallback: download platform-specific installer
   if (platform === "win32") {
-    // Windows: download installer.ps1 and run via PowerShell
     const tmp = join(os.tmpdir(), "epic-harness-installer.ps1");
     log("Downloading Windows installer...");
     await downloadFile(INSTALLER_PS1, tmp);
@@ -99,7 +127,6 @@ async function install() {
     );
     if (r.status !== 0) throw new Error("PowerShell installer failed");
   } else {
-    // macOS / Linux: download installer.sh and run via sh
     const tmp = join(os.tmpdir(), "epic-harness-installer.sh");
     log("Downloading installer...");
     await downloadFile(INSTALLER_SH, tmp);
