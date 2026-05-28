@@ -92,14 +92,6 @@ codex plugin marketplace add epicsagas/plugins
 
 Instala automaticamente todas as 22 habilidades e registra os hooks. Disponível imediatamente — sem etapas adicionais. Atualiza com `codex plugin update epic@epicsagas`.
 
-### Antigravity (Gemini CLI)
-
-```bash
-agy plugins install https://github.com/epicsagas/epic-harness
-```
-
-Instala automaticamente o plugin (habilidades, agentes, comandos, hooks) e o registra na próxima inicialização de sessão.
-
 ### macOS / Linux
 
 ```bash

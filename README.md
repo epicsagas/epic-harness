@@ -107,14 +107,6 @@ Auto-installs all 22 skills and registers hooks. Available immediately — no fu
 
 Updates with `codex plugin update epic@epicsagas`.
 
-### Antigravity (Gemini CLI)
-
-```bash
-agy plugins install https://github.com/epicsagas/epic-harness
-```
-
-Auto-installs the plugin (skills, agents, commands, hooks) and registers it on next session start.
-
 ### macOS / Linux
 
 ```bash

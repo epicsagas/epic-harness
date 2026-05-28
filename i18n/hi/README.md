@@ -92,14 +92,6 @@ codex plugin marketplace add epicsagas/plugins
 
 सभी 22 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
 
-### Antigravity (Gemini CLI)
-
-```bash
-agy plugins install https://github.com/epicsagas/epic-harness
-```
-
-प्लगइन (स्किल, एजेंट, कमांड, हुक) स्वचालित रूप से इंस्टॉल करता है और अगले सेशन शुरू होने पर पंजीकृत करता है।
-
 ### macOS / Linux
 
 ```bash

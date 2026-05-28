@@ -92,14 +92,6 @@ codex plugin marketplace add epicsagas/plugins
 
 22のスキルをすべて自動インストールし、フックを登録します。追加の手順なしですぐに利用可能です。`codex plugin update epic@epicsagas` で更新できます。
 
-### Antigravity (Gemini CLI)
-
-```bash
-agy plugins install https://github.com/epicsagas/epic-harness
-```
-
-プラグイン（スキル、エージェント、コマンド、フック）を自動インストールし、次回セッション開始時に登録します。
-
 ### macOS / Linux
 
 ```bash
