@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "로그인 API에 JWT 인증 추가"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 원하면 파이프라인 스킬을 직접 호출할 수도 있습니다:
@@ -54,7 +54,7 @@ $ /orbit "로그인 API에 JWT 인증 추가"
 ```bash
 /spec "로그인 API에 JWT 인증 추가"   # 요구사항 명확화 → SPEC-*.md
 /go                                    # 자동 계획 → TDD 서브에이전트 → 4분
-/check                                 # 병렬 리뷰 + 보안 + 테스트 → PASS
+/audit                                 # 병렬 리뷰 + 보안 + 테스트 → PASS
 /ship                                  # 격리 테스트 → PR → CI green
 ```
 
@@ -179,7 +179,7 @@ Claude Code 세션 안에서: `/evolve status`
 | **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 — 5 Whys, JTBD, Socratic |
 | **spec** | 요구사항 정의 — 번호가 매겨진 R + AC 문서로 변환 |
 | **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
-| **check** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
+| **audit** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
 | **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
 | **evolve** | 진화 — 자동 세션 분석, 패턴 감지, 스킬 시딩, 메트릭 업데이트 |
 | **/team** | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
@@ -203,9 +203,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -217,7 +217,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**보라색** — 사람 개입: 모드 선택 (불분명한 경우만 인터랙티브), 3회 check 실패 시 일시정지.
+**보라색** — 사람 개입: 모드 선택 (불분명한 경우만 인터랙티브), 3회 audit 실패 시 일시정지.
 **초록색** — 명확 + 복잡 → council 자동 스펙; 명확 + 단순 → direct 빌드; 둘 다 완전 자율 실행.
 
 상태는 `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`에 저장 — 컨텍스트 압축에도 유지됩니다.
@@ -437,7 +437,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

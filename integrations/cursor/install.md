@@ -79,7 +79,7 @@ This generates:
 - `.cursor/rules/harness-skills.mdc` — Consolidated quality skills for auto-trigger
 
 After installation, the following skills are available:
-- **Pipeline skills** (user-invoked): orbit, evolve, team, discover, spec, go, check, ship
+- **Pipeline skills** (user-invoked): orbit, evolve, team, discover, spec, go, audit, ship
 - **Quality skills** (auto-triggered): tdd, secure, verify, simplify, perf, document, reflect, etc.
 
 ---

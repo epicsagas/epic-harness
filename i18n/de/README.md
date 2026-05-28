@@ -46,7 +46,7 @@ Ein einziger Befehl liefert ein Feature von Ende zu Ende. Skills werden ausgelö
 
 ```bash
 $ /orbit "JWT-Auth zur Login-API hinzufügen"
-→ spec genehmigt → go (TDD-Subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec genehmigt → go (TDD-Subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 Oder Pipeline-Skills direkt aufrufen:
@@ -54,7 +54,7 @@ Oder Pipeline-Skills direkt aufrufen:
 ```bash
 /spec "JWT-Auth zur Login-API hinzufügen"   # klärt Anforderungen → SPEC-*.md
 /go                                          # plant automatisch → TDD-Subagents → 4 Min.
-/check                                       # paralleles Review + Sicherheit + Tests → PASS
+/audit                                       # paralleles Review + Sicherheit + Tests → PASS
 /ship                                        # isolierter Test → PR → CI grün
 ```
 
@@ -174,12 +174,12 @@ In einer Claude Code-Session: `/evolve status`
 
 | Skill | Was er macht |
 |---------|-------------|
-| **/orbit** | **Vollständig autonome Pipeline**: discover → spec → go → check → ship → evolve in einem Durchlauf |
+| **/orbit** | **Vollständig autonome Pipeline**: discover → spec → go → audit → ship → evolve in einem Durchlauf |
 | **discover** | Problem entdecken — 5 Whys, JTBD, sokratisch; Anforderungen klären |
 | **spec** | Anforderungen definieren — konvertiert zu nummeriertem R + AC Dokument |
 | **go** | Build-Phase — automatische Planung → TDD-Subagenten → parallele Ausführung → AC-Verifizierung |
-| **check** | Review-Phase — paralleles Code-Review + Sicherheitsaudit + Tests mit scope-basierten Extras |
-| **ship** | Versand-Phase — isolierter Test → PR mit vollem Check-Report → CI-Überwachung + Auto-Fix |
+| **audit** | Review-Phase — paralleles Code-Review + Sicherheitsaudit + Tests mit scope-basierten Extras |
+| **ship** | Versand-Phase — isolierter Test → PR mit vollem Audit-Report → CI-Überwachung + Auto-Fix |
 | **/team** | Organisations-Bibliotheken durchsuchen, bestehende Teams einbinden oder neue entwerfen (3–6 Agents, synchronisiert zu `.claude/agents/`) |
 | **/evolve** | Manueller Evolutions-Trigger — Sessions analysieren, Dashboard anzeigen, Skill-Effektivität prüfen, Rollback durchführen |
 
@@ -201,9 +201,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -436,7 +436,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team (manuell)")
         c8("/evolve (manuell)")

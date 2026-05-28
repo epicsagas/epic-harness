@@ -21,7 +21,7 @@ static SKILL_DISCOVER: &str = include_str!("../registry/skills/discover/SKILL.md
 static SKILL_ORCHESTRATE: &str = include_str!("../registry/skills/orchestrate/SKILL.md");
 static SKILL_SPEC: &str = include_str!("../registry/skills/spec/SKILL.md");
 static SKILL_GO: &str = include_str!("../registry/skills/go/SKILL.md");
-static SKILL_CHECK: &str = include_str!("../registry/skills/check/SKILL.md");
+static SKILL_AUDIT: &str = include_str!("../registry/skills/audit/SKILL.md");
 static SKILL_SHIP: &str = include_str!("../registry/skills/ship/SKILL.md");
 static SKILL_ORBIT: &str = include_str!("../registry/skills/orbit/SKILL.md");
 static SKILL_EVOLVE: &str = include_str!("../registry/skills/evolve/SKILL.md");
@@ -43,7 +43,7 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("orchestrate", SKILL_ORCHESTRATE),
     ("spec", SKILL_SPEC),
     ("go", SKILL_GO),
-    ("check", SKILL_CHECK),
+    ("audit", SKILL_AUDIT),
     ("ship", SKILL_SHIP),
     ("orbit", SKILL_ORBIT),
     ("evolve", SKILL_EVOLVE),
@@ -790,7 +790,7 @@ fn cleanup_legacy_files(target_dir: &Path) -> u32 {
         "discover",
         "spec",
         "go",
-        "check",
+        "audit",
         "ship",
         "intervene",
         "status",
@@ -1351,7 +1351,7 @@ mod tests {
         // Consolidated skills (absorbed from commands)
         assert!(paths.contains(&"skills/spec/SKILL.md"));
         assert!(paths.contains(&"skills/go/SKILL.md"));
-        assert!(paths.contains(&"skills/check/SKILL.md"));
+        assert!(paths.contains(&"skills/audit/SKILL.md"));
         assert!(paths.contains(&"skills/ship/SKILL.md"));
         // Remaining command-skills
         assert!(paths.contains(&"skills/orbit/SKILL.md"));

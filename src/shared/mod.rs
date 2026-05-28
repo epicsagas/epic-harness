@@ -555,7 +555,7 @@ warned:
         let f3 = dir.path().join("PIPELINE-20260507-running.json");
         fs::write(
             &f3,
-            r#"{"id":"active-003","status":"running","phase":"check"}"#,
+            r#"{"id":"active-003","status":"running","phase":"audit"}"#,
         )
         .unwrap();
         // Non-pipeline file (should be ignored)

@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "为登录 API 添加 JWT 认证"
-→ spec 已批准 → go（TDD 子智能体） → check（通过） → ship（PR + CI） → evolve
+→ spec 已批准 → go（TDD 子智能体） → audit（通过） → ship（PR + CI） → evolve
 ```
 
 也可以直接调用管道技能：
@@ -54,7 +54,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 ```bash
 /spec "为登录 API 添加 JWT 认证"   # 明确需求 → SPEC-*.md
 /go                                  # 自动规划 → TDD 子智能体 → 4 分钟
-/check                               # 并行审查 + 安全审计 + 测试 → 通过
+/audit                               # 并行审查 + 安全审计 + 测试 → 通过
 /ship                                # 隔离测试 → PR → CI 通过
 ```
 
@@ -177,13 +177,13 @@ ls ~/.harness/              # 数据目录存在
 | **discover** | 问题发现 — 5 Whys、JTBD、Socratic 方法 |
 | **spec** | 需求定义 — 转换为编号的 R + AC 文档 |
 | **go** | 构建阶段 — 自动规划 → TDD 子智能体 → 并行执行 → AC 验证 |
-| **check** | 审查阶段 — 并行代码审查 + 安全审计 + 测试 |
+| **audit** | 审查阶段 — 并行代码审查 + 安全审计 + 测试 |
 | **ship** | 发布阶段 — 隔离测试 → PR → CI 监控 + 自动修复 |
 | **evolve** | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
 | **team** | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
 | **orchestrate** | 多智能体编排状态和实时智能体控制 |
 
-`/orbit` 将 `discover → spec → go → check → ship → evolve` 封装为一次自主执行。`/team` 和 `/evolve` 可单独调用。所有技能根据上下文自动触发，也可以按名称直接调用。
+`/orbit` 将 `discover → spec → go → audit → ship → evolve` 封装为一次自主执行。`/team` 和 `/evolve` 可单独调用。所有技能根据上下文自动触发，也可以按名称直接调用。
 
 ---
 
@@ -201,9 +201,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -434,7 +434,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team (manual)")
         c8("/evolve (manual)")

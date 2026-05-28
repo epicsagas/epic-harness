@@ -42,9 +42,9 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
   "branch": null,
   "worktree_name": null,
   "original_cwd": null,
-  "check_fail_count": 0,
+  "audit_fail_count": 0,
   "max_retries": 3,
-  "check_report": null,
+  "audit_report": null,
   "deadline": "{ISO-8601, now + 30 minutes}",
   "started_at": "{ISO-8601}",
   "updated_at": "{ISO-8601}",
@@ -93,31 +93,31 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 6. Handle states: DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED
 7. Integrate: full test suite, verify ACs
 
-## Step 4: Check
+## Step 4: Audit
 
 1. Gather scope via `git diff --stat`
 2. Classify changed files (API, Frontend, DB, Backend, Tests, Infra)
 3. Launch parallel sub-agents: Reviewer, Auditor, Test runner (+ scope-specific)
-4. Synthesize Check Report: Quality/Security/Performance PASS/WARN/FAIL + Spec Coverage
-5. **PRESERVE check report** in pipeline state `check_report` field
+4. Synthesize Audit Report: Quality/Security/Performance PASS/WARN/FAIL + Spec Coverage
+5. **PRESERVE audit report** in pipeline state `audit_report` field
 
 ## Step 5: Verdict
 
 - **All PASS + all AC verified** → proceed to Ship
 - **WARN** → log, auto-proceed
-- **FAIL** → increment `check_fail_count`:
+- **FAIL** → increment `audit_fail_count`:
   - `< 3`: plan fixes from action items, execute, return to Step 4
   - `≥ 3`: **PAUSE** — ask user "continue or abort?"
 
 ## Step 6: Ship
 
-1. **Gate**: verify PASS check report exists
+1. **Gate**: verify PASS audit report exists
 2. **Integration verification** — run directly in worktree:
    - Clean build artifacts first: `cargo clean` / `npm run clean` / equivalent
    - Full build from scratch · complete test suite · linter + formatter
    - Fail → STOP. Do NOT create PR.
 3. **Git hygiene**: conventional commits, rebase, squash fixups
-4. **Create PR** via `gh pr create` with spec + check report in body
+4. **Create PR** via `gh pr create` with spec + audit report in body
 5. **CI watch** via `gh pr checks --watch`, auto-fix failures
 6. **Exit worktree**: Return to original directory and keep the worktree
 
@@ -131,23 +131,23 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 - Branch: orbit-{goal_slug}
 - Worktree: orbit-{goal_slug} (preserved for PR)
 - PR: {URL}
-- Check retries: {count}
+- Audit retries: {count}
 
 ### Phase Summary
 | Phase | Status | Retries |
 |-------|--------|---------|
 | Spec | approved | 0 |
 | Go | complete | 0 |
-| Check | PASS | {count} |
+| Audit | PASS | {count} |
 | Ship | complete | 0 |
 ```
 
 ## Red Flags
 - Starting without user mode selection
 - Proceeding without spec approval
-- Continuing after 3 check failures without user consent
+- Continuing after 3 audit failures without user consent
 - Skipping isolated integration test
-- Shipping with FAIL in security checks
-- Losing check report between phases
+- Shipping with FAIL in security audits
+- Losing audit report between phases
 - Creating branch with dirty working tree
 - Losing worktree reference between phases

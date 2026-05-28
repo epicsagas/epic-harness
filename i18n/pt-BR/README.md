@@ -46,7 +46,7 @@ Um comando entrega uma funcionalidade de ponta a ponta. As habilidades são ativ
 
 ```bash
 $ /orbit "Adicionar autenticação JWT à API de login"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 Ou invoque as skills do pipeline diretamente:
@@ -54,7 +54,7 @@ Ou invoque as skills do pipeline diretamente:
 ```bash
 /spec "Adicionar autenticação JWT à API de login"   # clarifica requisitos → SPEC-*.md
 /go                                                   # planejamento automático → subagentes TDD → 4 min
-/check                                                # revisão paralela + segurança + testes → PASS
+/audit                                                # revisão paralela + segurança + testes → PASS
 /ship                                                 # teste isolado → PR → CI verde
 ```
 
@@ -179,10 +179,10 @@ Dentro de uma sessão do Claude Code: `/evolve status`
 | **discover** | Esclarece requisitos vagos — 5 Por Quês, JTBD, questionamento socrático |
 | **spec** | Define requisitos — converte em documento R + AC numerado |
 | **go** | Fase de build — planejamento automático → sub-agentes TDD → execução paralela → verificação AC |
-| **check** | Fase de revisão — revisão de código paralela + auditoria de segurança + testes com extras por escopo |
+| **audit** | Fase de revisão — revisão de código paralela + auditoria de segurança + testes com extras por escopo |
 | **ship** | Fase de entrega — teste isolado → PR com relatório completo → monitoramento CI + auto-fix |
 | **evolve** | Análise de evolução — analise sessões, visualize o painel, inspecione a efetividade das habilidades, rollback |
-| **/orbit** | **Pipeline autônomo completo**: discover → spec → go → check → ship → evolve em uma única execução |
+| **/orbit** | **Pipeline autônomo completo**: discover → spec → go → audit → ship → evolve em uma única execução |
 | **/team** | Navegue pelas bibliotecas da organização, contrate equipes existentes ou crie novas (3–6 agentes, sincronizados em `.claude/agents/`) |
 
 Os estágios do pipeline são acionados automaticamente pelo contexto ou invocáveis pelo nome. Os nomes antigos de comandos continuam funcionando via roteamento de alias.
@@ -203,9 +203,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -217,7 +217,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Roxo** — etapas humanas: seleção de modo (unclear → interativo), pausa após 3 falhas de check.
+**Roxo** — etapas humanas: seleção de modo (unclear → interativo), pausa após 3 falhas de audit.
 **Verde** — clear + complex → auto-spec em conselho; clear + simple → build direto; ambos totalmente autônomos.
 
 Estado persistido em `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobrevive à compactação de contexto.
@@ -437,7 +437,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

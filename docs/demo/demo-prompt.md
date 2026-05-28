@@ -34,7 +34,7 @@ Explore the knowledge graph around the detected smells. Use get_neighbors and fi
 ```
 
 > Orbit detects episteme results in context and auto-enters Direct Mode.
-> The full pipeline runs: Spec -> Go -> Check -> Ship -> Evolve.
+> The full pipeline runs: Spec -> Go -> Audit -> Ship -> Evolve.
 > This is the longest phase (~3-5 min).
 
 ---

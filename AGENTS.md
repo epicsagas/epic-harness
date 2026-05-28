@@ -23,7 +23,7 @@
 ## Architecture: 4-Ring Model
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
-- **Ring 1 (Pipeline)**: 8 skills that orchestrate multi-step workflows (discover → spec → go → check → ship, orbit, evolve, team)
+- **Ring 1 (Pipeline)**: 8 skills that orchestrate multi-step workflows (discover → spec → go → audit → ship, orbit, evolve, team)
 - **Ring 2 (Quality Gates)**: 14 skills that auto-trigger on context signals (tdd, debug, secure, verify, etc.)
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
 
@@ -56,7 +56,7 @@ flowchart TD
 
 **State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — updated after every phase transition, survives context compaction.
 
-**Human checkpoints**: mode selection (interactive only when unclear), 3 failed checks (pause).
+**Human checkpoints**: mode selection (interactive only when unclear), 3 failed audits (pause).
 
 **Evolve**: runs automatically after PR created + CI green. Skipped on abort.
 

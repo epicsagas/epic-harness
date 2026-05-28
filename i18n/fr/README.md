@@ -46,7 +46,7 @@ Une seule commande livre une fonctionnalite de bout en bout. Les competences se 
 
 ```bash
 $ /orbit "Add JWT auth to the login API"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 Ou invoquer les skills du pipeline directement :
@@ -54,7 +54,7 @@ Ou invoquer les skills du pipeline directement :
 ```bash
 /spec "Add JWT auth to the login API"   # clarifie les exigences → SPEC-*.md
 /go                                      # planification automatique → sous-agents TDD → 4 min
-/check                                   # revue parallele + securite + tests → PASS
+/audit                                   # revue parallele + securite + tests → PASS
 /ship                                    # test isole → PR → CI vert
 ```
 
@@ -178,13 +178,13 @@ Dans une session Claude Code : `/evolve status`
 | **discover** | Clarifie les exigences — 5 Pourquoi, JTBD, socratique |
 | **spec** | Definit les exigences — convertit en document R + AC numerote |
 | **go** | Phase de build — planification auto → sous-agents TDD → execution parallele → verification AC |
-| **check** | Phase de review — revue de code parallele + audit de securite + tests avec extras par scope |
+| **audit** | Phase de review — revue de code parallele + audit de securite + tests avec extras par scope |
 | **ship** | Phase de livraison — test isole → PR avec rapport complet → surveillance CI + auto-fix |
 | **evolve** | Declencheur d'evolution — analyser les sessions, voir le tableau de bord, inspecter l'efficacite des competences, restaurer |
-| **/orbit** | **Pipeline autonome complet** : discover → spec → go → check → ship → evolve en une seule execution |
+| **/orbit** | **Pipeline autonome complet** : discover → spec → go → audit → ship → evolve en une seule execution |
 | **/team** | Parcourir les bibliotheques d'organisation, recruter des equipes existantes ou en concevoir de nouvelles (3–6 agents, synchronises vers `.claude/agents/`) |
 
-Les etapes du pipeline (`discover`, `spec`, `go`, `check`, `ship`, `evolve`) sont des **skills** — declenchees automatiquement selon le contexte ou appelables par nom. `/orbit` encapsule l'ensemble du pipeline en une seule execution autonome.
+Les etapes du pipeline (`discover`, `spec`, `go`, `audit`, `ship`, `evolve`) sont des **skills** — declenchees automatiquement selon le contexte ou appelables par nom. `/orbit` encapsule l'ensemble du pipeline en une seule execution autonome.
 
 ---
 
@@ -202,9 +202,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -216,7 +216,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Violet** — etapes humaines : selection du mode (flou → interactif), pause apres 3 echecs de check.
+**Violet** — etapes humaines : selection du mode (flou → interactif), pause apres 3 echecs de audit.
 **Vert** — clair + complexe → auto-spec en conseil ; clair + simple → construction directe ; les deux entierement autonomes.
 
 Etat persiste dans `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survit a la compaction du contexte.
@@ -436,7 +436,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manuel)")

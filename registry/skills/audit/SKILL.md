@@ -1,9 +1,9 @@
 ---
-name: check
-description: "Check phase. Parallel review: code quality + security + tests. Outputs PASS/WARN/FAIL per dimension. Validates spec coverage."
+name: audit
+description: "Audit phase. Parallel review: code quality + security + tests. Outputs PASS/WARN/FAIL per dimension. Validates spec coverage."
 ---
 
-# Check — Verify Everything
+# Audit — Verify Everything
 
 **CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
@@ -11,9 +11,9 @@ description: "Check phase. Parallel review: code quality + security + tests. Out
 
 This skill has 3 internal modes that run in parallel:
 
-1. **check:code** — Code quality, logic, style, test coverage, spec coverage
-2. **check:security** — OWASP Top 10 + performance (N+1, leaks)
-3. **check:test** — Full test suite, AC verification, coverage delta
+1. **audit:code** — Code quality, logic, style, test coverage, spec coverage
+2. **audit:security** — OWASP Top 10 + performance (N+1, leaks)
+3. **audit:test** — Full test suite, AC verification, coverage delta
 
 ---
 
@@ -57,7 +57,7 @@ Launch all 3 modes with `run_in_background: true`.
 
 ---
 
-## Mode: check:code (Review)
+## Mode: audit:code (Review)
 
 ### Constraints
 - Be specific — cite file and line number for every finding
@@ -88,7 +88,7 @@ Launch all 3 modes with `run_in_background: true`.
 
 ---
 
-## Mode: check:security (Audit)
+## Mode: audit:security (Security)
 
 ### Constraints
 - False positives are better than false negatives for security
@@ -129,7 +129,7 @@ Launch all 3 modes with `run_in_background: true`.
 
 ---
 
-## Mode: check:test (Test Runner)
+## Mode: audit:test (Test Runner)
 
 1. Run the full test suite
 2. Verify each Acceptance Criterion is demonstrably met
@@ -143,7 +143,7 @@ Launch all 3 modes with `run_in_background: true`.
 Combine all findings into a single report:
 
 ```
-## Check Report
+## Audit Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - Branch: {current branch}
 
@@ -168,9 +168,9 @@ Combine all findings into a single report:
 
 ### Step 5: Act
 
-- **All PASS + all AC verified**: **"Check passed. Run `/ship` to create a PR."**
+- **All PASS + all AC verified**: **"Audit passed. Run `/ship` to create a PR."**
 - **WARN**: Show warnings, ask if user wants to fix before shipping
-- **FAIL or AC missing**: List each blocker with a one-line fix hint. **"Fix with `/go`, then re-run `/check`."**
+- **FAIL or AC missing**: List each blocker with a one-line fix hint. **"Fix with `/go`, then re-run `/audit`."**
 
 ## Anti-Rationalization
 
@@ -192,4 +192,4 @@ Combine all findings into a single report:
 - Skipping security review for "small changes"
 - Approving code with failing tests
 - Ignoring performance warnings in hot paths
-- Marking check PASS when any AC is unverified
+- Marking audit PASS when any AC is unverified

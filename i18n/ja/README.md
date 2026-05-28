@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "ログインAPIにJWT認証を追加"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 パイプラインスキルを直接呼び出すこともできます:
@@ -54,7 +54,7 @@ $ /orbit "ログインAPIにJWT認証を追加"
 ```bash
 /spec "ログインAPIにJWT認証を追加"   # 要件を明確化 → SPEC-*.md
 /go                                   # 自動計画 → TDDサブエージェント → 4分
-/check                                # 並列レビュー + セキュリティ + テスト → PASS
+/audit                                # 並列レビュー + セキュリティ + テスト → PASS
 /ship                                 # 分離テスト → PR → CIグリーン
 ```
 
@@ -174,16 +174,16 @@ Claude Codeセッション内: `/evolve status`
 
 | スキル | 機能 |
 |-------|------|
-| **/orbit** | **完全自律パイプライン**: discover → spec → go → check → ship → evolve を一括実行 |
+| **/orbit** | **完全自律パイプライン**: discover → spec → go → audit → ship → evolve を一括実行 |
 | **discover** | 曖昧なリクエストを明確化 — 5 Whys、JTBD、ソクラテス対話 |
 | **spec** | 要件を番号付きR + ACドキュメントに変換 |
 | **go** | 自動計画 → TDDサブエージェント → 並列実行 → AC検証 |
-| **check** | 並列コードレビュー + セキュリティ監査 + テスト |
+| **audit** | 並列コードレビュー + セキュリティ監査 + テスト |
 | **ship** | 分離テスト → チェックレポート付きPR → CI監視 + 自動修正 |
 | **evolve** | 手動進化トリガー — セッション分析、ダッシュボード表示、スキル有効性確認、ロールバック |
 | **team** | orgのライブラリを閲覧、既存チームを雇用、または新規設計（3–6エージェント、`.claude/agents/` に同期） |
 
-`discover` → `spec` → `go` → `check` → `ship` → `evolve` は `/orbit` でラップされます。`team` と `evolve` は手動呼び出しです。
+`discover` → `spec` → `go` → `audit` → `ship` → `evolve` は `/orbit` でラップされます。`team` と `evolve` は手動呼び出しです。
 
 ---
 
@@ -201,9 +201,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -429,7 +429,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1(discover) --> c2(spec) --> c3(go) --> c4(check) --> c5(ship) --> c6(evolve)
+            c1(discover) --> c2(spec) --> c3(go) --> c4(audit) --> c5(ship) --> c6(evolve)
         end
         c7("/team")
         c8("/evolve (manual)")

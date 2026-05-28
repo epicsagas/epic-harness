@@ -59,7 +59,7 @@ One command ships a feature end-to-end. Skills fire without you asking. The agen
 
 ```bash
 $ /orbit "Add JWT auth to the login API"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 Or invoke pipeline skills directly:
@@ -67,7 +67,7 @@ Or invoke pipeline skills directly:
 ```bash
 /spec "Add JWT auth to the login API"   # clarifies requirements → SPEC-*.md
 /go                                      # auto-plans → TDD subagents → 4 min
-/check                                   # parallel review + security + tests → PASS
+/audit                                   # parallel review + security + tests → PASS
 /ship                                    # isolated test → PR → CI green
 ```
 
@@ -191,12 +191,12 @@ Inside a Claude Code session: `/evolve status`
 
 | Skill | What it does |
 |-------|-------------|
-| `/orbit` | **Full autonomous pipeline**: spec → go → check → ship → evolve in one shot |
+| `/orbit` | **Full autonomous pipeline**: spec → go → audit → ship → evolve in one shot |
 | `/discover` | Problem discovery — 5 Whys, JTBD, Socratic questioning |
 | `/spec` | Define requirements — converts to numbered R + AC document |
 | `/go` | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
-| `/check` | Review phase — parallel code review + security audit + tests |
-| `/ship` | Shipping phase — isolated test → PR with full check report → CI watch |
+| `/audit` | Audit phase — parallel code review + security audit + tests |
+| `/ship` | Shipping phase — isolated test → PR with full audit report → CI watch |
 | `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, rollback |
 | `/team` | Browse org libraries, hire existing teams, or design new ones |
 
@@ -216,9 +216,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -230,7 +230,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Purple** — human steps: mode selection (unclear → interactive), 3× check failure pause.
+**Purple** — human steps: mode selection (unclear → interactive), 3× audit failure pause.
 **Green** — clear + complex → council auto-spec; clear + simple → direct build; both fully autonomous.
 
 State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
@@ -458,7 +458,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

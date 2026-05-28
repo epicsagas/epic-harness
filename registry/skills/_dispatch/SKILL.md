@@ -31,7 +31,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | User runs `/intervene` | **orchestrate** |
 | 요구사항 정의 필요, 스펙 없음 | **spec** |
 | 빌드/구현 시작, 스펙 승인됨 | **go** |
-| 리뷰/감사/테스트 필요 | **check** |
+| 리뷰/감사/테스트 필요 | **audit** |
 | PR 생성 / CI / 배포 준비 | **ship** |
 
 ## Alias Routing
@@ -39,7 +39,8 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 Users can still type legacy command names. Map them:
 - `/spec` → invoke skill **spec** directly
 - `/go` → invoke skill **go** directly
-- `/check` → invoke skill **check** directly
+- `/audit` → invoke skill **audit** directly
+- `/check` → invoke skill **audit** directly (legacy alias)
 - `/ship` → invoke skill **ship** directly
 - `/discover` → invoke skill **discover** directly
 - `/intervene` → invoke skill **orchestrate** (intervene mode)
@@ -53,12 +54,12 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 |----------------|-----------|----------------|
 | `/discover` problem framed | `status: framed` written | "Problem defined. Run `/spec` to turn this into a buildable specification." |
 | `/spec` saved | `status: approved` written | "Spec saved. Run `/go` to start building." |
-| `/go` report done | All tasks complete, tests green | "Build complete. Run `/check` to verify before shipping." |
-| `/check` report done | All PASS + all AC verified | "Check passed. Run `/ship` to create a PR." |
-| `/check` report done | Any FAIL or AC missing | "Fix blockers with `/go`, then re-run `/check`." |
+| `/go` report done | All tasks complete, tests green | "Build complete. Run `/audit` to verify before shipping." |
+| `/audit` report done | All PASS + all AC verified | "Audit passed. Run `/ship` to create a PR." |
+| `/audit` report done | Any FAIL or AC missing | "Fix blockers with `/go`, then re-run `/audit`." |
 | `/ship` report done | PR created, CI green | "Shipped. Loop complete." |
 | `/orbit` phase done | Pipeline `status: running` | "(orbit) Phase complete. Continuing to next phase..." |
-| `/orbit` check FAIL × 3 | `check_fail_count >= max_retries` | "(orbit) 3 check failures reached. Pausing for your input." |
+| `/orbit` audit FAIL × 3 | `audit_fail_count >= max_retries` | "(orbit) 3 audit failures reached. Pausing for your input." |
 | `/orbit` complete | PR created, CI green | "(orbit) Pipeline complete. See consolidated report above." |
 | `/intervene` executed | Control directive written | "Intervention recorded. Use /status to monitor." |
 
@@ -68,7 +69,7 @@ These transitions are informational nudges only. The user controls when each pha
 
 When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exists with `status: running`):
 
-- **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/check`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
+- **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/audit`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
 - **Dispatch skills normally** — tdd, debug, verify, secure, perf, simplify, document, context all fire as usual within each phase
 - **episteme pre-analysis**: if episteme `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to **go:plan** as spec material — skip mode selection entirely and enter Direct Build
 - **After orbit completes** (`status: complete` or `status: aborted`) — resume normal dispatch behavior

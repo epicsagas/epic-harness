@@ -34,7 +34,7 @@ body:
     attributes:
       label: Area
       options:
-        - Commands (/spec, /go, /check, /ship, /evolve, /orbit)
+        - Commands (/spec, /go, /audit, /ship, /evolve, /orbit)
         - Skills (auto-trigger)
         - Hooks (guard, observe, polish, resume)
         - Memory (harness mem)

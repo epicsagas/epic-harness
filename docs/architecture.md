@@ -26,7 +26,7 @@ flowchart TB
         direction TB
         subgraph orbit["  /orbit  (autonomous)"]
             direction LR
-            c1("/discover\noptional") --> c2("/spec") --> c3("/go") --> c4("/check") --> c5("/ship")
+            c1("/discover\noptional") --> c2("/spec") --> c3("/go") --> c4("/audit") --> c5("/ship")
             c4 -->|"FAIL → retry"| c3
         end
         c6("/team")
@@ -51,7 +51,7 @@ flowchart TB
 
 ```
 Ring 0 (Invisible)     resume · guard · polish · observe · snapshot · reflect
-Ring 1 (Pipeline)      /discover → /spec → /go → /check → /ship  ← wrapped by /orbit
+Ring 1 (Pipeline)      /discover → /spec → /go → /audit → /ship  ← wrapped by /orbit
                        /team  /evolve
 Ring 2 (Quality Gates) tdd · debug · secure · perf · simplify · document · verify · context · council · agent-introspection
 Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills → gate → reload
@@ -68,7 +68,7 @@ Ring 3 (Self-Evolve)   observe → analyze → detect patterns → seed skills �
 
 ### Ring 1: /orbit — Autonomous Pipeline
 
-`/orbit` wraps spec→go→check→ship into a single autonomous execution. It orchestrates existing skills.
+`/orbit` wraps spec→go→audit→ship into a single autonomous execution. It orchestrates existing skills.
 
 ```mermaid
 flowchart TD
@@ -81,9 +81,9 @@ flowchart TD
     APPROVE -->|modify| GEN
     APPROVE -->|reject| ABORT(["Abort"])
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -94,8 +94,8 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-Human checkpoints (purple): mode selection, spec approval, 3× check failure pause.
-Autonomous phases (green): go, check, ship — run without user intervention.
+Human checkpoints (purple): mode selection, spec approval, 3× audit failure pause.
+Autonomous phases (green): go, audit, ship — run without user intervention.
 
 State tracked in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`.
 
@@ -105,7 +105,7 @@ Commands use **conditional worktree isolation** to prevent conflicts:
 
 - **`/go`**: Detects file-level conflicts in parallel tasks. Uses `isolation: "worktree"` (Claude Code Agent tool) when tasks modify overlapping files. Otherwise executes in main working tree.
 - **`/ship`**: Launches isolated pre-flight test in a clean worktree before creating PR. Simulates CI conditions locally to catch build/test failures before remote execution.
-- **`/check`**: No isolation needed — read-only analysis with no code modification.
+- **`/audit`**: No isolation needed — read-only analysis with no code modification.
 
 ### Why 4 Rings?
 
@@ -337,7 +337,7 @@ epic-harness/
 │   ├── discover/SKILL.md
 │   ├── spec/SKILL.md
 │   ├── go/SKILL.md
-│   ├── check/SKILL.md
+│   ├── audit/SKILL.md
 │   ├── ship/SKILL.md
 │   ├── orbit/SKILL.md
 │   ├── evolve/SKILL.md
@@ -357,7 +357,7 @@ epic-harness/
 │   ├── commit/SKILL.md
 │   ├── orchestrate/SKILL.md
 │   └── agent-introspection/SKILL.md
-├── agents/            # Internal agents (used by /go, /check)
+├── agents/            # Internal agents (used by /go, /audit)
 │   ├── builder.md
 │   ├── reviewer.md
 │   ├── auditor.md

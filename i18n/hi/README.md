@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "लॉगिन API में JWT auth जोड़ो"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 या पाइपलाइन स्किल्स को सीधे इनवोक करें:
@@ -54,7 +54,7 @@ $ /orbit "लॉगिन API में JWT auth जोड़ो"
 ```bash
 /spec "Add JWT auth to the login API"   # आवश्यकताएँ स्पष्ट करता है → SPEC-*.md
 /go                                      # ऑटो-प्लान → TDD subagents → 4 मिनट
-/check                                   # समानांतर review + security + tests → PASS
+/audit                                   # समानांतर review + security + tests → PASS
 /ship                                    # isolated test → PR → CI green
 ```
 
@@ -174,11 +174,11 @@ Claude Code सेशन के अंदर: `/evolve status`
 
 | स्किल | यह क्या करता है |
 |---------|-------------|
-| `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: discover → spec → go → check → ship → evolve एक ही शॉट में |
+| `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: discover → spec → go → audit → ship → evolve एक ही शॉट में |
 | `/discover` | अस्पष्ट अनुरोधों को स्पष्ट करता है — 5 Whys, JTBD, Socratic |
 | `/spec` | आवश्यकताओं को परिभाषित करता है — क्रमांकित R + AC दस्तावेज़ |
 | `/go` | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन |
-| `/check` | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट |
+| `/audit` | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट |
 | `/ship` | शिपिंग चरण — आइसोलेटेड टेस्ट → PR → CI मॉनिटरिंग + ऑटो-फिक्स |
 | `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर — सेशन विश्लेषण, डैशबोर्ड देखें, स्किल प्रभावशीलता निरीक्षण, rollback |
 | `/team` | ऑर्ग लाइब्रेरी ब्राउज़ करें, मौजूदा टीमों को हायर करें, या नई डिज़ाइन करें (3–6 एजेंट, `.claude/agents/` में सिंक) |
@@ -199,9 +199,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -213,7 +213,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**बैंगनी** — मानव चरण: मोड चयन (अस्पष्ट → इंटरेक्टिव), 3× check विफलता पर रुकना।
+**बैंगनी** — मानव चरण: मोड चयन (अस्पष्ट → इंटरेक्टिव), 3× audit विफलता पर रुकना।
 **हरा** — clear + complex → council auto-spec; clear + simple → direct build; दोनों पूर्ण रूप से स्वायत्त।
 
 स्थिति `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` में बनी रहती है — context compaction के बाद भी जीवित।
@@ -433,7 +433,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

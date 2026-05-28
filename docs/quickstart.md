@@ -36,12 +36,12 @@ The Rust binary handles all hooks. If you also want to install for other tools (
    /spec       # describe what you want to build
                # → if spec has 3+ requirements and no team linked, suggests /team
    /go         # let it build (uses worktree isolation for parallel conflicting tasks)
-   /check      # parallel review + security + perf audit
+   /audit      # parallel review + security + perf audit
    /ship       # isolated pre-flight test → PR + CI + merge
                # → on completion, suggests /evolve to improve skills for the next cycle
    ```
 
-   **Or use `/orbit`** — runs spec → go → check → ship autonomously in one command:
+   **Or use `/orbit`** — runs spec → go → audit → ship autonomously in one command:
    ```
    /orbit
    # Choose mode:

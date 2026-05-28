@@ -18,7 +18,7 @@ These skills activate automatically based on context signals:
 |-------|---------|
 | `spec` | Define requirements before coding |
 | `go` | Build with auto-plan + TDD |
-| `check` | Review + security audit + tests |
+| `audit` | Review + security audit + tests |
 | `ship` | Create PR, verify CI, merge |
 | `tdd` | New feature or bug fix — Red → Green → Refactor |
 | `debug` | Test failure, runtime error, unexpected behavior |
@@ -88,11 +88,11 @@ Anti-patterns: vague messages, wrong type, staging unrelated files, using `--no-
 
 ## Orbit — Autonomous Pipeline
 
-Chains `spec → go → check → ship` skills in one session.
+Chains `spec → go → audit → ship` skills in one session.
 
 **Two modes:**
-- **Interactive**: user describes the problem, then spec/go/check/ship skills fire automatically
+- **Interactive**: user describes the problem, then spec/go/audit/ship skills fire automatically
 - **Council auto-spec**: 4-voice council generates spec; user approves or rejects
 
-After spec approved, runs autonomously. On FAIL: auto-fix and re-check, max 3 cycles. Pauses for human input if all 3 fail.
+After spec approved, runs autonomously. On FAIL: auto-fix and re-audit, max 3 cycles. Pauses for human input if all 3 fail.
 State tracked in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`.

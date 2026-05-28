@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "為登入 API 新增 JWT 驗證"
-→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
 ```
 
 也可以直接呼叫管道技能：
@@ -54,7 +54,7 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 ```bash
 /spec "為登入 API 新增 JWT 驗證"   # 釐清需求 → SPEC-*.md
 /go                                # 自動規劃 → TDD 子智能體 → 4 分鐘
-/check                             # 平行審查 + 安全 + 測試 → PASS
+/audit                             # 平行審查 + 安全 + 測試 → PASS
 /ship                              # 隔離測試 → PR → CI 綠燈
 ```
 
@@ -180,11 +180,11 @@ ls ~/.harness/              # 資料目錄存在
 | **discover** | 自動或 `/discover` | 問題發現 — 5 Whys、JTBD、蘇格拉底式提問 |
 | **spec** | 自動或 `/spec` | 將需求轉換為編號的 R + AC 文件 |
 | **go** | 自動或 `/go` | 建構階段 — 自動規劃 → TDD 子代理 → 平行執行 → AC 驗證 |
-| **check** | 自動或 `/check` | 審查階段 — 平行程式碼審查 + 安全稽核 + 測試 |
+| **audit** | 自動或 `/audit` | 審查階段 — 平行程式碼審查 + 安全稽核 + 測試 |
 | **ship** | 自動或 `/ship` | 發佈階段 — 隔離測試 → PR → CI 監控 + 自動修復 |
 | **evolve** | 自動或 `/evolve` | 工作階段分析、儀表板、技能效果檢查、回滾 |
 | **team** | `/team` | 瀏覽組織庫、聘請現有團隊，或設計新團隊（3-6 個智能體） |
-| **orbit** | `/orbit` | **完整自主流水線**：discover → spec → go → check → ship → evolve 一次執行 |
+| **orbit** | `/orbit` | **完整自主流水線**：discover → spec → go → audit → ship → evolve 一次執行 |
 
 所有管道技能均可按名稱直接呼叫，也會根據上下文自動觸發。
 
@@ -204,9 +204,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> CHECK["Check\nreview + audit + test"]:::auto
-    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    CHECK -->|FAIL| RETRY{"retry < 3?"}
+    GO --> AUDIT["Audit\nreview + security + test"]:::auto
+    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -438,7 +438,7 @@ flowchart TB
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("check") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")
