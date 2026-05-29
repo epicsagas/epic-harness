@@ -228,7 +228,10 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             // ── CORS & Other ────────────────────────────────
             (Method::Options, _) => Response::from_string("{}")
                 .with_status_code(204)
-                .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173").unwrap())
+                .with_header(
+                    Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173")
+                        .unwrap(),
+                )
                 .with_header(
                     Header::from_bytes(
                         b"Access-Control-Allow-Methods",
@@ -263,7 +266,9 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 fn json_response(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
-        .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173").unwrap())
+        .with_header(
+            Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173").unwrap(),
+        )
 }
 
 fn percent_decode(s: &str) -> String {
@@ -338,10 +343,14 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 if let Ok(file) = fs::File::open(&evo_log) {
                     use std::io::BufRead;
                     for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-                        if line.trim().is_empty() { continue; }
+                        if line.trim().is_empty() {
+                            continue;
+                        }
                         if let Ok(v) = serde_json::from_str(&line) {
                             buf.push_back(v);
-                            if buf.len() > 50 { buf.pop_front(); }
+                            if buf.len() > 50 {
+                                buf.pop_front();
+                            }
                         }
                     }
                 }
