@@ -71,7 +71,7 @@ When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exist
 
 - **SUPPRESS** normal phase transition prompts ("Run `/go`", "Run `/audit`", "Run `/ship`", etc.) — orbit handles its own phase transitions internally
 - **Dispatch skills normally** — tdd, debug, verify, secure, perf, simplify, document, context all fire as usual within each phase
-- **episteme pre-analysis**: if episteme `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to **go:plan** as spec material — skip mode selection entirely and enter Direct Build
+- **episteme pre-analysis**: if episteme `suggest_refactorings` output is present in context before `/orbit` starts, pass it directly to **go:plan** as spec material — auto-detect direct mode
 - **After orbit completes** (`status: complete` or `status: aborted`) — resume normal dispatch behavior
 
 **Orbit Recovery on Session Resume**: When a session resumes (after context compaction or crash) and an active pipeline is detected:
@@ -79,7 +79,7 @@ When `/orbit` is active (detected by: `$HARNESS_DIR/orbit/PIPELINE-*.json` exist
 - **Do NOT re-run mode selection** — the mode was already chosen and recorded in `mode` field
 - **Do NOT re-run spec creation** — the spec file path is in `spec_file` field
 - Resume from the current `phase` as documented in the pipeline state
-- If `phase` is `mode_select` with no `mode` set, then and only then prompt for mode selection
+- If `phase` is `auto_detect` with no `mode` set, run auto-detection logic (PRD present → council, clear request → direct, vague → council) and proceed without asking
 
 The orbit command is a self-contained pipeline. Interjecting normal transition nudges during orbit would confuse the user.
 

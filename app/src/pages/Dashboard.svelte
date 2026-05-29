@@ -69,7 +69,7 @@
   <div class="ring-badge">
     <div class="ring-num" style="background:var(--accent-soft);color:var(--accent);">1</div>
     <div class="ring-info">
-      <div class="ring-title">Commands</div>
+      <div class="ring-title">Pipeline</div>
       <div class="ring-desc">{$tStore('ring1Desc')}</div>
     </div>
   </div>

@@ -87,13 +87,19 @@
   }
 
   const activeCount = $derived(
-    run ? run.agents.filter(a => a.status === 'running').length : 0
+    run ? run.agents.filter(a => a.status === 'running' || a.status === 'blocked').length : 0
   );
   const completedCount = $derived(
     run ? run.agents.filter(a => a.status === 'done').length : 0
   );
   const failedCount = $derived(
     run ? run.agents.filter(a => a.status === 'failed').length : 0
+  );
+  const activeAgents = $derived(
+    run ? run.agents.filter(a => a.status !== 'done') : []
+  );
+  const completedAgents = $derived(
+    run ? run.agents.filter(a => a.status === 'done') : []
   );
 
   // Low success tools from obs
@@ -173,9 +179,9 @@
         </div>
       </div>
 
-      <!-- Agent Cards -->
+      <!-- Agent Cards (active only) -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
-        {#each run.agents as agent}
+        {#each activeAgents as agent}
           {@const status = agentStatuses.get(agent.id)}
           <div class="agent-card">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
@@ -209,6 +215,33 @@
           </div>
         {/each}
       </div>
+
+      <!-- Completed Agents Table -->
+      {#if completedAgents.length > 0}
+        <div style="margin-top:16px;">
+          <h4 style="margin-bottom:8px;font-size:13px;color:var(--fg-secondary);">{$tStore('completedLabel')} ({completedAgents.length})</h4>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>{$tStore('colAgents')}</th>
+                <th>{$tStore('colStatus')}</th>
+                <th>{$tStore('colGoal')}</th>
+                <th>{$tStore('completedAtLabel')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each completedAgents as agent}
+                <tr>
+                  <td style="font-family:var(--font-mono);font-size:11px;">{agent.role}</td>
+                  <td><span class="pill {statusPillClass(agent.status)}">{agent.status}</span></td>
+                  <td style="font-size:12px;color:var(--fg-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{agent.task}</td>
+                  <td style="font-size:11px;color:var(--muted);">{agent.completed_at ? relativeTime(agent.completed_at) : '--'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
 
       <!-- Dependency Graph -->
       {#if Object.keys(run.dependency_graph).length > 0}

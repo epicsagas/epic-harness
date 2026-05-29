@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: "Complete orbit — autonomous spec through ship. Choose interactive or council mode, then hands-off until PR."
+description: "Complete orbit — autonomous spec through ship. Auto-detects mode, hands-off until PR."
 ---
 
 # /orbit — Complete Orbit
@@ -35,7 +35,7 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 {
   "id": "{timestamp}",
   "mode": null,
-  "phase": "mode_select",
+  "phase": "auto_detect",
   "status": "running",
   "spec_file": null,
   "goal_slug": null,
@@ -52,26 +52,57 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 }
 ```
 
-## Step 1: Mode Selection
+## Step 1: Auto-Detect Mode
 
-Ask the user:
-> **1. Interactive discover** — You run `/discover` and `/spec` yourself, then say "orbit go".
-> **2. Council auto-spec** — 4-voice council analyzes your request, generates a spec, you approve.
+**DO NOT ask the user for mode selection.** Auto-detect the best path:
 
-Wait for choice. Record in pipeline state.
+### Detection Logic
 
-## Step 2A: Interactive Mode
+| Signal | Mode | Reason |
+|--------|------|--------|
+| PRD / detailed requirements doc exists in project | `council` | Rich input → council synthesizes best approach |
+| User request is specific and actionable (clear goal, defined scope) | `direct` | No need for discovery — spec directly |
+| User request is vague, unfocused, or "I want to..." without specifics | `council` | Council frames the problem better than guessing |
+| User explicitly says "interactive" or "let me discover first" | `interactive` | Respect explicit preference |
 
-Tell user to run `/discover` → `/spec`, then say "orbit go". STOP and wait.
-On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
+### Detection Process
 
-## Step 2B: Council Auto-Spec
+1. Check for PRD/requirements docs: `ls {project}/PRD*.md {project}/docs/PRD*.md {project}/requirements*.md 2>/dev/null`
+2. Evaluate user request clarity:
+   - **Specific**: contains concrete feature descriptions, acceptance criteria, or technical constraints → `direct`
+   - **Vague**: "build X", "improve Y", "add Z" without details → `council`
+3. Record detected mode in pipeline state (`"mode": "direct|council|interactive"`)
+4. Report mode choice to user as a **notification**, not a question: `"Orbit mode: {mode} (auto-detected)"`
+5. Proceed immediately to the matching step below — **do not wait for confirmation**
 
-1. Gather the user's request (ask if not stated)
+## Step 2A: Direct Mode (clear request → auto-spec)
+
+**Use when**: Request is specific and actionable.
+
+1. Read the user's request + any existing docs (PRD, README, AGENTS.md)
+2. Generate spec directly at `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`
+3. Record via `mem_add` (type=decision, importance=0.9)
+4. **Proceed immediately to Step 3** — no approval gate
+
+## Step 2B: Council Auto-Spec (complex/vague request → council)
+
+**Use when**: PRD exists or request needs framing.
+
+1. Gather the user's request from conversation context
 2. Launch 4 parallel sub-agents (Architect, Skeptic, Pragmatist, Critic) — each receives ONLY the request + codebase context, NOT the full conversation (anti-anchoring)
 3. Synthesize: list agreement/disagreement, produce recommended approach
 4. Generate spec at `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`
-5. Record via `mem_add` (type=decision, importance=0.9). Proceed to Step 3.
+5. Record via `mem_add` (type=decision, importance=0.9)
+6. **Proceed immediately to Step 3** — no approval gate, no "orbit go"
+
+## Step 2C: Interactive Mode (explicit user choice only)
+
+**Use when**: User explicitly requested interactive mode.
+
+1. Tell user to run `/discover` → `/spec`, then say "orbit go". STOP and wait.
+2. On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
+
+**This mode is never auto-selected.** It requires explicit user opt-in.
 
 ## Step 3: Build (Go)
 
@@ -125,7 +156,7 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 ```
 ## Orbit Complete
 - Pipeline: PIPELINE-{id}
-- Mode: {interactive|council}
+- Mode: {direct|council|interactive} (auto-detected)
 - Spec: SPEC-{timestamp} ({goal_slug})
 - Branch: orbit-{goal_slug}
 - Worktree: orbit-{goal_slug} (preserved for PR)
@@ -142,8 +173,7 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 ```
 
 ## Red Flags
-- Starting without user mode selection
-- Interactive mode proceeding without spec approval (council mode auto-approves)
+- Interactive mode proceeding without spec approval (direct and council modes auto-approve)
 - Continuing after 3 audit failures without user consent
 - Skipping isolated integration test
 - Shipping with FAIL in security audits

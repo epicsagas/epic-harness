@@ -16,11 +16,11 @@
       ],
     },
     {
-      label: 'Ring 1 · Commands',
+      label: 'Ring 1 · Pipeline',
       ringDot: true,
       dotColor: 'var(--accent)',
       items: [
-        { id: 'commands', icon: '▶', label: 'Commands', badge: '3' },
+        { id: 'commands', icon: '▶', label: 'Pipeline', badge: '3' },
       ],
     },
     {

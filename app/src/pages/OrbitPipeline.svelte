@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getOrbitPipelines } from '../lib/harness.js';
+  import { getOrbitPipelines, dismissOrbitPipeline } from '../lib/harness.js';
   import type { OrbitPipeline } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore, t } from '$lib/i18n.js';
@@ -126,6 +126,13 @@
   function projectLabel(raw: string | undefined): string {
     return raw?.replace(/-[a-f0-9]{6}$/, '') ?? '--';
   }
+
+  async function dismiss(id: string) {
+    try {
+      await dismissOrbitPipeline(id);
+      pipelines = pipelines.filter(p => p.id !== id);
+    } catch { /* ignore */ }
+  }
 </script>
 
 <div class="screen-header">
@@ -174,8 +181,15 @@
     <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--accent);">
       <div class="panel-header">
         <h3><span class="pill info" style="margin-right:8px;">RUNNING</span>{p.goal_slug ?? $tStore('noGoal')}</h3>
-        <div class="panel-actions" style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">
-          ID: {shortId(p.id)} · Mode: {p.mode ?? '--'} · Check fails: {p.check_fail_count}
+        <div class="panel-actions" style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">
+            ID: {shortId(p.id)} · Mode: {p.mode ?? '--'} · Check fails: {p.check_fail_count}
+          </span>
+          <button
+            onclick={() => dismiss(p.id)}
+            title="Dismiss"
+            style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;cursor:pointer;padding:0;line-height:1;"
+          >✕</button>
         </div>
       </div>
       <div class="panel-body">
@@ -271,6 +285,7 @@
             <th>Status</th>
             <th>Started</th>
             <th>Duration</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -283,6 +298,13 @@
               <td><span class="pill {statusBadgeClass(p.status)}">{p.status}</span></td>
               <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;">{fmtDatetime(p.started_at)}</td>
               <td style="font-family:var(--font-mono);text-align:right;">{$tStore('durationMin', durationMinutes(p.started_at, p.updated_at))}</td>
+              <td>
+                <button
+                  onclick={() => dismiss(p.id)}
+                  title="Dismiss"
+                  style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
+                >✕</button>
+              </td>
             </tr>
           {/each}
         </tbody>

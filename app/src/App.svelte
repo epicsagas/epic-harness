@@ -31,7 +31,7 @@
   const screenLabels: Record<string, string> = {
     dashboard: 'dashboard',
     orbit: '/orbit pipeline',
-    commands: 'commands',
+    commands: 'pipeline',
     skills: 'auto skills',
     agents: 'agents',
     evolution: 'eval & evolve',

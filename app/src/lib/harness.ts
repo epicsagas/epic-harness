@@ -201,6 +201,14 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
   };
 }
 export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
+export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch('/api/orbit', {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id }),
+  });
+  return res.json();
+}
 export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills');
 export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary');
 export const getGraph = () => invoke<GraphData>('get_graph');

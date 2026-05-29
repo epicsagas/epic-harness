@@ -45,6 +45,36 @@ function harnessApiPlugin(): Plugin {
         next();
       });
 
+      // Orbit pipeline dismiss
+      server.middlewares.use('/api/orbit', (req, res, next) => {
+        if (req.method !== 'DELETE') { next(); return; }
+        let body = '';
+        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
+        req.on('end', () => {
+          try {
+            const { id } = JSON.parse(body || '{}');
+            if (!id) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing id' })); return; }
+            const projectsRoot = path.resolve(harnessDir, '..');
+            let deleted = false;
+            if (fs.existsSync(projectsRoot)) {
+              for (const proj of fs.readdirSync(projectsRoot)) {
+                const orbitDir = path.join(projectsRoot, proj, 'orbit');
+                if (!fs.existsSync(orbitDir)) continue;
+                for (const f of fs.readdirSync(orbitDir)) {
+                  if (!f.startsWith('PIPELINE-') || !f.endsWith('.json') || !f.includes(id)) continue;
+                  fs.unlinkSync(path.join(orbitDir, f));
+                  deleted = true;
+                }
+              }
+            }
+            res.end(JSON.stringify({ ok: deleted, dismissed: id }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ ok: false, error: String(e) }));
+          }
+        });
+      });
+
       // Agent tracking routes for the live Agents tab
       server.middlewares.use('/api/run', (_req, res) => {
         res.setHeader('Content-Type', 'application/json');

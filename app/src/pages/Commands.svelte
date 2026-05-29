@@ -36,7 +36,7 @@
 </script>
 
 <div class="screen-header">
-  <h2>{$tStore('pageCommands')} <span class="subtitle-tag">Ring 1</span></h2>
+  <h2>{$tStore('pageCommands')} <span class="subtitle-tag">Ring 1 · Skills</span></h2>
   <p>{$tStore('pageCommandsDesc3')}</p>
 </div>
 

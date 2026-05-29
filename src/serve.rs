@@ -134,6 +134,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 json_response(&body)
             }
 
+            // ── Orbit Pipeline Dismiss ───────────────────────
+            (Method::Delete, url) if url.starts_with("/api/orbit/") => {
+                let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
+                let harness_dir = common::harness_dir();
+                let body = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
+                json_response(&body)
+            }
+
             // ── Memory API (Nodes) ───────────────────────────
             (Method::Get, "/api/nodes") => {
                 let nodes =
@@ -292,6 +300,40 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&decoded).into_owned()
+}
+
+/// Dismiss (delete) an orbit pipeline file across all projects.
+fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
+    let projects_root = harness_dir.parent().unwrap_or(harness_dir);
+    let mut deleted = false;
+
+    if let Ok(rd) = std::fs::read_dir(projects_root) {
+        for proj_entry in rd.filter_map(|e| e.ok()) {
+            let orbit_dir = proj_entry.path().join("orbit");
+            if !orbit_dir.exists() {
+                continue;
+            }
+            // Match by ID — pipeline_id is the timestamp part (e.g. "20260523105350")
+            if let Ok(files) = std::fs::read_dir(&orbit_dir) {
+                for f in files.filter_map(|e| e.ok()) {
+                    let fname = f.file_name().to_string_lossy().to_string();
+                    if fname.starts_with("PIPELINE-")
+                        && fname.ends_with(".json")
+                        && fname.contains(pipeline_id)
+                        && std::fs::remove_file(f.path()).is_ok()
+                    {
+                        deleted = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if deleted {
+        serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string()
+    } else {
+        serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string()
+    }
 }
 
 fn parse_query_param(url: &str, key: &str) -> Option<String> {
