@@ -70,9 +70,8 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 1. Gather the user's request (ask if not stated)
 2. Launch 4 parallel sub-agents (Architect, Skeptic, Pragmatist, Critic) — each receives ONLY the request + codebase context, NOT the full conversation (anti-anchoring)
 3. Synthesize: list agreement/disagreement, produce recommended approach
-4. Generate spec at `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: pending`
-5. Present to user: **Approve / Modify / Reject**
-6. On approve: set `status: approved`, record via `mem_add` (type=decision, importance=0.9). Proceed.
+4. Generate spec at `$HARNESS_DIR/specs/SPEC-{timestamp}.md` with `status: approved`
+5. Record via `mem_add` (type=decision, importance=0.9). Proceed to Step 3.
 
 ## Step 3: Build (Go)
 
@@ -144,7 +143,7 @@ On resume: load latest `SPEC-*.md` with `status: approved`. Proceed to Step 3.
 
 ## Red Flags
 - Starting without user mode selection
-- Proceeding without spec approval
+- Interactive mode proceeding without spec approval (council mode auto-approves)
 - Continuing after 3 audit failures without user consent
 - Skipping isolated integration test
 - Shipping with FAIL in security audits

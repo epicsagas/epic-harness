@@ -2,10 +2,11 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import fs from 'fs';
 import type { Plugin } from 'vite';
 
+const rootPkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
 const host = process.env.TAURI_DEV_HOST;
 
 function getHarnessDir(): string {
@@ -102,6 +103,7 @@ function harnessApiPlugin(): Plugin {
               ? fs.readFileSync(evoLog, 'utf8').trim().split('\n').filter(Boolean).slice(-50)
                   .map(l => { try { return JSON.parse(l); } catch { return null; } })
                   .filter(Boolean)
+                  .reverse()
               : [];
             const metricsPath = path.join(harnessDir, 'metrics.json');
             const metrics = fs.existsSync(metricsPath)
@@ -234,14 +236,8 @@ function harnessApiPlugin(): Plugin {
             data = { nodes: [], edges: [] };
             if (fs.existsSync(dbPath)) {
               try {
-                const nodesJson = execSync(
-                  `sqlite3 -json "${dbPath}" "SELECT id, type, title, tags, importance FROM nodes WHERE type != 'session' ORDER BY importance DESC LIMIT 200"`,
-                  { encoding: 'utf8' }
-                ).trim();
-                const edgesJson = execSync(
-                  `sqlite3 -json "${dbPath}" "SELECT source, target, relation, weight FROM edges LIMIT 500"`,
-                  { encoding: 'utf8' }
-                ).trim();
+                const nodesJson = execFileSync('sqlite3', ['-json', dbPath, 'SELECT id, type, title, tags, importance FROM nodes WHERE type != \'session\' ORDER BY importance DESC LIMIT 200'], { encoding: 'utf8' }).trim();
+                const edgesJson = execFileSync('sqlite3', ['-json', dbPath, 'SELECT source, target, relation, weight FROM edges LIMIT 500'], { encoding: 'utf8' }).trim();
                 const rawNodes = nodesJson ? (JSON.parse(nodesJson) as Array<Record<string, unknown>>) : [];
                 const rawEdges = edgesJson ? (JSON.parse(edgesJson) as Array<Record<string, unknown>>) : [];
                 data = {
@@ -277,6 +273,9 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts'],
+  },
+  define: {
+    __APP_VERSION__: JSON.stringify(rootPkg.version),
   },
   plugins: [svelte(), viteSingleFile(), harnessApiPlugin()],
   appType: 'spa',
