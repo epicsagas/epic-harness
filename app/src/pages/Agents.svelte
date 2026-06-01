@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
-  import { getOrchestratorRun, getOrchestratorAgentStatus } from '../lib/harness.js';
+  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent } from '../lib/harness.js';
   import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
@@ -185,8 +185,15 @@
           {@const status = agentStatuses.get(agent.id)}
           <div class="agent-card">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-              <div class="agent-name">{agent.role}</div>
-              <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <div class="agent-name">{agent.role}</div>
+                <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
+              </div>
+              <button
+                onclick={async () => { await dismissAgent(agent.id); await load(); }}
+                title="Dismiss"
+                style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
+              >✕</button>
             </div>
             <div class="agent-desc" style="font-size:12px;color:var(--fg-secondary);margin-bottom:8px;">
               {agent.task}

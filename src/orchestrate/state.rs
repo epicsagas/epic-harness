@@ -497,6 +497,45 @@ pub fn upsert_agent_to_run(
     Ok(agent_id.to_string())
 }
 
+/// Dismiss an agent: remove from run.json and delete its status directory.
+pub fn dismiss_agent(base: &Path, agent_id: &str) -> bool {
+    if !validate_agent_id(agent_id) {
+        return false;
+    }
+    let orch_dir = orchestrator_dir(base);
+    let lock_path = orch_dir.join("run.json.lock");
+    let _lock = match acquire_lock(&lock_path) {
+        Ok(l) => l,
+        Err(_) => return false,
+    };
+
+    let Some(mut run) = read_run(base) else {
+        return false;
+    };
+
+    let before = run.agents.len();
+    run.agents.retain(|a| a.id != agent_id);
+    run.dependency_graph.remove(agent_id);
+    if run.agents.len() == before {
+        return false; // agent not found
+    }
+
+    let now = crate::shared::helpers::now_iso();
+    run.updated_at = now;
+
+    if write_run(base, &run).is_err() {
+        return false;
+    }
+
+    // Remove agent status directory
+    let dir = agent_dir(base, agent_id);
+    if dir.exists() {
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    true
+}
+
 /// Clean up stale auto-generated runs.
 ///
 /// - Complete runs older than 1 hour: remove agent status directories

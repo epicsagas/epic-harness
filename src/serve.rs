@@ -233,6 +233,20 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 }
             }
 
+            (Method::Delete, url) if url.starts_with("/api/agents/") => {
+                let agent_id = url
+                    .trim_start_matches("/api/agents/")
+                    .trim_end_matches('/');
+                let harness_dir = common::harness_dir();
+                if !orch::validate_agent_id(agent_id) {
+                    json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
+                } else {
+                    let ok = orch::dismiss_agent(&harness_dir, agent_id);
+                    let body = serde_json::json!({"ok": ok, "dismissed": agent_id}).to_string();
+                    json_response(&body)
+                }
+            }
+
             // ── CORS & Other ────────────────────────────────
             (Method::Options, _) => Response::from_string("{}")
                 .with_status_code(204)

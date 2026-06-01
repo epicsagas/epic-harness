@@ -45,34 +45,26 @@ function harnessApiPlugin(): Plugin {
         next();
       });
 
-      // Orbit pipeline dismiss
+      // Orbit pipeline dismiss — DELETE /api/orbit/:id
       server.middlewares.use('/api/orbit', (req, res, next) => {
         if (req.method !== 'DELETE') { next(); return; }
-        let body = '';
-        req.on('data', (chunk: Buffer) => { body += chunk.toString(); });
-        req.on('end', () => {
-          try {
-            const { id } = JSON.parse(body || '{}');
-            if (!id) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing id' })); return; }
-            const projectsRoot = path.resolve(harnessDir, '..');
-            let deleted = false;
-            if (fs.existsSync(projectsRoot)) {
-              for (const proj of fs.readdirSync(projectsRoot)) {
-                const orbitDir = path.join(projectsRoot, proj, 'orbit');
-                if (!fs.existsSync(orbitDir)) continue;
-                for (const f of fs.readdirSync(orbitDir)) {
-                  if (!f.startsWith('PIPELINE-') || !f.endsWith('.json') || !f.includes(id)) continue;
-                  fs.unlinkSync(path.join(orbitDir, f));
-                  deleted = true;
-                }
-              }
+        const match = (req.url ?? '').match(/^\/([^/]+)$/);
+        if (!match) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing id' })); return; }
+        const id = decodeURIComponent(match[1]);
+        const projectsRoot = path.resolve(harnessDir, '..');
+        let deleted = false;
+        if (fs.existsSync(projectsRoot)) {
+          for (const proj of fs.readdirSync(projectsRoot)) {
+            const orbitDir = path.join(projectsRoot, proj, 'orbit');
+            if (!fs.existsSync(orbitDir)) continue;
+            for (const f of fs.readdirSync(orbitDir)) {
+              if (!f.startsWith('PIPELINE-') || !f.endsWith('.json') || !f.includes(id)) continue;
+              fs.unlinkSync(path.join(orbitDir, f));
+              deleted = true;
             }
-            res.end(JSON.stringify({ ok: deleted, dismissed: id }));
-          } catch (e) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ ok: false, error: String(e) }));
           }
-        });
+        }
+        res.end(JSON.stringify({ ok: deleted, dismissed: id }));
       });
 
       // Agent tracking routes for the live Agents tab
@@ -98,6 +90,43 @@ function harnessApiPlugin(): Plugin {
         if (!fs.existsSync(statusPath)) { res.end(JSON.stringify(null)); return; }
         try { res.end(fs.readFileSync(statusPath, 'utf8')); }
         catch { res.end(JSON.stringify(null)); }
+      });
+
+      // Agent dismiss — DELETE /api/agents/:id
+      server.middlewares.use('/api/agents', (req, res, next) => {
+        if (req.method !== 'DELETE') { next(); return; }
+        const match = (req.url ?? '').match(/^\/([^/]+)$/);
+        if (!match) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing id' })); return; }
+        const agentId = decodeURIComponent(match[1]);
+        if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'invalid agent id' })); return; }
+        if (!harnessDir) { res.end(JSON.stringify({ ok: false, error: 'HARNESS_DIR not found' })); return; }
+        // Remove agent from run.json
+        const runPath = path.join(harnessDir, 'orchestrator', 'run.json');
+        let dismissed = false;
+        if (fs.existsSync(runPath)) {
+          try {
+            const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
+            const before = run.agents?.length ?? 0;
+            if (run.agents) {
+              run.agents = run.agents.filter((a: Record<string, unknown>) => a.id !== agentId);
+            }
+            if (run.dependency_graph) {
+              delete run.dependency_graph[agentId];
+            }
+            if (run.agents?.length < before) {
+              fs.writeFileSync(runPath, JSON.stringify(run, null, 2));
+              dismissed = true;
+            }
+          } catch { /* ignore */ }
+        }
+        // Remove agent status directory
+        const agentDir = path.resolve(harnessDir, 'orchestrator', 'agents', agentId);
+        if (agentDir.startsWith(path.resolve(harnessDir, 'orchestrator', 'agents') + path.sep) && fs.existsSync(agentDir)) {
+          fs.rmSync(agentDir, { recursive: true, force: true });
+          dismissed = true;
+        }
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ ok: dismissed, dismissed: agentId }));
       });
 
       server.middlewares.use('/api/harness', (req, res) => {

@@ -202,11 +202,7 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
 }
 export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
 export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
-  const res = await fetch('/api/orbit', {
-    method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id }),
-  });
+  const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();
 }
 export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills');
@@ -236,6 +232,11 @@ export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchA
   } catch {
     return null;
   }
+}
+
+export async function dismissAgent(agentId: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' });
+  return res.json();
 }
 
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
