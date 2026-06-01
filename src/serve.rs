@@ -234,9 +234,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
-                let agent_id = url
-                    .trim_start_matches("/api/agents/")
-                    .trim_end_matches('/');
+                let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
                 let harness_dir = common::harness_dir();
                 if !orch::validate_agent_id(agent_id) {
                     json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
