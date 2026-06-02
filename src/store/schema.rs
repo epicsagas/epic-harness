@@ -12,13 +12,13 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
     // WAL auto-checkpoint
     let _ = conn.execute_batch("PRAGMA wal_autocheckpoint=100;");
 
-    // Schema version tracking (same pattern as memory.db)
+    // Schema version tracking (distinct from memory.db's _meta)
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS _meta (
+        "CREATE TABLE IF NOT EXISTS _harness_meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
-        INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '1');",
+        INSERT OR IGNORE INTO _harness_meta (key, value) VALUES ('schema_version', '1');",
     )
     .map_err(io::Error::other)?;
 

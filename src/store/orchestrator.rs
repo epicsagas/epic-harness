@@ -250,21 +250,46 @@ pub fn write_control_conn(
 
 // ── Cleanup ──────────────────────────────────────────
 
-/// Clean up stale runs and agents.
-pub fn cleanup_stale_conn(conn: &Connection, _now_ts: &str) -> io::Result<u64> {
+/// Clean up completed/aborted runs and orphaned agents.
+///
+/// `cutoff_ts` is an ISO-8601 timestamp; only runs updated before this time
+/// are removed. Pass an empty string to remove all completed/aborted runs.
+///
+/// TODO: extend to clean up runs by timestamp once callers can supply a
+/// meaningful cutoff (e.g. "older than 7 days").
+pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
     let mut count = 0u64;
 
-    // Delete events/inbox for agents in completed/aborted runs
-    // This is a simplified version — full implementation would check timestamps
-    let deleted_runs = conn
-        .execute(
+    let deleted_runs = if cutoff_ts.is_empty() {
+        conn.execute(
             "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted')",
             [],
         )
-        .map_err(io::Error::other)?;
+    } else {
+        conn.execute(
+            "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
+            rusqlite::params![cutoff_ts],
+        )
+    }
+    .map_err(io::Error::other)?;
     count += deleted_runs as u64;
 
-    // Delete orphaned agents (no matching run)
+    // Delete events and inbox messages for orphaned agents (no matching run)
+    conn.execute(
+        "DELETE FROM orch_agent_events WHERE agent_id IN (
+             SELECT id FROM orch_agents WHERE run_id NOT IN (SELECT id FROM orch_runs)
+         )",
+        [],
+    )
+    .map_err(io::Error::other)?;
+    conn.execute(
+        "DELETE FROM orch_agent_inbox WHERE agent_id IN (
+             SELECT id FROM orch_agents WHERE run_id NOT IN (SELECT id FROM orch_runs)
+         )",
+        [],
+    )
+    .map_err(io::Error::other)?;
+
     let deleted_agents = conn
         .execute(
             "DELETE FROM orch_agents WHERE run_id NOT IN (SELECT id FROM orch_runs)",

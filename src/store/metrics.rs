@@ -20,37 +20,33 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 /// Load the full Metrics struct from SQLite.
 pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
-    // Scalar state
-    let get = |key: &str| -> String {
+    // Scalar state — use explicit Option to distinguish missing vs present
+    let get = |key: &str| -> Option<String> {
         conn.query_row(
             "SELECT value FROM metrics_state WHERE key = ?1",
             rusqlite::params![key],
             |row| row.get::<_, String>(0),
         )
-        .unwrap_or_default()
+        .ok()
     };
 
-    let total_sessions: u64 = get("total_sessions").parse().unwrap_or(0);
-    let avg_success_rate: f64 = get("avg_success_rate").parse().unwrap_or(0.0);
-    let total_evolved_skills: u64 = get("total_evolved_skills").parse().unwrap_or(0);
-    let last_session = {
-        let v = get("last_session");
-        if v.is_empty() { None } else { Some(v) }
-    };
-    let best_score: Option<f64> = {
-        let v = get("best_score");
-        v.parse().ok()
-    };
-    let best_session = get("best_session");
-    let trend = {
-        let v = get("trend");
-        if v.is_empty() { "stable".into() } else { v }
-    };
-    let stagnation_count: u64 = get("stagnation_count").parse().unwrap_or(0);
-    let last_error_context = {
-        let v = get("last_error_context");
-        if v.is_empty() { None } else { Some(v) }
-    };
+    let total_sessions: u64 = get("total_sessions")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let avg_success_rate: f64 = get("avg_success_rate")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0.0);
+    let total_evolved_skills: u64 = get("total_evolved_skills")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let last_session = get("last_session").filter(|v| !v.is_empty());
+    let best_score: Option<f64> = get("best_score").and_then(|v| v.parse().ok());
+    let best_session = get("best_session").unwrap_or_default();
+    let trend = get("trend").unwrap_or_else(|| "stable".into());
+    let stagnation_count: u64 = get("stagnation_count")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+    let last_error_context = get("last_error_context").filter(|v| !v.is_empty());
 
     // Score history
     let mut sh_stmt = conn
@@ -126,6 +122,10 @@ pub fn load_metrics() -> io::Result<Metrics> {
 // ── Save ─────────────────────────────────────────────
 
 /// Save the full Metrics struct to SQLite.
+///
+/// Uses UPSERT (INSERT OR REPLACE) for scalar state and skill_attribution
+/// instead of full DELETE + reinsert to avoid data loss on partial failures.
+/// Score history is capped at MAX_SCORE_HISTORY most recent entries.
 pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
 
@@ -154,7 +154,8 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         upsert("last_error_context", v).map_err(io::Error::other)?;
     }
 
-    // Score history — clear and rewrite (capped)
+    // Score history — keep the most recent MAX_SCORE_HISTORY entries.
+    // Use DELETE + batch INSERT in transaction for ordered append-only data.
     tx.execute("DELETE FROM score_history", [])
         .map_err(io::Error::other)?;
     let entries: Vec<&SessionScoreEntry> = m
@@ -171,7 +172,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
                 entry.timestamp,
                 entry.success_rate,
                 entry.avg_score,
-                entry.observations as i64,
+                super::u64_to_i64(entry.observations),
                 entry.dimension_averages.tool_success,
                 entry.dimension_averages.output_quality,
                 entry.dimension_averages.execution_cost,
@@ -180,16 +181,15 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         .map_err(io::Error::other)?;
     }
 
-    // Skill attribution — clear and rewrite
-    tx.execute("DELETE FROM skill_attribution", [])
-        .map_err(io::Error::other)?;
+    // Skill attribution — UPSERT per skill instead of DELETE all + reinsert
     for sa in m.skill_attribution.values() {
         tx.execute(
-            "INSERT INTO skill_attribution (skill_name, sessions_active, avg_score_with,
-             avg_score_without, first_seen) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT OR REPLACE INTO skill_attribution
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
+             VALUES (?1,?2,?3,?4,?5)",
             rusqlite::params![
                 sa.skill_name,
-                sa.sessions_active as i64,
+                super::u64_to_i64(sa.sessions_active),
                 sa.avg_score_with,
                 sa.avg_score_without,
                 sa.first_seen,
@@ -281,9 +281,10 @@ mod tests {
     }
 
     #[test]
-    fn score_history_cap_at_50() {
+    fn score_history_cap_retains_most_recent() {
         let conn = in_memory_db();
         let mut m = sample_metrics();
+        // Add 60 entries with ascending observations values
         for i in 0..60 {
             m.score_history.push(SessionScoreEntry {
                 timestamp: format!("2026-06-{:02}T10:00:00Z", i % 28 + 1),
@@ -296,6 +297,20 @@ mod tests {
         save_metrics_conn(&conn, &m).unwrap();
 
         let loaded = load_metrics_conn(&conn).unwrap();
+        // Should be capped at 50
         assert!(loaded.score_history.len() <= 50);
+
+        // The most recent entries (observations 11..60) should be retained,
+        // not the oldest (0..10). The last entry should have observations=59.
+        let last = loaded.score_history.last().unwrap();
+        assert_eq!(last.observations, 59);
+
+        // The first retained entry should have observations=10 (skipped 0..9)
+        let first = &loaded.score_history[0];
+        assert!(
+            first.observations >= 10,
+            "expected observations >= 10, got {}",
+            first.observations
+        );
     }
 }

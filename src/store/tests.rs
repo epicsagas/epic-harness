@@ -22,7 +22,7 @@ fn schema_creates_all_tables() {
         .collect();
 
     let expected = [
-        "_meta",
+        "_harness_meta",
         "evolution_records",
         "evolved_skills",
         "global_patterns",
@@ -63,7 +63,7 @@ fn meta_table_tracks_version() {
     let conn = in_memory_db();
     let version: String = conn
         .query_row(
-            "SELECT value FROM _meta WHERE key = 'schema_version'",
+            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
             [],
             |row| row.get(0),
         )

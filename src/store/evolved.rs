@@ -46,7 +46,7 @@ pub fn upsert_skill_conn(conn: &Connection, skill: &EvolvedSkillRow) -> io::Resu
 pub fn list_skills_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRow>> {
     let mut stmt = conn
         .prepare(
-            "SELECT name, origin, confidence, project, '', active, created, updated
+            "SELECT name, origin, confidence, project, active, created, updated
              FROM evolved_skills ORDER BY name",
         )
         .map_err(io::Error::other)?;
@@ -58,10 +58,10 @@ pub fn list_skills_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRow>> {
                 origin: row.get(1)?,
                 confidence: row.get(2)?,
                 project: row.get(3)?,
-                skill_md: row.get(4)?, // empty — omitted for listing
-                active: row.get::<_, i32>(5)? != 0,
-                created: row.get(6)?,
-                updated: row.get(7)?,
+                skill_md: String::new(),
+                active: row.get::<_, i32>(4)? != 0,
+                created: row.get(5)?,
+                updated: row.get(6)?,
             })
         })
         .map_err(io::Error::other)?;
@@ -150,7 +150,7 @@ pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<Str
 
     let rows = stmt
         .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)) // i64→u64 safe: always non-negative
         })
         .map_err(io::Error::other)?;
 
@@ -172,7 +172,7 @@ pub fn save_promotion_counters_conn(
     for (key, count) in counters {
         conn.execute(
             "INSERT INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
-            rusqlite::params![key, *count as i64],
+            rusqlite::params![key, super::u64_to_i64(*count)],
         )
         .map_err(io::Error::other)?;
     }

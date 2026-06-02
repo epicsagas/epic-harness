@@ -18,14 +18,14 @@ pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Resul
          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         rusqlite::params![
             rec.timestamp,
-            rec.observations as i64,
+            super::u64_to_i64(rec.observations),
             rec.success_rate,
             rec.avg_score,
             error_json,
             failure_json,
-            rec.skills_seeded as i64,
-            rec.skills_rolled_back as i64,
-            rec.total_evolved as i64,
+            super::u64_to_i64(rec.skills_seeded),
+            super::u64_to_i64(rec.skills_rolled_back),
+            super::u64_to_i64(rec.total_evolved),
             rec.analysis_summary,
         ],
     )

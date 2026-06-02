@@ -58,6 +58,15 @@ pub fn query_patterns_excluding_conn(
                 "project": row.get::<_, String>(1)?,
                 "success_rate": row.get::<_, f64>(2)?,
                 "avg_score": row.get::<_, f64>(3)?,
+                "per_error_stats": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(4).unwrap_or_else(|_| "{}".into())
+                ).unwrap_or_else(|_| serde_json::json!({})),
+                "failure_patterns": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(5).unwrap_or_else(|_| "[]".into())
+                ).unwrap_or_else(|_| serde_json::json!([])),
+                "weak_tools": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(6).unwrap_or_else(|_| "[]".into())
+                ).unwrap_or_else(|_| serde_json::json!([])),
             }))
         })
         .map_err(io::Error::other)?;
@@ -89,6 +98,15 @@ pub fn query_all_patterns_conn(
                 "project": row.get::<_, String>(1)?,
                 "success_rate": row.get::<_, f64>(2)?,
                 "avg_score": row.get::<_, f64>(3)?,
+                "per_error_stats": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(4).unwrap_or_else(|_| "{}".into())
+                ).unwrap_or_else(|_| serde_json::json!({})),
+                "failure_patterns": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(5).unwrap_or_else(|_| "[]".into())
+                ).unwrap_or_else(|_| serde_json::json!([])),
+                "weak_tools": serde_json::from_str::<serde_json::Value>(
+                    &row.get::<_, String>(6).unwrap_or_else(|_| "[]".into())
+                ).unwrap_or_else(|_| serde_json::json!([])),
             }))
         })
         .map_err(io::Error::other)?;
@@ -128,6 +146,9 @@ mod tests {
         let patterns = query_all_patterns_conn(&conn, 10).unwrap();
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0]["project"], "project-a");
+        assert!(patterns[0]["per_error_stats"].is_object());
+        assert!(patterns[0]["failure_patterns"].is_array());
+        assert!(patterns[0]["weak_tools"].is_array());
     }
 
     #[test]

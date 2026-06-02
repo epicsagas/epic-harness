@@ -42,7 +42,7 @@ pub fn insert_observation_conn(
             rec.failure_category,
             rec.error_snippet,
             rec.file_ext,
-            rec.sequence_id.map(|v| v as i64),
+            rec.sequence_id.map(super::u64_to_i64),
             rec.pipeline_id,
         ],
     )

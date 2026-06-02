@@ -125,6 +125,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 Response::from_string(sse_body)
                     .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
                     .with_header(Header::from_bytes(b"Cache-Control", b"no-cache").unwrap())
+                    .with_header(Header::from_bytes(b"Connection", b"keep-alive").unwrap())
             }
 
             // ── Memory API (Graph/Stats) ─────────────────────
