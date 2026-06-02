@@ -41,51 +41,12 @@ pub fn query_patterns_excluding_conn(
     exclude_project: &str,
     limit: usize,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, project, success_rate, avg_score,
-                    per_error_stats, failure_patterns, weak_tools
-             FROM global_patterns
-             WHERE project != ?1
-             ORDER BY timestamp DESC LIMIT ?2",
-        )
-        .map_err(io::Error::other)?;
-
-    let rows = stmt
-        .query_map(rusqlite::params![exclude_project, limit as i64], |row| {
-            let per_error_raw: String = row.get::<_, String>(4).unwrap_or_else(|_| "{}".into());
-            let failure_raw: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".into());
-            let weak_raw: String = row.get::<_, String>(6).unwrap_or_else(|_| "[]".into());
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, f64>(2)?,
-                row.get::<_, f64>(3)?,
-                per_error_raw,
-                failure_raw,
-                weak_raw,
-            ))
-        })
-        .map_err(io::Error::other)?;
-
-    let mut patterns = Vec::new();
-    for r in rows {
-        let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
-            r.map_err(io::Error::other)?;
-        let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
-        let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
-        let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
-        patterns.push(serde_json::json!({
-            "timestamp": ts,
-            "project": project,
-            "success_rate": success_rate,
-            "avg_score": avg_score,
-            "per_error_stats": per_error_stats,
-            "failure_patterns": failure_patterns,
-            "weak_tools": weak_tools,
-        }));
-    }
-    Ok(patterns)
+    query_patterns_conn(
+        conn,
+        Some(exclude_project),
+        limit,
+        "WHERE project != ?1",
+    )
 }
 
 /// Query all patterns (regardless of project).
@@ -93,49 +54,66 @@ pub fn query_all_patterns_conn(
     conn: &Connection,
     limit: usize,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, project, success_rate, avg_score,
-                    per_error_stats, failure_patterns, weak_tools
-             FROM global_patterns ORDER BY timestamp DESC LIMIT ?1",
-        )
-        .map_err(io::Error::other)?;
+    query_patterns_conn(conn, None, limit, "")
+}
 
-    let rows = stmt
-        .query_map(rusqlite::params![limit as i64], |row| {
-            let per_error_raw: String = row.get::<_, String>(4).unwrap_or_else(|_| "{}".into());
-            let failure_raw: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".into());
-            let weak_raw: String = row.get::<_, String>(6).unwrap_or_else(|_| "[]".into());
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, f64>(2)?,
-                row.get::<_, f64>(3)?,
-                per_error_raw,
-                failure_raw,
-                weak_raw,
-            ))
-        })
-        .map_err(io::Error::other)?;
+/// Shared query implementation for global patterns.
+fn query_patterns_conn(
+    conn: &Connection,
+    exclude_project: Option<&str>,
+    limit: usize,
+    where_clause: &str,
+) -> io::Result<Vec<serde_json::Value>> {
+    let sql = format!(
+        "SELECT timestamp, project, success_rate, avg_score,
+                per_error_stats, failure_patterns, weak_tools
+         FROM global_patterns
+         {where_clause}
+         ORDER BY timestamp DESC LIMIT ?",
+    );
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+
+    let rows = if exclude_project.is_some() {
+        stmt.query_map(
+            rusqlite::params![exclude_project, limit as i64],
+            map_pattern_row,
+        )
+    } else {
+        stmt.query_map(rusqlite::params![limit as i64], map_pattern_row)
+    }
+    .map_err(io::Error::other)?;
 
     let mut patterns = Vec::new();
     for r in rows {
         let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
             r.map_err(io::Error::other)?;
-        let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
-        let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
-        let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
         patterns.push(serde_json::json!({
             "timestamp": ts,
             "project": project,
             "success_rate": success_rate,
             "avg_score": avg_score,
-            "per_error_stats": per_error_stats,
-            "failure_patterns": failure_patterns,
-            "weak_tools": weak_tools,
+            "per_error_stats": parse_json_field(&per_error_raw, serde_json::json!({})),
+            "failure_patterns": parse_json_field(&failure_raw, serde_json::json!([])),
+            "weak_tools": parse_json_field(&weak_raw, serde_json::json!([])),
         }));
     }
     Ok(patterns)
+}
+
+/// Row mapper for global_patterns queries.
+type PatternRow = (String, String, f64, f64, String, String, String);
+
+#[allow(clippy::type_complexity)]
+fn map_pattern_row(row: &rusqlite::Row<'_>) -> Result<PatternRow, rusqlite::Error> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get::<_, String>(4).unwrap_or_else(|_| "{}".into()),
+        row.get::<_, String>(5).unwrap_or_else(|_| "[]".into()),
+        row.get::<_, String>(6).unwrap_or_else(|_| "[]".into()),
+    ))
 }
 
 /// Parse a JSON field from a DB column, logging a warning on failure.

@@ -28,6 +28,8 @@ mod tests;
 use rusqlite::Connection;
 use std::fs;
 use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use crate::shared::paths;
 
@@ -71,6 +73,13 @@ pub fn open_harness_db() -> io::Result<Connection> {
         fs::create_dir_all(parent)?;
     }
     let conn = Connection::open(&path).map_err(io::Error::other)?;
+
+    // Restrict DB file to owner-only (observation data may contain file paths,
+    // command text, etc.). Only applies on Unix; no-op on other platforms.
+    #[cfg(unix)]
+    {
+        let _ = fs::set_permissions(&path, PermissionsExt::from_mode(0o600));
+    }
 
     // Apply schema (WAL + FK pragma are set inside init_schema as the first operation).
     // Uses IF NOT EXISTS throughout, so safe to call on existing DBs.

@@ -309,8 +309,12 @@ pub fn run(_input: &HookInput) -> i32 {
         }
     }
 
-    // 2. Eval metrics
-    let metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    // 2. Eval metrics — try SQLite first, fall back to JSON file
+    let metrics: Metrics = crate::store::open_harness_db()
+        .ok()
+        .and_then(|conn| crate::store::metrics::load_metrics_conn(&conn).ok())
+        .filter(|m| m.total_sessions > 0)
+        .unwrap_or_else(|| read_json(&metrics_file(), default_metrics()));
     if metrics.total_sessions > 0 {
         let score_str = metrics
             .score_history

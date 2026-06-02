@@ -74,23 +74,29 @@ pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> 
 /// Query observations for a date range (inclusive).
 /// `from_ts` and `to_ts` are ISO-8601 date strings like "2026-06-02".
 /// Automatically pads with T00:00:00 / T23:59:59 for range comparison.
+/// Set `limit` to `None` for unlimited (use with caution on large date ranges).
 pub fn query_obs_for_date_range_conn(
     conn: &Connection,
     from_ts: &str,
     to_ts: &str,
+    limit: Option<usize>,
 ) -> io::Result<Vec<ObsRecord>> {
     let from = pad_date(from_ts, false);
     let to = pad_date(to_ts, true);
+    let limit_clause = limit
+        .map(|l| format!(" LIMIT {}", l.min(50_000)))
+        .unwrap_or_default();
 
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, tool, tool_category, action, result, score,
-                    dim_success, dim_quality, dim_cost,
-                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id
-             FROM observations
-             WHERE timestamp >= ?1 AND timestamp <= ?2
-             ORDER BY timestamp ASC",
-        )
+    let sql = format!(
+        "SELECT timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost,
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+         FROM observations
+         WHERE timestamp >= ?1 AND timestamp <= ?2
+         ORDER BY timestamp ASC{limit_clause}"
+    );
+
+    let mut stmt = conn.prepare(&sql)
         .map_err(io::Error::other)?;
 
     let rows = stmt
@@ -347,7 +353,7 @@ mod tests {
         let id = insert_observation_conn(&conn, &rec, "20260602_12345").unwrap();
         assert!(id > 0);
 
-        let results = query_obs_for_date_range_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
+        let results = query_obs_for_date_range_conn(&conn, "2026-06-02", "2026-06-02", None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool, "Bash");
         assert_eq!(results[0].score, Some(0.95));
@@ -422,7 +428,7 @@ mod tests {
         let deleted = delete_obs_older_than_conn(&conn, "2026-05-15").unwrap();
         assert_eq!(deleted, 1);
 
-        let results = query_obs_for_date_range_conn(&conn, "2026-05-01", "2026-05-31").unwrap();
+        let results = query_obs_for_date_range_conn(&conn, "2026-05-01", "2026-05-31", None).unwrap();
         assert!(results.is_empty());
     }
 

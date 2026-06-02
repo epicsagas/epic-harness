@@ -212,8 +212,9 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
             created_at  TEXT NOT NULL,
             updated_at  TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_orbit_status  ON orbit_pipelines(status);
-        CREATE INDEX IF NOT EXISTS idx_orbit_project ON orbit_pipelines(project);",
+        CREATE INDEX IF NOT EXISTS idx_orbit_status   ON orbit_pipelines(status);
+        CREATE INDEX IF NOT EXISTS idx_orbit_project  ON orbit_pipelines(project);
+        CREATE INDEX IF NOT EXISTS idx_orbit_created  ON orbit_pipelines(created_at DESC);",
     )
     .map_err(io::Error::other)?;
 

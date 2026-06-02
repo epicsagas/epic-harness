@@ -486,9 +486,12 @@ pub fn run(input: &HookInput) -> i32 {
         }
     }
 
-    // Write to SQLite (primary) with JSONL fallback
+    // Write to SQLite (primary) with JSONL fallback on failure
     if let Some(ref conn) = db {
-        let _ = crate::store::observations::insert_observation_conn(conn, &record, &sid);
+        if let Err(e) = crate::store::observations::insert_observation_conn(conn, &record, &sid) {
+            eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
+            append_jsonl(&session_file, &record);
+        }
     } else {
         append_jsonl(&session_file, &record);
     }

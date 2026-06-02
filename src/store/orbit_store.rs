@@ -59,16 +59,25 @@ pub fn read_running_pipeline_conn(
 }
 
 /// List all pipelines across all projects (for dashboard).
+/// Capped at `limit` results to prevent unbounded memory usage.
 pub fn list_all_pipelines_conn(conn: &Connection) -> io::Result<Vec<serde_json::Value>> {
+    list_all_pipelines_conn_limited(conn, 200)
+}
+
+/// List pipelines with a custom limit.
+pub fn list_all_pipelines_conn_limited(
+    conn: &Connection,
+    limit: usize,
+) -> io::Result<Vec<serde_json::Value>> {
     let mut stmt = conn
         .prepare(
             "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
-             FROM orbit_pipelines ORDER BY created_at DESC",
+             FROM orbit_pipelines ORDER BY created_at DESC LIMIT ?1",
         )
         .map_err(io::Error::other)?;
 
     let rows = stmt
-        .query_map([], |row| {
+        .query_map(rusqlite::params![limit as i64], |row| {
             let id: String = row.get(0)?;
             let project: String = row.get(1)?;
             let status: String = row.get(2)?;

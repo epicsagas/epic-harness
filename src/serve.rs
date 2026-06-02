@@ -162,7 +162,11 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             // ── Memory API (Nodes) ───────────────────────────
-            (Method::Get, "/api/nodes") => {
+            (Method::Get, u) if u == "/api/nodes" || u.starts_with("/api/nodes?") => {
+                let limit: usize = parse_query_param(u, "limit")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(200)
+                    .min(1000);
                 let nodes = match store::open_db() {
                     Ok(conn) => store::read_all_nodes_conn(&conn).unwrap_or_default(),
                     Err(e) => {
@@ -172,6 +176,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 };
                 let results: Vec<serde_json::Value> = nodes
                     .into_iter()
+                    .take(limit)
                     .map(|n| {
                         serde_json::json!({
                             "id": n.frontmatter.id,
@@ -353,6 +358,12 @@ fn percent_decode(s: &str) -> String {
 
 /// Dismiss (delete) an orbit pipeline file across all projects.
 fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
+    // Validate pipeline_id to prevent unintended file matches.
+    // Expected format: alphanumeric + hyphens (e.g. "20260523105350" or "20260522-170016").
+    if pipeline_id.is_empty() || !pipeline_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return serde_json::json!({"ok": false, "error": "invalid pipeline id"}).to_string();
+    }
+
     let projects_root = harness_dir.parent().unwrap_or(harness_dir);
     let mut deleted = false;
 

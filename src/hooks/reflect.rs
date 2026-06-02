@@ -78,7 +78,7 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    // Collect obs from all target project slugs
+    // Collect obs from all target project slugs — try SQLite first, fall back to JSONL
     for slug in &project_slugs {
         // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
@@ -95,52 +95,72 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
-        let slug_obs_dir = slug_harness.join("obs");
-        if !slug_obs_dir.is_dir() {
-            continue;
-        }
-        let all_obs = list_files(&slug_obs_dir, ".jsonl");
-        let filtered: Vec<String> = all_obs
-            .into_iter()
-            .filter(|f| {
-                let tag = f.replace("session_", "");
-                tag.get(..8)
-                    .map(|s| s >= cutoff_tag.as_str())
-                    .unwrap_or(true)
+
+        // Try SQLite first (primary source after migration)
+        let sqlite_obs = crate::store::open_harness_db()
+            .ok()
+            .and_then(|conn| {
+                crate::store::observations::query_obs_for_date_range_conn(
+                    &conn, &date_from, &date_to, None,
+                )
+                .ok()
             })
-            .collect();
-        for f in &filtered {
-            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
-            for r in &recs {
-                total_obs += 1;
-                *tool_counts.entry(r.tool.clone()).or_default() += 1;
-                if let Some(ref fc) = r.failure_category {
-                    *failure_cats.entry(fc.clone()).or_default() += 1;
-                }
-                if let Some(ref ext) = r.file_ext {
-                    *file_ext_counts.entry(ext.clone()).or_default() += 1;
-                }
-                if let Some(s) = r.score {
-                    scores.push(s);
-                }
-                if let Some(ref dims) = r.dimensions {
-                    let ds = serde_json::to_value(dims).ok();
-                    if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
-                        for (k, v) in obj {
-                            if let Some(n) = v.as_f64() {
-                                *dim_sums.entry(k.clone()).or_default() += n;
-                                *dim_counts.entry(k.clone()).or_default() += 1;
-                            }
+            .unwrap_or_default();
+
+        let recs: Vec<ObsRecord> = if !sqlite_obs.is_empty() {
+            sqlite_obs
+        } else {
+            // Fallback to JSONL files
+            let slug_obs_dir = slug_harness.join("obs");
+            if !slug_obs_dir.is_dir() {
+                continue;
+            }
+            let all_obs = list_files(&slug_obs_dir, ".jsonl");
+            let filtered: Vec<String> = all_obs
+                .into_iter()
+                .filter(|f| {
+                    let tag = f.replace("session_", "");
+                    tag.get(..8)
+                        .map(|s| s >= cutoff_tag.as_str())
+                        .unwrap_or(true)
+                })
+                .collect();
+            let mut combined: Vec<ObsRecord> = Vec::new();
+            for f in &filtered {
+                combined.extend(read_jsonl_typed::<ObsRecord>(&slug_obs_dir.join(f)));
+            }
+            combined
+        };
+
+        for r in &recs {
+            total_obs += 1;
+            *tool_counts.entry(r.tool.clone()).or_default() += 1;
+            if let Some(ref fc) = r.failure_category {
+                *failure_cats.entry(fc.clone()).or_default() += 1;
+            }
+            if let Some(ref ext) = r.file_ext {
+                *file_ext_counts.entry(ext.clone()).or_default() += 1;
+            }
+            if let Some(s) = r.score {
+                scores.push(s);
+            }
+            if let Some(ref dims) = r.dimensions {
+                let ds = serde_json::to_value(dims).ok();
+                if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                    for (k, v) in obj {
+                        if let Some(n) = v.as_f64() {
+                            *dim_sums.entry(k.clone()).or_default() += n;
+                            *dim_counts.entry(k.clone()).or_default() += 1;
                         }
                     }
                 }
-                let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-                entry.1 += 1;
-                if r.result.as_deref() == Some("success")
-                    || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-                {
-                    entry.0 += 1;
-                }
+            }
+            let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+            entry.1 += 1;
+            if r.result.as_deref() == Some("success")
+                || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+            {
+                entry.0 += 1;
             }
         }
     }
@@ -779,7 +799,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let today_str = today();
     let observations = if let Ok(conn) = crate::store::open_harness_db() {
         match crate::store::observations::query_obs_for_date_range_conn(
-            &conn, &today_str, &today_str,
+            &conn, &today_str, &today_str, None,
         ) {
             Ok(recs) => recs,
             Err(e) => {
@@ -892,7 +912,9 @@ pub fn run(_input: &HookInput) -> i32 {
     };
     // Write evolution record to SQLite (primary) + JSONL (fallback)
     if let Ok(conn) = crate::store::open_harness_db() {
-        let _ = crate::store::evolution::insert_record_conn(&conn, &record);
+        if let Err(e) = crate::store::evolution::insert_record_conn(&conn, &record) {
+            eprintln!("[reflect] SQLite evo write failed: {e}");
+        }
     }
     append_jsonl(&evolution_file(), &record);
 

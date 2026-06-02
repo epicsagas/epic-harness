@@ -80,9 +80,9 @@ pub fn query_recent_records_conn(
     Ok(records)
 }
 
-/// Query all evolution records.
+/// Query all evolution records (capped at 10_000 to prevent unbounded memory use).
 pub fn query_all_records_conn(conn: &Connection) -> io::Result<Vec<EvolutionRecord>> {
-    query_recent_records_conn(conn, i64::MAX as usize)
+    query_recent_records_conn(conn, 10_000)
 }
 
 #[cfg(test)]
