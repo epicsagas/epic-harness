@@ -229,9 +229,18 @@ pub fn run_context(
         "tool_success_rate": tool_success_rate,
     });
 
-    // 2. Evolution stats
-    let evo_records: Vec<serde_json::Value> =
-        read_jsonl_typed::<serde_json::Value>(&evolution_file());
+    // 2. Evolution stats (SQLite first, fallback to JSONL)
+    let evo_records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
+        match crate::store::evolution::query_all_records_conn(&conn) {
+            Ok(recs) => recs
+                .iter()
+                .filter_map(|r| serde_json::to_value(r).ok())
+                .collect(),
+            Err(_) => read_jsonl_typed::<serde_json::Value>(&evolution_file()),
+        }
+    } else {
+        read_jsonl_typed::<serde_json::Value>(&evolution_file())
+    };
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
     let mut skills_generated: u64 = 0;
@@ -302,8 +311,12 @@ pub fn run_context(
         "stagnation_count": stagnation_count,
     });
 
-    // 3. Metrics summary
-    let metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    // 3. Metrics summary (SQLite first, fallback to JSON)
+    let metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
+        crate::store::metrics::load_metrics_conn(&conn).unwrap_or_else(|_| default_metrics())
+    } else {
+        read_json(&metrics_file(), default_metrics())
+    };
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
@@ -373,13 +386,24 @@ pub fn run_context(
         "skill_attribution": skill_attr,
     });
 
-    // 4. Session snapshots
-    let snap_files = list_files(&sessions_dir(), ".json");
-    let snapshots: Vec<serde_json::Value> = snap_files
-        .iter()
-        .rev()
-        .take(5)
-        .filter_map(|f| {
+    // 4. Session snapshots (SQLite first, fallback to JSON)
+    let snapshots: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
+        match crate::store::sessions::list_recent_snapshots_conn(&conn, 5) {
+            Ok(snaps) => snaps
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "timestamp": s.timestamp,
+                        "type": s.snap_type,
+                        "summary": s.summary.chars().take(400).collect::<String>(),
+                    })
+                })
+                .collect(),
+            Err(_) => vec![],
+        }
+    } else {
+        let snap_files = list_files(&sessions_dir(), ".json");
+        snap_files.iter().rev().take(5).filter_map(|f| {
             let sp: serde_json::Value = read_json(&sessions_dir().join(f), serde_json::Value::Null);
             if sp.is_null() { return None; }
             Some(serde_json::json!({
@@ -387,8 +411,8 @@ pub fn run_context(
                 "type": sp.get("type").and_then(|v| v.as_str()).unwrap_or(""),
                 "summary": sp.get("summary").and_then(|v| v.as_str()).unwrap_or("").chars().take(400).collect::<String>(),
             }))
-        })
-        .collect();
+        }).collect()
+    };
 
     // 5. Evolved skills
     let evolved_list_dirs = list_dirs(&evolved_dir());
@@ -736,25 +760,34 @@ pub fn run(_input: &HookInput) -> i32 {
     if !harness_exists() {
         return 0;
     }
-    if !obs_dir().is_dir() {
-        return 0;
-    }
 
-    // 1. Collect today's observations
+    // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
-    let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
-        .into_iter()
-        .filter(|f| f.contains(&today_str))
-        .collect();
-    if obs_files.is_empty() {
-        return 0;
-    }
-
-    let mut observations: Vec<ObsRecord> = vec![];
-    for f in &obs_files {
-        let recs: Vec<ObsRecord> = read_jsonl_typed(&obs_dir().join(f));
-        observations.extend(recs);
-    }
+    let observations = if let Ok(conn) = crate::store::open_harness_db() {
+        match crate::store::observations::query_obs_for_date_range_conn(
+            &conn, &today_str, &today_str,
+        ) {
+            Ok(recs) => recs,
+            Err(_) => return 0,
+        }
+    } else {
+        // Fallback: read from JSONL files
+        if !obs_dir().is_dir() {
+            return 0;
+        }
+        let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
+            .into_iter()
+            .filter(|f| f.contains(&today_str))
+            .collect();
+        if obs_files.is_empty() {
+            return 0;
+        }
+        let mut recs: Vec<ObsRecord> = vec![];
+        for f in &obs_files {
+            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
+        }
+        recs
+    };
     if observations.len() < 3 {
         return 0;
     }
@@ -763,8 +796,12 @@ pub fn run(_input: &HookInput) -> i32 {
     let mut analysis = evolve::analyze_session(&observations);
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
-    // 3. Stagnation
-    let mut metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    // 3. Stagnation (load metrics from SQLite, fallback to JSON)
+    let mut metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
+        crate::store::metrics::load_metrics_conn(&conn).unwrap_or_else(|_| default_metrics())
+    } else {
+        read_json(&metrics_file(), default_metrics())
+    };
     let (should_rollback, improved, rolled_back_count) =
         evolve::check_stagnation(&mut metrics, analysis.avg_score);
 
@@ -828,6 +865,10 @@ pub fn run(_input: &HookInput) -> i32 {
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
     };
+    // Write evolution record to SQLite (primary) + JSONL (fallback)
+    if let Ok(conn) = crate::store::open_harness_db() {
+        let _ = crate::store::evolution::insert_record_conn(&conn, &record);
+    }
     append_jsonl(&evolution_file(), &record);
 
     // 10. Session handoff context
@@ -885,6 +926,10 @@ pub fn run(_input: &HookInput) -> i32 {
     }
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
 
+    // Save metrics to SQLite (primary) + JSON file (fallback)
+    if let Ok(conn) = crate::store::open_harness_db() {
+        let _ = crate::store::metrics::save_metrics_conn(&conn, &metrics);
+    }
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }

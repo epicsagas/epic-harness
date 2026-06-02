@@ -8,6 +8,7 @@ mod mem;
 mod orchestrate;
 mod serve;
 mod shared;
+mod store;
 mod team;
 mod telemetry;
 mod update;

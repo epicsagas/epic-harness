@@ -91,18 +91,36 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Orchestration API ───────────────────────────
             (Method::Get, "/api/run") => {
-                let harness_dir = common::harness_dir();
-                let body = match orch::read_run(&harness_dir) {
-                    Some(run) => serde_json::to_string(&run).unwrap_or_else(|_| "{}".into()),
-                    None => "{}".into(),
+                let body = if let Ok(conn) = crate::store::open_harness_db() {
+                    match crate::store::orchestrator::read_run_conn(&conn) {
+                        Ok(Some(run)) => {
+                            serde_json::to_string(&run).unwrap_or_else(|_| "{}".into())
+                        }
+                        _ => "{}".into(),
+                    }
+                } else {
+                    let harness_dir = common::harness_dir();
+                    match orch::read_run(&harness_dir) {
+                        Some(run) => serde_json::to_string(&run).unwrap_or_else(|_| "{}".into()),
+                        None => "{}".into(),
+                    }
                 };
                 json_response(&body)
             }
 
             (Method::Get, "/api/events") => {
-                let harness_dir = common::harness_dir();
-                let run = orch::read_run(&harness_dir);
-                let data = serde_json::to_string(&run).unwrap_or_else(|_| "null".into());
+                let data = if let Ok(conn) = crate::store::open_harness_db() {
+                    match crate::store::orchestrator::read_run_conn(&conn) {
+                        Ok(Some(run)) => {
+                            serde_json::to_string(&run).unwrap_or_else(|_| "null".into())
+                        }
+                        _ => "null".into(),
+                    }
+                } else {
+                    let harness_dir = common::harness_dir();
+                    serde_json::to_string(&orch::read_run(&harness_dir))
+                        .unwrap_or_else(|_| "null".into())
+                };
                 let sse_body = format!("data: {data}\n\n");
                 Response::from_string(sse_body)
                     .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
@@ -221,10 +239,23 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let agent_id = url
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
-                let harness_dir = common::harness_dir();
                 if !orch::validate_agent_id(agent_id) {
                     json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
+                } else if let Ok(conn) = crate::store::open_harness_db() {
+                    let body = match crate::store::orchestrator::read_agent_conn(&conn, agent_id) {
+                        Ok(Some(a)) => serde_json::json!({
+                            "agent_id": a.id,
+                            "phase": a.phase,
+                            "progress": a.progress,
+                            "last_heartbeat": a.last_heartbeat,
+                            "status": a.status,
+                        })
+                        .to_string(),
+                        _ => "{}".into(),
+                    };
+                    json_response(&body)
                 } else {
+                    let harness_dir = common::harness_dir();
                     let body = match orch::read_agent_status(&harness_dir, agent_id) {
                         Some(s) => serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()),
                         None => "{}".into(),
@@ -363,10 +394,49 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
     use std::fs;
     match cmd {
         "get_harness_metrics" => {
+            // Try SQLite first, fallback to JSON file
+            if let Ok(conn) = crate::store::open_harness_db() {
+                if let Ok(metrics) = crate::store::metrics::load_metrics_conn(&conn) {
+                    return serde_json::to_string(&metrics).unwrap_or_else(|_| "null".into());
+                }
+            }
             let p = harness_dir.join("metrics.json");
             fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
         }
         "get_evolved_skills" => {
+            // Try SQLite first
+            if let Ok(conn) = crate::store::open_harness_db() {
+                let skills = crate::store::evolved::list_skills_full_conn(&conn)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "skill_md": s.skill_md,
+                            "created_at": s.created
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let history = crate::store::evolution::query_recent_records_conn(&conn, 50)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|r| serde_json::to_value(r).ok())
+                    .collect::<Vec<_>>();
+                let total_sessions = crate::store::metrics::load_metrics_conn(&conn)
+                    .map(|m| m.total_sessions)
+                    .unwrap_or(0);
+                if !skills.is_empty() || !history.is_empty() {
+                    return serde_json::json!({
+                        "evolved_skills": skills,
+                        "evolution_history": history,
+                        "total_sessions_analyzed": total_sessions,
+                        "patterns_detected": history.len()
+                    })
+                    .to_string();
+                }
+            }
+
+            // Fallback: file-based reading
             let evolved_dir = harness_dir.join("evolved");
             let skills: Vec<serde_json::Value> = if evolved_dir.exists() {
                 fs::read_dir(&evolved_dir)
@@ -376,13 +446,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                             .map(|e| {
                                 let name = e.file_name().to_string_lossy().to_string();
                                 let skill_md_path = e.path().join("SKILL.md");
-                                let skill_md =
-                                    fs::read_to_string(&skill_md_path).unwrap_or_default();
-                                serde_json::json!({
-                                    "name": name,
-                                    "skill_md": skill_md,
-                                    "created_at": null
-                                })
+                                let skill_md = fs::read_to_string(&skill_md_path).unwrap_or_default();
+                                serde_json::json!({ "name": name, "skill_md": skill_md, "created_at": null })
                             })
                             .collect()
                     })
@@ -418,15 +483,75 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                 .and_then(|v| v["total_sessions"].as_u64())
                 .unwrap_or(0);
-            let result = serde_json::json!({
+            serde_json::json!({
                 "evolved_skills": skills,
                 "evolution_history": history,
                 "total_sessions_analyzed": total_sessions,
                 "patterns_detected": history.len()
-            });
-            result.to_string()
+            })
+            .to_string()
         }
         "get_obs_summary" => {
+            // Try SQLite first, fallback to JSONL
+            if let Ok(conn) = crate::store::open_harness_db() {
+                if let Ok(stats) = crate::store::observations::query_obs_stats_conn(
+                    &conn,
+                    "2020-01-01", // all data
+                    "2099-12-31",
+                ) {
+                    if stats.total > 0 {
+                        let tool_stats: Vec<serde_json::Value> = {
+                            let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
+                                serde_json::json!({
+                                    "tool": t.tool,
+                                    "calls": t.calls,
+                                    "success_rate": if t.calls > 0 {
+                                        (t.successes as f64 / t.calls as f64 * 1000.0).round() / 1000.0
+                                    } else { 0.0 },
+                                    "avg_score": (t.avg_score * 1000.0).round() / 1000.0
+                                })
+                            }).collect();
+                            v.sort_by(|a, b| {
+                                b["calls"]
+                                    .as_i64()
+                                    .unwrap_or(0)
+                                    .cmp(&a["calls"].as_i64().unwrap_or(0))
+                            });
+                            v
+                        };
+                        let recent_sessions: Vec<serde_json::Value> = stats
+                            .session_stats
+                            .iter()
+                            .take(10)
+                            .map(|s| {
+                                let date = s
+                                    .session_id
+                                    .split('_')
+                                    .next()
+                                    .unwrap_or("unknown")
+                                    .to_string();
+                                serde_json::json!({
+                                    "session_id": s.session_id,
+                                    "date": date,
+                                    "tool_calls": s.calls,
+                                    "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
+                                    "failures": s.failures
+                                })
+                            })
+                            .collect();
+                        return serde_json::json!({
+                            "recent_sessions": recent_sessions,
+                            "tool_stats": tool_stats,
+                            "total_tool_calls": stats.total,
+                            "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
+                            "active_agents": []
+                        })
+                        .to_string();
+                    }
+                }
+            }
+
+            // Fallback: JSONL file parsing (for legacy data)
             let obs_dir = harness_dir.join("obs");
             if !obs_dir.exists() {
                 return serde_json::json!({
@@ -509,26 +634,19 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 });
                 v
             };
-
             let recent_sessions: Vec<serde_json::Value> = {
                 let mut v: Vec<_> = session_map.iter().collect();
                 v.sort_by(|a, b| b.0.cmp(a.0));
-                v.into_iter()
-                    .take(10)
-                    .map(|(sid, (calls, score_sum, failures, date))| {
-                        serde_json::json!({
-                            "session_id": sid,
-                            "date": date,
-                            "tool_calls": calls,
-                            "avg_score": if *calls > 0 {
-                                (*score_sum / *calls as f64 * 1000.0).round() / 1000.0
-                            } else { 0.0 },
-                            "failures": failures
-                        })
+                v.into_iter().take(10).map(|(sid, (calls, score_sum, failures, date))| {
+                    serde_json::json!({
+                        "session_id": sid,
+                        "date": date,
+                        "tool_calls": calls,
+                        "avg_score": if *calls > 0 { (*score_sum / *calls as f64 * 1000.0).round() / 1000.0 } else { 0.0 },
+                        "failures": failures
                     })
-                    .collect()
+                }).collect()
             };
-
             let total: u64 = tool_stats
                 .iter()
                 .map(|t| t["calls"].as_u64().unwrap_or(0))
@@ -555,6 +673,21 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             .to_string()
         }
         "get_orbit_pipelines" => {
+            // Try SQLite first
+            if let Ok(conn) = crate::store::open_harness_db() {
+                if let Ok(pipelines) = crate::store::orbit_store::list_all_pipelines_conn(&conn) {
+                    if !pipelines.is_empty() {
+                        let mut sorted = pipelines;
+                        sorted.sort_by(|a, b| {
+                            let ta = a["started_at"].as_str().unwrap_or("");
+                            let tb = b["started_at"].as_str().unwrap_or("");
+                            tb.cmp(ta)
+                        });
+                        return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
+                    }
+                }
+            }
+            // Fallback: scan PIPELINE-*.json files
             let projects_root = harness_dir.parent().unwrap_or(harness_dir);
             let mut all: Vec<serde_json::Value> = vec![];
             if let Ok(rd) = fs::read_dir(projects_root) {

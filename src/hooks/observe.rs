@@ -348,7 +348,11 @@ pub fn run(input: &HookInput) -> i32 {
     }
     ensure_dir(&obs_dir());
 
-    let session_file = obs_dir().join(format!("session_{}.jsonl", session_id()));
+    let sid = session_id();
+
+    // Open harness DB for SQLite writes (fallback to JSONL if DB unavailable)
+    let db = crate::store::open_harness_db().ok();
+    let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
     let action = input.tool_input.as_ref().map(|v| {
@@ -367,7 +371,11 @@ pub fn run(input: &HookInput) -> i32 {
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
-    let seq_id = get_next_sequence_id(&session_file);
+    let seq_id = if db.is_none() {
+        get_next_sequence_id(&session_file)
+    } else {
+        0
+    };
 
     let mut record = ObsRecord {
         timestamp: now_iso(),
@@ -430,7 +438,14 @@ pub fn run(input: &HookInput) -> i32 {
                 score_bash(&combined, cmd)
             }
             "edit" => {
-                let prev = get_last_action(&session_file);
+                let prev = db
+                    .as_ref()
+                    .and_then(|conn| {
+                        crate::store::observations::query_last_action_conn(conn, &sid)
+                            .ok()
+                            .flatten()
+                    })
+                    .or_else(|| get_last_action(&session_file));
                 score_edit(&combined, prev.as_deref(), action.as_deref())
             }
             "write" => score_write(&combined),
@@ -471,7 +486,12 @@ pub fn run(input: &HookInput) -> i32 {
         }
     }
 
-    append_jsonl(&session_file, &record);
+    // Write to SQLite (primary) with JSONL fallback
+    if let Some(ref conn) = db {
+        let _ = crate::store::observations::insert_observation_conn(conn, &record, &sid);
+    } else {
+        append_jsonl(&session_file, &record);
+    }
 
     // Fire tool_error telemetry only on failures to keep event volume low.
     // Capped at 50 events per session to avoid flooding PostHog during error loops.

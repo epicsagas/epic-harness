@@ -1,25 +1,55 @@
 use super::common::*;
 
 fn get_obs_summary() -> Option<String> {
+    let today_str = today();
+
+    // Try SQLite first
+    if let Ok(conn) = crate::store::open_harness_db() {
+        if let Ok(stats) =
+            crate::store::observations::query_obs_stats_conn(&conn, &today_str, &today_str)
+        {
+            if stats.total > 0 {
+                let success_rate = if stats.total > 0 {
+                    ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
+                } else {
+                    100
+                };
+                let error_str = if !stats.error_stats.is_empty() {
+                    let parts: Vec<String> = stats
+                        .error_stats
+                        .iter()
+                        .take(3)
+                        .map(|(c, n)| format!("{}:{}", c, n))
+                        .collect();
+                    format!(", errors=[{}]", parts.join(","))
+                } else {
+                    String::new()
+                };
+                return Some(format!(
+                    "{} obs, {success_rate}% success, avg={:.2}{error_str}",
+                    stats.total, stats.avg_score
+                ));
+            }
+        }
+    }
+
+    // Fallback: read from JSONL files
     let obs = obs_dir();
     if !obs.is_dir() {
         return None;
     }
 
-    let today_str = today();
     let mut files: Vec<String> = list_files(&obs, ".jsonl")
         .into_iter()
         .filter(|f| f.contains(&today_str))
         .collect();
 
-    // Merge all today's sessions
     let mut records: Vec<ObsRecord> = vec![];
     for f in &files {
         let recs: Vec<ObsRecord> = read_jsonl_typed(&obs.join(f));
         records.extend(recs);
     }
 
-    // Fallback: try latest file
     if records.is_empty() {
         files = list_files(&obs, ".jsonl");
         files.sort();
@@ -104,14 +134,18 @@ pub fn run(input: &HookInput) -> i32 {
         pipeline_state: super::common::read_active_orbit_state(),
     };
 
-    let filename = format!(
-        "snapshot_{}.json",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-    );
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
 
+    // Write to SQLite (primary)
+    if let Ok(conn) = crate::store::open_harness_db() {
+        let _ = crate::store::sessions::insert_snapshot_conn(&conn, &snapshot, millis);
+    }
+
+    // Also write JSONL file for backward compatibility
+    let filename = format!("snapshot_{}.json", millis);
     let path = sessions_dir().join(&filename);
     if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
         let _ = std::fs::write(&path, json);

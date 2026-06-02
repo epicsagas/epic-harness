@@ -120,9 +120,6 @@ fn get_cross_project_hints() -> Vec<String> {
     if !cross_project_file().is_file() {
         return vec![];
     }
-    if !global_patterns_file().is_file() {
-        return vec![];
-    }
 
     let project_name = cwd()
         .file_name()
@@ -130,7 +127,24 @@ fn get_cross_project_hints() -> Vec<String> {
         .unwrap_or("")
         .to_string();
 
-    let records = read_jsonl(&global_patterns_file());
+    // Try SQLite first, fallback to JSONL
+    let records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
+        match crate::store::global::query_patterns_excluding_conn(&conn, &project_name, 20) {
+            Ok(patterns) => patterns,
+            Err(_) => {
+                if !global_patterns_file().is_file() {
+                    return vec![];
+                }
+                read_jsonl(&global_patterns_file())
+            }
+        }
+    } else {
+        if !global_patterns_file().is_file() {
+            return vec![];
+        }
+        read_jsonl(&global_patterns_file())
+    };
+
     let other: Vec<_> = records
         .iter()
         .filter(|r| r.get("project").and_then(|p| p.as_str()) != Some(&project_name))
@@ -251,29 +265,43 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    // 1. Latest session snapshot
-    let mut snaps = list_files(&sessions_dir(), ".json");
-    snaps.sort();
-    if let Some(latest_name) = snaps.last() {
-        let snap: SessionSnapshot = read_json(
-            &sessions_dir().join(latest_name),
-            SessionSnapshot {
-                timestamp: String::new(),
-                snap_type: String::new(),
-                summary: String::new(),
-                pending_tasks: vec![],
-                context_usage: None,
-                pipeline_state: None,
-            },
-        );
-        if !snap.summary.is_empty() {
-            hint("resume", &format!("Previous: {}", snap.summary));
+    // 1. Latest session snapshot (SQLite first, fallback to JSON file)
+    if let Ok(conn) = crate::store::open_harness_db() {
+        if let Ok(Some(snap)) = crate::store::sessions::get_latest_snapshot_conn(&conn) {
+            if !snap.summary.is_empty() {
+                hint("resume", &format!("Previous: {}", snap.summary));
+            }
+            if !snap.pending_tasks.is_empty() {
+                hint(
+                    "resume",
+                    &format!("Pending: {}", snap.pending_tasks.join(", ")),
+                );
+            }
         }
-        if !snap.pending_tasks.is_empty() {
-            hint(
-                "resume",
-                &format!("Pending: {}", snap.pending_tasks.join(", ")),
+    } else {
+        let mut snaps = list_files(&sessions_dir(), ".json");
+        snaps.sort();
+        if let Some(latest_name) = snaps.last() {
+            let snap: SessionSnapshot = read_json(
+                &sessions_dir().join(latest_name),
+                SessionSnapshot {
+                    timestamp: String::new(),
+                    snap_type: String::new(),
+                    summary: String::new(),
+                    pending_tasks: vec![],
+                    context_usage: None,
+                    pipeline_state: None,
+                },
             );
+            if !snap.summary.is_empty() {
+                hint("resume", &format!("Previous: {}", snap.summary));
+            }
+            if !snap.pending_tasks.is_empty() {
+                hint(
+                    "resume",
+                    &format!("Pending: {}", snap.pending_tasks.join(", ")),
+                );
+            }
         }
     }
 
