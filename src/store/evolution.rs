@@ -82,7 +82,7 @@ pub fn query_recent_records_conn(
 
 /// Query all evolution records.
 pub fn query_all_records_conn(conn: &Connection) -> io::Result<Vec<EvolutionRecord>> {
-    query_recent_records_conn(conn, i32::MAX as usize)
+    query_recent_records_conn(conn, i64::MAX as usize)
 }
 
 #[cfg(test)]

@@ -163,8 +163,13 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Memory API (Nodes) ───────────────────────────
             (Method::Get, "/api/nodes") => {
-                let nodes =
-                    store::read_all_nodes_conn(&store::open_db().unwrap()).unwrap_or_default();
+                let nodes = match store::open_db() {
+                    Ok(conn) => store::read_all_nodes_conn(&conn).unwrap_or_default(),
+                    Err(e) => {
+                        eprintln!("[serve] failed to open DB for /api/nodes: {e}");
+                        Vec::new()
+                    }
+                };
                 let results: Vec<serde_json::Value> = nodes
                     .into_iter()
                     .map(|n| {

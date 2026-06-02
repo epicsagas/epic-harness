@@ -167,15 +167,17 @@ pub fn save_promotion_counters_conn(
     conn: &Connection,
     counters: &HashMap<String, u64>,
 ) -> io::Result<()> {
-    conn.execute("DELETE FROM promotion_counters", [])
+    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+    tx.execute("DELETE FROM promotion_counters", [])
         .map_err(io::Error::other)?;
     for (key, count) in counters {
-        conn.execute(
+        tx.execute(
             "INSERT INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
             rusqlite::params![key, super::u64_to_i64(*count)],
         )
         .map_err(io::Error::other)?;
     }
+    tx.commit().map_err(io::Error::other)?;
     Ok(())
 }
 

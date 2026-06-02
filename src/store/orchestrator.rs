@@ -280,32 +280,41 @@ pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64>
         // Deletion order respects FK constraints (foreign_keys=ON):
         //   child rows (events, inbox, agents) must be removed before parent (runs).
         //
-        // Step 1: identify stale run IDs
-        let stale_run_subquery = if cutoff_ts.is_empty() {
-            "SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')".to_string()
-        } else {
-            format!(
-                "SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < '{}'",
-                cutoff_ts.replace('\'', "''") // basic escaping; cutoff_ts is ISO-8601
+        // Step 1: materialise stale run IDs into a temp table so the subquery
+        //         is evaluated once and parameter binding is used throughout
+        //         (no string interpolation / SQL injection surface).
+        conn.execute_batch(
+            "CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY);
+             DELETE FROM _stale_run_ids;",
+        )
+        .map_err(io::Error::other)?;
+
+        if cutoff_ts.is_empty() {
+            conn.execute(
+                "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')",
+                [],
             )
-        };
+            .map_err(io::Error::other)?;
+        } else {
+            conn.execute(
+                "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
+                rusqlite::params![cutoff_ts],
+            )
+            .map_err(io::Error::other)?;
+        }
 
         // Step 2: delete child rows for agents belonging to stale runs
         conn.execute(
-            &format!(
-                "DELETE FROM orch_agent_events WHERE agent_id IN (
-                     SELECT id FROM orch_agents WHERE run_id IN ({stale_run_subquery})
-                 )"
-            ),
+            "DELETE FROM orch_agent_events WHERE agent_id IN (
+                 SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
+             )",
             [],
         )
         .map_err(io::Error::other)?;
         conn.execute(
-            &format!(
-                "DELETE FROM orch_agent_inbox WHERE agent_id IN (
-                     SELECT id FROM orch_agents WHERE run_id IN ({stale_run_subquery})
-                 )"
-            ),
+            "DELETE FROM orch_agent_inbox WHERE agent_id IN (
+                 SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
+             )",
             [],
         )
         .map_err(io::Error::other)?;
@@ -313,26 +322,24 @@ pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64>
         // Step 3: delete agents for stale runs
         let deleted_agents = conn
             .execute(
-                &format!("DELETE FROM orch_agents WHERE run_id IN ({stale_run_subquery})"),
+                "DELETE FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)",
                 [],
             )
             .map_err(io::Error::other)?;
         count += deleted_agents as u64;
 
-        // Step 4: now safe to delete the runs themselves
-        let deleted_runs = if cutoff_ts.is_empty() {
-            conn.execute(
-                "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted')",
+        // Step 4: delete the runs themselves
+        let deleted_runs = conn
+            .execute(
+                "DELETE FROM orch_runs WHERE id IN (SELECT id FROM _stale_run_ids)",
                 [],
             )
-        } else {
-            conn.execute(
-                "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
-                rusqlite::params![cutoff_ts],
-            )
-        }
-        .map_err(io::Error::other)?;
+            .map_err(io::Error::other)?;
         count += deleted_runs as u64;
+
+        // Cleanup temp table
+        conn.execute_batch("DELETE FROM _stale_run_ids")
+            .map_err(io::Error::other)?;
 
         Ok(count)
     };

@@ -6,26 +6,60 @@
 use rusqlite::Connection;
 use std::io;
 
+/// Current schema version. Increment when adding migrations in `run_migrations`.
+const SCHEMA_VERSION: u32 = 1;
+
 /// Apply the full operational schema to an open connection.
-/// Safe to call multiple times (uses `IF NOT EXISTS`).
+///
+/// On first run (no `_harness_meta` table): applies all DDL + PRAGMA.
+/// On subsequent runs: skips PRAGMA/DDL if schema version matches, only runs
+/// pending migrations for version bumps.
 pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
-    // Enable WAL mode and foreign key enforcement first — before any DDL.
-    // WAL must be set before schema init so all subsequent writes use WAL journal.
-    // foreign_keys=ON is required to enforce REFERENCES constraints declared in DDL.
+    // Check if schema already initialised by probing for the meta table.
+    let existing_version: Option<u32> = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .and_then(|v| v.parse().ok());
+
+    if let Some(version) = existing_version {
+        // Schema exists — just ensure PRAGMA are set and run pending migrations.
+        apply_pragma(conn)?;
+        if version < SCHEMA_VERSION {
+            run_migrations(conn, version, SCHEMA_VERSION)?;
+        }
+        return Ok(());
+    }
+
+    // First run: apply everything.
+    apply_pragma(conn)?;
+    apply_ddl(conn)?;
+    set_version(conn, SCHEMA_VERSION)?;
+
+    Ok(())
+}
+
+/// Apply WAL, FK, and autocheckpoint PRAGMA.
+fn apply_pragma(conn: &Connection) -> io::Result<()> {
     conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA foreign_keys=ON;
          PRAGMA wal_autocheckpoint=100;",
     )
-    .map_err(io::Error::other)?;
+    .map_err(io::Error::other)
+}
 
+/// Apply the full DDL (tables + indexes). Uses IF NOT EXISTS throughout.
+fn apply_ddl(conn: &Connection) -> io::Result<()> {
     // Schema version tracking (distinct from memory.db's _meta)
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _harness_meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
-        );
-        INSERT OR IGNORE INTO _harness_meta (key, value) VALUES ('schema_version', '1');",
+        );",
     )
     .map_err(io::Error::other)?;
 
@@ -226,5 +260,44 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
     )
     .map_err(io::Error::other)?;
 
+    // ── Additional indexes for query performance ─────────
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_orch_agents_run ON orch_agents(run_id);",
+    )
+    .map_err(io::Error::other)?;
+
+    Ok(())
+}
+
+/// Write the current schema version to _harness_meta.
+fn set_version(conn: &Connection, version: u32) -> io::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', ?1)",
+        rusqlite::params![version.to_string()],
+    )
+    .map_err(io::Error::other)?;
+    Ok(())
+}
+
+/// Run schema migrations from `from_version` (exclusive) to `to_version` (inclusive).
+///
+/// Add migration blocks here when bumping `SCHEMA_VERSION`:
+///
+/// ```ignore
+/// if to_version >= 2 && from_version < 2 {
+///     conn.execute_batch("ALTER TABLE …")?;
+/// }
+/// ```
+fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::Result<()> {
+    // Placeholder — no migrations yet (version 1 is the initial schema).
+    // When SCHEMA_VERSION is bumped to 2+, add migration blocks here, e.g.:
+    //
+    // if to_version >= 2 && from_version < 2 {
+    //     conn.execute_batch("ALTER TABLE observations ADD COLUMN new_col TEXT")
+    //         .map_err(io::Error::other)?;
+    // }
+
+    set_version(conn, to_version)?;
+    let _ = (from_version, to_version); // suppress unused warnings until migrations are added
     Ok(())
 }

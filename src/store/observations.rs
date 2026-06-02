@@ -8,6 +8,20 @@ use std::io;
 use crate::shared::obs::ObsRecord;
 use crate::shared::scoring::ScoreDimensions;
 
+/// Pad an ISO-8601 date string for lexicographic range comparison.
+/// `"2026-06-02"` → `"2026-06-02T00:00:00"` / `"...T23:59:59"`.
+fn pad_date(ts: &str, end_of_day: bool) -> String {
+    if ts.len() == 10 {
+        if end_of_day {
+            format!("{ts}T23:59:59")
+        } else {
+            format!("{ts}T00:00:00")
+        }
+    } else {
+        ts.to_string()
+    }
+}
+
 /// Insert a single observation record.
 pub fn insert_observation_conn(
     conn: &Connection,
@@ -65,17 +79,8 @@ pub fn query_obs_for_date_range_conn(
     from_ts: &str,
     to_ts: &str,
 ) -> io::Result<Vec<ObsRecord>> {
-    // Pad dates for lexicographic comparison
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let from = pad_date(from_ts, false);
+    let to = pad_date(to_ts, true);
 
     let mut stmt = conn
         .prepare(
@@ -141,23 +146,14 @@ pub fn query_obs_for_date_range_conn(
 /// Aggregate observation stats via SQL.
 /// Returns (total_count, success_count, avg_score, per_tool_stats_json, per_error_stats_json).
 pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io::Result<ObsStats> {
-    // Pad dates for lexicographic comparison
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let from = pad_date(from_ts, false);
+    let to = pad_date(to_ts, true);
 
     // Overall stats
     let (total, successes, avg_score): (i64, i64, f64) = conn
         .query_row(
             "SELECT COUNT(*),
-                    COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
                     COALESCE(AVG(score), 0.0)
              FROM observations
              WHERE timestamp >= ?1 AND timestamp <= ?2",
@@ -170,7 +166,7 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
     let mut tool_stmt = conn
         .prepare(
             "SELECT tool, COUNT(*) as calls,
-                    SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
                     COALESCE(AVG(score), 0.0) as avg_score
              FROM observations
              WHERE timestamp >= ?1 AND timestamp <= ?2

@@ -72,7 +72,13 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
             })
         })
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| match r {
+            Ok(entry) => Some(entry),
+            Err(e) => {
+                eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                None
+            }
+        })
         .collect();
 
     // Skill attribution
@@ -94,7 +100,13 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
             })
         })
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| match r {
+            Ok(sa) => Some(sa),
+            Err(e) => {
+                eprintln!("[store/metrics] skipping malformed skill_attribution row: {e}");
+                None
+            }
+        })
         .map(|sa| (sa.skill_name.clone(), sa))
         .collect();
 
@@ -155,10 +167,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     }
 
     // Score history — keep the most recent MAX_SCORE_HISTORY entries.
-    // Use DELETE + batch INSERT in transaction for ordered append-only data.
-    // Double-reverse: first .rev().take(N) selects the N most recent entries
-    // (from the tail), then the second .rev() restores chronological order
-    // so the DB rows are inserted oldest-first (matching the original append order).
+    // Clear and re-insert in chronological order within the transaction.
     tx.execute("DELETE FROM score_history", [])
         .map_err(io::Error::other)?;
     let entries: Vec<&SessionScoreEntry> = m
@@ -184,12 +193,17 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         .map_err(io::Error::other)?;
     }
 
-    // Skill attribution — UPSERT per skill instead of DELETE all + reinsert
+    // Skill attribution — UPSERT preserving first_seen on conflict
     for sa in m.skill_attribution.values() {
         tx.execute(
-            "INSERT OR REPLACE INTO skill_attribution
+            "INSERT INTO skill_attribution
              (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?1,?2,?3,?4,?5)",
+             VALUES (?1,?2,?3,?4,?5)
+             ON CONFLICT(skill_name) DO UPDATE SET
+                 sessions_active = excluded.sessions_active,
+                 avg_score_with = excluded.avg_score_with,
+                 avg_score_without = excluded.avg_score_without,
+                 first_seen = MIN(skill_attribution.first_seen, excluded.first_seen)",
             rusqlite::params![
                 sa.skill_name,
                 super::u64_to_i64(sa.sessions_active),

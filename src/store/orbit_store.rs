@@ -81,6 +81,9 @@ pub fn list_all_pipelines_conn(conn: &Connection) -> io::Result<Vec<serde_json::
             // Merge metadata into the state JSON
             let mut val: serde_json::Value = serde_json::from_str(&state_json)
                 .unwrap_or(serde_json::Value::Object(Default::default()));
+            if !val.is_object() {
+                val = serde_json::Value::Object(Default::default());
+            }
             let map = val.as_object_mut().unwrap();
             map.insert("id".into(), serde_json::Value::String(id));
             map.insert("project".into(), serde_json::Value::String(project));

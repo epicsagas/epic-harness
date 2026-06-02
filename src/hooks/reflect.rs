@@ -1214,39 +1214,60 @@ mod tests {
     fn effective_sources_all_expands() {
         let sources: Vec<String> = vec!["all".into()];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "claude-session", "alcove"]
+            vec!["harness", "mem", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness"]
+            vec!["harness", "mem"]
         } else {
-            sources.iter().map(|s| s.as_str()).collect()
+            let mut v: Vec<&str> = vec!["harness", "mem"];
+            for s in sources.iter() {
+                let s = s.as_str();
+                if s != "harness" && s != "mem" {
+                    v.push(s);
+                }
+            }
+            v
         };
-        assert_eq!(effective, vec!["harness", "claude-session", "alcove"]);
+        assert_eq!(effective, vec!["harness", "mem", "claude-session", "alcove"]);
     }
 
     #[test]
     fn effective_sources_empty_defaults_to_harness() {
         let sources: Vec<String> = vec![];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "claude-session", "alcove"]
+            vec!["harness", "mem", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness"]
+            vec!["harness", "mem"]
         } else {
-            sources.iter().map(|s| s.as_str()).collect()
+            let mut v: Vec<&str> = vec!["harness", "mem"];
+            for s in sources.iter() {
+                let s = s.as_str();
+                if s != "harness" && s != "mem" {
+                    v.push(s);
+                }
+            }
+            v
         };
-        assert_eq!(effective, vec!["harness"]);
+        assert_eq!(effective, vec!["harness", "mem"]);
     }
 
     #[test]
     fn effective_sources_explicit_list_passthrough() {
         let sources: Vec<String> = vec!["harness".into(), "alcove".into()];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "claude-session", "alcove"]
+            vec!["harness", "mem", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness"]
+            vec!["harness", "mem"]
         } else {
-            sources.iter().map(|s| s.as_str()).collect()
+            let mut v: Vec<&str> = vec!["harness", "mem"];
+            for s in sources.iter() {
+                let s = s.as_str();
+                if s != "harness" && s != "mem" {
+                    v.push(s);
+                }
+            }
+            v
         };
-        assert_eq!(effective, vec!["harness", "alcove"]);
+        assert_eq!(effective, vec!["harness", "mem", "alcove"]);
     }
 
     #[test]

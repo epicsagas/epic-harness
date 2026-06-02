@@ -77,7 +77,10 @@ pub fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::R
 pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) -> (u64, u64) {
     let conn = match store::open_db() {
         Ok(c) => c,
-        Err(_) => return (0, 0),
+        Err(e) => {
+            eprintln!("[ingest] failed to open memory DB: {e}");
+            return (0, 0);
+        }
     };
 
     let slug = project_slug();
@@ -89,7 +92,10 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
     // this single-writer, fresh-connection pattern.
     let tx = match conn.unchecked_transaction() {
         Ok(t) => t,
-        Err(_) => return (0, 0),
+        Err(e) => {
+            eprintln!("[ingest] failed to begin transaction: {e}");
+            return (0, 0);
+        }
     };
 
     let mut nodes_created = 0u64;

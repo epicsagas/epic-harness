@@ -32,20 +32,24 @@ use std::io;
 use crate::shared::paths;
 
 /// Convert u64 to i64 for SQLite storage.
-/// Saturates at i64::MAX on overflow (extremely unlikely for session/metric counters,
-/// but logs a warning so callers can detect if it ever happens in production).
+///
+/// SQLite has no native u64 type, so counters are stored as i64.
+/// Values exceeding `i64::MAX` saturate — this is acceptable because all u64 fields
+/// in the schema (session counters, observation counts, skill attribution) are
+/// monotonically increasing counters that will never approach `i64::MAX` (~9.2e18)
+/// in practice. The saturation preserves ordering and prevents silent data loss.
+///
+/// When reading back, `i64 as u64` is always safe for values that originated here
+/// (either the original value or `i64::MAX`, both non-negative).
 #[inline]
 pub(crate) fn u64_to_i64(v: u64) -> i64 {
-    match v.try_into() {
-        Ok(n) => n,
-        Err(_) => {
-            eprintln!(
-                "[store] u64_to_i64: value {v} exceeds i64::MAX, saturating — \
-                 sequence_id uniqueness may be affected"
-            );
-            i64::MAX
-        }
-    }
+    v.try_into().unwrap_or_else(|_| {
+        eprintln!(
+            "[store] u64_to_i64: value {v} exceeds i64::MAX, saturating — \
+             acceptable for counters but would break if used as an identifier"
+        );
+        i64::MAX
+    })
 }
 
 /// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
@@ -62,7 +66,6 @@ pub fn harness_db_path() -> std::path::PathBuf {
 /// For new databases, schema is applied and legacy migration runs if needed.
 pub fn open_harness_db() -> io::Result<Connection> {
     let path = harness_db_path();
-    let _is_new = !path.exists();
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
