@@ -6,6 +6,8 @@
 use rusqlite::Connection;
 use std::io::{self, BufRead};
 
+use super::store_err;
+
 /// Run legacy migration if not already done.
 /// Called from `open_harness_db()` after schema init.
 ///
@@ -79,8 +81,7 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
     // BEGIN IMMEDIATE acquires a write lock upfront, serializing concurrent migration
     // attempts. rusqlite's unchecked_transaction() uses DEFERRED; we issue BEGIN
     // IMMEDIATE directly to get the stricter lock without requiring &mut Connection.
-    conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(io::Error::other)?;
+    store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
 
     // Re-check flag inside the write lock — a concurrent opener may have set it
     // between our outer read above and this BEGIN IMMEDIATE.
@@ -93,7 +94,7 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
         .ok()
         .is_some_and(|v| v == "1");
     if already {
-        conn.execute_batch("ROLLBACK").map_err(io::Error::other)?;
+        store_err(conn.execute_batch("ROLLBACK"))?;
         return Ok(stats);
     }
 
@@ -117,12 +118,11 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
     }
 
     // Mark as migrated and commit atomically
-    conn.execute(
+    store_err(conn.execute(
         "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
         [],
-    )
-    .map_err(io::Error::other)?;
-    conn.execute_batch("COMMIT").map_err(io::Error::other)?;
+    ))?;
+    store_err(conn.execute_batch("COMMIT"))?;
 
     Ok(stats)
 }

@@ -2,7 +2,11 @@
 
 use rusqlite::Connection;
 
-fn in_memory_db() -> Connection {
+/// Shared in-memory test database helper.
+/// Each `#[cfg(test)]` submodule should use `super::super::tests::in_memory_db()`
+/// (or `super::super::super::tests::in_memory_db()` from sub-sub-modules) instead
+/// of defining its own copy.
+pub(crate) fn in_memory_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     super::schema::init_schema(&conn).unwrap();
     conn
@@ -68,7 +72,7 @@ fn meta_table_tracks_version() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "1");
+    assert_eq!(version, "2");
 }
 
 #[test]

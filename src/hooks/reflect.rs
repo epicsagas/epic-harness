@@ -797,17 +797,22 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
-    let observations = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::observations::query_obs_for_date_range_conn(
-            &conn, &today_str, &today_str, None,
-        ) {
-            Ok(recs) => recs,
-            Err(e) => {
+    let sqlite_obs = crate::store::open_harness_db()
+        .ok()
+        .and_then(|conn| {
+            crate::store::observations::query_obs_for_date_range_conn(
+                &conn, &today_str, &today_str, None,
+            )
+            .map_err(|e| {
                 eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-                // Fallthrough to JSONL path below
-                return 0;
-            }
-        }
+                e
+            })
+            .ok()
+        })
+        .unwrap_or_default();
+
+    let observations = if !sqlite_obs.is_empty() {
+        sqlite_obs
     } else {
         // Fallback: read from JSONL files
         if !obs_dir().is_dir() {

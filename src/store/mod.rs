@@ -23,6 +23,90 @@ pub mod sessions;
 #[cfg(test)]
 mod tests;
 
+// ── Store error type ─────────────────────────────────
+
+/// Unified error type for store operations.
+///
+/// Replaces `.map_err(io::Error::other)` throughout store modules,
+/// preserving rusqlite context for better debugging.
+#[derive(Debug)]
+pub struct StoreError {
+    source: rusqlite::Error,
+    context: Option<&'static str>,
+}
+
+impl StoreError {
+    pub fn new(source: rusqlite::Error) -> Self {
+        Self {
+            source,
+            context: None,
+        }
+    }
+
+    pub fn with_context(source: rusqlite::Error, ctx: &'static str) -> Self {
+        Self {
+            source,
+            context: Some(ctx),
+        }
+    }
+}
+
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.context {
+            Some(ctx) => write!(f, "{ctx}: {source}", source = self.source),
+            None => write!(f, "{source}", source = self.source),
+        }
+    }
+}
+
+impl std::error::Error for StoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl From<rusqlite::Error> for StoreError {
+    fn from(e: rusqlite::Error) -> Self {
+        Self::new(e)
+    }
+}
+
+impl From<StoreError> for io::Error {
+    fn from(e: StoreError) -> io::Error {
+        io::Error::other(e)
+    }
+}
+
+/// Convert a rusqlite result to io::Result, preserving context.
+#[inline]
+pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> {
+    result.map_err(io::Error::other)
+}
+
+/// Execute a closure with an open harness DB connection.
+///
+/// Returns `None` if the DB cannot be opened (logged to stderr).
+/// Use for SQLite-first queries where callers provide their own fallback.
+pub fn with_harness_db<F, T>(f: F) -> Option<T>
+where
+    F: FnOnce(&Connection) -> io::Result<T>,
+{
+    match open_harness_db() {
+        Ok(conn) => match f(&conn) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                eprintln!("[store] query failed: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            eprintln!("[store] harness.db unavailable: {e}");
+            None
+        }
+    }
+}
+
 // ── DB connection ────────────────────────────────────
 
 use rusqlite::Connection;

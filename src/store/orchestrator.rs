@@ -7,6 +7,8 @@
 use rusqlite::Connection;
 use std::io;
 
+use super::store_err;
+
 // ── Types ────────────────────────────────────────────
 
 /// Subset of orchestrate::state::OrchestrationRun fields stored in DB.
@@ -39,7 +41,7 @@ pub struct OrchAgent {
 
 /// Initialize a new orchestration run.
 pub fn init_run_conn(conn: &Connection, run: &OrchRun) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT OR REPLACE INTO orch_runs
          (id, status, agents_json, dep_graph_json, created_at, updated_at)
          VALUES (?1,?2,?3,?4,?5,?6)",
@@ -51,8 +53,7 @@ pub fn init_run_conn(conn: &Connection, run: &OrchRun) -> io::Result<()> {
             run.created_at,
             run.updated_at,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -83,11 +84,10 @@ pub fn read_run_conn(conn: &Connection) -> io::Result<Option<OrchRun>> {
 
 /// Update run status.
 pub fn update_run_status_conn(conn: &Connection, run_id: &str, status: &str) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "UPDATE orch_runs SET status = ?1, updated_at = ?2 WHERE id = ?3",
         rusqlite::params![status, crate::shared::helpers::now_iso(), run_id],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -95,7 +95,7 @@ pub fn update_run_status_conn(conn: &Connection, run_id: &str, status: &str) -> 
 
 /// Insert or update an agent.
 pub fn upsert_agent_conn(conn: &Connection, agent: &OrchAgent) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT OR REPLACE INTO orch_agents
          (id, run_id, role, task, satisfies_json, status, phase, progress,
           last_heartbeat, started_at, completed_at)
@@ -113,8 +113,7 @@ pub fn upsert_agent_conn(conn: &Connection, agent: &OrchAgent) -> io::Result<()>
             agent.started_at,
             agent.completed_at,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -155,43 +154,39 @@ pub fn read_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<Option<O
 /// two concurrent callers cannot both read `exists=true` and then both attempt to delete.
 pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool> {
     // BEGIN IMMEDIATE acquires a write lock without requiring &mut Connection.
-    conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(io::Error::other)?;
+    store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
 
     // Check agent exists inside the write lock
-    let exists: bool =
+    let exists: bool = store_err(
         conn.query_row(
             "SELECT COUNT(*) FROM orch_agents WHERE id = ?1",
             rusqlite::params![agent_id],
             |row| row.get::<_, i64>(0),
         )
-        .map_err(|e| {
+        .inspect_err(|_| {
             let _ = conn.execute_batch("ROLLBACK");
-            io::Error::other(e)
-        })? > 0;
+        }),
+    )? > 0;
 
     if !exists {
-        conn.execute_batch("ROLLBACK").map_err(io::Error::other)?;
+        store_err(conn.execute_batch("ROLLBACK"))?;
         return Ok(false);
     }
 
     // Delete agent and related records within the held write lock
     let del = || -> io::Result<()> {
-        conn.execute(
+        store_err(conn.execute(
             "DELETE FROM orch_agents WHERE id = ?1",
             rusqlite::params![agent_id],
-        )
-        .map_err(io::Error::other)?;
-        conn.execute(
+        ))?;
+        store_err(conn.execute(
             "DELETE FROM orch_agent_events WHERE agent_id = ?1",
             rusqlite::params![agent_id],
-        )
-        .map_err(io::Error::other)?;
-        conn.execute(
+        ))?;
+        store_err(conn.execute(
             "DELETE FROM orch_agent_inbox WHERE agent_id = ?1",
             rusqlite::params![agent_id],
-        )
-        .map_err(io::Error::other)?;
+        ))?;
         Ok(())
     };
 
@@ -200,7 +195,7 @@ pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool>
         return Err(e);
     }
 
-    conn.execute_batch("COMMIT").map_err(io::Error::other)?;
+    store_err(conn.execute_batch("COMMIT"))?;
     Ok(true)
 }
 
@@ -214,12 +209,11 @@ pub fn append_event_conn(
     event_type: &str,
     data_json: &str,
 ) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json)
          VALUES (?1,?2,?3,?4)",
         rusqlite::params![agent_id, timestamp, event_type, data_json],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -233,12 +227,11 @@ pub fn post_inbox_conn(
     timestamp: &str,
     message: &str,
 ) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message)
          VALUES (?1,?2,?3,?4)",
         rusqlite::params![agent_id, from_agent, timestamp, message],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -252,12 +245,11 @@ pub fn write_control_conn(
     message: Option<&str>,
     generation: i64,
 ) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT OR REPLACE INTO orch_control (id, action, target, message, generation)
          VALUES (1, ?1, ?2, ?3, ?4)",
         rusqlite::params![action, target, message, generation],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -271,8 +263,7 @@ pub fn write_control_conn(
 /// All deletions are wrapped in a single IMMEDIATE transaction so a partial failure
 /// does not leave orphaned agent events or inbox messages without their agents.
 pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
-    conn.execute_batch("BEGIN IMMEDIATE")
-        .map_err(io::Error::other)?;
+    store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
 
     let do_cleanup = || -> io::Result<u64> {
         let mut count = 0u64;
@@ -283,70 +274,60 @@ pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64>
         // Step 1: materialise stale run IDs into a temp table so the subquery
         //         is evaluated once and parameter binding is used throughout
         //         (no string interpolation / SQL injection surface).
-        conn.execute_batch(
+        store_err(conn.execute_batch(
             "CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY);
              DELETE FROM _stale_run_ids;",
-        )
-        .map_err(io::Error::other)?;
+        ))?;
 
         if cutoff_ts.is_empty() {
-            conn.execute(
+            store_err(conn.execute(
                 "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')",
                 [],
-            )
-            .map_err(io::Error::other)?;
+            ))?;
         } else {
-            conn.execute(
+            store_err(conn.execute(
                 "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
                 rusqlite::params![cutoff_ts],
-            )
-            .map_err(io::Error::other)?;
+            ))?;
         }
 
         // Step 2: delete child rows for agents belonging to stale runs
-        conn.execute(
+        store_err(conn.execute(
             "DELETE FROM orch_agent_events WHERE agent_id IN (
                  SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
              )",
             [],
-        )
-        .map_err(io::Error::other)?;
-        conn.execute(
+        ))?;
+        store_err(conn.execute(
             "DELETE FROM orch_agent_inbox WHERE agent_id IN (
                  SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
              )",
             [],
-        )
-        .map_err(io::Error::other)?;
+        ))?;
 
         // Step 3: delete agents for stale runs
-        let deleted_agents = conn
-            .execute(
-                "DELETE FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)",
-                [],
-            )
-            .map_err(io::Error::other)?;
+        let deleted_agents = store_err(conn.execute(
+            "DELETE FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)",
+            [],
+        ))?;
         count += deleted_agents as u64;
 
         // Step 4: delete the runs themselves
-        let deleted_runs = conn
-            .execute(
-                "DELETE FROM orch_runs WHERE id IN (SELECT id FROM _stale_run_ids)",
-                [],
-            )
-            .map_err(io::Error::other)?;
+        let deleted_runs = store_err(conn.execute(
+            "DELETE FROM orch_runs WHERE id IN (SELECT id FROM _stale_run_ids)",
+            [],
+        ))?;
         count += deleted_runs as u64;
 
         // Cleanup temp table
-        conn.execute_batch("DELETE FROM _stale_run_ids")
-            .map_err(io::Error::other)?;
+        store_err(conn.execute_batch("DELETE FROM _stale_run_ids"))?;
 
         Ok(count)
     };
 
     match do_cleanup() {
         Ok(count) => {
-            conn.execute_batch("COMMIT").map_err(io::Error::other)?;
+            store_err(conn.execute_batch("COMMIT"))?;
             Ok(count)
         }
         Err(e) => {
@@ -361,9 +342,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     #[test]

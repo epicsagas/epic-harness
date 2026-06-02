@@ -13,6 +13,8 @@ use std::io;
 use crate::shared::evolution::{Metrics, SessionScoreEntry, SkillAttribution};
 use crate::shared::scoring::ScoreDimensions;
 
+use super::store_err;
+
 /// Maximum score history entries to retain.
 const MAX_SCORE_HISTORY: usize = 50;
 
@@ -49,48 +51,42 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
     let last_error_context = get("last_error_context").filter(|v| !v.is_empty());
 
     // Score history
-    let mut sh_stmt = conn
-        .prepare(
-            "SELECT timestamp, success_rate, avg_score, observations,
+    let mut sh_stmt = store_err(conn.prepare(
+        "SELECT timestamp, success_rate, avg_score, observations,
                     dim_success, dim_quality, dim_cost
              FROM score_history ORDER BY id ASC",
-        )
-        .map_err(io::Error::other)?;
+    ))?;
 
-    let score_history: Vec<SessionScoreEntry> = sh_stmt
-        .query_map([], |row| {
-            Ok(SessionScoreEntry {
-                timestamp: row.get(0)?,
-                success_rate: row.get(1)?,
-                avg_score: row.get(2)?,
-                observations: row.get::<_, i64>(3)? as u64,
-                dimension_averages: ScoreDimensions {
-                    tool_success: row.get(4)?,
-                    output_quality: row.get(5)?,
-                    execution_cost: row.get(6)?,
-                },
-            })
+    let score_history: Vec<SessionScoreEntry> = store_err(sh_stmt.query_map([], |row| {
+        Ok(SessionScoreEntry {
+            timestamp: row.get(0)?,
+            success_rate: row.get(1)?,
+            avg_score: row.get(2)?,
+            observations: row.get::<_, i64>(3)? as u64,
+            dimension_averages: ScoreDimensions {
+                tool_success: row.get(4)?,
+                output_quality: row.get(5)?,
+                execution_cost: row.get(6)?,
+            },
         })
-        .map_err(io::Error::other)?
-        .filter_map(|r| match r {
-            Ok(entry) => Some(entry),
-            Err(e) => {
-                eprintln!("[store/metrics] skipping malformed score_history row: {e}");
-                None
-            }
-        })
-        .collect();
+    }))?
+    .filter_map(|r| match r {
+        Ok(entry) => Some(entry),
+        Err(e) => {
+            eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+            None
+        }
+    })
+    .collect();
 
     // Skill attribution
-    let mut sa_stmt = conn
-        .prepare(
-            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+    let mut sa_stmt = store_err(conn.prepare(
+        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
              FROM skill_attribution",
-        )
-        .map_err(io::Error::other)?;
+    ))?;
 
-    let skill_attribution: HashMap<String, SkillAttribution> = sa_stmt
-        .query_map([], |row| {
+    let skill_attribution: HashMap<String, SkillAttribution> =
+        store_err(sa_stmt.query_map([], |row| {
             Ok(SkillAttribution {
                 skill_name: row.get(0)?,
                 sessions_active: row.get::<_, i64>(1)? as u64,
@@ -98,8 +94,7 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
                 avg_score_without: row.get(3)?,
                 first_seen: row.get(4)?,
             })
-        })
-        .map_err(io::Error::other)?
+        }))?
         .filter_map(|r| match r {
             Ok(sa) => Some(sa),
             Err(e) => {
@@ -139,7 +134,7 @@ pub fn load_metrics() -> io::Result<Metrics> {
 /// instead of full DELETE + reinsert to avoid data loss on partial failures.
 /// Score history is capped at MAX_SCORE_HISTORY most recent entries.
 pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
-    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+    let tx = store_err(conn.unchecked_transaction())?;
 
     // Scalar state — upsert each key
     let upsert = |key: &str, value: &str| {
@@ -149,27 +144,28 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         )
     };
 
-    upsert("total_sessions", &m.total_sessions.to_string()).map_err(io::Error::other)?;
-    upsert("avg_success_rate", &m.avg_success_rate.to_string()).map_err(io::Error::other)?;
-    upsert("total_evolved_skills", &m.total_evolved_skills.to_string())
-        .map_err(io::Error::other)?;
+    store_err(upsert("total_sessions", &m.total_sessions.to_string()))?;
+    store_err(upsert("avg_success_rate", &m.avg_success_rate.to_string()))?;
+    store_err(upsert(
+        "total_evolved_skills",
+        &m.total_evolved_skills.to_string(),
+    ))?;
     if let Some(ref v) = m.last_session {
-        upsert("last_session", v).map_err(io::Error::other)?;
+        store_err(upsert("last_session", v))?;
     }
     if let Some(v) = m.best_score {
-        upsert("best_score", &v.to_string()).map_err(io::Error::other)?;
+        store_err(upsert("best_score", &v.to_string()))?;
     }
-    upsert("best_session", &m.best_session).map_err(io::Error::other)?;
-    upsert("trend", &m.trend).map_err(io::Error::other)?;
-    upsert("stagnation_count", &m.stagnation_count.to_string()).map_err(io::Error::other)?;
+    store_err(upsert("best_session", &m.best_session))?;
+    store_err(upsert("trend", &m.trend))?;
+    store_err(upsert("stagnation_count", &m.stagnation_count.to_string()))?;
     if let Some(ref v) = m.last_error_context {
-        upsert("last_error_context", v).map_err(io::Error::other)?;
+        store_err(upsert("last_error_context", v))?;
     }
 
     // Score history — keep the most recent MAX_SCORE_HISTORY entries.
     // Clear and re-insert in chronological order within the transaction.
-    tx.execute("DELETE FROM score_history", [])
-        .map_err(io::Error::other)?;
+    store_err(tx.execute("DELETE FROM score_history", []))?;
     let entries: Vec<&SessionScoreEntry> = m
         .score_history
         .iter()
@@ -177,7 +173,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         .take(MAX_SCORE_HISTORY)
         .collect();
     for entry in entries.into_iter().rev() {
-        tx.execute(
+        store_err(tx.execute(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
              dim_success, dim_quality, dim_cost) VALUES (?1,?2,?3,?4,?5,?6,?7)",
             rusqlite::params![
@@ -189,13 +185,12 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
                 entry.dimension_averages.output_quality,
                 entry.dimension_averages.execution_cost,
             ],
-        )
-        .map_err(io::Error::other)?;
+        ))?;
     }
 
     // Skill attribution — UPSERT preserving first_seen on conflict
     for sa in m.skill_attribution.values() {
-        tx.execute(
+        store_err(tx.execute(
             "INSERT INTO skill_attribution
              (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
              VALUES (?1,?2,?3,?4,?5)
@@ -211,11 +206,10 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
                 sa.avg_score_without,
                 sa.first_seen,
             ],
-        )
-        .map_err(io::Error::other)?;
+        ))?;
     }
 
-    tx.commit().map_err(io::Error::other)?;
+    store_err(tx.commit())?;
     Ok(())
 }
 
@@ -230,9 +224,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     fn sample_metrics() -> Metrics {

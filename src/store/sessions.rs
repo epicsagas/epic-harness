@@ -5,6 +5,8 @@ use std::io;
 
 use crate::shared::types::SessionSnapshot;
 
+use super::store_err;
+
 /// Insert a session snapshot.
 pub fn insert_snapshot_conn(
     conn: &Connection,
@@ -17,7 +19,7 @@ pub fn insert_snapshot_conn(
         .as_ref()
         .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".into()));
 
-    conn.execute(
+    store_err(conn.execute(
         "INSERT INTO sessions
          (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis)
          VALUES (?1,?2,?3,?4,?5,?6,?7)",
@@ -30,9 +32,26 @@ pub fn insert_snapshot_conn(
             pipeline_json,
             created_at_millis,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(conn.last_insert_rowid())
+}
+
+/// Map a session row to a [`SessionSnapshot`].
+fn map_session_row(row: &rusqlite::Row<'_>) -> Result<SessionSnapshot, rusqlite::Error> {
+    let pending_json: String = row.get(3)?;
+    let pending_tasks: Vec<String> = serde_json::from_str(&pending_json).unwrap_or_default();
+    let pipeline_json: Option<String> = row.get(5)?;
+    let pipeline_state: Option<serde_json::Value> = pipeline_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok());
+    Ok(SessionSnapshot {
+        timestamp: row.get(0)?,
+        snap_type: row.get(1)?,
+        summary: row.get(2)?,
+        pending_tasks,
+        context_usage: row.get(4)?,
+        pipeline_state,
+    })
 }
 
 /// Get the most recent session snapshot.
@@ -41,23 +60,7 @@ pub fn get_latest_snapshot_conn(conn: &Connection) -> io::Result<Option<SessionS
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
          FROM sessions ORDER BY id DESC LIMIT 1",
         [],
-        |row| {
-            let pending_json: String = row.get(3)?;
-            let pending_tasks: Vec<String> =
-                serde_json::from_str(&pending_json).unwrap_or_default();
-            let pipeline_json: Option<String> = row.get(5)?;
-            let pipeline_state: Option<serde_json::Value> = pipeline_json
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
-            Ok(SessionSnapshot {
-                timestamp: row.get(0)?,
-                snap_type: row.get(1)?,
-                summary: row.get(2)?,
-                pending_tasks,
-                context_usage: row.get(4)?,
-                pipeline_state,
-            })
-        },
+        map_session_row,
     );
 
     match result {
@@ -72,36 +75,16 @@ pub fn list_recent_snapshots_conn(
     conn: &Connection,
     limit: usize,
 ) -> io::Result<Vec<SessionSnapshot>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
+    let mut stmt = store_err(conn.prepare(
+        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
              FROM sessions ORDER BY id DESC LIMIT ?1",
-        )
-        .map_err(io::Error::other)?;
+    ))?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![limit as i64], |row| {
-            let pending_json: String = row.get(3)?;
-            let pending_tasks: Vec<String> =
-                serde_json::from_str(&pending_json).unwrap_or_default();
-            let pipeline_json: Option<String> = row.get(5)?;
-            let pipeline_state: Option<serde_json::Value> = pipeline_json
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
-            Ok(SessionSnapshot {
-                timestamp: row.get(0)?,
-                snap_type: row.get(1)?,
-                summary: row.get(2)?,
-                pending_tasks,
-                context_usage: row.get(4)?,
-                pipeline_state,
-            })
-        })
-        .map_err(io::Error::other)?;
+    let rows = store_err(stmt.query_map(rusqlite::params![limit as i64], map_session_row))?;
 
     let mut snaps = Vec::new();
     for r in rows {
-        snaps.push(r.map_err(io::Error::other)?);
+        snaps.push(store_err(r)?);
     }
     Ok(snaps)
 }
@@ -111,9 +94,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     #[test]

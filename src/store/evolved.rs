@@ -5,6 +5,8 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::io;
 
+use super::store_err;
+
 /// Evolved skill metadata (mirrors evolve::skills::SkillMeta).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EvolvedSkillRow {
@@ -21,7 +23,7 @@ pub struct EvolvedSkillRow {
 /// Insert or update an evolved skill.
 pub fn upsert_skill_conn(conn: &Connection, skill: &EvolvedSkillRow) -> io::Result<()> {
     let active_int = if skill.active { 1 } else { 0 };
-    conn.execute(
+    store_err(conn.execute(
         "INSERT OR REPLACE INTO evolved_skills
          (name, origin, confidence, project, skill_md, active, created, updated)
          VALUES (?1,?2,?3,?4,?5,?6,
@@ -37,53 +39,34 @@ pub fn upsert_skill_conn(conn: &Connection, skill: &EvolvedSkillRow) -> io::Resu
             skill.created,
             skill.updated,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
 /// List all evolved skills (metadata only, no skill_md body).
 pub fn list_skills_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRow>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT name, origin, confidence, project, active, created, updated
-             FROM evolved_skills ORDER BY name",
-        )
-        .map_err(io::Error::other)?;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(EvolvedSkillRow {
-                name: row.get(0)?,
-                origin: row.get(1)?,
-                confidence: row.get(2)?,
-                project: row.get(3)?,
-                skill_md: String::new(),
-                active: row.get::<_, i32>(4)? != 0,
-                created: row.get(5)?,
-                updated: row.get(6)?,
-            })
-        })
-        .map_err(io::Error::other)?;
-
-    let mut skills = Vec::new();
-    for r in rows {
-        skills.push(r.map_err(io::Error::other)?);
-    }
-    Ok(skills)
+    list_skills_inner(conn, false)
 }
 
 /// List all evolved skills including the full skill_md body.
 pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRow>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT name, origin, confidence, project, skill_md, active, created, updated
-             FROM evolved_skills ORDER BY name",
-        )
-        .map_err(io::Error::other)?;
+    list_skills_inner(conn, true)
+}
 
-    let rows = stmt
-        .query_map([], |row| {
+/// Inner implementation shared by [`list_skills_conn`] and [`list_skills_full_conn`].
+fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
+    let sql = if include_body {
+        "SELECT name, origin, confidence, project, skill_md, active, created, updated
+         FROM evolved_skills ORDER BY name"
+    } else {
+        "SELECT name, origin, confidence, project, active, created, updated
+         FROM evolved_skills ORDER BY name"
+    };
+
+    let mut stmt = store_err(conn.prepare(sql))?;
+
+    let rows = store_err(stmt.query_map([], |row| {
+        if include_body {
             Ok(EvolvedSkillRow {
                 name: row.get(0)?,
                 origin: row.get(1)?,
@@ -94,12 +77,23 @@ pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRo
                 created: row.get(6)?,
                 updated: row.get(7)?,
             })
-        })
-        .map_err(io::Error::other)?;
+        } else {
+            Ok(EvolvedSkillRow {
+                name: row.get(0)?,
+                origin: row.get(1)?,
+                confidence: row.get(2)?,
+                project: row.get(3)?,
+                skill_md: String::new(),
+                active: row.get::<_, i32>(4)? != 0,
+                created: row.get(5)?,
+                updated: row.get(6)?,
+            })
+        }
+    }))?;
 
     let mut skills = Vec::new();
     for r in rows {
-        skills.push(r.map_err(io::Error::other)?);
+        skills.push(store_err(r)?);
     }
     Ok(skills)
 }
@@ -119,24 +113,20 @@ pub fn read_skill_md_conn(conn: &Connection, name: &str) -> io::Result<Option<St
 
 /// Delete an evolved skill by name.
 pub fn delete_skill_conn(conn: &Connection, name: &str) -> io::Result<bool> {
-    let count = conn
-        .execute(
-            "DELETE FROM evolved_skills WHERE name = ?1",
-            rusqlite::params![name],
-        )
-        .map_err(io::Error::other)?;
+    let count = store_err(conn.execute(
+        "DELETE FROM evolved_skills WHERE name = ?1",
+        rusqlite::params![name],
+    ))?;
     Ok(count > 0)
 }
 
 /// Count active evolved skills.
 pub fn count_active_skills_conn(conn: &Connection) -> io::Result<usize> {
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM evolved_skills WHERE active = 1",
-            [],
-            |row| row.get(0),
-        )
-        .map_err(io::Error::other)?;
+    let count: i64 = store_err(conn.query_row(
+        "SELECT COUNT(*) FROM evolved_skills WHERE active = 1",
+        [],
+        |row| row.get(0),
+    ))?;
     Ok(count as usize)
 }
 
@@ -144,19 +134,15 @@ pub fn count_active_skills_conn(conn: &Connection) -> io::Result<usize> {
 
 /// Load all promotion counters.
 pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<String, u64>> {
-    let mut stmt = conn
-        .prepare("SELECT pattern_key, count FROM promotion_counters")
-        .map_err(io::Error::other)?;
+    let mut stmt = store_err(conn.prepare("SELECT pattern_key, count FROM promotion_counters"))?;
 
-    let rows = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)) // i64→u64 safe: always non-negative
-        })
-        .map_err(io::Error::other)?;
+    let rows = store_err(stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)) // i64→u64 safe: always non-negative
+    }))?;
 
     let mut counters = HashMap::new();
     for r in rows {
-        let (k, v) = r.map_err(io::Error::other)?;
+        let (k, v) = store_err(r)?;
         counters.insert(k, v);
     }
     Ok(counters)
@@ -167,17 +153,15 @@ pub fn save_promotion_counters_conn(
     conn: &Connection,
     counters: &HashMap<String, u64>,
 ) -> io::Result<()> {
-    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
-    tx.execute("DELETE FROM promotion_counters", [])
-        .map_err(io::Error::other)?;
+    let tx = store_err(conn.unchecked_transaction())?;
+    store_err(tx.execute("DELETE FROM promotion_counters", []))?;
     for (key, count) in counters {
-        tx.execute(
+        store_err(tx.execute(
             "INSERT INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
             rusqlite::params![key, super::u64_to_i64(*count)],
-        )
-        .map_err(io::Error::other)?;
+        ))?;
     }
-    tx.commit().map_err(io::Error::other)?;
+    store_err(tx.commit())?;
     Ok(())
 }
 
@@ -186,9 +170,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     fn sample_skill(name: &str) -> EvolvedSkillRow {

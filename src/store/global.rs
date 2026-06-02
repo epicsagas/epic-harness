@@ -4,6 +4,16 @@
 use rusqlite::Connection;
 use std::io;
 
+use super::store_err;
+
+/// Type-safe filter for pattern queries — prevents raw SQL injection.
+pub enum PatternFilter {
+    /// Return all patterns regardless of project.
+    All,
+    /// Return patterns excluding the given project.
+    Excluding(String),
+}
+
 /// Insert a global pattern record.
 #[allow(clippy::too_many_arguments)]
 pub fn insert_pattern_conn(
@@ -16,7 +26,7 @@ pub fn insert_pattern_conn(
     failure_patterns_json: &str,
     weak_tools_json: &str,
 ) -> io::Result<i64> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT INTO global_patterns
          (timestamp, project, success_rate, avg_score, per_error_stats,
           failure_patterns, weak_tools)
@@ -30,8 +40,7 @@ pub fn insert_pattern_conn(
             failure_patterns_json,
             weak_tools_json,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -41,7 +50,11 @@ pub fn query_patterns_excluding_conn(
     exclude_project: &str,
     limit: usize,
 ) -> io::Result<Vec<serde_json::Value>> {
-    query_patterns_conn(conn, Some(exclude_project), limit, "WHERE project != ?1")
+    query_patterns_conn(
+        conn,
+        &PatternFilter::Excluding(exclude_project.to_string()),
+        limit,
+    )
 }
 
 /// Query all patterns (regardless of project).
@@ -49,39 +62,44 @@ pub fn query_all_patterns_conn(
     conn: &Connection,
     limit: usize,
 ) -> io::Result<Vec<serde_json::Value>> {
-    query_patterns_conn(conn, None, limit, "")
+    query_patterns_conn(conn, &PatternFilter::All, limit)
 }
 
 /// Shared query implementation for global patterns.
 fn query_patterns_conn(
     conn: &Connection,
-    exclude_project: Option<&str>,
+    filter: &PatternFilter,
     limit: usize,
-    where_clause: &str,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let sql = format!(
-        "SELECT timestamp, project, success_rate, avg_score,
-                per_error_stats, failure_patterns, weak_tools
-         FROM global_patterns
-         {where_clause}
-         ORDER BY timestamp DESC LIMIT ?",
-    );
-    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let mut stmt = match filter {
+        PatternFilter::Excluding(_) => store_err(conn.prepare(
+            "SELECT timestamp, project, success_rate, avg_score,
+                        per_error_stats, failure_patterns, weak_tools
+                 FROM global_patterns
+                 WHERE project != ?1
+                 ORDER BY timestamp DESC LIMIT ?2",
+        ))?,
+        PatternFilter::All => store_err(conn.prepare(
+            "SELECT timestamp, project, success_rate, avg_score,
+                        per_error_stats, failure_patterns, weak_tools
+                 FROM global_patterns
+                 ORDER BY timestamp DESC LIMIT ?1",
+        ))?,
+    };
 
-    let rows = if exclude_project.is_some() {
-        stmt.query_map(
-            rusqlite::params![exclude_project, limit as i64],
-            map_pattern_row,
-        )
-    } else {
-        stmt.query_map(rusqlite::params![limit as i64], map_pattern_row)
-    }
-    .map_err(io::Error::other)?;
+    let rows = match filter {
+        PatternFilter::Excluding(project) => {
+            store_err(stmt.query_map(rusqlite::params![project, limit as i64], map_pattern_row))?
+        }
+        PatternFilter::All => {
+            store_err(stmt.query_map(rusqlite::params![limit as i64], map_pattern_row))?
+        }
+    };
 
     let mut patterns = Vec::new();
     for r in rows {
         let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
-            r.map_err(io::Error::other)?;
+            store_err(r)?;
         patterns.push(serde_json::json!({
             "timestamp": ts,
             "project": project,
@@ -131,9 +149,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     #[test]

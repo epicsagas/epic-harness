@@ -8,6 +8,8 @@ use std::io;
 use crate::shared::obs::ObsRecord;
 use crate::shared::scoring::ScoreDimensions;
 
+use super::store_err;
+
 /// Pad an ISO-8601 date string for lexicographic range comparison.
 /// `"2026-06-02"` → `"2026-06-02T00:00:00"` / `"...T23:59:59"`.
 fn pad_date(ts: &str, end_of_day: bool) -> String {
@@ -36,7 +38,7 @@ pub fn insert_observation_conn(
         ),
         None => (None, None, None),
     };
-    conn.execute(
+    store_err(conn.execute(
         "INSERT INTO observations
          (timestamp, session_id, tool, tool_category, action, result, score,
           dim_success, dim_quality, dim_cost, failure_category, error_snippet,
@@ -59,8 +61,7 @@ pub fn insert_observation_conn(
             rec.sequence_id.map(super::u64_to_i64),
             rec.pipeline_id,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -96,54 +97,52 @@ pub fn query_obs_for_date_range_conn(
          ORDER BY timestamp ASC{limit_clause}"
     );
 
-    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let mut stmt = store_err(conn.prepare(&sql))?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![from, to], |row| {
-            let dim_s: Option<f64> = row.get(6)?;
-            let dim_q: Option<f64> = row.get(7)?;
-            let dim_c: Option<f64> = row.get(8)?;
-            Ok(ObsRecord {
-                timestamp: row.get(0)?,
-                tool: row.get(1)?,
-                tool_category: row.get(2)?,
-                action: row.get(3)?,
-                result: row.get(4)?,
-                score: row.get(5)?,
-                dimensions: {
-                    let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
-                    let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
-                    if any_some && !all_some {
-                        eprintln!(
-                            "[store] observations: partial dimensions (s={}, q={}, c={}) — \
+    let rows = store_err(stmt.query_map(rusqlite::params![from, to], |row| {
+        let dim_s: Option<f64> = row.get(6)?;
+        let dim_q: Option<f64> = row.get(7)?;
+        let dim_c: Option<f64> = row.get(8)?;
+        Ok(ObsRecord {
+            timestamp: row.get(0)?,
+            tool: row.get(1)?,
+            tool_category: row.get(2)?,
+            action: row.get(3)?,
+            result: row.get(4)?,
+            score: row.get(5)?,
+            dimensions: {
+                let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+                let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
+                if any_some && !all_some {
+                    eprintln!(
+                        "[store] observations: partial dimensions (s={}, q={}, c={}) — \
                              defaulting missing fields to 0.0",
-                            dim_s.is_some(),
-                            dim_q.is_some(),
-                            dim_c.is_some()
-                        );
-                    }
-                    if any_some {
-                        Some(ScoreDimensions {
-                            tool_success: dim_s.unwrap_or(0.0),
-                            output_quality: dim_q.unwrap_or(0.0),
-                            execution_cost: dim_c.unwrap_or(0.0),
-                        })
-                    } else {
-                        None
-                    }
-                },
-                failure_category: row.get(9)?,
-                error_snippet: row.get(10)?,
-                file_ext: row.get(11)?,
-                sequence_id: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
-                pipeline_id: row.get(13)?,
-            })
+                        dim_s.is_some(),
+                        dim_q.is_some(),
+                        dim_c.is_some()
+                    );
+                }
+                if any_some {
+                    Some(ScoreDimensions {
+                        tool_success: dim_s.unwrap_or(0.0),
+                        output_quality: dim_q.unwrap_or(0.0),
+                        execution_cost: dim_c.unwrap_or(0.0),
+                    })
+                } else {
+                    None
+                }
+            },
+            failure_category: row.get(9)?,
+            error_snippet: row.get(10)?,
+            file_ext: row.get(11)?,
+            sequence_id: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+            pipeline_id: row.get(13)?,
         })
-        .map_err(io::Error::other)?;
+    }))?;
 
     let mut records = Vec::new();
     for r in rows {
-        records.push(r.map_err(io::Error::other)?);
+        records.push(store_err(r)?);
     }
     Ok(records)
 }
@@ -155,22 +154,19 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
     let to = pad_date(to_ts, true);
 
     // Overall stats
-    let (total, successes, avg_score): (i64, i64, f64) = conn
-        .query_row(
-            "SELECT COUNT(*),
+    let (total, successes, avg_score): (i64, i64, f64) = store_err(conn.query_row(
+        "SELECT COUNT(*),
                     COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
                     COALESCE(AVG(score), 0.0)
              FROM observations
              WHERE timestamp >= ?1 AND timestamp <= ?2",
-            rusqlite::params![from, to],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .map_err(io::Error::other)?;
+        rusqlite::params![from, to],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    ))?;
 
     // Per-tool stats — capped at 100 distinct tools to prevent unbounded result sets
-    let mut tool_stmt = conn
-        .prepare(
-            "SELECT tool, COUNT(*) as calls,
+    let mut tool_stmt = store_err(conn.prepare(
+        "SELECT tool, COUNT(*) as calls,
                     SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
                     COALESCE(AVG(score), 0.0) as avg_score
              FROM observations
@@ -178,51 +174,44 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
              GROUP BY tool
              ORDER BY calls DESC
              LIMIT 100",
-        )
-        .map_err(io::Error::other)?;
+    ))?;
 
-    let tool_rows = tool_stmt
-        .query_map(rusqlite::params![from, to], |row| {
-            Ok(ToolStatRow {
-                tool: row.get(0)?,
-                calls: row.get(1)?,
-                successes: row.get(2)?,
-                avg_score: row.get(3)?,
-            })
+    let tool_rows = store_err(tool_stmt.query_map(rusqlite::params![from, to], |row| {
+        Ok(ToolStatRow {
+            tool: row.get(0)?,
+            calls: row.get(1)?,
+            successes: row.get(2)?,
+            avg_score: row.get(3)?,
         })
-        .map_err(io::Error::other)?;
+    }))?;
 
     let mut tool_stats = Vec::new();
     for r in tool_rows {
-        tool_stats.push(r.map_err(io::Error::other)?);
+        tool_stats.push(store_err(r)?);
     }
 
     // Per-error-category stats — capped at 50 distinct categories
-    let mut err_stmt = conn
-        .prepare(
-            "SELECT failure_category, COUNT(*) as cnt
+    let mut err_stmt = store_err(conn.prepare(
+        "SELECT failure_category, COUNT(*) as cnt
              FROM observations
              WHERE timestamp >= ?1 AND timestamp <= ?2
                AND failure_category IS NOT NULL
              GROUP BY failure_category
              ORDER BY cnt DESC
              LIMIT 50",
-        )
-        .map_err(io::Error::other)?;
+    ))?;
 
-    let err_rows = err_stmt
-        .query_map(rusqlite::params![from, to], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })
-        .map_err(io::Error::other)?;
+    let err_rows = store_err(err_stmt.query_map(rusqlite::params![from, to], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    }))?;
 
     let mut error_stats = Vec::new();
     for r in err_rows {
-        error_stats.push(r.map_err(io::Error::other)?);
+        error_stats.push(store_err(r)?);
     }
 
     // Per-session stats
-    let mut sess_stmt = conn
+    let mut sess_stmt = store_err(conn
         .prepare(
             "SELECT session_id, COUNT(*) as calls,
                     COALESCE(AVG(score), 0.0) as avg_score,
@@ -232,23 +221,20 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
              GROUP BY session_id
              ORDER BY session_id DESC
              LIMIT 20",
-        )
-        .map_err(io::Error::other)?;
+        ))?;
 
-    let sess_rows = sess_stmt
-        .query_map(rusqlite::params![from, to], |row| {
-            Ok(SessionStatRow {
-                session_id: row.get(0)?,
-                calls: row.get(1)?,
-                avg_score: row.get(2)?,
-                failures: row.get(3)?,
-            })
+    let sess_rows = store_err(sess_stmt.query_map(rusqlite::params![from, to], |row| {
+        Ok(SessionStatRow {
+            session_id: row.get(0)?,
+            calls: row.get(1)?,
+            avg_score: row.get(2)?,
+            failures: row.get(3)?,
         })
-        .map_err(io::Error::other)?;
+    }))?;
 
     let mut session_stats = Vec::new();
     for r in sess_rows {
-        session_stats.push(r.map_err(io::Error::other)?);
+        session_stats.push(store_err(r)?);
     }
 
     Ok(ObsStats {
@@ -279,12 +265,10 @@ pub fn query_last_action_conn(conn: &Connection, session_id: &str) -> io::Result
 /// Delete observations older than the cutoff timestamp.
 /// Returns the number of deleted rows.
 pub fn delete_obs_older_than_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
-    let count = conn
-        .execute(
-            "DELETE FROM observations WHERE timestamp < ?1",
-            rusqlite::params![cutoff_ts],
-        )
-        .map_err(io::Error::other)?;
+    let count = store_err(conn.execute(
+        "DELETE FROM observations WHERE timestamp < ?1",
+        rusqlite::params![cutoff_ts],
+    ))?;
     Ok(count as u64)
 }
 
@@ -322,9 +306,7 @@ mod tests {
     use rusqlite::Connection;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     #[test]

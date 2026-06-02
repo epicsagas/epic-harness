@@ -6,12 +6,14 @@ use std::io;
 
 use crate::shared::evolution::EvolutionRecord;
 
+use super::store_err;
+
 /// Insert an evolution record.
 pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Result<i64> {
     let error_json = serde_json::to_string(&rec.error_patterns).unwrap_or_else(|_| "{}".into());
     let failure_json = serde_json::to_string(&rec.failure_patterns).unwrap_or_else(|_| "[]".into());
 
-    conn.execute(
+    store_err(conn.execute(
         "INSERT INTO evolution_records
          (timestamp, observations, success_rate, avg_score, error_patterns,
           failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary)
@@ -28,8 +30,7 @@ pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Resul
             super::u64_to_i64(rec.total_evolved),
             rec.analysis_summary,
         ],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(conn.last_insert_rowid())
 }
 
@@ -44,36 +45,33 @@ pub fn query_recent_records_conn(
     conn: &Connection,
     limit: usize,
 ) -> io::Result<Vec<EvolutionRecord>> {
-    let mut stmt = conn
+    let mut stmt = store_err(conn
         .prepare(
             "SELECT timestamp, observations, success_rate, avg_score, error_patterns,
                     failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary
              FROM evolution_records ORDER BY id DESC LIMIT ?1",
-        )
-        .map_err(io::Error::other)?;
+        ))?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![limit as i64], |row| {
-            let error_json: String = row.get(4)?;
-            let failure_json: String = row.get(5)?;
-            Ok(EvolutionRecord {
-                timestamp: row.get(0)?,
-                observations: row.get::<_, i64>(1)? as u64,
-                success_rate: row.get(2)?,
-                avg_score: row.get(3)?,
-                error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
-                failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
-                skills_seeded: row.get::<_, i64>(6)? as u64,
-                skills_rolled_back: row.get::<_, i64>(7)? as u64,
-                total_evolved: row.get::<_, i64>(8)? as u64,
-                analysis_summary: row.get(9)?,
-            })
+    let rows = store_err(stmt.query_map(rusqlite::params![limit as i64], |row| {
+        let error_json: String = row.get(4)?;
+        let failure_json: String = row.get(5)?;
+        Ok(EvolutionRecord {
+            timestamp: row.get(0)?,
+            observations: row.get::<_, i64>(1)? as u64,
+            success_rate: row.get(2)?,
+            avg_score: row.get(3)?,
+            error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
+            failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
+            skills_seeded: row.get::<_, i64>(6)? as u64,
+            skills_rolled_back: row.get::<_, i64>(7)? as u64,
+            total_evolved: row.get::<_, i64>(8)? as u64,
+            analysis_summary: row.get(9)?,
         })
-        .map_err(io::Error::other)?;
+    }))?;
 
     let mut records = Vec::new();
     for r in rows {
-        records.push(r.map_err(io::Error::other)?);
+        records.push(store_err(r)?);
     }
     // Reverse so oldest-first (matching original JSONL read order)
     records.reverse();
@@ -91,9 +89,7 @@ mod tests {
     use std::collections::HashMap;
 
     fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+        super::super::tests::in_memory_db()
     }
 
     #[test]

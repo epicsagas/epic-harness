@@ -6,8 +6,10 @@
 use rusqlite::Connection;
 use std::io;
 
+use super::store_err;
+
 /// Current schema version. Increment when adding migrations in `run_migrations`.
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Apply the full operational schema to an open connection.
 ///
@@ -44,27 +46,26 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
 
 /// Apply WAL, FK, and autocheckpoint PRAGMA.
 fn apply_pragma(conn: &Connection) -> io::Result<()> {
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "PRAGMA journal_mode=WAL;
          PRAGMA foreign_keys=ON;
-         PRAGMA wal_autocheckpoint=100;",
-    )
-    .map_err(io::Error::other)
+         PRAGMA wal_autocheckpoint=100;
+         PRAGMA busy_timeout=5000;",
+    ))
 }
 
 /// Apply the full DDL (tables + indexes). Uses IF NOT EXISTS throughout.
 fn apply_ddl(conn: &Connection) -> io::Result<()> {
     // Schema version tracking (distinct from memory.db's _meta)
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS _harness_meta (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Observations ──────────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS observations (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp        TEXT NOT NULL,
@@ -87,11 +88,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_obs_session    ON observations(session_id);
         CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
         CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Sessions ──────────────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS sessions (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp         TEXT NOT NULL,
@@ -103,11 +103,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
             created_at_millis INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_sessions_ts ON sessions(timestamp DESC);",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Evolution Records ─────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS evolution_records (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp         TEXT NOT NULL,
@@ -122,11 +121,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
             analysis_summary  TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Metrics (3-table normalized) ──────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS metrics_state (
             key   TEXT PRIMARY KEY,
             value TEXT NOT NULL
@@ -148,11 +146,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
             avg_score_without REAL NOT NULL DEFAULT 0.0,
             first_seen        TEXT NOT NULL
         );",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Orchestrator ──────────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS orch_runs (
             id             TEXT PRIMARY KEY,
             status         TEXT NOT NULL DEFAULT 'running',
@@ -176,14 +173,14 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
         );
         CREATE TABLE IF NOT EXISTS orch_agent_events (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent_id    TEXT NOT NULL,
+            agent_id    TEXT NOT NULL REFERENCES orch_agents(id),
             timestamp   TEXT NOT NULL,
             event_type  TEXT NOT NULL,
             data_json   TEXT NOT NULL DEFAULT '{}'
         );
         CREATE TABLE IF NOT EXISTS orch_agent_inbox (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            agent_id    TEXT NOT NULL,
+            agent_id    TEXT NOT NULL REFERENCES orch_agents(id),
             from_agent  TEXT NOT NULL,
             timestamp   TEXT NOT NULL,
             message     TEXT NOT NULL
@@ -197,11 +194,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_orch_events ON orch_agent_events(agent_id, timestamp);
         CREATE INDEX IF NOT EXISTS idx_orch_inbox  ON orch_agent_inbox(agent_id, timestamp);",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Orbit Pipelines ───────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS orbit_pipelines (
             id          TEXT PRIMARY KEY,
             project     TEXT NOT NULL,
@@ -215,11 +211,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_orbit_status   ON orbit_pipelines(status);
         CREATE INDEX IF NOT EXISTS idx_orbit_project  ON orbit_pipelines(project);
         CREATE INDEX IF NOT EXISTS idx_orbit_created  ON orbit_pipelines(created_at DESC);",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Evolved Skills ────────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS evolved_skills (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             name        TEXT NOT NULL UNIQUE,
@@ -241,11 +236,10 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
             updated     TEXT NOT NULL,
             skills_json TEXT NOT NULL DEFAULT '[]'
         );",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Global Patterns ───────────────────────────────
-    conn.execute_batch(
+    store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS global_patterns (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp        TEXT NOT NULL,
@@ -258,23 +252,24 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_global_ts      ON global_patterns(timestamp DESC);
         CREATE INDEX IF NOT EXISTS idx_global_project  ON global_patterns(project);",
-    )
-    .map_err(io::Error::other)?;
+    ))?;
 
     // ── Additional indexes for query performance ─────────
-    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_orch_agents_run ON orch_agents(run_id);")
-        .map_err(io::Error::other)?;
+    store_err(conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_orch_agents_run ON orch_agents(run_id);
+         CREATE INDEX IF NOT EXISTS idx_obs_tool_ts     ON observations(tool, timestamp);
+         CREATE INDEX IF NOT EXISTS idx_evolved_proj_act ON evolved_skills(project, active);",
+    ))?;
 
     Ok(())
 }
 
 /// Write the current schema version to _harness_meta.
 fn set_version(conn: &Connection, version: u32) -> io::Result<()> {
-    conn.execute(
+    store_err(conn.execute(
         "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', ?1)",
         rusqlite::params![version.to_string()],
-    )
-    .map_err(io::Error::other)?;
+    ))?;
     Ok(())
 }
 
@@ -288,15 +283,18 @@ fn set_version(conn: &Connection, version: u32) -> io::Result<()> {
 /// }
 /// ```
 fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::Result<()> {
-    // Placeholder — no migrations yet (version 1 is the initial schema).
-    // When SCHEMA_VERSION is bumped to 2+, add migration blocks here, e.g.:
-    //
-    // if to_version >= 2 && from_version < 2 {
-    //     conn.execute_batch("ALTER TABLE observations ADD COLUMN new_col TEXT")
-    //         .map_err(io::Error::other)?;
-    // }
+    // v1→v2: Add missing FK indexes and performance indexes for existing DBs.
+    // SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so FK references are
+    // enforced via the index + application logic for pre-existing data.
+    if to_version >= 2 && from_version < 2 {
+        store_err(conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_orch_events_agent ON orch_agent_events(agent_id);
+             CREATE INDEX IF NOT EXISTS idx_orch_inbox_agent  ON orch_agent_inbox(agent_id);
+             CREATE INDEX IF NOT EXISTS idx_obs_tool_ts       ON observations(tool, timestamp);
+             CREATE INDEX IF NOT EXISTS idx_evolved_proj_act  ON evolved_skills(project, active);",
+        ))?;
+    }
 
     set_version(conn, to_version)?;
-    let _ = (from_version, to_version); // suppress unused warnings until migrations are added
     Ok(())
 }
