@@ -96,8 +96,7 @@ pub fn query_obs_for_date_range_conn(
          ORDER BY timestamp ASC{limit_clause}"
     );
 
-    let mut stmt = conn.prepare(&sql)
-        .map_err(io::Error::other)?;
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
 
     let rows = stmt
         .query_map(rusqlite::params![from, to], |row| {
@@ -353,7 +352,8 @@ mod tests {
         let id = insert_observation_conn(&conn, &rec, "20260602_12345").unwrap();
         assert!(id > 0);
 
-        let results = query_obs_for_date_range_conn(&conn, "2026-06-02", "2026-06-02", None).unwrap();
+        let results =
+            query_obs_for_date_range_conn(&conn, "2026-06-02", "2026-06-02", None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool, "Bash");
         assert_eq!(results[0].score, Some(0.95));
@@ -428,7 +428,8 @@ mod tests {
         let deleted = delete_obs_older_than_conn(&conn, "2026-05-15").unwrap();
         assert_eq!(deleted, 1);
 
-        let results = query_obs_for_date_range_conn(&conn, "2026-05-01", "2026-05-31", None).unwrap();
+        let results =
+            query_obs_for_date_range_conn(&conn, "2026-05-01", "2026-05-31", None).unwrap();
         assert!(results.is_empty());
     }
 

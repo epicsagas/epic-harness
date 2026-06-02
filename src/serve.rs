@@ -360,7 +360,11 @@ fn percent_decode(s: &str) -> String {
 fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
     // Validate pipeline_id to prevent unintended file matches.
     // Expected format: alphanumeric + hyphens (e.g. "20260523105350" or "20260522-170016").
-    if pipeline_id.is_empty() || !pipeline_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if pipeline_id.is_empty()
+        || !pipeline_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
         return serde_json::json!({"ok": false, "error": "invalid pipeline id"}).to_string();
     }
 

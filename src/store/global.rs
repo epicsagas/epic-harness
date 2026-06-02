@@ -41,12 +41,7 @@ pub fn query_patterns_excluding_conn(
     exclude_project: &str,
     limit: usize,
 ) -> io::Result<Vec<serde_json::Value>> {
-    query_patterns_conn(
-        conn,
-        Some(exclude_project),
-        limit,
-        "WHERE project != ?1",
-    )
+    query_patterns_conn(conn, Some(exclude_project), limit, "WHERE project != ?1")
 }
 
 /// Query all patterns (regardless of project).

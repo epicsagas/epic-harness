@@ -262,10 +262,8 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
     .map_err(io::Error::other)?;
 
     // ── Additional indexes for query performance ─────────
-    conn.execute_batch(
-        "CREATE INDEX IF NOT EXISTS idx_orch_agents_run ON orch_agents(run_id);",
-    )
-    .map_err(io::Error::other)?;
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_orch_agents_run ON orch_agents(run_id);")
+        .map_err(io::Error::other)?;
 
     Ok(())
 }

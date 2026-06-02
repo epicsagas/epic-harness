@@ -1249,7 +1249,10 @@ mod tests {
             }
             v
         };
-        assert_eq!(effective, vec!["harness", "mem", "claude-session", "alcove"]);
+        assert_eq!(
+            effective,
+            vec!["harness", "mem", "claude-session", "alcove"]
+        );
     }
 
     #[test]
