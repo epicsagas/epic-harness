@@ -487,16 +487,16 @@ epic mem mcp-install                                   # 註冊 MCP 伺服器
 epic mem export --out ./docs/memory                    # 匯出為 Markdown
 ```
 
-### MCP 工具（6 個）
+### CLI 命令（6 個）
 
-| 工具 | 用途 |
+| 命令 | 用途 |
 |------|---------|
-| `mem_recall` | 基於提示 + 專案 + 圖鄰居的智慧上下文檢索 |
-| `mem_add` | 按類型自動設定重要性新增節點（或顯式 0.0–1.0） |
-| `mem_search` | 關鍵字搜尋（全文），按重要性排序 |
-| `mem_query` | 按標籤/類型/專案過濾 — `mem_list` 的別名 |
-| `mem_context` | 專案範圍的智慧檢索（無提示） |
-| `mem_related` | 從節點 ID 進行圖遍歷（發現關聯知識） |
+| `epic-harness mem recall "HINT"` | 基於提示 + 專案 + 圖鄰居的智慧上下文檢索 |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | 按類型自動設定重要性新增節點（或顯式 0.0–1.0） |
+| `epic-harness mem search "QUERY"` | 關鍵字搜尋（全文），按重要性排序 |
+| `epic-harness mem list` | 按標籤/類型/專案過濾 |
+| `epic-harness mem context` | 專案範圍的智慧檢索（無提示） |
+| `epic-harness mem related ID` | 從節點 ID 進行圖遍歷（發現關聯知識） |
 
 ### 節點類型
 

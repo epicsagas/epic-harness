@@ -485,16 +485,16 @@ epic mem mcp-install                                   # Enregistrer le serveur 
 epic mem export --out ./docs/memory                    # Exporter en Markdown
 ```
 
-### Outils MCP (6)
+### Commandes CLI (6)
 
-| Outil | Objectif |
-|-------|----------|
-| `mem_recall` | Rappel contextuel intelligent avec indice + projet + voisins du graphe |
-| `mem_add` | Ajouter un noeud avec auto-importance par type (ou explicite 0.0–1.0) |
-| `mem_search` | Recherche par mot-cle (texte integral), classe par importance |
-| `mem_query` | Filtrer par tag/type/projet — alias de `mem_list` |
-| `mem_context` | Rappel contextuel intelligent par projet (sans indice) |
-| `mem_related` | Traversee de graphe depuis un ID de noeud (trouve les connaissances connectees) |
+| Commande | Objectif |
+|----------|----------|
+| `epic-harness mem recall "HINT"` | Rappel contextuel intelligent avec indice + projet + voisins du graphe |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | Ajouter un noeud avec auto-importance par type (ou explicite 0.0–1.0) |
+| `epic-harness mem search "QUERY"` | Recherche par mot-cle (texte integral), classe par importance |
+| `epic-harness mem list` | Filtrer par tag/type/projet |
+| `epic-harness mem context` | Rappel contextuel intelligent par projet (sans indice) |
+| `epic-harness mem related ID` | Traversee de graphe depuis un ID de noeud (trouve les connaissances connectees) |
 
 ### Types de noeuds
 

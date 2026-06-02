@@ -243,7 +243,7 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 
 ## Unified Memory Layer — WIP
 
-> **Status: In Development.** This section describes the target architecture. Implementation is ongoing in `src/hooks/mem/`. CLI, MCP server, Web UI, and auto-recording are not yet production-ready.
+> **Status: In Development.** This section describes the target architecture. Implementation is ongoing in `src/hooks/mem/`. CLI, Web UI, and auto-recording are not yet production-ready.
 
 A cross-agent knowledge graph that persists developer decisions, patterns, and context across all supported coding tools.
 
@@ -294,9 +294,8 @@ Directed edges stored in the `edges` table. Valid relation types:
 
 | Interface | Description |
 |-----------|-------------|
-| CLI (`harness mem`) | 15 subcommands: `add`, `edit`, `delete`, `query`, `search`, `related`, `link`, `graph`, `export`, `serve`, `validate`, `migrate`, `context`, `mcp`, `mcp-install` |
+| CLI (`harness mem`) | 15 subcommands: `add`, `edit`, `delete`, `list`, `search`, `related`, `link`, `graph`, `export`, `serve`, `validate`, `migrate`, `context`, `recall` |
 | REST API | `epic mem serve` — embedded Rust server, port 7700 |
-| MCP server | `epic mem mcp` — stdio JSON-RPC 2.0, 5 tools; register via `harness mem mcp-install [--force]` |
 | Git backup | `epic mem export [--out <dir>]` — dumps all nodes to Markdown |
 
 ### Auto-Recording Pipeline

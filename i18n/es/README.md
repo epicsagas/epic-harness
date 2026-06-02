@@ -487,16 +487,16 @@ epic mem mcp-install                                   # Registrar servidor MCP
 epic mem export --out ./docs/memory                    # Exportar a Markdown
 ```
 
-### Herramientas MCP (6)
+### Comandos CLI (6)
 
-| Herramienta | Propósito |
-|-------------|----------|
-| `mem_recall` | Recuperación contextual inteligente con hint + project + vecinos del grafo |
-| `mem_add` | Añadir nodo con importancia automática por tipo (o explícita 0.0–1.0) |
-| `mem_search` | Búsqueda por palabra clave (texto completo), clasificada por importancia |
-| `mem_query` | Filtrar por etiqueta/tipo/proyecto — alias de `mem_list` |
-| `mem_context` | Recuperación inteligente con ámbito de proyecto (sin hint) |
-| `mem_related` | Traversal del grafo desde un ID de nodo (encuentra conocimiento conectado) |
+| Comando | Propósito |
+|---------|----------|
+| `epic-harness mem recall "HINT"` | Recuperación contextual inteligente con hint + project + vecinos del grafo |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | Añadir nodo con importancia automática por tipo (o explícita 0.0–1.0) |
+| `epic-harness mem search "QUERY"` | Búsqueda por palabra clave (texto completo), clasificada por importancia |
+| `epic-harness mem list` | Filtrar por etiqueta/tipo/proyecto |
+| `epic-harness mem context` | Recuperación inteligente con ámbito de proyecto (sin hint) |
+| `epic-harness mem related ID` | Traversal del grafo desde un ID de nodo (encuentra conocimiento conectado) |
 
 ### Tipos de Nodo
 

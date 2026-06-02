@@ -163,7 +163,7 @@ goal_slug: {kebab-case}
 {key decisions from council synthesis}
 ```
 
-Record via `mem_add` (type=decision, importance=0.9). Show spec as FYI → **proceed immediately to Step 3**.
+Record via `epic-harness mem add --title "Orbit: council decision" --type decision --importance 0.9 --body "CONTEXT"`. Show spec as FYI → **proceed immediately to Step 3**.
 
 ---
 

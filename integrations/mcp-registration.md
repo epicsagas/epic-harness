@@ -1,86 +1,28 @@
-# harness-mem MCP Server
+# harness-mem CLI Commands
 
-The unified memory store is exposed as a native MCP server built directly into
-the `epic-harness` binary. No Node.js or external runtime is required.
+The unified memory store is accessed via `epic-harness mem` CLI commands built directly into
+the `epic-harness` binary. All commands output JSON.
 
-Transport: JSON-RPC 2.0 over stdio (MCP protocol version `2024-11-05`).
-
-## Automatic registration (via `install`)
-
-Running `epic-harness install <tool>` **automatically** injects
-`mcpServers.harness-mem` into the tool's settings file.
-
-| Tool | Settings file | Auto-registered |
-|------|--------------|-----------------|
-| antigravity | `~/.gemini/config/mcp_config.json` | ✓ |
-| cursor | `~/.cursor/mcp.json` | ✓ |
-| opencode | `~/.config/opencode/config.json` | ✓ |
-| codex | n/a (no mcpServers concept) | — |
-| cline | workspace-level only | — |
-| aider | no MCP support | — |
-
-## Standalone registration for Claude Code
+## Usage
 
 ```bash
-# Register in ~/.claude/settings.json
-epic-harness mem mcp-install
+# Add a memory node
+epic-harness mem add --title "Decision: use Redis" --type decision --importance 0.9 --body "Context..."
 
-# Preview without writing
-epic-harness mem mcp-install --dry-run
-```
+# Smart contextual recall
+epic-harness mem recall "auth refactor" --project myapp --limit 5
 
-The resulting entry in `~/.claude/settings.json`:
+# Full-text search
+epic-harness mem search "database migration" --limit 10
 
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "/path/to/epic-harness",
-      "args": ["mem", "mcp"]
-    }
-  }
-}
-```
+# List/filter nodes
+epic-harness mem list --type decision --project myapp --limit 5
 
-## Manual registration for other tools
+# Project-scoped recall (use at session start)
+epic-harness mem context --project myapp --limit 5
 
-### Cursor — `~/.cursor/mcp.json`
-
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "epic-harness",
-      "args": ["mem", "mcp"]
-    }
-  }
-}
-```
-
-### Antigravity — `~/.gemini/config/mcp_config.json`
-
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "epic-harness",
-      "args": ["mem", "mcp"]
-    }
-  }
-}
-```
-
-### OpenCode — `~/.config/opencode/config.json`
-
-```json
-{
-  "mcpServers": {
-    "harness-mem": {
-      "command": "epic-harness",
-      "args": ["mem", "mcp"]
-    }
-  }
-}
+# Graph traversal from a node
+epic-harness mem related NODE_ID --depth 2
 ```
 
 ## Environment variables
@@ -89,27 +31,26 @@ The resulting entry in `~/.claude/settings.json`:
 |----------|---------|-------------|
 | `HARNESS_ROOT` | `~/.harness` | Memory store root directory |
 
-## Available tools (5)
+## Available commands (6)
 
-| Tool | Description |
-|------|-------------|
-| `mem_add` | Add a new memory node (decisions, patterns, errors, etc.) |
-| `mem_query` | Query nodes by tag / type / project filter |
-| `mem_search` | Full-text keyword search across all nodes |
-| `mem_related` | BFS traversal of the knowledge graph to find related nodes |
-| `mem_context` | Load project context at session start |
+| Command | Description |
+|---------|-------------|
+| `epic-harness mem add` | Add a new memory node (decisions, patterns, errors, etc.) |
+| `epic-harness mem list` | Query nodes by tag / type / project filter |
+| `epic-harness mem search` | Full-text keyword search across all nodes |
+| `epic-harness mem related` | BFS traversal of the knowledge graph to find related nodes |
+| `epic-harness mem context` | Load project context at session start |
+| `epic-harness mem recall` | Smart contextual recall with hint + graph neighbors |
 
 ## Testing
 
 ```bash
-# Start MCP server manually (reads JSON-RPC from stdin)
-epic-harness mem mcp
+# Verify CLI is working
+epic-harness mem list --limit 1
 
-# Initialize handshake
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","clientInfo":{"name":"test","version":"1.0"}}}' \
-  | epic-harness mem mcp
+# Add a test node
+epic-harness mem add --title "test node" --type concept --body "test body"
 
-# List available tools
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
-  | epic-harness mem mcp
+# Search for it
+epic-harness mem search "test node"
 ```
