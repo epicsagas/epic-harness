@@ -131,7 +131,10 @@ fn get_cross_project_hints() -> Vec<String> {
     let records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
         match crate::store::global::query_patterns_excluding_conn(&conn, &project_name, 20) {
             Ok(patterns) => patterns,
-            Err(_) => {
+            Err(e) => {
+                eprintln!(
+                    "[resume] SQLite global patterns read failed, falling back to JSONL: {e}"
+                );
                 if !global_patterns_file().is_file() {
                     return vec![];
                 }
@@ -139,6 +142,7 @@ fn get_cross_project_hints() -> Vec<String> {
             }
         }
     } else {
+        eprintln!("[resume] harness.db unavailable for global patterns, falling back to JSONL");
         if !global_patterns_file().is_file() {
             return vec![];
         }

@@ -236,9 +236,13 @@ pub fn run_context(
                 .iter()
                 .filter_map(|r| serde_json::to_value(r).ok())
                 .collect(),
-            Err(_) => read_jsonl_typed::<serde_json::Value>(&evolution_file()),
+            Err(e) => {
+                eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
+                read_jsonl_typed::<serde_json::Value>(&evolution_file())
+            }
         }
     } else {
+        eprintln!("[reflect] harness.db unavailable for evolution records, falling back to JSONL");
         read_jsonl_typed::<serde_json::Value>(&evolution_file())
     };
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
@@ -313,8 +317,15 @@ pub fn run_context(
 
     // 3. Metrics summary (SQLite first, fallback to JSON)
     let metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        crate::store::metrics::load_metrics_conn(&conn).unwrap_or_else(|_| default_metrics())
+        match crate::store::metrics::load_metrics_conn(&conn) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
+                read_json(&metrics_file(), default_metrics())
+            }
+        }
     } else {
+        eprintln!("[reflect] harness.db unavailable for metrics, falling back to JSON");
         read_json(&metrics_file(), default_metrics())
     };
     let sh = &metrics.score_history;
@@ -399,7 +410,10 @@ pub fn run_context(
                     })
                 })
                 .collect(),
-            Err(_) => vec![],
+            Err(e) => {
+                eprintln!("[reflect] SQLite sessions read failed, falling back to JSON: {e}");
+                vec![]
+            }
         }
     } else {
         let snap_files = list_files(&sessions_dir(), ".json");
@@ -768,7 +782,11 @@ pub fn run(_input: &HookInput) -> i32 {
             &conn, &today_str, &today_str,
         ) {
             Ok(recs) => recs,
-            Err(_) => return 0,
+            Err(e) => {
+                eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
+                // Fallthrough to JSONL path below
+                return 0;
+            }
         }
     } else {
         // Fallback: read from JSONL files
@@ -798,8 +816,15 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 3. Stagnation (load metrics from SQLite, fallback to JSON)
     let mut metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        crate::store::metrics::load_metrics_conn(&conn).unwrap_or_else(|_| default_metrics())
+        match crate::store::metrics::load_metrics_conn(&conn) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
+                read_json(&metrics_file(), default_metrics())
+            }
+        }
     } else {
+        eprintln!("[reflect] harness.db unavailable for metrics load, falling back to JSON");
         read_json(&metrics_file(), default_metrics())
     };
     let (should_rollback, improved, rolled_back_count) =

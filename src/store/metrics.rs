@@ -156,6 +156,9 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
 
     // Score history — keep the most recent MAX_SCORE_HISTORY entries.
     // Use DELETE + batch INSERT in transaction for ordered append-only data.
+    // Double-reverse: first .rev().take(N) selects the N most recent entries
+    // (from the tail), then the second .rev() restores chronological order
+    // so the DB rows are inserted oldest-first (matching the original append order).
     tx.execute("DELETE FROM score_history", [])
         .map_err(io::Error::other)?;
     let entries: Vec<&SessionScoreEntry> = m

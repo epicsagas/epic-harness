@@ -150,44 +150,58 @@ pub fn read_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<Option<O
 }
 
 /// Dismiss an agent: remove from agents table and update run JSON.
+///
+/// Uses BEGIN IMMEDIATE to prevent the check-then-delete race condition:
+/// two concurrent callers cannot both read `exists=true` and then both attempt to delete.
 pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool> {
-    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+    // BEGIN IMMEDIATE acquires a write lock without requiring &mut Connection.
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(io::Error::other)?;
 
-    // Check agent exists
-    let exists: bool = tx
+    // Check agent exists inside the write lock
+    let exists: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM orch_agents WHERE id = ?1",
             rusqlite::params![agent_id],
             |row| row.get::<_, i64>(0),
         )
-        .map_err(io::Error::other)?
+        .map_err(|e| {
+            let _ = conn.execute_batch("ROLLBACK");
+            io::Error::other(e)
+        })?
         > 0;
 
     if !exists {
-        tx.rollback().map_err(io::Error::other)?;
+        conn.execute_batch("ROLLBACK").map_err(io::Error::other)?;
         return Ok(false);
     }
 
-    // Delete agent
-    tx.execute(
-        "DELETE FROM orch_agents WHERE id = ?1",
-        rusqlite::params![agent_id],
-    )
-    .map_err(io::Error::other)?;
+    // Delete agent and related records within the held write lock
+    let del = || -> io::Result<()> {
+        conn.execute(
+            "DELETE FROM orch_agents WHERE id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(io::Error::other)?;
+        conn.execute(
+            "DELETE FROM orch_agent_events WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(io::Error::other)?;
+        conn.execute(
+            "DELETE FROM orch_agent_inbox WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(io::Error::other)?;
+        Ok(())
+    };
 
-    // Delete agent events and inbox
-    tx.execute(
-        "DELETE FROM orch_agent_events WHERE agent_id = ?1",
-        rusqlite::params![agent_id],
-    )
-    .map_err(io::Error::other)?;
-    tx.execute(
-        "DELETE FROM orch_agent_inbox WHERE agent_id = ?1",
-        rusqlite::params![agent_id],
-    )
-    .map_err(io::Error::other)?;
+    if let Err(e) = del() {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(e);
+    }
 
-    tx.commit().map_err(io::Error::other)?;
+    conn.execute_batch("COMMIT").map_err(io::Error::other)?;
     Ok(true)
 }
 
@@ -255,50 +269,85 @@ pub fn write_control_conn(
 /// `cutoff_ts` is an ISO-8601 timestamp; only runs updated before this time
 /// are removed. Pass an empty string to remove all completed/aborted runs.
 ///
-/// TODO: extend to clean up runs by timestamp once callers can supply a
-/// meaningful cutoff (e.g. "older than 7 days").
+/// All deletions are wrapped in a single IMMEDIATE transaction so a partial failure
+/// does not leave orphaned agent events or inbox messages without their agents.
 pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
-    let mut count = 0u64;
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(io::Error::other)?;
 
-    let deleted_runs = if cutoff_ts.is_empty() {
+    let do_cleanup = || -> io::Result<u64> {
+        let mut count = 0u64;
+
+        // Deletion order respects FK constraints (foreign_keys=ON):
+        //   child rows (events, inbox, agents) must be removed before parent (runs).
+        //
+        // Step 1: identify stale run IDs
+        let stale_run_subquery = if cutoff_ts.is_empty() {
+            "SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')".to_string()
+        } else {
+            format!(
+                "SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < '{}'",
+                cutoff_ts.replace('\'', "''") // basic escaping; cutoff_ts is ISO-8601
+            )
+        };
+
+        // Step 2: delete child rows for agents belonging to stale runs
         conn.execute(
-            "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted')",
-            [],
-        )
-    } else {
-        conn.execute(
-            "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
-            rusqlite::params![cutoff_ts],
-        )
-    }
-    .map_err(io::Error::other)?;
-    count += deleted_runs as u64;
-
-    // Delete events and inbox messages for orphaned agents (no matching run)
-    conn.execute(
-        "DELETE FROM orch_agent_events WHERE agent_id IN (
-             SELECT id FROM orch_agents WHERE run_id NOT IN (SELECT id FROM orch_runs)
-         )",
-        [],
-    )
-    .map_err(io::Error::other)?;
-    conn.execute(
-        "DELETE FROM orch_agent_inbox WHERE agent_id IN (
-             SELECT id FROM orch_agents WHERE run_id NOT IN (SELECT id FROM orch_runs)
-         )",
-        [],
-    )
-    .map_err(io::Error::other)?;
-
-    let deleted_agents = conn
-        .execute(
-            "DELETE FROM orch_agents WHERE run_id NOT IN (SELECT id FROM orch_runs)",
+            &format!(
+                "DELETE FROM orch_agent_events WHERE agent_id IN (
+                     SELECT id FROM orch_agents WHERE run_id IN ({stale_run_subquery})
+                 )"
+            ),
             [],
         )
         .map_err(io::Error::other)?;
-    count += deleted_agents as u64;
+        conn.execute(
+            &format!(
+                "DELETE FROM orch_agent_inbox WHERE agent_id IN (
+                     SELECT id FROM orch_agents WHERE run_id IN ({stale_run_subquery})
+                 )"
+            ),
+            [],
+        )
+        .map_err(io::Error::other)?;
 
-    Ok(count)
+        // Step 3: delete agents for stale runs
+        let deleted_agents = conn
+            .execute(
+                &format!("DELETE FROM orch_agents WHERE run_id IN ({stale_run_subquery})"),
+                [],
+            )
+            .map_err(io::Error::other)?;
+        count += deleted_agents as u64;
+
+        // Step 4: now safe to delete the runs themselves
+        let deleted_runs = if cutoff_ts.is_empty() {
+            conn.execute(
+                "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted')",
+                [],
+            )
+        } else {
+            conn.execute(
+                "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
+                rusqlite::params![cutoff_ts],
+            )
+        }
+        .map_err(io::Error::other)?;
+        count += deleted_runs as u64;
+
+        Ok(count)
+    };
+
+    match do_cleanup() {
+        Ok(count) => {
+            conn.execute_batch("COMMIT").map_err(io::Error::other)?;
+            Ok(count)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
 }
 
 #[cfg(test)]

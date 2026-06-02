@@ -9,8 +9,15 @@ use std::io;
 /// Apply the full operational schema to an open connection.
 /// Safe to call multiple times (uses `IF NOT EXISTS`).
 pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
-    // WAL auto-checkpoint
-    let _ = conn.execute_batch("PRAGMA wal_autocheckpoint=100;");
+    // Enable WAL mode and foreign key enforcement first — before any DDL.
+    // WAL must be set before schema init so all subsequent writes use WAL journal.
+    // foreign_keys=ON is required to enforce REFERENCES constraints declared in DDL.
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         PRAGMA wal_autocheckpoint=100;",
+    )
+    .map_err(io::Error::other)?;
 
     // Schema version tracking (distinct from memory.db's _meta)
     conn.execute_batch(
@@ -42,9 +49,10 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
             sequence_id      INTEGER,
             pipeline_id      TEXT
         );
-        CREATE INDEX IF NOT EXISTS idx_obs_ts      ON observations(timestamp);
-        CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id);
-        CREATE INDEX IF NOT EXISTS idx_obs_tool    ON observations(tool_category);",
+        CREATE INDEX IF NOT EXISTS idx_obs_ts         ON observations(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_obs_session    ON observations(session_id);
+        CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
+        CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);",
     )
     .map_err(io::Error::other)?;
 

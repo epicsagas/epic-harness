@@ -53,27 +53,37 @@ pub fn query_patterns_excluding_conn(
 
     let rows = stmt
         .query_map(rusqlite::params![exclude_project, limit as i64], |row| {
-            Ok(serde_json::json!({
-                "timestamp": row.get::<_, String>(0)?,
-                "project": row.get::<_, String>(1)?,
-                "success_rate": row.get::<_, f64>(2)?,
-                "avg_score": row.get::<_, f64>(3)?,
-                "per_error_stats": serde_json::from_str::<serde_json::Value>(
-                    &row.get::<_, String>(4).unwrap_or_else(|_| "{}".into())
-                ).unwrap_or_else(|_| serde_json::json!({})),
-                "failure_patterns": serde_json::from_str::<serde_json::Value>(
-                    &row.get::<_, String>(5).unwrap_or_else(|_| "[]".into())
-                ).unwrap_or_else(|_| serde_json::json!([])),
-                "weak_tools": serde_json::from_str::<serde_json::Value>(
-                    &row.get::<_, String>(6).unwrap_or_else(|_| "[]".into())
-                ).unwrap_or_else(|_| serde_json::json!([])),
-            }))
+            let per_error_raw: String = row.get::<_, String>(4).unwrap_or_else(|_| "{}".into());
+            let failure_raw: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".into());
+            let weak_raw: String = row.get::<_, String>(6).unwrap_or_else(|_| "[]".into());
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, f64>(3)?,
+                per_error_raw,
+                failure_raw,
+                weak_raw,
+            ))
         })
         .map_err(io::Error::other)?;
 
     let mut patterns = Vec::new();
     for r in rows {
-        patterns.push(r.map_err(io::Error::other)?);
+        let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
+            r.map_err(io::Error::other)?;
+        let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
+        let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
+        let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
+        patterns.push(serde_json::json!({
+            "timestamp": ts,
+            "project": project,
+            "success_rate": success_rate,
+            "avg_score": avg_score,
+            "per_error_stats": per_error_stats,
+            "failure_patterns": failure_patterns,
+            "weak_tools": weak_tools,
+        }));
     }
     Ok(patterns)
 }
@@ -93,29 +103,54 @@ pub fn query_all_patterns_conn(
 
     let rows = stmt
         .query_map(rusqlite::params![limit as i64], |row| {
-            Ok(serde_json::json!({
-                "timestamp": row.get::<_, String>(0)?,
-                "project": row.get::<_, String>(1)?,
-                "success_rate": row.get::<_, f64>(2)?,
-                "avg_score": row.get::<_, f64>(3)?,
-                "per_error_stats": serde_json::from_str::<serde_json::Value>(
-                    &row.get::<_, String>(4).unwrap_or_else(|_| "{}".into())
-                ).unwrap_or_else(|_| serde_json::json!({})),
-                "failure_patterns": serde_json::from_str::<serde_json::Value>(
-                    &row.get::<_, String>(5).unwrap_or_else(|_| "[]".into())
-                ).unwrap_or_else(|_| serde_json::json!([])),
-                "weak_tools": serde_json::from_str::<serde_json::Value>(
-                    &row.get::<_, String>(6).unwrap_or_else(|_| "[]".into())
-                ).unwrap_or_else(|_| serde_json::json!([])),
-            }))
+            let per_error_raw: String = row.get::<_, String>(4).unwrap_or_else(|_| "{}".into());
+            let failure_raw: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".into());
+            let weak_raw: String = row.get::<_, String>(6).unwrap_or_else(|_| "[]".into());
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, f64>(3)?,
+                per_error_raw,
+                failure_raw,
+                weak_raw,
+            ))
         })
         .map_err(io::Error::other)?;
 
     let mut patterns = Vec::new();
     for r in rows {
-        patterns.push(r.map_err(io::Error::other)?);
+        let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
+            r.map_err(io::Error::other)?;
+        let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
+        let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
+        let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
+        patterns.push(serde_json::json!({
+            "timestamp": ts,
+            "project": project,
+            "success_rate": success_rate,
+            "avg_score": avg_score,
+            "per_error_stats": per_error_stats,
+            "failure_patterns": failure_patterns,
+            "weak_tools": weak_tools,
+        }));
     }
     Ok(patterns)
+}
+
+/// Parse a JSON field from a DB column, logging a warning on failure.
+fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value {
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "[store/global] JSON parse failed ({}): '{}' — using fallback",
+                e,
+                &raw[..raw.len().min(100)]
+            );
+            fallback
+        }
+    }
 }
 
 #[cfg(test)]

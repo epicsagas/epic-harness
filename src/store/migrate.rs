@@ -8,6 +8,10 @@ use std::io::{self, BufRead};
 
 /// Run legacy migration if not already done.
 /// Called from `open_harness_db()` after schema init.
+///
+/// Uses an IMMEDIATE transaction to serialize concurrent migration attempts:
+/// only the first opener acquires the write lock and sets the flag; subsequent
+/// openers see the flag and exit before doing any work.
 pub fn run(conn: &Connection) {
     let migrated: bool = conn
         .query_row(
@@ -24,9 +28,26 @@ pub fn run(conn: &Connection) {
 
     match do_migrate(conn) {
         Ok(stats) => {
+            let error_pct = if stats.total_lines > 0 {
+                stats.errors as f64 / stats.total_lines as f64 * 100.0
+            } else {
+                0.0
+            };
+            if error_pct > 10.0 {
+                eprintln!(
+                    "[migrate] WARNING: high error rate {:.1}% ({} errors / {} lines) — \
+                     some legacy data may not have been imported",
+                    error_pct, stats.errors, stats.total_lines
+                );
+            }
             eprintln!(
-                "[migrate] legacy import complete: {} obs, {} sessions, {} evo, {} metrics errors",
-                stats.obs_imported, stats.sess_imported, stats.evo_imported, stats.errors
+                "[migrate] legacy import complete: {} obs, {} sessions, {} evo records; \
+                 {} parse/insert errors ({:.1}%)",
+                stats.obs_imported,
+                stats.sess_imported,
+                stats.evo_imported,
+                stats.errors,
+                error_pct,
             );
         }
         Err(e) => {
@@ -41,6 +62,8 @@ struct MigrationStats {
     sess_imported: usize,
     evo_imported: usize,
     errors: usize,
+    /// Total lines/files attempted (for error rate calculation).
+    total_lines: usize,
 }
 
 fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
@@ -50,26 +73,52 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
         sess_imported: 0,
         evo_imported: 0,
         errors: 0,
+        total_lines: 0,
     };
 
+    // BEGIN IMMEDIATE acquires a write lock upfront, serializing concurrent migration
+    // attempts. rusqlite's unchecked_transaction() uses DEFERRED; we issue BEGIN
+    // IMMEDIATE directly to get the stricter lock without requiring &mut Connection.
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(io::Error::other)?;
+
+    // Re-check flag inside the write lock — a concurrent opener may have set it
+    // between our outer read above and this BEGIN IMMEDIATE.
+    let already: bool = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .is_some_and(|v| v == "1");
+    if already {
+        conn.execute_batch("ROLLBACK").map_err(io::Error::other)?;
+        return Ok(stats);
+    }
+
     // Import observations from obs/*.jsonl
-    import_observations(conn, &harness_dir, &mut stats)?;
-
+    let obs_result = import_observations(conn, &harness_dir, &mut stats);
     // Import sessions from sessions/*.json
-    import_sessions(conn, &harness_dir, &mut stats)?;
-
+    let sess_result = import_sessions(conn, &harness_dir, &mut stats);
     // Import evolution from evolution.jsonl
-    import_evolution(conn, &harness_dir, &mut stats)?;
-
+    let evo_result = import_evolution(conn, &harness_dir, &mut stats);
     // Import metrics from metrics.json
-    import_metrics(conn, &harness_dir, &mut stats)?;
+    let metrics_result = import_metrics(conn, &harness_dir, &mut stats);
 
-    // Mark as migrated
+    // Propagate first error (if any) after rollback
+    if let Err(e) = obs_result.and(sess_result).and(evo_result).and(metrics_result) {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(e);
+    }
+
+    // Mark as migrated and commit atomically
     conn.execute(
         "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
         [],
     )
     .map_err(io::Error::other)?;
+    conn.execute_batch("COMMIT").map_err(io::Error::other)?;
 
     Ok(stats)
 }
@@ -97,14 +146,13 @@ fn import_observations(
             .unwrap_or(filename)
             .to_string();
 
-        // Stream lines via BufReader instead of loading entire file into memory
+        // Stream lines via BufReader instead of loading entire file into memory.
+        // The outer do_migrate() already holds a BEGIN IMMEDIATE transaction.
         let file = std::fs::File::open(&path)?;
         let reader = std::io::BufReader::new(file);
 
-        // Batch insert in a transaction for large files
-        let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
-
         for line in reader.lines() {
+            stats.total_lines += 1;
             let line = match line {
                 Ok(l) => l,
                 Err(e) => {
@@ -113,10 +161,13 @@ fn import_observations(
                     continue;
                 }
             };
+            if line.trim().is_empty() {
+                continue;
+            }
             match serde_json::from_str::<crate::shared::obs::ObsRecord>(&line) {
                 Ok(rec) => {
                     if let Err(e) =
-                        super::observations::insert_observation_conn(&tx, &rec, &session_id)
+                        super::observations::insert_observation_conn(conn, &rec, &session_id)
                     {
                         eprintln!("[migrate] insert obs error: {e}");
                         stats.errors += 1;
@@ -130,7 +181,6 @@ fn import_observations(
                 }
             }
         }
-        tx.commit().map_err(io::Error::other)?;
     }
     Ok(())
 }
@@ -153,10 +203,20 @@ fn import_sessions(
         }
         // Extract millis from filename: snapshot_{millis}.json
         let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-        let millis: i64 = filename
+        let millis: i64 = match filename
             .strip_prefix("snapshot_")
             .and_then(|s| s.parse().ok())
-            .unwrap_or(0);
+        {
+            Some(ms) => ms,
+            None => {
+                eprintln!(
+                    "[migrate] cannot parse millis from session filename '{}' — skipping",
+                    path.display()
+                );
+                stats.errors += 1;
+                continue;
+            }
+        };
 
         match std::fs::read_to_string(&path) {
             Ok(content) => {
@@ -199,6 +259,7 @@ fn import_evolution(
     let reader = std::io::BufReader::new(file);
 
     for line in reader.lines() {
+        stats.total_lines += 1;
         let line = match line {
             Ok(l) => l,
             Err(e) => {
@@ -207,6 +268,9 @@ fn import_evolution(
                 continue;
             }
         };
+        if line.trim().is_empty() {
+            continue;
+        }
         match serde_json::from_str::<crate::shared::evolution::EvolutionRecord>(&line) {
             Ok(rec) => {
                 if let Err(e) = super::evolution::insert_record_conn(conn, &rec) {

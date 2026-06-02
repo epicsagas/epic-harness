@@ -100,14 +100,27 @@ pub fn query_obs_for_date_range_conn(
                 action: row.get(3)?,
                 result: row.get(4)?,
                 score: row.get(5)?,
-                dimensions: if dim_s.is_some() || dim_q.is_some() || dim_c.is_some() {
-                    Some(ScoreDimensions {
-                        tool_success: dim_s.unwrap_or(0.0),
-                        output_quality: dim_q.unwrap_or(0.0),
-                        execution_cost: dim_c.unwrap_or(0.0),
-                    })
-                } else {
-                    None
+                dimensions: {
+                    let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+                    let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
+                    if any_some && !all_some {
+                        eprintln!(
+                            "[store] observations: partial dimensions (s={}, q={}, c={}) — \
+                             defaulting missing fields to 0.0",
+                            dim_s.is_some(),
+                            dim_q.is_some(),
+                            dim_c.is_some()
+                        );
+                    }
+                    if any_some {
+                        Some(ScoreDimensions {
+                            tool_success: dim_s.unwrap_or(0.0),
+                            output_quality: dim_q.unwrap_or(0.0),
+                            execution_cost: dim_c.unwrap_or(0.0),
+                        })
+                    } else {
+                        None
+                    }
                 },
                 failure_category: row.get(9)?,
                 error_snippet: row.get(10)?,
@@ -153,7 +166,7 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
         )
         .map_err(io::Error::other)?;
 
-    // Per-tool stats
+    // Per-tool stats — capped at 100 distinct tools to prevent unbounded result sets
     let mut tool_stmt = conn
         .prepare(
             "SELECT tool, COUNT(*) as calls,
@@ -161,7 +174,9 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
                     COALESCE(AVG(score), 0.0) as avg_score
              FROM observations
              WHERE timestamp >= ?1 AND timestamp <= ?2
-             GROUP BY tool",
+             GROUP BY tool
+             ORDER BY calls DESC
+             LIMIT 100",
         )
         .map_err(io::Error::other)?;
 
@@ -181,14 +196,16 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
         tool_stats.push(r.map_err(io::Error::other)?);
     }
 
-    // Per-error-category stats
+    // Per-error-category stats — capped at 50 distinct categories
     let mut err_stmt = conn
         .prepare(
             "SELECT failure_category, COUNT(*) as cnt
              FROM observations
              WHERE timestamp >= ?1 AND timestamp <= ?2
                AND failure_category IS NOT NULL
-             GROUP BY failure_category",
+             GROUP BY failure_category
+             ORDER BY cnt DESC
+             LIMIT 50",
         )
         .map_err(io::Error::other)?;
 
