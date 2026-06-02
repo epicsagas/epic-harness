@@ -189,7 +189,6 @@ epic-harness mem add \
   --importance 0.8 \
   --body "Overall: {score}/10. Lowest: {lowest_dim}. Top action: {top_action}"
 ```
-```
 
 ---
 

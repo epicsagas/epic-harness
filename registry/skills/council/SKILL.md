@@ -57,7 +57,6 @@ epic-harness mem add \
   --importance 0.9 \
   --body "Context: ...\nOptions: ...\nChosen: ...\nRationale: ...\nTrade-off accepted: ..."
 ```
-```
 
 ## Anti-Rationalization
 

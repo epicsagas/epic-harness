@@ -61,7 +61,6 @@ epic-harness mem add \
   --type error \
   --body "Pattern: ...\nRoot cause: ...\nRecovery: ...\n"
 ```
-```
 
 ## Anti-Rationalization
 
