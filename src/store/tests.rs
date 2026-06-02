@@ -80,7 +80,10 @@ fn wal_mode_is_enabled() {
         .query_row("PRAGMA journal_mode", [], |row| row.get(0))
         .unwrap();
     // In-memory always = "memory"; accept both to keep in-memory tests green
-    assert!(mode == "wal" || mode == "memory", "unexpected journal_mode: {mode}");
+    assert!(
+        mode == "wal" || mode == "memory",
+        "unexpected journal_mode: {mode}"
+    );
 }
 
 #[test]
@@ -243,7 +246,9 @@ fn global_json_field_parse_failure_uses_fallback() {
 
 #[test]
 fn dismiss_agent_is_atomic() {
-    use super::orchestrator::{dismiss_agent_conn, init_run_conn, read_agent_conn, upsert_agent_conn, OrchAgent, OrchRun};
+    use super::orchestrator::{
+        OrchAgent, OrchRun, dismiss_agent_conn, init_run_conn, read_agent_conn, upsert_agent_conn,
+    };
 
     let conn = in_memory_db();
     let run = OrchRun {
@@ -277,14 +282,19 @@ fn dismiss_agent_is_atomic() {
 
     // Second dismiss of the same agent must return false (not panic)
     let second = dismiss_agent_conn(&conn, "agent-atomic").unwrap();
-    assert!(!second, "second dismiss of non-existent agent must return false");
+    assert!(
+        !second,
+        "second dismiss of non-existent agent must return false"
+    );
 
     assert!(read_agent_conn(&conn, "agent-atomic").unwrap().is_none());
 }
 
 #[test]
 fn cleanup_stale_is_atomic() {
-    use super::orchestrator::{cleanup_stale_conn, init_run_conn, upsert_agent_conn, OrchAgent, OrchRun};
+    use super::orchestrator::{
+        OrchAgent, OrchRun, cleanup_stale_conn, init_run_conn, upsert_agent_conn,
+    };
 
     let conn = in_memory_db();
     let run = OrchRun {

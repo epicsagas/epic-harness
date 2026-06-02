@@ -159,8 +159,8 @@ pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool>
         .map_err(io::Error::other)?;
 
     // Check agent exists inside the write lock
-    let exists: bool = conn
-        .query_row(
+    let exists: bool =
+        conn.query_row(
             "SELECT COUNT(*) FROM orch_agents WHERE id = ?1",
             rusqlite::params![agent_id],
             |row| row.get::<_, i64>(0),
@@ -168,8 +168,7 @@ pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool>
         .map_err(|e| {
             let _ = conn.execute_batch("ROLLBACK");
             io::Error::other(e)
-        })?
-        > 0;
+        })? > 0;
 
     if !exists {
         conn.execute_batch("ROLLBACK").map_err(io::Error::other)?;

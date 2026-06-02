@@ -107,7 +107,11 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
     let metrics_result = import_metrics(conn, &harness_dir, &mut stats);
 
     // Propagate first error (if any) after rollback
-    if let Err(e) = obs_result.and(sess_result).and(evo_result).and(metrics_result) {
+    if let Err(e) = obs_result
+        .and(sess_result)
+        .and(evo_result)
+        .and(metrics_result)
+    {
         let _ = conn.execute_batch("ROLLBACK");
         return Err(e);
     }
