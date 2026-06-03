@@ -485,16 +485,16 @@ epic mem mcp-install                                   # MCP-Server registrieren
 epic mem export --out ./docs/memory                    # Nach Markdown exportieren
 ```
 
-### MCP-Tools (6)
+### CLI-Befehle (6)
 
-| Tool | Zweck |
-|------|-------|
-| `mem_recall` | Intelligenter kontextueller Abruf mit Hint + Projekt + Graph-Nachbarn |
-| `mem_add` | Knoten hinzufügen mit automatischer Wichtigkeit nach Typ (oder explizit 0.0–1.0) |
-| `mem_search` | Schlagwortsuche (Volltext), nach Wichtigkeit sortiert |
-| `mem_query` | Filtern nach Tag/Typ/Projekt — Alias für `mem_list` |
-| `mem_context` | Projektbezogener intelligenter Abruf (ohne Hint) |
-| `mem_related` | Graph-Traversierung ab einer Knoten-ID (findet verbundenenes Wissen) |
+| Befehl | Zweck |
+|--------|-------|
+| `epic-harness mem recall "HINT"` | Intelligenter kontextueller Abruf mit Hint + Projekt + Graph-Nachbarn |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | Knoten hinzufügen mit automatischer Wichtigkeit nach Typ (oder explizit 0.0–1.0) |
+| `epic-harness mem search "QUERY"` | Schlagwortsuche (Volltext), nach Wichtigkeit sortiert |
+| `epic-harness mem list` | Filtern nach Tag/Typ/Projekt |
+| `epic-harness mem context` | Projektbezogener intelligenter Abruf (ohne Hint) |
+| `epic-harness mem related ID` | Graph-Traversierung ab einer Knoten-ID (findet verbundenenes Wissen) |
 
 ### Knoten-Typen
 

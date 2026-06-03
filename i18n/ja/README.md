@@ -478,16 +478,16 @@ epic mem mcp-install                                   # MCPサーバーを登�
 epic mem export --out ./docs/memory                    # Markdownにエクスポート
 ```
 
-### MCPツール（6）
+### CLIコマンド（6）
 
-| ツール | 目的 |
-|------|------|
-| `mem_recall` | ヒント + プロジェクト + グラフ隣接ノードによるスマートコンテキストリコール |
-| `mem_add` | タイプ別自動重要度でノードを追加（または明示的な0.0–1.0） |
-| `mem_search` | キーワード検索（全文）、重要度でランク付け |
-| `mem_query` | タグ/タイプ/プロジェクトでフィルター — `mem_list` のエイリアス |
-| `mem_context` | プロジェクトスコープのスマートリコール（ヒントなし） |
-| `mem_related` | ノードIDからのグラフトラバーサル（接続された知識を検索） |
+| コマンド | 目的 |
+|---------|------|
+| `epic-harness mem recall "HINT"` | ヒント + プロジェクト + グラフ隣接ノードによるスマートコンテキストリコール |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | タイプ別自動重要度でノードを追加（または明示的な0.0–1.0） |
+| `epic-harness mem search "QUERY"` | キーワード検索（全文）、重要度でランク付け |
+| `epic-harness mem list` | タグ/タイプ/プロジェクトでフィルター |
+| `epic-harness mem context` | プロジェクトスコープのスマートリコール（ヒントなし） |
+| `epic-harness mem related ID` | ノードIDからのグラフトラバーサル（接続された知識を検索） |
 
 ### ノードタイプ
 

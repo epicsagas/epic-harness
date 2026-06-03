@@ -482,16 +482,16 @@ epic mem mcp-install                                   # MCP सर्वर reg
 epic mem export --out ./docs/memory                    # Markdown में export
 ```
 
-### MCP टूल (6)
+### CLI कमांड (6)
 
-| टूल | उद्देश्य |
-|------|---------|
-| `mem_recall` | hint + project + graph neighbors के साथ स्मार्ट contextual recall |
-| `mem_add` | type के अनुसार auto-importance (या explicit 0.0–1.0) के साथ नोड जोड़ें |
-| `mem_search` | keyword खोज (full-text), importance के अनुसार ranked |
-| `mem_query` | tag/type/project द्वारा फ़िल्टर — `mem_list` का उपनाम |
-| `mem_context` | प्रोजेक्ट-scoped स्मार्ट recall (कोई hint नहीं) |
-| `mem_related` | नोड ID से graph traversal (connected knowledge ढूंढता है) |
+| कमांड | उद्देश्य |
+|--------|---------|
+| `epic-harness mem recall "HINT"` | hint + project + graph neighbors के साथ स्मार्ट contextual recall |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | type के अनुसार auto-importance (या explicit 0.0–1.0) के साथ नोड जोड़ें |
+| `epic-harness mem search "QUERY"` | keyword खोज (full-text), importance के अनुसार ranked |
+| `epic-harness mem list` | tag/type/project द्वारा फ़िल्टर |
+| `epic-harness mem context` | प्रोजेक्ट-scoped स्मार्ट recall (कोई hint नहीं) |
+| `epic-harness mem related ID` | नोड ID से graph traversal (connected knowledge ढूंढता है) |
 
 ### नोड प्रकार
 

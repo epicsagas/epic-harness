@@ -36,7 +36,7 @@ serde_yaml = "0.9"
 toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
-rusqlite = { version = "0.39", features = ["bundled", "vtab"] }
+rusqlite = { version = "0.40", features = ["bundled", "vtab"] }
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }

@@ -486,16 +486,16 @@ epic mem mcp-install                                   # MCP 서버 등록
 epic mem export --out ./docs/memory                    # Markdown 내보내기
 ```
 
-### MCP 도구 (6개)
+### CLI 명령어 (6개)
 
-| 도구 | 목적 |
-|------|------|
-| `mem_recall` | 힌트 + 프로젝트 + 그래프 이웃을 활용한 스마트 컨텍스트 리콜 |
-| `mem_add` | 유형별 자동 중요도로 노드 추가 (또는 명시적 0.0–1.0) |
-| `mem_search` | 키워드 검색 (전체 텍스트), 중요도 순 정렬 |
-| `mem_query` | 태그/유형/프로젝트별 필터 — `mem_list`의 별칭 |
-| `mem_context` | 프로젝트 범위 스마트 리콜 (힌트 없음) |
-| `mem_related` | 노드 ID에서 그래프 탐색 (연결된 지식 발견) |
+| 명령어 | 목적 |
+|--------|------|
+| `epic-harness mem recall "HINT"` | 힌트 + 프로젝트 + 그래프 이웃을 활용한 스마트 컨텍스트 리콜 |
+| `epic-harness mem add --title "T" --type TYPE --body "B"` | 유형별 자동 중요도로 노드 추가 (또는 명시적 0.0–1.0) |
+| `epic-harness mem search "QUERY"` | 키워드 검색 (전체 텍스트), 중요도 순 정렬 |
+| `epic-harness mem list` | 태그/유형/프로젝트별 필터 |
+| `epic-harness mem context` | 프로젝트 범위 스마트 리콜 (힌트 없음) |
+| `epic-harness mem related ID` | 노드 ID에서 그래프 탐색 (연결된 지식 발견) |
 
 ### 노드 유형
 
