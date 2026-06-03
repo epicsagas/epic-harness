@@ -14,11 +14,11 @@ use super::{query_row_optional, store_err};
 /// Pad an ISO-8601 date string for lexicographic range comparison.
 /// `"2026-06-02"` → `"2026-06-02T00:00:00Z"` / `"...T23:59:59Z"`.
 ///
-/// The `Z` suffix serves as a sentinel for end-of-day: because `'Z'` (0x5A) is
-/// greater than `'.'` (0x2E) and `'+'` (0x2B), any fractional-second variant
-/// such as `T23:59:59.999Z` or timezone-offset form `T23:59:59+00:00` compares
-/// lexicographically *less than* `T23:59:59Z`, so all same-day timestamps are
-/// correctly included in the `<= upper` range.
+/// Intentional choice: `T23:59:59Z` (not `T23:59:59.999Z`) is used as the upper sentinel
+/// because `'Z'` (0x5A) > `'.'` (0x2E) and `'+'` (0x2B) in ASCII order. This means any
+/// fractional-second or offset variant — `T23:59:59.999Z`, `T23:59:59+00:00` — compares
+/// lexicographically *less than* `T23:59:59Z`, so all same-day timestamps are correctly
+/// included in `<= upper` without needing to enumerate fractional-second forms.
 fn pad_date(ts: &str, end_of_day: bool) -> String {
     if ts.len() == 10 {
         if end_of_day {
