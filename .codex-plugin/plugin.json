@@ -1,5 +1,5 @@
 {
-  "name": "epic",
+  "name": "epic-harness",
   "version": "0.5.0",
   "description": "Auto-trigger skills + self-evolving agent harness. Includes orbit, evolve, team, tdd, audit, ship and more.",
   "author": {
@@ -25,7 +25,7 @@
     "shortDescription": "Autonomous agent harness — auto-trigger skills, self-evolving engine.",
     "longDescription": "Epic Harness provides auto-trigger quality skills (TDD, security, simplify, perf), pipeline skills (orbit, evolve, team), and a self-evolving skill engine. Less to remember, more automation.",
     "developerName": "epicsagas",
-    "category": "Productivity",
+    "category": "Harness",
     "capabilities": ["Read", "Write"],
     "websiteURL": "https://github.com/epicsagas/epic-harness"
   }
