@@ -36,11 +36,7 @@ pub async fn get_harness_metrics(state: State<'_, AppState>) -> Result<HarnessMe
         let m = epic_harness::store::metrics::load_metrics_conn(&conn)
             .map_err(|e| format!("load metrics: {e}"))?;
 
-        let all_scores: Vec<f64> = m
-            .score_history
-            .iter()
-            .map(|e| e.avg_score)
-            .collect();
+        let all_scores: Vec<f64> = m.score_history.iter().map(|e| e.avg_score).collect();
         let scores: Vec<f64> = all_scores
             .iter()
             .rev()
@@ -103,9 +99,7 @@ pub struct OrbitPipeline {
 }
 
 #[tauri::command]
-pub async fn get_orbit_pipelines(
-    state: State<'_, AppState>,
-) -> Result<Vec<OrbitPipeline>, String> {
+pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<OrbitPipeline>, String> {
     let db = state.harness_db.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let conn = db
@@ -179,11 +173,9 @@ pub async fn get_evolved_skills(state: State<'_, AppState>) -> Result<EvolutionD
             .collect();
 
         // Evolution history
-        let records = epic_harness::store::evolution::query_recent_records_conn(
-            &conn,
-            MAX_EVOLUTION_ENTRIES,
-        )
-        .map_err(|e| format!("query evolution records: {e}"))?;
+        let records =
+            epic_harness::store::evolution::query_recent_records_conn(&conn, MAX_EVOLUTION_ENTRIES)
+                .map_err(|e| format!("query evolution records: {e}"))?;
 
         let total_sessions = records.len() as u32;
         let patterns_detected: u32 = records

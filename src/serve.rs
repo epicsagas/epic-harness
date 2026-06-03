@@ -93,11 +93,19 @@ pub fn run_serve(port: Option<u16>) -> i32 {
         let method = request.method().clone();
 
         let response = match (method, url.as_str()) {
-            (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(
-                DASHBOARD_HTML,
-            )
-            .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap())
-            .with_header(Header::from_bytes(b"Cache-Control", b"no-cache, no-store, must-revalidate").unwrap()),
+            (Method::Get, "/") | (Method::Get, "/index.html") => {
+                Response::from_string(DASHBOARD_HTML)
+                    .with_header(
+                        Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
+                    )
+                    .with_header(
+                        Header::from_bytes(
+                            b"Cache-Control",
+                            b"no-cache, no-store, must-revalidate",
+                        )
+                        .unwrap(),
+                    )
+            }
 
             // ── Orchestration API ───────────────────────────
             (Method::Get, "/api/run") => handle_get_run(db.as_ref(), &harness_dir),

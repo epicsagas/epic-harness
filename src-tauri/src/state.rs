@@ -11,8 +11,8 @@ pub struct AppState {
 
 impl AppState {
     pub fn new() -> Result<Self, String> {
-        let mem_conn =
-            epic_harness::mem::store::open_db().map_err(|e| format!("Failed to open memory DB: {e}"))?;
+        let mem_conn = epic_harness::mem::store::open_db()
+            .map_err(|e| format!("Failed to open memory DB: {e}"))?;
         let harness_conn = epic_harness::store::open_harness_db()
             .map_err(|e| format!("Failed to open harness DB: {e}"))?;
         Ok(Self {
