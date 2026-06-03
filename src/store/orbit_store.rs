@@ -1,9 +1,9 @@
 //! orbit_store.rs — Orbit pipeline SQLite I/O
 //!
-//! `upsert_pipeline_conn`, `read_running_pipeline_conn`, `dismiss_pipeline_conn`,
-//! and `update_pipeline_status_conn` are pre-built for when the orbit skill writes
-//! pipeline state directly to SQLite. Currently the orbit skill writes PIPELINE-*.json
-//! files; the hooks integration is pending.
+//! Dual-write model: the /orbit skill writes PIPELINE-*.json files (required for
+//! phase recovery via Claude Code's file tools); hooks sync those files to SQLite
+//! at session-end (reflect) and pre-compact (snapshot) so the REST API and dashboard
+//! have a queryable, up-to-date view without changing the skill.
 
 use rusqlite::Connection;
 use std::io;
@@ -148,6 +148,77 @@ pub fn update_pipeline_status_conn(
         rusqlite::params![status, now, pipeline_id],
     ))?;
     Ok(count > 0)
+}
+
+/// Sync all `PIPELINE-*.json` files in `orbit_dir` to the `orbit_pipelines` table.
+///
+/// Called by the reflect hook (session end) and snapshot hook (pre-compact).
+/// Each file is upserted with `INSERT OR REPLACE`, so re-running is safe.
+/// Returns the number of pipelines successfully synced.
+pub fn sync_orbit_files_to_db_conn(
+    conn: &Connection,
+    orbit_dir: &std::path::Path,
+) -> io::Result<usize> {
+    if !orbit_dir.is_dir() {
+        return Ok(0);
+    }
+
+    let project = crate::shared::paths::project_slug();
+    let mut synced = 0;
+
+    let entries = std::fs::read_dir(orbit_dir)
+        .map_err(io::Error::other)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name();
+            let s = name.to_string_lossy();
+            s.starts_with("PIPELINE-") && s.ends_with(".json")
+        });
+
+    for entry in entries {
+        let path = entry.path();
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("[store/orbit] failed to read {}: {e}", path.display());
+                continue;
+            }
+        };
+
+        let val: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[store/orbit] malformed JSON in {}: {e}", path.display());
+                continue;
+            }
+        };
+
+        let id = val
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| {
+                // Fall back to filename stem (e.g. "PIPELINE-20260603-121409")
+                path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+            })
+            .to_string();
+
+        let status = val
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let phase = val.get("phase").and_then(|v| v.as_str());
+        let mode = val.get("mode").and_then(|v| v.as_str());
+
+        if let Err(e) = upsert_pipeline_conn(conn, &id, &project, status, phase, mode, &content) {
+            eprintln!("[store/orbit] upsert failed for {id}: {e}");
+            continue;
+        }
+        synced += 1;
+    }
+
+    Ok(synced)
 }
 
 #[cfg(test)]

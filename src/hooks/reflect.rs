@@ -956,7 +956,19 @@ pub fn run(_input: &HookInput) -> i32 {
         let _ = fs::write(metrics_file(), json);
     }
 
-    // 11.5. Workspace manifest
+    // 11.5. Sync orbit pipeline files → SQLite (dual-write: files are source of truth
+    //       for /orbit phase recovery; SQLite enables REST API + dashboard queries).
+    if let Some(ref conn) = db {
+        match crate::store::orbit_store::sync_orbit_files_to_db_conn(conn, &orbit_dir()) {
+            Ok(n) if n > 0 => {
+                eprintln!("[reflect] synced {n} orbit pipeline(s) to SQLite");
+            }
+            Err(e) => eprintln!("[reflect] orbit sync failed (non-fatal): {e}"),
+            _ => {}
+        }
+    }
+
+    // 11.6. Workspace manifest
     evolve::write_workspace_manifest();
 
     // 12. Report

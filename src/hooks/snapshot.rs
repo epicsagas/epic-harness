@@ -158,6 +158,12 @@ pub fn run(input: &HookInput) -> i32 {
         }
     }
 
+    // Sync orbit pipeline files → SQLite so the REST API stays current during long sessions.
+    // Best-effort: a failure here must not block the pre-compact snapshot.
+    if let Ok(conn) = crate::store::open_harness_db() {
+        let _ = crate::store::orbit_store::sync_orbit_files_to_db_conn(&conn, &orbit_dir());
+    }
+
     hint(
         "snapshot",
         &format!(
