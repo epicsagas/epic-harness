@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **SQLite operational store**: all project operational data (observations, sessions, metrics, evolution, orbit pipelines, evolved skills) now stored in `harness.db` alongside the existing `memory.db` knowledge graph
 - `epic-harness migrate` subcommand: import legacy JSONL/JSON data into SQLite (`--dry-run` to preview, `--reset` to retry interrupted migration)
 - `store::observations::query_latest_observations_conn()`: query N most recent observation records
+- Dashboard: auto-build Tauri app in CI, agent dismiss action, orbit pipeline dismiss
+- README: static badge links fixed
 
 ### Changed
 - Dashboard commands (`get_harness_metrics`, `get_orbit_pipelines`, `get_evolved_skills`, `get_obs_summary`) now read from SQLite instead of file I/O
@@ -34,6 +36,42 @@ epic-harness migrate             # perform the import
 ```
 
 Original files are **not deleted** after import. New users are automatically on SQLite — no action needed.
+
+## [0.4.8] — 2026-05-28
+
+### Added
+- Dashboard: orbit full-auto mode, pipeline dismiss, agents done-separation, Ring 1 skill rename
+
+## [0.4.7] — 2026-05-27
+
+### Fixed
+- Dashboard: dynamic version injection, evolution history newest-first sort, council auto-proceed, security hardening
+
+## [0.4.6] — 2026-05-26
+
+### Added
+- Install: brew + cargo-binstall cascade fallback when binary not found
+
+### Changed
+- Rename `check` skill to `audit` for consistency with pipeline naming
+- Remove Antigravity integration section from docs
+
+## [0.4.5] — 2026-05-26
+
+### Added
+- Antigravity (Gemini CLI) plugin package with install docs and i18n translations
+- Cursor integration: sessionStart + preCompact hooks, `.cursor/skills/` generation
+- Plugin manifests: declare hooks and mcpServers in Claude/Codex plugin.json
+
+### Changed
+- Cursor: migrate commands to skills format
+- Antigravity: switch from install.rs to plugin-only distribution
+- i18n: sync installer URLs, remove stale Codex install command
+- README: rewrite top description for multi-tool positioning
+- Remove deprecated Codex and Antigravity file-based plugin files
+
+### Fixed
+- Dashboard: i18n double-call in Agents page
 
 ## [0.4.4] — 2026-05-25
 
