@@ -12,11 +12,15 @@ use crate::shared::scoring::ScoreDimensions;
 use super::{query_row_optional, store_err};
 
 /// Pad an ISO-8601 date string for lexicographic range comparison.
-/// `"2026-06-02"` → `"2026-06-02T00:00:00"` / `"...T23:59:59"`.
+/// `"2026-06-02"` → `"2026-06-02T00:00:00Z"` / `"...T23:59:59Z"`.
+///
+/// The `Z` suffix serves as a sentinel for end-of-day: because `'Z'` (0x5A) is
+/// greater than `'.'` (0x2E) and `'+'` (0x2B), any fractional-second variant
+/// such as `T23:59:59.999Z` or timezone-offset form `T23:59:59+00:00` compares
+/// lexicographically *less than* `T23:59:59Z`, so all same-day timestamps are
+/// correctly included in the `<= upper` range.
 fn pad_date(ts: &str, end_of_day: bool) -> String {
     if ts.len() == 10 {
-        // All stored timestamps use UTC (Z suffix). Pad with matching suffix so
-        // lexicographic range comparison works correctly against stored values.
         if end_of_day {
             format!("{ts}T23:59:59Z")
         } else {

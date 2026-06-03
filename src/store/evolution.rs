@@ -1,7 +1,4 @@
 //! evolution.rs — Evolution record SQLite I/O
-//!
-//! See observations.rs for dead_code rationale.
-#![allow(dead_code)]
 
 use rusqlite::Connection;
 use std::io;
@@ -43,9 +40,9 @@ pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Resul
 }
 
 /// Standalone insert — opens own connection.
-/// Currently unused; retained as public API for future batch import scenarios.
+/// Currently unused; retained for future batch import scenarios.
 #[allow(dead_code)]
-pub fn insert_record(rec: &EvolutionRecord) -> io::Result<i64> {
+pub(crate) fn insert_record(rec: &EvolutionRecord) -> io::Result<i64> {
     let conn = super::open_harness_db()?;
     insert_record_conn(&conn, rec)
 }

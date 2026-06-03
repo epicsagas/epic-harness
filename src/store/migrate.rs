@@ -327,27 +327,34 @@ fn import_sessions(
             }
         };
 
-        match std::fs::read_to_string(&path) {
-            Ok(content) => {
-                match serde_json::from_str::<crate::shared::types::SessionSnapshot>(&content) {
-                    Ok(snap) => {
-                        if let Err(e) = super::sessions::insert_snapshot_conn(conn, &snap, millis) {
-                            eprintln!("[migrate] insert session error: {e}");
-                            stats.errors += 1;
-                        } else {
-                            stats.sess_imported += 1;
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[migrate] parse session error in {}: {e}", path.display());
-                        stats.errors += 1;
-                    }
-                }
-            }
+        // Parse before opening the transaction to avoid holding a write lock
+        // while doing I/O — consistent with import_observations per-file pattern.
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
             Err(e) => {
                 eprintln!("[migrate] read session error {}: {e}", path.display());
                 stats.errors += 1;
+                continue;
             }
+        };
+        let snap = match serde_json::from_str::<crate::shared::types::SessionSnapshot>(&content) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("[migrate] parse session error in {}: {e}", path.display());
+                stats.errors += 1;
+                continue;
+            }
+        };
+
+        // Each file gets its own ImmediateTx to bound WAL growth.
+        let tx = ImmediateTx::begin(conn)?;
+        if let Err(e) = super::sessions::insert_snapshot_conn(conn, &snap, millis) {
+            eprintln!("[migrate] insert session error: {e}");
+            stats.errors += 1;
+            // tx drops → ROLLBACK; no partial state committed for this file
+        } else {
+            stats.sess_imported += 1;
+            tx.commit()?;
         }
     }
     Ok(())
@@ -363,10 +370,13 @@ fn import_evolution(
         return Ok(());
     }
 
-    // Stream via BufReader
+    // Stream via BufReader; wrap all inserts in a single ImmediateTx so a
+    // mid-import crash doesn't leave a partially-imported file with
+    // legacy_migrated='in_progress' stuck permanently.
     let file = std::fs::File::open(&evo_file)?;
     let reader = std::io::BufReader::new(file);
 
+    let tx = ImmediateTx::begin(conn)?;
     for line in reader.lines() {
         stats.total_lines += 1;
         let line = match line {
@@ -395,6 +405,7 @@ fn import_evolution(
             }
         }
     }
+    tx.commit()?;
     Ok(())
 }
 

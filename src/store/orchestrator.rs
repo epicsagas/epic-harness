@@ -1,9 +1,11 @@
 //! orchestrator.rs — Orchestrator state SQLite I/O
 //!
 //! Replaces file-based orchestrator/ directory with SQLite tables.
-//! See observations.rs for dead_code rationale.
-#![allow(dead_code)]
 //! flock(2) advisory locking is replaced by SQLite WAL transactions.
+//!
+//! All public functions are unused until the orchestrate hooks integration lands.
+//! TODO: remove `#![allow(dead_code)]` once hooks wire these up.
+#![allow(dead_code)]
 
 use rusqlite::Connection;
 use std::io;
@@ -101,8 +103,8 @@ pub fn init_run_conn(conn: &Connection, run: &OrchRun) -> io::Result<()> {
 pub fn read_run_conn(conn: &Connection) -> io::Result<Option<OrchRun>> {
     query_row_optional(conn.query_row(
         "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at
-         FROM orch_runs WHERE status = 'running' ORDER BY created_at DESC LIMIT 1",
-        [],
+         FROM orch_runs WHERE status = ?1 ORDER BY created_at DESC LIMIT 1",
+        rusqlite::params![RunStatus::Running.as_str()],
         |row| {
             Ok(OrchRun {
                 id: row.get(0)?,
@@ -297,13 +299,13 @@ pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64>
 
     if cutoff_ts.is_empty() {
         store_err(conn.execute(
-            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')",
-            [],
+            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status = ?1 OR status = ?2",
+            rusqlite::params![RunStatus::Complete.as_str(), RunStatus::Aborted.as_str()],
         ))?;
     } else {
         store_err(conn.execute(
-            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
-            rusqlite::params![cutoff_ts],
+            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE (status = ?1 OR status = ?2) AND updated_at < ?3",
+            rusqlite::params![RunStatus::Complete.as_str(), RunStatus::Aborted.as_str(), cutoff_ts],
         ))?;
     }
 

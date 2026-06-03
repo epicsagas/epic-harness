@@ -10,6 +10,8 @@ use std::io;
 
 use super::{query_row_optional, store_err};
 
+const MAX_PIPELINE_LIST: usize = 200;
+
 /// Upsert a pipeline state. If a pipeline with the same id exists, it's replaced.
 #[allow(dead_code)]
 pub fn upsert_pipeline_conn(
@@ -67,9 +69,9 @@ pub fn read_running_pipeline_conn(
 }
 
 /// List all pipelines across all projects (for dashboard).
-/// Capped at `limit` results to prevent unbounded memory usage.
+/// Capped at `MAX_PIPELINE_LIST` results to prevent unbounded memory usage.
 pub fn list_all_pipelines_conn(conn: &Connection) -> io::Result<Vec<serde_json::Value>> {
-    list_all_pipelines_conn_limited(conn, 200)
+    list_all_pipelines_conn_limited(conn, MAX_PIPELINE_LIST)
 }
 
 /// List pipelines with a custom limit.
@@ -100,18 +102,19 @@ pub fn list_all_pipelines_conn_limited(
         if !val.is_object() {
             val = serde_json::Value::Object(Default::default());
         }
-        let map = val.as_object_mut().unwrap();
-        map.insert("id".into(), serde_json::Value::String(id));
-        map.insert("project".into(), serde_json::Value::String(project));
-        map.insert("status".into(), serde_json::Value::String(status));
-        if let Some(p) = phase {
-            map.insert("phase".into(), serde_json::Value::String(p));
+        if let Some(map) = val.as_object_mut() {
+            map.insert("id".into(), serde_json::Value::String(id));
+            map.insert("project".into(), serde_json::Value::String(project));
+            map.insert("status".into(), serde_json::Value::String(status));
+            if let Some(p) = phase {
+                map.insert("phase".into(), serde_json::Value::String(p));
+            }
+            if let Some(m) = mode {
+                map.insert("mode".into(), serde_json::Value::String(m));
+            }
+            map.insert("started_at".into(), serde_json::Value::String(created_at));
+            map.insert("updated_at".into(), serde_json::Value::String(updated_at));
         }
-        if let Some(m) = mode {
-            map.insert("mode".into(), serde_json::Value::String(m));
-        }
-        map.insert("started_at".into(), serde_json::Value::String(created_at));
-        map.insert("updated_at".into(), serde_json::Value::String(updated_at));
         Ok(val)
     }))?;
 
