@@ -1,5 +1,10 @@
 //! observations.rs — Observation records SQLite I/O
-#![allow(dead_code)] // standalone functions are public API for future use
+//!
+//! Dual-API: `_conn()` variants are wired into hooks/serve; standalone functions
+//! are public API for future CLI commands and batch import. Suppress dead_code
+//! at module level because the store layer is built incrementally — not all
+//! public functions have callers yet.
+#![allow(dead_code)]
 
 use rusqlite::Connection;
 use std::io;
@@ -65,6 +70,7 @@ pub fn insert_observation_conn(
 }
 
 /// Standalone insert — opens own connection.
+/// Currently unused; retained as public API for future batch import scenarios.
 #[allow(dead_code)]
 pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> {
     let conn = super::open_harness_db()?;

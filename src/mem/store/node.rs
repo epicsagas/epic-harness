@@ -101,6 +101,18 @@ pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
     Ok(nodes)
 }
 
+/// Read nodes with a SQL-level LIMIT (avoids loading all rows into memory).
+pub fn read_nodes_limited_conn(conn: &Connection, limit: usize) -> io::Result<Vec<Node>> {
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?");
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map(rusqlite::params![limit as i64], super::util::row_to_node)
+        .map_err(io::Error::other)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(nodes)
+}
+
 pub fn list_node_ids() -> io::Result<Vec<String>> {
     let conn = super::open_db()?;
     list_node_ids_conn(&conn)

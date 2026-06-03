@@ -371,10 +371,11 @@ pub fn run(input: &HookInput) -> i32 {
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
+    // sequence_id was used for JSONL row ordering; not needed with SQLite (ORDER BY id).
     let seq_id = if db.is_none() {
-        get_next_sequence_id(&session_file)
+        Some(get_next_sequence_id(&session_file))
     } else {
-        0
+        None
     };
 
     let mut record = ObsRecord {
@@ -388,7 +389,7 @@ pub fn run(input: &HookInput) -> i32 {
         failure_category: None,
         error_snippet: None,
         file_ext,
-        sequence_id: Some(seq_id),
+        sequence_id: seq_id,
         pipeline_id: super::common::detect_active_orbit_id(),
     };
 

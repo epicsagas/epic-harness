@@ -1,7 +1,8 @@
 //! orchestrator.rs — Orchestrator state SQLite I/O
-#![allow(dead_code)] // standalone functions are public API for future use
 //!
 //! Replaces file-based orchestrator/ directory with SQLite tables.
+//! See observations.rs for dead_code rationale.
+#![allow(dead_code)]
 //! flock(2) advisory locking is replaced by SQLite WAL transactions.
 
 use rusqlite::Connection;

@@ -813,7 +813,11 @@ pub fn run(_input: &HookInput) -> i32 {
         })
         .unwrap_or_default();
 
-    let observations = if !sqlite_obs.is_empty() {
+    // Track whether data came from SQLite to avoid writing it back (double-write prevention).
+    // When reading from JSONL fallback, the data may have already been imported during
+    // legacy migration — writing it again would create duplicate records in SQLite.
+    let obs_from_sqlite = !sqlite_obs.is_empty();
+    let observations = if obs_from_sqlite {
         sqlite_obs
     } else {
         // Fallback: read from JSONL files
@@ -916,10 +920,13 @@ pub fn run(_input: &HookInput) -> i32 {
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
     };
-    // Write evolution record to SQLite (primary) + JSONL (fallback)
-    if let Some(ref conn) = db {
-        if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
-            eprintln!("[reflect] SQLite evo write failed: {e}");
+    // Write evolution record to SQLite — only when obs source was also SQLite
+    // (avoids double-importing records already in DB from legacy migration)
+    if obs_from_sqlite {
+        if let Some(ref conn) = db {
+            if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
+                eprintln!("[reflect] SQLite evo write failed: {e}");
+            }
         }
     }
     append_jsonl(&evolution_file(), &record);
@@ -979,9 +986,11 @@ pub fn run(_input: &HookInput) -> i32 {
     }
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
 
-    // Save metrics to SQLite (primary) + JSON file (fallback)
-    if let Some(ref conn) = db {
-        let _ = crate::store::metrics::save_metrics_conn(conn, &metrics);
+    // Save metrics to SQLite — only when obs source was also SQLite (double-write prevention)
+    if obs_from_sqlite {
+        if let Some(ref conn) = db {
+            let _ = crate::store::metrics::save_metrics_conn(conn, &metrics);
+        }
     }
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);

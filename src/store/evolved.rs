@@ -1,5 +1,7 @@
 //! evolved.rs — Evolved skills SQLite I/O
-#![allow(dead_code)] // standalone functions are public API for future use
+//!
+//! See observations.rs for dead_code rationale.
+#![allow(dead_code)]
 
 use rusqlite::Connection;
 use std::collections::HashMap;

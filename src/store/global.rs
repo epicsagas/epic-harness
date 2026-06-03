@@ -1,5 +1,7 @@
 //! global.rs — Cross-project pattern SQLite I/O
-#![allow(dead_code)] // standalone functions are public API for future use
+//!
+//! See observations.rs for dead_code rationale.
+#![allow(dead_code)]
 
 use rusqlite::Connection;
 use std::io;
@@ -118,14 +120,30 @@ type PatternRow = (String, String, f64, f64, String, String, String);
 
 #[allow(clippy::type_complexity)]
 fn map_pattern_row(row: &rusqlite::Row<'_>) -> Result<PatternRow, rusqlite::Error> {
+    let per_err = row.get::<_, String>(4).unwrap_or_else(|e| {
+        eprintln!(
+            "[store/global] schema mismatch: per_error_stats col missing ({e}) — using fallback"
+        );
+        "{}".into()
+    });
+    let failure = row.get::<_, String>(5).unwrap_or_else(|e| {
+        eprintln!(
+            "[store/global] schema mismatch: failure_patterns col missing ({e}) — using fallback"
+        );
+        "[]".into()
+    });
+    let weak = row.get::<_, String>(6).unwrap_or_else(|e| {
+        eprintln!("[store/global] schema mismatch: weak_tools col missing ({e}) — using fallback");
+        "[]".into()
+    });
     Ok((
         row.get(0)?,
         row.get(1)?,
         row.get(2)?,
         row.get(3)?,
-        row.get::<_, String>(4).unwrap_or_else(|_| "{}".into()),
-        row.get::<_, String>(5).unwrap_or_else(|_| "[]".into()),
-        row.get::<_, String>(6).unwrap_or_else(|_| "[]".into()),
+        per_err,
+        failure,
+        weak,
     ))
 }
 

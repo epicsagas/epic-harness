@@ -1,5 +1,7 @@
 //! metrics.rs — Metrics state SQLite I/O (3-table normalized)
-#![allow(dead_code)] // standalone functions are public API for future use
+//!
+//! See observations.rs for dead_code rationale.
+#![allow(dead_code)]
 //!
 //! Replaces the single `metrics.json` file with:
 //! - `metrics_state` — key-value scalar fields
@@ -120,7 +122,9 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
     })
 }
 
-/// Standalone load.
+/// Standalone load — opens own connection.
+/// Currently unused; retained as public API for CLI commands.
+#[allow(dead_code)]
 pub fn load_metrics() -> io::Result<Metrics> {
     let conn = super::open_harness_db()?;
     load_metrics_conn(&conn)
@@ -164,6 +168,8 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     }
 
     // Score history — clear and re-insert within the transaction.
+    // Full replacement is used because Metrics.score_history is an append-only Vec
+    // capped at 50 entries, and callers always load-then-save the full struct.
     // WAL mode guarantees concurrent readers see either the old or new state,
     // never an intermediate empty table.
     store_err(tx.execute("DELETE FROM score_history", []))?;
@@ -214,7 +220,9 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     Ok(())
 }
 
-/// Standalone save.
+/// Standalone save — opens own connection.
+/// Currently unused; retained as public API for CLI commands.
+#[allow(dead_code)]
 pub fn save_metrics(m: &Metrics) -> io::Result<()> {
     let conn = super::open_harness_db()?;
     save_metrics_conn(&conn, m)

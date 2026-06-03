@@ -230,7 +230,7 @@ fn handle_list_nodes(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .unwrap_or(200)
         .min(1000);
     let nodes = match store::open_db() {
-        Ok(conn) => store::read_all_nodes_conn(&conn).unwrap_or_default(),
+        Ok(conn) => store::read_nodes_limited_conn(&conn, limit).unwrap_or_default(),
         Err(e) => {
             eprintln!("[serve] failed to open DB for /api/nodes: {e}");
             Vec::new()
@@ -238,7 +238,6 @@ fn handle_list_nodes(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     };
     let results: Vec<serde_json::Value> = nodes
         .into_iter()
-        .take(limit)
         .map(|n| {
             serde_json::json!({
                 "id": n.frontmatter.id,
@@ -344,7 +343,11 @@ fn handle_agent_dismiss(
     if !orch::validate_agent_id(agent_id) {
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
-    let ok = orch::dismiss_agent(harness_dir, agent_id);
+    // SQLite-first: try DB dismiss, fall back to file-based if DB unavailable
+    let ok = crate::store::with_harness_db(|conn| {
+        crate::store::orchestrator::dismiss_agent_conn(conn, agent_id)
+    })
+    .unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
     let body = serde_json::json!({"ok": ok, "dismissed": agent_id}).to_string();
     json_response(&body)
 }

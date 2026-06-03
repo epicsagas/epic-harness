@@ -100,6 +100,10 @@ pub fn harness_db_path() -> std::path::PathBuf {
 ///
 /// For existing databases, schema init is skipped (checked via _harness_meta).
 /// For new databases, schema is applied and legacy migration runs if needed.
+///
+/// TODO: In serve mode (long-running HTTP server), each request opens a new connection.
+/// Consider connection pooling or `Arc<Mutex<Connection>>` reuse to reduce schema
+/// version check overhead. CLI hook usage (one-shot) is fine as-is.
 pub fn open_harness_db() -> io::Result<Connection> {
     let path = harness_db_path();
 
