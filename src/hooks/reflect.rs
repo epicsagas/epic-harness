@@ -78,6 +78,9 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
+    // Open DB once before the slug loop — all slugs share the same harness.db
+    let shared_db = crate::store::open_harness_db().ok();
+
     // Collect obs from all target project slugs — try SQLite first, fall back to JSONL
     for slug in &project_slugs {
         // Fix 1: Verify resolved path stays within harness projects root
@@ -97,11 +100,11 @@ pub fn run_context(
         }
 
         // Try SQLite first (primary source after migration)
-        let sqlite_obs = crate::store::open_harness_db()
-            .ok()
+        let sqlite_obs = shared_db
+            .as_ref()
             .and_then(|conn| {
                 crate::store::observations::query_obs_for_date_range_conn(
-                    &conn, &date_from, &date_to, None,
+                    conn, &date_from, &date_to, None,
                 )
                 .ok()
             })
@@ -250,8 +253,8 @@ pub fn run_context(
     });
 
     // 2. Evolution stats (SQLite first, fallback to JSONL)
-    let evo_records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::evolution::query_all_records_conn(&conn) {
+    let evo_records: Vec<serde_json::Value> = if let Some(ref conn) = shared_db {
+        match crate::store::evolution::query_all_records_conn(conn) {
             Ok(recs) => recs
                 .iter()
                 .filter_map(|r| serde_json::to_value(r).ok())
@@ -262,7 +265,6 @@ pub fn run_context(
             }
         }
     } else {
-        eprintln!("[reflect] harness.db unavailable for evolution records, falling back to JSONL");
         read_jsonl_typed::<serde_json::Value>(&evolution_file())
     };
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
@@ -336,8 +338,8 @@ pub fn run_context(
     });
 
     // 3. Metrics summary (SQLite first, fallback to JSON)
-    let metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::metrics::load_metrics_conn(&conn) {
+    let metrics: Metrics = if let Some(ref conn) = shared_db {
+        match crate::store::metrics::load_metrics_conn(conn) {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
@@ -345,7 +347,6 @@ pub fn run_context(
             }
         }
     } else {
-        eprintln!("[reflect] harness.db unavailable for metrics, falling back to JSON");
         read_json(&metrics_file(), default_metrics())
     };
     let sh = &metrics.score_history;
@@ -418,8 +419,8 @@ pub fn run_context(
     });
 
     // 4. Session snapshots (SQLite first, fallback to JSON)
-    let snapshots: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::sessions::list_recent_snapshots_conn(&conn, 5) {
+    let snapshots: Vec<serde_json::Value> = if let Some(ref conn) = shared_db {
+        match crate::store::sessions::list_recent_snapshots_conn(conn, 5) {
             Ok(snaps) => snaps
                 .iter()
                 .map(|s| {
@@ -797,11 +798,12 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
-    let sqlite_obs = crate::store::open_harness_db()
-        .ok()
+    let db = crate::store::open_harness_db().ok();
+    let sqlite_obs = db
+        .as_ref()
         .and_then(|conn| {
             crate::store::observations::query_obs_for_date_range_conn(
-                &conn, &today_str, &today_str, None,
+                conn, &today_str, &today_str, None,
             )
             .map_err(|e| {
                 eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
@@ -840,8 +842,8 @@ pub fn run(_input: &HookInput) -> i32 {
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
     // 3. Stagnation (load metrics from SQLite, fallback to JSON)
-    let mut metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::metrics::load_metrics_conn(&conn) {
+    let mut metrics: Metrics = if let Some(ref conn) = db {
+        match crate::store::metrics::load_metrics_conn(conn) {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
@@ -849,7 +851,6 @@ pub fn run(_input: &HookInput) -> i32 {
             }
         }
     } else {
-        eprintln!("[reflect] harness.db unavailable for metrics load, falling back to JSON");
         read_json(&metrics_file(), default_metrics())
     };
     let (should_rollback, improved, rolled_back_count) =
@@ -916,8 +917,8 @@ pub fn run(_input: &HookInput) -> i32 {
         analysis_summary: evolve::build_summary(&analysis),
     };
     // Write evolution record to SQLite (primary) + JSONL (fallback)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        if let Err(e) = crate::store::evolution::insert_record_conn(&conn, &record) {
+    if let Some(ref conn) = db {
+        if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
             eprintln!("[reflect] SQLite evo write failed: {e}");
         }
     }
@@ -979,8 +980,8 @@ pub fn run(_input: &HookInput) -> i32 {
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
 
     // Save metrics to SQLite (primary) + JSON file (fallback)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        let _ = crate::store::metrics::save_metrics_conn(&conn, &metrics);
+    if let Some(ref conn) = db {
+        let _ = crate::store::metrics::save_metrics_conn(conn, &metrics);
     }
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);

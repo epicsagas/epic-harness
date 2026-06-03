@@ -1,6 +1,5 @@
 //! observations.rs — Observation records SQLite I/O
-
-#![allow(dead_code)]
+#![allow(dead_code)] // standalone functions are public API for future use
 
 use rusqlite::Connection;
 use std::io;
@@ -306,7 +305,7 @@ mod tests {
     use rusqlite::Connection;
 
     fn in_memory_db() -> Connection {
-        super::super::tests::in_memory_db()
+        super::super::in_memory_db()
     }
 
     #[test]

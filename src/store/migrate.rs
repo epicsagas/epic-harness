@@ -137,6 +137,15 @@ fn import_observations(
         return Ok(());
     }
 
+    // Prepare INSERT statement once for all observation rows.
+    let mut insert_stmt = store_err(conn.prepare(
+        "INSERT INTO observations
+         (timestamp, session_id, tool, tool_category, action, result, score,
+          dim_success, dim_quality, dim_cost, failure_category, error_snippet,
+          file_ext, sequence_id, pipeline_id)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+    ))?;
+
     let entries = std::fs::read_dir(&obs_dir)?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -170,9 +179,32 @@ fn import_observations(
             }
             match serde_json::from_str::<crate::shared::obs::ObsRecord>(&line) {
                 Ok(rec) => {
-                    if let Err(e) =
-                        super::observations::insert_observation_conn(conn, &rec, &session_id)
-                    {
+                    let (dim_s, dim_q, dim_c) = match &rec.dimensions {
+                        Some(d) => (
+                            Some(d.tool_success),
+                            Some(d.output_quality),
+                            Some(d.execution_cost),
+                        ),
+                        None => (None, None, None),
+                    };
+                    let result = insert_stmt.execute(rusqlite::params![
+                        rec.timestamp,
+                        session_id,
+                        rec.tool,
+                        rec.tool_category,
+                        rec.action,
+                        rec.result,
+                        rec.score,
+                        dim_s,
+                        dim_q,
+                        dim_c,
+                        rec.failure_category,
+                        rec.error_snippet,
+                        rec.file_ext,
+                        rec.sequence_id.map(super::u64_to_i64),
+                        rec.pipeline_id,
+                    ]);
+                    if let Err(e) = result {
                         eprintln!("[migrate] insert obs error: {e}");
                         stats.errors += 1;
                     } else {

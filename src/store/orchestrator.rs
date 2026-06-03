@@ -1,5 +1,5 @@
 //! orchestrator.rs — Orchestrator state SQLite I/O
-#![allow(dead_code)]
+#![allow(dead_code)] // standalone functions are public API for future use
 //!
 //! Replaces file-based orchestrator/ directory with SQLite tables.
 //! flock(2) advisory locking is replaced by SQLite WAL transactions.
@@ -342,7 +342,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        super::super::tests::in_memory_db()
+        super::super::in_memory_db()
     }
 
     #[test]

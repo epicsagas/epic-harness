@@ -178,13 +178,15 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 fn handle_get_run(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = crate::store::with_harness_db(|conn| {
         crate::store::orchestrator::read_run_conn(conn).map(|opt| {
-            opt.map(|r| serde_json::to_string(&r).unwrap_or_else(|_| "{}".into()))
+            opt.as_ref()
+                .map(|r| json_or(r, "{}"))
                 .unwrap_or_else(|| "{}".into())
         })
     })
     .unwrap_or_else(|| {
         orch::read_run(harness_dir)
-            .map(|r| serde_json::to_string(&r).unwrap_or_else(|_| "{}".into()))
+            .as_ref()
+            .map(|r| json_or(r, "{}"))
             .unwrap_or_else(|| "{}".into())
     });
     json_response(&body)
@@ -193,13 +195,12 @@ fn handle_get_run(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec
 fn handle_get_events(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec<u8>>> {
     let data = crate::store::with_harness_db(|conn| {
         crate::store::orchestrator::read_run_conn(conn).map(|opt| {
-            opt.map(|r| serde_json::to_string(&r).unwrap_or_else(|_| "null".into()))
+            opt.as_ref()
+                .map(|r| json_or(r, "null"))
                 .unwrap_or_else(|| "null".into())
         })
     })
-    .unwrap_or_else(|| {
-        serde_json::to_string(&orch::read_run(harness_dir)).unwrap_or_else(|_| "null".into())
-    });
+    .unwrap_or_else(|| json_or(&orch::read_run(harness_dir), "null"));
     let sse_body = format!("data: {data}\n\n");
     Response::from_string(sse_body)
         .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
@@ -356,6 +357,11 @@ fn json_response(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .with_header(
             Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173").unwrap(),
         )
+}
+
+/// Serialize a value to JSON, or return the fallback string on failure.
+fn json_or<T: serde::Serialize>(val: &T, fallback: &str) -> String {
+    serde_json::to_string(val).unwrap_or_else(|_| fallback.into())
 }
 
 fn percent_decode(s: &str) -> String {

@@ -1,5 +1,5 @@
 //! metrics.rs — Metrics state SQLite I/O (3-table normalized)
-#![allow(dead_code)]
+#![allow(dead_code)] // standalone functions are public API for future use
 //!
 //! Replaces the single `metrics.json` file with:
 //! - `metrics_state` — key-value scalar fields
@@ -163,8 +163,9 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         store_err(upsert("last_error_context", v))?;
     }
 
-    // Score history — keep the most recent MAX_SCORE_HISTORY entries.
-    // Clear and re-insert in chronological order within the transaction.
+    // Score history — clear and re-insert within the transaction.
+    // WAL mode guarantees concurrent readers see either the old or new state,
+    // never an intermediate empty table.
     store_err(tx.execute("DELETE FROM score_history", []))?;
     let entries: Vec<&SessionScoreEntry> = m
         .score_history
@@ -224,7 +225,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        super::super::tests::in_memory_db()
+        super::super::in_memory_db()
     }
 
     fn sample_metrics() -> Metrics {

@@ -3,9 +3,7 @@
 use rusqlite::Connection;
 
 /// Shared in-memory test database helper.
-/// Each `#[cfg(test)]` submodule should use `super::super::tests::in_memory_db()`
-/// (or `super::super::super::tests::in_memory_db()` from sub-sub-modules) instead
-/// of defining its own copy.
+/// Re-exported via `super::in_memory_db` from submodules — use `super::in_memory_db()`.
 pub(crate) fn in_memory_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     super::schema::init_schema(&conn).unwrap();

@@ -1,5 +1,5 @@
 //! evolved.rs — Evolved skills SQLite I/O
-#![allow(dead_code)]
+#![allow(dead_code)] // standalone functions are public API for future use
 
 use rusqlite::Connection;
 use std::collections::HashMap;
@@ -54,41 +54,31 @@ pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRo
 }
 
 /// Inner implementation shared by [`list_skills_conn`] and [`list_skills_full_conn`].
+///
+/// When `include_body` is false, `skill_md` is projected as `''` so a single
+/// row-mapping closure handles both cases without column-index drift.
 fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
     let sql = if include_body {
         "SELECT name, origin, confidence, project, skill_md, active, created, updated
          FROM evolved_skills ORDER BY name"
     } else {
-        "SELECT name, origin, confidence, project, active, created, updated
+        "SELECT name, origin, confidence, project, '' AS skill_md, active, created, updated
          FROM evolved_skills ORDER BY name"
     };
 
     let mut stmt = store_err(conn.prepare(sql))?;
 
     let rows = store_err(stmt.query_map([], |row| {
-        if include_body {
-            Ok(EvolvedSkillRow {
-                name: row.get(0)?,
-                origin: row.get(1)?,
-                confidence: row.get(2)?,
-                project: row.get(3)?,
-                skill_md: row.get(4)?,
-                active: row.get::<_, i32>(5)? != 0,
-                created: row.get(6)?,
-                updated: row.get(7)?,
-            })
-        } else {
-            Ok(EvolvedSkillRow {
-                name: row.get(0)?,
-                origin: row.get(1)?,
-                confidence: row.get(2)?,
-                project: row.get(3)?,
-                skill_md: String::new(),
-                active: row.get::<_, i32>(4)? != 0,
-                created: row.get(5)?,
-                updated: row.get(6)?,
-            })
-        }
+        Ok(EvolvedSkillRow {
+            name: row.get(0)?,
+            origin: row.get(1)?,
+            confidence: row.get(2)?,
+            project: row.get(3)?,
+            skill_md: row.get(4)?,
+            active: row.get::<_, i32>(5)? != 0,
+            created: row.get(6)?,
+            updated: row.get(7)?,
+        })
     }))?;
 
     let mut skills = Vec::new();
@@ -170,7 +160,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        super::super::tests::in_memory_db()
+        super::super::in_memory_db()
     }
 
     fn sample_skill(name: &str) -> EvolvedSkillRow {
