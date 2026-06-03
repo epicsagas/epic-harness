@@ -250,6 +250,59 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
     })
 }
 
+/// Query the N most recent observation records (for dashboard activity feed).
+pub fn query_latest_observations_conn(
+    conn: &Connection,
+    limit: usize,
+) -> io::Result<Vec<ObsRecord>> {
+    let mut stmt = store_err(conn.prepare(
+        "SELECT timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost,
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+         FROM observations ORDER BY id DESC LIMIT ?1",
+    ))?;
+
+    let rows = store_err(stmt.query_map(rusqlite::params![limit as i64], |row| {
+        let dim_s: Option<f64> = row.get(6)?;
+        let dim_q: Option<f64> = row.get(7)?;
+        let dim_c: Option<f64> = row.get(8)?;
+        Ok(ObsRecord {
+            timestamp: row.get(0)?,
+            tool: row.get(1)?,
+            tool_category: row.get(2)?,
+            action: row.get(3)?,
+            result: row.get(4)?,
+            score: row.get(5)?,
+            dimensions: {
+                let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+                let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
+                if any_some && !all_some {
+                    None
+                } else if all_some {
+                    Some(ScoreDimensions {
+                        tool_success: dim_s.unwrap_or(0.0),
+                        output_quality: dim_q.unwrap_or(0.0),
+                        execution_cost: dim_c.unwrap_or(0.0),
+                    })
+                } else {
+                    None
+                }
+            },
+            failure_category: row.get(9)?,
+            error_snippet: row.get(10)?,
+            file_ext: row.get(11)?,
+            sequence_id: row.get::<_, Option<i64>>(12)?.map(super::i64_to_u64),
+            pipeline_id: row.get(13)?,
+        })
+    }))?;
+
+    let mut records = Vec::new();
+    for r in rows {
+        records.push(store_err(r)?);
+    }
+    Ok(records)
+}
+
 /// Get the last action for a given session (replaces file tail read).
 pub fn query_last_action_conn(conn: &Connection, session_id: &str) -> io::Result<Option<String>> {
     query_row_optional(conn.query_row(
