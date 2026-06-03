@@ -137,7 +137,7 @@ pub fn query_obs_for_date_range_conn(
                 failure_category: row.get(9)?,
                 error_snippet: row.get(10)?,
                 file_ext: row.get(11)?,
-                sequence_id: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+                sequence_id: row.get::<_, Option<i64>>(12)?.map(super::i64_to_u64),
                 pipeline_id: row.get(13)?,
             })
         }),

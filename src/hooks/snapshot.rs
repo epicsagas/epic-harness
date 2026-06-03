@@ -139,16 +139,23 @@ pub fn run(input: &HookInput) -> i32 {
         .unwrap_or_default()
         .as_millis() as i64;
 
-    // Write to SQLite (primary)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        let _ = crate::store::sessions::insert_snapshot_conn(&conn, &snapshot, millis);
-    }
-
-    // Also write JSONL file for backward compatibility
+    // Write to SQLite (primary). Only fall back to a JSON file when the DB is
+    // unavailable — writing to both stores unconditionally causes sessions/ to
+    // accumulate stale files and resume.rs to surface stale data when the DB is
+    // healthy but the file timestamp is newer.
     let filename = format!("snapshot_{}.json", millis);
-    let path = sessions_dir().join(&filename);
-    if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-        let _ = std::fs::write(&path, json);
+    let sqlite_ok = crate::store::open_harness_db()
+        .ok()
+        .and_then(|conn| {
+            crate::store::sessions::insert_snapshot_conn(&conn, &snapshot, millis).ok()
+        })
+        .is_some();
+
+    if !sqlite_ok {
+        let path = sessions_dir().join(&filename);
+        if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
+            let _ = std::fs::write(&path, json);
+        }
     }
 
     hint(

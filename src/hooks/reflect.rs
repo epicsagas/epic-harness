@@ -104,7 +104,10 @@ pub fn run_context(
     // See policy comment in run() — SQLite is required here, no JSONL fallback.
     let recs: Vec<ObsRecord> = match shared_db.as_ref() {
         Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
-            conn, &date_from, &date_to, None,
+            conn,
+            &date_from,
+            &date_to,
+            Some(50_000),
         ) {
             Ok(r) => r,
             Err(e) => {

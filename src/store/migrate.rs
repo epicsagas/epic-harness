@@ -11,8 +11,10 @@ use super::{ImmediateTx, store_err};
 /// Entry point for the `migrate` subcommand.
 ///
 /// `dry_run = true` scans files and reports what would be imported without writing anything.
+/// `reset = true` clears an `in_progress` marker left by a previously interrupted migration,
+/// allowing the import to be retried without manual DB surgery.
 /// Returns an exit code (0 = success, 1 = error).
-pub fn run_subcommand(dry_run: bool) -> i32 {
+pub fn run_subcommand(dry_run: bool, reset: bool) -> i32 {
     let conn = match super::open_harness_db() {
         Ok(c) => c,
         Err(e) => {
@@ -35,11 +37,22 @@ pub fn run_subcommand(dry_run: bool) -> i32 {
             return 0;
         }
         Some("in_progress") => {
-            eprintln!(
-                "[migrate] a previous migration was interrupted. \
-                 Delete the 'legacy_migrated' key from _harness_meta and re-run to retry."
-            );
-            return 1;
+            if reset {
+                if let Err(e) = conn.execute(
+                    "DELETE FROM _harness_meta WHERE key = 'legacy_migrated'",
+                    [],
+                ) {
+                    eprintln!("[migrate] failed to clear in_progress marker: {e}");
+                    return 1;
+                }
+                println!("[migrate] cleared interrupted migration marker — retrying");
+            } else {
+                eprintln!(
+                    "[migrate] a previous migration was interrupted. \
+                     Re-run with --reset to clear the marker and retry."
+                );
+                return 1;
+            }
         }
         _ => {}
     }
@@ -370,13 +383,16 @@ fn import_evolution(
         return Ok(());
     }
 
-    // Stream via BufReader; wrap all inserts in a single ImmediateTx so a
-    // mid-import crash doesn't leave a partially-imported file with
-    // legacy_migrated='in_progress' stuck permanently.
+    // Stream via BufReader with batched transactions (BATCH_SIZE records per commit)
+    // to cap WAL growth. import_observations uses per-file transactions for the same
+    // reason; evolution.jsonl is a single large file so we batch by record count.
+    const BATCH_SIZE: usize = 500;
     let file = std::fs::File::open(&evo_file)?;
     let reader = std::io::BufReader::new(file);
 
-    let tx = ImmediateTx::begin(conn)?;
+    let mut records_in_batch: usize = 0;
+    let mut current_tx = ImmediateTx::begin(conn)?;
+
     for line in reader.lines() {
         stats.total_lines += 1;
         let line = match line {
@@ -397,6 +413,12 @@ fn import_evolution(
                     stats.errors += 1;
                 } else {
                     stats.evo_imported += 1;
+                    records_in_batch += 1;
+                    if records_in_batch >= BATCH_SIZE {
+                        current_tx.commit()?;
+                        records_in_batch = 0;
+                        current_tx = ImmediateTx::begin(conn)?;
+                    }
                 }
             }
             Err(e) => {
@@ -405,7 +427,7 @@ fn import_evolution(
             }
         }
     }
-    tx.commit()?;
+    current_tx.commit()?;
     Ok(())
 }
 

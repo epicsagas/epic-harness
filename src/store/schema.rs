@@ -298,20 +298,31 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
     // v2→v3: Add UNIQUE constraint on score_history.timestamp.
     // SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so we recreate the table.
     //
-    // Atomicity: BEGIN IMMEDIATE and the schema_version bump are embedded in a single
-    // execute_batch call. rusqlite's execute_batch maps to sqlite3_exec, which correctly
-    // handles BEGIN/COMMIT as SQL statements. We must NOT combine an external ImmediateTx
-    // RAII guard with execute_batch — execute_batch issues its own implicit autocommits
-    // for each statement when not already inside a BEGIN block, so the guard would not
-    // protect the DDL statements. The embedded BEGIN here removes that ambiguity.
+    // Concurrency: ImmediateTx acquires a write lock before the version re-check,
+    // closing the TOCTOU window where two processes could both read version=1 in
+    // init_schema() and both enter run_migrations(1, 3). The re-read inside the lock
+    // ensures the second process skips the migration once the first has committed.
     //
-    // Crash recovery: if the process dies after BEGIN but before COMMIT, SQLite rolls
-    // back automatically on the next open (WAL + journal). If it dies after COMMIT,
-    // schema_version=3 is set and the migration block is skipped on next startup.
+    // Crash recovery: if the process dies after ImmediateTx::begin but before commit(),
+    // the RAII guard issues ROLLBACK automatically. If it dies after commit(), the
+    // schema_version=3 row is durable and the re-check skips the migration on restart.
     if to_version >= 3 && from_version < 3 {
+        let tx = super::ImmediateTx::begin(conn)?;
+        // Re-read version inside the lock to guard against concurrent migration.
+        let current_v: Option<u32> = conn
+            .query_row(
+                "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|v| v.parse().ok());
+        if current_v.map(|v| v >= 3).unwrap_or(false) {
+            // Already migrated by a concurrent process — drop tx (auto-ROLLBACK).
+            return Ok(());
+        }
         store_err(conn.execute_batch(
-            "BEGIN IMMEDIATE;
-             CREATE TABLE IF NOT EXISTS score_history_v3 (
+            "CREATE TABLE IF NOT EXISTS score_history_v3 (
                  id           INTEGER PRIMARY KEY AUTOINCREMENT,
                  timestamp    TEXT NOT NULL UNIQUE,
                  success_rate REAL NOT NULL,
@@ -325,10 +336,13 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
                  SELECT id, timestamp, success_rate, avg_score, observations,
                         dim_success, dim_quality, dim_cost FROM score_history;
              DROP TABLE score_history;
-             ALTER TABLE score_history_v3 RENAME TO score_history;
-             INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', '3');
-             COMMIT;",
+             ALTER TABLE score_history_v3 RENAME TO score_history;",
         ))?;
+        store_err(conn.execute(
+            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', '3')",
+            [],
+        ))?;
+        tx.commit()?;
         return Ok(());
     }
 

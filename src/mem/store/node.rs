@@ -54,7 +54,10 @@ pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> io::Result<Vec<Node>>
             super::util::row_to_node,
         )
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| {
+            r.map_err(|e| eprintln!("[mem/node] row deserialization error: {e}"))
+                .ok()
+        })
         .collect();
     Ok(nodes)
 }
@@ -96,7 +99,10 @@ pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
     let nodes: Vec<Node> = stmt
         .query_map([], super::util::row_to_node)
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| {
+            r.map_err(|e| eprintln!("[mem/node] row deserialization error: {e}"))
+                .ok()
+        })
         .collect();
     Ok(nodes)
 }
@@ -109,7 +115,10 @@ pub fn read_nodes_limited_conn(conn: &Connection, limit: usize) -> io::Result<Ve
     let nodes: Vec<Node> = stmt
         .query_map(rusqlite::params![limit as i64], super::util::row_to_node)
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| {
+            r.map_err(|e| eprintln!("[mem/node] row deserialization error: {e}"))
+                .ok()
+        })
         .collect();
     Ok(nodes)
 }

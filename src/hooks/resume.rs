@@ -3,6 +3,8 @@ use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::path::Path;
 
+use rusqlite::Connection;
+
 use super::common::*;
 use crate::config::CONFIG;
 use crate::mem::store;
@@ -116,7 +118,7 @@ fn apply_cold_start_presets(stacks: &[&str]) -> u32 {
     applied
 }
 
-fn get_cross_project_hints() -> Vec<String> {
+fn get_cross_project_hints(db: Option<&Connection>) -> Vec<String> {
     if !cross_project_file().is_file() {
         return vec![];
     }
@@ -127,9 +129,9 @@ fn get_cross_project_hints() -> Vec<String> {
         .unwrap_or("")
         .to_string();
 
-    // Try SQLite first, fallback to JSONL
-    let records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::global::query_patterns_excluding_conn(&conn, &project_name, 20) {
+    // Try SQLite first (reuse shared connection), fallback to JSONL
+    let records: Vec<serde_json::Value> = if let Some(conn) = db {
+        match crate::store::global::query_patterns_excluding_conn(conn, &project_name, 20) {
             Ok(patterns) => patterns,
             Err(e) => {
                 eprintln!(
@@ -142,7 +144,6 @@ fn get_cross_project_hints() -> Vec<String> {
             }
         }
     } else {
-        eprintln!("[resume] harness.db unavailable for global patterns, falling back to JSONL");
         if !global_patterns_file().is_file() {
             return vec![];
         }
@@ -269,9 +270,12 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
+    // Open harness.db once and share across all reads in this session start.
+    let shared_db = crate::store::open_harness_db().ok();
+
     // 1. Latest session snapshot (SQLite first, fallback to JSON file)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        if let Ok(Some(snap)) = crate::store::sessions::get_latest_snapshot_conn(&conn) {
+    if let Some(conn) = shared_db.as_ref() {
+        if let Ok(Some(snap)) = crate::store::sessions::get_latest_snapshot_conn(conn) {
             if !snap.summary.is_empty() {
                 hint("resume", &format!("Previous: {}", snap.summary));
             }
@@ -310,9 +314,9 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 2. Eval metrics — try SQLite first, fall back to JSON file
-    let metrics: Metrics = crate::store::open_harness_db()
-        .ok()
-        .and_then(|conn| crate::store::metrics::load_metrics_conn(&conn).ok())
+    let metrics: Metrics = shared_db
+        .as_ref()
+        .and_then(|conn| crate::store::metrics::load_metrics_conn(conn).ok())
         .filter(|m| m.total_sessions > 0)
         .unwrap_or_else(|| read_json(&metrics_file(), default_metrics()));
     if metrics.total_sessions > 0 {
@@ -513,7 +517,7 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 8. Cross-project hints (#2)
-    for h in get_cross_project_hints() {
+    for h in get_cross_project_hints(shared_db.as_ref()) {
         hint("resume", &h);
     }
 

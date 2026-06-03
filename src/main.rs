@@ -176,7 +176,8 @@ fn main() {
         "reflect" => hooks::reflect::run(&input),
         "migrate" => {
             let dry_run = args.iter().any(|a| a == "--dry-run");
-            store::migrate::run_subcommand(dry_run)
+            let reset = args.iter().any(|a| a == "--reset");
+            store::migrate::run_subcommand(dry_run, reset)
         }
         "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
         | "update" => {
@@ -221,6 +222,7 @@ fn main() {
             eprintln!("USER SUBCOMMANDS:");
             eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
             eprintln!("    --dry-run  Preview what would be imported without writing");
+            eprintln!("    --reset    Clear an interrupted migration marker and retry");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
