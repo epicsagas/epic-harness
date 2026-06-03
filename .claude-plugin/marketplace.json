@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "epic",
+      "name": "epic-harness",
       "source": "./",
       "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness."
     }
