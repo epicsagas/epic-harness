@@ -175,10 +175,10 @@ fn main() {
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
         "migrate" => {
-        let dry_run = args.iter().any(|a| a == "--dry-run");
-        store::migrate::run_subcommand(dry_run)
-    }
-    "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
+            let dry_run = args.iter().any(|a| a == "--dry-run");
+            store::migrate::run_subcommand(dry_run)
+        }
+        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
         | "update" => {
             unreachable!()
         }

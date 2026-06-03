@@ -8,6 +8,7 @@ use super::store_err;
 /// Type-safe filter for pattern queries — prevents raw SQL injection.
 pub enum PatternFilter {
     /// Return all patterns regardless of project.
+    #[allow(dead_code)]
     All,
     /// Return patterns excluding the given project.
     Excluding(String),
@@ -57,6 +58,7 @@ pub fn query_patterns_excluding_conn(
 }
 
 /// Query all patterns (regardless of project).
+#[allow(dead_code)]
 pub fn query_all_patterns_conn(
     conn: &Connection,
     limit: usize,

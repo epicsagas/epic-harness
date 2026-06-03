@@ -124,7 +124,10 @@ pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<Str
     let mut stmt = store_err(conn.prepare("SELECT pattern_key, count FROM promotion_counters"))?;
 
     let rows = store_err(stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, super::i64_to_u64(row.get::<_, i64>(1)?)))
+        Ok((
+            row.get::<_, String>(0)?,
+            super::i64_to_u64(row.get::<_, i64>(1)?),
+        ))
     }))?;
 
     let mut counters = HashMap::new();

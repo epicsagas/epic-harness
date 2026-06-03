@@ -158,7 +158,9 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     //   → always UPSERT; the default value IS the absent state.
     match &m.last_session {
         Some(v) => store_err(upsert("last_session", v))?,
-        None => store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?,
+        None => {
+            store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?
+        }
     };
     match m.best_score {
         Some(v) => store_err(upsert("best_score", &v.to_string()))?,

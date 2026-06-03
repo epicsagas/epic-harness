@@ -12,10 +12,14 @@ use super::store_err;
 
 /// Insert an evolution record.
 pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Result<i64> {
-    let error_json = serde_json::to_string(&rec.error_patterns)
-        .unwrap_or_else(|e| { eprintln!("[store/evolution] error_patterns serialization failed: {e}"); "{}".into() });
-    let failure_json = serde_json::to_string(&rec.failure_patterns)
-        .unwrap_or_else(|e| { eprintln!("[store/evolution] failure_patterns serialization failed: {e}"); "[]".into() });
+    let error_json = serde_json::to_string(&rec.error_patterns).unwrap_or_else(|e| {
+        eprintln!("[store/evolution] error_patterns serialization failed: {e}");
+        "{}".into()
+    });
+    let failure_json = serde_json::to_string(&rec.failure_patterns).unwrap_or_else(|e| {
+        eprintln!("[store/evolution] failure_patterns serialization failed: {e}");
+        "[]".into()
+    });
 
     store_err(conn.execute(
         "INSERT INTO evolution_records

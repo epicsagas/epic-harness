@@ -109,7 +109,9 @@ pub fn run_context(
                 }
             },
             None => {
-                eprintln!("[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data");
+                eprintln!(
+                    "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
+                );
                 continue;
             }
         };
@@ -239,7 +241,11 @@ pub fn run_context(
                 .map_err(|e| eprintln!("[reflect] SQLite evolution read failed: {e}"))
                 .ok()
         })
-        .map(|recs| recs.iter().filter_map(|r| serde_json::to_value(r).ok()).collect())
+        .map(|recs| {
+            recs.iter()
+                .filter_map(|r| serde_json::to_value(r).ok())
+                .collect()
+        })
         .unwrap_or_default();
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
@@ -772,7 +778,9 @@ pub fn run(_input: &HookInput) -> i32 {
             }
         },
         None => {
-            eprintln!("[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data");
+            eprintln!(
+                "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
+            );
             return 1;
         }
     };

@@ -174,7 +174,10 @@ fn immediate_tx_rollbacks_on_drop() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(val, "before", "uncommitted transaction must be rolled back on drop");
+    assert_eq!(
+        val, "before",
+        "uncommitted transaction must be rolled back on drop"
+    );
 }
 
 #[test]
@@ -186,7 +189,10 @@ fn fk_violation_on_agent_without_run() {
          VALUES ('agent-x', 'nonexistent-run', 'worker', 'do thing', '[]', 'running', 'exec', 0.0, '')",
         [],
     );
-    assert!(result.is_err(), "FK violation must reject insert of agent with non-existent run_id");
+    assert!(
+        result.is_err(),
+        "FK violation must reject insert of agent with non-existent run_id"
+    );
 }
 
 #[test]
@@ -204,7 +210,10 @@ fn unique_constraint_on_score_history_timestamp() {
          VALUES ('2026-06-02T10:00:00Z', 0.7, 0.6, 5, 0.5, 0.5, 0.5)",
         [],
     );
-    assert!(result.is_err(), "UNIQUE constraint must reject duplicate score_history timestamp");
+    assert!(
+        result.is_err(),
+        "UNIQUE constraint must reject duplicate score_history timestamp"
+    );
 }
 
 #[test]

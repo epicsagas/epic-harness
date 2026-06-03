@@ -13,15 +13,16 @@ pub fn insert_snapshot_conn(
     snap: &SessionSnapshot,
     created_at_millis: i64,
 ) -> io::Result<i64> {
-    let pending_json = serde_json::to_string(&snap.pending_tasks)
-        .unwrap_or_else(|e| { eprintln!("[store/sessions] pending_tasks serialization failed: {e}"); "[]".into() });
-    let pipeline_json = snap
-        .pipeline_state
-        .as_ref()
-        .map(|v| serde_json::to_string(v).unwrap_or_else(|e| {
+    let pending_json = serde_json::to_string(&snap.pending_tasks).unwrap_or_else(|e| {
+        eprintln!("[store/sessions] pending_tasks serialization failed: {e}");
+        "[]".into()
+    });
+    let pipeline_json = snap.pipeline_state.as_ref().map(|v| {
+        serde_json::to_string(v).unwrap_or_else(|e| {
             eprintln!("[store/sessions] pipeline_state serialization failed: {e}");
             "{}".into()
-        }));
+        })
+    });
 
     store_err(conn.execute(
         "INSERT INTO sessions
