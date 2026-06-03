@@ -21,18 +21,27 @@ pub fn run_subcommand(dry_run: bool) -> i32 {
         }
     };
 
-    let already_migrated: bool = conn
+    let migration_state: Option<String> = conn
         .query_row(
             "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
             [],
             |row| row.get::<_, String>(0),
         )
-        .ok()
-        .is_some_and(|v| v == "1");
+        .ok();
 
-    if already_migrated {
-        println!("already migrated — nothing to do");
-        return 0;
+    match migration_state.as_deref() {
+        Some("1") => {
+            println!("already migrated — nothing to do");
+            return 0;
+        }
+        Some("in_progress") => {
+            eprintln!(
+                "[migrate] a previous migration was interrupted. \
+                 Delete the 'legacy_migrated' key from _harness_meta and re-run to retry."
+            );
+            return 1;
+        }
+        _ => {}
     }
 
     if dry_run {
@@ -141,40 +150,46 @@ pub(crate) fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
         total_lines: 0,
     };
 
-    // BEGIN IMMEDIATE acquires a write lock upfront, serializing concurrent migration
-    // attempts. ImmediateTx provides RAII rollback on drop for safety.
-    let tx = ImmediateTx::begin(conn)?;
-
-    // Re-check flag inside the write lock — a concurrent opener may have set it
-    // between our outer read above and this BEGIN IMMEDIATE.
-    let already: bool = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
+    // Phase 1: Reserve migration under write lock. ImmediateTx serializes concurrent
+    // callers; re-checking the flag inside the lock closes the TOCTOU window between
+    // the outer read in run_subcommand and this BEGIN IMMEDIATE.
+    {
+        let tx = ImmediateTx::begin(conn)?;
+        let already: bool = conn
+            .query_row(
+                "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .is_some_and(|v| v == "1" || v == "in_progress");
+        if already {
+            return Ok(stats); // tx drops → auto-ROLLBACK
+        }
+        store_err(conn.execute(
+            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', 'in_progress')",
             [],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
-        .is_some_and(|v| v == "1");
-    if already {
-        // tx drops → auto-ROLLBACK via ImmediateTx
-        return Ok(stats);
+        ))?;
+        tx.commit()?;
     }
 
-    // Import observations from obs/*.jsonl
+    // Phase 2: Per-file imports. Each source file gets its own ImmediateTx so the WAL
+    // never grows unboundedly for large legacy datasets. The 'in_progress' marker set
+    // above prevents concurrent migration attempts from racing with these small commits.
     import_observations(conn, &harness_dir, &mut stats)?;
-    // Import sessions from sessions/*.json
     import_sessions(conn, &harness_dir, &mut stats)?;
-    // Import evolution from evolution.jsonl
     import_evolution(conn, &harness_dir, &mut stats)?;
-    // Import metrics from metrics.json
     import_metrics(conn, &harness_dir, &mut stats)?;
 
-    // Mark as migrated and commit atomically
-    store_err(conn.execute(
-        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
-        [],
-    ))?;
-    tx.commit()?;
+    // Phase 3: Mark complete.
+    {
+        let tx = ImmediateTx::begin(conn)?;
+        store_err(conn.execute(
+            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
+            [],
+        ))?;
+        tx.commit()?;
+    }
 
     Ok(stats)
 }
@@ -189,15 +204,6 @@ fn import_observations(
         return Ok(());
     }
 
-    // Prepare INSERT statement once for all observation rows.
-    let mut insert_stmt = store_err(conn.prepare(
-        "INSERT INTO observations
-         (timestamp, session_id, tool, tool_category, action, result, score,
-          dim_success, dim_quality, dim_cost, failure_category, error_snippet,
-          file_ext, sequence_id, pipeline_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
-    ))?;
-
     let entries = std::fs::read_dir(&obs_dir)?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -211,8 +217,18 @@ fn import_observations(
             .unwrap_or(filename)
             .to_string();
 
-        // Stream lines via BufReader instead of loading entire file into memory.
-        // The outer do_migrate() already holds a BEGIN IMMEDIATE transaction.
+        // Each file gets its own ImmediateTx to bound WAL growth.
+        // do_migrate() released its outer tx before calling this function.
+        let tx = ImmediateTx::begin(conn)?;
+
+        let mut insert_stmt = store_err(conn.prepare(
+            "INSERT INTO observations
+             (timestamp, session_id, tool, tool_category, action, result, score,
+              dim_success, dim_quality, dim_cost, failure_category, error_snippet,
+              file_ext, sequence_id, pipeline_id)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+        ))?;
+
         let file = std::fs::File::open(&path)?;
         let reader = std::io::BufReader::new(file);
 
@@ -269,6 +285,11 @@ fn import_observations(
                 }
             }
         }
+
+        // Explicitly drop the prepared statement before committing —
+        // Statement holds a shared borrow of conn but commit() also needs conn.
+        drop(insert_stmt);
+        tx.commit()?;
     }
     Ok(())
 }

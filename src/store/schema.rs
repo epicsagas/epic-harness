@@ -319,9 +319,15 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
              DROP TABLE score_history;
              ALTER TABLE score_history_v3 RENAME TO score_history;",
         ))?;
+        // set_version inside the transaction so the version bump and schema change
+        // are atomic — a crash between commit and set_version would otherwise cause
+        // the migration to retry against an already-renamed table.
+        set_version(conn, to_version)?;
         tx.commit()?;
+        return Ok(());
     }
 
+    // Only reached when to_version == 2 (v3 block above returns early).
     set_version(conn, to_version)?;
     Ok(())
 }

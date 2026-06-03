@@ -21,21 +21,21 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 /// Load the full Metrics struct from SQLite.
 pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
-    // Scalar state — use explicit Option to distinguish missing vs present
-    let get = |key: &str| -> Option<String> {
-        match conn.query_row(
-            "SELECT value FROM metrics_state WHERE key = ?1",
-            rusqlite::params![key],
-            |row| row.get::<_, String>(0),
-        ) {
-            Ok(v) => Some(v),
-            Err(rusqlite::Error::QueryReturnedNoRows) => None,
-            Err(e) => {
-                eprintln!("[store/metrics] error reading key '{key}': {e}");
-                None
-            }
+    // Load all scalar state in one query instead of one SELECT per key.
+    let mut kv_stmt = store_err(conn.prepare("SELECT key, value FROM metrics_state"))?;
+    let state: HashMap<String, String> = store_err(kv_stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }))?
+    .filter_map(|r| match r {
+        Ok(pair) => Some(pair),
+        Err(e) => {
+            eprintln!("[store/metrics] error reading metrics_state row: {e}");
+            None
         }
-    };
+    })
+    .collect();
+
+    let get = |key: &str| -> Option<String> { state.get(key).cloned() };
 
     let total_sessions: u64 = get("total_sessions")
         .and_then(|v| v.parse().ok())

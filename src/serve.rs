@@ -116,7 +116,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             // ── Orbit Pipeline Dismiss ───────────────────────
             (Method::Delete, url) if url.starts_with("/api/orbit/") => {
                 let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
-                let body = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
+                let body = dismiss_orbit_pipeline(db.as_ref(), pipeline_id, &harness_dir);
                 json_response(&body)
             }
 
@@ -441,8 +441,15 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Dismiss (delete) an orbit pipeline file across all projects.
-fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
+/// Dismiss (delete) an orbit pipeline across SQLite and the filesystem.
+///
+/// SQLite-first: deletes from `orbit_pipelines` table when DB is available.
+/// Falls back to scanning PIPELINE-*.json files in project orbit directories.
+fn dismiss_orbit_pipeline(
+    db: Option<&rusqlite::Connection>,
+    pipeline_id: &str,
+    harness_dir: &std::path::Path,
+) -> String {
     // Validate pipeline_id to prevent unintended file matches.
     // Expected format: alphanumeric + hyphens (e.g. "20260523105350" or "20260522-170016").
     if pipeline_id.is_empty()
@@ -453,8 +460,15 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> S
         return serde_json::json!({"ok": false, "error": "invalid pipeline id"}).to_string();
     }
 
+    // SQLite-first: remove the DB record
+    let db_deleted = try_db(db, |conn| {
+        crate::store::orbit_store::dismiss_pipeline_conn(conn, pipeline_id)
+    })
+    .unwrap_or(false);
+
+    // File-based: remove matching PIPELINE-*.json files across all project dirs
     let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-    let mut deleted = false;
+    let mut file_deleted = false;
 
     if let Ok(rd) = std::fs::read_dir(projects_root) {
         for proj_entry in rd.filter_map(|e| e.ok()) {
@@ -462,7 +476,6 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> S
             if !orbit_dir.exists() {
                 continue;
             }
-            // Match by ID — pipeline_id is the timestamp part (e.g. "20260523105350")
             if let Ok(files) = std::fs::read_dir(&orbit_dir) {
                 for f in files.filter_map(|e| e.ok()) {
                     let fname = f.file_name().to_string_lossy().to_string();
@@ -471,14 +484,14 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> S
                         && fname.contains(pipeline_id)
                         && std::fs::remove_file(f.path()).is_ok()
                     {
-                        deleted = true;
+                        file_deleted = true;
                     }
                 }
             }
         }
     }
 
-    if deleted {
+    if db_deleted || file_deleted {
         serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string()
     } else {
         serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string()

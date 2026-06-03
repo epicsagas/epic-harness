@@ -57,11 +57,35 @@ pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRo
 
 /// Inner implementation shared by [`list_skills_conn`] and [`list_skills_full_conn`].
 ///
-/// Always SELECTs all columns; when `include_body` is false, `skill_md` is cleared
-/// in the mapper. This avoids column-index drift from maintaining two SQL strings.
+/// Uses separate SQL strings for metadata-only vs full queries to avoid fetching
+/// potentially large skill_md blobs when the caller only needs metadata.
 fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
+    if include_body {
+        let mut stmt = store_err(conn.prepare(
+            "SELECT name, origin, confidence, project, skill_md, active, created, updated
+             FROM evolved_skills ORDER BY name",
+        ))?;
+        let rows = store_err(stmt.query_map([], |row| {
+            Ok(EvolvedSkillRow {
+                name: row.get(0)?,
+                origin: row.get(1)?,
+                confidence: row.get(2)?,
+                project: row.get(3)?,
+                skill_md: row.get(4)?,
+                active: row.get::<_, i32>(5)? != 0,
+                created: row.get(6)?,
+                updated: row.get(7)?,
+            })
+        }))?;
+        let mut skills = Vec::new();
+        for r in rows {
+            skills.push(store_err(r)?);
+        }
+        return Ok(skills);
+    }
+
     let mut stmt = store_err(conn.prepare(
-        "SELECT name, origin, confidence, project, skill_md, active, created, updated
+        "SELECT name, origin, confidence, project, active, created, updated
          FROM evolved_skills ORDER BY name",
     ))?;
 
@@ -71,14 +95,10 @@ fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<Ev
             origin: row.get(1)?,
             confidence: row.get(2)?,
             project: row.get(3)?,
-            skill_md: if include_body {
-                row.get(4)?
-            } else {
-                String::new()
-            },
-            active: row.get::<_, i32>(5)? != 0,
-            created: row.get(6)?,
-            updated: row.get(7)?,
+            skill_md: String::new(),
+            active: row.get::<_, i32>(4)? != 0,
+            created: row.get(5)?,
+            updated: row.get(6)?,
         })
     }))?;
 

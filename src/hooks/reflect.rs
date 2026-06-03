@@ -77,12 +77,11 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    // Open DB once before the slug loop — all slugs share the same harness.db.
     let shared_db = crate::store::open_harness_db().ok();
 
-    // Collect obs from all target project slugs
+    // Validate all slug paths before reading data (security: prevent path traversal).
+    // harness.db stores all projects together so the DB query runs once, not per-slug.
     for slug in &project_slugs {
-        // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
         let safe = if slug_harness.exists() {
             slug_harness
@@ -97,55 +96,58 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
+    }
 
-        let recs: Vec<ObsRecord> = match shared_db.as_ref() {
-            Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
-                conn, &date_from, &date_to, None,
-            ) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("[reflect] SQLite observations read failed for slug {slug}: {e}");
-                    continue;
-                }
-            },
-            None => {
-                eprintln!(
-                    "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
-                );
-                continue;
+    // Query observations once — the DB is shared across all projects and slug-filtering
+    // is not yet supported in the schema. Querying inside the slug loop caused N copies
+    // of the same result set to be accumulated (one per slug).
+    let recs: Vec<ObsRecord> = match shared_db.as_ref() {
+        Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
+            conn, &date_from, &date_to, None,
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[reflect] SQLite observations read failed: {e}");
+                return 1;
             }
-        };
+        },
+        None => {
+            eprintln!(
+                "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
+            );
+            return 1;
+        }
+    };
 
-        for r in &recs {
-            total_obs += 1;
-            *tool_counts.entry(r.tool.clone()).or_default() += 1;
-            if let Some(ref fc) = r.failure_category {
-                *failure_cats.entry(fc.clone()).or_default() += 1;
-            }
-            if let Some(ref ext) = r.file_ext {
-                *file_ext_counts.entry(ext.clone()).or_default() += 1;
-            }
-            if let Some(s) = r.score {
-                scores.push(s);
-            }
-            if let Some(ref dims) = r.dimensions {
-                let ds = serde_json::to_value(dims).ok();
-                if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
-                    for (k, v) in obj {
-                        if let Some(n) = v.as_f64() {
-                            *dim_sums.entry(k.clone()).or_default() += n;
-                            *dim_counts.entry(k.clone()).or_default() += 1;
-                        }
+    for r in &recs {
+        total_obs += 1;
+        *tool_counts.entry(r.tool.clone()).or_default() += 1;
+        if let Some(ref fc) = r.failure_category {
+            *failure_cats.entry(fc.clone()).or_default() += 1;
+        }
+        if let Some(ref ext) = r.file_ext {
+            *file_ext_counts.entry(ext.clone()).or_default() += 1;
+        }
+        if let Some(s) = r.score {
+            scores.push(s);
+        }
+        if let Some(ref dims) = r.dimensions {
+            let ds = serde_json::to_value(dims).ok();
+            if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                for (k, v) in obj {
+                    if let Some(n) = v.as_f64() {
+                        *dim_sums.entry(k.clone()).or_default() += n;
+                        *dim_counts.entry(k.clone()).or_default() += 1;
                     }
                 }
             }
-            let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-            entry.1 += 1;
-            if r.result.as_deref() == Some("success")
-                || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-            {
-                entry.0 += 1;
-            }
+        }
+        let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+        entry.1 += 1;
+        if r.result.as_deref() == Some("success")
+            || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+        {
+            entry.0 += 1;
         }
     }
 
@@ -864,13 +866,17 @@ pub fn run(_input: &HookInput) -> i32 {
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
     };
-    // Write evolution record to SQLite when DB is available.
+    // SQLite-first: fall back to JSONL only when DB write fails or DB is unavailable.
+    // Writing to both stores after migration is complete risks divergence: if the process
+    // crashes between the two writes, the stores contain different data.
     if let Some(ref conn) = db {
         if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
-            eprintln!("[reflect] SQLite evo write failed: {e}");
+            eprintln!("[reflect] SQLite evo write failed: {e}; falling back to JSONL");
+            append_jsonl(&evolution_file(), &record);
         }
+    } else {
+        append_jsonl(&evolution_file(), &record);
     }
-    append_jsonl(&evolution_file(), &record);
 
     // 10. Session handoff context
     let last_errors: Vec<String> = observations
@@ -927,11 +933,15 @@ pub fn run(_input: &HookInput) -> i32 {
     }
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
 
-    // Save metrics to SQLite when DB is available.
+    // SQLite-first: fall back to file only when DB write fails or DB is unavailable.
     if let Some(ref conn) = db {
-        let _ = crate::store::metrics::save_metrics_conn(conn, &metrics);
-    }
-    if let Ok(json) = serde_json::to_string_pretty(&metrics) {
+        if let Err(e) = crate::store::metrics::save_metrics_conn(conn, &metrics) {
+            eprintln!("[reflect] SQLite metrics write failed: {e}; falling back to file");
+            if let Ok(json) = serde_json::to_string_pretty(&metrics) {
+                let _ = fs::write(metrics_file(), json);
+            }
+        }
+    } else if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }
 
