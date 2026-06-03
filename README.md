@@ -554,17 +554,29 @@ All data lives in `~/.harness/` (home directory), not in your project root. Surv
 │   └── {org}/teams/{team}/
 │       ├── config.json, mission.md, playbook.md, agents/, .history/
 └── projects/{slug}/
+    ├── harness.db             # SQLite operational store (obs, sessions, metrics, evolution, orbit, evolved skills)
     ├── memory/                # Project patterns and rules
     ├── sessions/              # Session snapshots (for resume)
-    ├── obs/                   # Tool usage observation logs (JSONL)
+    ├── obs/                   # Tool usage observation logs (JSONL, legacy)
     ├── evolved/               # Auto-evolved skills
     │   ├── manifest.json
     │   └── {skill}/SKILL.md + meta.json
     ├── evolved_backup/        # Best checkpoint (for rollback)
     ├── dispatch/              # Skill dispatch logs
-    ├── evolution.jsonl        # Full evolution history
-    └── metrics.json           # Aggregate stats + skill attribution
+    ├── evolution.jsonl        # Full evolution history (legacy)
+    └── metrics.json           # Aggregate stats + skill attribution (legacy)
 ```
+
+### Migration (JSONL → SQLite)
+
+Since v0.4.9, operational data is stored in `harness.db` (SQLite). Existing users with JSONL/JSON files should run once after upgrading:
+
+```bash
+epic-harness migrate --dry-run   # preview what would be imported
+epic-harness migrate             # perform the import
+```
+
+Original files are **not deleted** after import. New users are automatically on SQLite — no action needed.
 
 Share safety rules with your team: `.harness/guard-rules.yaml` in the project root (committed to git).
 

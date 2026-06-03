@@ -251,6 +251,8 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
 }
 
 /// Query the N most recent observation records (for dashboard activity feed).
+/// Used by the Tauri dashboard crate; not called from the main binary.
+#[allow(dead_code)]
 pub fn query_latest_observations_conn(
     conn: &Connection,
     limit: usize,

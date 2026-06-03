@@ -5,14 +5,35 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.9]
+
+### Added
+- **SQLite operational store**: all project operational data (observations, sessions, metrics, evolution, orbit pipelines, evolved skills) now stored in `harness.db` alongside the existing `memory.db` knowledge graph
+- `epic-harness migrate` subcommand: import legacy JSONL/JSON data into SQLite (`--dry-run` to preview, `--reset` to retry interrupted migration)
+- `store::observations::query_latest_observations_conn()`: query N most recent observation records
 
 ### Changed
+- Dashboard commands (`get_harness_metrics`, `get_orbit_pipelines`, `get_evolved_skills`, `get_obs_summary`) now read from SQLite instead of file I/O
+- `observe` hook writes to SQLite first, falls back to JSONL on write failure
+- `reflect` hook reads/writes metrics and evolution data from SQLite
+- `snapshot` hook syncs sessions and orbit pipelines to SQLite
+- Web dashboard HTML response now includes `Cache-Control: no-cache` header to prevent stale UI
 - CLI: `mem delete` renamed to `mem remove` (old name works as deprecated alias)
 - CLI: `mem query` renamed to `mem list` (old name works as deprecated alias)
 - README: rewrite top description for multi-tool positioning (Claude Code + Codex CLI + Gemini CLI)
 - Install docs: remove "recommended" wording for neutrality
 - Remove Antigravity integration, add Codex CLI plugin description
+
+### Migration Guide
+
+Existing users with JSONL/JSON data should run once after upgrading:
+
+```bash
+epic-harness migrate --dry-run   # preview what would be imported
+epic-harness migrate             # perform the import
+```
+
+Original files are **not deleted** after import. New users are automatically on SQLite — no action needed.
 
 ## [0.4.4] — 2026-05-25
 
