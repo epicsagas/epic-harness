@@ -225,6 +225,88 @@ fn v2_to_v3_migration_is_idempotent() {
 }
 
 #[test]
+fn v1_to_v3_migration_runs_both_steps() {
+    // A v1 DB (no UNIQUE on score_history, no FK indexes) must reach v3 after
+    // init_schema: v1→v2 (add indexes) then v2→v3 (recreate score_history with UNIQUE).
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+        .unwrap();
+    conn.execute_batch(
+        "CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '1');",
+    )
+    .unwrap();
+    // v1 score_history: no UNIQUE on timestamp, no FK indexes.
+    // Columns must match what the v1→v2 migration's CREATE INDEX statements reference.
+    conn.execute_batch(
+        "CREATE TABLE score_history (
+             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+             timestamp    TEXT NOT NULL,
+             success_rate REAL NOT NULL,
+             avg_score    REAL NOT NULL,
+             observations INTEGER NOT NULL DEFAULT 0,
+             dim_success  REAL NOT NULL DEFAULT 0.0,
+             dim_quality  REAL NOT NULL DEFAULT 0.0,
+             dim_cost     REAL NOT NULL DEFAULT 0.0
+         );
+         CREATE TABLE orch_agent_events (
+             id          INTEGER PRIMARY KEY,
+             agent_id    TEXT,
+             timestamp   TEXT,
+             event_type  TEXT,
+             data_json   TEXT
+         );
+         CREATE TABLE orch_agent_inbox (
+             id          INTEGER PRIMARY KEY,
+             agent_id    TEXT,
+             from_agent  TEXT,
+             timestamp   TEXT,
+             message     TEXT
+         );
+         CREATE TABLE observations (
+             id              INTEGER PRIMARY KEY,
+             tool            TEXT,
+             tool_category   TEXT,
+             timestamp       TEXT
+         );
+         CREATE TABLE evolved_skills (
+             id      INTEGER PRIMARY KEY,
+             project TEXT,
+             active  INTEGER
+         );",
+    )
+    .unwrap();
+
+    super::schema::init_schema(&conn).unwrap();
+
+    let version: String = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "3", "v1 DB must reach schema_version=3");
+
+    // UNIQUE constraint must exist after v3 migration
+    let result = conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-01-01T00:00:00Z', 0.9, 0.8, 1, 1.0, 1.0, 1.0)",
+        [],
+    );
+    assert!(result.is_ok());
+    let dup = conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-01-01T00:00:00Z', 0.5, 0.4, 1, 0.5, 0.5, 0.5)",
+        [],
+    );
+    assert!(
+        dup.is_err(),
+        "UNIQUE constraint must be active after v1→v3 migration"
+    );
+}
+
+#[test]
 fn u64_to_i64_converts_normal_values() {
     assert_eq!(super::u64_to_i64(0), 0);
     assert_eq!(super::u64_to_i64(1_000_000), 1_000_000);

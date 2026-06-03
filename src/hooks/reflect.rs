@@ -767,7 +767,7 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
 
-    // 1. Collect today's observations from SQLite (fallback to JSONL)
+    // 1. Collect today's observations from SQLite (no JSONL fallback — see policy at db==None branch)
     let today_str = today();
     let db = crate::store::open_harness_db().ok();
     let observations = match db.as_ref() {
