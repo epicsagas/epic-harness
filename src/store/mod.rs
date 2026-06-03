@@ -34,10 +34,58 @@ pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> 
     result.map_err(io::Error::other)
 }
 
+/// Convert a single-row query result to `Option<T>`, mapping "no rows" to `None`.
+///
+/// Used across all store submodules to handle the common pattern:
+/// `query_row()` → `Ok(v)` / `QueryReturnedNoRows` → `None` / other errors propagated.
+#[inline]
+pub(crate) fn query_row_optional<T>(result: Result<T, rusqlite::Error>) -> io::Result<Option<T>> {
+    match result {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(io::Error::other(e)),
+    }
+}
+
+// ── RAII transaction guard ───────────────────────────
+
+/// RAII guard for `BEGIN IMMEDIATE` transactions.
+///
+/// Calls `ROLLBACK` on drop if not explicitly committed, preventing
+/// connection state corruption when errors occur mid-transaction.
+pub(crate) struct ImmediateTx<'a> {
+    conn: &'a Connection,
+    committed: bool,
+}
+
+impl<'a> ImmediateTx<'a> {
+    pub(crate) fn begin(conn: &'a Connection) -> io::Result<Self> {
+        store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
+        Ok(Self {
+            conn,
+            committed: false,
+        })
+    }
+
+    pub(crate) fn commit(mut self) -> io::Result<()> {
+        self.committed = true;
+        store_err(self.conn.execute_batch("COMMIT"))
+    }
+}
+
+impl Drop for ImmediateTx<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+    }
+}
+
 /// Execute a closure with an open harness DB connection.
 ///
 /// Returns `None` if the DB cannot be opened (logged to stderr).
 /// Use for SQLite-first queries where callers provide their own fallback.
+#[allow(dead_code)]
 pub fn with_harness_db<F, T>(f: F) -> Option<T>
 where
     F: FnOnce(&Connection) -> io::Result<T>,
@@ -95,30 +143,25 @@ pub fn harness_db_path() -> std::path::PathBuf {
 
 /// Check whether legacy JSONL/JSON data has been migrated into SQLite.
 ///
-/// Returns `true` when `legacy_migrated = "1"` exists in `_harness_meta`,
-/// meaning the one-shot import has completed (or there was no legacy data to import).
-/// Returns `false` when the flag is missing or DB cannot be opened.
+/// Returns:
+/// - `Ok(true)` when `legacy_migrated = "1"` exists in `_harness_meta`
+/// - `Ok(false)` when the flag is missing (migration not yet run)
+/// - `Err(...)` when the DB cannot be opened at all
 ///
 /// Use this to decide whether to trust SQLite as the authoritative read source:
-/// - `true` → SQLite-only (empty results mean "no data", not "migration pending")
-/// - `false` → JSONL fallback (migration hasn't run yet)
-pub fn is_legacy_migrated() -> bool {
-    with_harness_db(|conn| {
-        let migrated: bool = conn
-            .query_row(
-                "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-            .is_some_and(|v| v == "1");
-        if migrated {
-            Ok(true)
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotFound, "not migrated"))
-        }
-    })
-    .unwrap_or(false)
+/// - `Ok(true)` → SQLite-only (empty results mean "no data", not "migration pending")
+/// - `Ok(false)` or `Err` → JSONL fallback (migration hasn't run yet, or DB unavailable)
+pub fn is_legacy_migrated() -> io::Result<bool> {
+    let conn = open_harness_db()?;
+    let migrated: bool = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .is_some_and(|v| v == "1");
+    Ok(migrated)
 }
 
 /// Open the harness operational database.
@@ -157,7 +200,10 @@ pub fn open_harness_db() -> io::Result<Connection> {
     // Run legacy migration when needed. migrate::run() is idempotent — it checks
     // the 'legacy_migrated' flag and exits immediately if already done.
     // Runs for both new and existing DBs to handle the first open after an upgrade.
-    migrate::run(&conn);
+    let migrated = migrate::run(&conn);
+    if migrated {
+        eprintln!("[store] legacy migration completed on this open");
+    }
 
     Ok(conn)
 }

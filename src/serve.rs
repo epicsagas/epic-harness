@@ -208,11 +208,10 @@ fn handle_get_run(
     let body = match db_ok {
         Some(body) => body,
         None => {
-            let mut body: serde_json::Value = orch::read_run(harness_dir)
+            let body: serde_json::Value = orch::read_run(harness_dir)
                 .as_ref()
                 .map(|r| serde_json::to_value(r).unwrap_or_default())
                 .unwrap_or_default();
-            body["_db_fallback"] = serde_json::Value::Bool(true);
             body.to_string()
         }
     };
@@ -262,10 +261,12 @@ fn handle_list_nodes(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(200)
         .min(1000);
+    // Note: uses store::open_db() (memory.db for the knowledge graph),
+    // not the harness operational DB passed as `db` to other handlers.
     let nodes = match store::open_db() {
         Ok(conn) => store::read_nodes_limited_conn(&conn, limit).unwrap_or_default(),
         Err(e) => {
-            eprintln!("[serve] failed to open DB for /api/nodes: {e}");
+            eprintln!("[serve] failed to open memory DB for /api/nodes: {e}");
             Vec::new()
         }
     };
@@ -363,10 +364,9 @@ fn handle_agent_status(
     })
     .map(|body| json_response(&body))
     .unwrap_or_else(|| {
-        let mut body: serde_json::Value = orch::read_agent_status(harness_dir, agent_id)
+        let body: serde_json::Value = orch::read_agent_status(harness_dir, agent_id)
             .map(|s| serde_json::to_value(&s).unwrap_or_default())
             .unwrap_or_default();
-        body["_db_fallback"] = serde_json::Value::Bool(true);
         json_response(&body.to_string())
     })
 }
@@ -384,10 +384,7 @@ fn handle_agent_dismiss(
         crate::store::orchestrator::dismiss_agent_conn(conn, agent_id)
     });
     let ok = db_ok.unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
-    let mut body = serde_json::json!({"ok": ok, "dismissed": agent_id});
-    if db.is_none() {
-        body["_db_fallback"] = serde_json::Value::Bool(true);
-    }
+    let body = serde_json::json!({"ok": ok, "dismissed": agent_id});
     json_response(&body.to_string())
 }
 

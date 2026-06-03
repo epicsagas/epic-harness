@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 use std::io;
 
-use super::store_err;
+use super::{ImmediateTx, store_err};
 
 /// Current schema version. Increment when adding migrations in `run_migrations`.
 const SCHEMA_VERSION: u32 = 3;
@@ -297,13 +297,13 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
 
     // v2→v3: Add UNIQUE constraint on score_history.timestamp.
     // SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so we recreate the table.
-    // Wrapped in BEGIN IMMEDIATE/COMMIT for atomicity — if the process crashes between
+    // Wrapped in ImmediateTx for atomicity — if the process crashes between
     // DROP and RENAME, the transaction rolls back and the migration retries on next startup.
     // score_history is capped at 50 entries so the table recreation is fast.
     if to_version >= 3 && from_version < 3 {
+        let tx = ImmediateTx::begin(conn)?;
         store_err(conn.execute_batch(
-            "BEGIN IMMEDIATE;
-             CREATE TABLE IF NOT EXISTS score_history_v3 (
+            "CREATE TABLE IF NOT EXISTS score_history_v3 (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 timestamp    TEXT NOT NULL UNIQUE,
                 success_rate REAL NOT NULL,
@@ -317,9 +317,9 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
                 SELECT id, timestamp, success_rate, avg_score, observations,
                        dim_success, dim_quality, dim_cost FROM score_history;
              DROP TABLE score_history;
-             ALTER TABLE score_history_v3 RENAME TO score_history;
-             COMMIT;",
+             ALTER TABLE score_history_v3 RENAME TO score_history;",
         ))?;
+        tx.commit()?;
     }
 
     set_version(conn, to_version)?;

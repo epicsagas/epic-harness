@@ -3,9 +3,9 @@
 use rusqlite::Connection;
 use std::io;
 
-use crate::shared::types::SessionSnapshot;
+use super::{query_row_optional, store_err};
 
-use super::store_err;
+use crate::shared::types::SessionSnapshot;
 
 /// Insert a session snapshot.
 pub fn insert_snapshot_conn(
@@ -13,11 +13,12 @@ pub fn insert_snapshot_conn(
     snap: &SessionSnapshot,
     created_at_millis: i64,
 ) -> io::Result<i64> {
-    let pending_json = serde_json::to_string(&snap.pending_tasks).unwrap_or_else(|_| "[]".into());
+    let pending_json =
+        serde_json::to_string(&snap.pending_tasks).expect("Vec<String> serialization cannot fail");
     let pipeline_json = snap
         .pipeline_state
         .as_ref()
-        .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".into()));
+        .map(|v| serde_json::to_string(v).expect("serde_json Value serialization cannot fail"));
 
     store_err(conn.execute(
         "INSERT INTO sessions
@@ -56,18 +57,12 @@ fn map_session_row(row: &rusqlite::Row<'_>) -> Result<SessionSnapshot, rusqlite:
 
 /// Get the most recent session snapshot.
 pub fn get_latest_snapshot_conn(conn: &Connection) -> io::Result<Option<SessionSnapshot>> {
-    let result = conn.query_row(
+    query_row_optional(conn.query_row(
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
          FROM sessions ORDER BY id DESC LIMIT 1",
         [],
         map_session_row,
-    );
-
-    match result {
-        Ok(snap) => Ok(Some(snap)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
+    ))
 }
 
 /// List the N most recent session snapshots.

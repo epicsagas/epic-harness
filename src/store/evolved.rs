@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::io;
 
-use super::store_err;
+use super::{query_row_optional, store_err};
 
 /// Evolved skill metadata (mirrors evolve::skills::SkillMeta).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -91,15 +91,11 @@ fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<Ev
 
 /// Read a single skill's markdown content.
 pub fn read_skill_md_conn(conn: &Connection, name: &str) -> io::Result<Option<String>> {
-    match conn.query_row(
+    query_row_optional(conn.query_row(
         "SELECT skill_md FROM evolved_skills WHERE name = ?1",
         rusqlite::params![name],
         |row| row.get::<_, String>(0),
-    ) {
-        Ok(md) => Ok(Some(md)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
+    ))
 }
 
 /// Delete an evolved skill by name.
@@ -140,6 +136,8 @@ pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<Str
 }
 
 /// Save all promotion counters (replaces entire table).
+///
+/// Precondition: caller must not hold an active transaction on this connection.
 pub fn save_promotion_counters_conn(
     conn: &Connection,
     counters: &HashMap<String, u64>,

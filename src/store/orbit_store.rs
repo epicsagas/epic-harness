@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 use std::io;
 
-use super::store_err;
+use super::{query_row_optional, store_err};
 
 /// Upsert a pipeline state. If a pipeline with the same id exists, it's replaced.
 pub fn upsert_pipeline_conn(
@@ -50,14 +50,13 @@ pub fn read_running_pipeline_conn(
         conn.query_row(query, [], |row| row.get::<_, String>(0))
     };
 
-    match result {
-        Ok(json_str) => {
+    match query_row_optional(result)? {
+        Some(json_str) => {
             let val: serde_json::Value = serde_json::from_str(&json_str)
                 .unwrap_or(serde_json::Value::Object(Default::default()));
             Ok(Some(val))
         }
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
+        None => Ok(None),
     }
 }
 

@@ -103,6 +103,7 @@ pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
 
 /// Read nodes with a SQL-level LIMIT (avoids loading all rows into memory).
 pub fn read_nodes_limited_conn(conn: &Connection, limit: usize) -> io::Result<Vec<Node>> {
+    // format! is safe here — NODE_COLUMNS is a compile-time const, not user input.
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?");
     let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
     let nodes: Vec<Node> = stmt

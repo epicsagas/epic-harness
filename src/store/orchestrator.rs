@@ -8,41 +8,7 @@
 use rusqlite::Connection;
 use std::io;
 
-use super::store_err;
-
-// ── RAII transaction guard ───────────────────────────
-
-/// RAII guard for `BEGIN IMMEDIATE` transactions.
-///
-/// Calls `ROLLBACK` on drop if not explicitly committed, preventing
-/// connection state corruption when errors occur mid-transaction.
-struct ImmediateTx<'a> {
-    conn: &'a Connection,
-    committed: bool,
-}
-
-impl<'a> ImmediateTx<'a> {
-    fn begin(conn: &'a Connection) -> io::Result<Self> {
-        store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
-        Ok(Self {
-            conn,
-            committed: false,
-        })
-    }
-
-    fn commit(mut self) -> io::Result<()> {
-        self.committed = true;
-        store_err(self.conn.execute_batch("COMMIT"))
-    }
-}
-
-impl Drop for ImmediateTx<'_> {
-    fn drop(&mut self) {
-        if !self.committed {
-            let _ = self.conn.execute_batch("ROLLBACK");
-        }
-    }
-}
+use super::{ImmediateTx, store_err};
 
 // ── Types ────────────────────────────────────────────
 

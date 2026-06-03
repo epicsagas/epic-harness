@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 use std::io::{self, BufRead};
 
-use super::store_err;
+use super::{ImmediateTx, store_err};
 
 /// Run legacy migration if not already done.
 /// Called from `open_harness_db()` after schema init.
@@ -14,7 +14,9 @@ use super::store_err;
 /// Uses an IMMEDIATE transaction to serialize concurrent migration attempts:
 /// only the first opener acquires the write lock and sets the flag; subsequent
 /// openers see the flag and exit before doing any work.
-pub fn run(conn: &Connection) {
+///
+/// Returns `true` if migration ran (even with partial errors), `false` if already done.
+pub fn run(conn: &Connection) -> bool {
     let migrated: bool = conn
         .query_row(
             "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
@@ -25,7 +27,7 @@ pub fn run(conn: &Connection) {
         .is_some_and(|v| v == "1");
 
     if migrated {
-        return;
+        return false;
     }
 
     match do_migrate(conn) {
@@ -56,6 +58,7 @@ pub fn run(conn: &Connection) {
             eprintln!("[migrate] legacy import failed: {e}");
         }
     }
+    true
 }
 
 /// Migration statistics for diagnostics.
@@ -79,9 +82,8 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
     };
 
     // BEGIN IMMEDIATE acquires a write lock upfront, serializing concurrent migration
-    // attempts. rusqlite's unchecked_transaction() uses DEFERRED; we issue BEGIN
-    // IMMEDIATE directly to get the stricter lock without requiring &mut Connection.
-    store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
+    // attempts. ImmediateTx provides RAII rollback on drop for safety.
+    let tx = ImmediateTx::begin(conn)?;
 
     // Re-check flag inside the write lock — a concurrent opener may have set it
     // between our outer read above and this BEGIN IMMEDIATE.
@@ -94,35 +96,25 @@ fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
         .ok()
         .is_some_and(|v| v == "1");
     if already {
-        store_err(conn.execute_batch("ROLLBACK"))?;
+        // tx drops → auto-ROLLBACK via ImmediateTx
         return Ok(stats);
     }
 
     // Import observations from obs/*.jsonl
-    let obs_result = import_observations(conn, &harness_dir, &mut stats);
+    import_observations(conn, &harness_dir, &mut stats)?;
     // Import sessions from sessions/*.json
-    let sess_result = import_sessions(conn, &harness_dir, &mut stats);
+    import_sessions(conn, &harness_dir, &mut stats)?;
     // Import evolution from evolution.jsonl
-    let evo_result = import_evolution(conn, &harness_dir, &mut stats);
+    import_evolution(conn, &harness_dir, &mut stats)?;
     // Import metrics from metrics.json
-    let metrics_result = import_metrics(conn, &harness_dir, &mut stats);
-
-    // Propagate first error (if any) after rollback
-    if let Err(e) = obs_result
-        .and(sess_result)
-        .and(evo_result)
-        .and(metrics_result)
-    {
-        let _ = conn.execute_batch("ROLLBACK");
-        return Err(e);
-    }
+    import_metrics(conn, &harness_dir, &mut stats)?;
 
     // Mark as migrated and commit atomically
     store_err(conn.execute(
         "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
         [],
     ))?;
-    store_err(conn.execute_batch("COMMIT"))?;
+    tx.commit()?;
 
     Ok(stats)
 }

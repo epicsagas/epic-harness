@@ -137,6 +137,8 @@ pub fn load_metrics() -> io::Result<Metrics> {
 /// Uses UPSERT (INSERT OR REPLACE) for scalar state and skill_attribution
 /// instead of full DELETE + reinsert to avoid data loss on partial failures.
 /// Score history is capped at MAX_SCORE_HISTORY most recent entries.
+///
+/// Precondition: caller must not hold an active transaction on this connection.
 pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     let tx = store_err(conn.unchecked_transaction())?;
 

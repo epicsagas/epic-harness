@@ -12,7 +12,7 @@ use std::io;
 use crate::shared::obs::ObsRecord;
 use crate::shared::scoring::ScoreDimensions;
 
-use super::store_err;
+use super::{query_row_optional, store_err};
 
 /// Pad an ISO-8601 date string for lexicographic range comparison.
 /// `"2026-06-02"` → `"2026-06-02T00:00:00"` / `"...T23:59:59"`.
@@ -89,61 +89,64 @@ pub fn query_obs_for_date_range_conn(
 ) -> io::Result<Vec<ObsRecord>> {
     let from = pad_date(from_ts, false);
     let to = pad_date(to_ts, true);
-    let limit_clause = limit
-        .map(|l| format!(" LIMIT {}", l.min(50_000)))
-        .unwrap_or_default();
+    // Use parameterized LIMIT for consistency with other queries.
+    // SQLite treats -1 as "no limit", so use that when None is passed.
+    let limit_val = limit.map(|l| l.min(50_000) as i64).unwrap_or(-1);
 
-    let sql = format!(
-        "SELECT timestamp, tool, tool_category, action, result, score,
+    let sql = "SELECT timestamp, tool, tool_category, action, result, score,
                 dim_success, dim_quality, dim_cost,
                 failure_category, error_snippet, file_ext, sequence_id, pipeline_id
          FROM observations
          WHERE timestamp >= ?1 AND timestamp <= ?2
-         ORDER BY timestamp ASC{limit_clause}"
-    );
+         ORDER BY timestamp ASC
+         LIMIT ?3";
 
-    let mut stmt = store_err(conn.prepare(&sql))?;
+    let mut stmt = store_err(conn.prepare(sql))?;
 
-    let rows = store_err(stmt.query_map(rusqlite::params![from, to], |row| {
-        let dim_s: Option<f64> = row.get(6)?;
-        let dim_q: Option<f64> = row.get(7)?;
-        let dim_c: Option<f64> = row.get(8)?;
-        Ok(ObsRecord {
-            timestamp: row.get(0)?,
-            tool: row.get(1)?,
-            tool_category: row.get(2)?,
-            action: row.get(3)?,
-            result: row.get(4)?,
-            score: row.get(5)?,
-            dimensions: {
-                let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
-                let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
-                if any_some && !all_some {
-                    eprintln!(
-                        "[store] observations: partial dimensions (s={}, q={}, c={}) — \
-                             defaulting missing fields to 0.0",
-                        dim_s.is_some(),
-                        dim_q.is_some(),
-                        dim_c.is_some()
-                    );
-                }
-                if any_some {
-                    Some(ScoreDimensions {
-                        tool_success: dim_s.unwrap_or(0.0),
-                        output_quality: dim_q.unwrap_or(0.0),
-                        execution_cost: dim_c.unwrap_or(0.0),
-                    })
-                } else {
-                    None
-                }
-            },
-            failure_category: row.get(9)?,
-            error_snippet: row.get(10)?,
-            file_ext: row.get(11)?,
-            sequence_id: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
-            pipeline_id: row.get(13)?,
-        })
-    }))?;
+    let rows = store_err(
+        stmt.query_map(rusqlite::params![from, to, limit_val], |row| {
+            let dim_s: Option<f64> = row.get(6)?;
+            let dim_q: Option<f64> = row.get(7)?;
+            let dim_c: Option<f64> = row.get(8)?;
+            Ok(ObsRecord {
+                timestamp: row.get(0)?,
+                tool: row.get(1)?,
+                tool_category: row.get(2)?,
+                action: row.get(3)?,
+                result: row.get(4)?,
+                score: row.get(5)?,
+                dimensions: {
+                    let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+                    let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
+                    if any_some && !all_some {
+                        eprintln!(
+                            "[store] observations: partial dimensions (s={}, q={}, c={}) — \
+                             treating as None to prevent score distortion",
+                            dim_s.is_some(),
+                            dim_q.is_some(),
+                            dim_c.is_some()
+                        );
+                        // Treat partially-NULL dimensions as entirely absent to avoid
+                        // distorting aggregates with spurious 0.0 ("complete failure") values.
+                        None
+                    } else if all_some {
+                        Some(ScoreDimensions {
+                            tool_success: dim_s.unwrap_or(0.0),
+                            output_quality: dim_q.unwrap_or(0.0),
+                            execution_cost: dim_c.unwrap_or(0.0),
+                        })
+                    } else {
+                        None
+                    }
+                },
+                failure_category: row.get(9)?,
+                error_snippet: row.get(10)?,
+                file_ext: row.get(11)?,
+                sequence_id: row.get::<_, Option<i64>>(12)?.map(|v| v as u64),
+                pipeline_id: row.get(13)?,
+            })
+        }),
+    )?;
 
     let mut records = Vec::new();
     for r in rows {
@@ -254,17 +257,13 @@ pub fn query_obs_stats_conn(conn: &Connection, from_ts: &str, to_ts: &str) -> io
 
 /// Get the last action for a given session (replaces file tail read).
 pub fn query_last_action_conn(conn: &Connection, session_id: &str) -> io::Result<Option<String>> {
-    match conn.query_row(
+    query_row_optional(conn.query_row(
         "SELECT action FROM observations
          WHERE session_id = ?1
          ORDER BY id DESC LIMIT 1",
         rusqlite::params![session_id],
         |row| row.get(0),
-    ) {
-        Ok(opt) => Ok(opt),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
+    ))
 }
 
 /// Delete observations older than the cutoff timestamp.

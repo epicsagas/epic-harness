@@ -82,7 +82,7 @@ pub fn run_context(
     // Use migration status to decide authoritative source: if legacy data has been
     // migrated, SQLite is authoritative (even empty results). Otherwise, JSONL fallback.
     let shared_db = crate::store::open_harness_db().ok();
-    let sqlite_authoritative = crate::store::is_legacy_migrated();
+    let sqlite_authoritative = crate::store::is_legacy_migrated().unwrap_or(false);
 
     // Collect obs from all target project slugs — try SQLite first, fall back to JSONL
     for slug in &project_slugs {
@@ -803,7 +803,7 @@ pub fn run(_input: &HookInput) -> i32 {
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
     let db = crate::store::open_harness_db().ok();
-    let sqlite_authoritative = crate::store::is_legacy_migrated();
+    let sqlite_authoritative = crate::store::is_legacy_migrated().unwrap_or(false);
     let sqlite_obs = db
         .as_ref()
         .and_then(|conn| {
