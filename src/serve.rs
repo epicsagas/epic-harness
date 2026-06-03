@@ -176,31 +176,39 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 // ── Route handlers ────────────────────────────────────
 
 fn handle_get_run(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec<u8>>> {
-    let body = crate::store::with_harness_db(|conn| {
+    let db_ok = crate::store::with_harness_db(|conn| {
         crate::store::orchestrator::read_run_conn(conn).map(|opt| {
             opt.as_ref()
                 .map(|r| json_or(r, "{}"))
                 .unwrap_or_else(|| "{}".into())
         })
-    })
-    .unwrap_or_else(|| {
-        orch::read_run(harness_dir)
-            .as_ref()
-            .map(|r| json_or(r, "{}"))
-            .unwrap_or_else(|| "{}".into())
     });
+    let body = match db_ok {
+        Some(body) => body,
+        None => {
+            let mut body: serde_json::Value = orch::read_run(harness_dir)
+                .as_ref()
+                .map(|r| serde_json::to_value(r).unwrap_or_default())
+                .unwrap_or_default();
+            body["_db_fallback"] = serde_json::Value::Bool(true);
+            body.to_string()
+        }
+    };
     json_response(&body)
 }
 
 fn handle_get_events(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec<u8>>> {
-    let data = crate::store::with_harness_db(|conn| {
+    let db_ok = crate::store::with_harness_db(|conn| {
         crate::store::orchestrator::read_run_conn(conn).map(|opt| {
             opt.as_ref()
                 .map(|r| json_or(r, "null"))
                 .unwrap_or_else(|| "null".into())
         })
-    })
-    .unwrap_or_else(|| json_or(&orch::read_run(harness_dir), "null"));
+    });
+    let data = match db_ok {
+        Some(data) => data,
+        None => json_or(&orch::read_run(harness_dir), "null"),
+    };
     let sse_body = format!("data: {data}\n\n");
     Response::from_string(sse_body)
         .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
@@ -329,10 +337,11 @@ fn handle_agent_status(
     })
     .map(|body| json_response(&body))
     .unwrap_or_else(|| {
-        let body = orch::read_agent_status(harness_dir, agent_id)
-            .map(|s| serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()))
-            .unwrap_or_else(|| "{}".into());
-        json_response(&body)
+        let mut body: serde_json::Value = orch::read_agent_status(harness_dir, agent_id)
+            .map(|s| serde_json::to_value(&s).unwrap_or_default())
+            .unwrap_or_default();
+        body["_db_fallback"] = serde_json::Value::Bool(true);
+        json_response(&body.to_string())
     })
 }
 
@@ -348,8 +357,11 @@ fn handle_agent_dismiss(
         crate::store::orchestrator::dismiss_agent_conn(conn, agent_id)
     })
     .unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
-    let body = serde_json::json!({"ok": ok, "dismissed": agent_id}).to_string();
-    json_response(&body)
+    let mut body = serde_json::json!({"ok": ok, "dismissed": agent_id});
+    if crate::store::open_harness_db().is_err() {
+        body["_db_fallback"] = serde_json::Value::Bool(true);
+    }
+    json_response(&body.to_string())
 }
 
 // ── Response helpers ──────────────────────────────────

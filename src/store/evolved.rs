@@ -57,18 +57,13 @@ pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRo
 
 /// Inner implementation shared by [`list_skills_conn`] and [`list_skills_full_conn`].
 ///
-/// When `include_body` is false, `skill_md` is projected as `''` so a single
-/// row-mapping closure handles both cases without column-index drift.
+/// Always SELECTs all columns; when `include_body` is false, `skill_md` is cleared
+/// in the mapper. This avoids column-index drift from maintaining two SQL strings.
 fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
-    let sql = if include_body {
+    let mut stmt = store_err(conn.prepare(
         "SELECT name, origin, confidence, project, skill_md, active, created, updated
-         FROM evolved_skills ORDER BY name"
-    } else {
-        "SELECT name, origin, confidence, project, '' AS skill_md, active, created, updated
-         FROM evolved_skills ORDER BY name"
-    };
-
-    let mut stmt = store_err(conn.prepare(sql))?;
+         FROM evolved_skills ORDER BY name",
+    ))?;
 
     let rows = store_err(stmt.query_map([], |row| {
         Ok(EvolvedSkillRow {
@@ -76,7 +71,11 @@ fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<Ev
             origin: row.get(1)?,
             confidence: row.get(2)?,
             project: row.get(3)?,
-            skill_md: row.get(4)?,
+            skill_md: if include_body {
+                row.get(4)?
+            } else {
+                String::new()
+            },
             active: row.get::<_, i32>(5)? != 0,
             created: row.get(6)?,
             updated: row.get(7)?,

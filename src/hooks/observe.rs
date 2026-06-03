@@ -371,7 +371,9 @@ pub fn run(input: &HookInput) -> i32 {
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
-    // sequence_id was used for JSONL row ordering; not needed with SQLite (ORDER BY id).
+    // SQLite uses auto-increment `id` for row ordering (ORDER BY id), so the JSONL-era
+    // sequence_id counter is unnecessary in DB mode. It's still computed for JSONL fallback
+    // to maintain correct row ordering when the database is unavailable.
     let seq_id = if db.is_none() {
         Some(get_next_sequence_id(&session_file))
     } else {

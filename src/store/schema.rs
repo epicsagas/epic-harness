@@ -9,7 +9,7 @@ use std::io;
 use super::store_err;
 
 /// Current schema version. Increment when adding migrations in `run_migrations`.
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
 
 /// Apply the full operational schema to an open connection.
 ///
@@ -131,7 +131,7 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
         );
         CREATE TABLE IF NOT EXISTS score_history (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp    TEXT NOT NULL,
+            timestamp    TEXT NOT NULL UNIQUE,
             success_rate REAL NOT NULL,
             avg_score    REAL NOT NULL,
             observations INTEGER NOT NULL DEFAULT 0,
@@ -292,6 +292,29 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
              CREATE INDEX IF NOT EXISTS idx_orch_inbox_agent  ON orch_agent_inbox(agent_id);
              CREATE INDEX IF NOT EXISTS idx_obs_tool_ts       ON observations(tool, timestamp);
              CREATE INDEX IF NOT EXISTS idx_evolved_proj_act  ON evolved_skills(project, active);",
+        ))?;
+    }
+
+    // v2→v3: Add UNIQUE constraint on score_history.timestamp.
+    // SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so we recreate the table.
+    // Data loss is prevented by copying all rows to the new table.
+    if to_version >= 3 && from_version < 3 {
+        store_err(conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS score_history_v3 (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp    TEXT NOT NULL UNIQUE,
+                success_rate REAL NOT NULL,
+                avg_score    REAL NOT NULL,
+                observations INTEGER NOT NULL DEFAULT 0,
+                dim_success  REAL NOT NULL DEFAULT 0.0,
+                dim_quality  REAL NOT NULL DEFAULT 0.0,
+                dim_cost     REAL NOT NULL DEFAULT 0.0
+             );
+             INSERT OR IGNORE INTO score_history_v3
+                SELECT id, timestamp, success_rate, avg_score, observations,
+                       dim_success, dim_quality, dim_cost FROM score_history;
+             DROP TABLE score_history;
+             ALTER TABLE score_history_v3 RENAME TO score_history;",
         ))?;
     }
 

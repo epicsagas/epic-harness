@@ -102,8 +102,11 @@ pub fn harness_db_path() -> std::path::PathBuf {
 /// For new databases, schema is applied and legacy migration runs if needed.
 ///
 /// TODO: In serve mode (long-running HTTP server), each request opens a new connection.
-/// Consider connection pooling or `Arc<Mutex<Connection>>` reuse to reduce schema
-/// version check overhead. CLI hook usage (one-shot) is fine as-is.
+/// Consider caching the `Connection` in a `std::sync::OnceLock` or `thread_local!`
+/// (initialized on first access, reused across requests) to avoid schema version
+/// check overhead on every HTTP request. WAL mode already handles concurrent reads
+/// safely, so a single shared connection per thread is sufficient. CLI hook usage
+/// (one-shot process per invocation) is fine as-is — no pooling needed.
 pub fn open_harness_db() -> io::Result<Connection> {
     let path = harness_db_path();
 

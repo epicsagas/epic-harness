@@ -167,12 +167,9 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         store_err(upsert("last_error_context", v))?;
     }
 
-    // Score history — clear and re-insert within the transaction.
-    // Full replacement is used because Metrics.score_history is an append-only Vec
-    // capped at 50 entries, and callers always load-then-save the full struct.
-    // WAL mode guarantees concurrent readers see either the old or new state,
-    // never an intermediate empty table.
-    store_err(tx.execute("DELETE FROM score_history", []))?;
+    // Score history — UPSERT per entry to avoid rowid inflation from DELETE+INSERT.
+    // timestamp is used as a natural key (sessions produce unique timestamps).
+    // After upsert, prune any rows beyond MAX_SCORE_HISTORY.
     let entries: Vec<&SessionScoreEntry> = m
         .score_history
         .iter()
@@ -182,7 +179,15 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     for entry in entries.into_iter().rev() {
         store_err(tx.execute(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
-             dim_success, dim_quality, dim_cost) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+             dim_success, dim_quality, dim_cost)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)
+             ON CONFLICT(timestamp) DO UPDATE SET
+                 success_rate = excluded.success_rate,
+                 avg_score = excluded.avg_score,
+                 observations = excluded.observations,
+                 dim_success = excluded.dim_success,
+                 dim_quality = excluded.dim_quality,
+                 dim_cost = excluded.dim_cost",
             rusqlite::params![
                 entry.timestamp,
                 entry.success_rate,
@@ -194,6 +199,13 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
             ],
         ))?;
     }
+    // Prune rows beyond the cap (oldest first)
+    store_err(tx.execute(
+        "DELETE FROM score_history WHERE id NOT IN (
+            SELECT id FROM score_history ORDER BY id DESC LIMIT ?
+        )",
+        rusqlite::params![MAX_SCORE_HISTORY as i64],
+    ))?;
 
     // Skill attribution — UPSERT preserving first_seen on conflict
     for sa in m.skill_attribution.values() {
@@ -302,10 +314,11 @@ mod tests {
     fn score_history_cap_retains_most_recent() {
         let conn = in_memory_db();
         let mut m = sample_metrics();
-        // Add 60 entries with ascending observations values
+        // Add 60 entries with unique timestamps (ascending) and ascending observations.
+        // In production, each session produces a unique timestamp.
         for i in 0..60 {
             m.score_history.push(SessionScoreEntry {
-                timestamp: format!("2026-06-{:02}T10:00:00Z", i % 28 + 1),
+                timestamp: format!("2026-06-{:02}T{:02}:00:00Z", i / 24 + 1, i % 24),
                 success_rate: 0.9,
                 avg_score: 0.85,
                 observations: i,
@@ -318,12 +331,12 @@ mod tests {
         // Should be capped at 50
         assert!(loaded.score_history.len() <= 50);
 
-        // The most recent entries (observations 11..60) should be retained,
-        // not the oldest (0..10). The last entry should have observations=59.
+        // The most recent entries (observations 10..59) should be retained,
+        // not the oldest (0..9). The last entry should have observations=59.
         let last = loaded.score_history.last().unwrap();
         assert_eq!(last.observations, 59);
 
-        // The first retained entry should have observations=10 (skipped 0..9)
+        // The first retained entry should have observations=10 (pruned 0..9)
         let first = &loaded.score_history[0];
         assert!(
             first.observations >= 10,
