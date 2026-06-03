@@ -1,23 +1,27 @@
 //! migrate.rs — Legacy JSONL/JSON → SQLite import
 //!
-//! Runs once on first startup after upgrade. Detects existing file-based data
-//! and imports it into the new SQLite tables. Original files are NOT deleted.
+//! Invoked explicitly via `epic-harness migrate [--dry-run]`.
+//! Original files are NOT deleted after import.
 
 use rusqlite::Connection;
 use std::io::{self, BufRead};
 
 use super::{ImmediateTx, store_err};
 
-/// Run legacy migration if not already done.
-/// Called from `open_harness_db()` after schema init.
+/// Entry point for the `migrate` subcommand.
 ///
-/// Uses an IMMEDIATE transaction to serialize concurrent migration attempts:
-/// only the first opener acquires the write lock and sets the flag; subsequent
-/// openers see the flag and exit before doing any work.
-///
-/// Returns `true` if migration ran (even with partial errors), `false` if already done.
-pub fn run(conn: &Connection) -> bool {
-    let migrated: bool = conn
+/// `dry_run = true` scans files and reports what would be imported without writing anything.
+/// Returns an exit code (0 = success, 1 = error).
+pub fn run_subcommand(dry_run: bool) -> i32 {
+    let conn = match super::open_harness_db() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[migrate] failed to open harness.db: {e}");
+            return 1;
+        }
+    };
+
+    let already_migrated: bool = conn
         .query_row(
             "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
             [],
@@ -26,11 +30,16 @@ pub fn run(conn: &Connection) -> bool {
         .ok()
         .is_some_and(|v| v == "1");
 
-    if migrated {
-        return false;
+    if already_migrated {
+        println!("already migrated — nothing to do");
+        return 0;
     }
 
-    match do_migrate(conn) {
+    if dry_run {
+        return run_dry(&conn);
+    }
+
+    match do_migrate(&conn) {
         Ok(stats) => {
             let error_pct = if stats.total_lines > 0 {
                 stats.errors as f64 / stats.total_lines as f64 * 100.0
@@ -44,25 +53,76 @@ pub fn run(conn: &Connection) -> bool {
                     error_pct, stats.errors, stats.total_lines
                 );
             }
-            eprintln!(
-                "[migrate] legacy import complete: {} obs, {} sessions, {} evo records; \
-                 {} parse/insert errors ({:.1}%)",
+            println!(
+                "migration complete: {} obs, {} sessions, {} evo records imported ({} errors, {:.1}%)",
                 stats.obs_imported,
                 stats.sess_imported,
                 stats.evo_imported,
                 stats.errors,
                 error_pct,
             );
+            0
         }
         Err(e) => {
-            eprintln!("[migrate] legacy import failed: {e}");
+            eprintln!("[migrate] import failed: {e}");
+            1
         }
     }
-    true
+}
+
+/// Scan legacy files and report counts without importing.
+fn run_dry(conn: &Connection) -> i32 {
+    let harness_dir = crate::shared::paths::harness_dir();
+
+    let obs_count = count_jsonl_lines(&harness_dir.join("obs"));
+    let sess_count = count_json_files(&harness_dir.join("sessions"));
+    let evo_count = count_jsonl_lines_single(&harness_dir.join("evolution.jsonl"));
+    let _ = conn; // ensure conn is used (schema already initialised)
+
+    println!(
+        "dry-run: would import ~{obs_count} obs lines, ~{sess_count} session files, ~{evo_count} evo records"
+    );
+    println!("run without --dry-run to perform the import");
+    0
+}
+
+fn count_jsonl_lines(dir: &std::path::Path) -> usize {
+    if !dir.is_dir() {
+        return 0;
+    }
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
+        .map(|e| {
+            std::fs::File::open(e.path())
+                .map(|f| std::io::BufReader::new(f).lines().count())
+                .unwrap_or(0)
+        })
+        .sum()
+}
+
+fn count_json_files(dir: &std::path::Path) -> usize {
+    if !dir.is_dir() {
+        return 0;
+    }
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
+        .count()
+}
+
+fn count_jsonl_lines_single(path: &std::path::Path) -> usize {
+    std::fs::File::open(path)
+        .map(|f| std::io::BufReader::new(f).lines().count())
+        .unwrap_or(0)
 }
 
 /// Migration statistics for diagnostics.
-struct MigrationStats {
+pub(crate) struct MigrationStats {
     obs_imported: usize,
     sess_imported: usize,
     evo_imported: usize,
@@ -71,7 +131,7 @@ struct MigrationStats {
     total_lines: usize,
 }
 
-fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
+pub(crate) fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
     let harness_dir = crate::shared::paths::harness_dir();
     let mut stats = MigrationStats {
         obs_imported: 0,
@@ -352,14 +412,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn run_is_idempotent() {
+    fn do_migrate_is_idempotent() {
         let conn = Connection::open_in_memory().unwrap();
         super::super::schema::init_schema(&conn).unwrap();
 
-        // First run (no files to import, but marks migrated)
-        run(&conn);
-        // Second run should be no-op
-        run(&conn);
+        // First run marks legacy_migrated=1
+        do_migrate(&conn).unwrap();
+        // Second run must see the flag and be a no-op (returns empty stats)
+        let stats = do_migrate(&conn).unwrap();
+        assert_eq!(stats.obs_imported, 0);
+        assert_eq!(stats.sess_imported, 0);
 
         let migrated: String = conn
             .query_row(

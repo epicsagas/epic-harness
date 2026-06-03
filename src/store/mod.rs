@@ -81,30 +81,6 @@ impl Drop for ImmediateTx<'_> {
     }
 }
 
-/// Execute a closure with an open harness DB connection.
-///
-/// Returns `None` if the DB cannot be opened (logged to stderr).
-/// Use for SQLite-first queries where callers provide their own fallback.
-#[allow(dead_code)]
-pub fn with_harness_db<F, T>(f: F) -> Option<T>
-where
-    F: FnOnce(&Connection) -> io::Result<T>,
-{
-    match open_harness_db() {
-        Ok(conn) => match f(&conn) {
-            Ok(v) => Some(v),
-            Err(e) => {
-                eprintln!("[store] query failed: {e}");
-                None
-            }
-        },
-        Err(e) => {
-            eprintln!("[store] harness.db unavailable: {e}");
-            None
-        }
-    }
-}
-
 // ── DB connection ────────────────────────────────────
 
 use rusqlite::Connection;
@@ -156,43 +132,11 @@ pub fn harness_db_path() -> std::path::PathBuf {
     paths::harness_dir().join("harness.db")
 }
 
-/// Check whether legacy JSONL/JSON data has been migrated into SQLite.
-///
-/// Returns:
-/// - `Ok(true)` when `legacy_migrated = "1"` exists in `_harness_meta`
-/// - `Ok(false)` when the flag is missing (migration not yet run)
-/// - `Err(...)` when the DB cannot be opened at all
-///
-/// Use this to decide whether to trust SQLite as the authoritative read source:
-/// - `Ok(true)` → SQLite-only (empty results mean "no data", not "migration pending")
-/// - `Ok(false)` or `Err` → JSONL fallback (migration hasn't run yet, or DB unavailable)
-pub fn is_legacy_migrated() -> io::Result<bool> {
-    let conn = open_harness_db()?;
-    let migrated: bool = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
-        .is_some_and(|v| v == "1");
-    Ok(migrated)
-}
-
 /// Open the harness operational database.
 ///
-/// Creates the file if it doesn't exist. Applies schema (tables, indexes),
-/// runs pending migrations, and imports legacy JSONL/JSON data on first run.
-///
-/// For existing databases, schema init is skipped (checked via _harness_meta).
-/// For new databases, schema is applied and legacy migration runs if needed.
-///
-/// TODO: In serve mode (long-running HTTP server), each request opens a new connection.
-/// Consider caching the `Connection` in a `std::sync::OnceLock` or `thread_local!`
-/// (initialized on first access, reused across requests) to avoid schema version
-/// check overhead on every HTTP request. WAL mode already handles concurrent reads
-/// safely, so a single shared connection per thread is sufficient. CLI hook usage
-/// (one-shot process per invocation) is fine as-is — no pooling needed.
+/// Creates the file if it doesn't exist. Applies schema (tables, indexes, WAL mode),
+/// and runs pending schema version migrations. Legacy JSONL/JSON data import is NOT
+/// automatic — run `epic-harness migrate` explicitly to import legacy data.
 pub fn open_harness_db() -> io::Result<Connection> {
     let path = harness_db_path();
 
@@ -211,14 +155,6 @@ pub fn open_harness_db() -> io::Result<Connection> {
     // Apply schema (WAL + FK pragma are set inside init_schema as the first operation).
     // Uses IF NOT EXISTS throughout, so safe to call on existing DBs.
     schema::init_schema(&conn)?;
-
-    // Run legacy migration when needed. migrate::run() is idempotent — it checks
-    // the 'legacy_migrated' flag and exits immediately if already done.
-    // Runs for both new and existing DBs to handle the first open after an upgrade.
-    let migrated = migrate::run(&conn);
-    if migrated {
-        eprintln!("[store] legacy migration completed on this open");
-    }
 
     Ok(conn)
 }

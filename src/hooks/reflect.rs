@@ -54,8 +54,8 @@ pub fn run_context(
     }
 
     // 1. Obs stats — compute date range
-    let (cutoff_tag, date_from) = if let Some(ref s) = since {
-        (s.clone(), s.clone())
+    let date_from = if let Some(ref s) = since {
+        s.clone()
     } else {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -64,8 +64,7 @@ pub fn run_context(
         let cutoff_ts = now.saturating_sub((days as u64) * 86400);
         let days_since_epoch = cutoff_ts / 86400;
         let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
-        let tag = format!("{y:04}{m:02}{d:02}");
-        (tag.clone(), tag)
+        format!("{y:04}{m:02}{d:02}")
     };
     let date_to = today();
 
@@ -79,12 +78,9 @@ pub fn run_context(
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
     // Open DB once before the slug loop — all slugs share the same harness.db.
-    // Use migration status to decide authoritative source: if legacy data has been
-    // migrated, SQLite is authoritative (even empty results). Otherwise, JSONL fallback.
     let shared_db = crate::store::open_harness_db().ok();
-    let sqlite_authoritative = crate::store::is_legacy_migrated().unwrap_or(false);
 
-    // Collect obs from all target project slugs — try SQLite first, fall back to JSONL
+    // Collect obs from all target project slugs
     for slug in &project_slugs {
         // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
@@ -102,41 +98,20 @@ pub fn run_context(
             return 1;
         }
 
-        // SQLite-first: if migration completed, trust DB (empty = no data).
-        // If not migrated, fall back to JSONL files for this slug.
-        let sqlite_obs = shared_db
-            .as_ref()
-            .and_then(|conn| {
-                crate::store::observations::query_obs_for_date_range_conn(
-                    conn, &date_from, &date_to, None,
-                )
-                .ok()
-            })
-            .unwrap_or_default();
-
-        let recs: Vec<ObsRecord> = if sqlite_authoritative || !sqlite_obs.is_empty() {
-            sqlite_obs
-        } else {
-            // Fallback to JSONL files
-            let slug_obs_dir = slug_harness.join("obs");
-            if !slug_obs_dir.is_dir() {
+        let recs: Vec<ObsRecord> = match shared_db.as_ref() {
+            Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
+                conn, &date_from, &date_to, None,
+            ) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("[reflect] SQLite observations read failed for slug {slug}: {e}");
+                    continue;
+                }
+            },
+            None => {
+                eprintln!("[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data");
                 continue;
             }
-            let all_obs = list_files(&slug_obs_dir, ".jsonl");
-            let filtered: Vec<String> = all_obs
-                .into_iter()
-                .filter(|f| {
-                    let tag = f.replace("session_", "");
-                    tag.get(..8)
-                        .map(|s| s >= cutoff_tag.as_str())
-                        .unwrap_or(true)
-                })
-                .collect();
-            let mut combined: Vec<ObsRecord> = Vec::new();
-            for f in &filtered {
-                combined.extend(read_jsonl_typed::<ObsRecord>(&slug_obs_dir.join(f)));
-            }
-            combined
         };
 
         for r in &recs {
@@ -256,21 +231,16 @@ pub fn run_context(
         "tool_success_rate": tool_success_rate,
     });
 
-    // 2. Evolution stats (SQLite first, fallback to JSONL)
-    let evo_records: Vec<serde_json::Value> = if let Some(ref conn) = shared_db {
-        match crate::store::evolution::query_all_records_conn(conn) {
-            Ok(recs) => recs
-                .iter()
-                .filter_map(|r| serde_json::to_value(r).ok())
-                .collect(),
-            Err(e) => {
-                eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
-                read_jsonl_typed::<serde_json::Value>(&evolution_file())
-            }
-        }
-    } else {
-        read_jsonl_typed::<serde_json::Value>(&evolution_file())
-    };
+    // 2. Evolution stats
+    let evo_records: Vec<serde_json::Value> = shared_db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::evolution::query_all_records_conn(conn)
+                .map_err(|e| eprintln!("[reflect] SQLite evolution read failed: {e}"))
+                .ok()
+        })
+        .map(|recs| recs.iter().filter_map(|r| serde_json::to_value(r).ok()).collect())
+        .unwrap_or_default();
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
     let mut skills_generated: u64 = 0;
@@ -341,18 +311,15 @@ pub fn run_context(
         "stagnation_count": stagnation_count,
     });
 
-    // 3. Metrics summary (SQLite first, fallback to JSON)
-    let metrics: Metrics = if let Some(ref conn) = shared_db {
-        match crate::store::metrics::load_metrics_conn(conn) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
-                read_json(&metrics_file(), default_metrics())
-            }
-        }
-    } else {
-        read_json(&metrics_file(), default_metrics())
-    };
+    // 3. Metrics summary
+    let metrics: Metrics = shared_db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::metrics::load_metrics_conn(conn)
+                .map_err(|e| eprintln!("[reflect] SQLite metrics read failed: {e}"))
+                .ok()
+        })
+        .unwrap_or_else(default_metrics);
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
@@ -422,10 +389,16 @@ pub fn run_context(
         "skill_attribution": skill_attr,
     });
 
-    // 4. Session snapshots (SQLite first, fallback to JSON)
-    let snapshots: Vec<serde_json::Value> = if let Some(ref conn) = shared_db {
-        match crate::store::sessions::list_recent_snapshots_conn(conn, 5) {
-            Ok(snaps) => snaps
+    // 4. Session snapshots
+    let snapshots: Vec<serde_json::Value> = shared_db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::sessions::list_recent_snapshots_conn(conn, 5)
+                .map_err(|e| eprintln!("[reflect] SQLite sessions read failed: {e}"))
+                .ok()
+        })
+        .map(|snaps| {
+            snaps
                 .iter()
                 .map(|s| {
                     serde_json::json!({
@@ -434,24 +407,9 @@ pub fn run_context(
                         "summary": s.summary.chars().take(400).collect::<String>(),
                     })
                 })
-                .collect(),
-            Err(e) => {
-                eprintln!("[reflect] SQLite sessions read failed, falling back to JSON: {e}");
-                vec![]
-            }
-        }
-    } else {
-        let snap_files = list_files(&sessions_dir(), ".json");
-        snap_files.iter().rev().take(5).filter_map(|f| {
-            let sp: serde_json::Value = read_json(&sessions_dir().join(f), serde_json::Value::Null);
-            if sp.is_null() { return None; }
-            Some(serde_json::json!({
-                "timestamp": sp.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
-                "type": sp.get("type").and_then(|v| v.as_str()).unwrap_or(""),
-                "summary": sp.get("summary").and_then(|v| v.as_str()).unwrap_or("").chars().take(400).collect::<String>(),
-            }))
-        }).collect()
-    };
+                .collect()
+        })
+        .unwrap_or_default();
 
     // 5. Evolved skills
     let evolved_list_dirs = list_dirs(&evolved_dir());
@@ -803,43 +761,20 @@ pub fn run(_input: &HookInput) -> i32 {
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
     let db = crate::store::open_harness_db().ok();
-    let sqlite_authoritative = crate::store::is_legacy_migrated().unwrap_or(false);
-    let sqlite_obs = db
-        .as_ref()
-        .and_then(|conn| {
-            crate::store::observations::query_obs_for_date_range_conn(
-                conn, &today_str, &today_str, None,
-            )
-            .map_err(|e| {
-                eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-                e
-            })
-            .ok()
-        })
-        .unwrap_or_default();
-
-    // When legacy migration has completed, SQLite is the authoritative source —
-    // empty results mean "no observations today" (not "migration pending").
-    // When migration hasn't run, fall back to JSONL files only when SQLite has no data.
-    let observations = if sqlite_authoritative || !sqlite_obs.is_empty() {
-        sqlite_obs
-    } else {
-        // Fallback: read from JSONL files
-        if !obs_dir().is_dir() {
-            return 0;
+    let observations = match db.as_ref() {
+        Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
+            conn, &today_str, &today_str, None,
+        ) {
+            Ok(recs) => recs,
+            Err(e) => {
+                eprintln!("[reflect] SQLite observations read failed: {e}");
+                return 1;
+            }
+        },
+        None => {
+            eprintln!("[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data");
+            return 1;
         }
-        let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
-            .into_iter()
-            .filter(|f| f.contains(&today_str))
-            .collect();
-        if obs_files.is_empty() {
-            return 0;
-        }
-        let mut recs: Vec<ObsRecord> = vec![];
-        for f in &obs_files {
-            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
-        }
-        recs
     };
     if observations.len() < 3 {
         return 0;
@@ -849,18 +784,15 @@ pub fn run(_input: &HookInput) -> i32 {
     let mut analysis = evolve::analyze_session(&observations);
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
-    // 3. Stagnation (load metrics from SQLite, fallback to JSON)
-    let mut metrics: Metrics = if let Some(ref conn) = db {
-        match crate::store::metrics::load_metrics_conn(conn) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
-                read_json(&metrics_file(), default_metrics())
-            }
-        }
-    } else {
-        read_json(&metrics_file(), default_metrics())
-    };
+    // 3. Stagnation
+    let mut metrics: Metrics = db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::metrics::load_metrics_conn(conn)
+                .map_err(|e| eprintln!("[reflect] SQLite metrics load failed: {e}"))
+                .ok()
+        })
+        .unwrap_or_else(default_metrics);
     let (should_rollback, improved, rolled_back_count) =
         evolve::check_stagnation(&mut metrics, analysis.avg_score);
 

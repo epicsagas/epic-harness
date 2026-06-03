@@ -1,10 +1,7 @@
 //! observations.rs — Observation records SQLite I/O
 //!
-//! Dual-API: `_conn()` variants are wired into hooks/serve; standalone functions
-//! are public API for future CLI commands and batch import. Suppress dead_code
-//! at module level because the store layer is built incrementally — not all
-//! public functions have callers yet.
-#![allow(dead_code)]
+//! `_conn()` variants are wired into hooks/serve and take a pre-opened connection.
+//! Standalone functions are used by the `migrate` subcommand for batch import.
 
 use rusqlite::Connection;
 use std::io;
@@ -67,14 +64,6 @@ pub fn insert_observation_conn(
         ],
     ))?;
     Ok(conn.last_insert_rowid())
-}
-
-/// Standalone insert — opens own connection.
-/// Currently unused; retained as public API for future batch import scenarios.
-#[allow(dead_code)]
-pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> {
-    let conn = super::open_harness_db()?;
-    insert_observation_conn(&conn, rec, session_id)
 }
 
 /// Query observations for a date range (inclusive).
@@ -266,16 +255,6 @@ pub fn query_last_action_conn(conn: &Connection, session_id: &str) -> io::Result
     ))
 }
 
-/// Delete observations older than the cutoff timestamp.
-/// Returns the number of deleted rows.
-pub fn delete_obs_older_than_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
-    let count = store_err(conn.execute(
-        "DELETE FROM observations WHERE timestamp < ?1",
-        rusqlite::params![cutoff_ts],
-    ))?;
-    Ok(count as u64)
-}
-
 // ── Stats types ──────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -392,7 +371,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_old_observations() {
+    fn old_observations_not_in_range_query() {
         let conn = in_memory_db();
 
         let rec = ObsRecord {
@@ -411,11 +390,9 @@ mod tests {
         };
         insert_observation_conn(&conn, &rec, "20260501_12345").unwrap();
 
-        let deleted = delete_obs_older_than_conn(&conn, "2026-05-15").unwrap();
-        assert_eq!(deleted, 1);
-
+        // Old record is outside the June query window
         let results =
-            query_obs_for_date_range_conn(&conn, "2026-05-01", "2026-05-31", None).unwrap();
+            query_obs_for_date_range_conn(&conn, "2026-06-01", "2026-06-30", None).unwrap();
         assert!(results.is_empty());
     }
 

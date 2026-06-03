@@ -371,10 +371,12 @@ pub fn run(input: &HookInput) -> i32 {
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
-    // Always compute seq_id for JSONL fallback correctness — if the SQLite write fails
-    // and we fall back to append_jsonl, the sequence_id must be present for ordering.
-    // SQLite ignores this field (uses auto-increment `id` for ORDER BY).
-    let seq_id = get_next_sequence_id(&session_file);
+    // seq_id is only needed for JSONL fallback ordering; SQLite uses auto-increment id.
+    let seq_id = if db.is_none() {
+        get_next_sequence_id(&session_file)
+    } else {
+        0
+    };
 
     let mut record = ObsRecord {
         timestamp: now_iso(),

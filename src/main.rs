@@ -174,7 +174,11 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
+        "migrate" => {
+        let dry_run = args.iter().any(|a| a == "--dry-run");
+        store::migrate::run_subcommand(dry_run)
+    }
+    "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
         | "update" => {
             unreachable!()
         }
@@ -215,6 +219,8 @@ fn main() {
                 "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
             );
             eprintln!("USER SUBCOMMANDS:");
+            eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
+            eprintln!("    --dry-run  Preview what would be imported without writing");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");

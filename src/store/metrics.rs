@@ -1,8 +1,5 @@
 //! metrics.rs — Metrics state SQLite I/O (3-table normalized)
 //!
-//! See observations.rs for dead_code rationale.
-#![allow(dead_code)]
-//!
 //! Replaces the single `metrics.json` file with:
 //! - `metrics_state` — key-value scalar fields
 //! - `score_history` — session score entries (capped at 50)
@@ -128,14 +125,6 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
     })
 }
 
-/// Standalone load — opens own connection.
-/// Currently unused; retained as public API for CLI commands.
-#[allow(dead_code)]
-pub fn load_metrics() -> io::Result<Metrics> {
-    let conn = super::open_harness_db()?;
-    load_metrics_conn(&conn)
-}
-
 // ── Save ─────────────────────────────────────────────
 
 /// Save the full Metrics struct to SQLite.
@@ -245,14 +234,6 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
 
     tx.commit()?;
     Ok(())
-}
-
-/// Standalone save — opens own connection.
-/// Currently unused; retained as public API for CLI commands.
-#[allow(dead_code)]
-pub fn save_metrics(m: &Metrics) -> io::Result<()> {
-    let conn = super::open_harness_db()?;
-    save_metrics_conn(&conn, m)
 }
 
 #[cfg(test)]
