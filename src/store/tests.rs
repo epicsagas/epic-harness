@@ -10,6 +10,38 @@ pub(crate) fn in_memory_db() -> Connection {
     conn
 }
 
+/// Create a v2 schema (no UNIQUE on score_history.timestamp) for migration tests.
+fn v2_db() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    // Apply pragmas manually (subset of init_schema)
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;",
+    )
+    .unwrap();
+    // Create _harness_meta and set version = 2
+    conn.execute_batch(
+        "CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '2');",
+    )
+    .unwrap();
+    // Create score_history WITHOUT UNIQUE constraint (v2 schema)
+    conn.execute_batch(
+        "CREATE TABLE score_history (
+             id           INTEGER PRIMARY KEY AUTOINCREMENT,
+             timestamp    TEXT NOT NULL,
+             success_rate REAL NOT NULL,
+             avg_score    REAL NOT NULL,
+             observations INTEGER NOT NULL DEFAULT 0,
+             dim_success  REAL NOT NULL DEFAULT 0.0,
+             dim_quality  REAL NOT NULL DEFAULT 0.0,
+             dim_cost     REAL NOT NULL DEFAULT 0.0
+         );",
+    )
+    .unwrap();
+    conn
+}
+
 #[test]
 fn schema_creates_all_tables() {
     let conn = in_memory_db();
@@ -119,6 +151,77 @@ fn migration_is_idempotent() {
         )
         .unwrap();
     assert_eq!(migrated, "1");
+}
+
+#[test]
+fn v2_to_v3_migration_upgrades_schema_version() {
+    // Start from a v2 DB and apply init_schema — must upgrade to v3.
+    let conn = v2_db();
+
+    // Seed a duplicate-timestamp row to verify OR IGNORE dedup
+    conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-01-01T00:00:00Z', 0.9, 0.8, 5, 1.0, 0.9, 0.8)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-01-01T00:00:00Z', 0.7, 0.6, 3, 0.5, 0.5, 0.5)",
+        [],
+    )
+    .unwrap();
+
+    // Apply schema (runs v2→v3 migration)
+    super::schema::init_schema(&conn).unwrap();
+
+    // Version must be 3
+    let version: String = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "3");
+
+    // UNIQUE constraint must now be in force (duplicate timestamp rejected)
+    let result = conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-01-01T00:00:00Z', 0.5, 0.4, 1, 0.0, 0.0, 0.0)",
+        [],
+    );
+    assert!(
+        result.is_err(),
+        "UNIQUE constraint must reject duplicate timestamp after v3 migration"
+    );
+
+    // Exactly one row must exist (OR IGNORE deduplicated the seed rows)
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM score_history", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        count, 1,
+        "duplicate seed row must have been ignored by OR IGNORE"
+    );
+}
+
+#[test]
+fn v2_to_v3_migration_is_idempotent() {
+    // Running init_schema twice on a v2 DB must not fail.
+    let conn = v2_db();
+    super::schema::init_schema(&conn).unwrap();
+    // Second call must be a no-op (version already = 3, no migration runs)
+    super::schema::init_schema(&conn).unwrap();
+
+    let version: String = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(version, "3");
 }
 
 #[test]

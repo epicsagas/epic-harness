@@ -12,6 +12,45 @@ use super::{ImmediateTx, query_row_optional, store_err};
 
 // ── Types ────────────────────────────────────────────
 
+/// Type-safe status for an orchestration run.
+/// `OrchRun.status` remains `String` for JSON/DB round-trip; use `RunStatus` for function params.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunStatus {
+    Running,
+    Complete,
+    Aborted,
+}
+
+impl RunStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RunStatus::Running => "running",
+            RunStatus::Complete => "complete",
+            RunStatus::Aborted => "aborted",
+        }
+    }
+}
+
+/// Type-safe control action for the single-row `orch_control` table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlAction {
+    Start,
+    Stop,
+    Pause,
+    Resume,
+}
+
+impl ControlAction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ControlAction::Start => "start",
+            ControlAction::Stop => "stop",
+            ControlAction::Pause => "pause",
+            ControlAction::Resume => "resume",
+        }
+    }
+}
+
 /// Subset of orchestrate::state::OrchestrationRun fields stored in DB.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OrchRun {
@@ -78,10 +117,14 @@ pub fn read_run_conn(conn: &Connection) -> io::Result<Option<OrchRun>> {
 }
 
 /// Update run status.
-pub fn update_run_status_conn(conn: &Connection, run_id: &str, status: &str) -> io::Result<()> {
+pub fn update_run_status_conn(
+    conn: &Connection,
+    run_id: &str,
+    status: RunStatus,
+) -> io::Result<()> {
     store_err(conn.execute(
         "UPDATE orch_runs SET status = ?1, updated_at = ?2 WHERE id = ?3",
-        rusqlite::params![status, crate::shared::helpers::now_iso(), run_id],
+        rusqlite::params![status.as_str(), crate::shared::helpers::now_iso(), run_id],
     ))?;
     Ok(())
 }
@@ -214,7 +257,7 @@ pub fn post_inbox_conn(
 /// Write a control directive (single-row table).
 pub fn write_control_conn(
     conn: &Connection,
-    action: &str,
+    action: ControlAction,
     target: Option<&str>,
     message: Option<&str>,
     generation: i64,
@@ -222,7 +265,7 @@ pub fn write_control_conn(
     store_err(conn.execute(
         "INSERT OR REPLACE INTO orch_control (id, action, target, message, generation)
          VALUES (1, ?1, ?2, ?3, ?4)",
-        rusqlite::params![action, target, message, generation],
+        rusqlite::params![action.as_str(), target, message, generation],
     ))?;
     Ok(())
 }

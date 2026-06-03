@@ -6,7 +6,7 @@
 use rusqlite::Connection;
 use std::io;
 
-use super::{ImmediateTx, store_err};
+use super::store_err;
 
 /// Current schema version. Increment when adding migrations in `run_migrations`.
 const SCHEMA_VERSION: u32 = 3;
@@ -297,33 +297,38 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
 
     // v2→v3: Add UNIQUE constraint on score_history.timestamp.
     // SQLite doesn't support ALTER TABLE ADD CONSTRAINT, so we recreate the table.
-    // Wrapped in ImmediateTx for atomicity — if the process crashes between
-    // DROP and RENAME, the transaction rolls back and the migration retries on next startup.
-    // score_history is capped at 50 entries so the table recreation is fast.
+    //
+    // Atomicity: BEGIN IMMEDIATE and the schema_version bump are embedded in a single
+    // execute_batch call. rusqlite's execute_batch maps to sqlite3_exec, which correctly
+    // handles BEGIN/COMMIT as SQL statements. We must NOT combine an external ImmediateTx
+    // RAII guard with execute_batch — execute_batch issues its own implicit autocommits
+    // for each statement when not already inside a BEGIN block, so the guard would not
+    // protect the DDL statements. The embedded BEGIN here removes that ambiguity.
+    //
+    // Crash recovery: if the process dies after BEGIN but before COMMIT, SQLite rolls
+    // back automatically on the next open (WAL + journal). If it dies after COMMIT,
+    // schema_version=3 is set and the migration block is skipped on next startup.
     if to_version >= 3 && from_version < 3 {
-        let tx = ImmediateTx::begin(conn)?;
         store_err(conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS score_history_v3 (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp    TEXT NOT NULL UNIQUE,
-                success_rate REAL NOT NULL,
-                avg_score    REAL NOT NULL,
-                observations INTEGER NOT NULL DEFAULT 0,
-                dim_success  REAL NOT NULL DEFAULT 0.0,
-                dim_quality  REAL NOT NULL DEFAULT 0.0,
-                dim_cost     REAL NOT NULL DEFAULT 0.0
+            "BEGIN IMMEDIATE;
+             CREATE TABLE IF NOT EXISTS score_history_v3 (
+                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                 timestamp    TEXT NOT NULL UNIQUE,
+                 success_rate REAL NOT NULL,
+                 avg_score    REAL NOT NULL,
+                 observations INTEGER NOT NULL DEFAULT 0,
+                 dim_success  REAL NOT NULL DEFAULT 0.0,
+                 dim_quality  REAL NOT NULL DEFAULT 0.0,
+                 dim_cost     REAL NOT NULL DEFAULT 0.0
              );
              INSERT OR IGNORE INTO score_history_v3
-                SELECT id, timestamp, success_rate, avg_score, observations,
-                       dim_success, dim_quality, dim_cost FROM score_history;
+                 SELECT id, timestamp, success_rate, avg_score, observations,
+                        dim_success, dim_quality, dim_cost FROM score_history;
              DROP TABLE score_history;
-             ALTER TABLE score_history_v3 RENAME TO score_history;",
+             ALTER TABLE score_history_v3 RENAME TO score_history;
+             INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', '3');
+             COMMIT;",
         ))?;
-        // set_version inside the transaction so the version bump and schema change
-        // are atomic — a crash between commit and set_version would otherwise cause
-        // the migration to retry against an already-renamed table.
-        set_version(conn, to_version)?;
-        tx.commit()?;
         return Ok(());
     }
 

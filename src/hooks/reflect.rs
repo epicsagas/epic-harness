@@ -101,6 +101,7 @@ pub fn run_context(
     // Query observations once — the DB is shared across all projects and slug-filtering
     // is not yet supported in the schema. Querying inside the slug loop caused N copies
     // of the same result set to be accumulated (one per slug).
+    // See policy comment in run() — SQLite is required here, no JSONL fallback.
     let recs: Vec<ObsRecord> = match shared_db.as_ref() {
         Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
             conn, &date_from, &date_to, None,
@@ -780,6 +781,13 @@ pub fn run(_input: &HookInput) -> i32 {
             }
         },
         None => {
+            // Storage policy: reflect.rs requires SQLite. Unlike observe.rs (which falls
+            // back to JSONL on transient write errors), reflect cannot fall back because:
+            // (1) JSONL records are per-session files with no aggregated index, and
+            // (2) if observe.rs wrote to JSONL, it was a transient failure — the next
+            //     successful write went to SQLite, so the session data is split.
+            // If harness.db is absent, the harness has never been initialized; there is
+            // nothing meaningful to analyze.
             eprintln!(
                 "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
             );

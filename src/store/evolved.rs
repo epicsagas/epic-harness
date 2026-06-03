@@ -59,46 +59,34 @@ pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRo
 ///
 /// Uses separate SQL strings for metadata-only vs full queries to avoid fetching
 /// potentially large skill_md blobs when the caller only needs metadata.
+/// A single mapper handles both cases: when `include_body` is false, `skill_md` is
+/// absent from the SELECT so column indexes for `active`, `created`, `updated` shift
+/// by one — `col_offset` encodes that shift.
 fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
-    if include_body {
-        let mut stmt = store_err(conn.prepare(
-            "SELECT name, origin, confidence, project, skill_md, active, created, updated
-             FROM evolved_skills ORDER BY name",
-        ))?;
-        let rows = store_err(stmt.query_map([], |row| {
-            Ok(EvolvedSkillRow {
-                name: row.get(0)?,
-                origin: row.get(1)?,
-                confidence: row.get(2)?,
-                project: row.get(3)?,
-                skill_md: row.get(4)?,
-                active: row.get::<_, i32>(5)? != 0,
-                created: row.get(6)?,
-                updated: row.get(7)?,
-            })
-        }))?;
-        let mut skills = Vec::new();
-        for r in rows {
-            skills.push(store_err(r)?);
-        }
-        return Ok(skills);
-    }
+    let sql = if include_body {
+        "SELECT name, origin, confidence, project, skill_md, active, created, updated \
+         FROM evolved_skills ORDER BY name"
+    } else {
+        "SELECT name, origin, confidence, project, active, created, updated \
+         FROM evolved_skills ORDER BY name"
+    };
 
-    let mut stmt = store_err(conn.prepare(
-        "SELECT name, origin, confidence, project, active, created, updated
-         FROM evolved_skills ORDER BY name",
-    ))?;
-
+    let mut stmt = store_err(conn.prepare(sql))?;
     let rows = store_err(stmt.query_map([], |row| {
+        let (skill_md, active_col, created_col, updated_col) = if include_body {
+            (row.get::<_, String>(4)?, 5usize, 6usize, 7usize)
+        } else {
+            (String::new(), 4usize, 5usize, 6usize)
+        };
         Ok(EvolvedSkillRow {
             name: row.get(0)?,
             origin: row.get(1)?,
             confidence: row.get(2)?,
             project: row.get(3)?,
-            skill_md: String::new(),
-            active: row.get::<_, i32>(4)? != 0,
-            created: row.get(5)?,
-            updated: row.get(6)?,
+            skill_md,
+            active: row.get::<_, i32>(active_col)? != 0,
+            created: row.get(created_col)?,
+            updated: row.get(updated_col)?,
         })
     }))?;
 
@@ -160,7 +148,10 @@ pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<Str
 
 /// Save all promotion counters (replaces entire table).
 ///
-/// Precondition: caller must not hold an active transaction on this connection.
+/// Atomicity: DELETE + INSERT are wrapped in a single `BEGIN IMMEDIATE` transaction
+/// via `ImmediateTx`. Individual `conn.execute()` calls correctly participate in
+/// an outer `BEGIN`-level transaction (unlike `execute_batch`, which issues implicit
+/// autocommits). Callers must not hold an active transaction on this connection.
 pub fn save_promotion_counters_conn(
     conn: &Connection,
     counters: &HashMap<String, u64>,
@@ -169,7 +160,7 @@ pub fn save_promotion_counters_conn(
     store_err(conn.execute("DELETE FROM promotion_counters", []))?;
     for (key, count) in counters {
         store_err(conn.execute(
-            "INSERT INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
+            "INSERT OR REPLACE INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
             rusqlite::params![key, super::u64_to_i64(*count)],
         ))?;
     }

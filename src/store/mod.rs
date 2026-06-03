@@ -147,6 +147,12 @@ pub fn open_harness_db() -> io::Result<Connection> {
 
     // Restrict DB file to owner-only (observation data may contain file paths,
     // command text, etc.). Only applies on Unix; no-op on other platforms.
+    //
+    // TOCTOU note: there is a small window between Connection::open (which creates
+    // the file with default umask permissions) and set_permissions here. rusqlite
+    // does not expose an fd-level fchmod API, so this window cannot be eliminated
+    // without a custom VFS. The risk is low for a local single-user tool — the
+    // threat actor would need to read the file within milliseconds of first creation.
     #[cfg(unix)]
     {
         let _ = fs::set_permissions(&path, PermissionsExt::from_mode(0o600));
