@@ -133,6 +133,78 @@ fn u64_to_i64_saturates_on_overflow() {
 }
 
 #[test]
+fn i64_to_u64_converts_normal_values() {
+    assert_eq!(super::i64_to_u64(0), 0);
+    assert_eq!(super::i64_to_u64(1_000_000), 1_000_000);
+    assert_eq!(super::i64_to_u64(i64::MAX), i64::MAX as u64);
+}
+
+#[test]
+fn i64_to_u64_clamps_negative_to_zero() {
+    assert_eq!(super::i64_to_u64(-1), 0);
+    assert_eq!(super::i64_to_u64(i64::MIN), 0);
+}
+
+#[test]
+fn immediate_tx_rollbacks_on_drop() {
+    let conn = in_memory_db();
+    conn.execute(
+        "INSERT INTO metrics_state (key, value) VALUES ('tx_test', 'before')",
+        [],
+    )
+    .unwrap();
+
+    {
+        let _tx = super::ImmediateTx::begin(&conn).unwrap();
+        conn.execute(
+            "UPDATE metrics_state SET value = 'during' WHERE key = 'tx_test'",
+            [],
+        )
+        .unwrap();
+        // _tx drops here → auto-ROLLBACK
+    }
+
+    let val: String = conn
+        .query_row(
+            "SELECT value FROM metrics_state WHERE key = 'tx_test'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(val, "before", "uncommitted transaction must be rolled back on drop");
+}
+
+#[test]
+fn fk_violation_on_agent_without_run() {
+    let conn = in_memory_db();
+    let result = conn.execute(
+        "INSERT INTO orch_agents
+         (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat)
+         VALUES ('agent-x', 'nonexistent-run', 'worker', 'do thing', '[]', 'running', 'exec', 0.0, '')",
+        [],
+    );
+    assert!(result.is_err(), "FK violation must reject insert of agent with non-existent run_id");
+}
+
+#[test]
+fn unique_constraint_on_score_history_timestamp() {
+    let conn = in_memory_db();
+    conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-06-02T10:00:00Z', 0.9, 0.8, 10, 1.0, 0.9, 0.8)",
+        [],
+    )
+    .unwrap();
+
+    let result = conn.execute(
+        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
+         VALUES ('2026-06-02T10:00:00Z', 0.7, 0.6, 5, 0.5, 0.5, 0.5)",
+        [],
+    );
+    assert!(result.is_err(), "UNIQUE constraint must reject duplicate score_history timestamp");
+}
+
+#[test]
 fn obs_stats_tool_limit_is_enforced() {
     use super::observations::{insert_observation_conn, query_obs_stats_conn};
     use crate::shared::obs::ObsRecord;

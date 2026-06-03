@@ -52,8 +52,10 @@ pub fn read_running_pipeline_conn(
 
     match query_row_optional(result)? {
         Some(json_str) => {
-            let val: serde_json::Value = serde_json::from_str(&json_str)
-                .unwrap_or(serde_json::Value::Object(Default::default()));
+            let val: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_else(|e| {
+                eprintln!("[store/orbit] malformed state_json, using empty object: {e}");
+                serde_json::Value::Object(Default::default())
+            });
             Ok(Some(val))
         }
         None => Ok(None),
@@ -87,8 +89,10 @@ pub fn list_all_pipelines_conn_limited(
         let updated_at: String = row.get(7)?;
 
         // Merge metadata into the state JSON
-        let mut val: serde_json::Value = serde_json::from_str(&state_json)
-            .unwrap_or(serde_json::Value::Object(Default::default()));
+        let mut val: serde_json::Value = serde_json::from_str(&state_json).unwrap_or_else(|e| {
+            eprintln!("[store/orbit] malformed state_json in listing, using empty object: {e}");
+            serde_json::Value::Object(Default::default())
+        });
         if !val.is_object() {
             val = serde_json::Value::Object(Default::default());
         }

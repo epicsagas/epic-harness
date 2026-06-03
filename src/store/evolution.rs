@@ -13,9 +13,9 @@ use super::store_err;
 /// Insert an evolution record.
 pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Result<i64> {
     let error_json = serde_json::to_string(&rec.error_patterns)
-        .expect("serde_json Value serialization cannot fail");
+        .unwrap_or_else(|e| { eprintln!("[store/evolution] error_patterns serialization failed: {e}"); "{}".into() });
     let failure_json = serde_json::to_string(&rec.failure_patterns)
-        .expect("serde_json Value serialization cannot fail");
+        .unwrap_or_else(|e| { eprintln!("[store/evolution] failure_patterns serialization failed: {e}"); "[]".into() });
 
     store_err(conn.execute(
         "INSERT INTO evolution_records
@@ -63,14 +63,14 @@ pub fn query_recent_records_conn(
         let failure_json: String = row.get(5)?;
         Ok(EvolutionRecord {
             timestamp: row.get(0)?,
-            observations: row.get::<_, i64>(1)? as u64,
+            observations: super::i64_to_u64(row.get::<_, i64>(1)?),
             success_rate: row.get(2)?,
             avg_score: row.get(3)?,
             error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
             failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
-            skills_seeded: row.get::<_, i64>(6)? as u64,
-            skills_rolled_back: row.get::<_, i64>(7)? as u64,
-            total_evolved: row.get::<_, i64>(8)? as u64,
+            skills_seeded: super::i64_to_u64(row.get::<_, i64>(6)?),
+            skills_rolled_back: super::i64_to_u64(row.get::<_, i64>(7)?),
+            total_evolved: super::i64_to_u64(row.get::<_, i64>(8)?),
             analysis_summary: row.get(9)?,
         })
     }))?;

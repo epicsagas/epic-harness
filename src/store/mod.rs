@@ -136,6 +136,21 @@ pub(crate) fn u64_to_i64(v: u64) -> i64 {
     })
 }
 
+/// Convert i64 to u64 for reading SQLite-stored counters.
+///
+/// Companion to [`u64_to_i64`]: negative values (which should never exist for
+/// counters that originated as u64) clamp to 0 with a diagnostic log.
+#[inline]
+pub(crate) fn i64_to_u64(v: i64) -> u64 {
+    v.try_into().unwrap_or_else(|_| {
+        eprintln!(
+            "[store] i64_to_u64: value {v} is negative, clamping to 0 — \
+             indicates data corruption or incorrect column read"
+        );
+        0
+    })
+}
+
 /// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
 pub fn harness_db_path() -> std::path::PathBuf {
     paths::harness_dir().join("harness.db")

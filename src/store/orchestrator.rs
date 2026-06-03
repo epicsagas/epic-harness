@@ -8,7 +8,7 @@
 use rusqlite::Connection;
 use std::io;
 
-use super::{ImmediateTx, store_err};
+use super::{ImmediateTx, query_row_optional, store_err};
 
 // ── Types ────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ pub fn init_run_conn(conn: &Connection, run: &OrchRun) -> io::Result<()> {
 
 /// Read the current orchestration run.
 pub fn read_run_conn(conn: &Connection) -> io::Result<Option<OrchRun>> {
-    let result = conn.query_row(
+    query_row_optional(conn.query_row(
         "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at
          FROM orch_runs WHERE status = 'running' ORDER BY created_at DESC LIMIT 1",
         [],
@@ -74,13 +74,7 @@ pub fn read_run_conn(conn: &Connection) -> io::Result<Option<OrchRun>> {
                 updated_at: row.get(5)?,
             })
         },
-    );
-
-    match result {
-        Ok(run) => Ok(Some(run)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
+    ))
 }
 
 /// Update run status.
@@ -120,7 +114,7 @@ pub fn upsert_agent_conn(conn: &Connection, agent: &OrchAgent) -> io::Result<()>
 
 /// Read agent status by ID.
 pub fn read_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<Option<OrchAgent>> {
-    let result = conn.query_row(
+    query_row_optional(conn.query_row(
         "SELECT id, run_id, role, task, satisfies_json, status, phase, progress,
                 last_heartbeat, started_at, completed_at
          FROM orch_agents WHERE id = ?1",
@@ -140,13 +134,7 @@ pub fn read_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<Option<O
                 completed_at: row.get(10)?,
             })
         },
-    );
-
-    match result {
-        Ok(agent) => Ok(Some(agent)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
+    ))
 }
 
 /// Dismiss an agent: remove from agents table and update run JSON.

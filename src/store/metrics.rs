@@ -15,7 +15,7 @@ use std::io;
 use crate::shared::evolution::{Metrics, SessionScoreEntry, SkillAttribution};
 use crate::shared::scoring::ScoreDimensions;
 
-use super::store_err;
+use super::{ImmediateTx, store_err};
 
 /// Maximum score history entries to retain.
 const MAX_SCORE_HISTORY: usize = 50;
@@ -26,12 +26,18 @@ const MAX_SCORE_HISTORY: usize = 50;
 pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
     // Scalar state — use explicit Option to distinguish missing vs present
     let get = |key: &str| -> Option<String> {
-        conn.query_row(
+        match conn.query_row(
             "SELECT value FROM metrics_state WHERE key = ?1",
             rusqlite::params![key],
             |row| row.get::<_, String>(0),
-        )
-        .ok()
+        ) {
+            Ok(v) => Some(v),
+            Err(rusqlite::Error::QueryReturnedNoRows) => None,
+            Err(e) => {
+                eprintln!("[store/metrics] error reading key '{key}': {e}");
+                None
+            }
+        }
     };
 
     let total_sessions: u64 = get("total_sessions")
@@ -64,7 +70,7 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
             timestamp: row.get(0)?,
             success_rate: row.get(1)?,
             avg_score: row.get(2)?,
-            observations: row.get::<_, i64>(3)? as u64,
+            observations: super::i64_to_u64(row.get::<_, i64>(3)?),
             dimension_averages: ScoreDimensions {
                 tool_success: row.get(4)?,
                 output_quality: row.get(5)?,
@@ -91,7 +97,7 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
         store_err(sa_stmt.query_map([], |row| {
             Ok(SkillAttribution {
                 skill_name: row.get(0)?,
-                sessions_active: row.get::<_, i64>(1)? as u64,
+                sessions_active: super::i64_to_u64(row.get::<_, i64>(1)?),
                 avg_score_with: row.get(2)?,
                 avg_score_without: row.get(3)?,
                 first_seen: row.get(4)?,
@@ -140,11 +146,11 @@ pub fn load_metrics() -> io::Result<Metrics> {
 ///
 /// Precondition: caller must not hold an active transaction on this connection.
 pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
-    let tx = store_err(conn.unchecked_transaction())?;
+    let tx = ImmediateTx::begin(conn)?;
 
     // Scalar state — upsert each key
     let upsert = |key: &str, value: &str| {
-        tx.execute(
+        conn.execute(
             "INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?1, ?2)",
             rusqlite::params![key, value],
         )
@@ -159,18 +165,18 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     // Option fields: Some → upsert, None → delete stale value
     match &m.last_session {
         Some(v) => store_err(upsert("last_session", v))?,
-        None => store_err(tx.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?,
+        None => store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?,
     };
     match m.best_score {
         Some(v) => store_err(upsert("best_score", &v.to_string()))?,
-        None => store_err(tx.execute("DELETE FROM metrics_state WHERE key = 'best_score'", []))?,
+        None => store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'best_score'", []))?,
     };
     store_err(upsert("best_session", &m.best_session))?;
     store_err(upsert("trend", &m.trend))?;
     store_err(upsert("stagnation_count", &m.stagnation_count.to_string()))?;
     match &m.last_error_context {
         Some(v) => store_err(upsert("last_error_context", v))?,
-        None => store_err(tx.execute(
+        None => store_err(conn.execute(
             "DELETE FROM metrics_state WHERE key = 'last_error_context'",
             [],
         ))?,
@@ -186,7 +192,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         .take(MAX_SCORE_HISTORY)
         .collect();
     for entry in entries.into_iter().rev() {
-        store_err(tx.execute(
+        store_err(conn.execute(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
              dim_success, dim_quality, dim_cost)
              VALUES (?1,?2,?3,?4,?5,?6,?7)
@@ -209,7 +215,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         ))?;
     }
     // Prune rows beyond the cap (oldest first)
-    store_err(tx.execute(
+    store_err(conn.execute(
         "DELETE FROM score_history WHERE id NOT IN (
             SELECT id FROM score_history ORDER BY id DESC LIMIT ?
         )",
@@ -218,7 +224,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
 
     // Skill attribution — UPSERT preserving first_seen on conflict
     for sa in m.skill_attribution.values() {
-        store_err(tx.execute(
+        store_err(conn.execute(
             "INSERT INTO skill_attribution
              (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
              VALUES (?1,?2,?3,?4,?5)
@@ -237,7 +243,7 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         ))?;
     }
 
-    store_err(tx.commit())?;
+    tx.commit()?;
     Ok(())
 }
 

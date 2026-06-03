@@ -7,7 +7,7 @@ use rusqlite::Connection;
 use std::collections::HashMap;
 use std::io;
 
-use super::{query_row_optional, store_err};
+use super::{ImmediateTx, query_row_optional, store_err};
 
 /// Evolved skill metadata (mirrors evolve::skills::SkillMeta).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -124,7 +124,7 @@ pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<Str
     let mut stmt = store_err(conn.prepare("SELECT pattern_key, count FROM promotion_counters"))?;
 
     let rows = store_err(stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)) // i64→u64 safe: always non-negative
+        Ok((row.get::<_, String>(0)?, super::i64_to_u64(row.get::<_, i64>(1)?)))
     }))?;
 
     let mut counters = HashMap::new();
@@ -142,15 +142,15 @@ pub fn save_promotion_counters_conn(
     conn: &Connection,
     counters: &HashMap<String, u64>,
 ) -> io::Result<()> {
-    let tx = store_err(conn.unchecked_transaction())?;
-    store_err(tx.execute("DELETE FROM promotion_counters", []))?;
+    let tx = ImmediateTx::begin(conn)?;
+    store_err(conn.execute("DELETE FROM promotion_counters", []))?;
     for (key, count) in counters {
-        store_err(tx.execute(
+        store_err(conn.execute(
             "INSERT INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
             rusqlite::params![key, super::u64_to_i64(*count)],
         ))?;
     }
-    store_err(tx.commit())?;
+    tx.commit()?;
     Ok(())
 }
 
