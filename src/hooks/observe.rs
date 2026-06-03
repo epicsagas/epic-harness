@@ -15,6 +15,8 @@ static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 fn get_next_sequence_id(session_file: &std::path::Path) -> u64 {
+    // TODO: replace with DB-based sequence once observe hook writes directly to SQLite.
+    // Currently uses file size as a monotonically-increasing proxy for insertion order.
     std::fs::metadata(session_file)
         .map(|m| m.len())
         .unwrap_or(0)

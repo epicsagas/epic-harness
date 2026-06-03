@@ -389,11 +389,15 @@ fn import_metrics(
 
     match std::fs::read_to_string(&metrics_file) {
         Ok(content) => {
-            let metrics = serde_json::from_str::<crate::shared::evolution::Metrics>(&content)
-                .unwrap_or_else(|e| {
+            let metrics = match serde_json::from_str::<crate::shared::evolution::Metrics>(&content)
+            {
+                Ok(m) => m,
+                Err(e) => {
                     eprintln!("[migrate] parse metrics error: {e}");
+                    stats.errors += 1;
                     crate::shared::evolution::default_metrics()
-                });
+                }
+            };
             if let Err(e) = super::metrics::save_metrics_conn(conn, &metrics) {
                 eprintln!("[migrate] save metrics error: {e}");
                 stats.errors += 1;

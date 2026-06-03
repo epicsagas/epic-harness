@@ -15,10 +15,12 @@ use super::{query_row_optional, store_err};
 /// `"2026-06-02"` → `"2026-06-02T00:00:00"` / `"...T23:59:59"`.
 fn pad_date(ts: &str, end_of_day: bool) -> String {
     if ts.len() == 10 {
+        // All stored timestamps use UTC (Z suffix). Pad with matching suffix so
+        // lexicographic range comparison works correctly against stored values.
         if end_of_day {
-            format!("{ts}T23:59:59")
+            format!("{ts}T23:59:59Z")
         } else {
-            format!("{ts}T00:00:00")
+            format!("{ts}T00:00:00Z")
         }
     } else {
         ts.to_string()

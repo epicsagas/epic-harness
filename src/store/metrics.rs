@@ -151,7 +151,11 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         "total_evolved_skills",
         &m.total_evolved_skills.to_string(),
     ))?;
-    // Option fields: Some → upsert, None → delete stale value
+    // Option fields follow a deliberate split policy:
+    // - Fields with meaningful "absence" (last_session, best_score, last_error_context)
+    //   → DELETE the key when None so load sees a clean absence, not a stale value.
+    // - Fields with a domain-valid default (trend="stable", best_session="", stagnation=0)
+    //   → always UPSERT; the default value IS the absent state.
     match &m.last_session {
         Some(v) => store_err(upsert("last_session", v))?,
         None => store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?,
@@ -310,11 +314,11 @@ mod tests {
     fn score_history_cap_retains_most_recent() {
         let conn = in_memory_db();
         let mut m = sample_metrics();
-        // Add 60 entries with unique timestamps (ascending) and ascending observations.
-        // In production, each session produces a unique timestamp.
+        // Add 60 entries using July dates so none overlap with the base "2026-06-02" entry.
+        // Each entry gets a unique timestamp (day 1..3, hour 0..23).
         for i in 0..60 {
             m.score_history.push(SessionScoreEntry {
-                timestamp: format!("2026-06-{:02}T{:02}:00:00Z", i / 24 + 1, i % 24),
+                timestamp: format!("2026-07-{:02}T{:02}:00:00Z", i / 24 + 1, i % 24),
                 success_rate: 0.9,
                 avg_score: 0.85,
                 observations: i,

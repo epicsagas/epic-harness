@@ -1,7 +1,4 @@
 //! global.rs — Cross-project pattern SQLite I/O
-//!
-//! See observations.rs for dead_code rationale.
-#![allow(dead_code)]
 
 use rusqlite::Connection;
 use std::io;

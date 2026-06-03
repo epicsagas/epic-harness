@@ -81,6 +81,10 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
     // Open DB once and reuse across all requests (single-threaded server).
     // Avoids per-request schema init + migration check overhead.
+    // Cross-session / cross-hook concurrency is handled at the SQLite layer:
+    // hooks run as separate processes each with their own connection, WAL mode
+    // allows concurrent reads without blocking, and busy_timeout=5000ms serializes
+    // concurrent writers. No thread-level sharing is needed here.
     let db = crate::store::open_harness_db().ok();
     let harness_dir = common::harness_dir();
 

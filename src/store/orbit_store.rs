@@ -1,7 +1,9 @@
 //! orbit_store.rs — Orbit pipeline SQLite I/O
 //!
-//! See observations.rs for dead_code rationale.
-#![allow(dead_code)]
+//! `upsert_pipeline_conn`, `read_running_pipeline_conn`, `dismiss_pipeline_conn`,
+//! and `update_pipeline_status_conn` are pre-built for when the orbit skill writes
+//! pipeline state directly to SQLite. Currently the orbit skill writes PIPELINE-*.json
+//! files; the hooks integration is pending.
 
 use rusqlite::Connection;
 use std::io;
@@ -9,6 +11,7 @@ use std::io;
 use super::{query_row_optional, store_err};
 
 /// Upsert a pipeline state. If a pipeline with the same id exists, it's replaced.
+#[allow(dead_code)]
 pub fn upsert_pipeline_conn(
     conn: &Connection,
     id: &str,
@@ -31,6 +34,7 @@ pub fn upsert_pipeline_conn(
 }
 
 /// Find a running pipeline, optionally filtered by project.
+#[allow(dead_code)]
 pub fn read_running_pipeline_conn(
     conn: &Connection,
     project: Option<&str>,
@@ -119,6 +123,7 @@ pub fn list_all_pipelines_conn_limited(
 }
 
 /// Dismiss (delete) a pipeline by ID.
+#[allow(dead_code)]
 pub fn dismiss_pipeline_conn(conn: &Connection, pipeline_id: &str) -> io::Result<bool> {
     let count = store_err(conn.execute(
         "DELETE FROM orbit_pipelines WHERE id = ?1",
@@ -128,6 +133,7 @@ pub fn dismiss_pipeline_conn(conn: &Connection, pipeline_id: &str) -> io::Result
 }
 
 /// Update pipeline status only.
+#[allow(dead_code)]
 pub fn update_pipeline_status_conn(
     conn: &Connection,
     pipeline_id: &str,
