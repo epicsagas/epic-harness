@@ -54,7 +54,10 @@ pub fn read_nodes_conn(conn: &Connection, ids: &[&str]) -> io::Result<Vec<Node>>
             super::util::row_to_node,
         )
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| {
+            r.map_err(|e| eprintln!("[mem/node] row deserialization error: {e}"))
+                .ok()
+        })
         .collect();
     Ok(nodes)
 }
@@ -96,7 +99,26 @@ pub fn read_all_nodes_conn(conn: &Connection) -> io::Result<Vec<Node>> {
     let nodes: Vec<Node> = stmt
         .query_map([], super::util::row_to_node)
         .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
+        .filter_map(|r| {
+            r.map_err(|e| eprintln!("[mem/node] row deserialization error: {e}"))
+                .ok()
+        })
+        .collect();
+    Ok(nodes)
+}
+
+/// Read nodes with a SQL-level LIMIT (avoids loading all rows into memory).
+pub fn read_nodes_limited_conn(conn: &Connection, limit: usize) -> io::Result<Vec<Node>> {
+    // format! is safe here — NODE_COLUMNS is a compile-time const, not user input.
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?");
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let nodes: Vec<Node> = stmt
+        .query_map(rusqlite::params![limit as i64], super::util::row_to_node)
+        .map_err(io::Error::other)?
+        .filter_map(|r| {
+            r.map_err(|e| eprintln!("[mem/node] row deserialization error: {e}"))
+                .ok()
+        })
         .collect();
     Ok(nodes)
 }

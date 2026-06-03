@@ -1,6 +1,6 @@
 ---
 name: council
-description: "Trigger: architecture, tech selection, or design decisions with significant trade-offs and no clear answer."
+description: "4-voice parallel deliberation (Architect · Skeptic · Pragmatist · Critic) for architecture, tech selection, or design decisions with no clear answer. Anti-anchoring: each voice gets independent context. Records decision in harness-mem."
 ---
 
 # Council — Structured Multi-Voice Decision Making

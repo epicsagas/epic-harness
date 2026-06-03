@@ -485,6 +485,24 @@ pub fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         "weak_tools": weak_tools,
     });
 
+    // Write to SQLite (primary) + JSONL (fallback)
+    if let Ok(conn) = crate::store::open_harness_db() {
+        let per_error_json = serde_json::to_string(&analysis.per_error_stats).unwrap_or_default();
+        let failure_json = serde_json::to_string(patterns).unwrap_or_default();
+        let weak_json = serde_json::to_string(&weak_tools).unwrap_or_default();
+        if let Err(e) = crate::store::global::insert_pattern_conn(
+            &conn,
+            record["timestamp"].as_str().unwrap_or(""),
+            &project_name,
+            analysis.success_rate,
+            analysis.avg_score,
+            &per_error_json,
+            &failure_json,
+            &weak_json,
+        ) {
+            eprintln!("[skills] SQLite global pattern write failed: {e}");
+        }
+    }
     append_jsonl(&global_patterns_file(), &record);
 }
 

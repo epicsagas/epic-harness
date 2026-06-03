@@ -3,6 +3,8 @@ use std::io::ErrorKind;
 use std::net::TcpStream;
 use std::path::Path;
 
+use rusqlite::Connection;
+
 use super::common::*;
 use crate::config::CONFIG;
 use crate::mem::store;
@@ -116,11 +118,8 @@ fn apply_cold_start_presets(stacks: &[&str]) -> u32 {
     applied
 }
 
-fn get_cross_project_hints() -> Vec<String> {
+fn get_cross_project_hints(db: Option<&Connection>) -> Vec<String> {
     if !cross_project_file().is_file() {
-        return vec![];
-    }
-    if !global_patterns_file().is_file() {
         return vec![];
     }
 
@@ -130,7 +129,27 @@ fn get_cross_project_hints() -> Vec<String> {
         .unwrap_or("")
         .to_string();
 
-    let records = read_jsonl(&global_patterns_file());
+    // Try SQLite first (reuse shared connection), fallback to JSONL
+    let records: Vec<serde_json::Value> = if let Some(conn) = db {
+        match crate::store::global::query_patterns_excluding_conn(conn, &project_name, 20) {
+            Ok(patterns) => patterns,
+            Err(e) => {
+                eprintln!(
+                    "[resume] SQLite global patterns read failed, falling back to JSONL: {e}"
+                );
+                if !global_patterns_file().is_file() {
+                    return vec![];
+                }
+                read_jsonl(&global_patterns_file())
+            }
+        }
+    } else {
+        if !global_patterns_file().is_file() {
+            return vec![];
+        }
+        read_jsonl(&global_patterns_file())
+    };
+
     let other: Vec<_> = records
         .iter()
         .filter(|r| r.get("project").and_then(|p| p.as_str()) != Some(&project_name))
@@ -251,34 +270,55 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    // 1. Latest session snapshot
-    let mut snaps = list_files(&sessions_dir(), ".json");
-    snaps.sort();
-    if let Some(latest_name) = snaps.last() {
-        let snap: SessionSnapshot = read_json(
-            &sessions_dir().join(latest_name),
-            SessionSnapshot {
-                timestamp: String::new(),
-                snap_type: String::new(),
-                summary: String::new(),
-                pending_tasks: vec![],
-                context_usage: None,
-                pipeline_state: None,
-            },
-        );
-        if !snap.summary.is_empty() {
-            hint("resume", &format!("Previous: {}", snap.summary));
+    // Open harness.db once and share across all reads in this session start.
+    let shared_db = crate::store::open_harness_db().ok();
+
+    // 1. Latest session snapshot (SQLite first, fallback to JSON file)
+    if let Some(conn) = shared_db.as_ref() {
+        if let Ok(Some(snap)) = crate::store::sessions::get_latest_snapshot_conn(conn) {
+            if !snap.summary.is_empty() {
+                hint("resume", &format!("Previous: {}", snap.summary));
+            }
+            if !snap.pending_tasks.is_empty() {
+                hint(
+                    "resume",
+                    &format!("Pending: {}", snap.pending_tasks.join(", ")),
+                );
+            }
         }
-        if !snap.pending_tasks.is_empty() {
-            hint(
-                "resume",
-                &format!("Pending: {}", snap.pending_tasks.join(", ")),
+    } else {
+        let mut snaps = list_files(&sessions_dir(), ".json");
+        snaps.sort();
+        if let Some(latest_name) = snaps.last() {
+            let snap: SessionSnapshot = read_json(
+                &sessions_dir().join(latest_name),
+                SessionSnapshot {
+                    timestamp: String::new(),
+                    snap_type: String::new(),
+                    summary: String::new(),
+                    pending_tasks: vec![],
+                    context_usage: None,
+                    pipeline_state: None,
+                },
             );
+            if !snap.summary.is_empty() {
+                hint("resume", &format!("Previous: {}", snap.summary));
+            }
+            if !snap.pending_tasks.is_empty() {
+                hint(
+                    "resume",
+                    &format!("Pending: {}", snap.pending_tasks.join(", ")),
+                );
+            }
         }
     }
 
-    // 2. Eval metrics
-    let metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    // 2. Eval metrics — try SQLite first, fall back to JSON file
+    let metrics: Metrics = shared_db
+        .as_ref()
+        .and_then(|conn| crate::store::metrics::load_metrics_conn(conn).ok())
+        .filter(|m| m.total_sessions > 0)
+        .unwrap_or_else(|| read_json(&metrics_file(), default_metrics()));
     if metrics.total_sessions > 0 {
         let score_str = metrics
             .score_history
@@ -477,7 +517,7 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 8. Cross-project hints (#2)
-    for h in get_cross_project_hints() {
+    for h in get_cross_project_hints(shared_db.as_ref()) {
         hint("resume", &h);
     }
 

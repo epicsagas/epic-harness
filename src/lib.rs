@@ -8,5 +8,6 @@ pub mod mem;
 pub mod orchestrate;
 pub mod serve;
 pub mod shared;
+pub mod store;
 pub mod team;
 pub mod telemetry;

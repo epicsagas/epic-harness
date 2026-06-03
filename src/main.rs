@@ -8,6 +8,7 @@ mod mem;
 mod orchestrate;
 mod serve;
 mod shared;
+mod store;
 mod team;
 mod telemetry;
 mod update;
@@ -173,6 +174,11 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
+        "migrate" => {
+            let dry_run = args.iter().any(|a| a == "--dry-run");
+            let reset = args.iter().any(|a| a == "--reset");
+            store::migrate::run_subcommand(dry_run, reset)
+        }
         "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
         | "update" => {
             unreachable!()
@@ -214,6 +220,9 @@ fn main() {
                 "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
             );
             eprintln!("USER SUBCOMMANDS:");
+            eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
+            eprintln!("    --dry-run  Preview what would be imported without writing");
+            eprintln!("    --reset    Clear an interrupted migration marker and retry");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");

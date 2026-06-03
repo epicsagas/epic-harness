@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: "Complete orbit — autonomous spec through ship. Auto-detects mode, hands-off until PR."
+description: "State-persisted autonomous pipeline: spec → go → audit → ship in one command. Auto-detects direct/council/interactive mode. Crash-recoverable via PIPELINE-*.json. Hands-off until PR."
 ---
 
 # /orbit — Complete Orbit

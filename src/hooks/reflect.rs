@@ -54,8 +54,8 @@ pub fn run_context(
     }
 
     // 1. Obs stats — compute date range
-    let (cutoff_tag, date_from) = if let Some(ref s) = since {
-        (s.clone(), s.clone())
+    let date_from = if let Some(ref s) = since {
+        s.clone()
     } else {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -64,8 +64,7 @@ pub fn run_context(
         let cutoff_ts = now.saturating_sub((days as u64) * 86400);
         let days_since_epoch = cutoff_ts / 86400;
         let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
-        let tag = format!("{y:04}{m:02}{d:02}");
-        (tag.clone(), tag)
+        format!("{y:04}{m:02}{d:02}")
     };
     let date_to = today();
 
@@ -78,9 +77,11 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    // Collect obs from all target project slugs
+    let shared_db = crate::store::open_harness_db().ok();
+
+    // Validate all slug paths before reading data (security: prevent path traversal).
+    // harness.db stores all projects together so the DB query runs once, not per-slug.
     for slug in &project_slugs {
-        // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
         let safe = if slug_harness.exists() {
             slug_harness
@@ -95,53 +96,62 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
-        let slug_obs_dir = slug_harness.join("obs");
-        if !slug_obs_dir.is_dir() {
-            continue;
+    }
+
+    // Query observations once — the DB is shared across all projects and slug-filtering
+    // is not yet supported in the schema. Querying inside the slug loop caused N copies
+    // of the same result set to be accumulated (one per slug).
+    // See policy comment in run() — SQLite is required here, no JSONL fallback.
+    let recs: Vec<ObsRecord> = match shared_db.as_ref() {
+        Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
+            conn,
+            &date_from,
+            &date_to,
+            Some(50_000),
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("[reflect] SQLite observations read failed: {e}");
+                return 1;
+            }
+        },
+        None => {
+            eprintln!(
+                "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
+            );
+            return 1;
         }
-        let all_obs = list_files(&slug_obs_dir, ".jsonl");
-        let filtered: Vec<String> = all_obs
-            .into_iter()
-            .filter(|f| {
-                let tag = f.replace("session_", "");
-                tag.get(..8)
-                    .map(|s| s >= cutoff_tag.as_str())
-                    .unwrap_or(true)
-            })
-            .collect();
-        for f in &filtered {
-            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
-            for r in &recs {
-                total_obs += 1;
-                *tool_counts.entry(r.tool.clone()).or_default() += 1;
-                if let Some(ref fc) = r.failure_category {
-                    *failure_cats.entry(fc.clone()).or_default() += 1;
-                }
-                if let Some(ref ext) = r.file_ext {
-                    *file_ext_counts.entry(ext.clone()).or_default() += 1;
-                }
-                if let Some(s) = r.score {
-                    scores.push(s);
-                }
-                if let Some(ref dims) = r.dimensions {
-                    let ds = serde_json::to_value(dims).ok();
-                    if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
-                        for (k, v) in obj {
-                            if let Some(n) = v.as_f64() {
-                                *dim_sums.entry(k.clone()).or_default() += n;
-                                *dim_counts.entry(k.clone()).or_default() += 1;
-                            }
-                        }
+    };
+
+    for r in &recs {
+        total_obs += 1;
+        *tool_counts.entry(r.tool.clone()).or_default() += 1;
+        if let Some(ref fc) = r.failure_category {
+            *failure_cats.entry(fc.clone()).or_default() += 1;
+        }
+        if let Some(ref ext) = r.file_ext {
+            *file_ext_counts.entry(ext.clone()).or_default() += 1;
+        }
+        if let Some(s) = r.score {
+            scores.push(s);
+        }
+        if let Some(ref dims) = r.dimensions {
+            let ds = serde_json::to_value(dims).ok();
+            if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                for (k, v) in obj {
+                    if let Some(n) = v.as_f64() {
+                        *dim_sums.entry(k.clone()).or_default() += n;
+                        *dim_counts.entry(k.clone()).or_default() += 1;
                     }
                 }
-                let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-                entry.1 += 1;
-                if r.result.as_deref() == Some("success")
-                    || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-                {
-                    entry.0 += 1;
-                }
             }
+        }
+        let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+        entry.1 += 1;
+        if r.result.as_deref() == Some("success")
+            || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+        {
+            entry.0 += 1;
         }
     }
 
@@ -230,8 +240,19 @@ pub fn run_context(
     });
 
     // 2. Evolution stats
-    let evo_records: Vec<serde_json::Value> =
-        read_jsonl_typed::<serde_json::Value>(&evolution_file());
+    let evo_records: Vec<serde_json::Value> = shared_db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::evolution::query_all_records_conn(conn)
+                .map_err(|e| eprintln!("[reflect] SQLite evolution read failed: {e}"))
+                .ok()
+        })
+        .map(|recs| {
+            recs.iter()
+                .filter_map(|r| serde_json::to_value(r).ok())
+                .collect()
+        })
+        .unwrap_or_default();
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
     let mut skills_generated: u64 = 0;
@@ -303,7 +324,14 @@ pub fn run_context(
     });
 
     // 3. Metrics summary
-    let metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    let metrics: Metrics = shared_db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::metrics::load_metrics_conn(conn)
+                .map_err(|e| eprintln!("[reflect] SQLite metrics read failed: {e}"))
+                .ok()
+        })
+        .unwrap_or_else(default_metrics);
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
@@ -374,21 +402,26 @@ pub fn run_context(
     });
 
     // 4. Session snapshots
-    let snap_files = list_files(&sessions_dir(), ".json");
-    let snapshots: Vec<serde_json::Value> = snap_files
-        .iter()
-        .rev()
-        .take(5)
-        .filter_map(|f| {
-            let sp: serde_json::Value = read_json(&sessions_dir().join(f), serde_json::Value::Null);
-            if sp.is_null() { return None; }
-            Some(serde_json::json!({
-                "timestamp": sp.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
-                "type": sp.get("type").and_then(|v| v.as_str()).unwrap_or(""),
-                "summary": sp.get("summary").and_then(|v| v.as_str()).unwrap_or("").chars().take(400).collect::<String>(),
-            }))
+    let snapshots: Vec<serde_json::Value> = shared_db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::sessions::list_recent_snapshots_conn(conn, 5)
+                .map_err(|e| eprintln!("[reflect] SQLite sessions read failed: {e}"))
+                .ok()
         })
-        .collect();
+        .map(|snaps| {
+            snaps
+                .iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "timestamp": s.timestamp,
+                        "type": s.snap_type,
+                        "summary": s.summary.chars().take(400).collect::<String>(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
 
     // 5. Evolved skills
     let evolved_list_dirs = list_dirs(&evolved_dir());
@@ -736,25 +769,34 @@ pub fn run(_input: &HookInput) -> i32 {
     if !harness_exists() {
         return 0;
     }
-    if !obs_dir().is_dir() {
-        return 0;
-    }
 
-    // 1. Collect today's observations
+    // 1. Collect today's observations from SQLite (no JSONL fallback — see policy at db==None branch)
     let today_str = today();
-    let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
-        .into_iter()
-        .filter(|f| f.contains(&today_str))
-        .collect();
-    if obs_files.is_empty() {
-        return 0;
-    }
-
-    let mut observations: Vec<ObsRecord> = vec![];
-    for f in &obs_files {
-        let recs: Vec<ObsRecord> = read_jsonl_typed(&obs_dir().join(f));
-        observations.extend(recs);
-    }
+    let db = crate::store::open_harness_db().ok();
+    let observations = match db.as_ref() {
+        Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
+            conn, &today_str, &today_str, None,
+        ) {
+            Ok(recs) => recs,
+            Err(e) => {
+                eprintln!("[reflect] SQLite observations read failed: {e}");
+                return 1;
+            }
+        },
+        None => {
+            // Storage policy: reflect.rs requires SQLite. Unlike observe.rs (which falls
+            // back to JSONL on transient write errors), reflect cannot fall back because:
+            // (1) JSONL records are per-session files with no aggregated index, and
+            // (2) if observe.rs wrote to JSONL, it was a transient failure — the next
+            //     successful write went to SQLite, so the session data is split.
+            // If harness.db is absent, the harness has never been initialized; there is
+            // nothing meaningful to analyze.
+            eprintln!(
+                "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
+            );
+            return 1;
+        }
+    };
     if observations.len() < 3 {
         return 0;
     }
@@ -764,7 +806,14 @@ pub fn run(_input: &HookInput) -> i32 {
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
     // 3. Stagnation
-    let mut metrics: Metrics = read_json(&metrics_file(), default_metrics());
+    let mut metrics: Metrics = db
+        .as_ref()
+        .and_then(|conn| {
+            crate::store::metrics::load_metrics_conn(conn)
+                .map_err(|e| eprintln!("[reflect] SQLite metrics load failed: {e}"))
+                .ok()
+        })
+        .unwrap_or_else(default_metrics);
     let (should_rollback, improved, rolled_back_count) =
         evolve::check_stagnation(&mut metrics, analysis.avg_score);
 
@@ -828,7 +877,17 @@ pub fn run(_input: &HookInput) -> i32 {
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
     };
-    append_jsonl(&evolution_file(), &record);
+    // SQLite-first: fall back to JSONL only when DB write fails or DB is unavailable.
+    // Writing to both stores after migration is complete risks divergence: if the process
+    // crashes between the two writes, the stores contain different data.
+    if let Some(ref conn) = db {
+        if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
+            eprintln!("[reflect] SQLite evo write failed: {e}; falling back to JSONL");
+            append_jsonl(&evolution_file(), &record);
+        }
+    } else {
+        append_jsonl(&evolution_file(), &record);
+    }
 
     // 10. Session handoff context
     let last_errors: Vec<String> = observations
@@ -885,11 +944,31 @@ pub fn run(_input: &HookInput) -> i32 {
     }
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
 
-    if let Ok(json) = serde_json::to_string_pretty(&metrics) {
+    // SQLite-first: fall back to file only when DB write fails or DB is unavailable.
+    if let Some(ref conn) = db {
+        if let Err(e) = crate::store::metrics::save_metrics_conn(conn, &metrics) {
+            eprintln!("[reflect] SQLite metrics write failed: {e}; falling back to file");
+            if let Ok(json) = serde_json::to_string_pretty(&metrics) {
+                let _ = fs::write(metrics_file(), json);
+            }
+        }
+    } else if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }
 
-    // 11.5. Workspace manifest
+    // 11.5. Sync orbit pipeline files → SQLite (dual-write: files are source of truth
+    //       for /orbit phase recovery; SQLite enables REST API + dashboard queries).
+    if let Some(ref conn) = db {
+        match crate::store::orbit_store::sync_orbit_files_to_db_conn(conn, &orbit_dir()) {
+            Ok(n) if n > 0 => {
+                eprintln!("[reflect] synced {n} orbit pipeline(s) to SQLite");
+            }
+            Err(e) => eprintln!("[reflect] orbit sync failed (non-fatal): {e}"),
+            _ => {}
+        }
+    }
+
+    // 11.6. Workspace manifest
     evolve::write_workspace_manifest();
 
     // 12. Report
@@ -1144,39 +1223,63 @@ mod tests {
     fn effective_sources_all_expands() {
         let sources: Vec<String> = vec!["all".into()];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "claude-session", "alcove"]
+            vec!["harness", "mem", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness"]
+            vec!["harness", "mem"]
         } else {
-            sources.iter().map(|s| s.as_str()).collect()
+            let mut v: Vec<&str> = vec!["harness", "mem"];
+            for s in sources.iter() {
+                let s = s.as_str();
+                if s != "harness" && s != "mem" {
+                    v.push(s);
+                }
+            }
+            v
         };
-        assert_eq!(effective, vec!["harness", "claude-session", "alcove"]);
+        assert_eq!(
+            effective,
+            vec!["harness", "mem", "claude-session", "alcove"]
+        );
     }
 
     #[test]
     fn effective_sources_empty_defaults_to_harness() {
         let sources: Vec<String> = vec![];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "claude-session", "alcove"]
+            vec!["harness", "mem", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness"]
+            vec!["harness", "mem"]
         } else {
-            sources.iter().map(|s| s.as_str()).collect()
+            let mut v: Vec<&str> = vec!["harness", "mem"];
+            for s in sources.iter() {
+                let s = s.as_str();
+                if s != "harness" && s != "mem" {
+                    v.push(s);
+                }
+            }
+            v
         };
-        assert_eq!(effective, vec!["harness"]);
+        assert_eq!(effective, vec!["harness", "mem"]);
     }
 
     #[test]
     fn effective_sources_explicit_list_passthrough() {
         let sources: Vec<String> = vec!["harness".into(), "alcove".into()];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "claude-session", "alcove"]
+            vec!["harness", "mem", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness"]
+            vec!["harness", "mem"]
         } else {
-            sources.iter().map(|s| s.as_str()).collect()
+            let mut v: Vec<&str> = vec!["harness", "mem"];
+            for s in sources.iter() {
+                let s = s.as_str();
+                if s != "harness" && s != "mem" {
+                    v.push(s);
+                }
+            }
+            v
         };
-        assert_eq!(effective, vec!["harness", "alcove"]);
+        assert_eq!(effective, vec!["harness", "mem", "alcove"]);
     }
 
     #[test]

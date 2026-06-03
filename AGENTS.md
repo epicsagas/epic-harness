@@ -154,9 +154,7 @@ Format failure = lint_fail, typecheck failure = build_fail — feeds into patter
 Skill dispatches logged to `~/.harness/projects/{slug}/dispatch/dispatch_YYYYMMDD.jsonl`.
 Analyze via `/evolve history`.
 
-## Unified Memory (harness-mem) — WIP
-
-> **Status: In Development.** The memory system is under active development. CLI, Web UI, and auto-recording pipeline are not yet fully functional. Do not rely on this feature in production.
+## Unified Memory (harness-mem)
 
 All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). Accessed via `epic-harness mem` CLI commands (outputs JSON).
 

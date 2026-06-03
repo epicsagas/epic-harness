@@ -39,8 +39,8 @@ pub(crate) use schema::init_schema;
 #[allow(unused_imports)] // re-exported for external crate consumers (graphos-desktop)
 pub use node::{
     delete_node_file, delete_node_file_conn, list_node_ids, list_node_ids_conn, node_exists_conn,
-    parse_node, read_all_nodes_conn, read_node, read_node_conn, read_nodes_conn, serialize_node,
-    write_node,
+    parse_node, read_all_nodes_conn, read_node, read_node_conn, read_nodes_conn,
+    read_nodes_limited_conn, serialize_node, write_node,
 };
 
 pub use node::write_node_conn;
