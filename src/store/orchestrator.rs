@@ -10,6 +10,40 @@ use std::io;
 
 use super::store_err;
 
+// ── RAII transaction guard ───────────────────────────
+
+/// RAII guard for `BEGIN IMMEDIATE` transactions.
+///
+/// Calls `ROLLBACK` on drop if not explicitly committed, preventing
+/// connection state corruption when errors occur mid-transaction.
+struct ImmediateTx<'a> {
+    conn: &'a Connection,
+    committed: bool,
+}
+
+impl<'a> ImmediateTx<'a> {
+    fn begin(conn: &'a Connection) -> io::Result<Self> {
+        store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
+        Ok(Self {
+            conn,
+            committed: false,
+        })
+    }
+
+    fn commit(mut self) -> io::Result<()> {
+        self.committed = true;
+        store_err(self.conn.execute_batch("COMMIT"))
+    }
+}
+
+impl Drop for ImmediateTx<'_> {
+    fn drop(&mut self) {
+        if !self.committed {
+            let _ = self.conn.execute_batch("ROLLBACK");
+        }
+    }
+}
+
 // ── Types ────────────────────────────────────────────
 
 /// Subset of orchestrate::state::OrchestrationRun fields stored in DB.
@@ -151,52 +185,37 @@ pub fn read_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<Option<O
 
 /// Dismiss an agent: remove from agents table and update run JSON.
 ///
-/// Uses BEGIN IMMEDIATE to prevent the check-then-delete race condition:
-/// two concurrent callers cannot both read `exists=true` and then both attempt to delete.
+/// Uses `ImmediateTx` guard for safe `BEGIN IMMEDIATE` with auto-rollback on error.
 pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool> {
-    // BEGIN IMMEDIATE acquires a write lock without requiring &mut Connection.
-    store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
+    let tx = ImmediateTx::begin(conn)?;
 
     // Check agent exists inside the write lock
-    let exists: bool = store_err(
-        conn.query_row(
-            "SELECT COUNT(*) FROM orch_agents WHERE id = ?1",
-            rusqlite::params![agent_id],
-            |row| row.get::<_, i64>(0),
-        )
-        .inspect_err(|_| {
-            let _ = conn.execute_batch("ROLLBACK");
-        }),
-    )? > 0;
+    let exists: bool = store_err(conn.query_row(
+        "SELECT COUNT(*) FROM orch_agents WHERE id = ?1",
+        rusqlite::params![agent_id],
+        |row| row.get::<_, i64>(0),
+    ))? > 0;
 
     if !exists {
-        store_err(conn.execute_batch("ROLLBACK"))?;
+        // tx drops → auto-ROLLBACK
         return Ok(false);
     }
 
     // Delete agent and related records within the held write lock
-    let del = || -> io::Result<()> {
-        store_err(conn.execute(
-            "DELETE FROM orch_agents WHERE id = ?1",
-            rusqlite::params![agent_id],
-        ))?;
-        store_err(conn.execute(
-            "DELETE FROM orch_agent_events WHERE agent_id = ?1",
-            rusqlite::params![agent_id],
-        ))?;
-        store_err(conn.execute(
-            "DELETE FROM orch_agent_inbox WHERE agent_id = ?1",
-            rusqlite::params![agent_id],
-        ))?;
-        Ok(())
-    };
+    store_err(conn.execute(
+        "DELETE FROM orch_agents WHERE id = ?1",
+        rusqlite::params![agent_id],
+    ))?;
+    store_err(conn.execute(
+        "DELETE FROM orch_agent_events WHERE agent_id = ?1",
+        rusqlite::params![agent_id],
+    ))?;
+    store_err(conn.execute(
+        "DELETE FROM orch_agent_inbox WHERE agent_id = ?1",
+        rusqlite::params![agent_id],
+    ))?;
 
-    if let Err(e) = del() {
-        let _ = conn.execute_batch("ROLLBACK");
-        return Err(e);
-    }
-
-    store_err(conn.execute_batch("COMMIT"))?;
+    tx.commit()?;
     Ok(true)
 }
 
@@ -264,78 +283,66 @@ pub fn write_control_conn(
 /// All deletions are wrapped in a single IMMEDIATE transaction so a partial failure
 /// does not leave orphaned agent events or inbox messages without their agents.
 pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
-    store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
+    let tx = ImmediateTx::begin(conn)?;
 
-    let do_cleanup = || -> io::Result<u64> {
-        let mut count = 0u64;
+    let mut count = 0u64;
 
-        // Deletion order respects FK constraints (foreign_keys=ON):
-        //   child rows (events, inbox, agents) must be removed before parent (runs).
-        //
-        // Step 1: materialise stale run IDs into a temp table so the subquery
-        //         is evaluated once and parameter binding is used throughout
-        //         (no string interpolation / SQL injection surface).
-        store_err(conn.execute_batch(
-            "CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY);
+    // Deletion order respects FK constraints (foreign_keys=ON):
+    //   child rows (events, inbox, agents) must be removed before parent (runs).
+    //
+    // Step 1: materialise stale run IDs into a temp table so the subquery
+    //         is evaluated once and parameter binding is used throughout
+    //         (no string interpolation / SQL injection surface).
+    store_err(conn.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY);
              DELETE FROM _stale_run_ids;",
-        ))?;
+    ))?;
 
-        if cutoff_ts.is_empty() {
-            store_err(conn.execute(
-                "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')",
-                [],
-            ))?;
-        } else {
-            store_err(conn.execute(
-                "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
-                rusqlite::params![cutoff_ts],
-            ))?;
-        }
-
-        // Step 2: delete child rows for agents belonging to stale runs
+    if cutoff_ts.is_empty() {
         store_err(conn.execute(
-            "DELETE FROM orch_agent_events WHERE agent_id IN (
-                 SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
-             )",
+            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')",
             [],
         ))?;
+    } else {
         store_err(conn.execute(
-            "DELETE FROM orch_agent_inbox WHERE agent_id IN (
-                 SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
-             )",
-            [],
+            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
+            rusqlite::params![cutoff_ts],
         ))?;
-
-        // Step 3: delete agents for stale runs
-        let deleted_agents = store_err(conn.execute(
-            "DELETE FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)",
-            [],
-        ))?;
-        count += deleted_agents as u64;
-
-        // Step 4: delete the runs themselves
-        let deleted_runs = store_err(conn.execute(
-            "DELETE FROM orch_runs WHERE id IN (SELECT id FROM _stale_run_ids)",
-            [],
-        ))?;
-        count += deleted_runs as u64;
-
-        // Cleanup temp table
-        store_err(conn.execute_batch("DELETE FROM _stale_run_ids"))?;
-
-        Ok(count)
-    };
-
-    match do_cleanup() {
-        Ok(count) => {
-            store_err(conn.execute_batch("COMMIT"))?;
-            Ok(count)
-        }
-        Err(e) => {
-            let _ = conn.execute_batch("ROLLBACK");
-            Err(e)
-        }
     }
+
+    // Step 2: delete child rows for agents belonging to stale runs
+    store_err(conn.execute(
+        "DELETE FROM orch_agent_events WHERE agent_id IN (
+                 SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
+             )",
+        [],
+    ))?;
+    store_err(conn.execute(
+        "DELETE FROM orch_agent_inbox WHERE agent_id IN (
+                 SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
+             )",
+        [],
+    ))?;
+
+    // Step 3: delete agents for stale runs
+    let deleted_agents = store_err(conn.execute(
+        "DELETE FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)",
+        [],
+    ))?;
+    count += deleted_agents as u64;
+
+    // Step 4: delete the runs themselves
+    let deleted_runs = store_err(conn.execute(
+        "DELETE FROM orch_runs WHERE id IN (SELECT id FROM _stale_run_ids)",
+        [],
+    ))?;
+    count += deleted_runs as u64;
+
+    // Cleanup temp table
+    store_err(conn.execute_batch("DELETE FROM _stale_run_ids"))?;
+
+    tx.commit()?;
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -343,7 +350,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        super::super::in_memory_db()
+        crate::store::in_memory_db()
     }
 
     #[test]

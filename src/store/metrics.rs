@@ -154,18 +154,25 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         "total_evolved_skills",
         &m.total_evolved_skills.to_string(),
     ))?;
-    if let Some(ref v) = m.last_session {
-        store_err(upsert("last_session", v))?;
-    }
-    if let Some(v) = m.best_score {
-        store_err(upsert("best_score", &v.to_string()))?;
-    }
+    // Option fields: Some → upsert, None → delete stale value
+    match &m.last_session {
+        Some(v) => store_err(upsert("last_session", v))?,
+        None => store_err(tx.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?,
+    };
+    match m.best_score {
+        Some(v) => store_err(upsert("best_score", &v.to_string()))?,
+        None => store_err(tx.execute("DELETE FROM metrics_state WHERE key = 'best_score'", []))?,
+    };
     store_err(upsert("best_session", &m.best_session))?;
     store_err(upsert("trend", &m.trend))?;
     store_err(upsert("stagnation_count", &m.stagnation_count.to_string()))?;
-    if let Some(ref v) = m.last_error_context {
-        store_err(upsert("last_error_context", v))?;
-    }
+    match &m.last_error_context {
+        Some(v) => store_err(upsert("last_error_context", v))?,
+        None => store_err(tx.execute(
+            "DELETE FROM metrics_state WHERE key = 'last_error_context'",
+            [],
+        ))?,
+    };
 
     // Score history — UPSERT per entry to avoid rowid inflation from DELETE+INSERT.
     // timestamp is used as a natural key (sessions produce unique timestamps).
@@ -245,7 +252,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        super::super::in_memory_db()
+        crate::store::in_memory_db()
     }
 
     fn sample_metrics() -> Metrics {

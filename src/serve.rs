@@ -79,10 +79,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
     eprintln!("Combined dashboard: http://localhost:{port}");
     eprintln!("Press Ctrl+C to stop.");
 
+    // Open DB once and reuse across all requests (single-threaded server).
+    // Avoids per-request schema init + migration check overhead.
+    let db = crate::store::open_harness_db().ok();
+    let harness_dir = common::harness_dir();
+
     for request in server.incoming_requests() {
         let url = request.url().to_string();
         let method = request.method().clone();
-        let harness_dir = common::harness_dir();
 
         let response = match (method, url.as_str()) {
             (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(
@@ -91,8 +95,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
 
             // ── Orchestration API ───────────────────────────
-            (Method::Get, "/api/run") => handle_get_run(&harness_dir),
-            (Method::Get, "/api/events") => handle_get_events(&harness_dir),
+            (Method::Get, "/api/run") => handle_get_run(db.as_ref(), &harness_dir),
+            (Method::Get, "/api/events") => handle_get_events(db.as_ref(), &harness_dir),
 
             // ── Memory API (Graph/Stats) ─────────────────────
             (Method::Get, "/api/graph") => handle_get_graph(),
@@ -101,7 +105,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
-                let body = handle_harness_cmd(&cmd, &harness_dir);
+                let body = handle_harness_cmd(db.as_ref(), &cmd, &harness_dir);
                 json_response(&body)
             }
 
@@ -127,12 +131,12 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let agent_id = url
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
-                handle_agent_status(agent_id, &harness_dir)
+                handle_agent_status(db.as_ref(), agent_id, &harness_dir)
             }
 
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
                 let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
-                handle_agent_dismiss(agent_id, &harness_dir)
+                handle_agent_dismiss(db.as_ref(), agent_id, &harness_dir)
             }
 
             // ── CORS & Other ────────────────────────────────
@@ -175,8 +179,26 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
 // ── Route handlers ────────────────────────────────────
 
-fn handle_get_run(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec<u8>>> {
-    let db_ok = crate::store::with_harness_db(|conn| {
+/// Try a DB operation with a cached connection. Logs errors and returns None on failure.
+/// Replaces per-request `crate::store::with_harness_db()` calls with the pre-opened connection.
+fn try_db<T>(
+    db: Option<&rusqlite::Connection>,
+    f: impl FnOnce(&rusqlite::Connection) -> std::io::Result<T>,
+) -> Option<T> {
+    db.and_then(|conn| match f(conn) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!("[serve] query failed: {e}");
+            None
+        }
+    })
+}
+
+fn handle_get_run(
+    db: Option<&rusqlite::Connection>,
+    harness_dir: &std::path::Path,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    let db_ok = try_db(db, |conn| {
         crate::store::orchestrator::read_run_conn(conn).map(|opt| {
             opt.as_ref()
                 .map(|r| json_or(r, "{}"))
@@ -197,8 +219,11 @@ fn handle_get_run(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec
     json_response(&body)
 }
 
-fn handle_get_events(harness_dir: &std::path::Path) -> Response<std::io::Cursor<Vec<u8>>> {
-    let db_ok = crate::store::with_harness_db(|conn| {
+fn handle_get_events(
+    db: Option<&rusqlite::Connection>,
+    harness_dir: &std::path::Path,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    let db_ok = try_db(db, |conn| {
         crate::store::orchestrator::read_run_conn(conn).map(|opt| {
             opt.as_ref()
                 .map(|r| json_or(r, "null"))
@@ -314,13 +339,14 @@ fn handle_search(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn handle_agent_status(
+    db: Option<&rusqlite::Connection>,
     agent_id: &str,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     if !orch::validate_agent_id(agent_id) {
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
-    crate::store::with_harness_db(|conn| {
+    try_db(db, |conn| {
         crate::store::orchestrator::read_agent_conn(conn, agent_id).map(|opt| {
             opt.map(|a| {
                 serde_json::json!({
@@ -346,6 +372,7 @@ fn handle_agent_status(
 }
 
 fn handle_agent_dismiss(
+    db: Option<&rusqlite::Connection>,
     agent_id: &str,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -353,12 +380,12 @@ fn handle_agent_dismiss(
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
     // SQLite-first: try DB dismiss, fall back to file-based if DB unavailable
-    let ok = crate::store::with_harness_db(|conn| {
+    let db_ok = try_db(db, |conn| {
         crate::store::orchestrator::dismiss_agent_conn(conn, agent_id)
-    })
-    .unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
+    });
+    let ok = db_ok.unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
     let mut body = serde_json::json!({"ok": ok, "dismissed": agent_id});
-    if crate::store::open_harness_db().is_err() {
+    if db.is_none() {
         body["_db_fallback"] = serde_json::Value::Bool(true);
     }
     json_response(&body.to_string())
@@ -459,12 +486,16 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> S
 
 // ── Harness command handler ───────────────────────────
 
-fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
+fn handle_harness_cmd(
+    db: Option<&rusqlite::Connection>,
+    cmd: &str,
+    harness_dir: &std::path::Path,
+) -> String {
     match cmd {
-        "get_harness_metrics" => cmd_get_metrics(harness_dir),
-        "get_evolved_skills" => cmd_get_evolved_skills(harness_dir),
-        "get_obs_summary" => cmd_get_obs_summary(harness_dir),
-        "get_orbit_pipelines" => cmd_get_orbit_pipelines(harness_dir),
+        "get_harness_metrics" => cmd_get_metrics(db, harness_dir),
+        "get_evolved_skills" => cmd_get_evolved_skills(db, harness_dir),
+        "get_obs_summary" => cmd_get_obs_summary(db, harness_dir),
+        "get_orbit_pipelines" => cmd_get_orbit_pipelines(db, harness_dir),
         "get_integration_status" => cmd_get_integration_status(),
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
@@ -473,8 +504,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
     }
 }
 
-fn cmd_get_metrics(harness_dir: &std::path::Path) -> String {
-    crate::store::with_harness_db(|conn| {
+fn cmd_get_metrics(db: Option<&rusqlite::Connection>, harness_dir: &std::path::Path) -> String {
+    try_db(db, |conn| {
         crate::store::metrics::load_metrics_conn(conn)
             .map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
     })
@@ -484,9 +515,12 @@ fn cmd_get_metrics(harness_dir: &std::path::Path) -> String {
     })
 }
 
-fn cmd_get_evolved_skills(harness_dir: &std::path::Path) -> String {
+fn cmd_get_evolved_skills(
+    db: Option<&rusqlite::Connection>,
+    harness_dir: &std::path::Path,
+) -> String {
     // Try SQLite first
-    if let Some(result) = crate::store::with_harness_db(|conn| {
+    if let Some(result) = try_db(db, |conn| {
         let skills = crate::store::evolved::list_skills_full_conn(conn)
             .unwrap_or_default()
             .into_iter()
@@ -577,10 +611,10 @@ fn cmd_get_evolved_skills(harness_dir: &std::path::Path) -> String {
     .to_string()
 }
 
-fn cmd_get_obs_summary(harness_dir: &std::path::Path) -> String {
+fn cmd_get_obs_summary(db: Option<&rusqlite::Connection>, harness_dir: &std::path::Path) -> String {
     // Try SQLite first
     if let Some(result) =
-        crate::store::with_harness_db(|conn| {
+        try_db(db, |conn| {
             let stats = crate::store::observations::query_obs_stats_conn(
                 conn,
                 "2020-01-01", // all data
@@ -762,9 +796,12 @@ fn cmd_get_obs_summary(harness_dir: &std::path::Path) -> String {
     .to_string()
 }
 
-fn cmd_get_orbit_pipelines(harness_dir: &std::path::Path) -> String {
+fn cmd_get_orbit_pipelines(
+    db: Option<&rusqlite::Connection>,
+    harness_dir: &std::path::Path,
+) -> String {
     // Try SQLite first
-    if let Some(result) = crate::store::with_harness_db(|conn| {
+    if let Some(result) = try_db(db, |conn| {
         let pipelines = crate::store::orbit_store::list_all_pipelines_conn(conn)?;
         if !pipelines.is_empty() {
             let mut sorted = pipelines;

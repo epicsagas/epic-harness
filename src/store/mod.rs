@@ -93,6 +93,34 @@ pub fn harness_db_path() -> std::path::PathBuf {
     paths::harness_dir().join("harness.db")
 }
 
+/// Check whether legacy JSONL/JSON data has been migrated into SQLite.
+///
+/// Returns `true` when `legacy_migrated = "1"` exists in `_harness_meta`,
+/// meaning the one-shot import has completed (or there was no legacy data to import).
+/// Returns `false` when the flag is missing or DB cannot be opened.
+///
+/// Use this to decide whether to trust SQLite as the authoritative read source:
+/// - `true` → SQLite-only (empty results mean "no data", not "migration pending")
+/// - `false` → JSONL fallback (migration hasn't run yet)
+pub fn is_legacy_migrated() -> bool {
+    with_harness_db(|conn| {
+        let migrated: bool = conn
+            .query_row(
+                "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .is_some_and(|v| v == "1");
+        if migrated {
+            Ok(true)
+        } else {
+            Err(io::Error::new(io::ErrorKind::NotFound, "not migrated"))
+        }
+    })
+    .unwrap_or(false)
+}
+
 /// Open the harness operational database.
 ///
 /// Creates the file if it doesn't exist. Applies schema (tables, indexes),

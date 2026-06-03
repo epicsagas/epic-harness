@@ -371,14 +371,10 @@ pub fn run(input: &HookInput) -> i32 {
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
-    // SQLite uses auto-increment `id` for row ordering (ORDER BY id), so the JSONL-era
-    // sequence_id counter is unnecessary in DB mode. It's still computed for JSONL fallback
-    // to maintain correct row ordering when the database is unavailable.
-    let seq_id = if db.is_none() {
-        Some(get_next_sequence_id(&session_file))
-    } else {
-        None
-    };
+    // Always compute seq_id for JSONL fallback correctness — if the SQLite write fails
+    // and we fall back to append_jsonl, the sequence_id must be present for ordering.
+    // SQLite ignores this field (uses auto-increment `id` for ORDER BY).
+    let seq_id = get_next_sequence_id(&session_file);
 
     let mut record = ObsRecord {
         timestamp: now_iso(),
@@ -391,7 +387,7 @@ pub fn run(input: &HookInput) -> i32 {
         failure_category: None,
         error_snippet: None,
         file_ext,
-        sequence_id: seq_id,
+        sequence_id: Some(seq_id),
         pipeline_id: super::common::detect_active_orbit_id(),
     };
 

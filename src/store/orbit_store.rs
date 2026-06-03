@@ -143,7 +143,7 @@ mod tests {
     use super::*;
 
     fn in_memory_db() -> Connection {
-        super::super::in_memory_db()
+        crate::store::in_memory_db()
     }
 
     #[test]

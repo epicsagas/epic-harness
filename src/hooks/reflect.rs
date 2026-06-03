@@ -78,8 +78,11 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    // Open DB once before the slug loop — all slugs share the same harness.db
+    // Open DB once before the slug loop — all slugs share the same harness.db.
+    // Use migration status to decide authoritative source: if legacy data has been
+    // migrated, SQLite is authoritative (even empty results). Otherwise, JSONL fallback.
     let shared_db = crate::store::open_harness_db().ok();
+    let sqlite_authoritative = crate::store::is_legacy_migrated();
 
     // Collect obs from all target project slugs — try SQLite first, fall back to JSONL
     for slug in &project_slugs {
@@ -99,7 +102,8 @@ pub fn run_context(
             return 1;
         }
 
-        // Try SQLite first (primary source after migration)
+        // SQLite-first: if migration completed, trust DB (empty = no data).
+        // If not migrated, fall back to JSONL files for this slug.
         let sqlite_obs = shared_db
             .as_ref()
             .and_then(|conn| {
@@ -110,7 +114,7 @@ pub fn run_context(
             })
             .unwrap_or_default();
 
-        let recs: Vec<ObsRecord> = if !sqlite_obs.is_empty() {
+        let recs: Vec<ObsRecord> = if sqlite_authoritative || !sqlite_obs.is_empty() {
             sqlite_obs
         } else {
             // Fallback to JSONL files
@@ -799,6 +803,7 @@ pub fn run(_input: &HookInput) -> i32 {
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
     let db = crate::store::open_harness_db().ok();
+    let sqlite_authoritative = crate::store::is_legacy_migrated();
     let sqlite_obs = db
         .as_ref()
         .and_then(|conn| {
@@ -813,10 +818,10 @@ pub fn run(_input: &HookInput) -> i32 {
         })
         .unwrap_or_default();
 
-    // Use SQLite as read source when available, even if it returns empty results.
-    // Empty results are valid (e.g., first session of the day) — the DB is still
-    // the primary source and writes should go to it.
-    let observations = if !sqlite_obs.is_empty() {
+    // When legacy migration has completed, SQLite is the authoritative source —
+    // empty results mean "no observations today" (not "migration pending").
+    // When migration hasn't run, fall back to JSONL files only when SQLite has no data.
+    let observations = if sqlite_authoritative || !sqlite_obs.is_empty() {
         sqlite_obs
     } else {
         // Fallback: read from JSONL files
