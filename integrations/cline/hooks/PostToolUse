@@ -1,20 +1,20 @@
 #!/bin/sh
-# epic-harness PostToolUse hook for Cline
+# epic PostToolUse hook for Cline
 #
 # Cline calls this script after every tool execution.
 # stdin: JSON with toolName, toolInput, toolOutput, etc.
 # stdout: JSON {"cancel": false}
 #
-# Records the tool call into the epic-harness observation pipeline
+# Records the tool call into the epic observation pipeline
 # in the background — never blocks Cline.
 
 set -u
 
 BINARY=""
-if command -v epic-harness >/dev/null 2>&1; then
-  BINARY="epic-harness"
-elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
-  BINARY="$HOME/.cargo/bin/epic-harness"
+if command -v epic >/dev/null 2>&1; then
+  BINARY="epic"
+elif [ -x "$HOME/.cargo/bin/epic" ]; then
+  BINARY="$HOME/.cargo/bin/epic"
 fi
 
 if [ -n "$BINARY" ]; then

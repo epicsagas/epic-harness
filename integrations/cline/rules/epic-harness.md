@@ -1,9 +1,9 @@
-<!-- Canonical source: ~/.harness/HARNESS.md (managed by epic-harness). Keep in sync when updating harness instructions. -->
-# epic-harness
+<!-- Canonical source: ~/.harness/HARNESS.md (managed by epic). Keep in sync when updating harness instructions. -->
+# epic harness
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
 
-This project uses the **epic-harness** automation layer. The hooks in
+This project uses the **epic** automation layer. The hooks in
 `~/Documents/Cline/Hooks/` run automatically around every tool call.
 Here is what they do:
 

@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\"; epic-harness resume",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\"; epic resume",
             "async": false
           }
         ],
@@ -20,7 +20,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic-harness guard"
+            "command": "epic guard"
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic-harness polish"
+            "command": "epic polish"
           }
         ],
         "description": "Auto-format + typecheck + lint warning after edits"
@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic-harness observe",
+            "command": "epic observe",
             "async": true,
             "timeout": 5
           }
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic-harness snapshot"
+            "command": "epic snapshot"
           }
         ],
         "description": "Save working state before context compaction"
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic-harness reflect"
+            "command": "epic reflect"
           }
         ],
         "description": "Analyze session observations → evolve skills → gate mutations"

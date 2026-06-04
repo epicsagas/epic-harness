@@ -1,5 +1,5 @@
 #!/bin/sh
-# epic-harness TaskResume hook for Cline
+# epic TaskResume hook for Cline
 #
 # Cline calls this when a paused task is resumed.
 # Restores harness context (evolved skills, prior observations).
@@ -9,10 +9,10 @@
 set -u
 
 BINARY=""
-if command -v epic-harness >/dev/null 2>&1; then
-  BINARY="epic-harness"
-elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
-  BINARY="$HOME/.cargo/bin/epic-harness"
+if command -v epic >/dev/null 2>&1; then
+  BINARY="epic"
+elif [ -x "$HOME/.cargo/bin/epic" ]; then
+  BINARY="$HOME/.cargo/bin/epic"
 fi
 
 if [ -n "$BINARY" ]; then

@@ -1,20 +1,20 @@
 #!/bin/sh
-# epic-harness PreToolUse hook for Cline
+# epic PreToolUse hook for Cline
 #
 # Cline calls this script before every tool execution.
 # stdin: JSON with toolName, toolInput, etc.
 # stdout: JSON {"cancel": false} or {"cancel": true, "errorMessage": "..."}
 #
-# This hook calls epic-harness guard. If guard exits 2 (blocked),
+# This hook calls epic guard. If guard exits 2 (blocked),
 # we return cancel:true so Cline skips the tool call.
 
 set -u
 
 BINARY=""
-if command -v epic-harness >/dev/null 2>&1; then
-  BINARY="epic-harness"
-elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
-  BINARY="$HOME/.cargo/bin/epic-harness"
+if command -v epic >/dev/null 2>&1; then
+  BINARY="epic"
+elif [ -x "$HOME/.cargo/bin/epic" ]; then
+  BINARY="$HOME/.cargo/bin/epic"
 fi
 
 # If binary not found, allow all tool use
@@ -26,7 +26,7 @@ fi
 # Read Cline's input JSON from stdin
 CLINE_JSON=$(cat)
 
-# Build a HookInput JSON for epic-harness.
+# Build a HookInput JSON for epic.
 # Extract toolName and toolInput from Cline's JSON using jq (preferred),
 # python3 (fallback), or pass empty values as a last resort.
 TOOL_NAME=""

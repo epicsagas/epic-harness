@@ -1,6 +1,6 @@
-# epic-harness
+# epic harness
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. Never use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. Never use `.harness/` in the project directory.
 
 ## Commands
 
@@ -41,7 +41,7 @@ At the beginning of every session:
 - Read `$HARNESS_DIR/memory/` for project-specific rules and patterns
 - If `$HARNESS_DIR/sessions/*.json` exists, read the latest file for previous session context
 - Report any evolved skills found in `$HARNESS_DIR/evolved/`
-- Run `epic-harness resume` if binary is available
+- Run `epic resume` if binary is available
 
 ## Auto-Behaviors
 
@@ -59,12 +59,12 @@ At the beginning of every session:
 
 | Hook | Command | Effect |
 |------|---------|--------|
-| Session start | `epic-harness resume` | Restore session + load evolved skills |
-| Pre tool use | `epic-harness guard` | Block dangerous shell patterns |
-| Post tool use | `epic-harness observe` | Record tool scores (async) |
-| Post edit | `epic-harness polish` | Auto-format + typecheck |
-| Pre compact | `epic-harness snapshot` | Save session state |
-| Session end | `epic-harness reflect` | Analyze failures, seed evolved skills, update metrics, ingest to memory |
+| Session start | `epic resume` | Restore session + load evolved skills |
+| Pre tool use | `epic guard` | Block dangerous shell patterns |
+| Post tool use | `epic observe` | Record tool scores (async) |
+| Post edit | `epic polish` | Auto-format + typecheck |
+| Pre compact | `epic snapshot` | Save session state |
+| Session end | `epic reflect` | Analyze failures, seed evolved skills, update metrics, ingest to memory |
 
 ## Harness Memory
 

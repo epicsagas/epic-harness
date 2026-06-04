@@ -1,11 +1,11 @@
 # epic-harness Cursor Integration — Install Guide
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
 
 ## Requirements
 
 - **Cursor 1.7 or later** — hooks (`preToolUse`, `postToolUse`, `sessionEnd`) and skills require Cursor 1.7+
-- **epic-harness binary** in `PATH`
+- **epic binary** in `PATH`
 
 ---
 
@@ -18,12 +18,12 @@ brew install epicsagas/tap/epic-harness
 
 **Cargo (from source):**
 ```bash
-cargo install epic-harness
+cargo install epic
 ```
 
 Verify the install:
 ```bash
-epic-harness --version
+epic --version
 ```
 
 ---
@@ -45,10 +45,10 @@ cp integrations/cursor/hooks.json ~/.cursor/hooks.json
 The `hooks.json` file follows [Cursor’s hooks schema](https://cursor.com/docs/hooks): **`version` must be `1`**, hook names are **camelCase** (`preToolUse`, not `PreToolUse`). The shell tool is matched with **`Shell`** (not `Bash`). If any of these are wrong, Cursor may ignore the file.
 
 The hooks wire up:
-- `preToolUse` on `Shell` → `epic-harness guard` (blocks dangerous commands)
-- `postToolUse` on `Edit` / `Write` → `epic-harness polish` (auto-format + type-check)
-- `postToolUse` on `*` → `epic-harness observe` (async observation recording)
-- `sessionEnd` → `epic-harness reflect` (evolution loop)
+- `preToolUse` on `Shell` → `epic guard` (blocks dangerous commands)
+- `postToolUse` on `Edit` / `Write` → `epic polish` (auto-format + type-check)
+- `postToolUse` on `*` → `epic observe` (async observation recording)
+- `sessionEnd` → `epic reflect` (evolution loop)
 
 ---
 
@@ -71,7 +71,7 @@ Skills provide both auto-triggered quality gates and user-invoked pipeline workf
 
 ```bash
 mkdir -p .cursor/rules .cursor/skills
-epic-harness install cursor --local
+epic install cursor --local
 ```
 
 This generates:
@@ -92,7 +92,7 @@ After installation, the following skills are available:
 
 ## Install command behavior
 
-`epic-harness install cursor` (and `--local`) **writes or updates** every embedded integration file (`hooks.json`, `rules/`, `skills/`) so it matches the binary. Files that already match are left unchanged. Legacy commands (`commands/*.md`) are automatically cleaned up.
+`epic install cursor` (and `--local`) **writes or updates** every embedded integration file (`hooks.json`, `rules/`, `skills/`) so it matches the binary. Files that already match are left unchanged. Legacy commands (`commands/*.md`) are automatically cleaned up.
 
 ## 6. Verify Installation
 
@@ -124,11 +124,11 @@ Start a new Cursor session. The Composer should load harness context from `$HARN
 
 ## Troubleshooting
 
-**"epic-harness not found" in hook output**
+**"epic not found" in hook output**
 The hooks degrade gracefully — they print a warning and continue. Install the binary and ensure it is in your shell's `PATH`. Restart Cursor after installing.
 
 **Hooks not firing**
-Confirm Cursor version is 1.7 or later. Check `Cursor > Settings > Hooks` to verify hooks are enabled for the project. Open `hooks.json` and confirm it has `"version": 1` and camelCase keys (`preToolUse`, `postToolUse`, `sessionEnd`). Re-run `epic-harness install cursor` after upgrading epic-harness so the file matches the embedded copy.
+Confirm Cursor version is 1.7 or later. Check `Cursor > Settings > Hooks` to verify hooks are enabled for the project. Open `hooks.json` and confirm it has `"version": 1` and camelCase keys (`preToolUse`, `postToolUse`, `sessionEnd`). Re-run `epic install cursor` after upgrading epic-harness so the file matches the embedded copy.
 
 **Agents not listed**
 Agents are not yet available for the Cursor integration. They will be added in a future release. Use the built-in agent capabilities in the meantime.
@@ -137,7 +137,7 @@ Agents are not yet available for the Cursor integration. They will be added in a
 Confirm `.mdc` files are in `.cursor/rules/` (not a subdirectory). Restart Cursor to pick up new rule files.
 
 **Commands not appearing**
-Commands were migrated to skills in v0.4.4. Run `epic-harness install cursor --local` to clean up legacy command files and install skills instead.
+Commands were migrated to skills in v0.4.4. Run `epic install cursor --local` to clean up legacy command files and install skills instead.
 
 ---
 
@@ -147,24 +147,24 @@ epic-harness includes a unified memory store shared across all agents and tools.
 
 **Session start — inject relevant context:**
 ```bash
-epic-harness mem context --project <slug>
+epic mem context --project <slug>
 ```
 This is surfaced automatically at session start via the `harness-context.mdc` rule.
 
 **Manual add — record a decision or pattern:**
 ```bash
-epic-harness mem add --title "Chose Postgres over SQLite" --type decision --body "SQLite lacks concurrent writes needed for our workload."
+epic mem add --title "Chose Postgres over SQLite" --type decision --body "SQLite lacks concurrent writes needed for our workload."
 ```
 
 **Supported `--type` values:** `decision`, `pattern`, `note`, `architecture`
 
 **Web UI — browse and search all memory:**
 ```bash
-epic-harness mem serve
+epic mem serve
 # → http://localhost:7700
 ```
 
-**Auto-record via hook:** The `postToolUse` hook runs `epic-harness mem-observe` after every Edit/Write tool call. If the tool output or assistant message contains decision keywords (`decision`, `architecture`, `pattern`, `chose`, `decided`, `approach`), the entry is recorded automatically.
+**Auto-record via hook:** The `postToolUse` hook runs `epic mem-observe` after every Edit/Write tool call. If the tool output or assistant message contains decision keywords (`decision`, `architecture`, `pattern`, `chose`, `decided`, `approach`), the entry is recorded automatically.
 
 **Shorthand via `harness` symlink** (if `hooks/bin/harness → epic-harness` exists):
 ```bash
@@ -172,4 +172,4 @@ harness mem add --title "..." --type decision --body "..."
 harness mem context --project <slug>
 harness mem serve
 ```
-The symlink is created automatically by `epic-harness install`. Run `epic-harness install --check` to verify.
+The symlink is created automatically by `epic install`. Run `epic install --check` to verify.

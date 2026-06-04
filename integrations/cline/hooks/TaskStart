@@ -1,5 +1,5 @@
 #!/bin/sh
-# epic-harness TaskStart hook for Cline
+# epic TaskStart hook for Cline
 #
 # Cline calls this when a new task begins.
 # Restores context from the previous session so the harness is warm.
@@ -9,10 +9,10 @@
 set -u
 
 BINARY=""
-if command -v epic-harness >/dev/null 2>&1; then
-  BINARY="epic-harness"
-elif [ -x "$HOME/.cargo/bin/epic-harness" ]; then
-  BINARY="$HOME/.cargo/bin/epic-harness"
+if command -v epic >/dev/null 2>&1; then
+  BINARY="epic"
+elif [ -x "$HOME/.cargo/bin/epic" ]; then
+  BINARY="$HOME/.cargo/bin/epic"
 fi
 
 if [ -n "$BINARY" ]; then

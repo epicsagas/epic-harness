@@ -8,7 +8,13 @@
 "use strict";
 
 const { execSync, spawnSync } = require("child_process");
-const { createWriteStream, mkdirSync, chmodSync, existsSync, readFileSync } = require("fs");
+const {
+  createWriteStream,
+  mkdirSync,
+  chmodSync,
+  existsSync,
+  readFileSync,
+} = require("fs");
 const { join } = require("path");
 const https = require("https");
 const os = require("os");
@@ -44,7 +50,7 @@ function getPluginVersion() {
     const manifestPath = join(
       process.env.CLAUDE_PLUGIN_ROOT || "",
       ".claude-plugin",
-      "plugin.json"
+      "plugin.json",
     );
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
     return manifest.version || null;
@@ -66,19 +72,21 @@ function downloadFile(url, dest) {
   return new Promise((resolve, reject) => {
     const file = createWriteStream(dest);
     const follow = (u) => {
-      https.get(u, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          follow(res.headers.location);
-          res.resume();
-          return;
-        }
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode} for ${u}`));
-          return;
-        }
-        res.pipe(file);
-        file.on("finish", () => file.close(resolve));
-      }).on("error", reject);
+      https
+        .get(u, (res) => {
+          if (res.statusCode === 301 || res.statusCode === 302) {
+            follow(res.headers.location);
+            res.resume();
+            return;
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`HTTP ${res.statusCode} for ${u}`));
+            return;
+          }
+          res.pipe(file);
+          file.on("finish", () => file.close(resolve));
+        })
+        .on("error", reject);
     };
     follow(url);
   });
@@ -91,7 +99,9 @@ async function install() {
 
   // macOS: prefer Homebrew if available
   if (platform === "darwin") {
-    const hasBrew = spawnSync("brew", ["--version"], { stdio: "pipe", shell: false }).status === 0;
+    const hasBrew =
+      spawnSync("brew", ["--version"], { stdio: "pipe", shell: false })
+        .status === 0;
     if (hasBrew) {
       log("Homebrew detected — installing via brew tap...");
       const r = spawnSync("brew", ["install", "epicsagas/tap/epic-harness"], {
@@ -104,7 +114,11 @@ async function install() {
   }
 
   // All platforms: try cargo-binstall (pre-built binary, fast)
-  const hasBinstall = spawnSync("cargo", ["binstall", "--version"], { stdio: "pipe", shell: false }).status === 0;
+  const hasBinstall =
+    spawnSync("cargo", ["binstall", "--version"], {
+      stdio: "pipe",
+      shell: false,
+    }).status === 0;
   if (hasBinstall) {
     log("cargo-binstall detected — installing...");
     const r = spawnSync("cargo", ["binstall", CARGO_PKG, "--no-confirm"], {
@@ -123,7 +137,7 @@ async function install() {
     const r = spawnSync(
       "powershell",
       ["-ExecutionPolicy", "Bypass", "-File", tmp],
-      { stdio: "inherit" }
+      { stdio: "inherit" },
     );
     if (r.status !== 0) throw new Error("PowerShell installer failed");
   } else {

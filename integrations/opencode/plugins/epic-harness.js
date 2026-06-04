@@ -1,25 +1,25 @@
 /**
- * epic-harness OpenCode plugin
+ * epic harness OpenCode plugin
  *
- * Bridges OpenCode lifecycle events to the epic-harness binary so the same
+ * Bridges OpenCode lifecycle events to the epic binary so the same
  * Ring-0 automation (guard, observe, resume, reflect) works inside OpenCode.
  *
- * Requires: epic-harness binary available in PATH (install via cargo install
- * epic-harness or place the binary in ~/bin/).
+ * Requires: epic binary available in PATH (install via cargo install
+ * epic or place the binary in ~/bin/).
  */
 
 import { spawnSync, spawn } from "node:child_process";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Locate the epic-harness binary. Returns null if not found. */
+/** Locate the epic binary. Returns null if not found. */
 function findBinary() {
-  const which = spawnSync("command", ["-v", "epic-harness"], { shell: true });
-  if (which.status === 0) return "epic-harness";
+  const which = spawnSync("command", ["-v", "epic"], { shell: true });
+  if (which.status === 0) return "epic";
   // Fallback: common install locations
   for (const p of [
-    `${process.env.HOME}/.cargo/bin/epic-harness`,
-    "/usr/local/bin/epic-harness",
+    `${process.env.HOME}/.cargo/bin/epic`,
+    "/usr/local/bin/epic",
   ]) {
     const check = spawnSync("test", ["-x", p], { shell: true });
     if (check.status === 0) return p;
@@ -28,7 +28,7 @@ function findBinary() {
 }
 
 /**
- * Call epic-harness synchronously (blocks — use for guard/resume).
+ * Call epic synchronously (blocks — use for guard/resume).
  * Returns { status, stdout, stderr }.
  */
 function callSync(bin, subCmd, hookInput) {
@@ -45,7 +45,7 @@ function callSync(bin, subCmd, hookInput) {
 }
 
 /**
- * Call epic-harness in the background (fire-and-forget).
+ * Call epic in the background (fire-and-forget).
  * Failures are silently ignored so the user's workflow is never blocked.
  */
 function callAsync(bin, subCmd, hookInput) {
@@ -87,8 +87,16 @@ function buildHookInput({ toolName, toolInput, toolOutput } = {}) {
 //
 
 const CC_TYPES = new Set([
-  "feat", "fix", "refactor", "docs", "test",
-  "build", "chore", "ci", "style", "perf",
+  "feat",
+  "fix",
+  "refactor",
+  "docs",
+  "test",
+  "build",
+  "chore",
+  "ci",
+  "style",
+  "perf",
 ]);
 
 /** Check if a command string is a git commit with a non-CC message. */
@@ -123,7 +131,7 @@ function isShellTool(toolName) {
 // ── Plugin export ─────────────────────────────────────────────────────────────
 
 export default {
-  name: "epic-harness",
+  name: "epic",
   version: "1.0.0",
 
   hooks: {
@@ -167,7 +175,7 @@ export default {
           // Guard blocked the command
           return {
             abort: true,
-            reason: result.stderr.trim() || "Blocked by epic-harness guard",
+            reason: result.stderr.trim() || "Blocked by epic guard",
           };
         }
       } catch {

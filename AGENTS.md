@@ -156,7 +156,7 @@ Analyze via `/evolve history`.
 
 ## Unified Memory (harness-mem)
 
-All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). Accessed via `epic-harness mem` CLI commands (outputs JSON).
+All agents share a single knowledge graph stored in `~/.harness/memory.db` (SQLite + FTS5). Accessed via `epic mem` CLI commands (outputs JSON).
 
 ### Smart Recall System
 
@@ -171,19 +171,19 @@ Memory retrieval uses composite scoring instead of simple latest-N:
 
 | Command | Purpose |
 |---------|---------|
-| `epic-harness mem recall "HINT"` | Smart contextual recall — hint + project + graph neighbors. Primary command for proactive memory retrieval. |
-| `epic-harness mem add --title "T" --type TYPE --body "B"` | Add node with auto-importance by type. Optional explicit importance (0.0–1.0). |
-| `epic-harness mem search "QUERY"` | FTS5 keyword search, results ranked by importance. Configurable limit. |
-| `epic-harness mem list` | Filter by tag/type/project. Returns importance + access_count. |
-| `epic-harness mem context` | Project-scoped smart recall (no hint). Use at session start. |
-| `epic-harness mem related ID` | BFS graph traversal from a node ID. |
+| `epic mem recall "HINT"` | Smart contextual recall — hint + project + graph neighbors. Primary command for proactive memory retrieval. |
+| `epic mem add --title "T" --type TYPE --body "B"` | Add node with auto-importance by type. Optional explicit importance (0.0–1.0). |
+| `epic mem search "QUERY"` | FTS5 keyword search, results ranked by importance. Configurable limit. |
+| `epic mem list` | Filter by tag/type/project. Returns importance + access_count. |
+| `epic mem context` | Project-scoped smart recall (no hint). Use at session start. |
+| `epic mem related ID` | BFS graph traversal from a node ID. |
 
 ### Memory Lifecycle
 
 - **Access tracking**: Every recall/search/context call increments `access_count` and updates `accessed_at`.
 - **Gradual decay**: Nodes untouched for 30+ days lose 10% importance per cycle (floor=0.05). `pinned` tag prevents decay.
 - **Stale tagging**: Nodes untouched for 180+ days tagged as `stale` and excluded from recall.
-- **Graph augmentation**: `epic-harness mem recall` follows 1-hop edges from top results, returning related nodes with connection counts.
+- **Graph augmentation**: `epic mem recall` follows 1-hop edges from top results, returning related nodes with connection counts.
 
 ### Node Schema
 
@@ -194,7 +194,7 @@ importance (REAL 0.0-1.0), access_count (INTEGER), accessed_at (TEXT)
 
 ### Dispatch Integration
 
-_dispatch skill runs `epic-harness mem recall` with current task context before invoking any skill. Past decisions (importance=0.9) surface first, preventing contradictory choices across sessions.
+_dispatch skill runs `epic mem recall` with current task context before invoking any skill. Past decisions (importance=0.9) surface first, preventing contradictory choices across sessions.
 
 ## Project Side Data
 

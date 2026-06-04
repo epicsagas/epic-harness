@@ -1,5 +1,5 @@
-<!-- Note: For harness commands, auto-behaviors, and hook events, see ~/.harness/HARNESS.md (managed by epic-harness). -->
-# Coding Conventions (epic-harness)
+<!-- Note: For harness commands, auto-behaviors, and hook events, see ~/.harness/HARNESS.md (managed by epic). -->
+# Coding Conventions (epic harness)
 
 ## Core Rules
 

@@ -392,7 +392,7 @@ jobs:
             end
 
             test do
-              assert_match "epic-harness", shell_output("#{bin}/epic-harness version 2>&1")
+              assert_match "epic-harness", shell_output("#{bin}/epic version 2>&1")
             end
           end
           RUBY
