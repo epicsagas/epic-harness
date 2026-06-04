@@ -272,18 +272,6 @@ static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
     "opencode",
     [
         (
-            "commands/evolve.md",
-            include_str!("../integrations/opencode/commands/evolve.md")
-        ),
-        (
-            "commands/team.md",
-            include_str!("../integrations/opencode/commands/team.md")
-        ),
-        (
-            "commands/orbit.md",
-            include_str!("../integrations/opencode/commands/orbit.md")
-        ),
-        (
             "plugins/epic-harness.js",
             include_str!("../integrations/opencode/plugins/epic-harness.js")
         ),
