@@ -127,9 +127,12 @@ pub(crate) fn i64_to_u64(v: i64) -> u64 {
     })
 }
 
-/// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
+/// Path to the global operational database: `~/.harness/harness.db`
+///
+/// Shared across all projects alongside `memory.db`. Project scoping is handled
+/// via the `project` column in each table rather than separate DB files.
 pub fn harness_db_path() -> std::path::PathBuf {
-    paths::harness_dir().join("harness.db")
+    paths::global_harness_db_path()
 }
 
 /// Open the harness operational database.

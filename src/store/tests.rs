@@ -102,7 +102,7 @@ fn meta_table_tracks_version() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "3");
+    assert_eq!(version, "4");
 }
 
 #[test]
@@ -183,7 +183,7 @@ fn v2_to_v3_migration_upgrades_schema_version() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "3");
+    assert_eq!(version, "4");
 
     // UNIQUE constraint must now be in force (duplicate timestamp rejected)
     let result = conn.execute(
@@ -221,7 +221,7 @@ fn v2_to_v3_migration_is_idempotent() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "3");
+    assert_eq!(version, "4");
 }
 
 #[test]
@@ -265,6 +265,7 @@ fn v1_to_v3_migration_runs_both_steps() {
          );
          CREATE TABLE observations (
              id              INTEGER PRIMARY KEY,
+             session_id      TEXT,
              tool            TEXT,
              tool_category   TEXT,
              timestamp       TEXT
@@ -286,7 +287,7 @@ fn v1_to_v3_migration_runs_both_steps() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(version, "3", "v1 DB must reach schema_version=3");
+    assert_eq!(version, "4", "v1 DB must reach schema_version=4");
 
     // UNIQUE constraint must exist after v3 migration
     let result = conn.execute(
@@ -424,7 +425,7 @@ fn obs_stats_tool_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, &rec, "sess_limit_test").unwrap();
+        insert_observation_conn(&conn, "test-project", &rec, "sess_limit_test").unwrap();
     }
 
     let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
@@ -459,7 +460,7 @@ fn obs_error_stats_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, &rec, "sess_err_limit").unwrap();
+        insert_observation_conn(&conn, "test-project", &rec, "sess_err_limit").unwrap();
     }
 
     let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
@@ -530,7 +531,7 @@ fn dismiss_agent_is_atomic() {
         created_at: "2026-06-02T10:00:00Z".into(),
         updated_at: "2026-06-02T10:00:00Z".into(),
     };
-    init_run_conn(&conn, &run).unwrap();
+    init_run_conn(&conn, "test-project", &run).unwrap();
 
     let agent = OrchAgent {
         id: "agent-atomic".into(),
@@ -576,7 +577,7 @@ fn cleanup_stale_is_atomic() {
         created_at: "2026-06-01T10:00:00Z".into(),
         updated_at: "2026-06-01T10:00:00Z".into(),
     };
-    init_run_conn(&conn, &run).unwrap();
+    init_run_conn(&conn, "test-project", &run).unwrap();
 
     let agent = OrchAgent {
         id: "agent-stale".into(),

@@ -34,6 +34,7 @@ fn pad_date(ts: &str, end_of_day: bool) -> String {
 /// Insert a single observation record.
 pub fn insert_observation_conn(
     conn: &Connection,
+    project: &str,
     rec: &ObsRecord,
     session_id: &str,
 ) -> io::Result<i64> {
@@ -49,8 +50,8 @@ pub fn insert_observation_conn(
         "INSERT INTO observations
          (timestamp, session_id, tool, tool_category, action, result, score,
           dim_success, dim_quality, dim_cost, failure_category, error_snippet,
-          file_ext, sequence_id, pipeline_id)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+          file_ext, sequence_id, pipeline_id, project)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         rusqlite::params![
             rec.timestamp,
             session_id,
@@ -67,6 +68,7 @@ pub fn insert_observation_conn(
             rec.file_ext,
             rec.sequence_id.map(super::u64_to_i64),
             rec.pipeline_id,
+            project,
         ],
     ))?;
     Ok(conn.last_insert_rowid())
@@ -375,7 +377,7 @@ mod tests {
             pipeline_id: None,
         };
 
-        let id = insert_observation_conn(&conn, &rec, "20260602_12345").unwrap();
+        let id = insert_observation_conn(&conn, "test-project", &rec, "20260602_12345").unwrap();
         assert!(id > 0);
 
         let results =
@@ -420,7 +422,7 @@ mod tests {
                 sequence_id: None,
                 pipeline_id: None,
             };
-            insert_observation_conn(&conn, &rec, "20260602_12345").unwrap();
+            insert_observation_conn(&conn, "test-project", &rec, "20260602_12345").unwrap();
         }
 
         let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
@@ -449,7 +451,7 @@ mod tests {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, &rec, "20260501_12345").unwrap();
+        insert_observation_conn(&conn, "test-project", &rec, "20260501_12345").unwrap();
 
         // Old record is outside the June query window
         let results =
@@ -490,8 +492,8 @@ mod tests {
             pipeline_id: None,
         };
 
-        insert_observation_conn(&conn, &rec1, "sess1").unwrap();
-        insert_observation_conn(&conn, &rec2, "sess1").unwrap();
+        insert_observation_conn(&conn, "test-project", &rec1, "sess1").unwrap();
+        insert_observation_conn(&conn, "test-project", &rec2, "sess1").unwrap();
 
         let last = query_last_action_conn(&conn, "sess1").unwrap();
         assert_eq!(last, Some("second edit".to_string()));

@@ -323,11 +323,12 @@ pub fn run_context(
         "stagnation_count": stagnation_count,
     });
 
-    // 3. Metrics summary
+    // 3. Metrics summary — use the first (current) project slug for context
+    let context_slug = project_slugs.first().map(|s| s.as_str()).unwrap_or("");
     let metrics: Metrics = shared_db
         .as_ref()
         .and_then(|conn| {
-            crate::store::metrics::load_metrics_conn(conn)
+            crate::store::metrics::load_metrics_conn(conn, context_slug)
                 .map_err(|e| eprintln!("[reflect] SQLite metrics read failed: {e}"))
                 .ok()
         })
@@ -772,6 +773,7 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 1. Collect today's observations from SQLite (no JSONL fallback — see policy at db==None branch)
     let today_str = today();
+    let slug = project_slug();
     let db = crate::store::open_harness_db().ok();
     let observations = match db.as_ref() {
         Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
@@ -809,7 +811,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let mut metrics: Metrics = db
         .as_ref()
         .and_then(|conn| {
-            crate::store::metrics::load_metrics_conn(conn)
+            crate::store::metrics::load_metrics_conn(conn, &slug)
                 .map_err(|e| eprintln!("[reflect] SQLite metrics load failed: {e}"))
                 .ok()
         })
@@ -881,7 +883,7 @@ pub fn run(_input: &HookInput) -> i32 {
     // Writing to both stores after migration is complete risks divergence: if the process
     // crashes between the two writes, the stores contain different data.
     if let Some(ref conn) = db {
-        if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
+        if let Err(e) = crate::store::evolution::insert_record_conn(conn, &slug, &record) {
             eprintln!("[reflect] SQLite evo write failed: {e}; falling back to JSONL");
             append_jsonl(&evolution_file(), &record);
         }
@@ -946,7 +948,7 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // SQLite-first: fall back to file only when DB write fails or DB is unavailable.
     if let Some(ref conn) = db {
-        if let Err(e) = crate::store::metrics::save_metrics_conn(conn, &metrics) {
+        if let Err(e) = crate::store::metrics::save_metrics_conn(conn, &slug, &metrics) {
             eprintln!("[reflect] SQLite metrics write failed: {e}; falling back to file");
             if let Ok(json) = serde_json::to_string_pretty(&metrics) {
                 let _ = fs::write(metrics_file(), json);

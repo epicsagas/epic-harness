@@ -190,9 +190,10 @@ pub(crate) fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
     // never grows unboundedly for large legacy datasets. The 'in_progress' marker set
     // above prevents concurrent migration attempts from racing with these small commits.
     import_observations(conn, &harness_dir, &mut stats)?;
-    import_sessions(conn, &harness_dir, &mut stats)?;
-    import_evolution(conn, &harness_dir, &mut stats)?;
-    import_metrics(conn, &harness_dir, &mut stats)?;
+    let slug = crate::shared::paths::project_slug();
+    import_sessions(conn, &slug, &harness_dir, &mut stats)?;
+    import_evolution(conn, &slug, &harness_dir, &mut stats)?;
+    import_metrics(conn, &slug, &harness_dir, &mut stats)?;
 
     // Phase 3: Mark complete.
     {
@@ -309,6 +310,7 @@ fn import_observations(
 
 fn import_sessions(
     conn: &Connection,
+    slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
 ) -> io::Result<()> {
@@ -361,7 +363,7 @@ fn import_sessions(
 
         // Each file gets its own ImmediateTx to bound WAL growth.
         let tx = ImmediateTx::begin(conn)?;
-        if let Err(e) = super::sessions::insert_snapshot_conn(conn, &snap, millis) {
+        if let Err(e) = super::sessions::insert_snapshot_conn(conn, slug, &snap, millis) {
             eprintln!("[migrate] insert session error: {e}");
             stats.errors += 1;
             // tx drops → ROLLBACK; no partial state committed for this file
@@ -375,6 +377,7 @@ fn import_sessions(
 
 fn import_evolution(
     conn: &Connection,
+    slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
 ) -> io::Result<()> {
@@ -408,7 +411,7 @@ fn import_evolution(
         }
         match serde_json::from_str::<crate::shared::evolution::EvolutionRecord>(&line) {
             Ok(rec) => {
-                if let Err(e) = super::evolution::insert_record_conn(conn, &rec) {
+                if let Err(e) = super::evolution::insert_record_conn(conn, slug, &rec) {
                     eprintln!("[migrate] insert evo error: {e}");
                     stats.errors += 1;
                 } else {
@@ -433,6 +436,7 @@ fn import_evolution(
 
 fn import_metrics(
     conn: &Connection,
+    slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
 ) -> io::Result<()> {
@@ -452,7 +456,7 @@ fn import_metrics(
                     crate::shared::evolution::default_metrics()
                 }
             };
-            if let Err(e) = super::metrics::save_metrics_conn(conn, &metrics) {
+            if let Err(e) = super::metrics::save_metrics_conn(conn, slug, &metrics) {
                 eprintln!("[migrate] save metrics error: {e}");
                 stats.errors += 1;
             }

@@ -144,10 +144,11 @@ pub fn run(input: &HookInput) -> i32 {
     // accumulate stale files and resume.rs to surface stale data when the DB is
     // healthy but the file timestamp is newer.
     let filename = format!("snapshot_{}.json", millis);
+    let slug = crate::shared::paths::project_slug();
     let sqlite_ok = crate::store::open_harness_db()
         .ok()
         .and_then(|conn| {
-            crate::store::sessions::insert_snapshot_conn(&conn, &snapshot, millis).ok()
+            crate::store::sessions::insert_snapshot_conn(&conn, &slug, &snapshot, millis).ok()
         })
         .is_some();
 

@@ -8,7 +8,11 @@ use crate::shared::evolution::EvolutionRecord;
 use super::store_err;
 
 /// Insert an evolution record.
-pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Result<i64> {
+pub fn insert_record_conn(
+    conn: &Connection,
+    project: &str,
+    rec: &EvolutionRecord,
+) -> io::Result<i64> {
     let error_json = serde_json::to_string(&rec.error_patterns).unwrap_or_else(|e| {
         eprintln!("[store/evolution] error_patterns serialization failed: {e}");
         "{}".into()
@@ -21,8 +25,8 @@ pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Resul
     store_err(conn.execute(
         "INSERT INTO evolution_records
          (timestamp, observations, success_rate, avg_score, error_patterns,
-          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary, project)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
         rusqlite::params![
             rec.timestamp,
             super::u64_to_i64(rec.observations),
@@ -34,6 +38,7 @@ pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Resul
             super::u64_to_i64(rec.skills_rolled_back),
             super::u64_to_i64(rec.total_evolved),
             rec.analysis_summary,
+            project,
         ],
     ))?;
     Ok(conn.last_insert_rowid())
@@ -42,9 +47,9 @@ pub fn insert_record_conn(conn: &Connection, rec: &EvolutionRecord) -> io::Resul
 /// Standalone insert — opens own connection.
 /// Currently unused; retained for future batch import scenarios.
 #[allow(dead_code)]
-pub(crate) fn insert_record(rec: &EvolutionRecord) -> io::Result<i64> {
+pub(crate) fn insert_record(project: &str, rec: &EvolutionRecord) -> io::Result<i64> {
     let conn = super::open_harness_db()?;
-    insert_record_conn(&conn, rec)
+    insert_record_conn(&conn, project, rec)
 }
 
 /// Query the N most recent evolution records.
@@ -119,7 +124,7 @@ mod tests {
             analysis_summary: "Good session".into(),
         };
 
-        insert_record_conn(&conn, &rec).unwrap();
+        insert_record_conn(&conn, "test-project", &rec).unwrap();
 
         let results = query_recent_records_conn(&conn, 10).unwrap();
         assert_eq!(results.len(), 1);

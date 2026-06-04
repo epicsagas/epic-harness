@@ -10,6 +10,7 @@ use crate::shared::types::SessionSnapshot;
 /// Insert a session snapshot.
 pub fn insert_snapshot_conn(
     conn: &Connection,
+    project: &str,
     snap: &SessionSnapshot,
     created_at_millis: i64,
 ) -> io::Result<i64> {
@@ -26,8 +27,8 @@ pub fn insert_snapshot_conn(
 
     store_err(conn.execute(
         "INSERT INTO sessions
-         (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
+         (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis, project)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![
             snap.timestamp,
             snap.snap_type,
@@ -36,6 +37,7 @@ pub fn insert_snapshot_conn(
             snap.context_usage,
             pipeline_json,
             created_at_millis,
+            project,
         ],
     ))?;
     Ok(conn.last_insert_rowid())
@@ -108,7 +110,7 @@ mod tests {
             pipeline_state: None,
         };
 
-        insert_snapshot_conn(&conn, &snap, 1000).unwrap();
+        insert_snapshot_conn(&conn, "test-project", &snap, 1000).unwrap();
 
         let latest = get_latest_snapshot_conn(&conn).unwrap();
         assert!(latest.is_some());
@@ -137,7 +139,7 @@ mod tests {
                 context_usage: None,
                 pipeline_state: None,
             };
-            insert_snapshot_conn(&conn, &snap, 1000 + i as i64).unwrap();
+            insert_snapshot_conn(&conn, "test-project", &snap, 1000 + i as i64).unwrap();
         }
 
         let recent = list_recent_snapshots_conn(&conn, 3).unwrap();

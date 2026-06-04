@@ -329,6 +329,7 @@ pub fn run(input: &HookInput) -> i32 {
     ensure_dir(&obs_dir());
 
     let sid = session_id();
+    let slug = crate::shared::paths::project_slug();
 
     // Open harness DB for SQLite writes (fallback to JSONL if DB unavailable)
     let db = crate::store::open_harness_db().ok();
@@ -465,7 +466,9 @@ pub fn run(input: &HookInput) -> i32 {
     // that observation is excluded from end-of-session analysis. This is an
     // acceptable tradeoff; persistent DB failures are treated as a setup problem.
     if let Some(ref conn) = db {
-        if let Err(e) = crate::store::observations::insert_observation_conn(conn, &record, &sid) {
+        if let Err(e) =
+            crate::store::observations::insert_observation_conn(conn, &slug, &record, &sid)
+        {
             eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
             append_jsonl(&session_file, &record);
         }

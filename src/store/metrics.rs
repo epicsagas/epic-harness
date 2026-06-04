@@ -19,21 +19,23 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 // ── Load ─────────────────────────────────────────────
 
-/// Load the full Metrics struct from SQLite.
-pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
+/// Load the full Metrics struct from SQLite for a given project.
+pub fn load_metrics_conn(conn: &Connection, project: &str) -> io::Result<Metrics> {
     // Load all scalar state in one query instead of one SELECT per key.
-    let mut kv_stmt = store_err(conn.prepare("SELECT key, value FROM metrics_state"))?;
-    let state: HashMap<String, String> = store_err(kv_stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }))?
-    .filter_map(|r| match r {
-        Ok(pair) => Some(pair),
-        Err(e) => {
-            eprintln!("[store/metrics] error reading metrics_state row: {e}");
-            None
-        }
-    })
-    .collect();
+    let mut kv_stmt =
+        store_err(conn.prepare("SELECT key, value FROM metrics_state WHERE project = ?1"))?;
+    let state: HashMap<String, String> =
+        store_err(kv_stmt.query_map(rusqlite::params![project], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }))?
+        .filter_map(|r| match r {
+            Ok(pair) => Some(pair),
+            Err(e) => {
+                eprintln!("[store/metrics] error reading metrics_state row: {e}");
+                None
+            }
+        })
+        .collect();
 
     let get = |key: &str| -> Option<String> { state.get(key).cloned() };
 
@@ -59,39 +61,40 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
     let mut sh_stmt = store_err(conn.prepare(
         "SELECT timestamp, success_rate, avg_score, observations,
                     dim_success, dim_quality, dim_cost
-             FROM score_history ORDER BY id ASC",
+             FROM score_history WHERE project = ?1 ORDER BY id ASC",
     ))?;
 
-    let score_history: Vec<SessionScoreEntry> = store_err(sh_stmt.query_map([], |row| {
-        Ok(SessionScoreEntry {
-            timestamp: row.get(0)?,
-            success_rate: row.get(1)?,
-            avg_score: row.get(2)?,
-            observations: super::i64_to_u64(row.get::<_, i64>(3)?),
-            dimension_averages: ScoreDimensions {
-                tool_success: row.get(4)?,
-                output_quality: row.get(5)?,
-                execution_cost: row.get(6)?,
-            },
+    let score_history: Vec<SessionScoreEntry> =
+        store_err(sh_stmt.query_map(rusqlite::params![project], |row| {
+            Ok(SessionScoreEntry {
+                timestamp: row.get(0)?,
+                success_rate: row.get(1)?,
+                avg_score: row.get(2)?,
+                observations: super::i64_to_u64(row.get::<_, i64>(3)?),
+                dimension_averages: ScoreDimensions {
+                    tool_success: row.get(4)?,
+                    output_quality: row.get(5)?,
+                    execution_cost: row.get(6)?,
+                },
+            })
+        }))?
+        .filter_map(|r| match r {
+            Ok(entry) => Some(entry),
+            Err(e) => {
+                eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                None
+            }
         })
-    }))?
-    .filter_map(|r| match r {
-        Ok(entry) => Some(entry),
-        Err(e) => {
-            eprintln!("[store/metrics] skipping malformed score_history row: {e}");
-            None
-        }
-    })
-    .collect();
+        .collect();
 
     // Skill attribution
     let mut sa_stmt = store_err(conn.prepare(
         "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
-             FROM skill_attribution",
+             FROM skill_attribution WHERE project = ?1",
     ))?;
 
     let skill_attribution: HashMap<String, SkillAttribution> =
-        store_err(sa_stmt.query_map([], |row| {
+        store_err(sa_stmt.query_map(rusqlite::params![project], |row| {
             Ok(SkillAttribution {
                 skill_name: row.get(0)?,
                 sessions_active: super::i64_to_u64(row.get::<_, i64>(1)?),
@@ -134,22 +137,31 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
 /// Score history is capped at MAX_SCORE_HISTORY most recent entries.
 ///
 /// Precondition: caller must not hold an active transaction on this connection.
-pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
+pub fn save_metrics_conn(conn: &Connection, project: &str, m: &Metrics) -> io::Result<()> {
     let tx = ImmediateTx::begin(conn)?;
 
-    // Scalar state — upsert each key
-    let upsert = |key: &str, value: &str| {
+    // Scalar state — upsert each key with project
+    let upsert = |key: &str, value: &str, proj: &str| {
         conn.execute(
-            "INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?1, ?2)",
-            rusqlite::params![key, value],
+            "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
+            rusqlite::params![key, value, proj],
         )
     };
 
-    store_err(upsert("total_sessions", &m.total_sessions.to_string()))?;
-    store_err(upsert("avg_success_rate", &m.avg_success_rate.to_string()))?;
+    store_err(upsert(
+        "total_sessions",
+        &m.total_sessions.to_string(),
+        project,
+    ))?;
+    store_err(upsert(
+        "avg_success_rate",
+        &m.avg_success_rate.to_string(),
+        project,
+    ))?;
     store_err(upsert(
         "total_evolved_skills",
         &m.total_evolved_skills.to_string(),
+        project,
     ))?;
     // Option fields follow a deliberate split policy:
     // - Fields with meaningful "absence" (last_session, best_score, last_error_context)
@@ -157,23 +169,31 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     // - Fields with a domain-valid default (trend="stable", best_session="", stagnation=0)
     //   → always UPSERT; the default value IS the absent state.
     match &m.last_session {
-        Some(v) => store_err(upsert("last_session", v))?,
-        None => {
-            store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'last_session'", []))?
-        }
+        Some(v) => store_err(upsert("last_session", v, project))?,
+        None => store_err(conn.execute(
+            "DELETE FROM metrics_state WHERE key = 'last_session' AND project = ?1",
+            rusqlite::params![project],
+        ))?,
     };
     match m.best_score {
-        Some(v) => store_err(upsert("best_score", &v.to_string()))?,
-        None => store_err(conn.execute("DELETE FROM metrics_state WHERE key = 'best_score'", []))?,
-    };
-    store_err(upsert("best_session", &m.best_session))?;
-    store_err(upsert("trend", &m.trend))?;
-    store_err(upsert("stagnation_count", &m.stagnation_count.to_string()))?;
-    match &m.last_error_context {
-        Some(v) => store_err(upsert("last_error_context", v))?,
+        Some(v) => store_err(upsert("best_score", &v.to_string(), project))?,
         None => store_err(conn.execute(
-            "DELETE FROM metrics_state WHERE key = 'last_error_context'",
-            [],
+            "DELETE FROM metrics_state WHERE key = 'best_score' AND project = ?1",
+            rusqlite::params![project],
+        ))?,
+    };
+    store_err(upsert("best_session", &m.best_session, project))?;
+    store_err(upsert("trend", &m.trend, project))?;
+    store_err(upsert(
+        "stagnation_count",
+        &m.stagnation_count.to_string(),
+        project,
+    ))?;
+    match &m.last_error_context {
+        Some(v) => store_err(upsert("last_error_context", v, project))?,
+        None => store_err(conn.execute(
+            "DELETE FROM metrics_state WHERE key = 'last_error_context' AND project = ?1",
+            rusqlite::params![project],
         ))?,
     };
 
@@ -189,8 +209,8 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
     for entry in entries.into_iter().rev() {
         store_err(conn.execute(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
-             dim_success, dim_quality, dim_cost)
-             VALUES (?1,?2,?3,?4,?5,?6,?7)
+             dim_success, dim_quality, dim_cost, project)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
              ON CONFLICT(timestamp) DO UPDATE SET
                  success_rate = excluded.success_rate,
                  avg_score = excluded.avg_score,
@@ -206,30 +226,32 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
                 entry.dimension_averages.tool_success,
                 entry.dimension_averages.output_quality,
                 entry.dimension_averages.execution_cost,
+                project,
             ],
         ))?;
     }
-    // Prune rows beyond the cap (oldest first)
+    // Prune rows beyond the cap (oldest first, per-project)
     store_err(conn.execute(
-        "DELETE FROM score_history WHERE id NOT IN (
-            SELECT id FROM score_history ORDER BY id DESC LIMIT ?
+        "DELETE FROM score_history WHERE project = ?1 AND id NOT IN (
+            SELECT id FROM score_history WHERE project = ?1 ORDER BY id DESC LIMIT ?
         )",
-        rusqlite::params![MAX_SCORE_HISTORY as i64],
+        rusqlite::params![project, MAX_SCORE_HISTORY as i64],
     ))?;
 
     // Skill attribution — UPSERT preserving first_seen on conflict
     for sa in m.skill_attribution.values() {
         store_err(conn.execute(
             "INSERT INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?1,?2,?3,?4,?5)
-             ON CONFLICT(skill_name) DO UPDATE SET
+             (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen)
+             VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(skill_name, project) DO UPDATE SET
                  sessions_active = excluded.sessions_active,
                  avg_score_with = excluded.avg_score_with,
                  avg_score_without = excluded.avg_score_without,
                  first_seen = MIN(skill_attribution.first_seen, excluded.first_seen)",
             rusqlite::params![
                 sa.skill_name,
+                project,
                 super::u64_to_i64(sa.sessions_active),
                 sa.avg_score_with,
                 sa.avg_score_without,
@@ -293,9 +315,9 @@ mod tests {
     fn save_and_load_metrics() {
         let conn = in_memory_db();
         let m = sample_metrics();
-        save_metrics_conn(&conn, &m).unwrap();
+        save_metrics_conn(&conn, "test-project", &m).unwrap();
 
-        let loaded = load_metrics_conn(&conn).unwrap();
+        let loaded = load_metrics_conn(&conn, "test-project").unwrap();
         assert_eq!(loaded.total_sessions, 10);
         assert_eq!(loaded.avg_success_rate, 0.92);
         assert_eq!(loaded.score_history.len(), 1);
@@ -307,7 +329,7 @@ mod tests {
     #[test]
     fn load_empty_metrics() {
         let conn = in_memory_db();
-        let loaded = load_metrics_conn(&conn).unwrap();
+        let loaded = load_metrics_conn(&conn, "test-project").unwrap();
         assert_eq!(loaded.total_sessions, 0);
         assert!(loaded.score_history.is_empty());
     }
@@ -327,9 +349,9 @@ mod tests {
                 dimension_averages: ScoreDimensions::default(),
             });
         }
-        save_metrics_conn(&conn, &m).unwrap();
+        save_metrics_conn(&conn, "test-project", &m).unwrap();
 
-        let loaded = load_metrics_conn(&conn).unwrap();
+        let loaded = load_metrics_conn(&conn, "test-project").unwrap();
         // Should be capped at 50
         assert!(loaded.score_history.len() <= 50);
 

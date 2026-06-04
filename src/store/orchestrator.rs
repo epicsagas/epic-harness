@@ -82,13 +82,14 @@ pub struct OrchAgent {
 // ── Run operations ───────────────────────────────────
 
 /// Initialize a new orchestration run.
-pub fn init_run_conn(conn: &Connection, run: &OrchRun) -> io::Result<()> {
+pub fn init_run_conn(conn: &Connection, project: &str, run: &OrchRun) -> io::Result<()> {
     store_err(conn.execute(
         "INSERT OR REPLACE INTO orch_runs
-         (id, status, agents_json, dep_graph_json, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6)",
+         (id, project, status, agents_json, dep_graph_json, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7)",
         rusqlite::params![
             run.id,
+            project,
             run.status,
             run.agents_json,
             run.dep_graph_json,
@@ -363,7 +364,7 @@ mod tests {
             created_at: "2026-06-02T10:00:00Z".into(),
             updated_at: "2026-06-02T10:00:00Z".into(),
         };
-        init_run_conn(&conn, &run).unwrap();
+        init_run_conn(&conn, "test-project", &run).unwrap();
 
         let loaded = read_run_conn(&conn).unwrap();
         assert!(loaded.is_some());
@@ -381,7 +382,7 @@ mod tests {
             created_at: "2026-06-02T10:00:00Z".into(),
             updated_at: "2026-06-02T10:00:00Z".into(),
         };
-        init_run_conn(&conn, &run).unwrap();
+        init_run_conn(&conn, "test-project", &run).unwrap();
 
         let agent = OrchAgent {
             id: "agent-1".into(),
@@ -414,7 +415,7 @@ mod tests {
             created_at: "2026-06-02T10:00:00Z".into(),
             updated_at: "2026-06-02T10:00:00Z".into(),
         };
-        init_run_conn(&conn, &run).unwrap();
+        init_run_conn(&conn, "test-project", &run).unwrap();
 
         let agent = OrchAgent {
             id: "agent-1".into(),

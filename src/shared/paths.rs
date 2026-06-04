@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 pub fn cwd() -> PathBuf {
@@ -6,13 +6,41 @@ pub fn cwd() -> PathBuf {
 }
 
 /// Returns a stable slug for the current project: `{sanitized-dirname}-{hash6}`.
+///
+/// Uses git root when available (same slug for all subdirs of a repo and worktrees
+/// sharing the same commondir). Falls back to CWD-based hashing outside git repos.
+///
 /// - Name is sanitized to `[a-zA-Z0-9_-]` to be safe as a directory component.
 /// - 6-char hex hash (24 bits) prevents collisions between same-named projects.
 pub fn project_slug() -> String {
     static SLUG: LazyLock<String> = LazyLock::new(|| {
-        let path = cwd();
-        // Walk components to find the last meaningful segment (handles "/" edge case).
-        let name = path
+        let cwd_path = cwd();
+
+        // Try git first: rev-parse --show-toplevel gives the worktree root.
+        if let Ok(git_root) = std::process::Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+        {
+            if git_root.status.success() {
+                let root = String::from_utf8_lossy(&git_root.stdout).trim().to_string();
+                if !root.is_empty() {
+                    let root_path = PathBuf::from(&root);
+                    let name = root_path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "project".into());
+                    let safe_name = sanitize_slug_name(&name);
+
+                    // For worktrees, use git common dir to get a stable identity
+                    // (worktrees share the same commondir).
+                    let hash_input = git_common_dir(&root_path).unwrap_or_else(|| root.clone());
+                    return format!("{}-{:06x}", safe_name, hash_path(&hash_input));
+                }
+            }
+        }
+
+        // Fallback: CWD-based (non-git directories).
+        let name = cwd_path
             .components()
             .filter_map(|c| {
                 if let std::path::Component::Normal(s) = c {
@@ -24,25 +52,62 @@ pub fn project_slug() -> String {
             .next_back()
             .unwrap_or("project")
             .to_string();
-        // Sanitize: replace any char that isn't alphanumeric, hyphen, or underscore.
-        let safe_name: String = name
-            .chars()
-            .map(|c| {
-                if c.is_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let full = path.to_string_lossy();
-        let mut h: u32 = 0;
-        for b in full.bytes() {
-            h = h.wrapping_shl(5).wrapping_sub(h).wrapping_add(b as u32);
-        }
-        format!("{}-{:06x}", safe_name, h & 0x00ff_ffff)
+        let safe_name = sanitize_slug_name(&name);
+        let full = cwd_path.to_string_lossy();
+        format!("{}-{:06x}", safe_name, hash_path(&full))
     });
     SLUG.clone()
+}
+
+/// Sanitize a name for use as a slug component.
+fn sanitize_slug_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Compute a 24-bit hash of a path string (6 hex chars).
+fn hash_path(s: &str) -> u32 {
+    let mut h: u32 = 0;
+    for b in s.bytes() {
+        h = h.wrapping_shl(5).wrapping_sub(h).wrapping_add(b as u32);
+    }
+    h & 0x00ff_ffff
+}
+
+/// Get the git common directory for a worktree root.
+/// Returns the commondir path which is shared across all worktrees of the same repo.
+fn git_common_dir(git_root: &Path) -> Option<String> {
+    let git_dir = git_root.join(".git");
+    // For worktrees, .git is a file pointing to the real git dir.
+    if git_dir.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&git_dir) {
+            // Format: "gitdir: /path/to/.git/worktrees/<name>"
+            if let Some(gitdir_path) = content.strip_prefix("gitdir: ") {
+                let gitdir_path = gitdir_path.trim();
+                // The commondir file is in the worktree-specific git dir.
+                let commondir_path = PathBuf::from(gitdir_path).join("commondir");
+                if let Ok(common) = std::fs::read_to_string(&commondir_path) {
+                    let common = common.trim();
+                    // commondir may be relative to the gitdir's parent.
+                    if PathBuf::from(common).is_absolute() {
+                        return Some(common.to_string());
+                    }
+                    if let Some(parent) = PathBuf::from(gitdir_path).parent() {
+                        return Some(parent.join(common).to_string_lossy().into_owned());
+                    }
+                }
+            }
+        }
+    }
+    // Regular repo: .git is the directory itself.
+    None
 }
 
 /// Per-project data lives in `~/.harness/projects/{slug}/` — outside the
@@ -135,6 +200,12 @@ pub fn global_harness_dir() -> PathBuf {
 }
 pub fn global_patterns_file() -> PathBuf {
     global_harness_dir().join("patterns.jsonl")
+}
+
+/// Path to the global operational database: `~/.harness/harness.db`
+/// Shared across all projects, alongside `memory.db`.
+pub fn global_harness_db_path() -> PathBuf {
+    dirs_home().join(".harness").join("harness.db")
 }
 
 /// Opt-in marker lives in the global dir (not per-project).

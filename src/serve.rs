@@ -529,7 +529,8 @@ fn handle_harness_cmd(
 
 fn cmd_get_metrics(db: Option<&rusqlite::Connection>, harness_dir: &std::path::Path) -> String {
     try_db(db, |conn| {
-        crate::store::metrics::load_metrics_conn(conn)
+        let slug = crate::shared::paths::project_slug();
+        crate::store::metrics::load_metrics_conn(conn, &slug)
             .map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
     })
     .unwrap_or_else(|| {
@@ -560,7 +561,8 @@ fn cmd_get_evolved_skills(
             .into_iter()
             .filter_map(|r| serde_json::to_value(r).ok())
             .collect::<Vec<_>>();
-        let total_sessions = crate::store::metrics::load_metrics_conn(conn)
+        let slug = crate::shared::paths::project_slug();
+        let total_sessions = crate::store::metrics::load_metrics_conn(conn, &slug)
             .map(|m| m.total_sessions)
             .unwrap_or(0);
         if !skills.is_empty() || !history.is_empty() {
