@@ -270,12 +270,10 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
 
 static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
     "opencode",
-    [
-        (
-            "plugins/epic-harness.js",
-            include_str!("../integrations/opencode/plugins/epic-harness.js")
-        ),
-    ]
+    [(
+        "plugins/epic-harness.js",
+        include_str!("../integrations/opencode/plugins/epic-harness.js")
+    ),]
 );
 
 static CLINE_FILES: &[(&str, &str)] = integration_files!(
