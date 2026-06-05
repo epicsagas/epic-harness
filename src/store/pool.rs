@@ -48,6 +48,15 @@ impl DbType {
             ))
         }
     }
+
+    /// Return the config-style driver name for this backend.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Sqlite => "sqlite",
+            Self::Postgres => "postgres",
+            Self::Mysql => "mysql",
+        }
+    }
 }
 
 // ── Default paths ──────────────────────────────────────
@@ -188,6 +197,8 @@ async fn build_mysql_pool(_url: &str, _max_connections: u32) -> io::Result<AnyPo
 ///
 /// Maps config values: prefer → `prefer`, require → `require`, disable → `disable`.
 /// For MySQL, `prefer` maps to `PREFERRED` and `require` to `REQUIRED`.
+/// Note: The MySQL `ssl-mode` branch is currently dead code because `build_mysql_pool()`
+/// returns `Unsupported`. It will be used when MySQL support is implemented.
 fn apply_tls_param(url: &str, param: &str, tls_mode: &str) -> io::Result<String> {
     let mut parsed = url
         .parse::<url::Url>()

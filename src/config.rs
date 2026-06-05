@@ -356,11 +356,7 @@ fn cross_validate_driver(driver: &mut String, url: &str) {
     }
     let detected =
         crate::store::pool::DbType::from_url(url).unwrap_or(crate::store::pool::DbType::Sqlite);
-    let detected_name = match detected {
-        crate::store::pool::DbType::Sqlite => "sqlite",
-        crate::store::pool::DbType::Postgres => "postgres",
-        crate::store::pool::DbType::Mysql => "mysql",
-    };
+    let detected_name = detected.name();
     if detected_name != driver.as_str() {
         eprintln!(
             "[harness] db.driver = '{driver}' but URL scheme is '{detected_name}:' — correcting driver to '{detected_name}'",
@@ -401,11 +397,7 @@ fn validate_config(cfg: &mut HarnessConfig) {
     // Do NOT correct driver — memory_url defaults to SQLite when empty.
     if !cfg.db.memory_url.is_empty() {
         if let Ok(detected) = crate::store::pool::DbType::from_url(&cfg.db.memory_url) {
-            let detected_name = match detected {
-                crate::store::pool::DbType::Sqlite => "sqlite",
-                crate::store::pool::DbType::Postgres => "postgres",
-                crate::store::pool::DbType::Mysql => "mysql",
-            };
+            let detected_name = detected.name();
             if detected_name != cfg.db.driver {
                 eprintln!(
                     "[harness] db.memory_url scheme is '{detected_name}:' but db.driver is '{}' — \
