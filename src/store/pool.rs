@@ -14,8 +14,8 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-use sqlx::any::AnyPoolOptions;
 use sqlx::AnyPool;
+use sqlx::any::AnyPoolOptions;
 
 use crate::config::CONFIG;
 use crate::shared::paths;

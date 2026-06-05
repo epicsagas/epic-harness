@@ -19,7 +19,7 @@ pub struct EvolvedSkillRow {
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 #[cfg(test)]
 pub async fn upsert_skill_pool(pool: &AnyPool, skill: &EvolvedSkillRow) -> io::Result<()> {

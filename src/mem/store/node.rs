@@ -1,6 +1,6 @@
 //! node.rs — Node CRUD operations
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 use std::io;
 
 use super::types::Node;

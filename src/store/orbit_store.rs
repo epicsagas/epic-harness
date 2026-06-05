@@ -11,7 +11,7 @@ const MAX_PIPELINE_LIST: usize = 200;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 /// Pool version of sync_orbit_files_to_db.
 pub async fn sync_orbit_files_to_db_pool(

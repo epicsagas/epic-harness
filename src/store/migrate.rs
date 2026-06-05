@@ -1273,10 +1273,10 @@ fn remap_csv(csv: &str, mapping: &std::collections::HashMap<&str, &str>) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::schema::SCHEMA_VERSION;
     use sqlx::ConnectOptions;
     use sqlx::Row;
     use sqlx::sqlite::SqliteConnectOptions;
-    use crate::store::schema::SCHEMA_VERSION;
 
     /// Create an in-memory SqliteConnection with the full harness schema applied.
     /// Migration tests use direct connections (not AnyPool) because they exercise

@@ -1,6 +1,6 @@
 //! recall.rs — Smart recall with composite scoring and graph boost
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 use std::io;
 
 use super::decay::touch_nodes_pool;

@@ -16,7 +16,7 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 /// Load the full Metrics struct from SQLite using a pool.
 pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metrics> {

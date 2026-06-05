@@ -1,6 +1,6 @@
 //! observations.rs — Observation records SQLite I/O (async pool)
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 use std::io;
 
 use crate::shared::obs::ObsRecord;

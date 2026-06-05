@@ -79,7 +79,7 @@ pub struct OrchAgent {
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
@@ -199,11 +199,7 @@ pub async fn read_agent_pool(
     }
 }
 
-pub async fn dismiss_agent_pool(
-    pool: &AnyPool,
-    project: &str,
-    agent_id: &str,
-) -> io::Result<bool> {
+pub async fn dismiss_agent_pool(pool: &AnyPool, project: &str, agent_id: &str) -> io::Result<bool> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
 
     let result = sqlx::query(
@@ -302,11 +298,7 @@ pub async fn write_control_pool(
 /// Clean up completed/aborted runs and orphaned agents.
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
-pub async fn cleanup_stale_pool(
-    pool: &AnyPool,
-    project: &str,
-    cutoff_ts: &str,
-) -> io::Result<u64> {
+pub async fn cleanup_stale_pool(pool: &AnyPool, project: &str, cutoff_ts: &str) -> io::Result<u64> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
 
     sqlx::query("CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY); DELETE FROM _stale_run_ids")

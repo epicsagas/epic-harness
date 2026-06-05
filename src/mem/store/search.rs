@@ -17,11 +17,7 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
     .unwrap_or_else(|_| vec![])
 }
 
-pub async fn search_nodes_pool(
-    pool: &AnyPool,
-    query: &str,
-    limit: i64,
-) -> io::Result<Vec<Node>> {
+pub async fn search_nodes_pool(pool: &AnyPool, query: &str, limit: i64) -> io::Result<Vec<Node>> {
     let sql = format!(
         "SELECT n.{NODE_COLUMNS_PREFIXED}
          FROM nodes n

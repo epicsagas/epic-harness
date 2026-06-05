@@ -29,7 +29,11 @@ pub async fn touch_nodes_pool(pool: &AnyPool, ids: &[String]) {
         Err(_) => return,
     };
     // Build parameterized IN clause: UPDATE ... WHERE id IN ($2, $3, ...)
-    let placeholders: Vec<String> = ids.iter().enumerate().map(|(i, _)| format!("${}", i + 2)).collect();
+    let placeholders: Vec<String> = ids
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("${}", i + 2))
+        .collect();
     let sql = format!(
         "UPDATE nodes SET access_count = access_count + 1, accessed_at = $1 WHERE id IN ({})",
         placeholders.join(",")

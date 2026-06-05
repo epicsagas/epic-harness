@@ -6,7 +6,7 @@ use crate::shared::types::SessionSnapshot;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 /// Map a sqlx row to a [`SessionSnapshot`].
 fn row_to_snapshot_pool(r: &sqlx::any::AnyRow) -> io::Result<SessionSnapshot> {

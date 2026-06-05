@@ -19,7 +19,7 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_pattern_pool(

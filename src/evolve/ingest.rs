@@ -7,10 +7,7 @@ use super::analysis::build_summary;
 
 /// Query pattern types detected in the previous session (the session that the
 /// current session "follows"). Extracts non-generic tags from CSV tag strings.
-pub async fn query_prev_pattern_types_async(
-    pool: &AnyPool,
-    session_node_id: &str,
-) -> Vec<String> {
+pub async fn query_prev_pattern_types_async(pool: &AnyPool, session_node_id: &str) -> Vec<String> {
     let sql = "SELECT n.tags FROM nodes n
          JOIN edges e ON e.source = n.id
          WHERE n.type = 'pattern'

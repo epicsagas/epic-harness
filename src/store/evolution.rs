@@ -6,7 +6,7 @@ use crate::shared::evolution::EvolutionRecord;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 
 pub async fn insert_record_pool(
     pool: &AnyPool,

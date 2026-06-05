@@ -1,7 +1,7 @@
 //! graph.rs — Graph build + traversal (related, rebuild)
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, AnyPool};
+use sqlx::{AnyPool, Row};
 use std::collections::HashSet;
 use std::io;
 
@@ -258,7 +258,6 @@ pub fn compute_stats() -> io::Result<serde_json::Value> {
 mod tests {
     use super::super::store::{Edge, append_edge_pool, init_schema_pool};
     use super::*;
-
 
     /// Open a fresh in-memory SQLite pool with the full schema applied.
     async fn mem_pool() -> AnyPool {
