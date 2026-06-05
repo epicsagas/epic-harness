@@ -92,7 +92,7 @@ Single file at `~/.harness/memory.db`. Project-agnostic (projects stored as tags
 
 ## Per-Project Files
 
-All under `~/.harness/projects/{slug}/`. The slug is `{sanitized-git-basename}-{hash6}` computed from `git rev-parse --show-toplevel`.
+All under `~/.harness/projects/{slug}/`. The slug is the project directory name (e.g., `epic-harness`), with non-alphanumeric characters replaced by `_`. Project names must be unique across the workspace.
 
 ### Active Data (written by hooks)
 

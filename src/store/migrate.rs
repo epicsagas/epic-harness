@@ -829,3 +829,289 @@ impl std::ops::AddAssign for GlobalMergeStats {
         self.promo += other.promo;
     }
 }
+
+// ── Slug normalization (hash suffix removal) ────────────
+
+/// Detect old-format slugs (`{name}-{6hex}`) and return the name part.
+fn strip_hash_suffix(slug: &str) -> Option<&str> {
+    if slug.len() > 7 {
+        let maybe_sep = &slug[slug.len() - 7..slug.len() - 6];
+        let maybe_hex = &slug[slug.len() - 6..];
+        if maybe_sep == "-" && maybe_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+            let name = &slug[..slug.len() - 7];
+            if !name.is_empty() {
+                return Some(name);
+            }
+        }
+    }
+    None
+}
+
+/// Auto-normalize old hashed slugs to name-only format.
+///
+/// Called from `init_schema()` after migrations. Idempotent — tracked via
+/// `_harness_meta.slugs_normalized`.
+pub fn normalize_slugs_if_needed(conn: &Connection) -> io::Result<()> {
+    // Check if already done.
+    let done: bool = conn
+        .query_row(
+            "SELECT value FROM _harness_meta WHERE key = 'slugs_normalized'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .ok()
+        .is_some_and(|v| v == "1");
+
+    if done {
+        return Ok(());
+    }
+
+    // Collect all distinct project values that need normalization.
+    let slugs = collect_distinct_projects(conn)?;
+    let mapping = build_normalization_mapping(&slugs);
+
+    if mapping.is_empty() {
+        // No hashed slugs found — just mark as done.
+        store_err(conn.execute(
+            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1')",
+            [],
+        ))?;
+        return Ok(());
+    }
+
+    eprintln!(
+        "[harness] normalizing {} hashed slug(s) to name-only format",
+        mapping.len()
+    );
+
+    // Apply within a transaction.
+    let tx = super::ImmediateTx::begin(conn)?;
+    apply_slug_mapping(conn, &mapping)?;
+    store_err(conn.execute(
+        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1')",
+        [],
+    ))?;
+    tx.commit()?;
+
+    // Rename per-project directories.
+    rename_slug_directories(&mapping);
+
+    // Normalize memory.db projects CSV.
+    normalize_memory_projects(&mapping);
+
+    Ok(())
+}
+
+/// Collect all distinct `project` values across all relevant tables.
+fn collect_distinct_projects(conn: &Connection) -> io::Result<Vec<String>> {
+    let tables = [
+        "observations",
+        "sessions",
+        "evolution_records",
+        "metrics_state",
+        "score_history",
+        "skill_attribution",
+        "promotion_counters",
+        "workspace_manifest",
+        "orch_runs",
+        "orch_control",
+        "orbit_pipelines",
+        "evolved_skills",
+        "global_patterns",
+    ];
+    let mut seen = std::collections::HashSet::new();
+    for table in &tables {
+        let rows: Vec<String> = conn
+            .prepare(&format!("SELECT DISTINCT project FROM {table}"))
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .query_map([], |row| row.get(0))
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect();
+        for slug in rows {
+            seen.insert(slug);
+        }
+    }
+    Ok(seen.into_iter().collect())
+}
+
+/// Build a mapping of `{old_hashed_slug} → {name_only_slug}`.
+fn build_normalization_mapping(slugs: &[String]) -> Vec<(String, String)> {
+    slugs
+        .iter()
+        .filter_map(|s| strip_hash_suffix(s).map(|name| (s.clone(), name.to_string())))
+        .collect()
+}
+
+/// Tables where `project` is part of a composite PK (need special handling).
+const COMPOSITE_PK_TABLES: &[&str] = &["skill_attribution", "promotion_counters"];
+
+/// Tables with simple project column (UPDATE works directly).
+const SIMPLE_TABLES: &[&str] = &[
+    "observations",
+    "sessions",
+    "evolution_records",
+    "metrics_state",
+    "score_history",
+    "workspace_manifest",
+    "orch_runs",
+    "orch_control",
+    "orbit_pipelines",
+    "evolved_skills",
+    "global_patterns",
+];
+
+/// Apply slug mapping to all tables in harness.db.
+fn apply_slug_mapping(conn: &Connection, mapping: &[(String, String)]) -> io::Result<()> {
+    for (old, new) in mapping {
+        // Simple tables: direct UPDATE.
+        for table in SIMPLE_TABLES {
+            store_err(conn.execute(
+                &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
+                rusqlite::params![new, old],
+            ))?;
+        }
+
+        // Composite PK tables: temp-table approach to handle PK conflicts
+        // when two hashed slugs map to the same name-only slug.
+        for table in COMPOSITE_PK_TABLES {
+            // Step 1: Copy matching rows to temp table.
+            store_err(conn.execute(
+                &format!("CREATE TEMP TABLE _norm_tmp AS SELECT * FROM {table} WHERE project = ?1"),
+                rusqlite::params![old],
+            ))?;
+            // Step 2: Delete originals.
+            store_err(conn.execute(
+                &format!("DELETE FROM {table} WHERE project = ?1"),
+                rusqlite::params![old],
+            ))?;
+            // Step 3: Update project in temp.
+            store_err(conn.execute("UPDATE _norm_tmp SET project = ?1", rusqlite::params![new]))?;
+            // Step 4: Insert back (IGNORE handles conflicts with existing rows).
+            store_err(conn.execute_batch(&format!(
+                "INSERT OR IGNORE INTO {table} SELECT * FROM _norm_tmp; DROP TABLE _norm_tmp;"
+            )))?;
+        }
+    }
+    Ok(())
+}
+
+/// Rename per-project directories from hashed to name-only slugs.
+fn rename_slug_directories(mapping: &[(String, String)]) {
+    let root = crate::shared::paths::harness_projects_root();
+    if !root.is_dir() {
+        return;
+    }
+
+    for (old, new) in mapping {
+        let old_dir = root.join(old);
+        let new_dir = root.join(new);
+
+        if !old_dir.is_dir() {
+            continue;
+        }
+
+        if new_dir.is_dir() {
+            // Target exists — merge contents.
+            if let Ok(entries) = std::fs::read_dir(&old_dir) {
+                for entry in entries.flatten() {
+                    let dest = new_dir.join(entry.file_name());
+                    if dest.exists() {
+                        // Merge subdirectory contents recursively.
+                        if entry.path().is_dir() {
+                            merge_dir_recursive(&entry.path(), &dest);
+                        }
+                        // Skip existing files (keep both — newer wins is not worth complexity).
+                    } else {
+                        let _ = std::fs::rename(entry.path(), &dest);
+                    }
+                }
+            }
+            // Remove old dir if empty.
+            let _ = std::fs::remove_dir(&old_dir);
+        } else {
+            // Simple rename.
+            let _ = std::fs::rename(&old_dir, &new_dir);
+        }
+    }
+}
+
+/// Recursively merge contents of `src` into `dst`.
+fn merge_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
+    let _ = std::fs::create_dir_all(dst);
+    if let Ok(entries) = std::fs::read_dir(src) {
+        for entry in entries.flatten() {
+            let dest = dst.join(entry.file_name());
+            if entry.path().is_dir() {
+                merge_dir_recursive(&entry.path(), &dest);
+            } else if !dest.exists() {
+                let _ = std::fs::rename(entry.path(), &dest);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(src);
+}
+
+/// Normalize projects CSV in memory.db nodes table.
+fn normalize_memory_projects(mapping: &[(String, String)]) {
+    if mapping.is_empty() {
+        return;
+    }
+    let db_path = crate::shared::paths::dirs_home()
+        .join(".harness")
+        .join("memory.db");
+    if !db_path.is_file() {
+        return;
+    }
+    let conn =
+        match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE) {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+    let mapping_map: std::collections::HashMap<&str, &str> = mapping
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+
+    let mut stmt = match conn.prepare("SELECT id, projects FROM nodes") {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let rows: Vec<(String, String)> = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+        Err(_) => return,
+    };
+
+    for (id, csv) in &rows {
+        let new_csv = remap_csv(csv, &mapping_map);
+        if new_csv != *csv {
+            let _ = conn.execute(
+                "UPDATE nodes SET projects = ?1 WHERE id = ?2",
+                rusqlite::params![new_csv, id],
+            );
+        }
+    }
+
+    // Update FTS.
+    let _ = conn.execute_batch("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');");
+}
+
+/// Remap slug values in a comma-separated CSV string.
+fn remap_csv(csv: &str, mapping: &std::collections::HashMap<&str, &str>) -> String {
+    if csv.is_empty() {
+        return csv.to_string();
+    }
+    csv.split(',')
+        .map(|s| {
+            let trimmed = s.trim();
+            mapping
+                .get(trimmed)
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| trimmed.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}

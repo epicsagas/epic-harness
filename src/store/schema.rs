@@ -38,6 +38,10 @@ pub(crate) fn init_schema(conn: &Connection) -> io::Result<()> {
         // was added in v4 but the DB started at v2 with a minimal schema subset).
         // IF NOT EXISTS makes this a no-op for tables that already exist.
         apply_ddl(conn)?;
+        // Normalize old hashed slugs to name-only format (idempotent).
+        if let Err(e) = super::migrate::normalize_slugs_if_needed(conn) {
+            eprintln!("[harness] slug normalization failed: {e}");
+        }
         return Ok(());
     }
 
