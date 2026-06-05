@@ -1,6 +1,5 @@
 //! util.rs — Shared helpers: paths, UUID, timestamps, CSV, row mapping, constants
 
-use super::types::Node;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -44,31 +43,6 @@ pub(crate) fn escape_like(value: &str) -> String {
         }
     }
     out
-}
-
-// ── Row mapping ───────────────────────────────────────
-
-pub(crate) fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
-    use super::types::NodeFrontmatter;
-    let tags: String = row.get(3)?;
-    let projects: String = row.get(4)?;
-    let agents: String = row.get(5)?;
-    Ok(Node {
-        frontmatter: NodeFrontmatter {
-            id: row.get(0)?,
-            node_type: row.get(1)?,
-            title: row.get(2)?,
-            tags: split_csv(&tags),
-            projects: split_csv(&projects),
-            agents: split_csv(&agents),
-            created: row.get(6)?,
-            updated: row.get(7)?,
-            importance: row.get(9).unwrap_or(0.5),
-            access_count: row.get::<_, i64>(10).unwrap_or(0),
-            accessed_at: row.get(11).unwrap_or_default(),
-        },
-        body: row.get(8)?,
-    })
 }
 
 // ── Paths ─────────────────────────────────────────────

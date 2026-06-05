@@ -23,13 +23,13 @@ use serde_json::{Value, json};
 use sqlx::SqlitePool;
 use tower_http::cors::{Any, CorsLayer};
 
-use super::graph::{compute_stats, rebuild_graph_json_pool};
-use super::server::{
-    compute_centrality_pool, handle_post_edge_pool, handle_post_node_pool, handle_put_node_pool,
+use super::graph::{compute_stats_pool, rebuild_graph_json_pool};
+use super::store::{
+    Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, read_index, read_node_pool, remove_edges_for_node,
-    remove_from_index, search_nodes_pool, validate_uuid,
+    delete_edge_by_id, delete_node_file, read_all_nodes_pool, read_node_pool,
+    remove_edges_for_node, remove_from_index, search_nodes_pool, validate_uuid,
 };
 use crate::store::pool;
 
@@ -107,6 +107,210 @@ async fn shutdown_signal() {
         .expect("failed to install CTRL+C handler");
 }
 
+// ── Business logic helpers (moved from server.rs) ─────────────────────────────
+
+const VALID_NODE_TYPES: &[&str] = &[
+    "decision",
+    "resolution",
+    "concept",
+    "project",
+    "error",
+    "session",
+    "pattern",
+    "instinct",
+    "psychographic",
+];
+
+const MAX_BODY_CHARS: usize = 65_536;
+const MAX_TITLE_CHARS: usize = 512;
+const MAX_ARRAY_ITEMS: usize = 50;
+const MAX_RELATION_CHARS: usize = 64;
+const WEIGHT_MIN: f64 = 0.0;
+const WEIGHT_MAX: f64 = 100.0;
+
+/// Create a new node using a pool connection.
+async fn handle_post_node_pool(body: &str, pool: &SqlitePool) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let now = now_iso();
+
+    let tags: Vec<String> = v["tags"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .take(MAX_ARRAY_ITEMS)
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let projects: Vec<String> = v["projects"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .take(MAX_ARRAY_ITEMS)
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let agents: Vec<String> = v["agents"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .take(MAX_ARRAY_ITEMS)
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let node_type = v["type"].as_str().unwrap_or("concept").to_string();
+    if !VALID_NODE_TYPES.contains(&node_type.as_str()) {
+        return Err(format!("invalid node type: {node_type}"));
+    }
+    let importance = v["importance"]
+        .as_f64()
+        .unwrap_or_else(|| importance_for_type(&node_type))
+        .clamp(0.0, 1.0);
+    let node = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            node_type,
+            title: v["title"]
+                .as_str()
+                .unwrap_or("Untitled")
+                .chars()
+                .take(MAX_TITLE_CHARS)
+                .collect(),
+            tags,
+            projects,
+            agents,
+            created: now.clone(),
+            updated: now,
+            importance,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: v["body"]
+            .as_str()
+            .unwrap_or("")
+            .chars()
+            .take(MAX_BODY_CHARS)
+            .collect(),
+    };
+
+    write_node_pool(pool, &node)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Update a node using a pool connection.
+async fn handle_put_node_pool(id: &str, body: &str, pool: &SqlitePool) -> Result<(), String> {
+    let mut node = read_node_pool(pool, id).await.map_err(|e| e.to_string())?;
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+
+    if let Some(t) = v["title"].as_str() {
+        node.frontmatter.title = t.chars().take(MAX_TITLE_CHARS).collect();
+    }
+    if let Some(t) = v["type"].as_str() {
+        if !VALID_NODE_TYPES.contains(&t) {
+            return Err(format!("invalid node type: {t}"));
+        }
+        node.frontmatter.node_type = t.to_string();
+    }
+    if let Some(b) = v["body"].as_str() {
+        node.body = b.chars().take(MAX_BODY_CHARS).collect();
+    }
+    if let Some(tags) = v["tags"].as_array() {
+        node.frontmatter.tags = tags
+            .iter()
+            .take(MAX_ARRAY_ITEMS)
+            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+            .collect();
+    }
+    if let Some(imp) = v["importance"].as_f64() {
+        node.frontmatter.importance = imp.clamp(0.0, 1.0);
+    }
+    node.frontmatter.updated = now_iso();
+
+    write_node_pool(pool, &node)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+fn parse_edge_payload(body: &str) -> Result<Edge, String> {
+    let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let source = v["source"].as_str().unwrap_or("").to_string();
+    let target = v["target"].as_str().unwrap_or("").to_string();
+    if !validate_uuid(&source) || !validate_uuid(&target) {
+        return Err("invalid source or target node id".to_string());
+    }
+    let relation: String = v["relation"]
+        .as_str()
+        .unwrap_or("related")
+        .chars()
+        .take(MAX_RELATION_CHARS)
+        .collect();
+    let weight = v["weight"]
+        .as_f64()
+        .unwrap_or(1.0)
+        .clamp(WEIGHT_MIN, WEIGHT_MAX);
+    Ok(Edge {
+        id: uuid::Uuid::new_v4().to_string(),
+        source,
+        target,
+        relation,
+        weight,
+        ts: now_iso(),
+    })
+}
+
+/// Create an edge using a pool connection.
+async fn handle_post_edge_pool(body: &str, pool: &SqlitePool) -> Result<String, String> {
+    let edge = parse_edge_payload(body)?;
+    let id = edge.id.clone();
+    append_edge_pool(pool, &edge)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Compute degree centrality using a pool connection.
+pub async fn compute_centrality_pool(pool: &SqlitePool, limit: usize) -> Vec<serde_json::Value> {
+    use sqlx::Row as SqlxRow;
+    let safe_limit = limit.min(100) as i64;
+    let sql = "SELECT n.id, n.title, n.type, n.importance, cnt.total_degree
+         FROM (
+             SELECT node_id, SUM(degree) AS total_degree FROM (
+                 SELECT source AS node_id, COUNT(*) AS degree FROM edges GROUP BY source
+                 UNION ALL
+                 SELECT target AS node_id, COUNT(*) AS degree FROM edges GROUP BY target
+             ) GROUP BY node_id
+         ) cnt
+         JOIN nodes n ON n.id = cnt.node_id
+         ORDER BY cnt.total_degree DESC
+         LIMIT ?1";
+
+    sqlx::query(sql)
+        .bind(safe_limit)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "id": r.try_get::<String, _>(0).unwrap_or_default(),
+                        "title": r.try_get::<String, _>(1).unwrap_or_default(),
+                        "type": r.try_get::<String, _>(2).unwrap_or_default(),
+                        "importance": r.try_get::<f64, _>(3).unwrap_or(0.0),
+                        "degree": r.try_get::<i64, _>(4).unwrap_or(0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn build_router(state: AppState, port: u16) -> Router {
@@ -165,8 +369,9 @@ async fn handle_d3() -> impl IntoResponse {
         .unwrap()
 }
 
-async fn handle_stats() -> impl IntoResponse {
-    let body = compute_stats()
+async fn handle_stats(State(state): State<AppState>) -> impl IntoResponse {
+    let body = compute_stats_pool(&state.pool)
+        .await
         .map(|v| v.to_string())
         .unwrap_or_else(|_| r#"{"error":"stats unavailable"}"#.to_string());
     json_ok(body)
@@ -193,9 +398,22 @@ async fn handle_centrality(
     Json(data).into_response()
 }
 
-async fn handle_list_nodes() -> impl IntoResponse {
-    let idx = read_index();
-    Json(idx.nodes).into_response()
+async fn handle_list_nodes(State(state): State<AppState>) -> impl IntoResponse {
+    use super::store::IndexNode;
+    let nodes: Vec<IndexNode> = read_all_nodes_pool(&state.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|n| IndexNode {
+            id: n.frontmatter.id,
+            title: n.frontmatter.title,
+            node_type: n.frontmatter.node_type,
+            tags: n.frontmatter.tags,
+            projects: n.frontmatter.projects,
+            updated: n.frontmatter.updated,
+        })
+        .collect();
+    Json(nodes).into_response()
 }
 
 async fn handle_create_node(State(state): State<AppState>, body: String) -> impl IntoResponse {

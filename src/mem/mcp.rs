@@ -6,17 +6,18 @@
 //! Implements MCP protocol version 2024-11-05 over stdin/stdout.
 //! Tools: mem_add, mem_query, mem_search, mem_related, mem_context
 
-use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sqlx::SqlitePool;
 use std::io::{self, BufRead, Write};
 
-use super::graph::{graph_neighbors_conn, related_nodes_conn};
+use super::graph::{graph_neighbors_pool, related_nodes_pool};
 use super::store::{
-    Node, NodeFrontmatter, importance_for_type, new_uuid, now_iso, open_db, query_nodes_conn,
-    read_node_conn, read_nodes_conn, search_nodes_conn, smart_recall_conn, touch_nodes_conn,
-    validate_uuid, write_node_dedup_conn,
+    Node, NodeFrontmatter, importance_for_type, new_uuid, now_iso, query_nodes_pool,
+    read_node_pool, read_nodes_pool, search_nodes_pool, smart_recall_pool, touch_nodes_pool,
+    validate_uuid, write_node_dedup_pool,
 };
+use crate::store::runtime;
 
 // ── Tool definitions ───────────────────────────────────────────────────────────
 
@@ -112,7 +113,7 @@ fn tool_definitions() -> Value {
 
 // ── Tool implementations ───────────────────────────────────────────────────────
 
-fn tool_mem_add(conn: &Connection, args: &Value) -> Value {
+fn tool_mem_add(pool: &SqlitePool, args: &Value) -> Value {
     let title = match args["title"].as_str() {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => return json!({ "error": "mem_add requires title, type, and body" }),
@@ -166,20 +167,21 @@ fn tool_mem_add(conn: &Connection, args: &Value) -> Value {
         body,
     };
 
-    match write_node_dedup_conn(conn, &node, 24) {
+    match runtime::block_on(write_node_dedup_pool(pool, &node, 24)) {
         Ok((existing_id, true)) => json!({ "id": existing_id, "deduplicated": true }),
         Ok((_, false)) => json!({ "id": id, "created": now }),
         Err(e) => json!({ "error": format!("write failed: {e}") }),
     }
 }
 
-fn tool_mem_query(conn: &Connection, args: &Value) -> Value {
+fn tool_mem_query(pool: &SqlitePool, args: &Value) -> Value {
     let tag = args["tag"].as_str();
     let type_filter = args["type"].as_str();
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
 
-    let nodes = query_nodes_conn(conn, tag, type_filter, project, limit).unwrap_or_default();
+    let nodes = runtime::block_on(query_nodes_pool(pool, tag, type_filter, project, limit))
+        .unwrap_or_default();
     let results: Vec<Value> = nodes
         .iter()
         .map(|node| {
@@ -201,18 +203,18 @@ fn tool_mem_query(conn: &Connection, args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
+fn tool_mem_search(pool: &SqlitePool, args: &Value) -> Value {
     let query = match args["query"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_search requires query" }),
     };
     let limit = args["limit"].as_u64().unwrap_or(20) as usize;
 
-    let nodes = search_nodes_conn(conn, query, limit).unwrap_or_default();
+    let nodes = runtime::block_on(search_nodes_pool(pool, query, limit as i64)).unwrap_or_default();
 
     // Touch retrieved nodes
     let ids: Vec<String> = nodes.iter().map(|n| n.frontmatter.id.clone()).collect();
-    touch_nodes_conn(conn, &ids);
+    runtime::block_on(touch_nodes_pool(pool, &ids));
 
     let results: Vec<Value> = nodes
         .iter()
@@ -241,7 +243,7 @@ fn tool_mem_search(conn: &Connection, args: &Value) -> Value {
     resp
 }
 
-fn tool_mem_related(conn: &Connection, args: &Value) -> Value {
+fn tool_mem_related(pool: &SqlitePool, args: &Value) -> Value {
     let id = match args["id"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_related requires id" }),
@@ -251,30 +253,32 @@ fn tool_mem_related(conn: &Connection, args: &Value) -> Value {
     }
 
     let depth = args["depth"].as_u64().unwrap_or(2) as usize;
-    let related_ids = related_nodes_conn(conn, id, depth);
+    let related_ids = runtime::block_on(related_nodes_pool(pool, id, depth));
 
     let results: Vec<Value> = related_ids
         .iter()
         .filter_map(|rid| {
-            read_node_conn(conn, rid).ok().map(|node| {
-                json!({
-                    "id":    node.frontmatter.id,
-                    "title": node.frontmatter.title,
-                    "type":  node.frontmatter.node_type
+            runtime::block_on(read_node_pool(pool, rid))
+                .ok()
+                .map(|node| {
+                    json!({
+                        "id":    node.frontmatter.id,
+                        "title": node.frontmatter.title,
+                        "type":  node.frontmatter.node_type
+                    })
                 })
-            })
         })
         .collect();
 
     json!(results)
 }
 
-fn tool_mem_context(conn: &Connection, args: &Value) -> Value {
+fn tool_mem_context(pool: &SqlitePool, args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
     // Use smart_recall for importance-weighted context
-    let scored = match smart_recall_conn(conn, project, None, limit) {
+    let scored = match runtime::block_on(smart_recall_pool(pool, project, None, limit)) {
         Ok(s) => s,
         Err(e) => return json!({"error": format!("recall failed: {e}")}),
     };
@@ -298,7 +302,7 @@ fn tool_mem_context(conn: &Connection, args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
+fn tool_mem_recall(pool: &SqlitePool, args: &Value) -> Value {
     let hint = match args["hint"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_recall requires hint" }),
@@ -308,7 +312,7 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
     let include_neighbors = args["include_neighbors"].as_bool().unwrap_or(true);
 
     // Phase 1: Smart recall with composite scoring
-    let scored = match smart_recall_conn(conn, project, Some(hint), limit) {
+    let scored = match runtime::block_on(smart_recall_pool(pool, project, Some(hint), limit)) {
         Ok(s) => s,
         Err(e) => return json!({"error": format!("recall failed: {e}")}),
     };
@@ -334,7 +338,7 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
             .iter()
             .map(|sn| sn.node.frontmatter.id.clone())
             .collect();
-        let neighbors = graph_neighbors_conn(conn, &seed_ids);
+        let neighbors = runtime::block_on(graph_neighbors_pool(pool, &seed_ids));
 
         // Add up to 5 graph neighbors not already in results — batch-read in one query.
         let existing_ids: std::collections::HashSet<&str> = scored
@@ -355,27 +359,28 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
             let weight_by_id: std::collections::HashMap<&str, f64> =
                 candidates.iter().cloned().collect();
 
-            let neighbor_results: Vec<Value> = read_nodes_conn(conn, &candidate_ids)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|node| {
-                    let edge_weight = weight_by_id
-                        .get(node.frontmatter.id.as_str())
-                        .copied()
-                        .unwrap_or(0.0);
-                    json!({
-                        "id":          node.frontmatter.id,
-                        "title":       node.frontmatter.title,
-                        "type":        node.frontmatter.node_type,
-                        "tags":        node.frontmatter.tags,
-                        "importance":  node.frontmatter.importance,
-                        "score":       (edge_weight * 100.0).round() / 100.0,
-                        "body":        node.body.chars().take(200).collect::<String>(),
-                        "via_graph":   true,
-                        "connections": (edge_weight * 100.0).round() / 100.0
+            let neighbor_results: Vec<Value> =
+                runtime::block_on(read_nodes_pool(pool, &candidate_ids))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|node| {
+                        let edge_weight = weight_by_id
+                            .get(node.frontmatter.id.as_str())
+                            .copied()
+                            .unwrap_or(0.0);
+                        json!({
+                            "id":          node.frontmatter.id,
+                            "title":       node.frontmatter.title,
+                            "type":        node.frontmatter.node_type,
+                            "tags":        node.frontmatter.tags,
+                            "importance":  node.frontmatter.importance,
+                            "score":       (edge_weight * 100.0).round() / 100.0,
+                            "body":        node.body.chars().take(200).collect::<String>(),
+                            "via_graph":   true,
+                            "connections": (edge_weight * 100.0).round() / 100.0
+                        })
                     })
-                })
-                .collect();
+                    .collect();
 
             results.extend(neighbor_results);
         }
@@ -388,14 +393,14 @@ fn tool_mem_recall(conn: &Connection, args: &Value) -> Value {
     })
 }
 
-fn call_tool(conn: &Connection, name: &str, args: &Value) -> Value {
+fn call_tool(pool: &SqlitePool, name: &str, args: &Value) -> Value {
     let result = match name {
-        "mem_add" => tool_mem_add(conn, args),
-        "mem_query" => tool_mem_query(conn, args),
-        "mem_search" => tool_mem_search(conn, args),
-        "mem_related" => tool_mem_related(conn, args),
-        "mem_context" => tool_mem_context(conn, args),
-        "mem_recall" => tool_mem_recall(conn, args),
+        "mem_add" => tool_mem_add(pool, args),
+        "mem_query" => tool_mem_query(pool, args),
+        "mem_search" => tool_mem_search(pool, args),
+        "mem_related" => tool_mem_related(pool, args),
+        "mem_context" => tool_mem_context(pool, args),
+        "mem_recall" => tool_mem_recall(pool, args),
         _ => json!({ "error": format!("Unknown tool: {name}") }),
     };
     json!({ "content": [{ "type": "text", "text": result.to_string() }] })
@@ -418,7 +423,7 @@ fn send(obj: &Value) {
     let _ = out.flush();
 }
 
-fn handle_message(conn: &Connection, msg: &RpcRequest) {
+fn handle_message(pool: &SqlitePool, msg: &RpcRequest) {
     match msg.method.as_str() {
         "initialize" => {
             let resp = json!({
@@ -454,7 +459,7 @@ fn handle_message(conn: &Connection, msg: &RpcRequest) {
                 .cloned()
                 .unwrap_or(json!({}));
 
-            let result = call_tool(conn, tool_name, &tool_args);
+            let result = call_tool(pool, tool_name, &tool_args);
             let resp = json!({
                 "jsonrpc": "2.0",
                 "id": msg.id,
@@ -479,12 +484,12 @@ fn handle_message(conn: &Connection, msg: &RpcRequest) {
 
 /// Run the stdio MCP server loop. Reads newline-delimited JSON-RPC from stdin.
 ///
-/// Opens the database once at startup so that all tool calls within the session
-/// share a single connection — avoids re-running WAL setup and schema migration
-/// on every request.
+/// Opens the database pool once at startup so that all tool calls within the
+/// session share a single connection pool — avoids re-running WAL setup and
+/// schema migration on every request.
 pub fn run_mcp_server() -> i32 {
-    let conn = match open_db() {
-        Ok(c) => c,
+    let pool = match runtime::block_on(crate::store::pool::memory_pool()) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!("harness-mem: failed to open database: {e}");
             return 1;
@@ -502,7 +507,7 @@ pub fn run_mcp_server() -> i32 {
             continue;
         }
         match serde_json::from_str::<RpcRequest>(&line) {
-            Ok(msg) => handle_message(&conn, &msg),
+            Ok(msg) => handle_message(&pool, &msg),
             Err(_) => {
                 // Ignore parse errors silently (per MCP spec)
             }
