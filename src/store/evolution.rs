@@ -95,6 +95,80 @@ pub fn query_all_records_conn(conn: &Connection) -> io::Result<Vec<EvolutionReco
     query_recent_records_conn(conn, 10_000)
 }
 
+// ── Async pool functions ─────────────────────────────
+
+use sqlx::{Row, SqlitePool};
+
+pub async fn insert_record_pool(
+    pool: &SqlitePool,
+    project: &str,
+    rec: &EvolutionRecord,
+) -> io::Result<i64> {
+    let error_json = serde_json::to_string(&rec.error_patterns).unwrap_or_else(|e| {
+        eprintln!("[store/evolution] error_patterns serialization failed: {e}");
+        "{}".into()
+    });
+    let failure_json = serde_json::to_string(&rec.failure_patterns).unwrap_or_else(|e| {
+        eprintln!("[store/evolution] failure_patterns serialization failed: {e}");
+        "[]".into()
+    });
+
+    let result = sqlx::query(
+        "INSERT INTO evolution_records (timestamp, observations, success_rate, avg_score, error_patterns, failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+    )
+    .bind(&rec.timestamp)
+    .bind(rec.observations as i64)
+    .bind(rec.success_rate)
+    .bind(rec.avg_score)
+    .bind(&error_json)
+    .bind(&failure_json)
+    .bind(rec.skills_seeded as i64)
+    .bind(rec.skills_rolled_back as i64)
+    .bind(rec.total_evolved as i64)
+    .bind(&rec.analysis_summary)
+    .bind(project)
+    .execute(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn query_recent_records_pool(
+    pool: &SqlitePool,
+    limit: i64,
+) -> io::Result<Vec<EvolutionRecord>> {
+    let rows = sqlx::query(
+        "SELECT timestamp, observations, success_rate, avg_score, error_patterns, failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary FROM evolution_records ORDER BY id DESC LIMIT ?1"
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let mut records: Vec<EvolutionRecord> = rows.iter().map(|r| {
+        let error_json: String = r.try_get(4).unwrap_or_else(|_| "{}".into());
+        let failure_json: String = r.try_get(5).unwrap_or_else(|_| "[]".into());
+        EvolutionRecord {
+            timestamp: r.try_get(0).unwrap_or_default(),
+            observations: r.try_get::<i64, _>(1).unwrap_or(0) as u64,
+            success_rate: r.try_get(2).unwrap_or(0.0),
+            avg_score: r.try_get(3).unwrap_or(0.0),
+            error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
+            failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
+            skills_seeded: r.try_get::<i64, _>(6).unwrap_or(0) as u64,
+            skills_rolled_back: r.try_get::<i64, _>(7).unwrap_or(0) as u64,
+            total_evolved: r.try_get::<i64, _>(8).unwrap_or(0) as u64,
+            analysis_summary: r.try_get(9).unwrap_or_default(),
+        }
+    }).collect();
+    records.reverse();
+    Ok(records)
+}
+
+pub async fn query_all_records_pool(pool: &SqlitePool) -> io::Result<Vec<EvolutionRecord>> {
+    query_recent_records_pool(pool, 10_000).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

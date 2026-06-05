@@ -17,6 +17,7 @@ pub mod migrate;
 pub mod observations;
 pub mod orbit_store;
 pub mod orchestrator;
+pub mod pool;
 pub(crate) mod schema;
 pub mod sessions;
 

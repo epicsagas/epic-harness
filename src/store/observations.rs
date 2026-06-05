@@ -4,6 +4,7 @@
 //! Standalone functions are used by the `migrate` subcommand for batch import.
 
 use rusqlite::Connection;
+use sqlx::{Row, SqlitePool};
 use std::io;
 
 use crate::shared::obs::ObsRecord;
@@ -344,6 +345,268 @@ pub struct SessionStatRow {
     pub calls: i64,
     pub avg_score: f64,
     pub failures: i64,
+}
+
+// ── Async pool functions ─────────────────────────────
+
+/// Map an sqlx observation row to ObsRecord.
+fn row_to_obs_record(r: &sqlx::sqlite::SqliteRow) -> io::Result<ObsRecord> {
+    let dim_s: Option<f64> = r.try_get(6).map_err(|e| io::Error::other(e.to_string()))?;
+    let dim_q: Option<f64> = r.try_get(7).map_err(|e| io::Error::other(e.to_string()))?;
+    let dim_c: Option<f64> = r.try_get(8).map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(ObsRecord {
+        timestamp: r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?,
+        tool: r.try_get(1).map_err(|e| io::Error::other(e.to_string()))?,
+        tool_category: r.try_get(2).map_err(|e| io::Error::other(e.to_string()))?,
+        action: r.try_get(3).map_err(|e| io::Error::other(e.to_string()))?,
+        result: r.try_get(4).map_err(|e| io::Error::other(e.to_string()))?,
+        score: r.try_get(5).map_err(|e| io::Error::other(e.to_string()))?,
+        dimensions: {
+            let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+            let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
+            if any_some && !all_some {
+                None
+            } else if all_some {
+                Some(ScoreDimensions {
+                    tool_success: dim_s.unwrap_or(0.0),
+                    output_quality: dim_q.unwrap_or(0.0),
+                    execution_cost: dim_c.unwrap_or(0.0),
+                })
+            } else {
+                None
+            }
+        },
+        failure_category: r.try_get(9).map_err(|e| io::Error::other(e.to_string()))?,
+        error_snippet: r.try_get(10).map_err(|e| io::Error::other(e.to_string()))?,
+        file_ext: r.try_get(11).map_err(|e| io::Error::other(e.to_string()))?,
+        sequence_id: r
+            .try_get::<Option<i64>, _>(12)
+            .ok()
+            .flatten()
+            .map(super::i64_to_u64),
+        pipeline_id: r.try_get(13).map_err(|e| io::Error::other(e.to_string()))?,
+    })
+}
+
+/// Async insert observation using pool.
+pub async fn insert_observation_pool(
+    pool: &SqlitePool,
+    project: &str,
+    rec: &ObsRecord,
+    session_id: &str,
+) -> io::Result<i64> {
+    let (dim_s, dim_q, dim_c) = match &rec.dimensions {
+        Some(d) => (
+            Some(d.tool_success),
+            Some(d.output_quality),
+            Some(d.execution_cost),
+        ),
+        None => (None, None, None),
+    };
+    let result = sqlx::query(
+        "INSERT INTO observations
+         (timestamp, session_id, tool, tool_category, action, result, score,
+          dim_success, dim_quality, dim_cost, failure_category, error_snippet,
+          file_ext, sequence_id, pipeline_id, project)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(&rec.timestamp)
+    .bind(session_id)
+    .bind(&rec.tool)
+    .bind(&rec.tool_category)
+    .bind(&rec.action)
+    .bind(&rec.result)
+    .bind(rec.score)
+    .bind(dim_s)
+    .bind(dim_q)
+    .bind(dim_c)
+    .bind(&rec.failure_category)
+    .bind(&rec.error_snippet)
+    .bind(&rec.file_ext)
+    .bind(rec.sequence_id.map(super::u64_to_i64))
+    .bind(&rec.pipeline_id)
+    .bind(project)
+    .execute(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(result.last_insert_rowid())
+}
+
+/// Async query observations for a date range.
+pub async fn query_obs_for_date_range_pool(
+    pool: &SqlitePool,
+    from_ts: &str,
+    to_ts: &str,
+    limit: Option<usize>,
+) -> io::Result<Vec<ObsRecord>> {
+    let from = pad_date(from_ts, false);
+    let to = pad_date(to_ts, true);
+    let limit_val = limit.map(|l| l.min(50_000) as i64).unwrap_or(-1);
+
+    let rows = sqlx::query(
+        "SELECT timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost,
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+         ORDER BY timestamp ASC
+         LIMIT ?",
+    )
+    .bind(&from)
+    .bind(&to)
+    .bind(limit_val)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    rows.iter().map(|r| row_to_obs_record(r)).collect()
+}
+
+/// Async aggregate observation stats.
+pub async fn query_obs_stats_pool(
+    pool: &SqlitePool,
+    from_ts: &str,
+    to_ts: &str,
+) -> io::Result<ObsStats> {
+    let from = pad_date(from_ts, false);
+    let to = pad_date(to_ts, true);
+
+    // Overall stats
+    let row = sqlx::query(
+        "SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
+                COALESCE(AVG(score), 0.0)
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let total: i64 = row.try_get(0).map_err(|e| io::Error::other(e.to_string()))?;
+    let successes: i64 = row.try_get(1).map_err(|e| io::Error::other(e.to_string()))?;
+    let avg_score: f64 = row.try_get(2).map_err(|e| io::Error::other(e.to_string()))?;
+
+    // Per-tool stats
+    let tool_rows = sqlx::query(
+        "SELECT tool, COUNT(*) as calls,
+                SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
+                COALESCE(AVG(score), 0.0) as avg_score
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+         GROUP BY tool ORDER BY calls DESC LIMIT 100",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let tool_stats: Vec<ToolStatRow> = tool_rows
+        .iter()
+        .map(|r| ToolStatRow {
+            tool: r.try_get(0).unwrap_or_default(),
+            calls: r.try_get(1).unwrap_or(0),
+            successes: r.try_get(2).unwrap_or(0),
+            avg_score: r.try_get(3).unwrap_or(0.0),
+        })
+        .collect();
+
+    // Per-error stats
+    let err_rows = sqlx::query(
+        "SELECT failure_category, COUNT(*) as cnt
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+           AND failure_category IS NOT NULL
+         GROUP BY failure_category ORDER BY cnt DESC LIMIT 50",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let error_stats: Vec<(String, i64)> = err_rows
+        .iter()
+        .filter_map(|r| {
+            let cat: String = r.try_get(0).ok()?;
+            let cnt: i64 = r.try_get(1).ok()?;
+            Some((cat, cnt))
+        })
+        .collect();
+
+    // Per-session stats
+    let sess_rows = sqlx::query(
+        "SELECT session_id, COUNT(*) as calls,
+                COALESCE(AVG(score), 0.0) as avg_score,
+                SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+         GROUP BY session_id ORDER BY session_id DESC LIMIT 20",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let session_stats: Vec<SessionStatRow> = sess_rows
+        .iter()
+        .map(|r| SessionStatRow {
+            session_id: r.try_get(0).unwrap_or_default(),
+            calls: r.try_get(1).unwrap_or(0),
+            avg_score: r.try_get(2).unwrap_or(0.0),
+            failures: r.try_get(3).unwrap_or(0),
+        })
+        .collect();
+
+    Ok(ObsStats {
+        total,
+        successes,
+        avg_score,
+        tool_stats,
+        error_stats,
+        session_stats,
+    })
+}
+
+/// Async query latest observations.
+#[allow(dead_code)]
+pub async fn query_latest_observations_pool(
+    pool: &SqlitePool,
+    limit: i64,
+) -> io::Result<Vec<ObsRecord>> {
+    let rows = sqlx::query(
+        "SELECT timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost,
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+         FROM observations ORDER BY id DESC LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    rows.iter().map(|r| row_to_obs_record(r)).collect()
+}
+
+/// Async query last action for a session.
+pub async fn query_last_action_pool(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> io::Result<Option<String>> {
+    let row = sqlx::query(
+        "SELECT action FROM observations
+         WHERE session_id = ?
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(session_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(row.and_then(|r| r.try_get::<String, _>(0).ok()))
 }
 
 #[cfg(test)]

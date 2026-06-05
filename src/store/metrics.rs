@@ -264,6 +264,247 @@ pub fn save_metrics_conn(conn: &Connection, project: &str, m: &Metrics) -> io::R
     Ok(())
 }
 
+// ── Async pool functions ─────────────────────────────
+
+use sqlx::{Row, SqlitePool};
+
+/// Load the full Metrics struct from SQLite using a pool.
+pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<Metrics> {
+    // Scalar state
+    let kv_rows = sqlx::query(
+        "SELECT key, value FROM metrics_state WHERE project = ?1"
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let state: HashMap<String, String> = kv_rows.iter().filter_map(|r| {
+        let key: String = r.try_get(0).ok()?;
+        let value: String = r.try_get(1).ok()?;
+        Some((key, value))
+    }).collect();
+
+    let get = |key: &str| -> Option<String> { state.get(key).cloned() };
+
+    let total_sessions: u64 = get("total_sessions").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let avg_success_rate: f64 = get("avg_success_rate").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let total_evolved_skills: u64 = get("total_evolved_skills").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let last_session = get("last_session").filter(|v| !v.is_empty());
+    let best_score: Option<f64> = get("best_score").and_then(|v| v.parse().ok());
+    let best_session = get("best_session").unwrap_or_default();
+    let trend = get("trend").unwrap_or_else(|| "stable".into());
+    let stagnation_count: u64 = get("stagnation_count").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let last_error_context = get("last_error_context").filter(|v| !v.is_empty());
+
+    // Score history
+    let sh_rows = sqlx::query(
+        "SELECT timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost FROM score_history WHERE project = ?1 ORDER BY id ASC"
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let score_history: Vec<SessionScoreEntry> = sh_rows.iter().filter_map(|r| {
+        let obs: i64 = r.try_get(3).ok()?;
+        Some(SessionScoreEntry {
+            timestamp: r.try_get(0).ok()?,
+            success_rate: r.try_get(1).ok()?,
+            avg_score: r.try_get(2).ok()?,
+            observations: obs as u64,
+            dimension_averages: ScoreDimensions {
+                tool_success: r.try_get(4).ok()?,
+                output_quality: r.try_get(5).ok()?,
+                execution_cost: r.try_get(6).ok()?,
+            },
+        })
+    }).collect();
+
+    // Skill attribution
+    let sa_rows = sqlx::query(
+        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen FROM skill_attribution WHERE project = ?1"
+    )
+    .bind(project)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let skill_attribution: HashMap<String, SkillAttribution> = sa_rows.iter().filter_map(|r| {
+        let sa = SkillAttribution {
+            skill_name: r.try_get(0).ok()?,
+            sessions_active: r.try_get::<i64, _>(1).ok()? as u64,
+            avg_score_with: r.try_get(2).ok()?,
+            avg_score_without: r.try_get(3).ok()?,
+            first_seen: r.try_get(4).ok()?,
+        };
+        Some((sa.skill_name.clone(), sa))
+    }).collect();
+
+    Ok(Metrics {
+        total_sessions,
+        avg_success_rate,
+        total_evolved_skills,
+        last_session,
+        score_history,
+        best_score,
+        best_session,
+        trend,
+        stagnation_count,
+        skill_attribution,
+        last_error_context,
+    })
+}
+
+/// Save the full Metrics struct to SQLite using a pool.
+pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) -> io::Result<()> {
+    let mut tx = pool.begin().await.map_err(|e| io::Error::other(e.to_string()))?;
+
+    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+        .bind("total_sessions")
+        .bind(m.total_sessions.to_string())
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+        .bind("avg_success_rate")
+        .bind(m.avg_success_rate.to_string())
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+        .bind("total_evolved_skills")
+        .bind(m.total_evolved_skills.to_string())
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+
+    match &m.last_session {
+        Some(v) => {
+            sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+                .bind("last_session")
+                .bind(v)
+                .bind(project)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+        None => {
+            sqlx::query("DELETE FROM metrics_state WHERE key = 'last_session' AND project = ?1")
+                .bind(project)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+    };
+    match m.best_score {
+        Some(v) => {
+            sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+                .bind("best_score")
+                .bind(v.to_string())
+                .bind(project)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+        None => {
+            sqlx::query("DELETE FROM metrics_state WHERE key = 'best_score' AND project = ?1")
+                .bind(project)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+    };
+    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+        .bind("best_session")
+        .bind(&m.best_session)
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+        .bind("trend")
+        .bind(&m.trend)
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+        .bind("stagnation_count")
+        .bind(m.stagnation_count.to_string())
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    match &m.last_error_context {
+        Some(v) => {
+            sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
+                .bind("last_error_context")
+                .bind(v)
+                .bind(project)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+        None => {
+            sqlx::query("DELETE FROM metrics_state WHERE key = 'last_error_context' AND project = ?1")
+                .bind(project)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| io::Error::other(e.to_string()))?;
+        }
+    };
+
+    // Score history — UPSERT with cap
+    let entries: Vec<&SessionScoreEntry> = m.score_history.iter().rev().take(MAX_SCORE_HISTORY).collect();
+    for entry in entries.into_iter().rev() {
+        sqlx::query(
+            "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(timestamp) DO UPDATE SET success_rate = excluded.success_rate, avg_score = excluded.avg_score, observations = excluded.observations, dim_success = excluded.dim_success, dim_quality = excluded.dim_quality, dim_cost = excluded.dim_cost"
+        )
+        .bind(&entry.timestamp)
+        .bind(entry.success_rate)
+        .bind(entry.avg_score)
+        .bind(entry.observations as i64)
+        .bind(entry.dimension_averages.tool_success)
+        .bind(entry.dimension_averages.output_quality)
+        .bind(entry.dimension_averages.execution_cost)
+        .bind(project)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    }
+    sqlx::query(
+        "DELETE FROM score_history WHERE project = ?1 AND id NOT IN (SELECT id FROM score_history WHERE project = ?1 ORDER BY id DESC LIMIT ?2)"
+    )
+    .bind(project)
+    .bind(MAX_SCORE_HISTORY as i64)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    // Skill attribution
+    for sa in m.skill_attribution.values() {
+        sqlx::query(
+            "INSERT INTO skill_attribution (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(skill_name, project) DO UPDATE SET sessions_active = excluded.sessions_active, avg_score_with = excluded.avg_score_with, avg_score_without = excluded.avg_score_without, first_seen = MIN(skill_attribution.first_seen, excluded.first_seen)"
+        )
+        .bind(&sa.skill_name)
+        .bind(project)
+        .bind(sa.sessions_active as i64)
+        .bind(sa.avg_score_with)
+        .bind(sa.avg_score_without)
+        .bind(&sa.first_seen)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    }
+
+    tx.commit().await.map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

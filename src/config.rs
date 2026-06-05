@@ -17,6 +17,7 @@ pub struct HarnessConfig {
     pub instinct: InstinctConfig,
     pub context: ContextConfig,
     pub dashboard: DashboardConfig,
+    pub db: DbConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,6 +258,35 @@ impl Default for DashboardConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct DbConfig {
+    /// Database driver: "sqlite" (only option in Phase 1).
+    pub driver: String,
+
+    /// Connection URL for harness.db.
+    /// Empty = default path (~/.harness/harness.db).
+    pub harness_url: String,
+
+    /// Connection URL for memory.db.
+    /// Empty = default path (~/.harness/memory.db).
+    pub memory_url: String,
+
+    /// Maximum number of connections in the pool.
+    pub max_connections: u32,
+}
+
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            driver: "sqlite".into(),
+            harness_url: String::new(),
+            memory_url: String::new(),
+            max_connections: 5,
+        }
+    }
+}
+
 // ── Global Config Instance ──────────────────────────
 
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
@@ -455,6 +485,22 @@ max_docs = 20
 
 # Automatically open the browser on first session start.
 # auto_open = true
+
+# ── Database ──────────────────────────────────────────
+[db]
+# Database driver: "sqlite" (Phase 1 only).
+driver = "sqlite"
+
+# Connection URL for harness.db (operational data).
+# Empty = default path (~/.harness/harness.db).
+harness_url = ""
+
+# Connection URL for memory.db (knowledge graph).
+# Empty = default path (~/.harness/memory.db).
+memory_url = ""
+
+# Maximum number of connections per pool.
+max_connections = 5
 "#
 }
 
@@ -479,6 +525,10 @@ mod tests {
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.pattern.weak_ext_min_obs, 3);
         assert_eq!(c.instinct.confidence_threshold, 0.8);
+        assert_eq!(c.db.driver, "sqlite");
+        assert!(c.db.harness_url.is_empty());
+        assert!(c.db.memory_url.is_empty());
+        assert_eq!(c.db.max_connections, 5);
     }
 
     #[test]
@@ -584,6 +634,15 @@ max_docs = 5
     fn template_includes_context_section() {
         let template = default_config_template();
         assert!(template.contains("[context]"));
+    }
+
+    #[test]
+    fn template_includes_db_section() {
+        let template = default_config_template();
+        assert!(template.contains("[db]"));
+        let c: HarnessConfig = toml::from_str(template).unwrap();
+        assert_eq!(c.db.driver, "sqlite");
+        assert_eq!(c.db.max_connections, 5);
     }
 
     #[test]

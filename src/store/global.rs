@@ -161,6 +161,100 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
     }
 }
 
+// ── Async pool functions ─────────────────────────────
+
+use sqlx::{Row, SqlitePool};
+
+pub async fn insert_pattern_pool(
+    pool: &SqlitePool,
+    timestamp: &str,
+    project: &str,
+    success_rate: f64,
+    avg_score: f64,
+    per_error_stats_json: &str,
+    failure_patterns_json: &str,
+    weak_tools_json: &str,
+) -> io::Result<i64> {
+    let result = sqlx::query(
+        "INSERT INTO global_patterns (timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools) VALUES (?1,?2,?3,?4,?5,?6,?7)"
+    )
+    .bind(timestamp)
+    .bind(project)
+    .bind(success_rate)
+    .bind(avg_score)
+    .bind(per_error_stats_json)
+    .bind(failure_patterns_json)
+    .bind(weak_tools_json)
+    .execute(pool)
+    .await
+    .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(result.last_insert_rowid())
+}
+
+pub async fn query_patterns_excluding_pool(
+    pool: &SqlitePool,
+    exclude_project: &str,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
+    query_patterns_pool_inner(pool, Some(exclude_project), limit).await
+}
+
+pub async fn query_all_patterns_pool(
+    pool: &SqlitePool,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
+    query_patterns_pool_inner(pool, None, limit).await
+}
+
+async fn query_patterns_pool_inner(
+    pool: &SqlitePool,
+    exclude_project: Option<&str>,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
+    let rows = if let Some(proj) = exclude_project {
+        sqlx::query(
+            "SELECT timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools FROM global_patterns WHERE project != ?1 ORDER BY timestamp DESC LIMIT ?2"
+        )
+        .bind(proj)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools FROM global_patterns ORDER BY timestamp DESC LIMIT ?1"
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(|e| io::Error::other(e.to_string()))?;
+
+    let patterns: Vec<serde_json::Value> = rows.iter().map(|r| {
+        let per_err: String = r.try_get(4).unwrap_or_else(|e| {
+            eprintln!("[store/global] schema mismatch: per_error_stats col missing ({e}) — using fallback");
+            "{}".into()
+        });
+        let failure: String = r.try_get(5).unwrap_or_else(|e| {
+            eprintln!("[store/global] schema mismatch: failure_patterns col missing ({e}) — using fallback");
+            "[]".into()
+        });
+        let weak: String = r.try_get(6).unwrap_or_else(|e| {
+            eprintln!("[store/global] schema mismatch: weak_tools col missing ({e}) — using fallback");
+            "[]".into()
+        });
+        serde_json::json!({
+            "timestamp": r.try_get::<String, _>(0).unwrap_or_default(),
+            "project": r.try_get::<String, _>(1).unwrap_or_default(),
+            "success_rate": r.try_get::<f64, _>(2).unwrap_or(0.0),
+            "avg_score": r.try_get::<f64, _>(3).unwrap_or(0.0),
+            "per_error_stats": parse_json_field(&per_err, serde_json::json!({})),
+            "failure_patterns": parse_json_field(&failure, serde_json::json!([])),
+            "weak_tools": parse_json_field(&weak, serde_json::json!([])),
+        })
+    }).collect();
+    Ok(patterns)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
