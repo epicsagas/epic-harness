@@ -69,12 +69,8 @@ pub fn extract_instincts(
 }
 
 pub fn promote_instincts_to_global(instincts: &[Instinct]) -> u64 {
-    let conn = match store::open_db() {
-        Ok(c) => c,
-        Err(_) => return 0,
-    };
-    let tx = match conn.unchecked_transaction() {
-        Ok(t) => t,
+    let pool = match crate::store::runtime::block_on(crate::store::pool::memory_pool()) {
+        Ok(p) => p,
         Err(_) => return 0,
     };
 
@@ -120,14 +116,15 @@ pub fn promote_instincts_to_global(instincts: &[Instinct]) -> u64 {
         };
 
         // Use dedup to avoid duplicate instincts (7-day window)
-        if let Ok((_, is_new)) = store::write_node_dedup_conn(&tx, &node, 168)
+        // write_node_dedup_pool returns (id, is_new): true = newly written, false = duplicate
+        if let Ok((_, is_new)) =
+            crate::store::runtime::block_on(store::write_node_dedup_pool(&pool, &node, 168))
             && is_new
         {
             promoted += 1;
         }
     }
 
-    let _ = tx.commit();
     promoted
 }
 

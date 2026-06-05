@@ -27,61 +27,13 @@ mod tests;
 
 // ── Store error helpers ──────────────────────────────
 
-/// Convert a rusqlite result to io::Result, preserving context.
-#[inline]
-pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> {
-    result.map_err(io::Error::other)
-}
-
 /// Convert a sqlx error to io::Result. Used by all `*_pool` async functions.
 #[inline]
-pub(crate) fn sqlx_err(e: sqlx::Error) -> io::Error {
-    io::Error::other(e)
+pub(crate) fn sqlx_err(e: sqlx::Error) -> std::io::Error {
+    std::io::Error::other(e)
 }
 
-// ── RAII transaction guard ───────────────────────────
-
-/// RAII guard for `BEGIN IMMEDIATE` transactions.
-///
-/// Calls `ROLLBACK` on drop if not explicitly committed, preventing
-/// connection state corruption when errors occur mid-transaction.
-pub(crate) struct ImmediateTx<'a> {
-    conn: &'a Connection,
-    committed: bool,
-}
-
-impl<'a> ImmediateTx<'a> {
-    pub(crate) fn begin(conn: &'a Connection) -> io::Result<Self> {
-        store_err(conn.execute_batch("BEGIN IMMEDIATE"))?;
-        Ok(Self {
-            conn,
-            committed: false,
-        })
-    }
-
-    pub(crate) fn commit(mut self) -> io::Result<()> {
-        self.committed = true;
-        store_err(self.conn.execute_batch("COMMIT"))
-    }
-}
-
-impl Drop for ImmediateTx<'_> {
-    fn drop(&mut self) {
-        if !self.committed {
-            let _ = self.conn.execute_batch("ROLLBACK");
-        }
-    }
-}
-
-// ── DB connection ────────────────────────────────────
-
-use rusqlite::Connection;
-use std::fs;
-use std::io;
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
-use crate::shared::paths;
+// ── Numeric helpers ──────────────────────────────────
 
 /// Convert u64 to i64 for SQLite storage.
 ///
@@ -124,38 +76,5 @@ pub(crate) fn i64_to_u64(v: i64) -> u64 {
 /// Shared across all projects alongside `memory.db`. Project scoping is handled
 /// via the `project` column in each table rather than separate DB files.
 pub fn harness_db_path() -> std::path::PathBuf {
-    paths::global_harness_db_path()
-}
-
-/// Open the harness operational database.
-///
-/// Creates the file if it doesn't exist. Applies schema (tables, indexes, WAL mode),
-/// and runs pending schema version migrations. Legacy JSONL/JSON data import is NOT
-/// automatic — run `epic-harness migrate` explicitly to import legacy data.
-pub fn open_harness_db() -> io::Result<Connection> {
-    let path = harness_db_path();
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let conn = Connection::open(&path).map_err(io::Error::other)?;
-
-    // Restrict DB file to owner-only (observation data may contain file paths,
-    // command text, etc.). Only applies on Unix; no-op on other platforms.
-    //
-    // TOCTOU note: there is a small window between Connection::open (which creates
-    // the file with default umask permissions) and set_permissions here. rusqlite
-    // does not expose an fd-level fchmod API, so this window cannot be eliminated
-    // without a custom VFS. The risk is low for a local single-user tool — the
-    // threat actor would need to read the file within milliseconds of first creation.
-    #[cfg(unix)]
-    {
-        let _ = fs::set_permissions(&path, PermissionsExt::from_mode(0o600));
-    }
-
-    // Apply schema (WAL + FK pragma are set inside init_schema as the first operation).
-    // Uses IF NOT EXISTS throughout, so safe to call on existing DBs.
-    schema::init_schema(&conn)?;
-
-    Ok(conn)
+    crate::shared::paths::global_harness_db_path()
 }

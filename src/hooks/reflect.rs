@@ -528,8 +528,8 @@ pub fn run_context(
 /// Pulls top nodes by importance for each project slug (or all if slugs = [current]).
 /// Session-type nodes are excluded (importance=0.05, noise) unless there's nothing else.
 fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
-    let conn = match store::open_db() {
-        Ok(c) => c,
+    let pool = match crate::store::runtime::block_on(crate::store::pool::memory_pool()) {
+        Ok(p) => p,
         Err(e) => {
             return serde_json::json!({"error": format!("mem db unavailable: {e}")});
         }
@@ -543,27 +543,33 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Smart recall — hint = broad engineering context, limit = 30
-    let recalled = match store::smart_recall_conn(
-        &conn,
+    let recalled = match crate::store::runtime::block_on(store::smart_recall_pool(
+        &pool,
         project_filter,
         Some("decision pattern error resolution concept"),
         30,
-    ) {
+    )) {
         Ok(s) => s,
         Err(e) => return serde_json::json!({"error": format!("recall failed: {e}")}),
     };
 
     // Also pull top decisions/resolutions explicitly (high-value types)
-    let decisions = store::query_nodes_conn(
-        &conn,
+    let decisions = crate::store::runtime::block_on(store::query_nodes_pool(
+        &pool,
         None, // tag filter
         Some("decision"),
         project_filter,
         10,
-    )
+    ))
     .unwrap_or_default();
-    let resolutions = store::query_nodes_conn(&conn, None, Some("resolution"), project_filter, 10)
-        .unwrap_or_default();
+    let resolutions = crate::store::runtime::block_on(store::query_nodes_pool(
+        &pool,
+        None,
+        Some("resolution"),
+        project_filter,
+        10,
+    ))
+    .unwrap_or_default();
 
     // Merge and deduplicate by id, prefer higher-importance entry
     let mut seen: std::collections::HashMap<String, serde_json::Value> =

@@ -5,17 +5,71 @@
 //!
 //! ## Why inline SQL instead of pool functions?
 //!
-//! This module uses rusqlite directly (not the async sqlx pool) because the
-//! `--to-global` consolidation path requires `ATTACH DATABASE` to merge
-//! per-project DBs into the global one. SQLite ATTACH only works on a raw
-//! connection — it cannot be issued through a sqlx pool. The import path
-//! (`do_migrate`) also needs transactional control (ImmediateTx) over a
-//! single connection to guarantee atomicity per file.
+//! This module uses a direct `sqlx::SqliteConnection` (not the async pool) because
+//! the `--to-global` consolidation path requires `ATTACH DATABASE` to merge
+//! per-project DBs into the global one. SQLite ATTACH is connection-scoped — it
+//! must be issued on the same connection as the subsequent INSERT/SELECT statements.
+//! Using a pool would route ATTACH and the follow-up queries to different connections.
+//! The import path (`do_migrate`) also uses per-connection transactional control
+//! (`BEGIN IMMEDIATE`) over a single connection to guarantee atomicity per file.
 
-use rusqlite::Connection;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use sqlx::{ConnectOptions, Executor, Row};
 use std::io::{self, BufRead};
+use std::str::FromStr;
 
-use super::{ImmediateTx, store_err};
+use super::sqlx_err;
+
+// ── Connection factory ──────────────────────────────────────────────────────
+
+async fn open_migrate_conn() -> io::Result<sqlx::SqliteConnection> {
+    let path = super::harness_db_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let url = format!("sqlite:{}", path.display());
+    let conn = SqliteConnectOptions::from_str(&url)
+        .map_err(sqlx_err)?
+        .foreign_keys(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .connect()
+        .await
+        .map_err(sqlx_err)?;
+    Ok(conn)
+}
+
+/// Open a direct sqlx `SqliteConnection` to an arbitrary DB path.
+#[allow(dead_code)]
+async fn open_conn_at(path: &std::path::Path) -> io::Result<sqlx::SqliteConnection> {
+    use sqlx::sqlite::SqliteConnectOptions;
+    let opts = SqliteConnectOptions::new()
+        .filename(path)
+        .foreign_keys(true)
+        .journal_mode(SqliteJournalMode::Wal);
+    let conn = opts.connect().await.map_err(sqlx_err)?;
+    Ok(conn)
+}
+
+// ── Transaction helpers ─────────────────────────────────────────────────────
+
+/// Begin an `IMMEDIATE` transaction on a direct connection.
+async fn begin_immediate(conn: &mut sqlx::SqliteConnection) -> io::Result<()> {
+    conn.execute("BEGIN IMMEDIATE").await.map_err(sqlx_err)?;
+    Ok(())
+}
+
+async fn commit(conn: &mut sqlx::SqliteConnection) -> io::Result<()> {
+    conn.execute("COMMIT").await.map_err(sqlx_err)?;
+    Ok(())
+}
+
+async fn rollback(conn: &mut sqlx::SqliteConnection) {
+    if let Err(e) = conn.execute("ROLLBACK").await {
+        eprintln!("[store::migrate] rollback failed: {e}");
+    }
+}
+
+// ── Public sync entry points ────────────────────────────────────────────────
 
 /// Entry point for the `migrate` subcommand.
 ///
@@ -24,7 +78,11 @@ use super::{ImmediateTx, store_err};
 /// allowing the import to be retried without manual DB surgery.
 /// Returns an exit code (0 = success, 1 = error).
 pub fn run_subcommand(dry_run: bool, reset: bool) -> i32 {
-    let conn = match super::open_harness_db() {
+    super::runtime::block_on(run_subcommand_async(dry_run, reset))
+}
+
+async fn run_subcommand_async(dry_run: bool, reset: bool) -> i32 {
+    let mut conn = match open_migrate_conn().await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[migrate] failed to open harness.db: {e}");
@@ -32,13 +90,13 @@ pub fn run_subcommand(dry_run: bool, reset: bool) -> i32 {
         }
     };
 
-    let migration_state: Option<String> = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .ok();
+    let migration_state: Option<String> =
+        sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
+            .fetch_optional(&mut conn)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<String, _>(0).ok());
 
     match migration_state.as_deref() {
         Some("1") => {
@@ -47,10 +105,11 @@ pub fn run_subcommand(dry_run: bool, reset: bool) -> i32 {
         }
         Some("in_progress") => {
             if reset {
-                if let Err(e) = conn.execute(
-                    "DELETE FROM _harness_meta WHERE key = 'legacy_migrated'",
-                    [],
-                ) {
+                if let Err(e) = conn
+                    .execute("DELETE FROM _harness_meta WHERE key = 'legacy_migrated'")
+                    .await
+                    .map_err(sqlx_err)
+                {
                     eprintln!("[migrate] failed to clear in_progress marker: {e}");
                     return 1;
                 }
@@ -70,7 +129,7 @@ pub fn run_subcommand(dry_run: bool, reset: bool) -> i32 {
         return run_dry(&conn);
     }
 
-    match do_migrate(&conn) {
+    match do_migrate_async(&mut conn).await {
         Ok(stats) => {
             let error_pct = if stats.total_lines > 0 {
                 stats.errors as f64 / stats.total_lines as f64 * 100.0
@@ -102,7 +161,7 @@ pub fn run_subcommand(dry_run: bool, reset: bool) -> i32 {
 }
 
 /// Scan legacy files and report counts without importing.
-fn run_dry(conn: &Connection) -> i32 {
+fn run_dry(conn: &sqlx::SqliteConnection) -> i32 {
     let harness_dir = crate::shared::paths::harness_dir();
 
     let obs_count = count_jsonl_lines(&harness_dir.join("obs"));
@@ -152,6 +211,8 @@ fn count_jsonl_lines_single(path: &std::path::Path) -> usize {
         .unwrap_or(0)
 }
 
+// ── Migration statistics ────────────────────────────────────────────────────
+
 /// Migration statistics for diagnostics.
 pub(crate) struct MigrationStats {
     obs_imported: usize,
@@ -162,7 +223,14 @@ pub(crate) struct MigrationStats {
     total_lines: usize,
 }
 
-pub(crate) fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
+#[allow(dead_code)]
+pub(crate) fn do_migrate(conn: &mut sqlx::SqliteConnection) -> io::Result<MigrationStats> {
+    super::runtime::block_on(do_migrate_async(conn))
+}
+
+pub(crate) async fn do_migrate_async(
+    conn: &mut sqlx::SqliteConnection,
+) -> io::Result<MigrationStats> {
     let harness_dir = crate::shared::paths::harness_dir();
     let mut stats = MigrationStats {
         obs_imported: 0,
@@ -172,53 +240,59 @@ pub(crate) fn do_migrate(conn: &Connection) -> io::Result<MigrationStats> {
         total_lines: 0,
     };
 
-    // Phase 1: Reserve migration under write lock. ImmediateTx serializes concurrent
-    // callers; re-checking the flag inside the lock closes the TOCTOU window between
-    // the outer read in run_subcommand and this BEGIN IMMEDIATE.
+    // Phase 1: Reserve migration under write lock. BEGIN IMMEDIATE serializes
+    // concurrent callers; re-checking the flag inside the lock closes the TOCTOU
+    // window between the outer read in run_subcommand and this BEGIN IMMEDIATE.
     {
-        let tx = ImmediateTx::begin(conn)?;
-        let already: bool = conn
-            .query_row(
-                "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .ok()
-            .is_some_and(|v| v == "1" || v == "in_progress");
+        begin_immediate(conn).await?;
+        let already: bool =
+            sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
+                .fetch_optional(&mut *conn)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|row| row.try_get::<String, _>(0).ok())
+                .is_some_and(|v| v == "1" || v == "in_progress");
+
         if already {
-            return Ok(stats); // tx drops → auto-ROLLBACK
+            rollback(conn).await;
+            return Ok(stats);
         }
-        store_err(conn.execute(
+
+        sqlx::query(
             "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', 'in_progress')",
-            [],
-        ))?;
-        tx.commit()?;
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(sqlx_err)?;
+        commit(conn).await?;
     }
 
-    // Phase 2: Per-file imports. Each source file gets its own ImmediateTx so the WAL
-    // never grows unboundedly for large legacy datasets. The 'in_progress' marker set
-    // above prevents concurrent migration attempts from racing with these small commits.
-    import_observations(conn, &harness_dir, &mut stats)?;
+    // Phase 2: Per-file imports. Each source file gets its own BEGIN IMMEDIATE so
+    // the WAL never grows unboundedly for large legacy datasets.
+    import_observations(conn, &harness_dir, &mut stats).await?;
     let slug = crate::shared::paths::project_slug();
-    import_sessions(conn, &slug, &harness_dir, &mut stats)?;
-    import_evolution(conn, &slug, &harness_dir, &mut stats)?;
-    import_metrics(conn, &slug, &harness_dir, &mut stats)?;
+    import_sessions(conn, &slug, &harness_dir, &mut stats).await?;
+    import_evolution(conn, &slug, &harness_dir, &mut stats).await?;
+    import_metrics(conn, &slug, &harness_dir, &mut stats).await?;
 
     // Phase 3: Mark complete.
     {
-        let tx = ImmediateTx::begin(conn)?;
-        store_err(conn.execute(
+        begin_immediate(conn).await?;
+        sqlx::query(
             "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
-            [],
-        ))?;
-        tx.commit()?;
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(sqlx_err)?;
+        commit(conn).await?;
     }
 
     Ok(stats)
 }
 
-fn import_observations(
-    conn: &Connection,
+async fn import_observations(
+    conn: &mut sqlx::SqliteConnection,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
 ) -> io::Result<()> {
@@ -240,17 +314,7 @@ fn import_observations(
             .unwrap_or(filename)
             .to_string();
 
-        // Each file gets its own ImmediateTx to bound WAL growth.
-        // do_migrate() released its outer tx before calling this function.
-        let tx = ImmediateTx::begin(conn)?;
-
-        let mut insert_stmt = store_err(conn.prepare(
-            "INSERT INTO observations
-             (timestamp, session_id, tool, tool_category, action, result, score,
-              dim_success, dim_quality, dim_cost, failure_category, error_snippet,
-              file_ext, sequence_id, pipeline_id)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
-        ))?;
+        begin_immediate(conn).await?;
 
         let file = std::fs::File::open(&path)?;
         let reader = std::io::BufReader::new(file);
@@ -278,23 +342,31 @@ fn import_observations(
                         ),
                         None => (None, None, None),
                     };
-                    let result = insert_stmt.execute(rusqlite::params![
-                        rec.timestamp,
-                        session_id,
-                        rec.tool,
-                        rec.tool_category,
-                        rec.action,
-                        rec.result,
-                        rec.score,
-                        dim_s,
-                        dim_q,
-                        dim_c,
-                        rec.failure_category,
-                        rec.error_snippet,
-                        rec.file_ext,
-                        rec.sequence_id.map(super::u64_to_i64),
-                        rec.pipeline_id,
-                    ]);
+                    let result = sqlx::query(
+                        "INSERT INTO observations \
+                         (timestamp, session_id, tool, tool_category, action, result, score, \
+                          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
+                          file_ext, sequence_id, pipeline_id) \
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    )
+                    .bind(&rec.timestamp)
+                    .bind(&session_id)
+                    .bind(&rec.tool)
+                    .bind(&rec.tool_category)
+                    .bind(&rec.action)
+                    .bind(&rec.result)
+                    .bind(rec.score)
+                    .bind(dim_s)
+                    .bind(dim_q)
+                    .bind(dim_c)
+                    .bind(&rec.failure_category)
+                    .bind(&rec.error_snippet)
+                    .bind(&rec.file_ext)
+                    .bind(rec.sequence_id.map(super::u64_to_i64))
+                    .bind(&rec.pipeline_id)
+                    .execute(&mut *conn)
+                    .await;
+
                     if let Err(e) = result {
                         eprintln!("[migrate] insert obs error: {e}");
                         stats.errors += 1;
@@ -309,16 +381,13 @@ fn import_observations(
             }
         }
 
-        // Explicitly drop the prepared statement before committing —
-        // Statement holds a shared borrow of conn but commit() also needs conn.
-        drop(insert_stmt);
-        tx.commit()?;
+        commit(conn).await?;
     }
     Ok(())
 }
 
-fn import_sessions(
-    conn: &Connection,
+async fn import_sessions(
+    conn: &mut sqlx::SqliteConnection,
     slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
@@ -370,8 +439,9 @@ fn import_sessions(
             }
         };
 
-        // Each file gets its own ImmediateTx to bound WAL growth.
-        let tx = ImmediateTx::begin(conn)?;
+        // Each file gets its own BEGIN IMMEDIATE to bound WAL growth.
+        begin_immediate(conn).await?;
+
         let pending_json = serde_json::to_string(&snap.pending_tasks).unwrap_or_else(|e| {
             eprintln!("[migrate] pending_tasks serialization failed: {e}");
             "[]".into()
@@ -382,30 +452,42 @@ fn import_sessions(
                 "{}".into()
             })
         });
-        let result = store_err(conn.execute(
-            "INSERT INTO sessions (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
-            rusqlite::params![
-                snap.timestamp, snap.snap_type, snap.summary, pending_json,
-                snap.context_usage, pipeline_json, millis, slug,
-            ],
-        ));
+
+        let result = sqlx::query(
+            "INSERT INTO sessions \
+             (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, \
+              created_at_millis, project) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&snap.timestamp)
+        .bind(&snap.snap_type)
+        .bind(&snap.summary)
+        .bind(&pending_json)
+        .bind(snap.context_usage)
+        .bind(&pipeline_json)
+        .bind(millis)
+        .bind(slug)
+        .execute(&mut *conn)
+        .await;
+
         match result {
             Ok(_) => {
                 stats.sess_imported += 1;
-                tx.commit()?;
+                commit(conn).await?;
             }
             Err(e) => {
                 eprintln!("[migrate] insert session error: {e}");
                 stats.errors += 1;
-                // tx drops → ROLLBACK; no partial state committed for this file
+                rollback(conn).await;
+                // No partial state committed for this file.
             }
         }
     }
     Ok(())
 }
 
-fn import_evolution(
-    conn: &Connection,
+async fn import_evolution(
+    conn: &mut sqlx::SqliteConnection,
     slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
@@ -416,14 +498,13 @@ fn import_evolution(
     }
 
     // Stream via BufReader with batched transactions (BATCH_SIZE records per commit)
-    // to cap WAL growth. import_observations uses per-file transactions for the same
-    // reason; evolution.jsonl is a single large file so we batch by record count.
+    // to cap WAL growth. evolution.jsonl is a single large file so we batch by record count.
     const BATCH_SIZE: usize = 500;
     let file = std::fs::File::open(&evo_file)?;
     let reader = std::io::BufReader::new(file);
 
     let mut records_in_batch: usize = 0;
-    let mut current_tx = ImmediateTx::begin(conn)?;
+    begin_immediate(conn).await?;
 
     for line in reader.lines() {
         stats.total_lines += 1;
@@ -449,22 +530,27 @@ fn import_evolution(
                         eprintln!("[migrate] failure_patterns serialization failed: {e}");
                         "[]".into()
                     });
-                let result = store_err(conn.execute(
-                    "INSERT INTO evolution_records (timestamp, observations, success_rate, avg_score, error_patterns, failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
-                    rusqlite::params![
-                        rec.timestamp,
-                        super::u64_to_i64(rec.observations),
-                        rec.success_rate,
-                        rec.avg_score,
-                        error_json,
-                        failure_json,
-                        super::u64_to_i64(rec.skills_seeded),
-                        super::u64_to_i64(rec.skills_rolled_back),
-                        super::u64_to_i64(rec.total_evolved),
-                        rec.analysis_summary,
-                        slug,
-                    ],
-                ));
+                let result = sqlx::query(
+                    "INSERT INTO evolution_records \
+                     (timestamp, observations, success_rate, avg_score, error_patterns, \
+                      failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
+                      analysis_summary, project) \
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                )
+                .bind(&rec.timestamp)
+                .bind(super::u64_to_i64(rec.observations))
+                .bind(rec.success_rate)
+                .bind(rec.avg_score)
+                .bind(&error_json)
+                .bind(&failure_json)
+                .bind(super::u64_to_i64(rec.skills_seeded))
+                .bind(super::u64_to_i64(rec.skills_rolled_back))
+                .bind(super::u64_to_i64(rec.total_evolved))
+                .bind(&rec.analysis_summary)
+                .bind(slug)
+                .execute(&mut *conn)
+                .await;
+
                 if let Err(e) = result {
                     eprintln!("[migrate] insert evo error: {e}");
                     stats.errors += 1;
@@ -472,9 +558,9 @@ fn import_evolution(
                     stats.evo_imported += 1;
                     records_in_batch += 1;
                     if records_in_batch >= BATCH_SIZE {
-                        current_tx.commit()?;
+                        commit(conn).await?;
                         records_in_batch = 0;
-                        current_tx = ImmediateTx::begin(conn)?;
+                        begin_immediate(conn).await?;
                     }
                 }
             }
@@ -484,12 +570,12 @@ fn import_evolution(
             }
         }
     }
-    current_tx.commit()?;
+    commit(conn).await?;
     Ok(())
 }
 
-fn import_metrics(
-    conn: &Connection,
+async fn import_metrics(
+    conn: &mut sqlx::SqliteConnection,
     slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
@@ -510,35 +596,45 @@ fn import_metrics(
                     crate::shared::evolution::default_metrics()
                 }
             };
-            // Inline key-value metrics_state write (replaces deleted save_metrics_conn).
-            let kv = |k: &str, v: &str| -> io::Result<()> {
-                store_err(conn.execute(
-                    "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![k, v, slug],
-                ))?;
-                Ok(())
-            };
-            let result: io::Result<()> = (|| {
-                kv("total_sessions", &metrics.total_sessions.to_string())?;
-                kv("avg_success_rate", &metrics.avg_success_rate.to_string())?;
-                kv(
+
+            macro_rules! kv {
+                ($k:expr, $v:expr) => {
+                    sqlx::query(
+                        "INSERT OR REPLACE INTO metrics_state (key, value, project) \
+                         VALUES (?, ?, ?)",
+                    )
+                    .bind($k)
+                    .bind($v)
+                    .bind(slug)
+                    .execute(&mut *conn)
+                    .await
+                    .map_err(sqlx_err)?
+                };
+            }
+
+            let result: io::Result<()> = async {
+                kv!("total_sessions", metrics.total_sessions.to_string());
+                kv!("avg_success_rate", metrics.avg_success_rate.to_string());
+                kv!(
                     "total_evolved_skills",
-                    &metrics.total_evolved_skills.to_string(),
-                )?;
+                    metrics.total_evolved_skills.to_string()
+                );
                 if let Some(ref v) = metrics.last_session {
-                    kv("last_session", v)?;
+                    kv!("last_session", v.clone());
                 }
                 if let Some(v) = metrics.best_score {
-                    kv("best_score", &v.to_string())?;
+                    kv!("best_score", v.to_string());
                 }
-                kv("best_session", &metrics.best_session)?;
-                kv("trend", &metrics.trend)?;
-                kv("stagnation_count", &metrics.stagnation_count.to_string())?;
+                kv!("best_session", metrics.best_session.clone());
+                kv!("trend", metrics.trend.clone());
+                kv!("stagnation_count", metrics.stagnation_count.to_string());
                 if let Some(ref v) = metrics.last_error_context {
-                    kv("last_error_context", v)?;
+                    kv!("last_error_context", v.clone());
                 }
                 Ok(())
-            })();
+            }
+            .await;
+
             if let Err(e) = result {
                 eprintln!("[migrate] save metrics error: {e}");
                 stats.errors += 1;
@@ -552,114 +648,27 @@ fn import_metrics(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn do_migrate_is_idempotent() {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-
-        // First run marks legacy_migrated=1
-        do_migrate(&conn).unwrap();
-        // Second run must see the flag and be a no-op (returns empty stats)
-        let stats = do_migrate(&conn).unwrap();
-        assert_eq!(stats.obs_imported, 0);
-        assert_eq!(stats.sess_imported, 0);
-
-        let migrated: String = conn
-            .query_row(
-                "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(migrated, "1");
-    }
-
-    #[test]
-    fn to_global_merges_per_project_dbs() {
-        let global_db = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&global_db).unwrap();
-
-        // Simulate a per-project DB (v3 schema — no project column)
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("harness.db");
-        let src_conn = Connection::open(&db_path).unwrap();
-        // Apply a minimal v3-like schema manually
-        src_conn
-            .execute_batch(
-                "CREATE TABLE observations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    tool TEXT NOT NULL,
-                    tool_category TEXT NOT NULL,
-                    action TEXT, result TEXT, score REAL,
-                    dim_success REAL, dim_quality REAL, dim_cost REAL,
-                    failure_category TEXT, error_snippet TEXT,
-                    file_ext TEXT, sequence_id INTEGER, pipeline_id TEXT
-                );
-                INSERT INTO observations (timestamp, session_id, tool, tool_category)
-                VALUES ('2026-01-01T00:00:00Z', 'sess1', 'Bash', 'shell');
-                CREATE TABLE sessions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL,
-                    snap_type TEXT NOT NULL,
-                    summary TEXT,
-                    snapshot_json TEXT NOT NULL,
-                    millis INTEGER NOT NULL
-                );
-                CREATE TABLE evolution_records (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp TEXT NOT NULL, observations INTEGER NOT NULL DEFAULT 0,
-                    success_rate REAL NOT NULL, avg_score REAL NOT NULL,
-                    error_patterns TEXT NOT NULL DEFAULT '{}',
-                    failure_patterns TEXT NOT NULL DEFAULT '[]',
-                    skills_seeded INTEGER NOT NULL DEFAULT 0,
-                    skills_rolled_back INTEGER NOT NULL DEFAULT 0,
-                    total_evolved INTEGER NOT NULL DEFAULT 0,
-                    analysis_summary TEXT NOT NULL DEFAULT ''
-                );",
-            )
-            .unwrap();
-        drop(src_conn);
-
-        // Attach and merge
-        let slug = "test-project";
-        let escaped_path = db_path.display().to_string().replace('\'', "''");
-        global_db
-            .execute(&format!("ATTACH '{escaped_path}' AS src"), [])
-            .unwrap();
-
-        let merged = super::merge_attached_db(&global_db, slug, "src").unwrap();
-        global_db.execute("DETACH src", []).unwrap();
-
-        assert_eq!(merged.obs, 1, "should merge 1 observation");
-        assert_eq!(merged.sessions, 0, "sessions table was empty");
-
-        // Verify the project column is set
-        let count: i64 = global_db
-            .query_row(
-                "SELECT COUNT(*) FROM observations WHERE project = ?1",
-                rusqlite::params![slug],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-    }
-}
-
-// ── Per-project DB → Global DB consolidation ────────────
+// ── Per-project DB → Global DB consolidation ────────────────────────────────
 
 /// Merge a per-project harness.db into the global DB using ATTACH.
 ///
 /// `attach_name` is the SQLite schema name used in ATTACH (e.g., "src").
 /// All data from the attached DB is copied with `project` set to `slug`.
 /// Tables that already have rows for this project are skipped (INSERT OR IGNORE).
+///
+/// The caller is responsible for issuing ATTACH before calling this function
+/// and DETACH after. ATTACH is connection-scoped so both must use the same conn.
+#[allow(dead_code)]
 pub fn merge_attached_db(
-    conn: &Connection,
+    conn: &mut sqlx::SqliteConnection,
+    slug: &str,
+    attach_name: &str,
+) -> io::Result<GlobalMergeStats> {
+    super::runtime::block_on(merge_attached_db_async(conn, slug, attach_name))
+}
+
+pub async fn merge_attached_db_async(
+    conn: &mut sqlx::SqliteConnection,
     slug: &str,
     attach_name: &str,
 ) -> io::Result<GlobalMergeStats> {
@@ -706,13 +715,13 @@ pub fn merge_attached_db(
     for (table, dest_cols, src_cols) in &simple_tables {
         let sql = format!(
             "INSERT OR IGNORE INTO main.{table} ({dest_cols}) \
-             SELECT {src_cols}, ?1 FROM {attach_name}.{table}"
+             SELECT {src_cols}, ? FROM {attach_name}.{table}"
         );
-        match conn.execute(&sql, rusqlite::params![slug]) {
-            Ok(n) => match *table {
-                "observations" => stats.obs += n,
-                "sessions" => stats.sessions += n,
-                "evolution_records" => stats.evo += n,
+        match sqlx::query(&sql).bind(slug).execute(&mut *conn).await {
+            Ok(r) => match *table {
+                "observations" => stats.obs += r.rows_affected() as usize,
+                "sessions" => stats.sessions += r.rows_affected() as usize,
+                "evolution_records" => stats.evo += r.rows_affected() as usize,
                 _ => {}
             },
             Err(e) => {
@@ -725,61 +734,66 @@ pub fn merge_attached_db(
     }
 
     // metrics_state: key-value with project
-    if let Ok(n) = conn.execute(
-        &format!(
-            "INSERT OR IGNORE INTO main.metrics_state (key, value, project) \
-             SELECT key, value, ?1 FROM {attach_name}.metrics_state"
-        ),
-        rusqlite::params![slug],
-    ) {
-        stats.metrics += n;
+    if let Ok(r) = sqlx::query(&format!(
+        "INSERT OR IGNORE INTO main.metrics_state (key, value, project) \
+         SELECT key, value, ? FROM {attach_name}.metrics_state"
+    ))
+    .bind(slug)
+    .execute(&mut *conn)
+    .await
+    {
+        stats.metrics += r.rows_affected() as usize;
     }
 
     // score_history: has UNIQUE(timestamp) so INSERT OR IGNORE deduplicates
-    if let Ok(n) = conn.execute(
-        &format!(
-            "INSERT OR IGNORE INTO main.score_history \
-             (timestamp, success_rate, avg_score, observations, \
-              dim_success, dim_quality, dim_cost, project) \
-             SELECT timestamp, success_rate, avg_score, observations, \
-                    dim_success, dim_quality, dim_cost, ?1 \
-             FROM {attach_name}.score_history"
-        ),
-        rusqlite::params![slug],
-    ) {
-        stats.score_history += n;
+    if let Ok(r) = sqlx::query(&format!(
+        "INSERT OR IGNORE INTO main.score_history \
+         (timestamp, success_rate, avg_score, observations, \
+          dim_success, dim_quality, dim_cost, project) \
+         SELECT timestamp, success_rate, avg_score, observations, \
+                dim_success, dim_quality, dim_cost, ? \
+         FROM {attach_name}.score_history"
+    ))
+    .bind(slug)
+    .execute(&mut *conn)
+    .await
+    {
+        stats.score_history += r.rows_affected() as usize;
     }
 
     // skill_attribution: composite PK (skill_name, project) — safe to INSERT OR IGNORE
-    if let Ok(n) = conn.execute(
-        &format!(
-            "INSERT OR IGNORE INTO main.skill_attribution \
-             (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) \
-             SELECT skill_name, ?1, sessions_active, avg_score_with, avg_score_without, first_seen \
-             FROM {attach_name}.skill_attribution"
-        ),
-        rusqlite::params![slug],
-    ) {
-        stats.skill_attr += n;
+    if let Ok(r) = sqlx::query(&format!(
+        "INSERT OR IGNORE INTO main.skill_attribution \
+         (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) \
+         SELECT skill_name, ?, sessions_active, avg_score_with, avg_score_without, first_seen \
+         FROM {attach_name}.skill_attribution"
+    ))
+    .bind(slug)
+    .execute(&mut *conn)
+    .await
+    {
+        stats.skill_attr += r.rows_affected() as usize;
     }
 
     // promotion_counters: composite PK (pattern_key, project)
-    if let Ok(n) = conn.execute(
-        &format!(
-            "INSERT OR IGNORE INTO main.promotion_counters (pattern_key, project, count) \
-             SELECT pattern_key, ?1, count FROM {attach_name}.promotion_counters"
-        ),
-        rusqlite::params![slug],
-    ) {
-        stats.promo += n;
+    if let Ok(r) = sqlx::query(&format!(
+        "INSERT OR IGNORE INTO main.promotion_counters (pattern_key, project, count) \
+         SELECT pattern_key, ?, count FROM {attach_name}.promotion_counters"
+    ))
+    .bind(slug)
+    .execute(&mut *conn)
+    .await
+    {
+        stats.promo += r.rows_affected() as usize;
     }
 
     // orch_agents, orch_agent_events, orch_agent_inbox: FK-linked to orch_runs
     for table in ["orch_agents", "orch_agent_events", "orch_agent_inbox"] {
-        let _ = conn.execute(
-            &format!("INSERT OR IGNORE INTO main.{table} SELECT * FROM {attach_name}.{table}"),
-            [],
-        );
+        let _ = sqlx::query(&format!(
+            "INSERT OR IGNORE INTO main.{table} SELECT * FROM {attach_name}.{table}"
+        ))
+        .execute(&mut *conn)
+        .await;
     }
 
     Ok(stats)
@@ -790,6 +804,10 @@ pub fn merge_attached_db(
 /// Scans `~/.harness/projects/*/harness.db` and merges each into the global DB.
 /// Returns an exit code (0 = success, 1 = error).
 pub fn run_to_global(dry_run: bool) -> i32 {
+    super::runtime::block_on(run_to_global_async(dry_run))
+}
+
+async fn run_to_global_async(dry_run: bool) -> i32 {
     let projects_root = crate::shared::paths::harness_projects_root();
     if !projects_root.is_dir() {
         println!("no per-project directories found — nothing to do");
@@ -833,7 +851,7 @@ pub fn run_to_global(dry_run: bool) -> i32 {
     }
 
     // Open global DB
-    let conn = match super::open_harness_db() {
+    let mut conn = match open_migrate_conn().await {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[migrate/to-global] failed to open global harness.db: {e}");
@@ -843,18 +861,22 @@ pub fn run_to_global(dry_run: bool) -> i32 {
 
     let mut total = GlobalMergeStats::default();
     for (slug, db_path) in &candidates {
-        // ATTACH the per-project DB read-only
-        let attach_name = "src";
+        // ATTACH the per-project DB.
         // SQLite ATTACH does not support parameterized arguments — the database
         // path must be interpolated into the SQL string. Single-quote escaping
         // prevents injection (unlikely in file paths but defensive).
-        let escaped_path = db_path.display().to_string().replace('\'', "''");
-        if let Err(e) = conn.execute(&format!("ATTACH '{escaped_path}' AS {attach_name}"), []) {
+        let attach_name = "src";
+        let escaped = db_path.display().to_string().replace('\'', "''");
+        if let Err(e) = conn
+            .execute(format!("ATTACH '{}' AS {attach_name}", escaped).as_str())
+            .await
+            .map_err(sqlx_err)
+        {
             eprintln!("[migrate/to-global] ATTACH failed for {slug}: {e}");
             continue;
         }
 
-        match merge_attached_db(&conn, slug, attach_name) {
+        match merge_attached_db_async(&mut conn, slug, attach_name).await {
             Ok(stats) => {
                 println!(
                     "  {slug}: {} obs, {} sessions, {} evo, {} metrics, {} score_history",
@@ -867,14 +889,18 @@ pub fn run_to_global(dry_run: bool) -> i32 {
             }
         }
 
-        let _ = conn.execute("DETACH src", []);
+        let _ = conn.execute("DETACH src").await;
     }
 
     // Mark consolidation complete
-    if let Err(e) = conn.execute(
-        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('global_consolidated', '1')",
-        [],
-    ) {
+    if let Err(e) = conn
+        .execute(
+            "INSERT OR REPLACE INTO _harness_meta (key, value) \
+             VALUES ('global_consolidated', '1')",
+        )
+        .await
+        .map_err(sqlx_err)
+    {
         eprintln!("[migrate/to-global] failed to set consolidation marker: {e}");
     }
 
@@ -912,9 +938,10 @@ impl std::ops::AddAssign for GlobalMergeStats {
     }
 }
 
-// ── Slug normalization (hash suffix removal) ────────────
+// ── Slug normalization (hash suffix removal) ────────────────────────────────
 
 /// Detect old-format slugs (`{name}-{6hex}`) and return the name part.
+#[allow(dead_code)]
 fn strip_hash_suffix(slug: &str) -> Option<&str> {
     if slug.len() > 7 {
         let maybe_sep = &slug[slug.len() - 7..slug.len() - 6];
@@ -933,15 +960,20 @@ fn strip_hash_suffix(slug: &str) -> Option<&str> {
 ///
 /// Called from `init_schema()` after migrations. Idempotent — tracked via
 /// `_harness_meta.slugs_normalized`.
-pub fn normalize_slugs_if_needed(conn: &Connection) -> io::Result<()> {
+#[allow(dead_code)]
+pub fn normalize_slugs_if_needed(conn: &mut sqlx::SqliteConnection) -> io::Result<()> {
+    super::runtime::block_on(normalize_slugs_if_needed_async(conn))
+}
+
+#[allow(dead_code)]
+pub async fn normalize_slugs_if_needed_async(conn: &mut sqlx::SqliteConnection) -> io::Result<()> {
     // Check if already done.
-    let done: bool = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'slugs_normalized'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
+    let done: bool = sqlx::query("SELECT value FROM _harness_meta WHERE key = 'slugs_normalized'")
+        .fetch_optional(&mut *conn)
+        .await
         .ok()
+        .flatten()
+        .and_then(|row| row.try_get::<String, _>(0).ok())
         .is_some_and(|v| v == "1");
 
     if done {
@@ -949,15 +981,17 @@ pub fn normalize_slugs_if_needed(conn: &Connection) -> io::Result<()> {
     }
 
     // Collect all distinct project values that need normalization.
-    let slugs = collect_distinct_projects(conn)?;
+    let slugs = collect_distinct_projects(conn).await?;
     let mapping = build_normalization_mapping(&slugs);
 
     if mapping.is_empty() {
         // No hashed slugs found — just mark as done.
-        store_err(conn.execute(
+        sqlx::query(
             "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1')",
-            [],
-        ))?;
+        )
+        .execute(&mut *conn)
+        .await
+        .map_err(sqlx_err)?;
         return Ok(());
     }
 
@@ -967,25 +1001,28 @@ pub fn normalize_slugs_if_needed(conn: &Connection) -> io::Result<()> {
     );
 
     // Apply within a transaction.
-    let tx = super::ImmediateTx::begin(conn)?;
-    apply_slug_mapping(conn, &mapping)?;
-    store_err(conn.execute(
+    begin_immediate(conn).await?;
+    apply_slug_mapping(conn, &mapping).await?;
+    sqlx::query(
         "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1')",
-        [],
-    ))?;
-    tx.commit()?;
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(sqlx_err)?;
+    commit(conn).await?;
 
     // Rename per-project directories.
     rename_slug_directories(&mapping);
 
     // Normalize memory.db projects CSV.
-    normalize_memory_projects(&mapping);
+    normalize_memory_projects(&mapping).await;
 
     Ok(())
 }
 
 /// Collect all distinct `project` values across all relevant tables.
-fn collect_distinct_projects(conn: &Connection) -> io::Result<Vec<String>> {
+#[allow(dead_code)]
+async fn collect_distinct_projects(conn: &mut sqlx::SqliteConnection) -> io::Result<Vec<String>> {
     let tables = [
         "observations",
         "sessions",
@@ -1003,12 +1040,12 @@ fn collect_distinct_projects(conn: &Connection) -> io::Result<Vec<String>> {
     ];
     let mut seen = std::collections::HashSet::new();
     for table in &tables {
-        let rows: Vec<String> = conn
-            .prepare(&format!("SELECT DISTINCT project FROM {table}"))
-            .map_err(|e| std::io::Error::other(e.to_string()))?
-            .query_map([], |row| row.get(0))
-            .map_err(|e| std::io::Error::other(e.to_string()))?
-            .filter_map(|r| r.ok())
+        let rows: Vec<String> = sqlx::query(&format!("SELECT DISTINCT project FROM {table}"))
+            .fetch_all(&mut *conn)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|row| row.try_get::<String, _>(0).ok())
             .collect();
         for slug in rows {
             seen.insert(slug);
@@ -1018,6 +1055,7 @@ fn collect_distinct_projects(conn: &Connection) -> io::Result<Vec<String>> {
 }
 
 /// Build a mapping of `{old_hashed_slug} → {name_only_slug}`.
+#[allow(dead_code)]
 fn build_normalization_mapping(slugs: &[String]) -> Vec<(String, String)> {
     slugs
         .iter()
@@ -1026,9 +1064,11 @@ fn build_normalization_mapping(slugs: &[String]) -> Vec<(String, String)> {
 }
 
 /// Tables where `project` is part of a composite PK (need special handling).
+#[allow(dead_code)]
 const COMPOSITE_PK_TABLES: &[&str] = &["skill_attribution", "promotion_counters"];
 
 /// Tables with simple project column (UPDATE works directly).
+#[allow(dead_code)]
 const SIMPLE_TABLES: &[&str] = &[
     "observations",
     "sessions",
@@ -1044,41 +1084,61 @@ const SIMPLE_TABLES: &[&str] = &[
 ];
 
 /// Apply slug mapping to all tables in harness.db.
-fn apply_slug_mapping(conn: &Connection, mapping: &[(String, String)]) -> io::Result<()> {
+#[allow(dead_code)]
+async fn apply_slug_mapping(
+    conn: &mut sqlx::SqliteConnection,
+    mapping: &[(String, String)],
+) -> io::Result<()> {
     for (old, new) in mapping {
         // Simple tables: direct UPDATE.
         for table in SIMPLE_TABLES {
-            store_err(conn.execute(
-                &format!("UPDATE {table} SET project = ?1 WHERE project = ?2"),
-                rusqlite::params![new, old],
-            ))?;
+            sqlx::query(&format!("UPDATE {table} SET project = ? WHERE project = ?"))
+                .bind(new)
+                .bind(old)
+                .execute(&mut *conn)
+                .await
+                .map_err(sqlx_err)?;
         }
 
         // Composite PK tables: temp-table approach to handle PK conflicts
         // when two hashed slugs map to the same name-only slug.
         for table in COMPOSITE_PK_TABLES {
             // Step 1: Copy matching rows to temp table.
-            store_err(conn.execute(
-                &format!("CREATE TEMP TABLE _norm_tmp AS SELECT * FROM {table} WHERE project = ?1"),
-                rusqlite::params![old],
-            ))?;
+            sqlx::query(&format!(
+                "CREATE TEMP TABLE _norm_tmp AS SELECT * FROM {table} WHERE project = ?"
+            ))
+            .bind(old)
+            .execute(&mut *conn)
+            .await
+            .map_err(sqlx_err)?;
             // Step 2: Delete originals.
-            store_err(conn.execute(
-                &format!("DELETE FROM {table} WHERE project = ?1"),
-                rusqlite::params![old],
-            ))?;
+            sqlx::query(&format!("DELETE FROM {table} WHERE project = ?"))
+                .bind(old)
+                .execute(&mut *conn)
+                .await
+                .map_err(sqlx_err)?;
             // Step 3: Update project in temp.
-            store_err(conn.execute("UPDATE _norm_tmp SET project = ?1", rusqlite::params![new]))?;
+            sqlx::query("UPDATE _norm_tmp SET project = ?")
+                .bind(new)
+                .execute(&mut *conn)
+                .await
+                .map_err(sqlx_err)?;
             // Step 4: Insert back (IGNORE handles conflicts with existing rows).
-            store_err(conn.execute_batch(&format!(
-                "INSERT OR IGNORE INTO {table} SELECT * FROM _norm_tmp; DROP TABLE _norm_tmp;"
-            )))?;
+            conn.execute(
+                format!(
+                    "INSERT OR IGNORE INTO {table} SELECT * FROM _norm_tmp; DROP TABLE _norm_tmp;"
+                )
+                .as_str(),
+            )
+            .await
+            .map_err(sqlx_err)?;
         }
     }
     Ok(())
 }
 
 /// Rename per-project directories from hashed to name-only slugs.
+#[allow(dead_code)]
 fn rename_slug_directories(mapping: &[(String, String)]) {
     let root = crate::shared::paths::harness_projects_root();
     if !root.is_dir() {
@@ -1119,6 +1179,7 @@ fn rename_slug_directories(mapping: &[(String, String)]) {
 }
 
 /// Recursively merge contents of `src` into `dst`.
+#[allow(dead_code)]
 fn merge_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
     let _ = std::fs::create_dir_all(dst);
     if let Ok(entries) = std::fs::read_dir(src) {
@@ -1135,7 +1196,8 @@ fn merge_dir_recursive(src: &std::path::Path, dst: &std::path::Path) {
 }
 
 /// Normalize projects CSV in memory.db nodes table.
-fn normalize_memory_projects(mapping: &[(String, String)]) {
+#[allow(dead_code)]
+async fn normalize_memory_projects(mapping: &[(String, String)]) {
     if mapping.is_empty() {
         return;
     }
@@ -1145,43 +1207,51 @@ fn normalize_memory_projects(mapping: &[(String, String)]) {
     if !db_path.is_file() {
         return;
     }
-    let conn =
-        match Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
+
+    let mut conn = match open_conn_at(&db_path).await {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let rows: Vec<(String, String)> = match sqlx::query("SELECT id, projects FROM nodes")
+        .fetch_all(&mut conn)
+        .await
+    {
+        Ok(rows) => rows
+            .into_iter()
+            .filter_map(|row| {
+                let id: String = row.try_get(0).ok()?;
+                let projects: String = row.try_get(1).ok()?;
+                Some((id, projects))
+            })
+            .collect(),
+        Err(_) => return,
+    };
 
     let mapping_map: std::collections::HashMap<&str, &str> = mapping
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    let mut stmt = match conn.prepare("SELECT id, projects FROM nodes") {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-    let rows: Vec<(String, String)> = match stmt.query_map([], |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }) {
-        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-        Err(_) => return,
-    };
-
     for (id, csv) in &rows {
         let new_csv = remap_csv(csv, &mapping_map);
         if new_csv != *csv {
-            let _ = conn.execute(
-                "UPDATE nodes SET projects = ?1 WHERE id = ?2",
-                rusqlite::params![new_csv, id],
-            );
+            let _ = sqlx::query("UPDATE nodes SET projects = ? WHERE id = ?")
+                .bind(&new_csv)
+                .bind(id)
+                .execute(&mut conn)
+                .await;
         }
     }
 
     // Update FTS.
-    let _ = conn.execute_batch("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');");
+    let _ = conn
+        .execute("INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')")
+        .await;
 }
 
 /// Remap slug values in a comma-separated CSV string.
+#[allow(dead_code)]
 fn remap_csv(csv: &str, mapping: &std::collections::HashMap<&str, &str>) -> String {
     if csv.is_empty() {
         return csv.to_string();
@@ -1196,4 +1266,160 @@ fn remap_csv(csv: &str, mapping: &std::collections::HashMap<&str, &str>) -> Stri
         })
         .collect::<Vec<_>>()
         .join(",")
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::ConnectOptions;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    /// Create an in-memory harness DB with full schema applied via pool.
+    async fn make_global_pool() -> sqlx::SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::store::schema::init_schema_pool(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn do_migrate_is_idempotent() {
+        let pool = make_global_pool().await;
+        let mut conn = pool.acquire().await.unwrap();
+
+        // First run marks legacy_migrated=1
+        do_migrate_async(&mut conn).await.unwrap();
+        // Second run must see the flag and be a no-op (returns empty stats)
+        let stats = do_migrate_async(&mut conn).await.unwrap();
+        assert_eq!(stats.obs_imported, 0);
+        assert_eq!(stats.sess_imported, 0);
+
+        let migrated: String =
+            sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap()
+                .try_get(0)
+                .unwrap();
+        assert_eq!(migrated, "1");
+    }
+
+    #[tokio::test]
+    async fn to_global_merges_per_project_dbs() {
+        // Use a file-based DB for global so ATTACH works correctly.
+        // sqlx in-memory pools may not share the same connection across ATTACH
+        // and subsequent queries when pool connection juggling occurs.
+        let dir = tempfile::tempdir().unwrap();
+        let global_db_path = dir.path().join("global.db");
+        let global_pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&global_db_path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        crate::store::schema::init_schema_pool(&global_pool)
+            .await
+            .unwrap();
+        let mut global_conn = global_pool.acquire().await.unwrap();
+
+        // Simulate a per-project DB (v3 schema — no project column)
+        let db_path = dir.path().join("harness.db");
+
+        {
+            let mut src_conn = SqliteConnectOptions::new()
+                .filename(&db_path)
+                .create_if_missing(true)
+                .foreign_keys(true)
+                .connect()
+                .await
+                .unwrap();
+            // Apply a minimal v3-like schema manually
+            src_conn
+                .execute(
+                    "CREATE TABLE observations (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        tool TEXT NOT NULL,
+                        tool_category TEXT NOT NULL,
+                        action TEXT, result TEXT, score REAL,
+                        dim_success REAL, dim_quality REAL, dim_cost REAL,
+                        failure_category TEXT, error_snippet TEXT,
+                        file_ext TEXT, sequence_id INTEGER, pipeline_id TEXT
+                    )",
+                )
+                .await
+                .unwrap();
+            src_conn
+                .execute(
+                    "INSERT INTO observations (timestamp, session_id, tool, tool_category) \
+                     VALUES ('2026-01-01T00:00:00Z', 'sess1', 'Bash', 'shell')",
+                )
+                .await
+                .unwrap();
+            src_conn
+                .execute(
+                    "CREATE TABLE sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL,
+                        snap_type TEXT NOT NULL,
+                        summary TEXT,
+                        snapshot_json TEXT NOT NULL,
+                        millis INTEGER NOT NULL
+                    )",
+                )
+                .await
+                .unwrap();
+            src_conn
+                .execute(
+                    "CREATE TABLE evolution_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TEXT NOT NULL, observations INTEGER NOT NULL DEFAULT 0,
+                        success_rate REAL NOT NULL, avg_score REAL NOT NULL,
+                        error_patterns TEXT NOT NULL DEFAULT '{}',
+                        failure_patterns TEXT NOT NULL DEFAULT '[]',
+                        skills_seeded INTEGER NOT NULL DEFAULT 0,
+                        skills_rolled_back INTEGER NOT NULL DEFAULT 0,
+                        total_evolved INTEGER NOT NULL DEFAULT 0,
+                        analysis_summary TEXT NOT NULL DEFAULT ''
+                    )",
+                )
+                .await
+                .unwrap();
+        }
+
+        // Attach and merge
+        let slug = "test-project";
+        let escaped_path = db_path.display().to_string().replace('\'', "''");
+        global_conn
+            .execute(format!("ATTACH '{escaped_path}' AS src").as_str())
+            .await
+            .unwrap();
+
+        let merged = merge_attached_db_async(&mut global_conn, slug, "src")
+            .await
+            .unwrap();
+        global_conn.execute("DETACH src").await.unwrap();
+
+        assert_eq!(merged.obs, 1, "should merge 1 observation");
+        assert_eq!(merged.sessions, 0, "sessions table was empty");
+
+        // Verify the project column is set
+        let count: i64 = sqlx::query("SELECT COUNT(*) FROM observations WHERE project = ?")
+            .bind(slug)
+            .fetch_one(&mut *global_conn)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(count, 1);
+    }
 }

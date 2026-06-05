@@ -1,11 +1,10 @@
 //! pool/ — Async connection pool factory (sqlx)
 //!
 //! Creates lazily-initialized `SqlitePool` instances for `harness.db` and `memory.db`.
-//! Pools are stored in global async `OnceCell` singletons — the first call creates the
-//! pool, subsequent calls return the existing one.
-//!
-//! This module lives alongside the existing rusqlite sync code in `store/mod.rs`.
-//! No existing code is modified; the async pools are additive for the migration.
+//! Each pool is stored in a `TokioMutex<Option<(url, pool)>>` — on every call the
+//! resolved URL is compared to the cached URL; if they differ the old pool is closed
+//! and a new one is opened.  This allows integration tests to redirect pool paths via
+//! `HARNESS_ROOT` without leaking state across tests.
 
 use std::fs;
 use std::io;
@@ -16,7 +15,6 @@ use std::str::FromStr;
 
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use tokio::sync::OnceCell;
 
 use crate::config::CONFIG;
 use crate::shared::paths;
@@ -28,6 +26,10 @@ fn default_harness_db_path() -> PathBuf {
 }
 
 fn default_memory_db_path() -> PathBuf {
+    // Honour HARNESS_ROOT if set (used by integration tests to redirect to a temp dir).
+    if let Ok(root) = std::env::var("HARNESS_ROOT") {
+        return PathBuf::from(root).join(".harness").join("memory.db");
+    }
     paths::dirs_home().join(".harness").join("memory.db")
 }
 
@@ -103,23 +105,41 @@ async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
 }
 
 // ── Global pool singletons ─────────────────────────
+//
+// In production (and in unit tests within the library crate), `HARNESS_ROOT` is
+// fixed for the lifetime of the process, so `OnceCell` is the right primitive.
+//
+// Integration tests (`tests/`) set `HARNESS_ROOT` to a fresh temp dir before each
+// test.  To support that pattern without forcing every integration test to call into
+// async pool machinery directly, each pool is stored as
+// `Mutex<Option<(url, pool)>>`.  On every call we check whether the resolved URL
+// still matches the cached URL; if not, the old pool is closed and a new one is
+// opened.  The mutex guarantees that concurrent async callers never see a torn
+// state.
 
-static HARNESS_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
-static MEMORY_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
+use tokio::sync::Mutex as TokioMutex;
+
+static HARNESS_POOL: TokioMutex<Option<(String, SqlitePool)>> = TokioMutex::const_new(None);
+static MEMORY_POOL: TokioMutex<Option<(String, SqlitePool)>> = TokioMutex::const_new(None);
 
 /// Returns a shared `SqlitePool` for `harness.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
 /// Uses `CONFIG.db` for URL and max_connections.
 pub async fn harness_pool() -> io::Result<SqlitePool> {
-    HARNESS_POOL
-        .get_or_try_init(|| async {
-            let pool = build_pool(&harness_url(), CONFIG.db.max_connections).await?;
-            super::schema::init_schema_pool(&pool).await?;
-            Ok(pool)
-        })
-        .await
-        .cloned()
+    let url = harness_url();
+    let mut guard = HARNESS_POOL.lock().await;
+    if guard.as_ref().map(|(u, _)| u == &url).unwrap_or(false) {
+        return Ok(guard.as_ref().unwrap().1.clone());
+    }
+    // URL changed (or first call) — close old pool and open a new one.
+    if let Some((_, old)) = guard.take() {
+        old.close().await;
+    }
+    let pool = build_pool(&url, CONFIG.db.max_connections).await?;
+    super::schema::init_schema_pool(&pool).await?;
+    *guard = Some((url, pool.clone()));
+    Ok(pool)
 }
 
 /// Returns a shared `SqlitePool` for `memory.db`.
@@ -127,29 +147,29 @@ pub async fn harness_pool() -> io::Result<SqlitePool> {
 /// Creates the pool on first call; subsequent calls return the same instance.
 /// Initializes the memory schema (nodes, edges, FTS5) on first creation.
 pub async fn memory_pool() -> io::Result<SqlitePool> {
-    MEMORY_POOL
-        .get_or_try_init(|| async {
-            let pool = build_pool(&memory_url(), CONFIG.db.max_connections).await?;
-            crate::mem::store::init_schema_pool(&pool).await?;
-            Ok(pool)
-        })
-        .await
-        .cloned()
+    let url = memory_url();
+    let mut guard = MEMORY_POOL.lock().await;
+    if guard.as_ref().map(|(u, _)| u == &url).unwrap_or(false) {
+        return Ok(guard.as_ref().unwrap().1.clone());
+    }
+    // URL changed (or first call) — close old pool and open a new one.
+    if let Some((_, old)) = guard.take() {
+        old.close().await;
+    }
+    let pool = build_pool(&url, CONFIG.db.max_connections).await?;
+    crate::mem::store::init_schema_pool(&pool).await?;
+    crate::mem::store::auto_migrate_legacy(&pool).await;
+    *guard = Some((url, pool.clone()));
+    Ok(pool)
 }
 
 /// Gracefully close all pools. Call on process shutdown to flush WAL.
-///
-/// Uses `get()` rather than `take()` because `OnceLock::take()` requires `&mut self`,
-/// which is unavailable on a `static`. After `close()`, any further pool operations
-/// will return an error — the desired behavior for a shutdown path.
-///
-/// Wire into the async shutdown hook once callers are migrated to pool functions.
 #[allow(dead_code)]
 pub async fn shutdown() {
-    if let Some(pool) = HARNESS_POOL.get() {
+    if let Some((_, pool)) = HARNESS_POOL.lock().await.take() {
         pool.close().await;
     }
-    if let Some(pool) = MEMORY_POOL.get() {
+    if let Some((_, pool)) = MEMORY_POOL.lock().await.take() {
         pool.close().await;
     }
 }

@@ -64,6 +64,7 @@ pub struct Edge {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[allow(dead_code)]
 pub struct Index {
     pub nodes: Vec<IndexNode>,
     pub by_tag: std::collections::HashMap<String, Vec<String>>,

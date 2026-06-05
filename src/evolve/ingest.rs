@@ -1,33 +1,36 @@
 use crate::mem::store;
 use crate::shared::{evolution::*, helpers::*, paths::*};
+use crate::store::runtime::block_on;
+use sqlx::SqlitePool;
 
 use super::analysis::build_summary;
 
 /// Query pattern types detected in the previous session (the session that the
 /// current session "follows"). Extracts non-generic tags from CSV tag strings.
-pub fn query_prev_pattern_types(conn: &rusqlite::Connection, session_node_id: &str) -> Vec<String> {
-    let mut results = Vec::new();
+pub async fn query_prev_pattern_types_async(
+    pool: &SqlitePool,
+    session_node_id: &str,
+) -> Vec<String> {
     let sql = "SELECT n.tags FROM nodes n
          JOIN edges e ON e.source = n.id
          WHERE n.type = 'pattern'
          AND e.relation = 'detected_in'
          AND e.target IN (
             SELECT e2.source FROM edges e2
-            WHERE e2.target = ?1 AND e2.relation = 'follows'
+            WHERE e2.target = ? AND e2.relation = 'follows'
          )";
-    if let Ok(mut stmt) = conn.prepare(sql) {
-        let rows = stmt.query_map(rusqlite::params![session_node_id], |row| {
-            let tags_str: String = row.get(0)?;
-            Ok(tags_str)
-        });
-        if let Ok(iter) = rows {
-            for r in iter.flatten() {
-                for tag in r.split(',') {
-                    let tag = tag.trim().trim_matches('"');
-                    if !tag.is_empty() && tag != "auto" && tag != "pattern" {
-                        results.push(tag.to_string());
-                    }
-                }
+    let tags_rows: Vec<String> = sqlx::query_scalar::<_, String>(sql)
+        .bind(session_node_id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
+
+    let mut results = Vec::new();
+    for tags_str in tags_rows {
+        for tag in tags_str.split(',') {
+            let tag = tag.trim().trim_matches('"');
+            if !tag.is_empty() && tag != "auto" && tag != "pattern" {
+                results.push(tag.to_string());
             }
         }
     }
@@ -35,15 +38,15 @@ pub fn query_prev_pattern_types(conn: &rusqlite::Connection, session_node_id: &s
 }
 
 /// Find or create a project hub node. Returns the hub node's ID.
-pub fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::Result<String> {
-    // Check if hub already exists
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT id FROM nodes WHERE type = 'project' AND title = ?1 LIMIT 1",
-            rusqlite::params![format!("project: {}", slug)],
-            |row| row.get(0),
-        )
-        .ok();
+pub async fn ensure_project_hub_async(pool: &SqlitePool, slug: &str) -> std::io::Result<String> {
+    let title = format!("project: {}", slug);
+    let existing: Option<String> = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1",
+    )
+    .bind(&title)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
 
     if let Some(id) = existing {
         return Ok(id);
@@ -56,7 +59,7 @@ pub fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::R
         frontmatter: store::NodeFrontmatter {
             id: id.clone(),
             node_type: "project".to_string(),
-            title: format!("project: {}", slug),
+            title,
             tags: vec!["hub".to_string()],
             projects: vec![slug.to_string()],
             agents: vec![],
@@ -68,35 +71,32 @@ pub fn ensure_project_hub(conn: &rusqlite::Connection, slug: &str) -> std::io::R
         },
         body: format!("Project hub node for {}", slug),
     };
-    store::write_node_conn(conn, &node)?;
+    store::write_node_pool(pool, &node).await?;
     Ok(id)
 }
 
 /// Ingest session analysis results into the knowledge graph.
 /// Returns (nodes_created, edges_created).
 pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) -> (u64, u64) {
-    let conn = match store::open_db() {
-        Ok(c) => c,
+    let pool = match block_on(crate::store::pool::memory_pool()) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!("[ingest] failed to open memory DB: {e}");
             return (0, 0);
         }
     };
 
+    block_on(ingest_to_memory_async(&pool, analysis, patterns))
+}
+
+async fn ingest_to_memory_async(
+    pool: &SqlitePool,
+    analysis: &SessionAnalysis,
+    patterns: &[DetectedPattern],
+) -> (u64, u64) {
     let slug = project_slug();
     let ts = now_iso();
     let dedup_hours = 24u64;
-    // `unchecked_transaction()` is used here because `open_db()` always returns
-    // a fresh connection in autocommit mode (no prior transaction active). Using
-    // the checked variant would be equivalent but adds unnecessary overhead for
-    // this single-writer, fresh-connection pattern.
-    let tx = match conn.unchecked_transaction() {
-        Ok(t) => t,
-        Err(e) => {
-            eprintln!("[ingest] failed to begin transaction: {e}");
-            return (0, 0);
-        }
-    };
 
     let mut nodes_created = 0u64;
     let mut edges_created = 0u64;
@@ -127,7 +127,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
             },
             body,
         };
-        match store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+        match store::write_node_dedup_pool(pool, &node, dedup_hours).await {
             Ok((id, false)) => {
                 session_node_id = id;
                 nodes_created += 1;
@@ -170,7 +170,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
             },
             body,
         };
-        if let Ok((id, deduped)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+        if let Ok((id, deduped)) = store::write_node_dedup_pool(pool, &node, dedup_hours).await {
             let files = pattern.involved_files.clone();
             pattern_node_ids.push((id.clone(), files));
             if !deduped {
@@ -186,7 +186,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     weight: 1.0,
                     ts: ts.clone(),
                 };
-                if store::append_edge_conn(&tx, &edge).is_ok() {
+                if store::append_edge_pool(pool, &edge).await.is_ok() {
                     edges_created += 1;
                 }
             }
@@ -195,7 +195,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 
     // 8b-2. Resolution nodes: patterns resolved since last session
     if !session_node_id.is_empty() {
-        let prev_pattern_types = query_prev_pattern_types(&tx, &session_node_id);
+        let prev_pattern_types = query_prev_pattern_types_async(pool, &session_node_id).await;
 
         // Get current pattern types for comparison
         let current_pattern_types: Vec<&str> =
@@ -226,7 +226,9 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     },
                     body,
                 };
-                if let Ok((id, false)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+                if let Ok((id, false)) =
+                    store::write_node_dedup_pool(pool, &node, dedup_hours).await
+                {
                     nodes_created += 1;
                     // Edge: resolution -> session (resolved_in)
                     let edge = store::Edge {
@@ -237,13 +239,13 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                         weight: 1.0,
                         ts: ts.clone(),
                     };
-                    if store::append_edge_conn(&tx, &edge).is_ok() {
+                    if store::append_edge_pool(pool, &edge).await.is_ok() {
                         edges_created += 1;
                     }
                     // Link resolution to project hub
-                    if let Ok(ref hub_id) = ensure_project_hub(&tx, &slug) {
-                        let _ = store::append_edge_conn(
-                            &tx,
+                    if let Ok(ref hub_id) = ensure_project_hub_async(pool, &slug).await {
+                        let _ = store::append_edge_pool(
+                            pool,
                             &store::Edge {
                                 id: store::new_uuid(),
                                 source: id,
@@ -253,6 +255,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                                 ts: ts.clone(),
                             },
                         )
+                        .await
                         .map(|_| edges_created += 1);
                     }
                 }
@@ -298,7 +301,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
             },
             body,
         };
-        if let Ok((id, false)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+        if let Ok((id, false)) = store::write_node_dedup_pool(pool, &node, dedup_hours).await {
             error_node_ids.push(id);
             nodes_created += 1;
         }
@@ -330,7 +333,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
             },
             body,
         };
-        if let Ok((id, false)) = store::write_node_dedup_conn(&tx, &node, dedup_hours) {
+        if let Ok((id, false)) = store::write_node_dedup_pool(pool, &node, dedup_hours).await {
             error_node_ids.push(id);
             nodes_created += 1;
         }
@@ -351,7 +354,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     weight: shared.len() as f64,
                     ts: ts.clone(),
                 };
-                if store::append_edge_conn(&tx, &edge).is_ok() {
+                if store::append_edge_pool(pool, &edge).await.is_ok() {
                     edges_created += 1;
                 }
             }
@@ -359,11 +362,11 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
     }
 
     // 8f. Project hub nodes + belongs_to edges
-    if let Ok(hub_id) = ensure_project_hub(&tx, &slug) {
+    if let Ok(hub_id) = ensure_project_hub_async(pool, &slug).await {
         // Link session node to project hub
         if !session_node_id.is_empty() {
-            let _ = store::append_edge_conn(
-                &tx,
+            let _ = store::append_edge_pool(
+                pool,
                 &store::Edge {
                     id: store::new_uuid(),
                     source: session_node_id.clone(),
@@ -373,12 +376,13 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     ts: ts.clone(),
                 },
             )
+            .await
             .map(|_| edges_created += 1);
         }
         // Link pattern nodes to project hub
         for (pid, _) in &pattern_node_ids {
-            let _ = store::append_edge_conn(
-                &tx,
+            let _ = store::append_edge_pool(
+                pool,
                 &store::Edge {
                     id: store::new_uuid(),
                     source: pid.clone(),
@@ -388,12 +392,13 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     ts: ts.clone(),
                 },
             )
+            .await
             .map(|_| edges_created += 1);
         }
         // Link error nodes to project hub
         for eid in &error_node_ids {
-            let _ = store::append_edge_conn(
-                &tx,
+            let _ = store::append_edge_pool(
+                pool,
                 &store::Edge {
                     id: store::new_uuid(),
                     source: eid.clone(),
@@ -403,25 +408,27 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     ts: ts.clone(),
                 },
             )
+            .await
             .map(|_| edges_created += 1);
         }
     }
 
     // 8g. Session chain: link to previous session in same project
     if !session_node_id.is_empty() {
-        let prev_session: Option<String> = tx
-            .query_row(
-                "SELECT id FROM nodes WHERE type = 'session' AND id != ?1
-             AND (',' || projects || ',' LIKE '%,' || ?2 || ',%')
+        let prev_session: Option<String> = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM nodes WHERE type = 'session' AND id != ?
+             AND (',' || projects || ',' LIKE '%,' || ? || ',%')
              ORDER BY updated DESC LIMIT 1",
-                rusqlite::params![session_node_id, slug],
-                |row| row.get(0),
-            )
-            .ok();
+        )
+        .bind(&session_node_id)
+        .bind(&slug)
+        .fetch_optional(pool)
+        .await
+        .unwrap_or(None);
 
         if let Some(prev_id) = prev_session {
-            let _ = store::append_edge_conn(
-                &tx,
+            let _ = store::append_edge_pool(
+                pool,
                 &store::Edge {
                     id: store::new_uuid(),
                     source: prev_id,
@@ -431,6 +438,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     ts: ts.clone(),
                 },
             )
+            .await
             .map(|_| edges_created += 1);
         }
     }
@@ -444,7 +452,9 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         .collect();
 
     if all_new_ids.len() >= 2 {
-        let new_nodes = store::read_nodes_conn(&tx, &all_new_ids).unwrap_or_default();
+        let new_nodes = store::read_nodes_pool(pool, &all_new_ids)
+            .await
+            .unwrap_or_default();
         for i in 0..new_nodes.len() {
             for j in (i + 1)..new_nodes.len() {
                 let shared: Vec<String> = new_nodes[i]
@@ -455,8 +465,8 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                     .cloned()
                     .collect();
                 if !shared.is_empty() {
-                    let _ = store::append_edge_conn(
-                        &tx,
+                    let _ = store::append_edge_pool(
+                        pool,
                         &store::Edge {
                             id: store::new_uuid(),
                             source: new_nodes[i].frontmatter.id.clone(),
@@ -466,13 +476,13 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
                             ts: ts.clone(),
                         },
                     )
+                    .await
                     .map(|_| edges_created += 1);
                 }
             }
         }
     }
 
-    let _ = tx.commit();
     (nodes_created, edges_created)
 }
 
@@ -481,19 +491,21 @@ mod tests {
     use super::*;
     use crate::mem::store;
 
-    fn open_test_mem_db() -> rusqlite::Connection {
-        let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
-        store::init_schema(&conn).expect("schema");
-        conn
+    async fn open_test_mem_pool() -> SqlitePool {
+        let pool = crate::store::pool::test_memory_pool().await;
+        store::init_schema_pool(&pool).await.expect("schema");
+        pool
     }
 
-    #[test]
-    fn ensure_project_hub_creates_new_hub_node() {
-        let conn = open_test_mem_db();
-        let hub_id = ensure_project_hub(&conn, "test-project").unwrap();
+    #[tokio::test]
+    async fn ensure_project_hub_creates_new_hub_node() {
+        let pool = open_test_mem_pool().await;
+        let hub_id = ensure_project_hub_async(&pool, "test-project")
+            .await
+            .unwrap();
         assert!(!hub_id.is_empty(), "hub ID must not be empty");
 
-        let node = store::read_node_conn(&conn, &hub_id).unwrap();
+        let node = store::read_node_pool(&pool, &hub_id).await.unwrap();
         assert_eq!(node.frontmatter.node_type, "project");
         assert_eq!(node.frontmatter.title, "project: test-project");
         assert!(node.frontmatter.tags.contains(&"hub".to_string()));
@@ -504,27 +516,29 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ensure_project_hub_returns_existing_hub() {
-        let conn = open_test_mem_db();
-        let id1 = ensure_project_hub(&conn, "my-proj").unwrap();
-        let id2 = ensure_project_hub(&conn, "my-proj").unwrap();
+    #[tokio::test]
+    async fn ensure_project_hub_returns_existing_hub() {
+        let pool = open_test_mem_pool().await;
+        let id1 = ensure_project_hub_async(&pool, "my-proj").await.unwrap();
+        let id2 = ensure_project_hub_async(&pool, "my-proj").await.unwrap();
         assert_eq!(id1, id2, "second call must return same hub ID");
     }
 
-    #[test]
-    fn ensure_project_hub_different_projects_get_different_ids() {
-        let conn = open_test_mem_db();
-        let id_a = ensure_project_hub(&conn, "proj-a").unwrap();
-        let id_b = ensure_project_hub(&conn, "proj-b").unwrap();
+    #[tokio::test]
+    async fn ensure_project_hub_different_projects_get_different_ids() {
+        let pool = open_test_mem_pool().await;
+        let id_a = ensure_project_hub_async(&pool, "proj-a").await.unwrap();
+        let id_b = ensure_project_hub_async(&pool, "proj-b").await.unwrap();
         assert_ne!(id_a, id_b, "different projects must get different hub IDs");
     }
 
-    #[test]
-    fn auto_edge_belongs_to_links_session_to_project_hub() {
-        let conn = open_test_mem_db();
+    #[tokio::test]
+    async fn auto_edge_belongs_to_links_session_to_project_hub() {
+        let pool = open_test_mem_pool().await;
 
-        let hub_id = ensure_project_hub(&conn, "edge-test-proj").unwrap();
+        let hub_id = ensure_project_hub_async(&pool, "edge-test-proj")
+            .await
+            .unwrap();
 
         let session_id = store::new_uuid();
         let session_node = store::Node {
@@ -541,7 +555,7 @@ mod tests {
             },
             body: "test session".into(),
         };
-        store::write_node_conn(&conn, &session_node).unwrap();
+        store::write_node_pool(&pool, &session_node).await.unwrap();
 
         let edge = store::Edge {
             id: store::new_uuid(),
@@ -551,18 +565,20 @@ mod tests {
             weight: 0.5,
             ts: store::now_iso(),
         };
-        store::append_edge_conn(&conn, &edge).unwrap();
+        store::append_edge_pool(&pool, &edge).await.unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
+        let edges = store::read_edges_pool(&pool, 5000)
+            .await
+            .unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == session_id && e.target == hub_id && e.relation == "belongs_to");
         assert!(found, "belongs_to edge from session to hub must exist");
     }
 
-    #[test]
-    fn auto_edge_follows_links_previous_session() {
-        let conn = open_test_mem_db();
+    #[tokio::test]
+    async fn auto_edge_follows_links_previous_session() {
+        let pool = open_test_mem_pool().await;
 
         let prev_id = store::new_uuid();
         let prev_node = store::Node {
@@ -578,7 +594,7 @@ mod tests {
             },
             body: "prev session".into(),
         };
-        store::write_node_conn(&conn, &prev_node).unwrap();
+        store::write_node_pool(&pool, &prev_node).await.unwrap();
 
         let curr_id = store::new_uuid();
         let curr_node = store::Node {
@@ -594,17 +610,18 @@ mod tests {
             },
             body: "curr session".into(),
         };
-        store::write_node_conn(&conn, &curr_node).unwrap();
+        store::write_node_pool(&pool, &curr_node).await.unwrap();
 
-        let prev_session: Option<String> = conn
-            .query_row(
-                "SELECT id FROM nodes WHERE type = 'session' AND id != ?1
-             AND (',' || projects || ',' LIKE '%,' || ?2 || ',%')
+        let prev_session: Option<String> = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM nodes WHERE type = 'session' AND id != ?
+             AND (',' || projects || ',' LIKE '%,' || ? || ',%')
              ORDER BY updated DESC LIMIT 1",
-                rusqlite::params![curr_id, "chain-proj"],
-                |row| row.get(0),
-            )
-            .ok();
+        )
+        .bind(&curr_id)
+        .bind("chain-proj")
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
 
         assert!(prev_session.is_some(), "should find a previous session");
         assert_eq!(prev_session.unwrap(), prev_id);
@@ -617,9 +634,11 @@ mod tests {
             weight: 0.3,
             ts: store::now_iso(),
         };
-        store::append_edge_conn(&conn, &edge).unwrap();
+        store::append_edge_pool(&pool, &edge).await.unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
+        let edges = store::read_edges_pool(&pool, 5000)
+            .await
+            .unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == prev_id && e.target == curr_id && e.relation == "follows");
@@ -629,9 +648,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn auto_edge_shares_context_links_same_tag_nodes() {
-        let conn = open_test_mem_db();
+    #[tokio::test]
+    async fn auto_edge_shares_context_links_same_tag_nodes() {
+        let pool = open_test_mem_pool().await;
 
         let id_a = store::new_uuid();
         let node_a = store::Node {
@@ -646,7 +665,7 @@ mod tests {
             },
             body: "error A body".into(),
         };
-        store::write_node_conn(&conn, &node_a).unwrap();
+        store::write_node_pool(&pool, &node_a).await.unwrap();
 
         let id_b = store::new_uuid();
         let node_b = store::Node {
@@ -661,10 +680,10 @@ mod tests {
             },
             body: "error B body".into(),
         };
-        store::write_node_conn(&conn, &node_b).unwrap();
+        store::write_node_pool(&pool, &node_b).await.unwrap();
 
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
-        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids).unwrap();
+        let new_nodes = store::read_nodes_pool(&pool, &all_new_ids).await.unwrap();
         assert_eq!(new_nodes.len(), 2);
 
         let shared: Vec<String> = new_nodes[0]
@@ -687,9 +706,11 @@ mod tests {
             weight: shared.len() as f64,
             ts: store::now_iso(),
         };
-        store::append_edge_conn(&conn, &edge).unwrap();
+        store::append_edge_pool(&pool, &edge).await.unwrap();
 
-        let edges = store::read_edges_conn(&conn, 5000).unwrap_or_default();
+        let edges = store::read_edges_pool(&pool, 5000)
+            .await
+            .unwrap_or_default();
         let found = edges
             .iter()
             .any(|e| e.source == id_a && e.target == id_b && e.relation == "shares_context");
@@ -699,9 +720,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn auto_edge_shares_context_ignores_auto_tag() {
-        let conn = open_test_mem_db();
+    #[tokio::test]
+    async fn auto_edge_shares_context_ignores_auto_tag() {
+        let pool = open_test_mem_pool().await;
 
         let id_a = store::new_uuid();
         let node_a = store::Node {
@@ -716,7 +737,7 @@ mod tests {
             },
             body: "error C body".into(),
         };
-        store::write_node_conn(&conn, &node_a).unwrap();
+        store::write_node_pool(&pool, &node_a).await.unwrap();
 
         let id_b = store::new_uuid();
         let node_b = store::Node {
@@ -731,10 +752,10 @@ mod tests {
             },
             body: "error D body".into(),
         };
-        store::write_node_conn(&conn, &node_b).unwrap();
+        store::write_node_pool(&pool, &node_b).await.unwrap();
 
         let all_new_ids: Vec<&str> = vec![&id_a, &id_b];
-        let new_nodes = store::read_nodes_conn(&conn, &all_new_ids).unwrap();
+        let new_nodes = store::read_nodes_pool(&pool, &all_new_ids).await.unwrap();
 
         let shared: Vec<String> = new_nodes[0]
             .frontmatter
@@ -749,13 +770,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn resolution_node_created_when_pattern_absent_in_current_session() {
-        let conn = open_test_mem_db();
+    #[tokio::test]
+    async fn resolution_node_created_when_pattern_absent_in_current_session() {
+        let pool = open_test_mem_pool().await;
         let slug = "res-test-proj";
 
         // 1. Create project hub
-        let hub_id = ensure_project_hub(&conn, slug).unwrap();
+        let hub_id = ensure_project_hub_async(&pool, slug).await.unwrap();
 
         // 2. Create previous session node
         let prev_session_id = store::new_uuid();
@@ -772,7 +793,7 @@ mod tests {
             },
             body: "previous session".into(),
         };
-        store::write_node_conn(&conn, &prev_session).unwrap();
+        store::write_node_pool(&pool, &prev_session).await.unwrap();
 
         // 3. Create a pattern node from the previous session
         let pattern_id = store::new_uuid();
@@ -789,11 +810,11 @@ mod tests {
             },
             body: "pattern body".into(),
         };
-        store::write_node_conn(&conn, &pattern_node).unwrap();
+        store::write_node_pool(&pool, &pattern_node).await.unwrap();
 
         // 4. Edge: pattern -> prev_session (detected_in)
-        store::append_edge_conn(
-            &conn,
+        store::append_edge_pool(
+            &pool,
             &store::Edge {
                 id: store::new_uuid(),
                 source: pattern_id.clone(),
@@ -803,6 +824,7 @@ mod tests {
                 ts: "2026-01-01T00:00:00Z".into(),
             },
         )
+        .await
         .unwrap();
 
         // 5. Create current session node (simulates what ingest_to_memory does)
@@ -820,11 +842,11 @@ mod tests {
             },
             body: "current session".into(),
         };
-        store::write_node_conn(&conn, &curr_session).unwrap();
+        store::write_node_pool(&pool, &curr_session).await.unwrap();
 
         // 6. Edge: prev_session -> curr_session (follows)
-        store::append_edge_conn(
-            &conn,
+        store::append_edge_pool(
+            &pool,
             &store::Edge {
                 id: store::new_uuid(),
                 source: prev_session_id,
@@ -834,10 +856,11 @@ mod tests {
                 ts: "2026-01-02T00:00:00Z".into(),
             },
         )
+        .await
         .unwrap();
 
         // 7. Query prev pattern types via shared helper
-        let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
+        let prev_pattern_types = query_prev_pattern_types_async(&pool, &curr_session_id).await;
 
         // Should find exactly the one pattern type from prev session
         assert_eq!(
@@ -875,11 +898,13 @@ mod tests {
                     pattern_type,
                 ),
             };
-            store::write_node_conn(&conn, &resolution_node).unwrap();
+            store::write_node_pool(&pool, &resolution_node)
+                .await
+                .unwrap();
 
             // Edge: resolution -> session (resolved_in)
-            store::append_edge_conn(
-                &conn,
+            store::append_edge_pool(
+                &pool,
                 &store::Edge {
                     id: store::new_uuid(),
                     source: resolution_id.clone(),
@@ -889,11 +914,12 @@ mod tests {
                     ts: "2026-01-02T00:00:00Z".into(),
                 },
             )
+            .await
             .unwrap();
 
             // Edge: resolution -> hub (belongs_to)
-            store::append_edge_conn(
-                &conn,
+            store::append_edge_pool(
+                &pool,
                 &store::Edge {
                     id: store::new_uuid(),
                     source: resolution_id.clone(),
@@ -903,11 +929,12 @@ mod tests {
                     ts: "2026-01-02T00:00:00Z".into(),
                 },
             )
+            .await
             .unwrap();
         }
 
         // 9. Verify the resolution node and edges exist
-        let edges = store::read_edges_conn(&conn, 5000).unwrap();
+        let edges = store::read_edges_pool(&pool, 5000).await.unwrap();
         let resolved_in: Vec<_> = edges
             .iter()
             .filter(|e| e.relation == "resolved_in" && e.target == curr_session_id)
@@ -934,9 +961,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn no_resolution_node_when_pattern_still_present() {
-        let conn = open_test_mem_db();
+    #[tokio::test]
+    async fn no_resolution_node_when_pattern_still_present() {
+        let pool = open_test_mem_pool().await;
         let slug = "res-still-present";
 
         // 1. Create previous session with a pattern
@@ -954,7 +981,7 @@ mod tests {
             },
             body: "prev session".into(),
         };
-        store::write_node_conn(&conn, &prev_session).unwrap();
+        store::write_node_pool(&pool, &prev_session).await.unwrap();
 
         let pattern_id = store::new_uuid();
         let pattern_node = store::Node {
@@ -970,10 +997,10 @@ mod tests {
             },
             body: "pattern body".into(),
         };
-        store::write_node_conn(&conn, &pattern_node).unwrap();
+        store::write_node_pool(&pool, &pattern_node).await.unwrap();
 
-        store::append_edge_conn(
-            &conn,
+        store::append_edge_pool(
+            &pool,
             &store::Edge {
                 id: store::new_uuid(),
                 source: pattern_id,
@@ -983,6 +1010,7 @@ mod tests {
                 ts: "2026-01-01T00:00:00Z".into(),
             },
         )
+        .await
         .unwrap();
 
         // 2. Create current session
@@ -1000,10 +1028,10 @@ mod tests {
             },
             body: "curr session".into(),
         };
-        store::write_node_conn(&conn, &curr_session).unwrap();
+        store::write_node_pool(&pool, &curr_session).await.unwrap();
 
-        store::append_edge_conn(
-            &conn,
+        store::append_edge_pool(
+            &pool,
             &store::Edge {
                 id: store::new_uuid(),
                 source: prev_session_id,
@@ -1013,10 +1041,11 @@ mod tests {
                 ts: "2026-01-02T00:00:00Z".into(),
             },
         )
+        .await
         .unwrap();
 
         // 3. Query prev pattern types via shared helper
-        let prev_pattern_types = query_prev_pattern_types(&conn, &curr_session_id);
+        let prev_pattern_types = query_prev_pattern_types_async(&pool, &curr_session_id).await;
 
         assert_eq!(prev_pattern_types.len(), 1);
         assert_eq!(prev_pattern_types[0], "thrashing");
@@ -1030,7 +1059,7 @@ mod tests {
         }
 
         // 5. Verify no resolution nodes exist
-        let all_edges = store::read_edges_conn(&conn, 5000).unwrap();
+        let all_edges = store::read_edges_pool(&pool, 5000).await.unwrap();
         let resolved_edges: Vec<_> = all_edges
             .iter()
             .filter(|e| e.relation == "resolved_in")

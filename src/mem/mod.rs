@@ -4,7 +4,6 @@ pub mod axum_server;
 pub mod cli;
 pub mod graph;
 pub mod mcp;
-pub mod server;
 pub mod store;
 
 pub fn run(args: &[String]) -> i32 {

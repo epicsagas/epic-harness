@@ -5,11 +5,9 @@ use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::io;
 
-use rusqlite::{Connection, params_from_iter};
-
-use super::store::{
-    atomic_write, graph_path, list_node_ids_conn, open_db, read_edges_conn, read_nodes_conn,
-};
+use super::store::{list_node_ids_pool, read_edges_pool, read_nodes_pool};
+use crate::store::pool::memory_pool;
+use crate::store::runtime::block_on;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GraphNode {
@@ -44,206 +42,7 @@ pub struct Graph {
 /// Prevents unbounded memory growth on dense graphs.
 const MAX_GRAPH_EDGES: usize = 2000;
 
-/// Build a `Graph` value from an existing connection.
-/// Reuses the caller's connection — no additional `open_db` call.
-pub fn build_graph_conn(conn: &Connection) -> io::Result<Graph> {
-    let ids = list_node_ids_conn(conn)?;
-    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let nodes = read_nodes_conn(conn, &id_refs)?
-        .into_iter()
-        .map(|node| GraphNode {
-            id: node.frontmatter.id,
-            title: node.frontmatter.title,
-            node_type: node.frontmatter.node_type,
-            tags: node.frontmatter.tags,
-            importance: node.frontmatter.importance,
-        })
-        .collect();
-    let edges = read_edges_conn(conn, MAX_GRAPH_EDGES)?
-        .into_iter()
-        .map(|e| GraphEdge {
-            source: e.source,
-            target: e.target,
-            relation: e.relation,
-            weight: e.weight,
-        })
-        .collect();
-    Ok(Graph { nodes, edges })
-}
-
-/// Build a `Graph` value from the current DB state.
-/// Opens a fresh connection and delegates to `build_graph_conn`.
-fn build_graph() -> io::Result<Graph> {
-    let conn = open_db()?;
-    build_graph_conn(&conn)
-}
-
-/// Build graph JSON string from an existing connection (no open_db call).
-/// Used by the web server to always return fresh data via its shared connection.
-pub fn rebuild_graph_json_conn(conn: &Connection) -> io::Result<String> {
-    serde_json::to_string_pretty(&build_graph_conn(conn)?)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-}
-
-pub fn rebuild_graph() -> io::Result<()> {
-    let data = serde_json::to_vec_pretty(&build_graph()?)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    atomic_write(&graph_path(), &data)
-}
-
-/// Build graph JSON string directly from DB (no file I/O).
-/// Used by the web server to always return fresh data.
-#[allow(dead_code)]
-pub fn rebuild_graph_json() -> io::Result<String> {
-    serde_json::to_string_pretty(&build_graph()?)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-}
-
-/// Get 1-hop neighbors using an existing connection.
-/// Returns `(neighbor_id, total_weight)` sorted by weight descending.
-/// Maximum seeds accepted per call — keeps `WHERE IN (?, ...)` well below
-/// SQLite's `SQLITE_LIMIT_VARIABLE_NUMBER` default of 999 (2 copies are bound).
-const MAX_SEED_IDS: usize = 100;
-
-pub fn graph_neighbors_conn(conn: &Connection, seed_ids: &[String]) -> Vec<(String, f64)> {
-    if seed_ids.is_empty() {
-        return vec![];
-    }
-    let seed_ids = if seed_ids.len() > MAX_SEED_IDS {
-        eprintln!(
-            "[mem/graph] graph_neighbors_conn: seed_ids.len()={} exceeds MAX_SEED_IDS={}, truncating",
-            seed_ids.len(),
-            MAX_SEED_IDS
-        );
-        &seed_ids[..MAX_SEED_IDS]
-    } else {
-        seed_ids
-    };
-
-    let ph: String = seed_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    // Sum weights per neighbor from both forward and backward edges.
-    let sql = format!(
-        "SELECT target AS nb, SUM(weight) AS w FROM edges WHERE source IN ({ph}) GROUP BY target \
-         UNION ALL \
-         SELECT source AS nb, SUM(weight) AS w FROM edges WHERE target IN ({ph}) GROUP BY source"
-    );
-
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-
-    let rows: Vec<(String, f64)> = stmt
-        .query_map(
-            params_from_iter(seed_ids.iter().chain(seed_ids.iter())),
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?)),
-        )
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default();
-
-    // Accumulate weights and exclude seeds.
-    let seed_set: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
-    let mut weights: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
-    for (nid, w) in rows {
-        if !seed_set.contains(nid.as_str()) {
-            *weights.entry(nid).or_default() += w;
-        }
-    }
-
-    let mut result: Vec<(String, f64)> = weights.into_iter().collect();
-    result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    result
-}
-
-/// BFS traversal using an existing connection.
-///
-/// `depth` is accepted for API compatibility but is not used as a hop limit.
-/// The single-column `UNION` CTE deduplicates on `node_id` alone, so each node
-/// enters the working set at most once. This prevents re-expansion of visited
-/// nodes in cyclic or dense graphs. Results are capped at 500.
-pub fn related_nodes_conn(conn: &Connection, start_id: &str, _depth: usize) -> Vec<String> {
-    let sql = "
-        WITH RECURSIVE bfs(node_id) AS (
-            SELECT target FROM edges WHERE source = ?1
-            UNION SELECT source FROM edges WHERE target = ?1
-            UNION SELECT e.target FROM edges e JOIN bfs ON e.source = bfs.node_id WHERE e.target != ?1
-            UNION SELECT e.source FROM edges e JOIN bfs ON e.target = bfs.node_id WHERE e.source != ?1
-        )
-        SELECT node_id FROM bfs
-        LIMIT 500
-    ";
-
-    conn.prepare(sql)
-        .and_then(|mut stmt| {
-            stmt.query_map(rusqlite::params![start_id], |row| row.get::<_, String>(0))
-                .map(|rows| rows.flatten().collect())
-        })
-        .unwrap_or_default()
-}
-
-/// Compute aggregate stats for the `/api/stats` endpoint using an existing connection.
-pub fn compute_stats_conn(conn: &Connection) -> io::Result<serde_json::Value> {
-    let total_nodes: i64 = conn
-        .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))
-        .unwrap_or(0);
-    let total_edges: i64 = conn
-        .query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))
-        .unwrap_or(0);
-    let avg_importance: f64 = conn
-        .query_row("SELECT AVG(importance) FROM nodes", [], |r| r.get(0))
-        .unwrap_or(0.0);
-
-    let mut stmt = conn
-        .prepare("SELECT type, COUNT(*) FROM nodes GROUP BY type")
-        .map_err(io::Error::other)?;
-    let by_type: serde_json::Map<String, serde_json::Value> = stmt
-        .query_map([], |row| {
-            let t: String = row.get(0)?;
-            let c: i64 = row.get(1)?;
-            Ok((t, serde_json::Value::from(c)))
-        })
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default();
-
-    Ok(serde_json::json!({
-        "total_nodes": total_nodes,
-        "total_edges": total_edges,
-        "avg_importance": (avg_importance * 100.0).round() / 100.0,
-        "by_type": serde_json::Value::Object(by_type),
-    }))
-}
-
-/// Compute aggregate stats for the `/api/stats` endpoint.
-pub fn compute_stats() -> io::Result<serde_json::Value> {
-    let conn = open_db()?;
-    compute_stats_conn(&conn)
-}
-
-/// BFS traversal from `start_id` to all reachable nodes via a SQL recursive CTE.
-///
-/// Uses `idx_edges_source` / `idx_edges_target` on each recursive step so only
-/// reachable edges are touched — O(reachable_edges) instead of O(E) total.
-/// Single-column `UNION` deduplicates on `node_id` alone, so each node enters
-/// the working set exactly once — preventing re-expansion in cyclic or dense
-/// graphs. The `depth` argument is kept for API compatibility but is ignored;
-/// traversal reaches all reachable nodes up to the LIMIT 500 safety cap.
-pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
-    let conn = match open_db() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("[mem/graph] related_nodes: open_db failed: {e}");
-            return vec![];
-        }
-    };
-    related_nodes_conn(&conn, start_id, depth)
-}
-
-// ── Async pool functions ─────────────────────────────
-
-use super::store::{list_node_ids_pool, read_edges_pool, read_nodes_pool};
-
 /// Build a `Graph` value using a sqlx pool.
-#[allow(dead_code)]
 pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
     let ids = list_node_ids_pool(pool).await?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -272,14 +71,38 @@ pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
 }
 
 /// Build graph JSON string using a sqlx pool.
-#[allow(dead_code)]
 pub async fn rebuild_graph_json_pool(pool: &SqlitePool) -> io::Result<String> {
     serde_json::to_string_pretty(&build_graph_pool(pool).await?)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
+/// Build graph JSON string — sync wrapper that acquires pool internally.
+/// Used by server.rs and other sync callers for the `/api/graph` endpoint.
+pub fn rebuild_graph_json() -> io::Result<String> {
+    block_on(async {
+        let pool = memory_pool().await?;
+        rebuild_graph_json_pool(&pool).await
+    })
+}
+
+/// Write the graph JSON to the graph file on disk.
+pub fn rebuild_graph() -> io::Result<()> {
+    block_on(async {
+        let pool = memory_pool().await?;
+        let graph = build_graph_pool(&pool).await?;
+        let data = serde_json::to_vec_pretty(&graph)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        use super::store::atomic_write;
+        use super::store::graph_path;
+        atomic_write(&graph_path(), &data)
+    })
+}
+
+/// Maximum seeds accepted per call — keeps `WHERE IN (?, ...)` well below
+/// SQLite's `SQLITE_LIMIT_VARIABLE_NUMBER` default of 999 (2 copies are bound).
+const MAX_SEED_IDS: usize = 100;
+
 /// Async 1-hop neighbors using QueryBuilder for the IN clause.
-#[allow(dead_code)]
 pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
@@ -295,8 +118,6 @@ pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec
         seed_ids
     };
 
-    // Build: SELECT target AS nb, SUM(weight) AS w FROM edges WHERE source IN (...) GROUP BY target
-    // UNION ALL SELECT source AS nb, SUM(weight) AS w FROM edges WHERE target IN (...) GROUP BY source
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT target AS nb, SUM(weight) AS w FROM edges WHERE source IN (",
     );
@@ -325,7 +146,6 @@ pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec
         })
         .collect();
 
-    // Accumulate weights and exclude seeds.
     let seed_set: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
     let mut weights: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
     for (nid, w) in raw {
@@ -339,8 +159,19 @@ pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec
     result
 }
 
-/// Async BFS traversal using a sqlx pool.
+/// Get 1-hop neighbors — sync wrapper that acquires pool internally.
 #[allow(dead_code)]
+pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
+    block_on(async {
+        let pool = memory_pool().await.unwrap_or_else(|e| {
+            eprintln!("[mem/graph] graph_neighbors: pool failed: {e}");
+            panic!("memory_pool unavailable");
+        });
+        graph_neighbors_pool(&pool, seed_ids).await
+    })
+}
+
+/// Async BFS traversal using a sqlx pool.
 pub async fn related_nodes_pool(pool: &SqlitePool, start_id: &str, _depth: usize) -> Vec<String> {
     let sql = "
         WITH RECURSIVE bfs(node_id) AS (
@@ -367,8 +198,21 @@ pub async fn related_nodes_pool(pool: &SqlitePool, start_id: &str, _depth: usize
         .unwrap_or_default()
 }
 
+/// BFS traversal from `start_id` — sync wrapper that acquires pool internally.
+pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
+    block_on(async {
+        let pool = match memory_pool().await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[mem/graph] related_nodes: pool failed: {e}");
+                return vec![];
+            }
+        };
+        related_nodes_pool(&pool, start_id, depth).await
+    })
+}
+
 /// Async compute aggregate stats using a sqlx pool.
-#[allow(dead_code)]
 pub async fn compute_stats_pool(pool: &SqlitePool) -> io::Result<serde_json::Value> {
     let total_nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
         .fetch_one(pool)
@@ -405,21 +249,32 @@ pub async fn compute_stats_pool(pool: &SqlitePool) -> io::Result<serde_json::Val
     }))
 }
 
+/// Compute aggregate stats — sync wrapper that acquires pool internally.
+pub fn compute_stats() -> io::Result<serde_json::Value> {
+    block_on(async {
+        let pool = memory_pool().await?;
+        compute_stats_pool(&pool).await
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use super::super::store::{Edge, append_edge_conn, init_schema};
+    use super::super::store::{Edge, append_edge_pool, init_schema_pool};
     use super::*;
-    use rusqlite::Connection;
+    use sqlx::sqlite::SqlitePoolOptions;
 
-    /// Open a fresh in-memory SQLite DB with the full schema applied.
-    /// Each call returns an independent connection — no shared state, no env var mutation.
-    fn mem_db() -> Connection {
-        let conn = Connection::open_in_memory().expect("in-memory db");
-        init_schema(&conn).expect("init_schema");
-        conn
+    /// Open a fresh in-memory SQLite pool with the full schema applied.
+    async fn mem_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("in-memory pool");
+        init_schema_pool(&pool).await.expect("init_schema_pool");
+        pool
     }
 
-    fn insert_edge(conn: &Connection, id: &str, src: &str, tgt: &str) {
+    async fn insert_edge(pool: &SqlitePool, id: &str, src: &str, tgt: &str) {
         let e = Edge {
             id: id.to_string(),
             source: src.to_string(),
@@ -428,21 +283,21 @@ mod tests {
             weight: 1.0,
             ts: "2026-01-01T00:00:00Z".to_string(),
         };
-        append_edge_conn(conn, &e).expect("append_edge_conn");
+        append_edge_pool(pool, &e).await.expect("append_edge_pool");
     }
 
     /// graph_neighbors returns 1-hop neighbors including backward edges.
-    #[test]
-    fn graph_neighbors_returns_direct_neighbors() {
-        let conn = mem_db();
+    #[tokio::test]
+    async fn graph_neighbors_returns_direct_neighbors() {
+        let pool = mem_pool().await;
 
         // A -> B, A -> C, D -> A (backward edge)
-        insert_edge(&conn, "e1", "A", "B");
-        insert_edge(&conn, "e2", "A", "C");
-        insert_edge(&conn, "e3", "D", "A");
+        insert_edge(&pool, "e1", "A", "B").await;
+        insert_edge(&pool, "e2", "A", "C").await;
+        insert_edge(&pool, "e3", "D", "A").await;
 
         let seeds = vec!["A".to_string()];
-        let mut result = graph_neighbors_conn(&conn, &seeds);
+        let mut result = graph_neighbors_pool(&pool, &seeds).await;
         result.sort_by(|a, b| a.0.cmp(&b.0));
 
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
@@ -456,16 +311,16 @@ mod tests {
     }
 
     /// graph_neighbors excludes all seeds from the result set.
-    #[test]
-    fn graph_neighbors_excludes_seeds() {
-        let conn = mem_db();
+    #[tokio::test]
+    async fn graph_neighbors_excludes_seeds() {
+        let pool = mem_pool().await;
 
         // Seed A -> Seed B -> C
-        insert_edge(&conn, "e1", "A", "B");
-        insert_edge(&conn, "e2", "B", "C");
+        insert_edge(&pool, "e1", "A", "B").await;
+        insert_edge(&pool, "e2", "B", "C").await;
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors_conn(&conn, &seeds);
+        let result = graph_neighbors_pool(&pool, &seeds).await;
         let ids: Vec<&str> = result.iter().map(|r| r.0.as_str()).collect();
 
         assert!(ids.contains(&"C"), "C should be reachable from B");
@@ -474,26 +329,26 @@ mod tests {
     }
 
     /// graph_neighbors with empty seed list returns empty.
-    #[test]
-    fn graph_neighbors_empty_seeds() {
-        let conn = mem_db();
-        let result = graph_neighbors_conn(&conn, &[]);
+    #[tokio::test]
+    async fn graph_neighbors_empty_seeds() {
+        let pool = mem_pool().await;
+        let result = graph_neighbors_pool(&pool, &[]).await;
         assert!(result.is_empty(), "empty seeds -> empty result");
     }
 
     /// related_nodes uses a single-column recursive CTE that traverses all
     /// reachable nodes. Each node appears at most once (UNION deduplicates on
     /// node_id alone). Cycles must not produce duplicate results.
-    #[test]
-    fn related_nodes_recursive_cte() {
-        let conn = mem_db();
+    #[tokio::test]
+    async fn related_nodes_recursive_cte() {
+        let pool = mem_pool().await;
 
         // Chain: A -> B -> C
-        insert_edge(&conn, "e1", "A", "B");
-        insert_edge(&conn, "e2", "B", "C");
+        insert_edge(&pool, "e1", "A", "B").await;
+        insert_edge(&pool, "e2", "B", "C").await;
 
         // All reachable nodes from A should include B and C; start node excluded.
-        let result = related_nodes_conn(&conn, "A", 2);
+        let result = related_nodes_pool(&pool, "A", 2).await;
         assert!(result.contains(&"B".to_string()), "should reach B");
         assert!(result.contains(&"C".to_string()), "should reach C (2-hop)");
         assert!(
@@ -502,8 +357,8 @@ mod tests {
         );
 
         // Cycle: C -> A — results must still be deduplicated (no duplicates).
-        insert_edge(&conn, "e3", "C", "A");
-        let cyclic = related_nodes_conn(&conn, "A", 3);
+        insert_edge(&pool, "e3", "C", "A").await;
+        let cyclic = related_nodes_pool(&pool, "A", 3).await;
         let unique: HashSet<_> = cyclic.iter().collect();
         assert_eq!(
             cyclic.len(),
@@ -517,16 +372,16 @@ mod tests {
     }
 
     /// graph_neighbors returns weight sums (both seeds connect to C with weight 1.0 each → 2.0).
-    #[test]
-    fn graph_neighbors_connection_count() {
-        let conn = mem_db();
+    #[tokio::test]
+    async fn graph_neighbors_connection_count() {
+        let pool = mem_pool().await;
 
         // Both seeds A and B connect to C (default weight 1.0 each → total 2.0).
-        insert_edge(&conn, "e1", "A", "C");
-        insert_edge(&conn, "e2", "B", "C");
+        insert_edge(&pool, "e1", "A", "C").await;
+        insert_edge(&pool, "e2", "B", "C").await;
 
         let seeds = vec!["A".to_string(), "B".to_string()];
-        let result = graph_neighbors_conn(&conn, &seeds);
+        let result = graph_neighbors_pool(&pool, &seeds).await;
         let c_weight = result.iter().find(|(id, _)| id == "C").map(|(_, w)| *w);
         assert_eq!(
             c_weight,

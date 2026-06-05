@@ -283,15 +283,16 @@ fn handle_list_nodes(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         .and_then(|v| v.parse().ok())
         .unwrap_or(200)
         .min(1000);
-    // Note: uses store::open_db() (memory.db for the knowledge graph),
+    // Note: uses the memory DB pool (memory.db for the knowledge graph),
     // not the harness operational DB passed as `db` to other handlers.
-    let nodes = match store::open_db() {
-        Ok(conn) => store::read_nodes_limited_conn(&conn, limit).unwrap_or_default(),
-        Err(e) => {
-            eprintln!("[serve] failed to open memory DB for /api/nodes: {e}");
-            Vec::new()
-        }
-    };
+    let nodes = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::memory_pool().await?;
+        store::read_nodes_limited_pool(&pool, limit as i64).await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[serve] failed to open memory DB for /api/nodes: {e}");
+        Vec::new()
+    });
     let results: Vec<serde_json::Value> = nodes
         .into_iter()
         .map(|n| {
