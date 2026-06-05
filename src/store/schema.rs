@@ -65,6 +65,9 @@ fn apply_pragma(conn: &Connection) -> io::Result<()> {
 }
 
 /// Apply the full DDL (tables + indexes). Uses IF NOT EXISTS throughout.
+///
+/// **Keep in sync with `init_schema_pool`** at the bottom of this file —
+/// any DDL change here must be mirrored there.
 fn apply_ddl(conn: &Connection) -> io::Result<()> {
     // Schema version tracking (distinct from memory.db's _meta)
     store_err(conn.execute_batch(
@@ -142,20 +145,22 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
     // ── Metrics (3-table normalized) ──────────────────
     store_err(conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS metrics_state (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            project TEXT NOT NULL DEFAULT ''
+            key     TEXT NOT NULL,
+            value   TEXT NOT NULL,
+            project TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (key, project)
         );
         CREATE TABLE IF NOT EXISTS score_history (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp    TEXT NOT NULL UNIQUE,
+            timestamp    TEXT NOT NULL,
             success_rate REAL NOT NULL,
             avg_score    REAL NOT NULL,
             observations INTEGER NOT NULL DEFAULT 0,
             dim_success  REAL NOT NULL DEFAULT 0.0,
             dim_quality  REAL NOT NULL DEFAULT 0.0,
             dim_cost     REAL NOT NULL DEFAULT 0.0,
-            project      TEXT NOT NULL DEFAULT ''
+            project      TEXT NOT NULL DEFAULT '',
+            UNIQUE(timestamp, project)
         );
         CREATE TABLE IF NOT EXISTS skill_attribution (
             skill_name        TEXT NOT NULL,
@@ -427,9 +432,49 @@ fn migrate_v3_to_v4(conn: &Connection) -> io::Result<()> {
         }
     }
 
-    // Tables that need composite PK changes — recreate with data.
+    // Tables that need PK or UNIQUE constraint changes — recreate with data.
     // Only migrate if the original table exists; otherwise apply_ddl() will create
     // the correct v4 schema from scratch after this migration.
+
+    // metrics_state: TEXT PK → (key, project) composite PK
+    if table_exists(conn, "metrics_state") {
+        store_err(conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS metrics_state_v4 (
+                 key     TEXT NOT NULL,
+                 value   TEXT NOT NULL,
+                 project TEXT NOT NULL DEFAULT '',
+                 PRIMARY KEY (key, project)
+             );
+             INSERT OR IGNORE INTO metrics_state_v4
+                 SELECT key, value, project FROM metrics_state;
+             DROP TABLE metrics_state;
+             ALTER TABLE metrics_state_v4 RENAME TO metrics_state;",
+        ))?;
+    }
+
+    // score_history: UNIQUE(timestamp) → UNIQUE(timestamp, project)
+    if table_exists(conn, "score_history") {
+        store_err(conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS score_history_v4 (
+                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                 timestamp    TEXT NOT NULL,
+                 success_rate REAL NOT NULL,
+                 avg_score    REAL NOT NULL,
+                 observations INTEGER NOT NULL DEFAULT 0,
+                 dim_success  REAL NOT NULL DEFAULT 0.0,
+                 dim_quality  REAL NOT NULL DEFAULT 0.0,
+                 dim_cost     REAL NOT NULL DEFAULT 0.0,
+                 project      TEXT NOT NULL DEFAULT '',
+                 UNIQUE(timestamp, project)
+             );
+             INSERT OR IGNORE INTO score_history_v4
+                 SELECT id, timestamp, success_rate, avg_score, observations,
+                        dim_success, dim_quality, dim_cost, project FROM score_history;
+             DROP TABLE score_history;
+             ALTER TABLE score_history_v4 RENAME TO score_history;",
+        ))?;
+    }
+
     if table_exists(conn, "skill_attribution") {
         // skill_attribution: TEXT PK → (skill_name, project) composite PK
         store_err(conn.execute_batch(
@@ -537,6 +582,9 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
 ///
 /// Async equivalent of `init_schema()` for use with sqlx pools.
 /// Called once during pool creation in `pool::harness_pool()`.
+///
+/// **Keep in sync with `apply_ddl`** above — any DDL change here must be
+/// mirrored in the rusqlite counterpart.
 pub(crate) async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     use sqlx::Executor;
 
@@ -614,20 +662,22 @@ pub(crate) async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_evo_project ON evolution_records(project);
 
         CREATE TABLE IF NOT EXISTS metrics_state (
-            key   TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            project TEXT NOT NULL DEFAULT ''
+            key     TEXT NOT NULL,
+            value   TEXT NOT NULL,
+            project TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (key, project)
         );
         CREATE TABLE IF NOT EXISTS score_history (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp    TEXT NOT NULL UNIQUE,
+            timestamp    TEXT NOT NULL,
             success_rate REAL NOT NULL,
             avg_score    REAL NOT NULL,
             observations INTEGER NOT NULL DEFAULT 0,
             dim_success  REAL NOT NULL DEFAULT 0.0,
             dim_quality  REAL NOT NULL DEFAULT 0.0,
             dim_cost     REAL NOT NULL DEFAULT 0.0,
-            project      TEXT NOT NULL DEFAULT ''
+            project      TEXT NOT NULL DEFAULT '',
+            UNIQUE(timestamp, project)
         );
         CREATE TABLE IF NOT EXISTS skill_attribution (
             skill_name        TEXT NOT NULL,

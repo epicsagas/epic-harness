@@ -125,111 +125,59 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
 pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) -> io::Result<()> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
 
-    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
-        .bind("total_sessions")
-        .bind(m.total_sessions.to_string())
+    // Fixed scalar fields — always upsert.
+    let fixed: &[(&str, String)] = &[
+        ("total_sessions", m.total_sessions.to_string()),
+        ("avg_success_rate", m.avg_success_rate.to_string()),
+        ("total_evolved_skills", m.total_evolved_skills.to_string()),
+        ("best_session", m.best_session.clone()),
+        ("trend", m.trend.clone()),
+        ("stagnation_count", m.stagnation_count.to_string()),
+    ];
+    for (key, val) in fixed {
+        sqlx::query(
+            "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
+        )
+        .bind(*key)
+        .bind(val)
         .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(crate::store::sqlx_err)?;
-    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
-        .bind("avg_success_rate")
-        .bind(m.avg_success_rate.to_string())
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
-        .bind("total_evolved_skills")
-        .bind(m.total_evolved_skills.to_string())
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+    }
 
-    match &m.last_session {
-        Some(v) => {
-            sqlx::query(
-                "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
-            )
-            .bind("last_session")
-            .bind(v)
-            .bind(project)
-            .execute(&mut *tx)
-            .await
-            .map_err(crate::store::sqlx_err)?;
-        }
-        None => {
-            sqlx::query("DELETE FROM metrics_state WHERE key = 'last_session' AND project = ?1")
+    // Optional fields — upsert when present, delete the key when absent so that
+    // load sees a clean absence rather than a stale value.
+    let optional: &[(&str, Option<String>)] = &[
+        ("last_session", m.last_session.clone()),
+        ("best_score", m.best_score.map(|v| v.to_string())),
+        ("last_error_context", m.last_error_context.clone()),
+    ];
+    for (key, opt_val) in optional {
+        match opt_val {
+            Some(val) => {
+                sqlx::query(
+                    "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
+                )
+                .bind(*key)
+                .bind(val)
                 .bind(project)
                 .execute(&mut *tx)
                 .await
                 .map_err(crate::store::sqlx_err)?;
-        }
-    };
-    match m.best_score {
-        Some(v) => {
-            sqlx::query(
-                "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
-            )
-            .bind("best_score")
-            .bind(v.to_string())
-            .bind(project)
-            .execute(&mut *tx)
-            .await
-            .map_err(crate::store::sqlx_err)?;
-        }
-        None => {
-            sqlx::query("DELETE FROM metrics_state WHERE key = 'best_score' AND project = ?1")
+            }
+            None => {
+                sqlx::query(
+                    "DELETE FROM metrics_state WHERE key = ?1 AND project = ?2",
+                )
+                .bind(*key)
                 .bind(project)
                 .execute(&mut *tx)
                 .await
                 .map_err(crate::store::sqlx_err)?;
+            }
         }
-    };
-    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
-        .bind("best_session")
-        .bind(&m.best_session)
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
-        .bind("trend")
-        .bind(&m.trend)
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
-        .bind("stagnation_count")
-        .bind(m.stagnation_count.to_string())
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    match &m.last_error_context {
-        Some(v) => {
-            sqlx::query(
-                "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
-            )
-            .bind("last_error_context")
-            .bind(v)
-            .bind(project)
-            .execute(&mut *tx)
-            .await
-            .map_err(crate::store::sqlx_err)?;
-        }
-        None => {
-            sqlx::query(
-                "DELETE FROM metrics_state WHERE key = 'last_error_context' AND project = ?1",
-            )
-            .bind(project)
-            .execute(&mut *tx)
-            .await
-            .map_err(crate::store::sqlx_err)?;
-        }
-    };
+    }
 
     // Score history — UPSERT with cap
     let entries: Vec<&SessionScoreEntry> = m
@@ -240,7 +188,15 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         .collect();
     for entry in entries.into_iter().rev() {
         sqlx::query(
-            "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(timestamp) DO UPDATE SET success_rate = excluded.success_rate, avg_score = excluded.avg_score, observations = excluded.observations, dim_success = excluded.dim_success, dim_quality = excluded.dim_quality, dim_cost = excluded.dim_cost"
+            "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost, project) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
+             ON CONFLICT(timestamp, project) DO UPDATE SET \
+                 success_rate = excluded.success_rate, \
+                 avg_score = excluded.avg_score, \
+                 observations = excluded.observations, \
+                 dim_success = excluded.dim_success, \
+                 dim_quality = excluded.dim_quality, \
+                 dim_cost = excluded.dim_cost"
         )
         .bind(&entry.timestamp)
         .bind(entry.success_rate)
@@ -388,5 +344,59 @@ mod tests {
             "expected observations >= 10, got {}",
             first.observations
         );
+    }
+
+    #[tokio::test]
+    async fn metrics_state_two_projects_isolated() {
+        let pool = in_memory_pool().await;
+
+        let mut m_a = sample_metrics();
+        m_a.total_sessions = 10;
+        m_a.trend = "improving".into();
+
+        let mut m_b = sample_metrics();
+        m_b.total_sessions = 99;
+        m_b.trend = "declining".into();
+
+        save_metrics_pool(&pool, "project-a", &m_a).await.unwrap();
+        save_metrics_pool(&pool, "project-b", &m_b).await.unwrap();
+
+        let a = load_metrics_pool(&pool, "project-a").await.unwrap();
+        let b = load_metrics_pool(&pool, "project-b").await.unwrap();
+
+        assert_eq!(a.total_sessions, 10);
+        assert_eq!(a.trend, "improving");
+        assert_eq!(b.total_sessions, 99);
+        assert_eq!(b.trend, "declining");
+    }
+
+    #[tokio::test]
+    async fn score_history_same_timestamp_different_projects() {
+        let pool = in_memory_pool().await;
+
+        let entry = SessionScoreEntry {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            success_rate: 0.9,
+            avg_score: 0.85,
+            observations: 5,
+            dimension_averages: ScoreDimensions::default(),
+        };
+
+        let mut m_a = sample_metrics();
+        m_a.score_history = vec![entry.clone()];
+        let mut m_b = sample_metrics();
+        m_b.score_history = vec![SessionScoreEntry {
+            observations: 50, // different value
+            ..entry
+        }];
+
+        save_metrics_pool(&pool, "project-a", &m_a).await.unwrap();
+        save_metrics_pool(&pool, "project-b", &m_b).await.unwrap();
+
+        let a = load_metrics_pool(&pool, "project-a").await.unwrap();
+        let b = load_metrics_pool(&pool, "project-b").await.unwrap();
+
+        assert_eq!(a.score_history[0].observations, 5);
+        assert_eq!(b.score_history[0].observations, 50);
     }
 }

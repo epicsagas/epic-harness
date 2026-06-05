@@ -21,8 +21,12 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
 
 /// Run an async store function from a synchronous context.
 ///
-/// Creates the global runtime on first call. Safe to call from any thread.
-/// **Panics** if called from within the runtime itself (would deadlock).
+/// Safe to call from any thread that is NOT already inside a tokio runtime
+/// (e.g., hooks invoked as child processes, `serve.rs` tiny_http thread).
+///
+/// # Panics
+/// Panics if called from inside a tokio task — e.g., an axum handler or
+/// a `#[tokio::test]`. Use `.await` directly in async callers instead.
 pub(crate) fn block_on<F, T>(fut: F) -> T
 where
     F: Future<Output = T>,

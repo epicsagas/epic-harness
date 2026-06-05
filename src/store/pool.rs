@@ -137,7 +137,9 @@ pub async fn memory_pool() -> io::Result<SqlitePool> {
 /// Uses `get()` rather than `take()` because `OnceLock::take()` requires `&mut self`,
 /// which is unavailable on a `static`. After `close()`, any further pool operations
 /// will return an error — the desired behavior for a shutdown path.
-#[cfg(test)]
+///
+/// Wire into the async shutdown hook once callers are migrated to pool functions.
+#[allow(dead_code)]
 pub async fn shutdown() {
     if let Some(pool) = HARNESS_POOL.get() {
         pool.close().await;
