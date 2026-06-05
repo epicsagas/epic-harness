@@ -341,6 +341,40 @@ fn load_config() -> HarnessConfig {
 
 // ── Validation ───────────────────────────────────────
 
+/// Detect the database scheme from a connection URL.
+/// Returns "sqlite", "postgres", or "mysql". Returns "sqlite" for empty URLs.
+fn url_scheme(url: &str) -> &str {
+    if url.starts_with("postgres:") || url.starts_with("postgresql:") {
+        "postgres"
+    } else if url.starts_with("mysql:") {
+        "mysql"
+    } else {
+        "sqlite"
+    }
+}
+
+/// Cross-validate `driver` against URL scheme. Warn and correct on mismatch.
+fn cross_validate_driver(driver: &mut String, url: &str) {
+    if url.is_empty() {
+        // Empty URL defaults to sqlite: — if driver says otherwise, warn.
+        if *driver != "sqlite" {
+            eprintln!(
+                "[harness] db.driver = '{driver}' but db.harness_url is empty — will default to SQLite. \
+                 Set db.harness_url to a {driver}:// URL or change driver to 'sqlite'.",
+            );
+            *driver = "sqlite".into();
+        }
+        return;
+    }
+    let scheme = url_scheme(url);
+    if scheme != driver.as_str() {
+        eprintln!(
+            "[harness] db.driver = '{driver}' but db.harness_url scheme is '{scheme}:' — correcting driver to '{scheme}'",
+        );
+        *driver = scheme.to_string();
+    }
+}
+
 fn validate_config(cfg: &mut HarnessConfig) {
     let w = cfg.scoring.weights;
     let sum: f64 = w.iter().sum();
@@ -366,6 +400,9 @@ fn validate_config(cfg: &mut HarnessConfig) {
     } else {
         cfg.db.driver = driver;
     }
+
+    // Cross-validate db.driver against URL schemes
+    cross_validate_driver(&mut cfg.db.driver, &cfg.db.harness_url);
 
     // Validate TLS mode
     match cfg.db.tls_mode.as_str() {
@@ -754,6 +791,7 @@ max_docs = 5
         let mut c = HarnessConfig {
             db: DbConfig {
                 driver: "postgres".into(),
+                harness_url: "postgres://u:p@localhost/db".into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -767,6 +805,7 @@ max_docs = 5
         let mut c = HarnessConfig {
             db: DbConfig {
                 driver: "mysql".into(),
+                harness_url: "mysql://u:p@localhost/db".into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -814,5 +853,47 @@ max_docs = 5
         };
         validate_config(&mut c);
         assert_eq!(c.db.tls_mode, "prefer"); // corrected
+    }
+
+    #[test]
+    fn cross_validate_driver_postgres_without_url_corrects_to_sqlite() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "postgres".into(),
+                // harness_url and memory_url are empty (defaults)
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "sqlite"); // corrected: no URL → sqlite
+    }
+
+    #[test]
+    fn cross_validate_driver_scheme_mismatch_corrects() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "sqlite".into(),
+                harness_url: "postgres://u:p@localhost/db".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "postgres"); // corrected to match URL scheme
+    }
+
+    #[test]
+    fn cross_validate_driver_matches_url_scheme() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "postgres".into(),
+                harness_url: "postgres://u:p@localhost/db".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "postgres"); // unchanged
     }
 }

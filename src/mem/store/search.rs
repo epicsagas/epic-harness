@@ -18,20 +18,42 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
 }
 
 pub async fn search_nodes_pool(pool: &AnyPool, query: &str, limit: i64) -> io::Result<Vec<Node>> {
-    let sql = format!(
-        "SELECT n.{NODE_COLUMNS_PREFIXED}
-         FROM nodes n
-         JOIN nodes_fts ON n.rowid = nodes_fts.rowid
-         WHERE nodes_fts MATCH $1
-         ORDER BY n.importance DESC
-         LIMIT $2"
-    );
-    let rows = sqlx::query(&sql)
-        .bind(query)
-        .bind(limit)
-        .fetch_all(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+    let db_type = crate::store::pool::memory_db_type();
+
+    let rows = match db_type {
+        crate::store::pool::DbType::Postgres => {
+            let sql = format!(
+                "SELECT {NODE_COLUMNS}
+                 FROM nodes
+                 WHERE search_vector @@ plainto_tsquery('english', $1)
+                 ORDER BY importance DESC
+                 LIMIT $2"
+            );
+            sqlx::query(&sql)
+                .bind(query)
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+                .map_err(crate::store::sqlx_err)?
+        }
+        _ => {
+            // SQLite (FTS5) and MySQL (deferred — falls back to SQLite FTS5 query)
+            let sql = format!(
+                "SELECT n.{NODE_COLUMNS_PREFIXED}
+                 FROM nodes n
+                 JOIN nodes_fts ON n.rowid = nodes_fts.rowid
+                 WHERE nodes_fts MATCH $1
+                 ORDER BY n.importance DESC
+                 LIMIT $2"
+            );
+            sqlx::query(&sql)
+                .bind(query)
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+                .map_err(crate::store::sqlx_err)?
+        }
+    };
     rows.iter().map(row_to_node_pool).collect()
 }
 
