@@ -22,16 +22,6 @@ use super::sqlx_err;
 
 // ── Connection factory ──────────────────────────────────────────────────────
 
-/// Open a direct (non-pooled) sqlx `SqliteConnection` to the global harness.db.
-///
-/// Creates parent directories and sets WAL + FK pragmas. Schema must already
-/// exist (callers are expected to have run `init_schema_pool` at startup, or
-/// the DB was created by `open_harness_db` earlier in the same process).
-#[allow(dead_code)]
-pub(crate) async fn open_migrate_conn_for_schema() -> io::Result<sqlx::SqliteConnection> {
-    open_migrate_conn().await
-}
-
 async fn open_migrate_conn() -> io::Result<sqlx::SqliteConnection> {
     let path = super::harness_db_path();
     if let Some(parent) = path.parent() {
@@ -74,7 +64,9 @@ async fn commit(conn: &mut sqlx::SqliteConnection) -> io::Result<()> {
 }
 
 async fn rollback(conn: &mut sqlx::SqliteConnection) {
-    let _ = conn.execute("ROLLBACK").await;
+    if let Err(e) = conn.execute("ROLLBACK").await {
+        eprintln!("[store::migrate] rollback failed: {e}");
+    }
 }
 
 // ── Public sync entry points ────────────────────────────────────────────────
