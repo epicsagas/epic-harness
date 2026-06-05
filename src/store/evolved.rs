@@ -188,7 +188,7 @@ pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io
     .bind(&skill.updated)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -220,7 +220,7 @@ async fn list_skills_pool_inner(
         .fetch_all(pool)
         .await
     }
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let skills: Vec<EvolvedSkillRow> = rows
         .iter()
@@ -256,11 +256,11 @@ pub async fn read_skill_md_pool(pool: &SqlitePool, name: &str) -> io::Result<Opt
         .bind(name)
         .fetch_optional(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     match row {
         Some(r) => Ok(Some(
-            r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?,
+            r.try_get(0).map_err(crate::store::sqlx_err)?,
         )),
         None => Ok(None),
     }
@@ -272,7 +272,7 @@ pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool
         .bind(name)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -281,10 +281,10 @@ pub async fn count_active_skills_pool(pool: &SqlitePool) -> io::Result<usize> {
     let row = sqlx::query("SELECT COUNT(*) FROM evolved_skills WHERE active = 1")
         .fetch_one(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let count: i64 = row
         .try_get(0)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(count as usize)
 }
 
@@ -293,12 +293,12 @@ pub async fn load_promotion_counters_pool(pool: &SqlitePool) -> io::Result<HashM
     let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters")
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     let mut counters = HashMap::new();
     for r in &rows {
-        let key: String = r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?;
-        let count: i64 = r.try_get(1).map_err(|e| io::Error::other(e.to_string()))?;
+        let key: String = r.try_get(0).map_err(crate::store::sqlx_err)?;
+        let count: i64 = r.try_get(1).map_err(crate::store::sqlx_err)?;
         counters.insert(key, count as u64);
     }
     Ok(counters)
@@ -312,24 +312,24 @@ pub async fn save_promotion_counters_pool(
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("DELETE FROM promotion_counters")
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     for (key, count) in counters {
         sqlx::query(
             "INSERT OR REPLACE INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
         )
         .bind(key)
-        .bind(*count as i64)
+        .bind(crate::store::u64_to_i64(*count))
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     }
     tx.commit()
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 

@@ -188,7 +188,7 @@ pub async fn insert_pattern_pool(
     .bind(weak_tools_json)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(result.last_insert_rowid())
 }
 
@@ -231,7 +231,7 @@ async fn query_patterns_pool_inner(
         .fetch_all(pool)
         .await
     }
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let patterns: Vec<serde_json::Value> = rows.iter().map(|r| {
         let per_err: String = r.try_get(4).unwrap_or_else(|e| {

@@ -149,7 +149,7 @@ pub async fn decay_importance_pool(
     .bind(floor)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(result.rows_affected())
 }
 
@@ -181,6 +181,6 @@ pub async fn tag_stale_nodes_pool(pool: &SqlitePool, days: u64) -> io::Result<u6
     .bind(&cutoff)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(result.rows_affected())
 }

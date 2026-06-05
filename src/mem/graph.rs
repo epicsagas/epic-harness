@@ -386,7 +386,7 @@ pub async fn compute_stats_pool(pool: &SqlitePool) -> io::Result<serde_json::Val
     let rows = sqlx::query("SELECT type, COUNT(*) FROM nodes GROUP BY type")
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     let by_type: serde_json::Map<String, serde_json::Value> = rows
         .iter()

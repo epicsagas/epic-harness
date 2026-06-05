@@ -35,6 +35,12 @@ pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> 
     result.map_err(io::Error::other)
 }
 
+/// Convert a sqlx error to io::Result. Used by all `*_pool` async functions.
+#[inline]
+pub(crate) fn sqlx_err(e: sqlx::Error) -> io::Error {
+    io::Error::other(e.to_string())
+}
+
 /// Convert a single-row query result to `Option<T>`, mapping "no rows" to `None`.
 ///
 /// Used across all store submodules to handle the common pattern:

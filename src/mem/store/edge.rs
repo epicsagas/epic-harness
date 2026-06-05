@@ -125,7 +125,7 @@ pub async fn append_edge_pool(pool: &SqlitePool, edge: &Edge) -> io::Result<()> 
     .bind(&edge.ts)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -135,16 +135,16 @@ pub async fn read_edges_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Ed
         .bind(limit)
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     rows.iter()
         .map(|r| {
             Ok(Edge {
-                id: r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?,
-                source: r.try_get(1).map_err(|e| io::Error::other(e.to_string()))?,
-                target: r.try_get(2).map_err(|e| io::Error::other(e.to_string()))?,
-                relation: r.try_get(3).map_err(|e| io::Error::other(e.to_string()))?,
-                weight: r.try_get(4).map_err(|e| io::Error::other(e.to_string()))?,
-                ts: r.try_get(5).map_err(|e| io::Error::other(e.to_string()))?,
+                id: r.try_get(0).map_err(crate::store::sqlx_err)?,
+                source: r.try_get(1).map_err(crate::store::sqlx_err)?,
+                target: r.try_get(2).map_err(crate::store::sqlx_err)?,
+                relation: r.try_get(3).map_err(crate::store::sqlx_err)?,
+                weight: r.try_get(4).map_err(crate::store::sqlx_err)?,
+                ts: r.try_get(5).map_err(crate::store::sqlx_err)?,
             })
         })
         .collect()
@@ -156,7 +156,7 @@ pub async fn delete_edge_by_id_pool(pool: &SqlitePool, edge_id: &str) -> io::Res
         .bind(edge_id)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -167,6 +167,6 @@ pub async fn remove_edges_for_node_pool(pool: &SqlitePool, node_id: &str) -> io:
         .bind(node_id)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }

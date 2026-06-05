@@ -26,6 +26,26 @@ pub(crate) fn split_csv(s: &str) -> Vec<String> {
         .collect()
 }
 
+// ── LIKE escape ───────────────────────────────────────
+
+/// Escape SQL LIKE wildcards (`%`, `_`, `\`) in a bound value.
+///
+/// Used with `LIKE '%,' || ? ESCAPE '\' || ',%'` patterns to prevent
+/// project names or tags containing `%` or `_` from matching unintended rows.
+pub(crate) fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '%' | '_' | '\\' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 // ── Row mapping ───────────────────────────────────────
 
 pub(crate) fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {

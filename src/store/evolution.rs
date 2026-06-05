@@ -118,7 +118,7 @@ pub async fn insert_record_pool(
         "INSERT INTO evolution_records (timestamp, observations, success_rate, avg_score, error_patterns, failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
     )
     .bind(&rec.timestamp)
-    .bind(rec.observations as i64)
+    .bind(crate::store::u64_to_i64(rec.observations))
     .bind(rec.success_rate)
     .bind(rec.avg_score)
     .bind(&error_json)
@@ -130,7 +130,7 @@ pub async fn insert_record_pool(
     .bind(project)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(result.last_insert_rowid())
 }
 
@@ -145,7 +145,7 @@ pub async fn query_recent_records_pool(
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let mut records: Vec<EvolutionRecord> = rows
         .iter()

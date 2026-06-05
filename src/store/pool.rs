@@ -1,7 +1,7 @@
 //! pool/ — Async connection pool factory (sqlx)
 //!
 //! Creates lazily-initialized `SqlitePool` instances for `harness.db` and `memory.db`.
-//! Pools are stored in global `OnceCell`s via `LazyLock` — the first call creates the
+//! Pools are stored in global `OnceLock` singletons — the first call creates the
 //! pool, subsequent calls return the existing one.
 //!
 //! This module lives alongside the existing rusqlite sync code in `store/mod.rs`.
@@ -16,7 +16,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::OnceLock;
 
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -62,7 +62,6 @@ fn memory_url() -> String {
 /// - Creates parent directories if needed.
 /// - Sets WAL mode, foreign_keys=ON, busy_timeout=5000ms.
 /// - Restricts file permissions to 0o600 on Unix.
-#[allow(dead_code)]
 async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
     // Extract filesystem path from "sqlite:/path/to/db" for directory/permission setup.
     let db_path = url.strip_prefix("sqlite:").unwrap_or(url);
@@ -95,14 +94,13 @@ async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
 
 // ── Global pool singletons ─────────────────────────
 
-static HARNESS_POOL: LazyLock<OnceLock<SqlitePool>> = LazyLock::new(OnceLock::new);
-static MEMORY_POOL: LazyLock<OnceLock<SqlitePool>> = LazyLock::new(OnceLock::new);
+static HARNESS_POOL: OnceLock<SqlitePool> = OnceLock::new();
+static MEMORY_POOL: OnceLock<SqlitePool> = OnceLock::new();
 
 /// Returns a shared `SqlitePool` for `harness.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
 /// Uses `CONFIG.db` for URL and max_connections.
-#[allow(dead_code)]
 pub async fn harness_pool() -> io::Result<SqlitePool> {
     if let Some(pool) = HARNESS_POOL.get() {
         return Ok(pool.clone());
@@ -116,7 +114,6 @@ pub async fn harness_pool() -> io::Result<SqlitePool> {
 /// Returns a shared `SqlitePool` for `memory.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
-#[allow(dead_code)]
 pub async fn memory_pool() -> io::Result<SqlitePool> {
     if let Some(pool) = MEMORY_POOL.get() {
         return Ok(pool.clone());
@@ -124,4 +121,18 @@ pub async fn memory_pool() -> io::Result<SqlitePool> {
     let pool = build_pool(&memory_url(), CONFIG.db.max_connections).await?;
     let _ = MEMORY_POOL.set(pool.clone());
     Ok(pool)
+}
+
+/// Gracefully close all pools. Call on process shutdown to flush WAL.
+///
+/// Uses `get()` rather than `take()` because `OnceLock::take()` requires `&mut self`,
+/// which is unavailable on a `static`. After `close()`, any further pool operations
+/// will return an error — the desired behavior for a shutdown path.
+pub async fn shutdown() {
+    if let Some(pool) = HARNESS_POOL.get() {
+        pool.close().await;
+    }
+    if let Some(pool) = MEMORY_POOL.get() {
+        pool.close().await;
+    }
 }

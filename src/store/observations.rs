@@ -352,16 +352,16 @@ pub struct SessionStatRow {
 /// Map an sqlx observation row to ObsRecord.
 #[allow(dead_code)]
 fn row_to_obs_record(r: &sqlx::sqlite::SqliteRow) -> io::Result<ObsRecord> {
-    let dim_s: Option<f64> = r.try_get(6).map_err(|e| io::Error::other(e.to_string()))?;
-    let dim_q: Option<f64> = r.try_get(7).map_err(|e| io::Error::other(e.to_string()))?;
-    let dim_c: Option<f64> = r.try_get(8).map_err(|e| io::Error::other(e.to_string()))?;
+    let dim_s: Option<f64> = r.try_get(6).map_err(crate::store::sqlx_err)?;
+    let dim_q: Option<f64> = r.try_get(7).map_err(crate::store::sqlx_err)?;
+    let dim_c: Option<f64> = r.try_get(8).map_err(crate::store::sqlx_err)?;
     Ok(ObsRecord {
-        timestamp: r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?,
-        tool: r.try_get(1).map_err(|e| io::Error::other(e.to_string()))?,
-        tool_category: r.try_get(2).map_err(|e| io::Error::other(e.to_string()))?,
-        action: r.try_get(3).map_err(|e| io::Error::other(e.to_string()))?,
-        result: r.try_get(4).map_err(|e| io::Error::other(e.to_string()))?,
-        score: r.try_get(5).map_err(|e| io::Error::other(e.to_string()))?,
+        timestamp: r.try_get(0).map_err(crate::store::sqlx_err)?,
+        tool: r.try_get(1).map_err(crate::store::sqlx_err)?,
+        tool_category: r.try_get(2).map_err(crate::store::sqlx_err)?,
+        action: r.try_get(3).map_err(crate::store::sqlx_err)?,
+        result: r.try_get(4).map_err(crate::store::sqlx_err)?,
+        score: r.try_get(5).map_err(crate::store::sqlx_err)?,
         dimensions: {
             let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
             let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
@@ -377,15 +377,15 @@ fn row_to_obs_record(r: &sqlx::sqlite::SqliteRow) -> io::Result<ObsRecord> {
                 None
             }
         },
-        failure_category: r.try_get(9).map_err(|e| io::Error::other(e.to_string()))?,
-        error_snippet: r.try_get(10).map_err(|e| io::Error::other(e.to_string()))?,
-        file_ext: r.try_get(11).map_err(|e| io::Error::other(e.to_string()))?,
+        failure_category: r.try_get(9).map_err(crate::store::sqlx_err)?,
+        error_snippet: r.try_get(10).map_err(crate::store::sqlx_err)?,
+        file_ext: r.try_get(11).map_err(crate::store::sqlx_err)?,
         sequence_id: r
             .try_get::<Option<i64>, _>(12)
             .ok()
             .flatten()
             .map(super::i64_to_u64),
-        pipeline_id: r.try_get(13).map_err(|e| io::Error::other(e.to_string()))?,
+        pipeline_id: r.try_get(13).map_err(crate::store::sqlx_err)?,
     })
 }
 
@@ -430,7 +430,7 @@ pub async fn insert_observation_pool(
     .bind(project)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(result.last_insert_rowid())
 }
 
@@ -460,7 +460,7 @@ pub async fn query_obs_for_date_range_pool(
     .bind(limit_val)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     rows.iter().map(row_to_obs_record).collect()
 }
@@ -487,17 +487,17 @@ pub async fn query_obs_stats_pool(
     .bind(&to)
     .fetch_one(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let total: i64 = row
         .try_get(0)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let successes: i64 = row
         .try_get(1)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let avg_score: f64 = row
         .try_get(2)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     // Per-tool stats
     let tool_rows = sqlx::query(
@@ -512,7 +512,7 @@ pub async fn query_obs_stats_pool(
     .bind(&to)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let tool_stats: Vec<ToolStatRow> = tool_rows
         .iter()
@@ -536,7 +536,7 @@ pub async fn query_obs_stats_pool(
     .bind(&to)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let error_stats: Vec<(String, i64)> = err_rows
         .iter()
@@ -560,7 +560,7 @@ pub async fn query_obs_stats_pool(
     .bind(&to)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let session_stats: Vec<SessionStatRow> = sess_rows
         .iter()
@@ -597,7 +597,7 @@ pub async fn query_latest_observations_pool(
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     rows.iter().map(row_to_obs_record).collect()
 }
@@ -616,7 +616,7 @@ pub async fn query_last_action_pool(
     .bind(session_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(row.and_then(|r| r.try_get::<String, _>(0).ok()))
 }
 

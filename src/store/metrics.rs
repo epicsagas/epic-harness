@@ -276,7 +276,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
         .bind(project)
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     let state: HashMap<String, String> = kv_rows
         .iter()
@@ -314,7 +314,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
     .bind(project)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let score_history: Vec<SessionScoreEntry> = sh_rows
         .iter()
@@ -341,7 +341,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
     .bind(project)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let skill_attribution: HashMap<String, SkillAttribution> = sa_rows
         .iter()
@@ -378,7 +378,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
         .bind("total_sessions")
@@ -386,21 +386,21 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
         .bind("avg_success_rate")
         .bind(m.avg_success_rate.to_string())
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
         .bind("total_evolved_skills")
         .bind(m.total_evolved_skills.to_string())
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     match &m.last_session {
         Some(v) => {
@@ -412,14 +412,14 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
             .bind(project)
             .execute(&mut *tx)
             .await
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(crate::store::sqlx_err)?;
         }
         None => {
             sqlx::query("DELETE FROM metrics_state WHERE key = 'last_session' AND project = ?1")
                 .bind(project)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| io::Error::other(e.to_string()))?;
+                .map_err(crate::store::sqlx_err)?;
         }
     };
     match m.best_score {
@@ -432,14 +432,14 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
             .bind(project)
             .execute(&mut *tx)
             .await
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(crate::store::sqlx_err)?;
         }
         None => {
             sqlx::query("DELETE FROM metrics_state WHERE key = 'best_score' AND project = ?1")
                 .bind(project)
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| io::Error::other(e.to_string()))?;
+                .map_err(crate::store::sqlx_err)?;
         }
     };
     sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
@@ -448,21 +448,21 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
         .bind("trend")
         .bind(&m.trend)
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)")
         .bind("stagnation_count")
         .bind(m.stagnation_count.to_string())
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     match &m.last_error_context {
         Some(v) => {
             sqlx::query(
@@ -473,7 +473,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
             .bind(project)
             .execute(&mut *tx)
             .await
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(crate::store::sqlx_err)?;
         }
         None => {
             sqlx::query(
@@ -482,7 +482,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
             .bind(project)
             .execute(&mut *tx)
             .await
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(crate::store::sqlx_err)?;
         }
     };
 
@@ -500,14 +500,14 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         .bind(&entry.timestamp)
         .bind(entry.success_rate)
         .bind(entry.avg_score)
-        .bind(entry.observations as i64)
+        .bind(crate::store::u64_to_i64(entry.observations))
         .bind(entry.dimension_averages.tool_success)
         .bind(entry.dimension_averages.output_quality)
         .bind(entry.dimension_averages.execution_cost)
         .bind(project)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     }
     sqlx::query(
         "DELETE FROM score_history WHERE project = ?1 AND id NOT IN (SELECT id FROM score_history WHERE project = ?1 ORDER BY id DESC LIMIT ?2)"
@@ -516,7 +516,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
     .bind(MAX_SCORE_HISTORY as i64)
     .execute(&mut *tx)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     // Skill attribution
     for sa in m.skill_attribution.values() {
@@ -525,18 +525,18 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         )
         .bind(&sa.skill_name)
         .bind(project)
-        .bind(sa.sessions_active as i64)
+        .bind(crate::store::u64_to_i64(sa.sessions_active))
         .bind(sa.avg_score_with)
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     }
 
     tx.commit()
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 

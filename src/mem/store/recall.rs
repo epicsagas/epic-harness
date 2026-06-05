@@ -8,7 +8,7 @@ use super::decay::{touch_nodes_conn, touch_nodes_pool};
 use super::node::row_to_node_pool;
 use super::search::{search_nodes_conn, search_nodes_pool};
 use super::types::{Node, ScoredNode};
-use super::util::{NODE_COLUMNS, parse_iso_to_secs};
+use super::util::{NODE_COLUMNS, escape_like, parse_iso_to_secs};
 
 /// Composite relevance score weights.
 pub const W_RECENCY: f64 = 0.20; // was 0.25 — reduced to make room for graph boost
@@ -49,8 +49,8 @@ pub fn smart_recall_conn(
     // Collect bound parameter values alongside conditions.
     let mut param_vals: Vec<Box<dyn rusqlite::ToSql>> = vec![];
     if let Some(p) = project {
-        conditions.push("(',' || projects || ',' LIKE '%,' || ? || ',%')");
-        param_vals.push(Box::new(p.to_string()));
+        conditions.push("(',' || projects || ',' LIKE '%,' || ? || ',%' ESCAPE '\\')");
+        param_vals.push(Box::new(escape_like(p)));
     }
     let where_clause = format!("WHERE {}", conditions.join(" AND "));
     let sql = format!(
@@ -228,8 +228,8 @@ pub async fn smart_recall_pool(
     ));
     if let Some(p) = project {
         qb.push(" AND (',' || projects || ',' LIKE '%,' || ");
-        qb.push_bind(p);
-        qb.push(" || ',%')");
+        qb.push_bind(escape_like(p));
+        qb.push(" || ',%' ESCAPE '\\')");
     }
     qb.push(" ORDER BY importance DESC, updated DESC LIMIT ");
     qb.push_bind(candidate_limit);
@@ -238,7 +238,7 @@ pub async fn smart_recall_pool(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let candidates: Vec<Node> = rows
         .iter()
         .filter_map(|r| row_to_node_pool(r).ok())

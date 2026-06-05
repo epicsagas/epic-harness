@@ -183,7 +183,7 @@ pub async fn write_node_pool(pool: &SqlitePool, node: &Node) -> io::Result<()> {
     .bind(&fm.accessed_at)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -213,7 +213,7 @@ pub async fn read_nodes_pool(pool: &SqlitePool, ids: &[&str]) -> io::Result<Vec<
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     rows.iter().map(row_to_node_pool).collect()
 }
 
@@ -223,7 +223,7 @@ pub async fn delete_node_pool(pool: &SqlitePool, id: &str) -> io::Result<()> {
         .bind(id)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -242,7 +242,7 @@ pub async fn read_all_nodes_pool(pool: &SqlitePool) -> io::Result<Vec<Node>> {
     let rows = sqlx::query(&sql)
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     rows.iter().map(row_to_node_pool).collect()
 }
 
@@ -253,7 +253,7 @@ pub async fn read_nodes_limited_pool(pool: &SqlitePool, limit: i64) -> io::Resul
         .bind(limit)
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     rows.iter().map(row_to_node_pool).collect()
 }
 
@@ -262,7 +262,7 @@ pub async fn list_node_ids_pool(pool: &SqlitePool) -> io::Result<Vec<String>> {
     let rows = sqlx::query("SELECT id FROM nodes")
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(rows
         .iter()
         .filter_map(|r| r.try_get::<String, _>(0).ok())
@@ -274,39 +274,39 @@ pub(crate) fn row_to_node_pool(row: &sqlx::sqlite::SqliteRow) -> io::Result<Node
     use super::types::NodeFrontmatter;
     let tags: String = row
         .try_get(3)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let projects: String = row
         .try_get(4)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let agents: String = row
         .try_get(5)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(Node {
         frontmatter: NodeFrontmatter {
             id: row
                 .try_get(0)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             node_type: row
                 .try_get(1)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             title: row
                 .try_get(2)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             tags: super::util::split_csv(&tags),
             projects: super::util::split_csv(&projects),
             agents: super::util::split_csv(&agents),
             created: row
                 .try_get(6)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             updated: row
                 .try_get(7)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             importance: row.try_get(9).unwrap_or(0.5),
             access_count: row.try_get::<i64, _>(10).unwrap_or(0),
             accessed_at: row.try_get(11).unwrap_or_default(),
         },
         body: row
             .try_get(8)
-            .map_err(|e| io::Error::other(e.to_string()))?,
+            .map_err(crate::store::sqlx_err)?,
     })
 }

@@ -7,7 +7,7 @@ use sqlx::SqlitePool;
 
 use super::node::row_to_node_pool;
 use super::types::Node;
-use super::util::{NODE_COLUMNS, NODE_COLUMNS_PREFIXED};
+use super::util::{NODE_COLUMNS, NODE_COLUMNS_PREFIXED, escape_like};
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
     let conn = match super::open_db() {
@@ -51,16 +51,16 @@ pub fn query_nodes_conn(
     let mut param_vals: Vec<Box<dyn rusqlite::ToSql>> = vec![];
 
     if let Some(t) = tag {
-        condition_strs.push("(',' || tags || ',' LIKE '%,' || ? || ',%')");
-        param_vals.push(Box::new(t.to_string()));
+        condition_strs.push("(',' || tags || ',' LIKE '%,' || ? || ',%' ESCAPE '\\')");
+        param_vals.push(Box::new(escape_like(t)));
     }
     if let Some(nt) = node_type {
         condition_strs.push("type = ?");
         param_vals.push(Box::new(nt.to_string()));
     }
     if let Some(p) = project {
-        condition_strs.push("(',' || projects || ',' LIKE '%,' || ? || ',%')");
-        param_vals.push(Box::new(p.to_string()));
+        condition_strs.push("(',' || projects || ',' LIKE '%,' || ? || ',%' ESCAPE '\\')");
+        param_vals.push(Box::new(escape_like(p)));
     }
 
     let where_clause = if condition_strs.is_empty() {
@@ -121,7 +121,7 @@ pub async fn search_nodes_pool(
         .bind(limit)
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     rows.iter().map(row_to_node_pool).collect()
 }
 
@@ -140,8 +140,8 @@ pub async fn query_nodes_pool(
 
     if let Some(t) = tag {
         qb.push(" AND (',' || tags || ',' LIKE '%,' || ");
-        qb.push_bind(t);
-        qb.push(" || ',%')");
+        qb.push_bind(escape_like(t));
+        qb.push(" || ',%' ESCAPE '\\')");
     }
     if let Some(nt) = node_type {
         qb.push(" AND type = ");
@@ -149,8 +149,8 @@ pub async fn query_nodes_pool(
     }
     if let Some(p) = project {
         qb.push(" AND (',' || projects || ',' LIKE '%,' || ");
-        qb.push_bind(p);
-        qb.push(" || ',%')");
+        qb.push_bind(escape_like(p));
+        qb.push(" || ',%' ESCAPE '\\')");
     }
 
     qb.push(" ORDER BY updated DESC LIMIT ");
@@ -160,6 +160,6 @@ pub async fn query_nodes_pool(
         .build()
         .fetch_all(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     rows.iter().map(row_to_node_pool).collect()
 }

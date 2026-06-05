@@ -98,7 +98,7 @@ use sqlx::{Row, SqlitePool};
 #[allow(dead_code)]
 fn row_to_snapshot_pool(r: &sqlx::sqlite::SqliteRow) -> io::Result<SessionSnapshot> {
     let g = |col: &str| -> Result<String, io::Error> {
-        r.try_get(col).map_err(|e| io::Error::other(e.to_string()))
+        r.try_get(col).map_err(crate::store::sqlx_err)
     };
     let pending_json: String = g("pending_tasks")?;
     let pending_tasks: Vec<String> = serde_json::from_str(&pending_json).unwrap_or_default();
@@ -145,7 +145,7 @@ pub async fn insert_snapshot_pool(
         .bind(project)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(result.last_insert_rowid())
 }
 
@@ -156,7 +156,7 @@ pub async fn get_latest_snapshot_pool(pool: &SqlitePool) -> io::Result<Option<Se
     )
     .fetch_optional(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     match row {
         Some(r) => Ok(Some(row_to_snapshot_pool(&r)?)),
@@ -175,7 +175,7 @@ pub async fn list_recent_snapshots_pool(
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     rows.iter().map(row_to_snapshot_pool).collect()
 }

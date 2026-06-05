@@ -249,7 +249,7 @@ pub async fn upsert_pipeline_pool(
     .bind(&now)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -272,11 +272,11 @@ pub async fn read_running_pipeline_pool(
         .fetch_optional(pool)
         .await
     }
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     match row {
         Some(r) => {
-            let json_str: String = r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?;
+            let json_str: String = r.try_get(0).map_err(crate::store::sqlx_err)?;
             let val: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_else(|e| {
                 eprintln!("[store/orbit] malformed state_json, using empty object: {e}");
                 serde_json::Value::Object(Default::default())
@@ -302,7 +302,7 @@ pub async fn list_all_pipelines_pool_limited(
     .bind(limit)
     .fetch_all(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     let pipelines: Vec<serde_json::Value> = rows
         .iter()
@@ -351,7 +351,7 @@ pub async fn dismiss_pipeline_pool(pool: &SqlitePool, pipeline_id: &str) -> io::
         .bind(pipeline_id)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -369,7 +369,7 @@ pub async fn update_pipeline_status_pool(
             .bind(pipeline_id)
             .execute(pool)
             .await
-            .map_err(|e| io::Error::other(e.to_string()))?;
+            .map_err(crate::store::sqlx_err)?;
     Ok(result.rows_affected() > 0)
 }
 

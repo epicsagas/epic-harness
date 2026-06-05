@@ -209,7 +209,7 @@ pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     sqlx::raw_sql("PRAGMA wal_autocheckpoint=100;")
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     sqlx::raw_sql(
         "CREATE TABLE IF NOT EXISTS nodes (
@@ -247,7 +247,7 @@ pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     )
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     // Migrate existing DBs: add new columns (ignore errors if already present)
     let _ = sqlx::raw_sql("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
@@ -292,7 +292,7 @@ pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
         sqlx::query_scalar::<_, String>("SELECT value FROM _meta WHERE key = 'schema_version'")
             .fetch_optional(pool)
             .await
-            .map_err(|e| io::Error::other(e.to_string()))?
+            .map_err(crate::store::sqlx_err)?
             .is_none_or(|v| v != "2");
 
     if needs_fts_migrate {
@@ -328,7 +328,7 @@ pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     )
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     Ok(())
 }

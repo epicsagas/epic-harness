@@ -106,6 +106,6 @@ async fn find_duplicate_in_pool(
     .bind(&cutoff)
     .fetch_optional(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(result)
 }

@@ -363,7 +363,7 @@ pub async fn init_run_pool(pool: &SqlitePool, project: &str, run: &OrchRun) -> i
     .bind(&run.updated_at)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -375,28 +375,28 @@ pub async fn read_run_pool(pool: &SqlitePool) -> io::Result<Option<OrchRun>> {
     .bind(RunStatus::Running.as_str())
     .fetch_optional(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     match row {
         Some(r) => Ok(Some(OrchRun {
             id: r
                 .try_get::<String, _>(0)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             status: r
                 .try_get::<String, _>(1)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             agents_json: r
                 .try_get::<String, _>(2)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             dep_graph_json: r
                 .try_get::<String, _>(3)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             created_at: r
                 .try_get::<String, _>(4)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             updated_at: r
                 .try_get::<String, _>(5)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
         })),
         None => Ok(None),
     }
@@ -414,7 +414,7 @@ pub async fn update_run_status_pool(
         .bind(run_id)
         .execute(pool)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -436,7 +436,7 @@ pub async fn upsert_agent_pool(pool: &SqlitePool, agent: &OrchAgent) -> io::Resu
     .bind(&agent.completed_at)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -448,43 +448,43 @@ pub async fn read_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result<Op
     .bind(agent_id)
     .fetch_optional(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
 
     match row {
         Some(r) => Ok(Some(OrchAgent {
             id: r
                 .try_get::<String, _>(0)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             run_id: r
                 .try_get::<String, _>(1)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             role: r
                 .try_get::<String, _>(2)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             task: r
                 .try_get::<String, _>(3)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             satisfies_json: r
                 .try_get::<String, _>(4)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             status: r
                 .try_get::<String, _>(5)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             phase: r
                 .try_get::<String, _>(6)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             progress: r
                 .try_get::<f64, _>(7)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             last_heartbeat: r
                 .try_get::<String, _>(8)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             started_at: r
                 .try_get::<Option<String>, _>(9)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
             completed_at: r
                 .try_get::<Option<String>, _>(10)
-                .map_err(|e| io::Error::other(e.to_string()))?,
+                .map_err(crate::store::sqlx_err)?,
         })),
         None => Ok(None),
     }
@@ -495,16 +495,16 @@ pub async fn dismiss_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result
     let mut tx = pool
         .begin()
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     let count_row = sqlx::query("SELECT COUNT(*) FROM orch_agents WHERE id = ?1")
         .bind(agent_id)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     let count: i64 = count_row
         .try_get::<i64, _>(0)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     if count == 0 {
         return Ok(false);
     }
@@ -513,21 +513,21 @@ pub async fn dismiss_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result
         .bind(agent_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("DELETE FROM orch_agent_events WHERE agent_id = ?1")
         .bind(agent_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     sqlx::query("DELETE FROM orch_agent_inbox WHERE agent_id = ?1")
         .bind(agent_id)
         .execute(&mut *tx)
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
 
     tx.commit()
         .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+        .map_err(crate::store::sqlx_err)?;
     Ok(true)
 }
 
@@ -548,7 +548,7 @@ pub async fn append_event_pool(
     .bind(data_json)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -569,7 +569,7 @@ pub async fn post_inbox_pool(
     .bind(message)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -590,7 +590,7 @@ pub async fn write_control_pool(
     .bind(generation)
     .execute(pool)
     .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    .map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
