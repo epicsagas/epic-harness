@@ -218,7 +218,7 @@ fn apply_tls_param(url: &str, param: &str, tls_mode: &str) -> io::Result<String>
         }
     };
 
-    // Replace existing param or append.
+    // Replace existing param or append using url crate's proper percent-encoding.
     let mut pairs: Vec<(String, String)> = parsed
         .query_pairs()
         .map(|(k, v)| (k.into_owned(), v.into_owned()))
@@ -230,14 +230,8 @@ fn apply_tls_param(url: &str, param: &str, tls_mode: &str) -> io::Result<String>
         pairs.push((param.to_string(), value.to_string()));
     }
 
-    let mut new_query = String::new();
-    for (k, v) in &pairs {
-        if !new_query.is_empty() {
-            new_query.push('&');
-        }
-        new_query.push_str(&format!("{k}={v}"));
-    }
-    parsed.set_query(Some(&new_query));
+    // Rebuild query using query_pairs_mut for correct percent-encoding.
+    parsed.query_pairs_mut().clear().extend_pairs(pairs);
 
     Ok(parsed.to_string())
 }

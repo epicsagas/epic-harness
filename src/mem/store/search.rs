@@ -82,6 +82,10 @@ pub fn query_nodes(
 }
 
 /// Async dynamic filter query using QueryBuilder.
+///
+/// The CSV-in-text LIKE pattern `',' || col || ',' LIKE '%,val,%'` works
+/// identically on SQLite and PostgreSQL (both support `||` concatenation
+/// and `LIKE ... ESCAPE`). A dedicated PostgreSQL branch is not needed.
 pub async fn query_nodes_pool(
     pool: &AnyPool,
     tag: Option<&str>,

@@ -486,6 +486,11 @@ async fn set_version_pool(pool: &AnyPool, version: u32) -> io::Result<()> {
 }
 
 /// Async v3->v4 migration: add project column to tables that don't have it.
+/// Async v3->v4 migration: add project column to tables that don't have it.
+///
+/// Uses `PRAGMA table_info` which is SQLite-only. This is safe because
+/// `run_migrations_pool` is only called when `db_type == Sqlite`.
+/// When PostgreSQL migrations are needed, use `information_schema.columns` instead.
 async fn migrate_v3_to_v4_pool(pool: &AnyPool) -> io::Result<()> {
     // Check if already migrated (project column exists in observations).
     let cols = sqlx::query("PRAGMA table_info(observations)")
@@ -622,6 +627,7 @@ async fn migrate_v3_to_v4_pool(pool: &AnyPool) -> io::Result<()> {
 }
 
 /// Check if a table exists and has a single-column primary key (not yet migrated to composite).
+/// SQLite-only: uses `PRAGMA table_info`.
 async fn table_has_single_pk(pool: &AnyPool, table: &str) -> io::Result<bool> {
     let cols = sqlx::query(&format!("PRAGMA table_info({table})"))
         .fetch_all(pool)

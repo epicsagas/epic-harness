@@ -54,6 +54,9 @@ axum-test = "20"
 
 [features]
 default = ["sqlite"]
+# `sqlite` is intentionally empty: sqlx's sqlite driver is always compiled in
+# via the base dependency. The flag exists for symmetry with `postgres`/`mysql`
+# and for use in `cfg!(feature = "sqlite")` guards.
 sqlite = []
 postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki"]
 mysql = ["sqlx/mysql", "sqlx/tls-rustls-ring-webpki"]

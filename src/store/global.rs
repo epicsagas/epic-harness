@@ -45,6 +45,9 @@ pub async fn insert_pattern_pool(
     .execute(pool)
     .await
     .map_err(crate::store::sqlx_err)?;
+    // AnyPool::last_insert_id() returns None for SQLite via sqlx any-driver.
+    // No caller depends on a non-zero return — insert success is verified by the
+    // absence of an error from .execute().
     Ok(result.last_insert_id().unwrap_or(0))
 }
 
