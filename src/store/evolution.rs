@@ -6,10 +6,10 @@ use crate::shared::evolution::EvolutionRecord;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, AnyPool};
 
 pub async fn insert_record_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
     rec: &EvolutionRecord,
 ) -> io::Result<i64> {
@@ -39,11 +39,11 @@ pub async fn insert_record_pool(
     .execute(pool)
     .await
     .map_err(crate::store::sqlx_err)?;
-    Ok(result.last_insert_rowid())
+    Ok(result.last_insert_id().unwrap_or(0))
 }
 
 pub async fn query_recent_records_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
     limit: i64,
 ) -> io::Result<Vec<EvolutionRecord>> {
@@ -80,7 +80,7 @@ pub async fn query_recent_records_pool(
 }
 
 pub async fn query_all_records_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
 ) -> io::Result<Vec<EvolutionRecord>> {
     query_recent_records_pool(pool, project, 10_000).await
@@ -91,7 +91,7 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    async fn in_memory_pool() -> sqlx::SqlitePool {
+    async fn in_memory_pool() -> sqlx::AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&pool).await.unwrap();
         pool

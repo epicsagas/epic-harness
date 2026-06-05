@@ -11,11 +11,11 @@ const MAX_PIPELINE_LIST: usize = 200;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, AnyPool};
 
 /// Pool version of sync_orbit_files_to_db.
 pub async fn sync_orbit_files_to_db_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     orbit_dir: &std::path::Path,
 ) -> io::Result<usize> {
     if !orbit_dir.is_dir() {
@@ -82,7 +82,7 @@ pub async fn sync_orbit_files_to_db_pool(
 }
 
 pub async fn upsert_pipeline_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     id: &str,
     project: &str,
     status: &str,
@@ -92,7 +92,7 @@ pub async fn upsert_pipeline_pool(
 ) -> io::Result<()> {
     let now = crate::shared::helpers::now_iso();
     sqlx::query(
-        "INSERT OR REPLACE INTO orbit_pipelines (id, project, status, phase, mode, state_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6, COALESCE((SELECT created_at FROM orbit_pipelines WHERE id = ?1), ?7), ?8)"
+        "INSERT INTO orbit_pipelines (id, project, status, phase, mode, state_json, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO UPDATE SET project=excluded.project, status=excluded.status, phase=excluded.phase, mode=excluded.mode, state_json=excluded.state_json, created_at=orbit_pipelines.created_at, updated_at=excluded.updated_at"
     )
     .bind(id)
     .bind(project)
@@ -110,12 +110,12 @@ pub async fn upsert_pipeline_pool(
 
 #[cfg(test)]
 pub async fn read_running_pipeline_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: Option<&str>,
 ) -> io::Result<Option<serde_json::Value>> {
     let row = if let Some(proj) = project {
         sqlx::query(
-            "SELECT state_json FROM orbit_pipelines WHERE status = 'running' AND project = ?1 LIMIT 1"
+            "SELECT state_json FROM orbit_pipelines WHERE status = 'running' AND project = $1 LIMIT 1"
         )
         .bind(proj)
         .fetch_optional(pool)
@@ -142,16 +142,16 @@ pub async fn read_running_pipeline_pool(
     }
 }
 
-pub async fn list_all_pipelines_pool(pool: &SqlitePool) -> io::Result<Vec<serde_json::Value>> {
+pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_json::Value>> {
     list_all_pipelines_pool_limited(pool, MAX_PIPELINE_LIST as i64).await
 }
 
 pub async fn list_all_pipelines_pool_limited(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
     let rows = sqlx::query(
-        "SELECT id, project, status, phase, mode, state_json, created_at, updated_at FROM orbit_pipelines ORDER BY created_at DESC LIMIT ?1"
+        "SELECT id, project, status, phase, mode, state_json, created_at, updated_at FROM orbit_pipelines ORDER BY created_at DESC LIMIT $1"
     )
     .bind(limit)
     .fetch_all(pool)
@@ -199,8 +199,8 @@ pub async fn list_all_pipelines_pool_limited(
     Ok(pipelines)
 }
 
-pub async fn dismiss_pipeline_pool(pool: &SqlitePool, pipeline_id: &str) -> io::Result<bool> {
-    let result = sqlx::query("DELETE FROM orbit_pipelines WHERE id = ?1")
+pub async fn dismiss_pipeline_pool(pool: &AnyPool, pipeline_id: &str) -> io::Result<bool> {
+    let result = sqlx::query("DELETE FROM orbit_pipelines WHERE id = $1")
         .bind(pipeline_id)
         .execute(pool)
         .await
@@ -212,7 +212,7 @@ pub async fn dismiss_pipeline_pool(pool: &SqlitePool, pipeline_id: &str) -> io::
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::SqlitePool {
+    async fn in_memory_pool() -> sqlx::AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&pool).await.unwrap();
         pool

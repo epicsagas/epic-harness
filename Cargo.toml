@@ -36,7 +36,8 @@ serde_yaml = "0.9"
 toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
-sqlx = { version = "0.8.1", features = ["runtime-tokio", "sqlite", "migrate"] }
+sqlx = { version = "0.8.1", features = ["runtime-tokio", "sqlite", "migrate", "any"] }
+url = "2"
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }
@@ -46,6 +47,16 @@ tower-http = { version = "0.6", features = ["cors"] }
 tempfile = "3"
 serial_test = "3"
 axum-test = "20"
+
+# ---------------------------------------------------------------------------
+# Feature flags — multi-database driver support
+# ---------------------------------------------------------------------------
+
+[features]
+default = ["sqlite"]
+sqlite = []
+postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki"]
+mysql = ["sqlx/mysql", "sqlx/tls-rustls-ring-webpki"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.xz"

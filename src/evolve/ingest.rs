@@ -1,14 +1,14 @@
 use crate::mem::store;
 use crate::shared::{evolution::*, helpers::*, paths::*};
 use crate::store::runtime::block_on;
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 use super::analysis::build_summary;
 
 /// Query pattern types detected in the previous session (the session that the
 /// current session "follows"). Extracts non-generic tags from CSV tag strings.
 pub async fn query_prev_pattern_types_async(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     session_node_id: &str,
 ) -> Vec<String> {
     let sql = "SELECT n.tags FROM nodes n
@@ -38,7 +38,7 @@ pub async fn query_prev_pattern_types_async(
 }
 
 /// Find or create a project hub node. Returns the hub node's ID.
-pub async fn ensure_project_hub_async(pool: &SqlitePool, slug: &str) -> std::io::Result<String> {
+pub async fn ensure_project_hub_async(pool: &AnyPool, slug: &str) -> std::io::Result<String> {
     let title = format!("project: {}", slug);
     let existing: Option<String> = sqlx::query_scalar::<_, String>(
         "SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1",
@@ -90,7 +90,7 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 }
 
 async fn ingest_to_memory_async(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     analysis: &SessionAnalysis,
     patterns: &[DetectedPattern],
 ) -> (u64, u64) {
@@ -491,7 +491,7 @@ mod tests {
     use super::*;
     use crate::mem::store;
 
-    async fn open_test_mem_pool() -> SqlitePool {
+    async fn open_test_mem_pool() -> AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         store::init_schema_pool(&pool).await.expect("schema");
         pool

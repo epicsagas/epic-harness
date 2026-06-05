@@ -6,10 +6,10 @@ use crate::shared::types::SessionSnapshot;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, AnyPool};
 
 /// Map a sqlx row to a [`SessionSnapshot`].
-fn row_to_snapshot_pool(r: &sqlx::sqlite::SqliteRow) -> io::Result<SessionSnapshot> {
+fn row_to_snapshot_pool(r: &sqlx::any::AnyRow) -> io::Result<SessionSnapshot> {
     let g =
         |col: &str| -> Result<String, io::Error> { r.try_get(col).map_err(crate::store::sqlx_err) };
     let pending_json: String = g("pending_tasks")?;
@@ -29,7 +29,7 @@ fn row_to_snapshot_pool(r: &sqlx::sqlite::SqliteRow) -> io::Result<SessionSnapsh
 }
 
 pub async fn insert_snapshot_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
     snap: &SessionSnapshot,
     created_at_millis: i64,
@@ -45,7 +45,7 @@ pub async fn insert_snapshot_pool(
         })
     });
 
-    let result = sqlx::query("INSERT INTO sessions (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)")
+    let result = sqlx::query("INSERT INTO sessions (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis, project) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)")
         .bind(&snap.timestamp)
         .bind(&snap.snap_type)
         .bind(&snap.summary)
@@ -57,15 +57,15 @@ pub async fn insert_snapshot_pool(
         .execute(pool)
         .await
         .map_err(crate::store::sqlx_err)?;
-    Ok(result.last_insert_rowid())
+    Ok(result.last_insert_id().unwrap_or(0))
 }
 
 pub async fn get_latest_snapshot_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
 ) -> io::Result<Option<SessionSnapshot>> {
     let row = sqlx::query(
-        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions WHERE project = ?1 ORDER BY id DESC LIMIT 1"
+        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions WHERE project = $1 ORDER BY id DESC LIMIT 1"
     )
     .bind(project)
     .fetch_optional(pool)
@@ -79,12 +79,12 @@ pub async fn get_latest_snapshot_pool(
 }
 
 pub async fn list_recent_snapshots_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
     limit: i64,
 ) -> io::Result<Vec<SessionSnapshot>> {
     let rows = sqlx::query(
-        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions WHERE project = ?1 ORDER BY id DESC LIMIT ?2"
+        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions WHERE project = $1 ORDER BY id DESC LIMIT $2"
     )
     .bind(project)
     .bind(limit)
@@ -99,7 +99,7 @@ pub async fn list_recent_snapshots_pool(
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::SqlitePool {
+    async fn in_memory_pool() -> sqlx::AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&pool).await.unwrap();
         pool

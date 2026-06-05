@@ -2,7 +2,7 @@
 
 use std::io;
 
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 use super::node::row_to_node_pool;
 use super::types::Node;
@@ -18,7 +18,7 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
 }
 
 pub async fn search_nodes_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     query: &str,
     limit: i64,
 ) -> io::Result<Vec<Node>> {
@@ -26,9 +26,9 @@ pub async fn search_nodes_pool(
         "SELECT n.{NODE_COLUMNS_PREFIXED}
          FROM nodes n
          JOIN nodes_fts ON n.rowid = nodes_fts.rowid
-         WHERE nodes_fts MATCH ?
+         WHERE nodes_fts MATCH $1
          ORDER BY n.importance DESC
-         LIMIT ?"
+         LIMIT $2"
     );
     let rows = sqlx::query(&sql)
         .bind(query)
@@ -65,7 +65,7 @@ pub fn query_nodes(
 
 /// Async dynamic filter query using QueryBuilder.
 pub async fn query_nodes_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     tag: Option<&str>,
     node_type: Option<&str>,
     project: Option<&str>,

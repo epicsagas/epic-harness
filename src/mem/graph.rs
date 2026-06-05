@@ -1,7 +1,7 @@
 //! graph.rs — Graph build + traversal (related, rebuild)
 
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, AnyPool};
 use std::collections::HashSet;
 use std::io;
 
@@ -43,7 +43,7 @@ pub struct Graph {
 const MAX_GRAPH_EDGES: usize = 2000;
 
 /// Build a `Graph` value using a sqlx pool.
-pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
+pub async fn build_graph_pool(pool: &AnyPool) -> io::Result<Graph> {
     let ids = list_node_ids_pool(pool).await?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let nodes = read_nodes_pool(pool, &id_refs)
@@ -71,7 +71,7 @@ pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
 }
 
 /// Build graph JSON string using a sqlx pool.
-pub async fn rebuild_graph_json_pool(pool: &SqlitePool) -> io::Result<String> {
+pub async fn rebuild_graph_json_pool(pool: &AnyPool) -> io::Result<String> {
     serde_json::to_string_pretty(&build_graph_pool(pool).await?)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
@@ -103,7 +103,7 @@ pub fn rebuild_graph() -> io::Result<()> {
 const MAX_SEED_IDS: usize = 100;
 
 /// Async 1-hop neighbors using QueryBuilder for the IN clause.
-pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec<(String, f64)> {
+pub async fn graph_neighbors_pool(pool: &AnyPool, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
     }
@@ -172,21 +172,18 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
 }
 
 /// Async BFS traversal using a sqlx pool.
-pub async fn related_nodes_pool(pool: &SqlitePool, start_id: &str, _depth: usize) -> Vec<String> {
+pub async fn related_nodes_pool(pool: &AnyPool, start_id: &str, _depth: usize) -> Vec<String> {
     let sql = "
         WITH RECURSIVE bfs(node_id) AS (
-            SELECT target FROM edges WHERE source = ?
-            UNION SELECT source FROM edges WHERE target = ?
-            UNION SELECT e.target FROM edges e JOIN bfs ON e.source = bfs.node_id WHERE e.target != ?
-            UNION SELECT e.source FROM edges e JOIN bfs ON e.target = bfs.node_id WHERE e.source != ?
+            SELECT target FROM edges WHERE source = $1
+            UNION SELECT source FROM edges WHERE target = $1
+            UNION SELECT e.target FROM edges e JOIN bfs ON e.source = bfs.node_id WHERE e.target != $1
+            UNION SELECT e.source FROM edges e JOIN bfs ON e.target = bfs.node_id WHERE e.source != $1
         )
         SELECT node_id FROM bfs
         LIMIT 500
     ";
     sqlx::query(sql)
-        .bind(start_id)
-        .bind(start_id)
-        .bind(start_id)
         .bind(start_id)
         .fetch_all(pool)
         .await
@@ -213,7 +210,7 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
 }
 
 /// Async compute aggregate stats using a sqlx pool.
-pub async fn compute_stats_pool(pool: &SqlitePool) -> io::Result<serde_json::Value> {
+pub async fn compute_stats_pool(pool: &AnyPool) -> io::Result<serde_json::Value> {
     let total_nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
         .fetch_one(pool)
         .await
@@ -261,11 +258,11 @@ pub fn compute_stats() -> io::Result<serde_json::Value> {
 mod tests {
     use super::super::store::{Edge, append_edge_pool, init_schema_pool};
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
+
 
     /// Open a fresh in-memory SQLite pool with the full schema applied.
-    async fn mem_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
+    async fn mem_pool() -> AnyPool {
+        let pool = sqlx::any::AnyPoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
@@ -274,7 +271,7 @@ mod tests {
         pool
     }
 
-    async fn insert_edge(pool: &SqlitePool, id: &str, src: &str, tgt: &str) {
+    async fn insert_edge(pool: &AnyPool, id: &str, src: &str, tgt: &str) {
         let e = Edge {
             id: id.to_string(),
             source: src.to_string(),

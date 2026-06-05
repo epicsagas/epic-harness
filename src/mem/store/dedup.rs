@@ -1,6 +1,6 @@
 //! dedup.rs — Node deduplication logic
 
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use std::io;
 
 use super::node::write_node_pool;
@@ -18,7 +18,7 @@ pub fn write_node_dedup(node: &Node, window_hours: u64) -> io::Result<(String, b
 
 /// Async write-with-dedup using a sqlx pool.
 pub async fn write_node_dedup_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     node: &Node,
     window_hours: u64,
 ) -> io::Result<(String, bool)> {
@@ -33,7 +33,7 @@ pub async fn write_node_dedup_pool(
 }
 
 async fn find_duplicate_in_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     title: &str,
     window_hours: u64,
 ) -> io::Result<Option<String>> {
@@ -51,7 +51,7 @@ async fn find_duplicate_in_pool(
         format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
     };
     let result = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM nodes WHERE title = ? AND updated > ? ORDER BY updated DESC LIMIT 1",
+        "SELECT id FROM nodes WHERE title = $1 AND updated > $2 ORDER BY updated DESC LIMIT 1",
     )
     .bind(title)
     .bind(&cutoff)

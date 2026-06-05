@@ -1,6 +1,6 @@
 //! recall.rs — Smart recall with composite scoring and graph boost
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, AnyPool};
 use std::io;
 
 use super::decay::touch_nodes_pool;
@@ -46,7 +46,7 @@ pub(crate) fn compute_recency(updated: &str, now_secs: u64) -> f64 {
 
 /// Async smart recall using a sqlx pool.
 pub async fn smart_recall_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: Option<&str>,
     hint: Option<&str>,
     limit: usize,

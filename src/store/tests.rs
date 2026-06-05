@@ -3,7 +3,7 @@
 use sqlx::Row;
 
 // ── Helper ────────────────────────────────────────────
-async fn setup_pool() -> sqlx::SqlitePool {
+async fn setup_pool() -> sqlx::AnyPool {
     let pool = crate::store::pool::test_memory_pool().await;
     crate::store::schema::init_schema_pool(&pool).await.unwrap();
     pool
@@ -103,7 +103,7 @@ async fn migration_is_idempotent() {
 
     // Simulate a completed migration by setting the flag.
     sqlx::query(
-        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
+        "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
     )
     .execute(&pool)
     .await
