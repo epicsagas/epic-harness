@@ -31,9 +31,9 @@ pub async fn insert_record_pool(
     .bind(rec.avg_score)
     .bind(&error_json)
     .bind(&failure_json)
-    .bind(rec.skills_seeded as i64)
-    .bind(rec.skills_rolled_back as i64)
-    .bind(rec.total_evolved as i64)
+    .bind(crate::store::u64_to_i64(rec.skills_seeded))
+    .bind(crate::store::u64_to_i64(rec.skills_rolled_back))
+    .bind(crate::store::u64_to_i64(rec.total_evolved))
     .bind(&rec.analysis_summary)
     .bind(project)
     .execute(pool)
@@ -127,5 +127,41 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].observations, 42);
         assert_eq!(results[0].error_patterns.get("syntax_error"), Some(&3));
+    }
+
+    #[tokio::test]
+    async fn insert_saturates_u64_counters_for_sqlite_storage() {
+        let pool = in_memory_pool().await;
+        let rec = EvolutionRecord {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            observations: u64::MAX,
+            success_rate: 0.95,
+            avg_score: 0.89,
+            error_patterns: HashMap::new(),
+            failure_patterns: vec![],
+            skills_seeded: u64::MAX,
+            skills_rolled_back: u64::MAX,
+            total_evolved: u64::MAX,
+            analysis_summary: "Overflow counters".into(),
+        };
+
+        insert_record_pool(&pool, "test-project", &rec)
+            .await
+            .unwrap();
+
+        let row = sqlx::query(
+            "SELECT observations, skills_seeded, skills_rolled_back, total_evolved
+             FROM evolution_records
+             WHERE project = ?1",
+        )
+        .bind("test-project")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(row.try_get::<i64, _>(0).unwrap(), i64::MAX);
+        assert_eq!(row.try_get::<i64, _>(1).unwrap(), i64::MAX);
+        assert_eq!(row.try_get::<i64, _>(2).unwrap(), i64::MAX);
+        assert_eq!(row.try_get::<i64, _>(3).unwrap(), i64::MAX);
     }
 }

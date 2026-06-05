@@ -1,7 +1,7 @@
 //! pool/ — Async connection pool factory (sqlx)
 //!
 //! Creates lazily-initialized `SqlitePool` instances for `harness.db` and `memory.db`.
-//! Pools are stored in global `OnceLock` singletons — the first call creates the
+//! Pools are stored in global async `OnceCell` singletons — the first call creates the
 //! pool, subsequent calls return the existing one.
 //!
 //! This module lives alongside the existing rusqlite sync code in `store/mod.rs`.
@@ -13,10 +13,10 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::OnceLock;
 
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use tokio::sync::OnceCell;
 
 use crate::config::CONFIG;
 use crate::shared::paths;
@@ -72,7 +72,7 @@ async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
     // Extract filesystem path from "sqlite:/path/to/db" for directory/permission setup.
     let db_path = url
         .strip_prefix("sqlite:")
-        .unwrap_or(url)
+        .expect("database URL scheme was validated above")
         .trim_start_matches("//");
     let path = PathBuf::from(db_path);
 
@@ -82,6 +82,7 @@ async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
 
     let options = SqliteConnectOptions::from_str(url)
         .map_err(io::Error::other)?
+        .create_if_missing(true)
         .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
         .foreign_keys(true)
         .busy_timeout(std::time::Duration::from_millis(5000));
@@ -103,35 +104,32 @@ async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
 
 // ── Global pool singletons ─────────────────────────
 
-static HARNESS_POOL: OnceLock<SqlitePool> = OnceLock::new();
-static MEMORY_POOL: OnceLock<SqlitePool> = OnceLock::new();
+static HARNESS_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
+static MEMORY_POOL: OnceCell<SqlitePool> = OnceCell::const_new();
 
 /// Returns a shared `SqlitePool` for `harness.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
 /// Uses `CONFIG.db` for URL and max_connections.
 pub async fn harness_pool() -> io::Result<SqlitePool> {
-    if let Some(pool) = HARNESS_POOL.get() {
-        return Ok(pool.clone());
-    }
-    let pool = build_pool(&harness_url(), CONFIG.db.max_connections).await?;
-    // Initialize schema on first connection.
-    super::schema::init_schema_pool(&pool).await?;
-    // If another thread beat us, that's fine — both pools are identical.
-    let _ = HARNESS_POOL.set(pool.clone());
-    Ok(pool)
+    HARNESS_POOL
+        .get_or_try_init(|| async {
+            let pool = build_pool(&harness_url(), CONFIG.db.max_connections).await?;
+            super::schema::init_schema_pool(&pool).await?;
+            Ok(pool)
+        })
+        .await
+        .cloned()
 }
 
 /// Returns a shared `SqlitePool` for `memory.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
 pub async fn memory_pool() -> io::Result<SqlitePool> {
-    if let Some(pool) = MEMORY_POOL.get() {
-        return Ok(pool.clone());
-    }
-    let pool = build_pool(&memory_url(), CONFIG.db.max_connections).await?;
-    let _ = MEMORY_POOL.set(pool.clone());
-    Ok(pool)
+    MEMORY_POOL
+        .get_or_try_init(|| async { build_pool(&memory_url(), CONFIG.db.max_connections).await })
+        .await
+        .cloned()
 }
 
 /// Gracefully close all pools. Call on process shutdown to flush WAL.
@@ -163,4 +161,57 @@ pub async fn test_memory_pool() -> SqlitePool {
         .connect_with(options)
         .await
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::Row;
+
+    #[tokio::test]
+    async fn build_pool_rejects_non_sqlite_urls() {
+        let err = build_pool("postgres://localhost/harness", 1)
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("sqlite:"));
+    }
+
+    #[tokio::test]
+    async fn build_pool_creates_file_and_allows_schema_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("nested").join("harness.db");
+        let url = format!("sqlite:{}", db_path.display());
+
+        let pool = build_pool(&url, 1).await.unwrap();
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+
+        sqlx::query(
+            "INSERT INTO observations
+             (timestamp, session_id, tool, tool_category, project)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind("2026-06-02T10:00:00Z")
+        .bind("session-1")
+        .bind("Bash")
+        .bind("bash")
+        .bind("test-project")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let row = sqlx::query("SELECT COUNT(*) FROM observations WHERE project = ?1")
+            .bind("test-project")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(row.try_get::<i64, _>(0).unwrap(), 1);
+        assert!(db_path.exists());
+
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(&db_path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
 }

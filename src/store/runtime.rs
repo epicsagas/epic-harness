@@ -6,13 +6,18 @@
 
 use std::future::Future;
 use std::sync::LazyLock;
-use std::sync::OnceLock;
 
 /// Global tokio runtime shared by all sync callers.
 ///
 /// Initialized once on first use. Two worker threads are sufficient for
 /// SQLite I/O (which is the only async work in this codebase).
-static RUNTIME: LazyLock<OnceLock<tokio::runtime::Runtime>> = LazyLock::new(OnceLock::new);
+static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("failed to create harness store runtime")
+});
 
 /// Run an async store function from a synchronous context.
 ///
@@ -22,12 +27,5 @@ pub(crate) fn block_on<F, T>(fut: F) -> T
 where
     F: Future<Output = T>,
 {
-    let rt = RUNTIME.get_or_init(|| {
-        tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build()
-            .expect("failed to create harness store runtime")
-    });
-    rt.block_on(fut)
+    RUNTIME.block_on(fut)
 }
