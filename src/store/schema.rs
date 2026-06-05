@@ -353,6 +353,9 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
         if current_v.map(|v| v >= 3).unwrap_or(false) {
             // Already migrated by a concurrent process — drop tx (auto-ROLLBACK).
             // Fall through so set_version() at the bottom of run_migrations is reached.
+            // Skip v3→v4 check below since DB is already at v3+.
+            set_version(conn, to_version)?;
+            return Ok(());
         } else {
             store_err(conn.execute_batch(
                 "CREATE TABLE IF NOT EXISTS score_history_v3 (
@@ -881,12 +884,107 @@ async fn migrate_v3_to_v4_pool(pool: &SqlitePool) -> io::Result<()> {
         }
     }
 
-    // Composite-PK table recreations (skill_attribution, promotion_counters,
-    // workspace_manifest) are handled by the rusqlite path in migrate_v3_to_v4().
-    // For the pool path, the DDL CREATE TABLE IF NOT EXISTS above already has
-    // the correct v4 schema. Existing v3 rows retain their original PKs, which
-    // is acceptable for the global DB use case where project-scoped queries
-    // filter via the new project column.
+    // Composite-PK table recreations — same logic as the rusqlite path in
+    // migrate_v3_to_v4(). Tables that need PK changes are recreated with the
+    // correct v4 composite primary keys.
+    let recreations: &[(&str, &str)] = &[
+        // (original_table, create_v4 + copy + drop + rename)
+        (
+            "metrics_state",
+            "CREATE TABLE IF NOT EXISTS metrics_state_v4 (\
+                 key TEXT NOT NULL, value TEXT NOT NULL, \
+                 project TEXT NOT NULL DEFAULT '', \
+                 PRIMARY KEY (key, project));\
+             INSERT OR IGNORE INTO metrics_state_v4 \
+                 SELECT key, value, project FROM metrics_state;\
+             DROP TABLE metrics_state;\
+             ALTER TABLE metrics_state_v4 RENAME TO metrics_state;",
+        ),
+        (
+            "score_history",
+            "CREATE TABLE IF NOT EXISTS score_history_v4 (\
+                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                 timestamp TEXT NOT NULL, success_rate REAL NOT NULL, \
+                 avg_score REAL NOT NULL, observations INTEGER NOT NULL DEFAULT 0, \
+                 dim_success REAL NOT NULL DEFAULT 0.0, \
+                 dim_quality REAL NOT NULL DEFAULT 0.0, \
+                 dim_cost REAL NOT NULL DEFAULT 0.0, \
+                 project TEXT NOT NULL DEFAULT '', \
+                 UNIQUE(timestamp, project));\
+             INSERT OR IGNORE INTO score_history_v4 \
+                 SELECT id, timestamp, success_rate, avg_score, observations, \
+                        dim_success, dim_quality, dim_cost, project FROM score_history;\
+             DROP TABLE score_history;\
+             ALTER TABLE score_history_v4 RENAME TO score_history;",
+        ),
+        (
+            "skill_attribution",
+            "CREATE TABLE IF NOT EXISTS skill_attribution_v4 (\
+                 skill_name TEXT NOT NULL, project TEXT NOT NULL DEFAULT '', \
+                 sessions_active INTEGER NOT NULL DEFAULT 0, \
+                 avg_score_with REAL NOT NULL DEFAULT 0.0, \
+                 avg_score_without REAL NOT NULL DEFAULT 0.0, \
+                 first_seen TEXT NOT NULL, \
+                 PRIMARY KEY (skill_name, project));\
+             INSERT OR IGNORE INTO skill_attribution_v4 \
+                 SELECT skill_name, '', sessions_active, avg_score_with, \
+                        avg_score_without, first_seen FROM skill_attribution;\
+             DROP TABLE skill_attribution;\
+             ALTER TABLE skill_attribution_v4 RENAME TO skill_attribution;",
+        ),
+        (
+            "promotion_counters",
+            "CREATE TABLE IF NOT EXISTS promotion_counters_v4 (\
+                 pattern_key TEXT NOT NULL, project TEXT NOT NULL DEFAULT '', \
+                 count INTEGER NOT NULL DEFAULT 0, \
+                 PRIMARY KEY (pattern_key, project));\
+             INSERT OR IGNORE INTO promotion_counters_v4 \
+                 SELECT pattern_key, '', count FROM promotion_counters;\
+             DROP TABLE promotion_counters;\
+             ALTER TABLE promotion_counters_v4 RENAME TO promotion_counters;",
+        ),
+        (
+            "workspace_manifest",
+            "CREATE TABLE IF NOT EXISTS workspace_manifest_v4 (\
+                 id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                 project TEXT NOT NULL DEFAULT '', \
+                 version TEXT NOT NULL DEFAULT '1.0', \
+                 updated TEXT NOT NULL, \
+                 skills_json TEXT NOT NULL DEFAULT '[]');\
+             INSERT OR IGNORE INTO workspace_manifest_v4 \
+                 SELECT id, '', version, updated, skills_json FROM workspace_manifest;\
+             DROP TABLE workspace_manifest;\
+             ALTER TABLE workspace_manifest_v4 RENAME TO workspace_manifest;",
+        ),
+    ];
+
+    for (table, sql) in recreations {
+        // Only recreate if the table exists and still has a single-column PK
+        // (i.e., hasn't been migrated yet).
+        if table_has_single_pk(pool, table).await? {
+            sqlx::raw_sql(sql)
+                .execute(pool)
+                .await
+                .map_err(super::sqlx_err)?;
+        }
+    }
 
     Ok(())
+}
+
+/// Check if a table exists and has a single-column primary key (not yet migrated to composite).
+async fn table_has_single_pk(pool: &SqlitePool, table: &str) -> io::Result<bool> {
+    // PRAGMA table_info returns one row per column; pk > 0 marks PK columns.
+    let cols = sqlx::query(&format!("PRAGMA table_info({table})"))
+        .fetch_all(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+    if cols.is_empty() {
+        return Ok(false); // table doesn't exist
+    }
+    let pk_count = cols
+        .iter()
+        .filter(|r| r.try_get::<i32, _>("pk").unwrap_or(0) > 0)
+        .count();
+    Ok(pk_count == 1)
 }

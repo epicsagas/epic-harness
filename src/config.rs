@@ -344,9 +344,10 @@ fn validate_config(cfg: &mut HarnessConfig) {
 
     if cfg.db.driver != "sqlite" {
         eprintln!(
-            "[harness] unsupported db.driver: '{}', only 'sqlite' is supported",
+            "[harness] unsupported db.driver: '{}', only 'sqlite' is supported — correcting",
             cfg.db.driver
         );
+        cfg.db.driver = "sqlite".into();
     }
     if cfg.db.max_connections == 0 {
         cfg.db.max_connections = 5;

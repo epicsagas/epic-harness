@@ -15,6 +15,7 @@ static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_io()
+        .enable_time()
         .build()
         .expect("failed to create harness store runtime")
 });

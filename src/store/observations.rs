@@ -598,11 +598,13 @@ mod tests {
                 .unwrap();
 
         assert_eq!(results.len(), 2);
-        assert!(
-            results
-                .iter()
-                .all(|r| r.tool != "Bash" || r.score == Some(0.9) || r.tool == "Edit")
-        );
+        // Verify correct projects returned (proj-a and proj-b only)
+        let tools: Vec<&str> = results
+            .iter()
+            .map(|r| r.tool.as_str())
+            .collect::<Vec<_>>()
+            .clone();
+        assert_eq!(tools, vec!["Bash", "Edit"]);
         // Verify proj-c is excluded
         assert!(
             results
