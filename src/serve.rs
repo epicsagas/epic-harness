@@ -118,7 +118,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
-                let body = handle_harness_cmd(db.as_ref(), &cmd, &harness_dir);
+                let body = handle_harness_cmd(db.as_ref(), &cmd);
                 json_response(&body)
             }
 
@@ -509,16 +509,12 @@ fn dismiss_orbit_pipeline(
 
 // ── Harness command handler ───────────────────────────
 
-fn handle_harness_cmd(
-    db: Option<&rusqlite::Connection>,
-    cmd: &str,
-    harness_dir: &std::path::Path,
-) -> String {
+fn handle_harness_cmd(db: Option<&rusqlite::Connection>, cmd: &str) -> String {
     match cmd {
-        "get_harness_metrics" => cmd_get_metrics(db, harness_dir),
-        "get_evolved_skills" => cmd_get_evolved_skills(db, harness_dir),
-        "get_obs_summary" => cmd_get_obs_summary(db, harness_dir),
-        "get_orbit_pipelines" => cmd_get_orbit_pipelines(db, harness_dir),
+        "get_harness_metrics" => cmd_get_metrics(db),
+        "get_evolved_skills" => cmd_get_evolved_skills(db),
+        "get_obs_summary" => cmd_get_obs_summary(db),
+        "get_orbit_pipelines" => cmd_get_orbit_pipelines(db),
         "get_integration_status" => cmd_get_integration_status(),
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
@@ -527,24 +523,17 @@ fn handle_harness_cmd(
     }
 }
 
-fn cmd_get_metrics(db: Option<&rusqlite::Connection>, harness_dir: &std::path::Path) -> String {
+fn cmd_get_metrics(db: Option<&rusqlite::Connection>) -> String {
     try_db(db, |conn| {
         let slug = crate::shared::paths::project_slug();
         crate::store::metrics::load_metrics_conn(conn, &slug)
             .map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
     })
-    .unwrap_or_else(|| {
-        let p = harness_dir.join("metrics.json");
-        std::fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
-    })
+    .unwrap_or_else(|| "null".into())
 }
 
-fn cmd_get_evolved_skills(
-    db: Option<&rusqlite::Connection>,
-    harness_dir: &std::path::Path,
-) -> String {
-    // Try SQLite first
-    if let Some(result) = try_db(db, |conn| {
+fn cmd_get_evolved_skills(db: Option<&rusqlite::Connection>) -> String {
+    try_db(db, |conn| {
         let skills = crate::store::evolved::list_skills_full_conn(conn)
             .unwrap_or_default()
             .into_iter()
@@ -565,90 +554,37 @@ fn cmd_get_evolved_skills(
         let total_sessions = crate::store::metrics::load_metrics_conn(conn, &slug)
             .map(|m| m.total_sessions)
             .unwrap_or(0);
-        if !skills.is_empty() || !history.is_empty() {
-            Ok(serde_json::json!({
-                "evolved_skills": skills,
-                "evolution_history": history,
-                "total_sessions_analyzed": total_sessions,
-                "patterns_detected": history.len()
-            })
-            .to_string())
-        } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "empty"))
-        }
-    }) {
-        return result;
-    }
-
-    // Fallback: file-based reading
-    let evolved_dir = harness_dir.join("evolved");
-    let skills: Vec<serde_json::Value> = if evolved_dir.exists() {
-        std::fs::read_dir(&evolved_dir)
-            .map(|rd| {
-                rd.filter_map(|e| e.ok())
-                    .filter(|e| e.path().is_dir())
-                    .map(|e| {
-                        let name = e.file_name().to_string_lossy().to_string();
-                        let skill_md_path = e.path().join("SKILL.md");
-                        let skill_md = std::fs::read_to_string(&skill_md_path).unwrap_or_default();
-                        serde_json::json!({ "name": name, "skill_md": skill_md, "created_at": null })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
-    } else {
-        vec![]
-    };
-    let evo_log = harness_dir.join("evolution.jsonl");
-    let history: Vec<serde_json::Value> = if evo_log.exists() {
-        let mut buf: std::collections::VecDeque<serde_json::Value> =
-            std::collections::VecDeque::with_capacity(51);
-        if let Ok(file) = std::fs::File::open(&evo_log) {
-            use std::io::BufRead;
-            for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
-                if line.trim().is_empty() {
-                    continue;
-                }
-                if let Ok(v) = serde_json::from_str(&line) {
-                    buf.push_back(v);
-                    if buf.len() > 50 {
-                        buf.pop_front();
-                    }
-                }
-            }
-        }
-        buf.into_iter().rev().collect()
-    } else {
-        vec![]
-    };
-    let metrics_path = harness_dir.join("metrics.json");
-    let total_sessions: u64 = std::fs::read_to_string(&metrics_path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v["total_sessions"].as_u64())
-        .unwrap_or(0);
-    serde_json::json!({
-        "evolved_skills": skills,
-        "evolution_history": history,
-        "total_sessions_analyzed": total_sessions,
-        "patterns_detected": history.len()
+        Ok(serde_json::json!({
+            "evolved_skills": skills,
+            "evolution_history": history,
+            "total_sessions_analyzed": total_sessions,
+            "patterns_detected": history.len()
+        })
+        .to_string())
     })
-    .to_string()
+    .unwrap_or_else(|| {
+        serde_json::json!({
+            "evolved_skills": [],
+            "evolution_history": [],
+            "total_sessions_analyzed": 0,
+            "patterns_detected": 0
+        })
+        .to_string()
+    })
 }
 
-fn cmd_get_obs_summary(db: Option<&rusqlite::Connection>, harness_dir: &std::path::Path) -> String {
-    // Try SQLite first
-    if let Some(result) =
-        try_db(db, |conn| {
-            let stats = crate::store::observations::query_obs_stats_conn(
-                conn,
-                "2020-01-01", // all data
-                "2099-12-31",
-            )?;
-            if stats.total > 0 {
-                let tool_stats: Vec<serde_json::Value> =
-                    {
-                        let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
+fn cmd_get_obs_summary(db: Option<&rusqlite::Connection>) -> String {
+    try_db(db, |conn| {
+        let stats = crate::store::observations::query_obs_stats_conn(
+            conn,
+            "2020-01-01", // all data
+            "2099-12-31",
+        )?;
+        let tool_stats: Vec<serde_json::Value> = {
+            let mut v: Vec<_> = stats
+                .tool_stats
+                .iter()
+                .map(|t| {
                     serde_json::json!({
                         "tool": t.tool,
                         "calls": t.calls,
@@ -657,223 +593,69 @@ fn cmd_get_obs_summary(db: Option<&rusqlite::Connection>, harness_dir: &std::pat
                         } else { 0.0 },
                         "avg_score": (t.avg_score * 1000.0).round() / 1000.0
                     })
-                }).collect();
-                        v.sort_by(|a, b| {
-                            b["calls"]
-                                .as_i64()
-                                .unwrap_or(0)
-                                .cmp(&a["calls"].as_i64().unwrap_or(0))
-                        });
-                        v
-                    };
-                let recent_sessions: Vec<serde_json::Value> = stats
-                    .session_stats
-                    .iter()
-                    .take(10)
-                    .map(|s| {
-                        let date = s
-                            .session_id
-                            .split('_')
-                            .next()
-                            .unwrap_or("unknown")
-                            .to_string();
-                        serde_json::json!({
-                            "session_id": s.session_id,
-                            "date": date,
-                            "tool_calls": s.calls,
-                            "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
-                            "failures": s.failures
-                        })
-                    })
-                    .collect();
-                return Ok(serde_json::json!({
-                    "recent_sessions": recent_sessions,
-                    "tool_stats": tool_stats,
-                    "total_tool_calls": stats.total,
-                    "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
-                    "active_agents": []
                 })
-                .to_string());
-            }
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "empty"))
+                .collect();
+            v.sort_by(|a, b| {
+                b["calls"]
+                    .as_i64()
+                    .unwrap_or(0)
+                    .cmp(&a["calls"].as_i64().unwrap_or(0))
+            });
+            v
+        };
+        let recent_sessions: Vec<serde_json::Value> = stats
+            .session_stats
+            .iter()
+            .take(10)
+            .map(|s| {
+                let date = s
+                    .session_id
+                    .split('_')
+                    .next()
+                    .unwrap_or("unknown")
+                    .to_string();
+                serde_json::json!({
+                    "session_id": s.session_id,
+                    "date": date,
+                    "tool_calls": s.calls,
+                    "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
+                    "failures": s.failures
+                })
+            })
+            .collect();
+        Ok(serde_json::json!({
+            "recent_sessions": recent_sessions,
+            "tool_stats": tool_stats,
+            "total_tool_calls": stats.total,
+            "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
+            "active_agents": []
         })
-    {
-        return result;
-    }
-
-    // Fallback: JSONL file parsing (for legacy data)
-    let obs_dir = harness_dir.join("obs");
-    if !obs_dir.exists() {
-        return serde_json::json!({
+        .to_string())
+    })
+    .unwrap_or_else(|| {
+        serde_json::json!({
             "recent_sessions": [],
             "tool_stats": [],
             "total_tool_calls": 0,
             "avg_score": 0.0,
             "active_agents": []
         })
-        .to_string();
-    }
-    use std::collections::HashMap;
-    let mut tool_map: HashMap<String, (u64, u64, f64)> = HashMap::new();
-    let mut session_map: HashMap<String, (u64, f64, u64, String)> = HashMap::new();
-
-    let mut files: Vec<_> = std::fs::read_dir(&obs_dir)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
-                .collect()
-        })
-        .unwrap_or_default();
-    files.sort_by_key(|e| e.file_name());
-
-    for entry in &files {
-        let fname = entry.file_name().to_string_lossy().to_string();
-        let session_key = fname.trim_end_matches(".jsonl").to_string();
-        let date = fname.split('_').nth(1).unwrap_or("unknown").to_string();
-        let sess = session_map
-            .entry(session_key.clone())
-            .or_insert((0, 0.0, 0, date));
-
-        if let Ok(content) = std::fs::read_to_string(entry.path()) {
-            for line in content.lines().filter(|l| !l.is_empty()) {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    let tool = v["tool"].as_str().unwrap_or("unknown").to_string();
-                    let is_success = v["result"].as_str() == Some("success")
-                        || v["tool_success"].as_bool() == Some(true);
-                    let score = v["score"]
-                        .as_f64()
-                        .or_else(|| v["composite_score"].as_f64())
-                        .unwrap_or(0.0);
-                    let t = tool_map.entry(tool).or_insert((0, 0, 0.0));
-                    t.0 += 1;
-                    if is_success {
-                        t.1 += 1;
-                    }
-                    t.2 += score;
-                    sess.0 += 1;
-                    sess.1 += score;
-                    if !is_success {
-                        sess.2 += 1;
-                    }
-                }
-            }
-        }
-    }
-
-    let tool_stats: Vec<serde_json::Value> = {
-        let mut v: Vec<_> = tool_map
-            .iter()
-            .map(|(tool, (calls, successes, score_sum))| {
-                serde_json::json!({
-                    "tool": tool,
-                    "calls": calls,
-                    "success_rate": if *calls > 0 {
-                        (*successes as f64 / *calls as f64 * 1000.0).round() / 1000.0
-                    } else { 0.0 },
-                    "avg_score": if *calls > 0 {
-                        (score_sum / *calls as f64 * 1000.0).round() / 1000.0
-                    } else { 0.0 }
-                })
-            })
-            .collect();
-        v.sort_by(|a, b| {
-            b["calls"]
-                .as_u64()
-                .unwrap_or(0)
-                .cmp(&a["calls"].as_u64().unwrap_or(0))
-        });
-        v
-    };
-    let recent_sessions: Vec<serde_json::Value> = {
-        let mut v: Vec<_> = session_map.iter().collect();
-        v.sort_by(|a, b| b.0.cmp(a.0));
-        v.into_iter().take(10).map(|(sid, (calls, score_sum, failures, date))| {
-            serde_json::json!({
-                "session_id": sid,
-                "date": date,
-                "tool_calls": calls,
-                "avg_score": if *calls > 0 { (*score_sum / *calls as f64 * 1000.0).round() / 1000.0 } else { 0.0 },
-                "failures": failures
-            })
-        }).collect()
-    };
-    let total: u64 = tool_stats
-        .iter()
-        .map(|t| t["calls"].as_u64().unwrap_or(0))
-        .sum();
-    let avg = if total > 0 {
-        tool_stats
-            .iter()
-            .map(|t| t["avg_score"].as_f64().unwrap_or(0.0) * t["calls"].as_f64().unwrap_or(0.0))
-            .sum::<f64>()
-            / total as f64
-    } else {
-        0.0
-    };
-
-    serde_json::json!({
-        "recent_sessions": recent_sessions,
-        "tool_stats": tool_stats,
-        "total_tool_calls": total,
-        "avg_score": (avg * 1000.0).round() / 1000.0,
-        "active_agents": []
+        .to_string()
     })
-    .to_string()
 }
 
-fn cmd_get_orbit_pipelines(
-    db: Option<&rusqlite::Connection>,
-    harness_dir: &std::path::Path,
-) -> String {
-    // Try SQLite first
-    if let Some(result) = try_db(db, |conn| {
+fn cmd_get_orbit_pipelines(db: Option<&rusqlite::Connection>) -> String {
+    try_db(db, |conn| {
         let pipelines = crate::store::orbit_store::list_all_pipelines_conn(conn)?;
-        if !pipelines.is_empty() {
-            let mut sorted = pipelines;
-            sorted.sort_by(|a, b| {
-                let ta = a["started_at"].as_str().unwrap_or("");
-                let tb = b["started_at"].as_str().unwrap_or("");
-                tb.cmp(ta)
-            });
-            Ok(serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into()))
-        } else {
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "empty"))
-        }
-    }) {
-        return result;
-    }
-    // Fallback: scan PIPELINE-*.json files
-    let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-    let mut all: Vec<serde_json::Value> = vec![];
-    if let Ok(rd) = std::fs::read_dir(projects_root) {
-        for proj_entry in rd.filter_map(|e| e.ok()) {
-            let orbit_dir = proj_entry.path().join("orbit");
-            if !orbit_dir.exists() {
-                continue;
-            }
-            if let Ok(files) = std::fs::read_dir(&orbit_dir) {
-                for f in files.filter_map(|e| e.ok()) {
-                    let fname = f.file_name().to_string_lossy().to_string();
-                    if fname.starts_with("PIPELINE-")
-                        && fname.ends_with(".json")
-                        && let Ok(content) = std::fs::read_to_string(f.path())
-                        && let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&content)
-                    {
-                        v["_project"] = serde_json::Value::String(
-                            proj_entry.file_name().to_string_lossy().to_string(),
-                        );
-                        all.push(v);
-                    }
-                }
-            }
-        }
-    }
-    all.sort_by(|a, b| {
-        let ta = a["started_at"].as_str().unwrap_or("");
-        let tb = b["started_at"].as_str().unwrap_or("");
-        tb.cmp(ta)
-    });
-    serde_json::to_string(&all).unwrap_or_else(|_| "[]".into())
+        let mut sorted = pipelines;
+        sorted.sort_by(|a, b| {
+            let ta = a["started_at"].as_str().unwrap_or("");
+            let tb = b["started_at"].as_str().unwrap_or("");
+            tb.cmp(ta)
+        });
+        Ok(serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into()))
+    })
+    .unwrap_or_else(|| "[]".into())
 }
 
 fn cmd_get_integration_status() -> String {

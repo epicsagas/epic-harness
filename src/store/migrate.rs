@@ -497,8 +497,6 @@ mod tests {
 
     #[test]
     fn to_global_merges_per_project_dbs() {
-        use std::path::Path;
-
         let global_db = Connection::open_in_memory().unwrap();
         super::super::schema::init_schema(&global_db).unwrap();
 
@@ -589,29 +587,39 @@ pub fn merge_attached_db(
     // Tables with simple columns — direct INSERT with project appended.
     let simple_tables = [
         // (table, columns_without_project, src_columns_without_project)
-        ("observations",
-         "timestamp, session_id, tool, tool_category, action, result, score, \
+        (
+            "observations",
+            "timestamp, session_id, tool, tool_category, action, result, score, \
           dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
           file_ext, sequence_id, pipeline_id, project",
-         "timestamp, session_id, tool, tool_category, action, result, score, \
+            "timestamp, session_id, tool, tool_category, action, result, score, \
           dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
-          file_ext, sequence_id, pipeline_id"),
-        ("sessions",
-         "timestamp, snap_type, summary, snapshot_json, millis, project",
-         "timestamp, snap_type, summary, snapshot_json, millis"),
-        ("evolution_records",
-         "timestamp, observations, success_rate, avg_score, error_patterns, \
+          file_ext, sequence_id, pipeline_id",
+        ),
+        (
+            "sessions",
+            "timestamp, snap_type, summary, snapshot_json, millis, project",
+            "timestamp, snap_type, summary, snapshot_json, millis",
+        ),
+        (
+            "evolution_records",
+            "timestamp, observations, success_rate, avg_score, error_patterns, \
           failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
           analysis_summary, project",
-         "timestamp, observations, success_rate, avg_score, error_patterns, \
+            "timestamp, observations, success_rate, avg_score, error_patterns, \
           failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
-          analysis_summary"),
-        ("orch_runs",
-         "id, status, agents_json, dep_graph_json, created_at, updated_at, project",
-         "id, status, agents_json, dep_graph_json, created_at, updated_at"),
-        ("orch_control",
-         "action, target, message, generation, project",
-         "action, target, message, generation"),
+          analysis_summary",
+        ),
+        (
+            "orch_runs",
+            "id, status, agents_json, dep_graph_json, created_at, updated_at, project",
+            "id, status, agents_json, dep_graph_json, created_at, updated_at",
+        ),
+        (
+            "orch_control",
+            "action, target, message, generation, project",
+            "action, target, message, generation",
+        ),
     ];
 
     for (table, dest_cols, src_cols) in &simple_tables {
@@ -722,10 +730,7 @@ pub fn run_to_global(dry_run: bool) -> i32 {
         if !db_path.is_file() {
             continue;
         }
-        let slug = entry
-            .file_name()
-            .to_string_lossy()
-            .into_owned();
+        let slug = entry.file_name().to_string_lossy().into_owned();
         candidates.push((slug, db_path));
     }
 
@@ -735,7 +740,10 @@ pub fn run_to_global(dry_run: bool) -> i32 {
     }
 
     if dry_run {
-        println!("dry-run: would merge {} per-project DB(s) into global harness.db:", candidates.len());
+        println!(
+            "dry-run: would merge {} per-project DB(s) into global harness.db:",
+            candidates.len()
+        );
         for (slug, path) in &candidates {
             println!("  {slug} ← {}", path.display());
         }
@@ -790,7 +798,10 @@ pub fn run_to_global(dry_run: bool) -> i32 {
 
     println!(
         "\nconsolidation complete: {} obs, {} sessions, {} evo records across {} project(s)",
-        total.obs, total.sessions, total.evo, candidates.len()
+        total.obs,
+        total.sessions,
+        total.evo,
+        candidates.len()
     );
     0
 }
