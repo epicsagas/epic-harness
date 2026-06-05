@@ -167,14 +167,12 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
                 .map_err(crate::store::sqlx_err)?;
             }
             None => {
-                sqlx::query(
-                    "DELETE FROM metrics_state WHERE key = ?1 AND project = ?2",
-                )
-                .bind(*key)
-                .bind(project)
-                .execute(&mut *tx)
-                .await
-                .map_err(crate::store::sqlx_err)?;
+                sqlx::query("DELETE FROM metrics_state WHERE key = ?1 AND project = ?2")
+                    .bind(*key)
+                    .bind(project)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(crate::store::sqlx_err)?;
             }
         }
     }
