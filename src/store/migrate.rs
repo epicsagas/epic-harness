@@ -347,7 +347,7 @@ async fn import_observations(
                          (timestamp, session_id, tool, tool_category, action, result, score, \
                           dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
                           file_ext, sequence_id, pipeline_id) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
                     )
                     .bind(&rec.timestamp)
                     .bind(&session_id)
@@ -457,7 +457,7 @@ async fn import_sessions(
             "INSERT INTO sessions \
              (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, \
               created_at_millis, project) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(&snap.timestamp)
         .bind(&snap.snap_type)
@@ -535,7 +535,7 @@ async fn import_evolution(
                      (timestamp, observations, success_rate, avg_score, error_patterns, \
                       failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
                       analysis_summary, project) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 )
                 .bind(&rec.timestamp)
                 .bind(super::u64_to_i64(rec.observations))
@@ -601,7 +601,7 @@ async fn import_metrics(
                 ($k:expr, $v:expr) => {
                     sqlx::query(
                         "INSERT INTO metrics_state (key, value, project) \
-                         VALUES (?, ?, ?) ON CONFLICT (key, project) DO UPDATE SET value=excluded.value",
+                         VALUES ($1, $2, $3) ON CONFLICT (key, project) DO UPDATE SET value=excluded.value",
                     )
                     .bind($k)
                     .bind($v)

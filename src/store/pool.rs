@@ -173,21 +173,15 @@ async fn build_postgres_pool(url: &str, max_connections: u32) -> io::Result<AnyP
     Ok(pool)
 }
 
-/// Build a MySQL pool with TLS enforced per `CONFIG.db.tls_mode`.
-async fn build_mysql_pool(url: &str, max_connections: u32) -> io::Result<AnyPool> {
-    let url = apply_tls_param(url, "ssl-mode", &CONFIG.db.tls_mode)?;
-    let pool = AnyPoolOptions::new()
-        .max_connections(max_connections)
-        .connect(&url)
-        .await
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::ConnectionRefused,
-                format!("MySQL connection failed: {e}"),
-            )
-        })?;
-
-    Ok(pool)
+/// Build a MySQL pool — currently **unsupported** (DDL and FTS not yet implemented).
+///
+/// Returns an error directing users to SQLite or PostgreSQL backends.
+async fn build_mysql_pool(_url: &str, _max_connections: u32) -> io::Result<AnyPool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "MySQL driver is not yet supported — use 'sqlite' (default) or 'postgres'. \
+         MySQL support will be added in a future release.",
+    ))
 }
 
 /// Inject or replace a TLS query parameter in the connection URL.

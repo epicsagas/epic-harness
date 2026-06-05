@@ -435,7 +435,7 @@ pub(crate) async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     let ddl = match db_type {
         DbType::Sqlite => DDL_SQLITE,
         DbType::Postgres => DDL_POSTGRES,
-        DbType::Mysql => DDL_SQLITE, // MySQL deferred — feature flag only for now
+        DbType::Mysql => DDL_SQLITE, // unreachable: build_mysql_pool returns Unsupported
     };
     sqlx::raw_sql(ddl)
         .execute(pool)

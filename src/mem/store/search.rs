@@ -37,7 +37,7 @@ pub async fn search_nodes_pool(pool: &AnyPool, query: &str, limit: i64) -> io::R
                 .map_err(crate::store::sqlx_err)?
         }
         _ => {
-            // SQLite (FTS5) and MySQL (deferred — falls back to SQLite FTS5 query)
+            // SQLite (FTS5). MySQL is unreachable: build_mysql_pool returns Unsupported.
             let sql = format!(
                 "SELECT n.{NODE_COLUMNS_PREFIXED}
                  FROM nodes n

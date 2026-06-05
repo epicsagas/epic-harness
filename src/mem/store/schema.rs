@@ -15,7 +15,7 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     match db_type {
         DbType::Sqlite => init_sqlite_schema(pool).await,
         DbType::Postgres => init_postgres_schema(pool).await,
-        DbType::Mysql => init_sqlite_schema(pool).await, // MySQL deferred
+        DbType::Mysql => init_sqlite_schema(pool).await, // unreachable: build_mysql_pool returns Unsupported
     }
 }
 
@@ -96,19 +96,20 @@ async fn init_sqlite_schema(pool: &AnyPool) -> io::Result<()> {
 
     // Schema version tracking
     let _ = sqlx::raw_sql(
-        "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '2');",
+        "CREATE TABLE IF NOT EXISTS _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT OR IGNORE INTO _harness_meta (key, value) VALUES ('schema_version', '2');",
     )
     .execute(pool)
     .await;
 
     // Migrate FTS to trigram tokenizer if needed (schema_version < 2)
-    let needs_fts_migrate: bool =
-        sqlx::query_scalar::<_, String>("SELECT value FROM _meta WHERE key = 'schema_version'")
-            .fetch_optional(pool)
-            .await
-            .map_err(crate::store::sqlx_err)?
-            .is_none_or(|v| v != "2");
+    let needs_fts_migrate: bool = sqlx::query_scalar::<_, String>(
+        "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?
+    .is_none_or(|v| v != "2");
 
     if needs_fts_migrate {
         let _ = sqlx::raw_sql(
@@ -116,7 +117,7 @@ async fn init_sqlite_schema(pool: &AnyPool) -> io::Result<()> {
              CREATE VIRTUAL TABLE nodes_fts
                  USING fts5(title, body, tags, content=nodes, content_rowid=rowid, tokenize='trigram');
              INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');
-             UPDATE _meta SET value = '2' WHERE key = 'schema_version';",
+             UPDATE _harness_meta SET value = '2' WHERE key = 'schema_version';",
         )
         .execute(pool)
         .await;
@@ -203,8 +204,8 @@ async fn init_postgres_schema(pool: &AnyPool) -> io::Result<()> {
 
     // Schema version tracking
     let _ = sqlx::raw_sql(
-        "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         INSERT INTO _meta (key, value) VALUES ('schema_version', '2')
+        "CREATE TABLE IF NOT EXISTS _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '2')
          ON CONFLICT (key) DO NOTHING;",
     )
     .execute(pool)

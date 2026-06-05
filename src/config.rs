@@ -341,37 +341,31 @@ fn load_config() -> HarnessConfig {
 
 // ── Validation ───────────────────────────────────────
 
-/// Detect the database scheme from a connection URL.
-/// Returns "sqlite", "postgres", or "mysql". Returns "sqlite" for empty URLs.
-fn url_scheme(url: &str) -> &str {
-    if url.starts_with("postgres:") || url.starts_with("postgresql:") {
-        "postgres"
-    } else if url.starts_with("mysql:") {
-        "mysql"
-    } else {
-        "sqlite"
-    }
-}
-
 /// Cross-validate `driver` against URL scheme. Warn and correct on mismatch.
 fn cross_validate_driver(driver: &mut String, url: &str) {
     if url.is_empty() {
         // Empty URL defaults to sqlite: — if driver says otherwise, warn.
         if *driver != "sqlite" {
             eprintln!(
-                "[harness] db.driver = '{driver}' but db.harness_url is empty — will default to SQLite. \
-                 Set db.harness_url to a {driver}:// URL or change driver to 'sqlite'.",
+                "[harness] db.driver = '{driver}' but URL is empty — will default to SQLite. \
+                 Set URL to a {driver}:// connection string or change driver to 'sqlite'.",
             );
             *driver = "sqlite".into();
         }
         return;
     }
-    let scheme = url_scheme(url);
-    if scheme != driver.as_str() {
+    let detected =
+        crate::store::pool::DbType::from_url(url).unwrap_or(crate::store::pool::DbType::Sqlite);
+    let detected_name = match detected {
+        crate::store::pool::DbType::Sqlite => "sqlite",
+        crate::store::pool::DbType::Postgres => "postgres",
+        crate::store::pool::DbType::Mysql => "mysql",
+    };
+    if detected_name != driver.as_str() {
         eprintln!(
-            "[harness] db.driver = '{driver}' but db.harness_url scheme is '{scheme}:' — correcting driver to '{scheme}'",
+            "[harness] db.driver = '{driver}' but URL scheme is '{detected_name}:' — correcting driver to '{detected_name}'",
         );
-        *driver = scheme.to_string();
+        *driver = detected_name.to_string();
     }
 }
 
@@ -403,6 +397,24 @@ fn validate_config(cfg: &mut HarnessConfig) {
 
     // Cross-validate db.driver against URL schemes
     cross_validate_driver(&mut cfg.db.driver, &cfg.db.harness_url);
+    // Warn if memory_url is explicitly set but its scheme differs from driver.
+    // Do NOT correct driver — memory_url defaults to SQLite when empty.
+    if !cfg.db.memory_url.is_empty() {
+        if let Ok(detected) = crate::store::pool::DbType::from_url(&cfg.db.memory_url) {
+            let detected_name = match detected {
+                crate::store::pool::DbType::Sqlite => "sqlite",
+                crate::store::pool::DbType::Postgres => "postgres",
+                crate::store::pool::DbType::Mysql => "mysql",
+            };
+            if detected_name != cfg.db.driver {
+                eprintln!(
+                    "[harness] db.memory_url scheme is '{detected_name}:' but db.driver is '{}' — \
+                     ensure both databases use the same backend or set memory_url explicitly",
+                    cfg.db.driver,
+                );
+            }
+        }
+    }
 
     // Validate TLS mode
     match cfg.db.tls_mode.as_str() {
