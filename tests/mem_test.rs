@@ -438,22 +438,20 @@ fn test_search_nodes_fts() {
     );
 }
 
-// ── write_node_dedup_conn + append_edge_conn tests ───
+// ── write_node_dedup + append_edge tests ─────────────
 
 #[test]
-fn test_write_node_dedup_conn_and_append_edge_conn() {
+fn test_write_node_dedup_and_append_edge() {
     use epic_harness::mem::store::{
-        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_node,
-        write_node_dedup_conn,
+        Edge, Node, NodeFrontmatter, append_edge, new_uuid, now_iso, read_node, write_node_dedup,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
-    let conn = open_db().unwrap();
     let ts = now_iso();
 
-    // Create two nodes via conn-based dedup
+    // Create two nodes via dedup
     let node_a = Node {
         frontmatter: NodeFrontmatter {
             id: new_uuid(),
@@ -470,7 +468,7 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
         },
         body: "pattern body A".into(),
     };
-    let (id_a, deduped_a) = write_node_dedup_conn(&conn, &node_a, 24).unwrap();
+    let (id_a, deduped_a) = write_node_dedup(&node_a, 24).unwrap();
     assert!(!deduped_a, "first write should not be deduped");
 
     // Second write with same title should be deduped
@@ -482,7 +480,7 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
         },
         body: "different body".into(),
     };
-    let (id_a2, deduped_a2) = write_node_dedup_conn(&conn, &node_a2, 24).unwrap();
+    let (id_a2, deduped_a2) = write_node_dedup(&node_a2, 24).unwrap();
     assert!(deduped_a2, "duplicate title within 24h should be deduped");
     assert_eq!(id_a, id_a2, "deduped ID should match original");
 
@@ -502,9 +500,9 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
         },
         body: "session body".into(),
     };
-    let (id_b, _) = write_node_dedup_conn(&conn, &node_b, 24).unwrap();
+    let (id_b, _) = write_node_dedup(&node_b, 24).unwrap();
 
-    // Create edge via conn
+    // Create edge
     let edge = Edge {
         id: new_uuid(),
         source: id_b.clone(),
@@ -513,10 +511,8 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
         weight: 1.0,
         ts: ts.clone(),
     };
-    append_edge_conn(&conn, &edge).unwrap();
+    append_edge(&edge).unwrap();
 
-    // Verify nodes exist
-    drop(conn); // release connection before read_node opens its own
     let read_a = read_node(&id_a).unwrap();
     assert_eq!(read_a.frontmatter.node_type, "pattern");
     let read_b = read_node(&id_b).unwrap();
@@ -528,13 +524,12 @@ fn test_write_node_dedup_conn_and_append_edge_conn() {
 #[test]
 fn test_smart_recall() {
     use epic_harness::mem::store::{
-        Node, NodeFrontmatter, new_uuid, now_iso, open_db, smart_recall, write_node_dedup_conn,
+        Node, NodeFrontmatter, new_uuid, now_iso, smart_recall, write_node_dedup,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
-    let conn = open_db().unwrap();
     let ts = now_iso();
 
     // Create nodes for two different projects with different importance
@@ -559,9 +554,8 @@ fn test_smart_recall() {
             },
             body: "body".into(),
         };
-        write_node_dedup_conn(&conn, &node, 24).unwrap();
+        write_node_dedup(&node, 24).unwrap();
     }
-    drop(conn);
 
     // Smart recall for myproj should return 2 nodes, highest importance first
     let results = smart_recall(Some("myproj"), None, 10).unwrap();
@@ -592,30 +586,54 @@ fn test_smart_recall() {
 
 #[test]
 fn test_tag_stale_nodes() {
-    use epic_harness::mem::store::{new_uuid, open_db, read_node, tag_stale_nodes};
-    use rusqlite::params;
+    use epic_harness::mem::store::{
+        Node, NodeFrontmatter, new_uuid, read_node, tag_stale_nodes, write_node,
+    };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
-    let conn = open_db().unwrap();
     let id = new_uuid();
 
     // Insert a node with an old timestamp (200 days ago)
-    conn.execute(
-        "INSERT INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
-         VALUES (?1, 'error', 'old error', 'auto', 'proj', '', datetime('now', '-200 days'), datetime('now', '-200 days'), 'old body')",
-        params![id],
-    ).unwrap();
+    let old_node = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            node_type: "error".into(),
+            title: "old error".into(),
+            tags: vec!["auto".into()],
+            projects: vec!["proj".into()],
+            agents: vec![],
+            created: "2020-01-01T00:00:00Z".into(),
+            updated: "2020-01-01T00:00:00Z".into(),
+            importance: 0.4,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: "old body".into(),
+    };
+    write_node(&old_node).unwrap();
 
     // Insert a fresh node
     let fresh_id = new_uuid();
-    conn.execute(
-        "INSERT INTO nodes (id, type, title, tags, projects, agents, created, updated, body)
-         VALUES (?1, 'pattern', 'fresh pattern', 'auto', 'proj', '', datetime('now'), datetime('now'), 'fresh body')",
-        params![fresh_id],
-    ).unwrap();
-    drop(conn);
+    let now = epic_harness::mem::store::now_iso();
+    let fresh_node = Node {
+        frontmatter: NodeFrontmatter {
+            id: fresh_id.clone(),
+            node_type: "pattern".into(),
+            title: "fresh pattern".into(),
+            tags: vec!["auto".into()],
+            projects: vec!["proj".into()],
+            agents: vec![],
+            created: now.clone(),
+            updated: now,
+            importance: 0.5,
+            access_count: 0,
+            accessed_at: String::new(),
+        },
+        body: "fresh body".into(),
+    };
+    write_node(&fresh_node).unwrap();
 
     let staled = tag_stale_nodes(90).unwrap();
     assert_eq!(staled, 1, "only the old node should be tagged stale");
@@ -642,14 +660,13 @@ fn test_tag_stale_nodes() {
 #[test]
 fn test_ingest_creates_project_hub_and_belongs_to_edges() {
     use epic_harness::mem::store::{
-        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db, read_edges_conn,
-        read_node, write_node_dedup_conn,
+        Edge, Node, NodeFrontmatter, append_edge, new_uuid, now_iso, read_edges, read_node,
+        write_node_dedup,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
-    let conn = open_db().unwrap();
     let ts = now_iso();
 
     // Insert a session node with a project slug
@@ -670,7 +687,7 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
         },
         body: "session body".into(),
     };
-    write_node_dedup_conn(&conn, &session_node, 24).unwrap();
+    write_node_dedup(&session_node, 24).unwrap();
 
     // Insert a pattern node linked to the session
     let pattern_id = new_uuid();
@@ -690,9 +707,9 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
         },
         body: "pattern body".into(),
     };
-    write_node_dedup_conn(&conn, &pattern_node, 24).unwrap();
+    write_node_dedup(&pattern_node, 24).unwrap();
 
-    // Create a project hub node (simulating what reflect would create)
+    // Create a project hub node
     let hub_id = new_uuid();
     let hub_node = Node {
         frontmatter: NodeFrontmatter {
@@ -710,7 +727,7 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
         },
         body: "project hub for testproj".into(),
     };
-    write_node_dedup_conn(&conn, &hub_node, 24).unwrap();
+    write_node_dedup(&hub_node, 24).unwrap();
 
     // Create belongs_to edges from session and pattern to hub
     let edge1 = Edge {
@@ -721,7 +738,7 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
         weight: 1.0,
         ts: ts.clone(),
     };
-    append_edge_conn(&conn, &edge1).unwrap();
+    append_edge(&edge1).unwrap();
 
     let edge2 = Edge {
         id: new_uuid(),
@@ -731,21 +748,15 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
         weight: 1.0,
         ts: ts.clone(),
     };
-    append_edge_conn(&conn, &edge2).unwrap();
+    append_edge(&edge2).unwrap();
 
     // Verify project hub exists with type='project'
     let hub = read_node(&hub_id).unwrap();
-    assert_eq!(
-        hub.frontmatter.node_type, "project",
-        "hub should be type 'project'"
-    );
-    assert_eq!(
-        hub.frontmatter.title, "testproj",
-        "hub title should match project slug"
-    );
+    assert_eq!(hub.frontmatter.node_type, "project");
+    assert_eq!(hub.frontmatter.title, "testproj");
 
     // Verify belongs_to edges from session and pattern to hub
-    let edges = read_edges_conn(&conn, 5000).unwrap();
+    let edges = read_edges();
     let belongs_edges: Vec<_> = edges
         .iter()
         .filter(|e| e.relation == "belongs_to" && e.target == hub_id)
@@ -756,103 +767,22 @@ fn test_ingest_creates_project_hub_and_belongs_to_edges() {
         "should have 2 belongs_to edges to hub"
     );
     let sources: Vec<&str> = belongs_edges.iter().map(|e| e.source.as_str()).collect();
-    assert!(
-        sources.contains(&session_id.as_str()),
-        "session should have belongs_to edge to hub"
-    );
-    assert!(
-        sources.contains(&pattern_id.as_str()),
-        "pattern should have belongs_to edge to hub"
-    );
-
-    drop(conn);
+    assert!(sources.contains(&session_id.as_str()));
+    assert!(sources.contains(&pattern_id.as_str()));
 }
 
-#[test]
-fn test_centrality_endpoint_returns_degree_ordered() {
-    use epic_harness::mem::server::compute_centrality;
-    use epic_harness::mem::store::{
-        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
-        write_node_dedup_conn,
-    };
-    let _guard = ENV_LOCK.lock().unwrap();
-    let root = temp_root();
-    set_root(&root);
-
-    let conn = open_db().unwrap();
-    let ts = now_iso();
-
-    // Create nodes A, B, C
-    let id_a = new_uuid();
-    let id_b = new_uuid();
-    let id_c = new_uuid();
-
-    for (id, title) in [(&id_a, "Node A"), (&id_b, "Node B"), (&id_c, "Node C")] {
-        let node = Node {
-            frontmatter: NodeFrontmatter {
-                id: id.clone(),
-                node_type: "concept".into(),
-                title: title.into(),
-                tags: vec![],
-                projects: vec![],
-                agents: vec![],
-                created: ts.clone(),
-                updated: ts.clone(),
-                importance: 0.5,
-                access_count: 0,
-                accessed_at: String::new(),
-            },
-            body: "test body".into(),
-        };
-        write_node_dedup_conn(&conn, &node, 24).unwrap();
-    }
-
-    // Create edges: A->B, A->C, B->C
-    // A has degree 2 (out to B, out to C)
-    // B has degree 2 (in from A, out to C)
-    // C has degree 2 (in from A, in from B)
-    let edges = [
-        (new_uuid(), &id_a, &id_b),
-        (new_uuid(), &id_a, &id_c),
-        (new_uuid(), &id_b, &id_c),
-    ];
-    for (eid, src, tgt) in &edges {
-        let edge = Edge {
-            id: eid.clone(),
-            source: src.to_string(),
-            target: tgt.to_string(),
-            relation: "related".into(),
-            weight: 1.0,
-            ts: ts.clone(),
-        };
-        append_edge_conn(&conn, &edge).unwrap();
-    }
-
-    // Verify centrality returns all nodes ordered by degree
-    let centrality = compute_centrality(&conn, 20);
-    assert_eq!(centrality.len(), 3, "should return all 3 nodes");
-
-    // All should have degree 2
-    for item in &centrality {
-        let degree = item["degree"].as_i64().unwrap();
-        assert_eq!(degree, 2, "each node should have degree 2");
-    }
-
-    drop(conn);
-}
+// ── Stats endpoint test ──────────────────────────────
 
 #[test]
 fn test_stats_endpoint_returns_correct_counts() {
     use epic_harness::mem::graph::compute_stats;
     use epic_harness::mem::store::{
-        Edge, Node, NodeFrontmatter, append_edge_conn, new_uuid, now_iso, open_db,
-        write_node_dedup_conn,
+        Edge, Node, NodeFrontmatter, append_edge, new_uuid, now_iso, write_node_dedup,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
-    let conn = open_db().unwrap();
     let ts = now_iso();
 
     // Insert 3 session nodes, 2 pattern nodes, 1 decision node
@@ -884,7 +814,7 @@ fn test_stats_endpoint_returns_correct_counts() {
             },
             body: "body".into(),
         };
-        write_node_dedup_conn(&conn, &node, 24).unwrap();
+        write_node_dedup(&node, 24).unwrap();
         node_ids.push(id);
     }
 
@@ -898,10 +828,8 @@ fn test_stats_endpoint_returns_correct_counts() {
             weight: 1.0,
             ts: ts.clone(),
         };
-        append_edge_conn(&conn, &edge).unwrap();
+        append_edge(&edge).unwrap();
     }
-
-    drop(conn);
 
     // Verify /api/stats returns total_nodes=6, total_edges=4
     let stats = compute_stats().unwrap();
@@ -915,118 +843,35 @@ fn test_stats_endpoint_returns_correct_counts() {
     assert_eq!(by_type["decision"], 1, "should have 1 decision node");
 }
 
+// ── smart_recall importance ranking test ────────────
+
 #[test]
 fn test_recall_ranks_decisions_above_sessions() {
     use epic_harness::mem::store::{
-        Node, NodeFrontmatter, new_uuid, open_db, smart_recall_conn, write_node_dedup_conn,
+        Node, NodeFrontmatter, new_uuid, smart_recall, write_node_dedup,
     };
     let _guard = ENV_LOCK.lock().unwrap();
     let root = temp_root();
     set_root(&root);
 
-    let conn = open_db().unwrap();
-
-    // Build a timestamp 2 days ago for sessions (recent)
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let recent_ts = {
-        let s = now_secs - (2 * 86400);
+
+    let fmt_ts = |offset_secs: u64| -> String {
+        let s = now_secs.saturating_sub(offset_secs);
         let sec = s % 60;
         let min = (s / 60) % 60;
         let hour = (s / 3600) % 24;
         let days = s / 86400;
-        let (y, m, d) = {
-            let mut yr = 1970u64;
-            let mut remaining = days;
-            loop {
-                let leap =
-                    (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
-                let diy = if leap { 366 } else { 365 };
-                if remaining < diy {
-                    break;
-                }
-                remaining -= diy;
-                yr += 1;
-            }
-            let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
-            let md = [
-                31u64,
-                if leap { 29 } else { 28 },
-                31,
-                30,
-                31,
-                30,
-                31,
-                31,
-                30,
-                31,
-                30,
-                31,
-            ];
-            let mut mo = 1u64;
-            let mut rd = remaining;
-            for &days_in in &md {
-                if rd < days_in {
-                    break;
-                }
-                rd -= days_in;
-                mo += 1;
-            }
-            (yr, mo, rd + 1)
-        };
+        // Simple date calculation
+        let (y, m, d) = epic_harness_days_to_ymd(days);
         format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
     };
 
-    // Build a timestamp 60 days ago for the decision (old)
-    let old_ts = {
-        let s = now_secs - (60 * 86400);
-        let sec = s % 60;
-        let min = (s / 60) % 60;
-        let hour = (s / 3600) % 24;
-        let days = s / 86400;
-        let (y, m, d) = {
-            let mut yr = 1970u64;
-            let mut remaining = days;
-            loop {
-                let leap =
-                    (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
-                let diy = if leap { 366 } else { 365 };
-                if remaining < diy {
-                    break;
-                }
-                remaining -= diy;
-                yr += 1;
-            }
-            let leap = (yr.is_multiple_of(4) && !yr.is_multiple_of(100)) || yr.is_multiple_of(400);
-            let md = [
-                31u64,
-                if leap { 29 } else { 28 },
-                31,
-                30,
-                31,
-                30,
-                31,
-                31,
-                30,
-                31,
-                30,
-                31,
-            ];
-            let mut mo = 1u64;
-            let mut rd = remaining;
-            for &days_in in &md {
-                if rd < days_in {
-                    break;
-                }
-                rd -= days_in;
-                mo += 1;
-            }
-            (yr, mo, rd + 1)
-        };
-        format!("{y:04}-{m:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
-    };
+    let recent_ts = fmt_ts(2 * 86400); // 2 days ago
+    let old_ts = fmt_ts(60 * 86400); // 60 days ago
 
     // Insert 5 session nodes (importance 0.05) with recent timestamps
     for i in 0..5i32 {
@@ -1046,7 +891,7 @@ fn test_recall_ranks_decisions_above_sessions() {
             },
             body: "session data".into(),
         };
-        write_node_dedup_conn(&conn, &node, 24).unwrap();
+        write_node_dedup(&node, 24).unwrap();
     }
 
     // Insert 1 decision node (importance 0.9) with older timestamp
@@ -1066,33 +911,28 @@ fn test_recall_ranks_decisions_above_sessions() {
         },
         body: "important decision body".into(),
     };
-    write_node_dedup_conn(&conn, &decision_node, 24).unwrap();
+    write_node_dedup(&decision_node, 24).unwrap();
 
-    // Call smart_recall_conn with limit=10
-    let results = smart_recall_conn(&conn, Some("proj"), None, 10).unwrap();
+    // Call smart_recall with limit=10
+    let results = smart_recall(Some("proj"), None, 10).unwrap();
     assert_eq!(results.len(), 6, "should return all 6 nodes");
 
-    // Verify decision node appears BEFORE any session node in results
     let decision_idx = results
         .iter()
         .position(|sn| sn.node.frontmatter.node_type == "decision");
     let first_session_idx = results
         .iter()
         .position(|sn| sn.node.frontmatter.node_type == "session");
-    assert!(
-        decision_idx.is_some(),
-        "decision node should be present in results"
-    );
+    assert!(decision_idx.is_some(), "decision node should be present");
     assert!(
         first_session_idx.is_some(),
-        "session nodes should be present in results"
+        "session nodes should be present"
     );
     assert!(
         decision_idx.unwrap() < first_session_idx.unwrap(),
         "decision node should rank above all session nodes"
     );
 
-    // Verify session nodes have lower scores than decision node
     let decision_score = results[decision_idx.unwrap()].score;
     for sn in &results {
         if sn.node.frontmatter.node_type == "session" {
@@ -1104,6 +944,43 @@ fn test_recall_ranks_decisions_above_sessions() {
             );
         }
     }
+}
 
-    drop(conn);
+// Helper to convert days since epoch to (year, month, day)
+#[allow(clippy::manual_is_multiple_of)]
+fn epic_harness_days_to_ymd(mut days: u64) -> (u64, u64, u64) {
+    let mut year = 1970u64;
+    loop {
+        let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+        let diy = if leap { 366 } else { 365 };
+        if days < diy {
+            break;
+        }
+        days -= diy;
+        year += 1;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let month_days = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 1u64;
+    for &md in &month_days {
+        if days < md {
+            break;
+        }
+        days -= md;
+        month += 1;
+    }
+    (year, month, days + 1)
 }

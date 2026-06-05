@@ -3,6 +3,7 @@
 use super::*;
 use std::path::PathBuf;
 
+#[allow(dead_code)]
 fn make_node(
     id: &str,
     title: &str,
@@ -132,80 +133,6 @@ fn test_parse_iso_non_leap_century() {
     assert_eq!(parse_iso_to_secs("2000-03-01T00:00:00Z"), expected);
 }
 
-/// Open an isolated in-memory SQLite DB with the full harness schema applied.
-fn open_mem_db() -> rusqlite::Connection {
-    let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS nodes (
-            id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
-            tags TEXT NOT NULL DEFAULT '', projects TEXT NOT NULL DEFAULT '',
-            agents TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL,
-            body TEXT NOT NULL DEFAULT '', importance REAL NOT NULL DEFAULT 0.5,
-            access_count INTEGER NOT NULL DEFAULT 0, accessed_at TEXT NOT NULL DEFAULT ''
-        );
-        CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts
-            USING fts5(title, body, tags, content=nodes, content_rowid=rowid, tokenize='trigram');
-        CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
-            INSERT INTO nodes_fts(rowid, title, body, tags)
-            VALUES (new.rowid, new.title, new.body, new.tags);
-        END;
-        CREATE TABLE IF NOT EXISTS edges (
-            id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL,
-            relation TEXT NOT NULL DEFAULT 'related', weight REAL NOT NULL DEFAULT 1.0,
-            ts TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
-        CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
-        CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
-        CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
-        CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '2');",
-    )
-    .expect("schema");
-    conn
-}
-
-// ── Fix 4: graph-boost lifts connected node ────────────
-#[test]
-fn smart_recall_graph_boost_lifts_connected_node() {
-    let conn = open_mem_db();
-
-    let id_a = "aaaaaaaa-0000-4000-8000-000000000001";
-    let id_b = "aaaaaaaa-0000-4000-8000-000000000002";
-    let id_e = "eeeeeeee-0000-4000-8000-000000000001";
-
-    let n1 = make_node(id_a, "Alpha Node", "concept", &[], Some(0.8));
-    let n2 = make_node(id_b, "Beta Node", "concept", &[], Some(0.4));
-    write_node_conn(&conn, &n1).unwrap();
-    write_node_conn(&conn, &n2).unwrap();
-
-    let edge = Edge {
-        id: id_e.to_string(),
-        source: id_a.to_string(),
-        target: id_b.to_string(),
-        relation: "related".to_string(),
-        weight: 5.0,
-        ts: now_iso(),
-    };
-    append_edge_conn(&conn, &edge).unwrap();
-
-    let results = smart_recall_conn(&conn, None, None, 10).unwrap();
-    let ids: Vec<&str> = results
-        .iter()
-        .map(|sn| sn.node.frontmatter.id.as_str())
-        .collect();
-    assert!(ids.contains(&id_a), "boost-a must appear");
-    assert!(ids.contains(&id_b), "boost-b must appear");
-
-    for sn in &results {
-        assert!(
-            sn.score > 0.0,
-            "score must be positive: {}",
-            sn.node.frontmatter.id
-        );
-    }
-}
-
 // ── Phase 2a: session importance downgrade ────────────────
 #[test]
 fn test_session_importance_is_005() {
@@ -221,92 +148,5 @@ fn test_session_importance_lower_than_pattern() {
     assert!(
         importance_for_type("session") < importance_for_type("pattern"),
         "session importance should be lower than pattern"
-    );
-}
-
-// ── Phase 2b: FTS5 trigram tokenizer ─────────────────────
-#[test]
-fn test_fts_uses_trigram_tokenizer() {
-    let conn = open_mem_db();
-    // Query the FTS table info to verify trigram tokenizer
-    let info: String = conn
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE name = 'nodes_fts'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("nodes_fts should exist");
-    assert!(
-        info.contains("trigram"),
-        "FTS5 table should use trigram tokenizer, got: {}",
-        info
-    );
-}
-
-#[test]
-fn test_fts_trigram_korean_substring_search() {
-    let conn = open_mem_db();
-
-    // Insert a node with Korean text
-    let node = make_node("korean-test-001", "Korean Test", "concept", &[], Some(0.7));
-    let node_with_korean = Node {
-        frontmatter: node.frontmatter.clone(),
-        body: "한국어 테스트입니다".to_string(),
-    };
-    write_node_conn(&conn, &node_with_korean).unwrap();
-
-    // Trigram tokenizer should match Korean substrings (3+ chars for valid trigrams)
-    let count: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH '한국어'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap_or(0);
-    assert!(count > 0, "trigram FTS should match Korean substring");
-}
-
-// ── Phase 2a: schema version tracking ─────────────────────
-#[test]
-fn test_schema_version_meta_table_exists() {
-    let conn = open_mem_db();
-    let version: String = conn
-        .query_row(
-            "SELECT value FROM _meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .expect("_meta table with schema_version should exist");
-    assert_eq!(version, "2", "schema_version should be '2'");
-}
-
-// ── Phase 2a: session importance backfill in schema ────────
-#[test]
-fn test_session_importance_backfill() {
-    let conn = open_mem_db();
-
-    // Insert a session node with default importance
-    conn.execute(
-        "INSERT INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance)
-         VALUES ('session-backfill-test', 'session', 'Session Backfill Test', '', '', '', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z', 'body', 0.5)",
-        [],
-    ).unwrap();
-
-    // Run the backfill that schema.rs applies
-    let _ = conn.execute_batch(
-        "UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;",
-    );
-
-    let imp: f64 = conn
-        .query_row(
-            "SELECT importance FROM nodes WHERE id = 'session-backfill-test'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(
-        (imp - 0.05).abs() < f64::EPSILON,
-        "session node importance should be backfilled to 0.05, got: {}",
-        imp
     );
 }

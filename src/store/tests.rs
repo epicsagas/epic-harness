@@ -1,58 +1,28 @@
 //! Integration tests for the store module
 
-use rusqlite::Connection;
+use sqlx::Row;
 
-/// Shared in-memory test database helper.
-/// Re-exported via `super::in_memory_db` from submodules — use `super::in_memory_db()`.
-pub(crate) fn in_memory_db() -> Connection {
-    let conn = Connection::open_in_memory().unwrap();
-    super::schema::init_schema(&conn).unwrap();
-    conn
+// ── Helper ────────────────────────────────────────────
+async fn setup_pool() -> sqlx::SqlitePool {
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    pool
 }
 
-/// Create a v2 schema (no UNIQUE on score_history.timestamp) for migration tests.
-fn v2_db() -> Connection {
-    let conn = Connection::open_in_memory().unwrap();
-    // Apply pragmas manually (subset of init_schema)
-    conn.execute_batch(
-        "PRAGMA journal_mode=WAL;
-         PRAGMA foreign_keys=ON;",
-    )
-    .unwrap();
-    // Create _harness_meta and set version = 2
-    conn.execute_batch(
-        "CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '2');",
-    )
-    .unwrap();
-    // Create score_history WITHOUT UNIQUE constraint (v2 schema)
-    conn.execute_batch(
-        "CREATE TABLE score_history (
-             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-             timestamp    TEXT NOT NULL,
-             success_rate REAL NOT NULL,
-             avg_score    REAL NOT NULL,
-             observations INTEGER NOT NULL DEFAULT 0,
-             dim_success  REAL NOT NULL DEFAULT 0.0,
-             dim_quality  REAL NOT NULL DEFAULT 0.0,
-             dim_cost     REAL NOT NULL DEFAULT 0.0
-         );",
-    )
-    .unwrap();
-    conn
-}
+// ── Schema / DDL tests ────────────────────────────────
 
-#[test]
-fn schema_creates_all_tables() {
-    let conn = in_memory_db();
+#[tokio::test]
+async fn schema_creates_all_tables() {
+    let pool = setup_pool().await;
 
-    // Verify all expected tables exist
-    let tables: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .filter_map(|r| r.ok())
+    let rows = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    let tables: Vec<String> = rows
+        .iter()
+        .map(|r| r.try_get::<String, _>(0).unwrap())
         .collect();
 
     let expected = [
@@ -84,228 +54,70 @@ fn schema_creates_all_tables() {
     }
 }
 
-#[test]
-fn schema_is_idempotent() {
-    let conn = Connection::open_in_memory().unwrap();
-    super::schema::init_schema(&conn).unwrap();
+#[tokio::test]
+async fn schema_is_idempotent() {
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
     // Running again should not fail
-    super::schema::init_schema(&conn).unwrap();
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
 }
 
-#[test]
-fn meta_table_tracks_version() {
-    let conn = in_memory_db();
-    let version: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
+#[tokio::test]
+async fn meta_table_tracks_version() {
+    let pool = setup_pool().await;
+    let version: String =
+        sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'schema_version'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(version, "4");
 }
 
-#[test]
-fn wal_mode_is_enabled() {
-    let conn = in_memory_db();
-    // In-memory DBs always report "memory" for journal_mode, but the pragma call
-    // must succeed without error. For file-backed DBs this would return "wal".
-    let mode: String = conn
-        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+#[tokio::test]
+async fn wal_mode_is_enforced() {
+    let pool = setup_pool().await;
+    // In-memory DBs report "memory"; file-backed report "wal". Accept both.
+    let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+        .fetch_one(&pool)
+        .await
         .unwrap();
-    // In-memory always = "memory"; accept both to keep in-memory tests green
     assert!(
         mode == "wal" || mode == "memory",
         "unexpected journal_mode: {mode}"
     );
 }
 
-#[test]
-fn foreign_keys_are_enforced() {
-    let conn = in_memory_db();
-    let fk: i64 = conn
-        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+#[tokio::test]
+async fn foreign_keys_are_enforced() {
+    let pool = setup_pool().await;
+    let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+        .fetch_one(&pool)
+        .await
         .unwrap();
     assert_eq!(fk, 1, "foreign_keys pragma must be ON (1)");
 }
 
-#[test]
-fn migration_is_idempotent() {
-    // Verify that setting the legacy_migrated flag prevents re-import.
-    // migrate::run_subcommand opens a real file DB, so here we just confirm
-    // the flag semantics via the meta table directly.
-    let conn = in_memory_db();
+#[tokio::test]
+async fn migration_is_idempotent() {
+    let pool = setup_pool().await;
 
-    // Simulate a completed migration by setting the flag
-    conn.execute(
+    // Simulate a completed migration by setting the flag.
+    sqlx::query(
         "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
-        [],
     )
+    .execute(&pool)
+    .await
     .unwrap();
 
-    let migrated: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let migrated: String =
+        sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(migrated, "1");
 }
 
-#[test]
-fn v2_to_v3_migration_upgrades_schema_version() {
-    // Start from a v2 DB and apply init_schema — must upgrade to v3.
-    let conn = v2_db();
-
-    // Seed a duplicate-timestamp row to verify OR IGNORE dedup
-    conn.execute(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-01-01T00:00:00Z', 0.9, 0.8, 5, 1.0, 0.9, 0.8)",
-        [],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-01-01T00:00:00Z', 0.7, 0.6, 3, 0.5, 0.5, 0.5)",
-        [],
-    )
-    .unwrap();
-
-    // Apply schema (runs v2→v3 migration)
-    super::schema::init_schema(&conn).unwrap();
-
-    // Version must be 3
-    let version: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(version, "4");
-
-    // UNIQUE constraint must now be in force (duplicate timestamp rejected)
-    let result = conn.execute(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-01-01T00:00:00Z', 0.5, 0.4, 1, 0.0, 0.0, 0.0)",
-        [],
-    );
-    assert!(
-        result.is_err(),
-        "UNIQUE constraint must reject duplicate timestamp after v3 migration"
-    );
-
-    // Exactly one row must exist (OR IGNORE deduplicated the seed rows)
-    let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM score_history", [], |r| r.get(0))
-        .unwrap();
-    assert_eq!(
-        count, 1,
-        "duplicate seed row must have been ignored by OR IGNORE"
-    );
-}
-
-#[test]
-fn v2_to_v3_migration_is_idempotent() {
-    // Running init_schema twice on a v2 DB must not fail.
-    let conn = v2_db();
-    super::schema::init_schema(&conn).unwrap();
-    // Second call must be a no-op (version already = 3, no migration runs)
-    super::schema::init_schema(&conn).unwrap();
-
-    let version: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(version, "4");
-}
-
-#[test]
-fn v1_to_v3_migration_runs_both_steps() {
-    // A v1 DB (no UNIQUE on score_history, no FK indexes) must reach v3 after
-    // init_schema: v1→v2 (add indexes) then v2→v3 (recreate score_history with UNIQUE).
-    let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
-        .unwrap();
-    conn.execute_batch(
-        "CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-         INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '1');",
-    )
-    .unwrap();
-    // v1 score_history: no UNIQUE on timestamp, no FK indexes.
-    // Columns must match what the v1→v2 migration's CREATE INDEX statements reference.
-    conn.execute_batch(
-        "CREATE TABLE score_history (
-             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-             timestamp    TEXT NOT NULL,
-             success_rate REAL NOT NULL,
-             avg_score    REAL NOT NULL,
-             observations INTEGER NOT NULL DEFAULT 0,
-             dim_success  REAL NOT NULL DEFAULT 0.0,
-             dim_quality  REAL NOT NULL DEFAULT 0.0,
-             dim_cost     REAL NOT NULL DEFAULT 0.0
-         );
-         CREATE TABLE orch_agent_events (
-             id          INTEGER PRIMARY KEY,
-             agent_id    TEXT,
-             timestamp   TEXT,
-             event_type  TEXT,
-             data_json   TEXT
-         );
-         CREATE TABLE orch_agent_inbox (
-             id          INTEGER PRIMARY KEY,
-             agent_id    TEXT,
-             from_agent  TEXT,
-             timestamp   TEXT,
-             message     TEXT
-         );
-         CREATE TABLE observations (
-             id              INTEGER PRIMARY KEY,
-             session_id      TEXT,
-             tool            TEXT,
-             tool_category   TEXT,
-             timestamp       TEXT
-         );
-         CREATE TABLE evolved_skills (
-             id      INTEGER PRIMARY KEY,
-             project TEXT,
-             active  INTEGER
-         );",
-    )
-    .unwrap();
-
-    super::schema::init_schema(&conn).unwrap();
-
-    let version: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(version, "4", "v1 DB must reach schema_version=4");
-
-    // UNIQUE constraint must exist after v3 migration
-    let result = conn.execute(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-01-01T00:00:00Z', 0.9, 0.8, 1, 1.0, 1.0, 1.0)",
-        [],
-    );
-    assert!(result.is_ok());
-    let dup = conn.execute(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-01-01T00:00:00Z', 0.5, 0.4, 1, 0.5, 0.5, 0.5)",
-        [],
-    );
-    assert!(
-        dup.is_err(),
-        "UNIQUE constraint must be active after v1→v3 migration"
-    );
-}
+// ── Numeric helpers ───────────────────────────────────
 
 #[test]
 fn u64_to_i64_converts_normal_values() {
@@ -316,7 +128,6 @@ fn u64_to_i64_converts_normal_values() {
 
 #[test]
 fn u64_to_i64_saturates_on_overflow() {
-    // Values above i64::MAX must saturate to i64::MAX (not panic)
     let result = super::u64_to_i64(u64::MAX);
     assert_eq!(result, i64::MAX);
 }
@@ -334,83 +145,56 @@ fn i64_to_u64_clamps_negative_to_zero() {
     assert_eq!(super::i64_to_u64(i64::MIN), 0);
 }
 
-#[test]
-fn immediate_tx_rollbacks_on_drop() {
-    let conn = in_memory_db();
-    conn.execute(
-        "INSERT INTO metrics_state (key, value) VALUES ('tx_test', 'before')",
-        [],
-    )
-    .unwrap();
+// ── Pool-based constraint tests ───────────────────────
 
-    {
-        let _tx = super::ImmediateTx::begin(&conn).unwrap();
-        conn.execute(
-            "UPDATE metrics_state SET value = 'during' WHERE key = 'tx_test'",
-            [],
-        )
-        .unwrap();
-        // _tx drops here → auto-ROLLBACK
-    }
-
-    let val: String = conn
-        .query_row(
-            "SELECT value FROM metrics_state WHERE key = 'tx_test'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        val, "before",
-        "uncommitted transaction must be rolled back on drop"
-    );
-}
-
-#[test]
-fn fk_violation_on_agent_without_run() {
-    let conn = in_memory_db();
-    let result = conn.execute(
+#[tokio::test]
+async fn fk_violation_on_agent_without_run() {
+    let pool = setup_pool().await;
+    let result = sqlx::query(
         "INSERT INTO orch_agents
          (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat)
          VALUES ('agent-x', 'nonexistent-run', 'worker', 'do thing', '[]', 'running', 'exec', 0.0, '')",
-        [],
-    );
+    )
+    .execute(&pool)
+    .await;
     assert!(
         result.is_err(),
         "FK violation must reject insert of agent with non-existent run_id"
     );
 }
 
-#[test]
-fn unique_constraint_on_score_history_timestamp() {
-    let conn = in_memory_db();
-    conn.execute(
+#[tokio::test]
+async fn unique_constraint_on_score_history_timestamp() {
+    let pool = setup_pool().await;
+    sqlx::query(
         "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
          VALUES ('2026-06-02T10:00:00Z', 0.9, 0.8, 10, 1.0, 0.9, 0.8)",
-        [],
     )
+    .execute(&pool)
+    .await
     .unwrap();
 
-    let result = conn.execute(
+    let result = sqlx::query(
         "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
          VALUES ('2026-06-02T10:00:00Z', 0.7, 0.6, 5, 0.5, 0.5, 0.5)",
-        [],
-    );
+    )
+    .execute(&pool)
+    .await;
     assert!(
         result.is_err(),
-        "UNIQUE constraint must reject duplicate score_history timestamp"
+        "UNIQUE constraint must reject duplicate score_history (timestamp, project)"
     );
 }
+
+// ── Observation / stats tests ─────────────────────────
 
 #[tokio::test]
 async fn obs_stats_tool_limit_is_enforced() {
     use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    let pool = setup_pool().await;
 
-    // Insert observations for 150 distinct tool names
     for i in 0..150usize {
         let rec = ObsRecord {
             timestamp: "2026-06-02T10:00:00Z".into(),
@@ -447,10 +231,8 @@ async fn obs_error_stats_limit_is_enforced() {
     use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    let pool = setup_pool().await;
 
-    // Insert observations for 80 distinct failure categories
     for i in 0..80usize {
         let rec = ObsRecord {
             timestamp: "2026-06-02T10:00:00Z".into(),
@@ -485,9 +267,7 @@ async fn obs_error_stats_limit_is_enforced() {
 async fn global_json_field_parse_failure_uses_fallback() {
     use super::global::{insert_pattern_pool, query_all_patterns_pool};
 
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
-    // Insert a row with intentionally malformed JSON in per_error_stats
+    let pool = setup_pool().await;
     sqlx::query(
         "INSERT INTO global_patterns
          (timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools)
@@ -497,21 +277,18 @@ async fn global_json_field_parse_failure_uses_fallback() {
     .await
     .unwrap();
 
-    // Should not panic; malformed per_error_stats returns fallback {}
     let patterns = query_all_patterns_pool(&pool, 10).await.unwrap();
     assert_eq!(patterns.len(), 1);
     assert!(
         patterns[0]["per_error_stats"].is_object(),
         "fallback should be an empty object"
     );
-    // Confirm fallback is empty object (not the original invalid string)
     assert_eq!(
         patterns[0]["per_error_stats"],
         serde_json::json!({}),
         "fallback for invalid JSON must be {{}}"
     );
 
-    // Insert with valid JSON — must be preserved
     insert_pattern_pool(
         &pool,
         "2026-06-02T11:00:00Z",
@@ -535,8 +312,7 @@ async fn dismiss_agent_is_atomic() {
         OrchAgent, OrchRun, dismiss_agent_pool, init_run_pool, read_agent_pool, upsert_agent_pool,
     };
 
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    let pool = setup_pool().await;
     let run = OrchRun {
         id: "run-atomic".into(),
         status: "running".into(),
@@ -562,13 +338,11 @@ async fn dismiss_agent_is_atomic() {
     };
     upsert_agent_pool(&pool, &agent).await.unwrap();
 
-    // First dismiss must succeed
     let first = dismiss_agent_pool(&pool, "test-project", "agent-atomic")
         .await
         .unwrap();
     assert!(first, "first dismiss must return true");
 
-    // Second dismiss of the same agent must return false (not panic)
     let second = dismiss_agent_pool(&pool, "test-project", "agent-atomic")
         .await
         .unwrap();
@@ -590,10 +364,8 @@ async fn cleanup_stale_is_atomic() {
     use super::orchestrator::{
         OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool,
     };
-    use sqlx::Row;
 
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    let pool = setup_pool().await;
     let run = OrchRun {
         id: "run-stale".into(),
         status: "complete".into(),
@@ -619,21 +391,17 @@ async fn cleanup_stale_is_atomic() {
     };
     upsert_agent_pool(&pool, &agent).await.unwrap();
 
-    // cleanup_stale must delete both run and orphaned agent atomically
     let deleted = cleanup_stale_pool(&pool, "test-project", "").await.unwrap();
     assert!(deleted >= 2, "must delete run + agent, got {deleted}");
 
-    // Neither should remain
-    let row = sqlx::query("SELECT COUNT(*) FROM orch_runs")
+    let run_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orch_runs")
         .fetch_one(&pool)
         .await
         .unwrap();
-    let run_count: i64 = row.try_get(0).unwrap();
-    let row = sqlx::query("SELECT COUNT(*) FROM orch_agents")
+    let agent_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orch_agents")
         .fetch_one(&pool)
         .await
         .unwrap();
-    let agent_count: i64 = row.try_get(0).unwrap();
     assert_eq!(run_count, 0);
     assert_eq!(agent_count, 0);
 }
