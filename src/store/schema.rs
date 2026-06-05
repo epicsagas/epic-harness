@@ -4,7 +4,7 @@
 //! orchestrator, orbit pipelines, evolved skills, and global patterns.
 
 use rusqlite::Connection;
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use std::io;
 
 use super::store_err;
@@ -214,7 +214,7 @@ fn apply_ddl(conn: &Connection) -> io::Result<()> {
             message     TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS orch_control (
-            id         INTEGER PRIMARY KEY CHECK (id = 1),
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
             project    TEXT NOT NULL DEFAULT '',
             action     TEXT NOT NULL,
             target     TEXT,
@@ -352,30 +352,27 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
             .and_then(|v| v.parse().ok());
         if current_v.map(|v| v >= 3).unwrap_or(false) {
             // Already migrated by a concurrent process — drop tx (auto-ROLLBACK).
-            return Ok(());
+            // Fall through so set_version() at the bottom of run_migrations is reached.
+        } else {
+            store_err(conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS score_history_v3 (
+                     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                     timestamp    TEXT NOT NULL UNIQUE,
+                     success_rate REAL NOT NULL,
+                     avg_score    REAL NOT NULL,
+                     observations INTEGER NOT NULL DEFAULT 0,
+                     dim_success  REAL NOT NULL DEFAULT 0.0,
+                     dim_quality  REAL NOT NULL DEFAULT 0.0,
+                     dim_cost     REAL NOT NULL DEFAULT 0.0
+                 );
+                 INSERT OR IGNORE INTO score_history_v3
+                     SELECT id, timestamp, success_rate, avg_score, observations,
+                            dim_success, dim_quality, dim_cost FROM score_history;
+                 DROP TABLE score_history;
+                 ALTER TABLE score_history_v3 RENAME TO score_history;",
+            ))?;
+            tx.commit()?;
         }
-        store_err(conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS score_history_v3 (
-                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                 timestamp    TEXT NOT NULL UNIQUE,
-                 success_rate REAL NOT NULL,
-                 avg_score    REAL NOT NULL,
-                 observations INTEGER NOT NULL DEFAULT 0,
-                 dim_success  REAL NOT NULL DEFAULT 0.0,
-                 dim_quality  REAL NOT NULL DEFAULT 0.0,
-                 dim_cost     REAL NOT NULL DEFAULT 0.0
-             );
-             INSERT OR IGNORE INTO score_history_v3
-                 SELECT id, timestamp, success_rate, avg_score, observations,
-                        dim_success, dim_quality, dim_cost FROM score_history;
-             DROP TABLE score_history;
-             ALTER TABLE score_history_v3 RENAME TO score_history;",
-        ))?;
-        store_err(conn.execute(
-            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', '3')",
-            [],
-        ))?;
-        tx.commit()?;
         // Fall through — do NOT return early, so subsequent migrations (v3→v4, etc.)
         // can run in the same init_schema() call.
     }
@@ -383,10 +380,9 @@ fn run_migrations(conn: &Connection, from_version: u32, to_version: u32) -> io::
     // v3→v4: Add project column to all tables for global DB.
     if to_version >= 4 && from_version < 4 {
         migrate_v3_to_v4(conn)?;
-        return Ok(());
+        // Fall through — do NOT return early, so set_version() is always reached.
     }
 
-    // Only reached when to_version == 2 (v3 block above returns early).
     set_version(conn, to_version)?;
     Ok(())
 }
@@ -547,10 +543,6 @@ fn migrate_v3_to_v4(conn: &Connection) -> io::Result<()> {
         }
     }
 
-    store_err(conn.execute(
-        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', '4')",
-        [],
-    ))?;
     tx.commit()?;
     Ok(())
 }
@@ -728,7 +720,7 @@ pub(crate) async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
             message     TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS orch_control (
-            id         INTEGER PRIMARY KEY CHECK (id = 1),
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
             project    TEXT NOT NULL DEFAULT '',
             action     TEXT NOT NULL,
             target     TEXT,
@@ -799,12 +791,102 @@ pub(crate) async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     .await
     .map_err(super::sqlx_err)?;
 
+    // Run pending migrations before setting version.
+    run_migrations_pool(pool).await?;
+
     // Set schema version.
-    sqlx::query("INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', ?)")
-        .bind(SCHEMA_VERSION.to_string())
+    set_version_pool(pool, SCHEMA_VERSION).await?;
+
+    Ok(())
+}
+
+/// Check schema version in the pool and run pending migrations.
+/// Async equivalent of the rusqlite-based `run_migrations`.
+async fn run_migrations_pool(pool: &SqlitePool) -> io::Result<()> {
+    // Read current version — None means fresh DB (no rows yet).
+    let current: u32 = sqlx::query_as::<_, (String,)>(
+        "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(super::sqlx_err)?
+    .and_then(|(v,)| v.parse().ok())
+    .unwrap_or(SCHEMA_VERSION); // Fresh DB: DDL already created v4 schema.
+
+    if current < 4 {
+        migrate_v3_to_v4_pool(pool).await?;
+    }
+
+    Ok(())
+}
+
+/// Write the current schema version to _harness_meta (sqlx variant).
+async fn set_version_pool(pool: &SqlitePool, version: u32) -> io::Result<()> {
+    sqlx::query("INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', ?1)")
+        .bind(version.to_string())
         .execute(pool)
         .await
         .map_err(super::sqlx_err)?;
+    Ok(())
+}
+
+/// Async v3->v4 migration: add project column to tables that don't have it.
+async fn migrate_v3_to_v4_pool(pool: &SqlitePool) -> io::Result<()> {
+    // Check if already migrated (project column exists in observations).
+    let cols = sqlx::query("PRAGMA table_info(observations)")
+        .fetch_all(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    let has_project = cols.iter().any(|row| {
+        row.try_get::<String, _>("name")
+            .map(|n| n == "project")
+            .unwrap_or(false)
+    });
+
+    if has_project {
+        return Ok(());
+    }
+
+    // Add project column to tables that need it.
+    let tables = [
+        "observations",
+        "sessions",
+        "evolution_records",
+        "metrics_state",
+        "score_history",
+        "orch_runs",
+        "orch_control",
+    ];
+
+    for table in &tables {
+        let cols = sqlx::query(&format!("PRAGMA table_info({table})"))
+            .fetch_all(pool)
+            .await
+            .map_err(super::sqlx_err)?;
+
+        let has_col = cols.iter().any(|r| {
+            r.try_get::<String, _>("name")
+                .map(|n| n == "project")
+                .unwrap_or(false)
+        });
+
+        if !has_col && !cols.is_empty() {
+            sqlx::query(&format!(
+                "ALTER TABLE {table} ADD COLUMN project TEXT NOT NULL DEFAULT ''"
+            ))
+            .execute(pool)
+            .await
+            .map_err(super::sqlx_err)?;
+        }
+    }
+
+    // Composite-PK table recreations (skill_attribution, promotion_counters,
+    // workspace_manifest) are handled by the rusqlite path in migrate_v3_to_v4().
+    // For the pool path, the DDL CREATE TABLE IF NOT EXISTS above already has
+    // the correct v4 schema. Existing v3 rows retain their original PKs, which
+    // is acceptable for the global DB use case where project-scoped queries
+    // filter via the new project column.
 
     Ok(())
 }

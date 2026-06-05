@@ -620,8 +620,9 @@ mod tests {
 
         // Attach and merge
         let slug = "test-project";
+        let escaped_path = db_path.display().to_string().replace('\'', "''");
         global_db
-            .execute(&format!("ATTACH '{}' AS src", db_path.display()), [])
+            .execute(&format!("ATTACH '{escaped_path}' AS src"), [])
             .unwrap();
 
         let merged = super::merge_attached_db(&global_db, slug, "src").unwrap();
@@ -838,10 +839,8 @@ pub fn run_to_global(dry_run: bool) -> i32 {
     for (slug, db_path) in &candidates {
         // ATTACH the per-project DB read-only
         let attach_name = "src";
-        if let Err(e) = conn.execute(
-            &format!("ATTACH '{}' AS {attach_name}", db_path.display()),
-            [],
-        ) {
+        let escaped_path = db_path.display().to_string().replace('\'', "''");
+        if let Err(e) = conn.execute(&format!("ATTACH '{escaped_path}' AS {attach_name}"), []) {
             eprintln!("[migrate/to-global] ATTACH failed for {slug}: {e}");
             continue;
         }

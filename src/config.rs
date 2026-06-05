@@ -304,7 +304,7 @@ fn load_config() -> HarnessConfig {
     }
     match std::fs::read_to_string(&path) {
         Ok(content) => {
-            let cfg = toml::from_str(&content).unwrap_or_else(|e| {
+            let mut cfg = toml::from_str(&content).unwrap_or_else(|e| {
                 eprintln!(
                     "[epic-harness] warning: failed to parse {}: {} — using defaults",
                     path.display(),
@@ -312,7 +312,7 @@ fn load_config() -> HarnessConfig {
                 );
                 HarnessConfig::default()
             });
-            validate_config(&cfg);
+            validate_config(&mut cfg);
             cfg
         }
         Err(e) => {
@@ -328,7 +328,7 @@ fn load_config() -> HarnessConfig {
 
 // ── Validation ───────────────────────────────────────
 
-fn validate_config(cfg: &HarnessConfig) {
+fn validate_config(cfg: &mut HarnessConfig) {
     let w = cfg.scoring.weights;
     let sum: f64 = w.iter().sum();
     if w.iter().any(|v| *v < 0.0) || sum.abs() < f64::EPSILON {
@@ -340,6 +340,16 @@ fn validate_config(cfg: &HarnessConfig) {
             "[epic-harness] warning: scoring weights sum to {:.3} (expected ~1.0) — scores may be unreliable",
             sum
         );
+    }
+
+    if cfg.db.driver != "sqlite" {
+        eprintln!(
+            "[harness] unsupported db.driver: '{}', only 'sqlite' is supported",
+            cfg.db.driver
+        );
+    }
+    if cfg.db.max_connections == 0 {
+        cfg.db.max_connections = 5;
     }
 }
 
@@ -657,29 +667,29 @@ max_docs = 5
 
     #[test]
     fn validate_weights_ok() {
-        let c = HarnessConfig::default();
-        validate_config(&c); // should not panic or warn
+        let mut c = HarnessConfig::default();
+        validate_config(&mut c); // should not panic or warn
     }
 
     #[test]
     fn validate_weights_negative_warns() {
-        let c = HarnessConfig {
+        let mut c = HarnessConfig {
             scoring: ScoringConfig {
                 weights: [-0.5, 0.3, 0.2],
             },
             ..Default::default()
         };
-        validate_config(&c); // warns but does not panic
+        validate_config(&mut c); // warns but does not panic
     }
 
     #[test]
     fn validate_weights_bad_sum_warns() {
-        let c = HarnessConfig {
+        let mut c = HarnessConfig {
             scoring: ScoringConfig {
                 weights: [5.0, 3.0, 2.0],
             },
             ..Default::default()
         };
-        validate_config(&c); // warns but does not panic
+        validate_config(&mut c); // warns but does not panic
     }
 }

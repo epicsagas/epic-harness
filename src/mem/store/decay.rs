@@ -92,27 +92,35 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
 
 // ── Async pool functions ─────────────────────────────
 
-/// Async batch-touch using a transaction (replaces SAVEPOINT/RELEASE).
+/// Async batch-touch using a single batched UPDATE (replaces N+1 per-row loop).
 #[allow(dead_code)]
 pub async fn touch_nodes_pool(pool: &SqlitePool, ids: &[String]) {
     if ids.is_empty() {
         return;
     }
+    let now = now_iso();
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(_) => return,
     };
-    let now = now_iso();
+    // Build parameterized IN clause: UPDATE ... WHERE id IN (?1, ?2, ...)
+    let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
+    let sql = format!(
+        "UPDATE nodes SET access_count = access_count + 1, accessed_at = ?1 WHERE id IN ({})",
+        placeholders.join(",")
+    );
+    let mut query = sqlx::query(&sql).bind(&now);
     for id in ids {
-        let _ = sqlx::query(
-            "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?",
-        )
-        .bind(&now)
-        .bind(id)
-        .execute(&mut *tx)
-        .await;
+        query = query.bind(id);
     }
-    let _ = tx.commit().await;
+    if let Err(e) = query.execute(&mut *tx).await {
+        eprintln!("[mem] touch_nodes_pool update failed: {e}");
+        let _ = tx.rollback().await;
+        return;
+    }
+    if let Err(e) = tx.commit().await {
+        eprintln!("[mem] touch_nodes_pool commit failed: {e}");
+    }
 }
 
 /// Async importance decay using pool.

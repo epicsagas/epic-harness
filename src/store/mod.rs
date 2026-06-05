@@ -39,7 +39,7 @@ pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> 
 /// Convert a sqlx error to io::Result. Used by all `*_pool` async functions.
 #[inline]
 pub(crate) fn sqlx_err(e: sqlx::Error) -> io::Error {
-    io::Error::other(e.to_string())
+    io::Error::other(e)
 }
 
 // ── RAII transaction guard ───────────────────────────

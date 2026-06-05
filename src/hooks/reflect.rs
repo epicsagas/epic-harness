@@ -104,9 +104,9 @@ pub fn run_context(
     // See policy comment in run() — SQLite is required here, no JSONL fallback.
     let recs: Vec<ObsRecord> = match shared_pool.as_ref() {
         Some(pool) => match crate::store::runtime::block_on(
-            crate::store::observations::query_obs_for_date_range_pool(
+            crate::store::observations::query_obs_for_date_range_multi_pool(
                 pool,
-                &project_slugs.join(","),
+                &project_slugs,
                 &date_from,
                 &date_to,
                 Some(50_000),
@@ -331,7 +331,7 @@ pub fn run_context(
     });
 
     // 3. Metrics summary — use the first (current) project slug for context
-    let context_slug = project_slugs.first().map(|s| s.as_str()).unwrap_or("");
+    // context_slug already bound at section 2 above; reused here.
     let metrics: Metrics = shared_pool
         .as_ref()
         .and_then(|pool| {

@@ -171,6 +171,42 @@ pub async fn query_obs_for_date_range_pool(
     rows.iter().map(row_to_obs_record).collect()
 }
 
+/// Async query observations for a date range, filtering by multiple projects.
+pub async fn query_obs_for_date_range_multi_pool(
+    pool: &SqlitePool,
+    projects: &[String],
+    from_ts: &str,
+    to_ts: &str,
+    limit: Option<usize>,
+) -> io::Result<Vec<ObsRecord>> {
+    if projects.is_empty() {
+        return Ok(vec![]);
+    }
+    let from = pad_date(from_ts, false);
+    let to = pad_date(to_ts, true);
+    let limit_val = limit.map(|l| l.min(50_000) as i64).unwrap_or(-1);
+
+    let placeholders: Vec<&str> = projects.iter().map(|_| "?").collect();
+    let sql = format!(
+        "SELECT timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost,
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+         FROM observations
+         WHERE project IN ({}) AND timestamp >= ? AND timestamp <= ?
+         ORDER BY timestamp ASC
+         LIMIT ?",
+        placeholders.join(",")
+    );
+    let mut q = sqlx::query(&sql);
+    for p in projects {
+        q = q.bind(p);
+    }
+    q = q.bind(&from).bind(&to).bind(limit_val);
+
+    let rows = q.fetch_all(pool).await.map_err(crate::store::sqlx_err)?;
+    rows.iter().map(row_to_obs_record).collect()
+}
+
 /// Async aggregate observation stats.
 pub async fn query_obs_stats_pool(
     pool: &SqlitePool,
@@ -495,5 +531,93 @@ mod tests {
 
         let last = query_last_action_pool(&pool, "sess1").await.unwrap();
         assert_eq!(last, Some("second edit".to_string()));
+    }
+
+    #[tokio::test]
+    async fn multi_project_query_returns_matching_projects() {
+        let pool = in_memory_pool().await;
+
+        let rec_a = ObsRecord {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: Some("test a".into()),
+            result: Some("success".into()),
+            score: Some(0.9),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        };
+        let rec_b = ObsRecord {
+            timestamp: "2026-06-02T11:00:00Z".into(),
+            tool: "Edit".into(),
+            tool_category: "edit".into(),
+            action: Some("test b".into()),
+            result: Some("success".into()),
+            score: Some(0.8),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        };
+        let rec_c = ObsRecord {
+            timestamp: "2026-06-02T12:00:00Z".into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: Some("test c".into()),
+            result: Some("success".into()),
+            score: Some(0.7),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        };
+
+        insert_observation_pool(&pool, "proj-a", &rec_a, "sess_a")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, "proj-b", &rec_b, "sess_b")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, "proj-c", &rec_c, "sess_c")
+            .await
+            .unwrap();
+
+        // Query for proj-a and proj-b only
+        let projects = vec!["proj-a".to_string(), "proj-b".to_string()];
+        let results =
+            query_obs_for_date_range_multi_pool(&pool, &projects, "2026-06-02", "2026-06-02", None)
+                .await
+                .unwrap();
+
+        assert_eq!(results.len(), 2);
+        assert!(
+            results
+                .iter()
+                .all(|r| r.tool != "Bash" || r.score == Some(0.9) || r.tool == "Edit")
+        );
+        // Verify proj-c is excluded
+        assert!(
+            results
+                .iter()
+                .all(|r| r.action.as_deref() != Some("test c"))
+        );
+    }
+
+    #[tokio::test]
+    async fn multi_project_query_empty_projects() {
+        let pool = in_memory_pool().await;
+        let results =
+            query_obs_for_date_range_multi_pool(&pool, &[], "2026-06-02", "2026-06-02", None)
+                .await
+                .unwrap();
+        assert!(results.is_empty());
     }
 }

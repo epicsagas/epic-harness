@@ -36,10 +36,10 @@ serde_yaml = "0.9"
 toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
-# Pinned to 0.32: rusqlite 0.32 + sqlx 0.8 share libsqlite3-sys 0.30.1.
+# Pinned to 0.32: rusqlite 0.32 + sqlx 0.8.1+ share libsqlite3-sys 0.30.1.
 # rusqlite 0.40+ requires libsqlite3-sys 0.38 which conflicts with sqlx.
 rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+sqlx = { version = "0.8.1", features = ["runtime-tokio", "sqlite", "migrate"] }
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }

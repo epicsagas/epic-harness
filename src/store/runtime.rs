@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
-        .enable_all()
+        .enable_io()
         .build()
         .expect("failed to create harness store runtime")
 });
@@ -31,5 +31,12 @@ pub(crate) fn block_on<F, T>(fut: F) -> T
 where
     F: Future<Output = T>,
 {
+    // Guard: panic early with a clear message if called from inside tokio.
+    // This prevents a confusing double-runtime panic from tokio itself.
+    if tokio::runtime::Handle::try_current().is_ok() {
+        panic!(
+            "store::runtime::block_on() called inside a tokio runtime — use .await directly in async code"
+        );
+    }
     RUNTIME.block_on(fut)
 }
