@@ -1,11 +1,11 @@
-//! store/ — Operational data SQLite I/O (replaces JSONL/JSON files)
+//! store/ — Operational data I/O (replaces JSONL/JSON files)
 //!
 //! All project operational data (observations, sessions, evolution, metrics,
 //! orchestrator state, orbit pipelines, evolved skills, global patterns) is
 //! stored in `harness.db` — separate from the knowledge graph `memory.db`.
 //!
 //! Follows the same async pool pattern as `src/mem/store/`:
-//! all functions use `SqlitePool` for concurrent access.
+//! all functions use `AnyPool` for concurrent access.
 
 // ── Internal submodules ──────────────────────────────
 

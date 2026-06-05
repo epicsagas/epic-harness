@@ -79,13 +79,13 @@ pub struct OrchAgent {
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row};
 
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
-pub async fn init_run_pool(pool: &SqlitePool, project: &str, run: &OrchRun) -> io::Result<()> {
+pub async fn init_run_pool(pool: &AnyPool, project: &str, run: &OrchRun) -> io::Result<()> {
     sqlx::query(
-        "INSERT OR REPLACE INTO orch_runs (id, project, status, agents_json, dep_graph_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)"
+        "INSERT INTO orch_runs (id, project, status, agents_json, dep_graph_json, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET project=excluded.project, status=excluded.status, agents_json=excluded.agents_json, dep_graph_json=excluded.dep_graph_json, updated_at=excluded.updated_at"
     )
     .bind(&run.id)
     .bind(project)
@@ -100,9 +100,9 @@ pub async fn init_run_pool(pool: &SqlitePool, project: &str, run: &OrchRun) -> i
     Ok(())
 }
 
-pub async fn read_run_pool(pool: &SqlitePool, project: &str) -> io::Result<Option<OrchRun>> {
+pub async fn read_run_pool(pool: &AnyPool, project: &str) -> io::Result<Option<OrchRun>> {
     let row = sqlx::query(
-        "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at FROM orch_runs WHERE project = ?1 AND status = ?2 ORDER BY created_at DESC LIMIT 1"
+        "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at FROM orch_runs WHERE project = $1 AND status = $2 ORDER BY created_at DESC LIMIT 1"
     )
     .bind(project)
     .bind(RunStatus::Running.as_str())
@@ -126,11 +126,11 @@ pub async fn read_run_pool(pool: &SqlitePool, project: &str) -> io::Result<Optio
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn update_run_status_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     run_id: &str,
     status: RunStatus,
 ) -> io::Result<()> {
-    sqlx::query("UPDATE orch_runs SET status = ?1, updated_at = ?2 WHERE id = ?3")
+    sqlx::query("UPDATE orch_runs SET status = $1, updated_at = $2 WHERE id = $3")
         .bind(status.as_str())
         .bind(crate::shared::helpers::now_iso())
         .bind(run_id)
@@ -142,9 +142,9 @@ pub async fn update_run_status_pool(
 
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
-pub async fn upsert_agent_pool(pool: &SqlitePool, agent: &OrchAgent) -> io::Result<()> {
+pub async fn upsert_agent_pool(pool: &AnyPool, agent: &OrchAgent) -> io::Result<()> {
     sqlx::query(
-        "INSERT OR REPLACE INTO orch_agents (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat, started_at, completed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
+        "INSERT INTO orch_agents (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat, started_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO UPDATE SET run_id=excluded.run_id, role=excluded.role, task=excluded.task, satisfies_json=excluded.satisfies_json, status=excluded.status, phase=excluded.phase, progress=excluded.progress, last_heartbeat=excluded.last_heartbeat, started_at=excluded.started_at, completed_at=excluded.completed_at"
     )
     .bind(&agent.id)
     .bind(&agent.run_id)
@@ -164,12 +164,12 @@ pub async fn upsert_agent_pool(pool: &SqlitePool, agent: &OrchAgent) -> io::Resu
 }
 
 pub async fn read_agent_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
     agent_id: &str,
 ) -> io::Result<Option<OrchAgent>> {
     let row = sqlx::query(
-        "SELECT a.id, a.run_id, a.role, a.task, a.satisfies_json, a.status, a.phase, a.progress, a.last_heartbeat, a.started_at, a.completed_at FROM orch_agents a JOIN orch_runs r ON a.run_id = r.id WHERE a.id = ?1 AND r.project = ?2"
+        "SELECT a.id, a.run_id, a.role, a.task, a.satisfies_json, a.status, a.phase, a.progress, a.last_heartbeat, a.started_at, a.completed_at FROM orch_agents a JOIN orch_runs r ON a.run_id = r.id WHERE a.id = $1 AND r.project = $2"
     )
     .bind(agent_id)
     .bind(project)
@@ -199,15 +199,11 @@ pub async fn read_agent_pool(
     }
 }
 
-pub async fn dismiss_agent_pool(
-    pool: &SqlitePool,
-    project: &str,
-    agent_id: &str,
-) -> io::Result<bool> {
+pub async fn dismiss_agent_pool(pool: &AnyPool, project: &str, agent_id: &str) -> io::Result<bool> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
 
     let result = sqlx::query(
-        "DELETE FROM orch_agents WHERE id = ?1 AND run_id IN (SELECT id FROM orch_runs WHERE project = ?2)"
+        "DELETE FROM orch_agents WHERE id = $1 AND run_id IN (SELECT id FROM orch_runs WHERE project = $2)"
     )
         .bind(agent_id)
         .bind(project)
@@ -218,12 +214,12 @@ pub async fn dismiss_agent_pool(
         return Ok(false);
     }
 
-    sqlx::query("DELETE FROM orch_agent_events WHERE agent_id = ?1")
+    sqlx::query("DELETE FROM orch_agent_events WHERE agent_id = $1")
         .bind(agent_id)
         .execute(&mut *tx)
         .await
         .map_err(crate::store::sqlx_err)?;
-    sqlx::query("DELETE FROM orch_agent_inbox WHERE agent_id = ?1")
+    sqlx::query("DELETE FROM orch_agent_inbox WHERE agent_id = $1")
         .bind(agent_id)
         .execute(&mut *tx)
         .await
@@ -236,14 +232,14 @@ pub async fn dismiss_agent_pool(
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn append_event_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     agent_id: &str,
     timestamp: &str,
     event_type: &str,
     data_json: &str,
 ) -> io::Result<()> {
     sqlx::query(
-        "INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json) VALUES (?1,?2,?3,?4)"
+        "INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json) VALUES ($1,$2,$3,$4)"
     )
     .bind(agent_id)
     .bind(timestamp)
@@ -258,14 +254,14 @@ pub async fn append_event_pool(
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn post_inbox_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     agent_id: &str,
     from_agent: &str,
     timestamp: &str,
     message: &str,
 ) -> io::Result<()> {
     sqlx::query(
-        "INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message) VALUES (?1,?2,?3,?4)"
+        "INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message) VALUES ($1,$2,$3,$4)"
     )
     .bind(agent_id)
     .bind(from_agent)
@@ -280,14 +276,14 @@ pub async fn post_inbox_pool(
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn write_control_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     action: ControlAction,
     target: Option<&str>,
     message: Option<&str>,
     generation: i64,
 ) -> io::Result<()> {
     sqlx::query(
-        "INSERT OR REPLACE INTO orch_control (id, action, target, message, generation) VALUES (1, ?1, ?2, ?3, ?4)"
+        "INSERT INTO orch_control (id, action, target, message, generation) VALUES (1, $1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET action=excluded.action, target=excluded.target, message=excluded.message, generation=excluded.generation"
     )
     .bind(action.as_str())
     .bind(target)
@@ -302,11 +298,7 @@ pub async fn write_control_pool(
 /// Clean up completed/aborted runs and orphaned agents.
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
-pub async fn cleanup_stale_pool(
-    pool: &SqlitePool,
-    project: &str,
-    cutoff_ts: &str,
-) -> io::Result<u64> {
+pub async fn cleanup_stale_pool(pool: &AnyPool, project: &str, cutoff_ts: &str) -> io::Result<u64> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
 
     sqlx::query("CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY); DELETE FROM _stale_run_ids")
@@ -316,7 +308,7 @@ pub async fn cleanup_stale_pool(
 
     if cutoff_ts.is_empty() {
         sqlx::query(
-            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE project = ?1 AND (status = ?2 OR status = ?3)",
+            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE project = $1 AND (status = $2 OR status = $3)",
         )
         .bind(project)
         .bind(RunStatus::Complete.as_str())
@@ -326,7 +318,7 @@ pub async fn cleanup_stale_pool(
         .map_err(crate::store::sqlx_err)?;
     } else {
         sqlx::query(
-            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE project = ?1 AND (status = ?2 OR status = ?3) AND updated_at < ?4",
+            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE project = $1 AND (status = $2 OR status = $3) AND updated_at < $4",
         )
         .bind(project)
         .bind(RunStatus::Complete.as_str())
@@ -381,7 +373,7 @@ pub async fn cleanup_stale_pool(
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> SqlitePool {
+    async fn in_memory_pool() -> AnyPool {
         let p = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&p).await.unwrap();
         p

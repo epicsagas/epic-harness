@@ -19,13 +19,13 @@ pub struct EvolvedSkillRow {
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row};
 
 #[cfg(test)]
-pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io::Result<()> {
+pub async fn upsert_skill_pool(pool: &AnyPool, skill: &EvolvedSkillRow) -> io::Result<()> {
     let active_int = if skill.active { 1 } else { 0 };
     sqlx::query(
-        "INSERT OR REPLACE INTO evolved_skills (name, origin, confidence, project, skill_md, active, created, updated) VALUES (?1,?2,?3,?4,?5,?6, COALESCE((SELECT created FROM evolved_skills WHERE name = ?1), ?7), ?8)"
+        "INSERT INTO evolved_skills (name, origin, confidence, project, skill_md, active, created, updated) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (name) DO UPDATE SET origin=excluded.origin, confidence=excluded.confidence, project=excluded.project, skill_md=excluded.skill_md, active=excluded.active, created=evolved_skills.created, updated=excluded.updated"
     )
     .bind(&skill.name)
     .bind(&skill.origin)
@@ -42,16 +42,16 @@ pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io
 }
 
 #[cfg(test)]
-pub async fn list_skills_pool(pool: &SqlitePool) -> io::Result<Vec<EvolvedSkillRow>> {
+pub async fn list_skills_pool(pool: &AnyPool) -> io::Result<Vec<EvolvedSkillRow>> {
     list_skills_pool_inner(pool, false).await
 }
 
-pub async fn list_skills_full_pool(pool: &SqlitePool) -> io::Result<Vec<EvolvedSkillRow>> {
+pub async fn list_skills_full_pool(pool: &AnyPool) -> io::Result<Vec<EvolvedSkillRow>> {
     list_skills_pool_inner(pool, true).await
 }
 
 async fn list_skills_pool_inner(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     include_body: bool,
 ) -> io::Result<Vec<EvolvedSkillRow>> {
     let rows = if include_body {
@@ -98,8 +98,8 @@ async fn list_skills_pool_inner(
 }
 
 #[cfg(test)]
-pub async fn read_skill_md_pool(pool: &SqlitePool, name: &str) -> io::Result<Option<String>> {
-    let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = ?1")
+pub async fn read_skill_md_pool(pool: &AnyPool, name: &str) -> io::Result<Option<String>> {
+    let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = $1")
         .bind(name)
         .fetch_optional(pool)
         .await
@@ -112,8 +112,8 @@ pub async fn read_skill_md_pool(pool: &SqlitePool, name: &str) -> io::Result<Opt
 }
 
 #[cfg(test)]
-pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool> {
-    let result = sqlx::query("DELETE FROM evolved_skills WHERE name = ?1")
+pub async fn delete_skill_pool(pool: &AnyPool, name: &str) -> io::Result<bool> {
+    let result = sqlx::query("DELETE FROM evolved_skills WHERE name = $1")
         .bind(name)
         .execute(pool)
         .await
@@ -123,10 +123,10 @@ pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool
 
 #[cfg(test)]
 pub async fn load_promotion_counters_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
 ) -> io::Result<HashMap<String, u64>> {
-    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters WHERE project = ?1")
+    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters WHERE project = $1")
         .bind(project)
         .fetch_all(pool)
         .await
@@ -143,19 +143,19 @@ pub async fn load_promotion_counters_pool(
 
 #[cfg(test)]
 pub async fn save_promotion_counters_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     project: &str,
     counters: &HashMap<String, u64>,
 ) -> io::Result<()> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
-    sqlx::query("DELETE FROM promotion_counters WHERE project = ?1")
+    sqlx::query("DELETE FROM promotion_counters WHERE project = $1")
         .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(crate::store::sqlx_err)?;
     for (key, count) in counters {
         sqlx::query(
-            "INSERT OR REPLACE INTO promotion_counters (pattern_key, project, count) VALUES (?1, ?2, ?3)",
+            "INSERT INTO promotion_counters (pattern_key, project, count) VALUES ($1, $2, $3) ON CONFLICT (pattern_key, project) DO UPDATE SET count=excluded.count",
         )
         .bind(key)
         .bind(project)
@@ -172,7 +172,7 @@ pub async fn save_promotion_counters_pool(
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::SqlitePool {
+    async fn in_memory_pool() -> sqlx::AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&pool).await.unwrap();
         pool

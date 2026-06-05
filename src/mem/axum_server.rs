@@ -20,7 +20,7 @@ use axum::{
     routing::{delete, get, post, put},
 };
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use tower_http::cors::{Any, CorsLayer};
 
 use super::graph::{compute_stats_pool, rebuild_graph_json_pool};
@@ -40,7 +40,7 @@ const D3_JS: &str = include_str!("d3.min.js");
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: SqlitePool,
+    pub pool: AnyPool,
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -129,7 +129,7 @@ const WEIGHT_MIN: f64 = 0.0;
 const WEIGHT_MAX: f64 = 100.0;
 
 /// Create a new node using a pool connection.
-async fn handle_post_node_pool(body: &str, pool: &SqlitePool) -> Result<String, String> {
+async fn handle_post_node_pool(body: &str, pool: &AnyPool) -> Result<String, String> {
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = now_iso();
@@ -204,7 +204,7 @@ async fn handle_post_node_pool(body: &str, pool: &SqlitePool) -> Result<String, 
 }
 
 /// Update a node using a pool connection.
-async fn handle_put_node_pool(id: &str, body: &str, pool: &SqlitePool) -> Result<(), String> {
+async fn handle_put_node_pool(id: &str, body: &str, pool: &AnyPool) -> Result<(), String> {
     let mut node = read_node_pool(pool, id).await.map_err(|e| e.to_string())?;
     let v: serde_json::Value = serde_json::from_str(body).map_err(|e| e.to_string())?;
 
@@ -266,7 +266,7 @@ fn parse_edge_payload(body: &str) -> Result<Edge, String> {
 }
 
 /// Create an edge using a pool connection.
-async fn handle_post_edge_pool(body: &str, pool: &SqlitePool) -> Result<String, String> {
+async fn handle_post_edge_pool(body: &str, pool: &AnyPool) -> Result<String, String> {
     let edge = parse_edge_payload(body)?;
     let id = edge.id.clone();
     append_edge_pool(pool, &edge)
@@ -276,7 +276,7 @@ async fn handle_post_edge_pool(body: &str, pool: &SqlitePool) -> Result<String, 
 }
 
 /// Compute degree centrality using a pool connection.
-pub async fn compute_centrality_pool(pool: &SqlitePool, limit: usize) -> Vec<serde_json::Value> {
+pub async fn compute_centrality_pool(pool: &AnyPool, limit: usize) -> Vec<serde_json::Value> {
     use sqlx::Row as SqlxRow;
     let safe_limit = limit.min(100) as i64;
     let sql = "SELECT n.id, n.title, n.type, n.importance, cnt.total_degree

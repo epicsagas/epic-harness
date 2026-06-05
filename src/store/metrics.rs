@@ -16,12 +16,12 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row};
 
 /// Load the full Metrics struct from SQLite using a pool.
-pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<Metrics> {
+pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metrics> {
     // Scalar state
-    let kv_rows = sqlx::query("SELECT key, value FROM metrics_state WHERE project = ?1")
+    let kv_rows = sqlx::query("SELECT key, value FROM metrics_state WHERE project = $1")
         .bind(project)
         .fetch_all(pool)
         .await
@@ -58,7 +58,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
 
     // Score history
     let sh_rows = sqlx::query(
-        "SELECT timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost FROM score_history WHERE project = ?1 ORDER BY id ASC"
+        "SELECT timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost FROM score_history WHERE project = $1 ORDER BY id ASC"
     )
     .bind(project)
     .fetch_all(pool)
@@ -127,7 +127,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
 
     // Skill attribution
     let sa_rows = sqlx::query(
-        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen FROM skill_attribution WHERE project = ?1"
+        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen FROM skill_attribution WHERE project = $1"
     )
     .bind(project)
     .fetch_all(pool)
@@ -199,7 +199,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
 }
 
 /// Save the full Metrics struct to SQLite using a pool.
-pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) -> io::Result<()> {
+pub async fn save_metrics_pool(pool: &AnyPool, project: &str, m: &Metrics) -> io::Result<()> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
 
     // Fixed scalar fields — always upsert.
@@ -213,7 +213,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
     ];
     for (key, val) in fixed {
         sqlx::query(
-            "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
+            "INSERT INTO metrics_state (key, value, project) VALUES ($1, $2, $3) ON CONFLICT (key, project) DO UPDATE SET value = excluded.value",
         )
         .bind(*key)
         .bind(val)
@@ -234,7 +234,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         match opt_val {
             Some(val) => {
                 sqlx::query(
-                    "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
+                    "INSERT INTO metrics_state (key, value, project) VALUES ($1, $2, $3) ON CONFLICT (key, project) DO UPDATE SET value = excluded.value",
                 )
                 .bind(*key)
                 .bind(val)
@@ -244,7 +244,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
                 .map_err(crate::store::sqlx_err)?;
             }
             None => {
-                sqlx::query("DELETE FROM metrics_state WHERE key = ?1 AND project = ?2")
+                sqlx::query("DELETE FROM metrics_state WHERE key = $1 AND project = $2")
                     .bind(*key)
                     .bind(project)
                     .execute(&mut *tx)
@@ -264,7 +264,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
     for entry in entries.into_iter().rev() {
         sqlx::query(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost, project) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
              ON CONFLICT(timestamp, project) DO UPDATE SET \
                  success_rate = excluded.success_rate, \
                  avg_score = excluded.avg_score, \
@@ -286,7 +286,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
         .map_err(crate::store::sqlx_err)?;
     }
     sqlx::query(
-        "DELETE FROM score_history WHERE project = ?1 AND id NOT IN (SELECT id FROM score_history WHERE project = ?1 ORDER BY id DESC LIMIT ?2)"
+        "DELETE FROM score_history WHERE project = $1 AND id NOT IN (SELECT id FROM score_history WHERE project = $1 ORDER BY id DESC LIMIT $2)"
     )
     .bind(project)
     .bind(MAX_SCORE_HISTORY as i64)
@@ -297,7 +297,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
     // Skill attribution
     for sa in m.skill_attribution.values() {
         sqlx::query(
-            "INSERT INTO skill_attribution (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) VALUES (?1,?2,?3,?4,?5,?6) ON CONFLICT(skill_name, project) DO UPDATE SET sessions_active = excluded.sessions_active, avg_score_with = excluded.avg_score_with, avg_score_without = excluded.avg_score_without, first_seen = MIN(skill_attribution.first_seen, excluded.first_seen)"
+            "INSERT INTO skill_attribution (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT(skill_name, project) DO UPDATE SET sessions_active = excluded.sessions_active, avg_score_with = excluded.avg_score_with, avg_score_without = excluded.avg_score_without, first_seen = MIN(skill_attribution.first_seen, excluded.first_seen)"
         )
         .bind(&sa.skill_name)
         .bind(project)
@@ -318,7 +318,7 @@ pub async fn save_metrics_pool(pool: &SqlitePool, project: &str, m: &Metrics) ->
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::SqlitePool {
+    async fn in_memory_pool() -> sqlx::AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&pool).await.unwrap();
         pool

@@ -260,7 +260,7 @@ pub(crate) async fn do_migrate_async(
         }
 
         sqlx::query(
-            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', 'in_progress')",
+            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', 'in_progress') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
         .execute(&mut *conn)
         .await
@@ -280,7 +280,7 @@ pub(crate) async fn do_migrate_async(
     {
         begin_immediate(conn).await?;
         sqlx::query(
-            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1')",
+            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
         .execute(&mut *conn)
         .await
@@ -347,7 +347,7 @@ async fn import_observations(
                          (timestamp, session_id, tool, tool_category, action, result, score, \
                           dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
                           file_ext, sequence_id, pipeline_id) \
-                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
                     )
                     .bind(&rec.timestamp)
                     .bind(&session_id)
@@ -457,7 +457,7 @@ async fn import_sessions(
             "INSERT INTO sessions \
              (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, \
               created_at_millis, project) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(&snap.timestamp)
         .bind(&snap.snap_type)
@@ -535,7 +535,7 @@ async fn import_evolution(
                      (timestamp, observations, success_rate, avg_score, error_patterns, \
                       failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
                       analysis_summary, project) \
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
                 )
                 .bind(&rec.timestamp)
                 .bind(super::u64_to_i64(rec.observations))
@@ -600,8 +600,8 @@ async fn import_metrics(
             macro_rules! kv {
                 ($k:expr, $v:expr) => {
                     sqlx::query(
-                        "INSERT OR REPLACE INTO metrics_state (key, value, project) \
-                         VALUES (?, ?, ?)",
+                        "INSERT INTO metrics_state (key, value, project) \
+                         VALUES ($1, $2, $3) ON CONFLICT (key, project) DO UPDATE SET value=excluded.value",
                     )
                     .bind($k)
                     .bind($v)
@@ -895,8 +895,8 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
     // Mark consolidation complete
     if let Err(e) = conn
         .execute(
-            "INSERT OR REPLACE INTO _harness_meta (key, value) \
-             VALUES ('global_consolidated', '1')",
+            "INSERT INTO _harness_meta (key, value) \
+             VALUES ('global_consolidated', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
         .await
         .map_err(sqlx_err)
@@ -987,7 +987,7 @@ pub async fn normalize_slugs_if_needed_async(conn: &mut sqlx::SqliteConnection) 
     if mapping.is_empty() {
         // No hashed slugs found — just mark as done.
         sqlx::query(
-            "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1')",
+            "INSERT INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
         .execute(&mut *conn)
         .await
@@ -1004,7 +1004,7 @@ pub async fn normalize_slugs_if_needed_async(conn: &mut sqlx::SqliteConnection) 
     begin_immediate(conn).await?;
     apply_slug_mapping(conn, &mapping).await?;
     sqlx::query(
-        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1')",
+        "INSERT INTO _harness_meta (key, value) VALUES ('slugs_normalized', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
     )
     .execute(&mut *conn)
     .await
@@ -1273,24 +1273,39 @@ fn remap_csv(csv: &str, mapping: &std::collections::HashMap<&str, &str>) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::schema::SCHEMA_VERSION;
     use sqlx::ConnectOptions;
-    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use sqlx::Row;
+    use sqlx::sqlite::SqliteConnectOptions;
 
-    /// Create an in-memory harness DB with full schema applied via pool.
-    async fn make_global_pool() -> sqlx::SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
+    /// Create an in-memory SqliteConnection with the full harness schema applied.
+    /// Migration tests use direct connections (not AnyPool) because they exercise
+    /// ATTACH and other SQLite-specific features.
+    async fn make_global_conn() -> sqlx::SqliteConnection {
+        let mut conn = SqliteConnectOptions::new()
+            .filename(":memory:")
+            .foreign_keys(true)
+            .connect()
             .await
             .unwrap();
-        crate::store::schema::init_schema_pool(&pool).await.unwrap();
-        pool
+        sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO _harness_meta (key, value) VALUES ('schema_version', $1)
+             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+        )
+        .bind(SCHEMA_VERSION.to_string())
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        conn
     }
 
     #[tokio::test]
     async fn do_migrate_is_idempotent() {
-        let pool = make_global_pool().await;
-        let mut conn = pool.acquire().await.unwrap();
+        let mut conn = make_global_conn().await;
 
         // First run marks legacy_migrated=1
         do_migrate_async(&mut conn).await.unwrap();
@@ -1301,7 +1316,7 @@ mod tests {
 
         let migrated: String =
             sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
-                .fetch_one(&mut *conn)
+                .fetch_one(&mut conn)
                 .await
                 .unwrap()
                 .try_get(0)
@@ -1312,23 +1327,20 @@ mod tests {
     #[tokio::test]
     async fn to_global_merges_per_project_dbs() {
         // Use a file-based DB for global so ATTACH works correctly.
-        // sqlx in-memory pools may not share the same connection across ATTACH
-        // and subsequent queries when pool connection juggling occurs.
         let dir = tempfile::tempdir().unwrap();
         let global_db_path = dir.path().join("global.db");
-        let global_pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect_with(
-                SqliteConnectOptions::new()
-                    .filename(&global_db_path)
-                    .create_if_missing(true),
-            )
+
+        let mut global_conn = SqliteConnectOptions::new()
+            .filename(&global_db_path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .connect()
             .await
             .unwrap();
-        crate::store::schema::init_schema_pool(&global_pool)
+        sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+            .execute(&mut global_conn)
             .await
             .unwrap();
-        let mut global_conn = global_pool.acquire().await.unwrap();
 
         // Simulate a per-project DB (v3 schema — no project column)
         let db_path = dir.path().join("harness.db");
@@ -1415,7 +1427,7 @@ mod tests {
         // Verify the project column is set
         let count: i64 = sqlx::query("SELECT COUNT(*) FROM observations WHERE project = ?")
             .bind(slug)
-            .fetch_one(&mut *global_conn)
+            .fetch_one(&mut global_conn)
             .await
             .unwrap()
             .try_get(0)

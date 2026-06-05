@@ -258,22 +258,34 @@ impl Default for DashboardConfig {
     }
 }
 
+/// Supported database drivers.
+const SUPPORTED_DRIVERS: &[&str] = &["sqlite", "postgres", "mysql"];
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct DbConfig {
-    /// Database driver: "sqlite" (only option in Phase 1).
+    /// Database driver: "sqlite" | "postgres" | "mysql".
+    /// Requires corresponding Cargo feature flag for non-sqlite drivers.
     pub driver: String,
 
     /// Connection URL for harness.db.
-    /// Empty = default path (~/.harness/harness.db).
+    /// Empty = default path (sqlite:~/.harness/harness.db).
+    /// For PostgreSQL: postgres://user:pass@host:port/dbname
+    /// For MySQL: mysql://user:pass@host:port/dbname
     pub harness_url: String,
 
     /// Connection URL for memory.db.
-    /// Empty = default path (~/.harness/memory.db).
+    /// Empty = default path (sqlite:~/.harness/memory.db).
     pub memory_url: String,
 
     /// Maximum number of connections in the pool.
     pub max_connections: u32,
+
+    /// TLS mode for non-sqlite connections:
+    /// - "prefer": try TLS, fall back to plain (default)
+    /// - "require": TLS required, connection fails without it
+    /// - "disable": no TLS
+    pub tls_mode: String,
 }
 
 impl Default for DbConfig {
@@ -283,6 +295,7 @@ impl Default for DbConfig {
             harness_url: String::new(),
             memory_url: String::new(),
             max_connections: 5,
+            tls_mode: "prefer".into(),
         }
     }
 }
@@ -328,6 +341,30 @@ fn load_config() -> HarnessConfig {
 
 // ── Validation ───────────────────────────────────────
 
+/// Cross-validate `driver` against URL scheme. Warn and correct on mismatch.
+fn cross_validate_driver(driver: &mut String, url: &str) {
+    if url.is_empty() {
+        // Empty URL defaults to sqlite: — if driver says otherwise, warn.
+        if *driver != "sqlite" {
+            eprintln!(
+                "[harness] db.driver = '{driver}' but URL is empty — will default to SQLite. \
+                 Set URL to a {driver}:// connection string or change driver to 'sqlite'.",
+            );
+            *driver = "sqlite".into();
+        }
+        return;
+    }
+    let detected =
+        crate::store::pool::DbType::from_url(url).unwrap_or(crate::store::pool::DbType::Sqlite);
+    let detected_name = detected.name();
+    if detected_name != driver.as_str() {
+        eprintln!(
+            "[harness] db.driver = '{driver}' but URL scheme is '{detected_name}:' — correcting driver to '{detected_name}'",
+        );
+        *driver = detected_name.to_string();
+    }
+}
+
 fn validate_config(cfg: &mut HarnessConfig) {
     let w = cfg.scoring.weights;
     let sum: f64 = w.iter().sum();
@@ -342,13 +379,46 @@ fn validate_config(cfg: &mut HarnessConfig) {
         );
     }
 
-    if cfg.db.driver != "sqlite" {
+    // Validate db.driver
+    let driver = cfg.db.driver.to_lowercase();
+    if !SUPPORTED_DRIVERS.contains(&driver.as_str()) {
         eprintln!(
-            "[harness] unsupported db.driver: '{}', only 'sqlite' is supported — correcting",
-            cfg.db.driver
+            "[harness] unsupported db.driver: '{}', supported: {:?} — correcting to 'sqlite'",
+            cfg.db.driver, SUPPORTED_DRIVERS
         );
         cfg.db.driver = "sqlite".into();
+    } else {
+        cfg.db.driver = driver;
     }
+
+    // Cross-validate db.driver against URL schemes
+    cross_validate_driver(&mut cfg.db.driver, &cfg.db.harness_url);
+    // Warn if memory_url is explicitly set but its scheme differs from driver.
+    // Do NOT correct driver — memory_url defaults to SQLite when empty.
+    if !cfg.db.memory_url.is_empty() {
+        if let Ok(detected) = crate::store::pool::DbType::from_url(&cfg.db.memory_url) {
+            let detected_name = detected.name();
+            if detected_name != cfg.db.driver {
+                eprintln!(
+                    "[harness] db.memory_url scheme is '{detected_name}:' but db.driver is '{}' — \
+                     ensure both databases use the same backend or set memory_url explicitly",
+                    cfg.db.driver,
+                );
+            }
+        }
+    }
+
+    // Validate TLS mode
+    match cfg.db.tls_mode.as_str() {
+        "prefer" | "require" | "disable" => {}
+        other => {
+            eprintln!(
+                "[harness] unsupported db.tls_mode: '{other}', supported: prefer/require/disable — correcting to 'prefer'"
+            );
+            cfg.db.tls_mode = "prefer".into();
+        }
+    }
+
     if cfg.db.max_connections == 0 {
         cfg.db.max_connections = 5;
     }
@@ -499,19 +569,30 @@ max_docs = 20
 
 # ── Database ──────────────────────────────────────────
 [db]
-# Database driver: "sqlite" (Phase 1 only).
+# Database driver: "sqlite" | "postgres" | "mysql".
+# Non-sqlite drivers require the corresponding Cargo feature flag.
+#   cargo build --features postgres
+#   cargo build --features mysql
 driver = "sqlite"
 
 # Connection URL for harness.db (operational data).
-# Empty = default path (~/.harness/harness.db).
+# SQLite: empty = default path (~/.harness/harness.db)
+# PostgreSQL: postgres://user:pass@host:5432/dbname?sslmode=require
+# MySQL: mysql://user:pass@host:3306/dbname
 harness_url = ""
 
 # Connection URL for memory.db (knowledge graph).
-# Empty = default path (~/.harness/memory.db).
+# Same URL format as harness_url.
 memory_url = ""
 
 # Maximum number of connections per pool.
 max_connections = 5
+
+# TLS mode for postgres/mysql connections:
+#   "prefer"  — try TLS, fall back to plain (default)
+#   "require" — TLS required, connection fails without it
+#   "disable" — no TLS (for local development only)
+tls_mode = "prefer"
 "#
 }
 
@@ -540,6 +621,7 @@ mod tests {
         assert!(c.db.harness_url.is_empty());
         assert!(c.db.memory_url.is_empty());
         assert_eq!(c.db.max_connections, 5);
+        assert_eq!(c.db.tls_mode, "prefer");
     }
 
     #[test]
@@ -654,6 +736,7 @@ max_docs = 5
         let c: HarnessConfig = toml::from_str(template).unwrap();
         assert_eq!(c.db.driver, "sqlite");
         assert_eq!(c.db.max_connections, 5);
+        assert_eq!(c.db.tls_mode, "prefer");
     }
 
     #[test]
@@ -692,5 +775,129 @@ max_docs = 5
             ..Default::default()
         };
         validate_config(&mut c); // warns but does not panic
+    }
+
+    #[test]
+    fn validate_driver_accepts_sqlite() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "sqlite".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "sqlite");
+    }
+
+    #[test]
+    fn validate_driver_accepts_postgres() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "postgres".into(),
+                harness_url: "postgres://u:p@localhost/db".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "postgres");
+    }
+
+    #[test]
+    fn validate_driver_accepts_mysql() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "mysql".into(),
+                harness_url: "mysql://u:p@localhost/db".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "mysql");
+    }
+
+    #[test]
+    fn validate_driver_rejects_unknown() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "oracle".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "sqlite"); // corrected
+    }
+
+    #[test]
+    fn validate_tls_mode_accepts_valid() {
+        for mode in &["prefer", "require", "disable"] {
+            let mut c = HarnessConfig {
+                db: DbConfig {
+                    tls_mode: mode.to_string(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            validate_config(&mut c);
+            assert_eq!(c.db.tls_mode, *mode);
+        }
+    }
+
+    #[test]
+    fn validate_tls_mode_rejects_invalid() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                tls_mode: "always".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.tls_mode, "prefer"); // corrected
+    }
+
+    #[test]
+    fn cross_validate_driver_postgres_without_url_corrects_to_sqlite() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "postgres".into(),
+                // harness_url and memory_url are empty (defaults)
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "sqlite"); // corrected: no URL → sqlite
+    }
+
+    #[test]
+    fn cross_validate_driver_scheme_mismatch_corrects() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "sqlite".into(),
+                harness_url: "postgres://u:p@localhost/db".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "postgres"); // corrected to match URL scheme
+    }
+
+    #[test]
+    fn cross_validate_driver_matches_url_scheme() {
+        let mut c = HarnessConfig {
+            db: DbConfig {
+                driver: "postgres".into(),
+                harness_url: "postgres://u:p@localhost/db".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        validate_config(&mut c);
+        assert_eq!(c.db.driver, "postgres"); // unchanged
     }
 }

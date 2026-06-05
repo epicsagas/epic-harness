@@ -116,7 +116,7 @@ fn apply_cold_start_presets(stacks: &[&str]) -> u32 {
     applied
 }
 
-fn get_cross_project_hints(pool: Option<&sqlx::SqlitePool>) -> Vec<String> {
+fn get_cross_project_hints(pool: Option<&sqlx::AnyPool>) -> Vec<String> {
     if !cross_project_file().is_file() {
         return vec![];
     }

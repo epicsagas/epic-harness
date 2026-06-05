@@ -2,7 +2,7 @@
 
 use std::io;
 
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 use super::node::row_to_node_pool;
 use super::types::Node;
@@ -17,25 +17,43 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
     .unwrap_or_else(|_| vec![])
 }
 
-pub async fn search_nodes_pool(
-    pool: &SqlitePool,
-    query: &str,
-    limit: i64,
-) -> io::Result<Vec<Node>> {
-    let sql = format!(
-        "SELECT n.{NODE_COLUMNS_PREFIXED}
-         FROM nodes n
-         JOIN nodes_fts ON n.rowid = nodes_fts.rowid
-         WHERE nodes_fts MATCH ?
-         ORDER BY n.importance DESC
-         LIMIT ?"
-    );
-    let rows = sqlx::query(&sql)
-        .bind(query)
-        .bind(limit)
-        .fetch_all(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+pub async fn search_nodes_pool(pool: &AnyPool, query: &str, limit: i64) -> io::Result<Vec<Node>> {
+    let db_type = crate::store::pool::memory_db_type();
+
+    let rows = match db_type {
+        crate::store::pool::DbType::Postgres => {
+            let sql = format!(
+                "SELECT {NODE_COLUMNS}
+                 FROM nodes
+                 WHERE search_vector @@ plainto_tsquery('english', $1)
+                 ORDER BY importance DESC
+                 LIMIT $2"
+            );
+            sqlx::query(&sql)
+                .bind(query)
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+                .map_err(crate::store::sqlx_err)?
+        }
+        _ => {
+            // SQLite (FTS5). MySQL is unreachable: build_mysql_pool returns Unsupported.
+            let sql = format!(
+                "SELECT n.{NODE_COLUMNS_PREFIXED}
+                 FROM nodes n
+                 JOIN nodes_fts ON n.rowid = nodes_fts.rowid
+                 WHERE nodes_fts MATCH $1
+                 ORDER BY n.importance DESC
+                 LIMIT $2"
+            );
+            sqlx::query(&sql)
+                .bind(query)
+                .bind(limit)
+                .fetch_all(pool)
+                .await
+                .map_err(crate::store::sqlx_err)?
+        }
+    };
     rows.iter().map(row_to_node_pool).collect()
 }
 
@@ -64,8 +82,12 @@ pub fn query_nodes(
 }
 
 /// Async dynamic filter query using QueryBuilder.
+///
+/// The CSV-in-text LIKE pattern `',' || col || ',' LIKE '%,val,%'` works
+/// identically on SQLite and PostgreSQL (both support `||` concatenation
+/// and `LIKE ... ESCAPE`). A dedicated PostgreSQL branch is not needed.
 pub async fn query_nodes_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     tag: Option<&str>,
     node_type: Option<&str>,
     project: Option<&str>,

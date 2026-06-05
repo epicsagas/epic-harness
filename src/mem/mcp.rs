@@ -8,7 +8,7 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use std::io::{self, BufRead, Write};
 
 use super::graph::{graph_neighbors_pool, related_nodes_pool};
@@ -113,7 +113,7 @@ fn tool_definitions() -> Value {
 
 // ── Tool implementations ───────────────────────────────────────────────────────
 
-fn tool_mem_add(pool: &SqlitePool, args: &Value) -> Value {
+fn tool_mem_add(pool: &AnyPool, args: &Value) -> Value {
     let title = match args["title"].as_str() {
         Some(s) if !s.is_empty() => s.to_string(),
         _ => return json!({ "error": "mem_add requires title, type, and body" }),
@@ -174,7 +174,7 @@ fn tool_mem_add(pool: &SqlitePool, args: &Value) -> Value {
     }
 }
 
-fn tool_mem_query(pool: &SqlitePool, args: &Value) -> Value {
+fn tool_mem_query(pool: &AnyPool, args: &Value) -> Value {
     let tag = args["tag"].as_str();
     let type_filter = args["type"].as_str();
     let project = args["project"].as_str();
@@ -203,7 +203,7 @@ fn tool_mem_query(pool: &SqlitePool, args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_search(pool: &SqlitePool, args: &Value) -> Value {
+fn tool_mem_search(pool: &AnyPool, args: &Value) -> Value {
     let query = match args["query"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_search requires query" }),
@@ -243,7 +243,7 @@ fn tool_mem_search(pool: &SqlitePool, args: &Value) -> Value {
     resp
 }
 
-fn tool_mem_related(pool: &SqlitePool, args: &Value) -> Value {
+fn tool_mem_related(pool: &AnyPool, args: &Value) -> Value {
     let id = match args["id"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_related requires id" }),
@@ -273,7 +273,7 @@ fn tool_mem_related(pool: &SqlitePool, args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_context(pool: &SqlitePool, args: &Value) -> Value {
+fn tool_mem_context(pool: &AnyPool, args: &Value) -> Value {
     let project = args["project"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
@@ -302,7 +302,7 @@ fn tool_mem_context(pool: &SqlitePool, args: &Value) -> Value {
     json!(results)
 }
 
-fn tool_mem_recall(pool: &SqlitePool, args: &Value) -> Value {
+fn tool_mem_recall(pool: &AnyPool, args: &Value) -> Value {
     let hint = match args["hint"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_recall requires hint" }),
@@ -393,7 +393,7 @@ fn tool_mem_recall(pool: &SqlitePool, args: &Value) -> Value {
     })
 }
 
-fn call_tool(pool: &SqlitePool, name: &str, args: &Value) -> Value {
+fn call_tool(pool: &AnyPool, name: &str, args: &Value) -> Value {
     let result = match name {
         "mem_add" => tool_mem_add(pool, args),
         "mem_query" => tool_mem_query(pool, args),
@@ -423,7 +423,7 @@ fn send(obj: &Value) {
     let _ = out.flush();
 }
 
-fn handle_message(pool: &SqlitePool, msg: &RpcRequest) {
+fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
     match msg.method.as_str() {
         "initialize" => {
             let resp = json!({

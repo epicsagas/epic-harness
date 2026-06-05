@@ -19,11 +19,11 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
 
 // ── Async pool functions ─────────────────────────────
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row};
 
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_pattern_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     timestamp: &str,
     project: &str,
     success_rate: f64,
@@ -45,11 +45,14 @@ pub async fn insert_pattern_pool(
     .execute(pool)
     .await
     .map_err(crate::store::sqlx_err)?;
-    Ok(result.last_insert_rowid())
+    // AnyPool::last_insert_id() returns None for SQLite via sqlx any-driver.
+    // No caller depends on a non-zero return — insert success is verified by the
+    // absence of an error from .execute().
+    Ok(result.last_insert_id().unwrap_or(0))
 }
 
 pub async fn query_patterns_excluding_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     exclude_project: &str,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
@@ -58,14 +61,14 @@ pub async fn query_patterns_excluding_pool(
 
 #[cfg(test)]
 pub async fn query_all_patterns_pool(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
     query_patterns_pool_inner(pool, None, limit).await
 }
 
 async fn query_patterns_pool_inner(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     exclude_project: Option<&str>,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
@@ -117,7 +120,7 @@ async fn query_patterns_pool_inner(
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::SqlitePool {
+    async fn in_memory_pool() -> sqlx::AnyPool {
         let pool = crate::store::pool::test_memory_pool().await;
         crate::store::schema::init_schema_pool(&pool).await.unwrap();
         pool

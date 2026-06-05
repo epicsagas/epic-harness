@@ -190,16 +190,16 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
 // ── Route handlers ────────────────────────────────────
 
-/// Try a pool operation with the shared SqlitePool. Logs errors and returns None on failure.
+/// Try a pool operation with the shared AnyPool. Logs errors and returns None on failure.
 ///
-/// The closure `f` receives a `&SqlitePool` and typically calls
+/// The closure `f` receives a `&AnyPool` and typically calls
 /// [`crate::store::runtime::block_on`] inside to bridge async pool queries.
 /// This is safe because `serve.rs` runs on tiny_http's blocking thread pool
 /// (not inside a tokio runtime), so `block_on` will never encounter an
 /// existing runtime and panic.
 fn try_pool<T>(
-    pool: Option<&sqlx::SqlitePool>,
-    f: impl FnOnce(&sqlx::SqlitePool) -> std::io::Result<T>,
+    pool: Option<&sqlx::AnyPool>,
+    f: impl FnOnce(&sqlx::AnyPool) -> std::io::Result<T>,
 ) -> Option<T> {
     pool.and_then(|p| match f(p) {
         Ok(v) => Some(v),
@@ -211,7 +211,7 @@ fn try_pool<T>(
 }
 
 fn handle_get_run(
-    pool: Option<&sqlx::SqlitePool>,
+    pool: Option<&sqlx::AnyPool>,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     let slug = crate::shared::paths::project_slug();
@@ -238,7 +238,7 @@ fn handle_get_run(
 }
 
 fn handle_get_events(
-    pool: Option<&sqlx::SqlitePool>,
+    pool: Option<&sqlx::AnyPool>,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     let slug = crate::shared::paths::project_slug();
@@ -363,7 +363,7 @@ fn handle_search(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn handle_agent_status(
-    pool: Option<&sqlx::SqlitePool>,
+    pool: Option<&sqlx::AnyPool>,
     agent_id: &str,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -399,7 +399,7 @@ fn handle_agent_status(
 }
 
 fn handle_agent_dismiss(
-    pool: Option<&sqlx::SqlitePool>,
+    pool: Option<&sqlx::AnyPool>,
     agent_id: &str,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -472,7 +472,7 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
 /// SQLite-first: deletes from `orbit_pipelines` table when DB is available.
 /// Falls back to scanning PIPELINE-*.json files in project orbit directories.
 fn dismiss_orbit_pipeline(
-    pool: Option<&sqlx::SqlitePool>,
+    pool: Option<&sqlx::AnyPool>,
     pipeline_id: &str,
     harness_dir: &std::path::Path,
 ) -> String {
@@ -529,7 +529,7 @@ fn dismiss_orbit_pipeline(
 
 // ── Harness command handler ───────────────────────────
 
-fn handle_harness_cmd(pool: Option<&sqlx::SqlitePool>, cmd: &str) -> String {
+fn handle_harness_cmd(pool: Option<&sqlx::AnyPool>, cmd: &str) -> String {
     match cmd {
         "get_harness_metrics" => cmd_get_metrics(pool),
         "get_evolved_skills" => cmd_get_evolved_skills(pool),
@@ -543,7 +543,7 @@ fn handle_harness_cmd(pool: Option<&sqlx::SqlitePool>, cmd: &str) -> String {
     }
 }
 
-fn cmd_get_metrics(pool: Option<&sqlx::SqlitePool>) -> String {
+fn cmd_get_metrics(pool: Option<&sqlx::AnyPool>) -> String {
     try_pool(pool, |p| {
         let slug = crate::shared::paths::project_slug();
         crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
@@ -552,7 +552,7 @@ fn cmd_get_metrics(pool: Option<&sqlx::SqlitePool>) -> String {
     .unwrap_or_else(|| "null".into())
 }
 
-fn cmd_get_evolved_skills(pool: Option<&sqlx::SqlitePool>) -> String {
+fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>) -> String {
     try_pool(pool, |p| {
         let slug = crate::shared::paths::project_slug();
         let skills =
@@ -597,7 +597,7 @@ fn cmd_get_evolved_skills(pool: Option<&sqlx::SqlitePool>) -> String {
     })
 }
 
-fn cmd_get_obs_summary(pool: Option<&sqlx::SqlitePool>) -> String {
+fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>) -> String {
     try_pool(pool, |p| {
         let slug = crate::shared::paths::project_slug();
         let stats =
@@ -671,7 +671,7 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::SqlitePool>) -> String {
     })
 }
 
-fn cmd_get_orbit_pipelines(pool: Option<&sqlx::SqlitePool>) -> String {
+fn cmd_get_orbit_pipelines(pool: Option<&sqlx::AnyPool>) -> String {
     try_pool(pool, |p| {
         let pipelines =
             crate::store::runtime::block_on(crate::store::orbit_store::list_all_pipelines_pool(p))?;

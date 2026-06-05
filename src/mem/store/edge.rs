@@ -1,6 +1,6 @@
 //! edge.rs — Edge CRUD operations
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row};
 use std::io;
 
 use super::types::Edge;
@@ -44,10 +44,11 @@ pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
 
 // ── Async pool functions ─────────────────────────────
 
-pub async fn append_edge_pool(pool: &SqlitePool, edge: &Edge) -> io::Result<()> {
+pub async fn append_edge_pool(pool: &AnyPool, edge: &Edge) -> io::Result<()> {
     sqlx::query(
-        "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO edges (id, source, target, relation, weight, ts)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (id) DO NOTHING",
     )
     .bind(&edge.id)
     .bind(&edge.source)
@@ -61,8 +62,8 @@ pub async fn append_edge_pool(pool: &SqlitePool, edge: &Edge) -> io::Result<()> 
     Ok(())
 }
 
-pub async fn read_edges_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Edge>> {
-    let rows = sqlx::query("SELECT id, source, target, relation, weight, ts FROM edges LIMIT ?")
+pub async fn read_edges_pool(pool: &AnyPool, limit: i64) -> io::Result<Vec<Edge>> {
+    let rows = sqlx::query("SELECT id, source, target, relation, weight, ts FROM edges LIMIT $1")
         .bind(limit)
         .fetch_all(pool)
         .await
@@ -81,8 +82,8 @@ pub async fn read_edges_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Ed
         .collect()
 }
 
-pub async fn delete_edge_by_id_pool(pool: &SqlitePool, edge_id: &str) -> io::Result<()> {
-    sqlx::query("DELETE FROM edges WHERE id = ?")
+pub async fn delete_edge_by_id_pool(pool: &AnyPool, edge_id: &str) -> io::Result<()> {
+    sqlx::query("DELETE FROM edges WHERE id = $1")
         .bind(edge_id)
         .execute(pool)
         .await
@@ -90,8 +91,8 @@ pub async fn delete_edge_by_id_pool(pool: &SqlitePool, edge_id: &str) -> io::Res
     Ok(())
 }
 
-pub async fn remove_edges_for_node_pool(pool: &SqlitePool, node_id: &str) -> io::Result<()> {
-    sqlx::query("DELETE FROM edges WHERE source = ? OR target = ?")
+pub async fn remove_edges_for_node_pool(pool: &AnyPool, node_id: &str) -> io::Result<()> {
+    sqlx::query("DELETE FROM edges WHERE source = $1 OR target = $2")
         .bind(node_id)
         .bind(node_id)
         .execute(pool)

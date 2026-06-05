@@ -1,6 +1,6 @@
 //! node.rs — Node CRUD operations
 
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row};
 use std::io;
 
 use super::types::Node;
@@ -54,11 +54,16 @@ pub fn parse_node(content: &str) -> Option<Node> {
 
 // ── Async pool functions ─────────────────────────────
 
-pub async fn write_node_pool(pool: &SqlitePool, node: &Node) -> io::Result<()> {
+pub async fn write_node_pool(pool: &AnyPool, node: &Node) -> io::Result<()> {
     let fm = &node.frontmatter;
     sqlx::query(
-        "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         ON CONFLICT (id) DO UPDATE SET
+           type=EXCLUDED.type, title=EXCLUDED.title, tags=EXCLUDED.tags,
+           projects=EXCLUDED.projects, agents=EXCLUDED.agents, created=EXCLUDED.created,
+           updated=EXCLUDED.updated, body=EXCLUDED.body, importance=EXCLUDED.importance,
+           access_count=EXCLUDED.access_count, accessed_at=EXCLUDED.accessed_at",
     )
     .bind(&fm.id)
     .bind(&fm.node_type)
@@ -78,8 +83,8 @@ pub async fn write_node_pool(pool: &SqlitePool, node: &Node) -> io::Result<()> {
     Ok(())
 }
 
-pub async fn read_node_pool(pool: &SqlitePool, id: &str) -> io::Result<Node> {
-    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?");
+pub async fn read_node_pool(pool: &AnyPool, id: &str) -> io::Result<Node> {
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = $1");
     let row = sqlx::query(&sql)
         .bind(id)
         .fetch_one(pool)
@@ -88,7 +93,7 @@ pub async fn read_node_pool(pool: &SqlitePool, id: &str) -> io::Result<Node> {
     row_to_node_pool(&row)
 }
 
-pub async fn read_nodes_pool(pool: &SqlitePool, ids: &[&str]) -> io::Result<Vec<Node>> {
+pub async fn read_nodes_pool(pool: &AnyPool, ids: &[&str]) -> io::Result<Vec<Node>> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
@@ -106,8 +111,8 @@ pub async fn read_nodes_pool(pool: &SqlitePool, ids: &[&str]) -> io::Result<Vec<
     rows.iter().map(row_to_node_pool).collect()
 }
 
-pub async fn delete_node_pool(pool: &SqlitePool, id: &str) -> io::Result<()> {
-    sqlx::query("DELETE FROM nodes WHERE id = ?")
+pub async fn delete_node_pool(pool: &AnyPool, id: &str) -> io::Result<()> {
+    sqlx::query("DELETE FROM nodes WHERE id = $1")
         .bind(id)
         .execute(pool)
         .await
@@ -116,15 +121,15 @@ pub async fn delete_node_pool(pool: &SqlitePool, id: &str) -> io::Result<()> {
 }
 
 #[allow(dead_code)]
-pub async fn node_exists_pool(pool: &SqlitePool, id: &str) -> bool {
-    sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)")
+pub async fn node_exists_pool(pool: &AnyPool, id: &str) -> bool {
+    sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = $1)")
         .bind(id)
         .fetch_one(pool)
         .await
         .is_ok_and(|v| v != 0)
 }
 
-pub async fn read_all_nodes_pool(pool: &SqlitePool) -> io::Result<Vec<Node>> {
+pub async fn read_all_nodes_pool(pool: &AnyPool) -> io::Result<Vec<Node>> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC");
     let rows = sqlx::query(&sql)
         .fetch_all(pool)
@@ -133,8 +138,8 @@ pub async fn read_all_nodes_pool(pool: &SqlitePool) -> io::Result<Vec<Node>> {
     rows.iter().map(row_to_node_pool).collect()
 }
 
-pub async fn read_nodes_limited_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Node>> {
-    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?");
+pub async fn read_nodes_limited_pool(pool: &AnyPool, limit: i64) -> io::Result<Vec<Node>> {
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT $1");
     let rows = sqlx::query(&sql)
         .bind(limit)
         .fetch_all(pool)
@@ -143,7 +148,7 @@ pub async fn read_nodes_limited_pool(pool: &SqlitePool, limit: i64) -> io::Resul
     rows.iter().map(row_to_node_pool).collect()
 }
 
-pub async fn list_node_ids_pool(pool: &SqlitePool) -> io::Result<Vec<String>> {
+pub async fn list_node_ids_pool(pool: &AnyPool) -> io::Result<Vec<String>> {
     let rows = sqlx::query("SELECT id FROM nodes")
         .fetch_all(pool)
         .await
@@ -155,7 +160,7 @@ pub async fn list_node_ids_pool(pool: &SqlitePool) -> io::Result<Vec<String>> {
 }
 
 /// Map an sqlx row to a Node. Column order matches NODE_COLUMNS.
-pub(crate) fn row_to_node_pool(row: &sqlx::sqlite::SqliteRow) -> io::Result<Node> {
+pub(crate) fn row_to_node_pool(row: &sqlx::any::AnyRow) -> io::Result<Node> {
     use super::types::NodeFrontmatter;
     let tags: String = row.try_get(3).map_err(crate::store::sqlx_err)?;
     let projects: String = row.try_get(4).map_err(crate::store::sqlx_err)?;
