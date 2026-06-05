@@ -1,6 +1,7 @@
 //! decay.rs — Importance decay, stale tagging, and access tracking
 
 use rusqlite::{Connection, params};
+use sqlx::SqlitePool;
 use std::io;
 
 use super::util::{days_to_ymd, now_iso};
@@ -87,4 +88,110 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
         )
         .map_err(io::Error::other)?;
     Ok(changed as u64)
+}
+
+// ── Async pool functions ─────────────────────────────
+
+/// Async batch-touch using a single batched UPDATE (replaces N+1 per-row loop).
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn touch_nodes_pool(pool: &SqlitePool, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let now = now_iso();
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(_) => return,
+    };
+    // Build parameterized IN clause: UPDATE ... WHERE id IN (?1, ?2, ...)
+    let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
+    let sql = format!(
+        "UPDATE nodes SET access_count = access_count + 1, accessed_at = ?1 WHERE id IN ({})",
+        placeholders.join(",")
+    );
+    let mut query = sqlx::query(&sql).bind(&now);
+    for id in ids {
+        query = query.bind(id);
+    }
+    if let Err(e) = query.execute(&mut *tx).await {
+        eprintln!("[mem] touch_nodes_pool update failed: {e}");
+        let _ = tx.rollback().await;
+        return;
+    }
+    if let Err(e) = tx.commit().await {
+        eprintln!("[mem] touch_nodes_pool commit failed: {e}");
+    }
+}
+
+/// Async importance decay using pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn decay_importance_pool(
+    pool: &SqlitePool,
+    days: u64,
+    factor: f64,
+    floor: f64,
+) -> io::Result<u64> {
+    let cutoff = {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(days * 86400);
+        let (y, m, d) = days_to_ymd(secs / 86400);
+        let hh = (secs / 3600) % 24;
+        let mm = (secs / 60) % 60;
+        let ss = secs % 60;
+        format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    };
+    let result = sqlx::query(
+        "UPDATE nodes SET importance = MAX(?, importance * ?)
+         WHERE (accessed_at < ? OR accessed_at = '')
+           AND updated < ?
+           AND importance > ?
+           AND ',' || tags || ',' NOT LIKE '%,pinned,%'",
+    )
+    .bind(&cutoff)
+    .bind(factor)
+    .bind(&cutoff)
+    .bind(&cutoff)
+    .bind(floor)
+    .execute(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+    Ok(result.rows_affected())
+}
+
+/// Async stale tagging using pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn tag_stale_nodes_pool(pool: &SqlitePool, days: u64) -> io::Result<u64> {
+    let cutoff_secs = std::time::SystemTime::now()
+        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .saturating_sub(days * 86400);
+    let cutoff = {
+        let s = cutoff_secs;
+        let (y, m, d) = days_to_ymd(s / 86400);
+        let hh = (s / 3600) % 24;
+        let mm = (s / 60) % 60;
+        let ss = s % 60;
+        format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+    };
+    let result = sqlx::query(
+        "UPDATE nodes SET tags = CASE
+            WHEN tags = '' THEN 'stale'
+            WHEN ',' || tags || ',' NOT LIKE '%,stale,%' THEN tags || ',stale'
+            ELSE tags
+         END
+         WHERE updated < ?
+           AND ',' || tags || ',' NOT LIKE '%,stale,%'",
+    )
+    .bind(&cutoff)
+    .execute(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+    Ok(result.rows_affected())
 }

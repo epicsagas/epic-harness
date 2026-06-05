@@ -77,7 +77,7 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    let shared_db = crate::store::open_harness_db().ok();
+    let shared_pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
 
     // Validate all slug paths before reading data (security: prevent path traversal).
     // harness.db stores all projects together so the DB query runs once, not per-slug.
@@ -102,12 +102,15 @@ pub fn run_context(
     // is not yet supported in the schema. Querying inside the slug loop caused N copies
     // of the same result set to be accumulated (one per slug).
     // See policy comment in run() — SQLite is required here, no JSONL fallback.
-    let recs: Vec<ObsRecord> = match shared_db.as_ref() {
-        Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
-            conn,
-            &date_from,
-            &date_to,
-            Some(50_000),
+    let recs: Vec<ObsRecord> = match shared_pool.as_ref() {
+        Some(pool) => match crate::store::runtime::block_on(
+            crate::store::observations::query_obs_for_date_range_multi_pool(
+                pool,
+                &project_slugs,
+                &date_from,
+                &date_to,
+                Some(50_000),
+            ),
         ) {
             Ok(r) => r,
             Err(e) => {
@@ -240,12 +243,16 @@ pub fn run_context(
     });
 
     // 2. Evolution stats
-    let evo_records: Vec<serde_json::Value> = shared_db
+    let context_slug = project_slugs.first().map(|s| s.as_str()).unwrap_or("");
+    let evo_records: Vec<serde_json::Value> = shared_pool
         .as_ref()
-        .and_then(|conn| {
-            crate::store::evolution::query_all_records_conn(conn)
-                .map_err(|e| eprintln!("[reflect] SQLite evolution read failed: {e}"))
-                .ok()
+        .and_then(|pool| {
+            crate::store::runtime::block_on(crate::store::evolution::query_all_records_pool(
+                pool,
+                context_slug,
+            ))
+            .map_err(|e| eprintln!("[reflect] SQLite evolution read failed: {e}"))
+            .ok()
         })
         .map(|recs| {
             recs.iter()
@@ -323,13 +330,17 @@ pub fn run_context(
         "stagnation_count": stagnation_count,
     });
 
-    // 3. Metrics summary
-    let metrics: Metrics = shared_db
+    // 3. Metrics summary — use the first (current) project slug for context
+    // context_slug already bound at section 2 above; reused here.
+    let metrics: Metrics = shared_pool
         .as_ref()
-        .and_then(|conn| {
-            crate::store::metrics::load_metrics_conn(conn)
-                .map_err(|e| eprintln!("[reflect] SQLite metrics read failed: {e}"))
-                .ok()
+        .and_then(|pool| {
+            crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(
+                pool,
+                context_slug,
+            ))
+            .map_err(|e| eprintln!("[reflect] SQLite metrics read failed: {e}"))
+            .ok()
         })
         .unwrap_or_else(default_metrics);
     let sh = &metrics.score_history;
@@ -402,12 +413,16 @@ pub fn run_context(
     });
 
     // 4. Session snapshots
-    let snapshots: Vec<serde_json::Value> = shared_db
+    let snapshots: Vec<serde_json::Value> = shared_pool
         .as_ref()
-        .and_then(|conn| {
-            crate::store::sessions::list_recent_snapshots_conn(conn, 5)
-                .map_err(|e| eprintln!("[reflect] SQLite sessions read failed: {e}"))
-                .ok()
+        .and_then(|pool| {
+            crate::store::runtime::block_on(crate::store::sessions::list_recent_snapshots_pool(
+                pool,
+                context_slug,
+                5,
+            ))
+            .map_err(|e| eprintln!("[reflect] SQLite sessions read failed: {e}"))
+            .ok()
         })
         .map(|snaps| {
             snaps
@@ -770,12 +785,15 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
 
-    // 1. Collect today's observations from SQLite (no JSONL fallback — see policy at db==None branch)
+    // 1. Collect today's observations from SQLite pool (no JSONL fallback — see policy at pool==None branch)
     let today_str = today();
-    let db = crate::store::open_harness_db().ok();
-    let observations = match db.as_ref() {
-        Some(conn) => match crate::store::observations::query_obs_for_date_range_conn(
-            conn, &today_str, &today_str, None,
+    let slug = project_slug();
+    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
+    let observations = match pool.as_ref() {
+        Some(p) => match crate::store::runtime::block_on(
+            crate::store::observations::query_obs_for_date_range_pool(
+                p, &slug, &today_str, &today_str, None,
+            ),
         ) {
             Ok(recs) => recs,
             Err(e) => {
@@ -806,10 +824,10 @@ pub fn run(_input: &HookInput) -> i32 {
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
     // 3. Stagnation
-    let mut metrics: Metrics = db
+    let mut metrics: Metrics = pool
         .as_ref()
-        .and_then(|conn| {
-            crate::store::metrics::load_metrics_conn(conn)
+        .and_then(|p| {
+            crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
                 .map_err(|e| eprintln!("[reflect] SQLite metrics load failed: {e}"))
                 .ok()
         })
@@ -880,8 +898,10 @@ pub fn run(_input: &HookInput) -> i32 {
     // SQLite-first: fall back to JSONL only when DB write fails or DB is unavailable.
     // Writing to both stores after migration is complete risks divergence: if the process
     // crashes between the two writes, the stores contain different data.
-    if let Some(ref conn) = db {
-        if let Err(e) = crate::store::evolution::insert_record_conn(conn, &record) {
+    if let Some(ref p) = pool {
+        if let Err(e) = crate::store::runtime::block_on(
+            crate::store::evolution::insert_record_pool(p, &slug, &record),
+        ) {
             eprintln!("[reflect] SQLite evo write failed: {e}; falling back to JSONL");
             append_jsonl(&evolution_file(), &record);
         }
@@ -945,8 +965,10 @@ pub fn run(_input: &HookInput) -> i32 {
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
 
     // SQLite-first: fall back to file only when DB write fails or DB is unavailable.
-    if let Some(ref conn) = db {
-        if let Err(e) = crate::store::metrics::save_metrics_conn(conn, &metrics) {
+    if let Some(ref p) = pool {
+        if let Err(e) = crate::store::runtime::block_on(crate::store::metrics::save_metrics_pool(
+            p, &slug, &metrics,
+        )) {
             eprintln!("[reflect] SQLite metrics write failed: {e}; falling back to file");
             if let Ok(json) = serde_json::to_string_pretty(&metrics) {
                 let _ = fs::write(metrics_file(), json);
@@ -958,8 +980,10 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 11.5. Sync orbit pipeline files → SQLite (dual-write: files are source of truth
     //       for /orbit phase recovery; SQLite enables REST API + dashboard queries).
-    if let Some(ref conn) = db {
-        match crate::store::orbit_store::sync_orbit_files_to_db_conn(conn, &orbit_dir()) {
+    if let Some(ref p) = pool {
+        match crate::store::runtime::block_on(
+            crate::store::orbit_store::sync_orbit_files_to_db_pool(p, &orbit_dir()),
+        ) {
             Ok(n) if n > 0 => {
                 eprintln!("[reflect] synced {n} orbit pipeline(s) to SQLite");
             }

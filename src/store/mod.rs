@@ -4,8 +4,8 @@
 //! orchestrator state, orbit pipelines, evolved skills, global patterns) is
 //! stored in `harness.db` — separate from the knowledge graph `memory.db`.
 //!
-//! Follows the same dual-API pattern as `src/mem/store/`:
-//! standalone functions open their own connection, `_conn()` variants reuse one.
+//! Follows the same async pool pattern as `src/mem/store/`:
+//! all functions use `SqlitePool` for concurrent access.
 
 // ── Internal submodules ──────────────────────────────
 
@@ -17,14 +17,13 @@ pub mod migrate;
 pub mod observations;
 pub mod orbit_store;
 pub mod orchestrator;
+pub mod pool;
+pub mod runtime;
 pub(crate) mod schema;
 pub mod sessions;
 
 #[cfg(test)]
 mod tests;
-
-#[cfg(test)]
-pub(crate) use tests::in_memory_db;
 
 // ── Store error helpers ──────────────────────────────
 
@@ -34,17 +33,10 @@ pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> 
     result.map_err(io::Error::other)
 }
 
-/// Convert a single-row query result to `Option<T>`, mapping "no rows" to `None`.
-///
-/// Used across all store submodules to handle the common pattern:
-/// `query_row()` → `Ok(v)` / `QueryReturnedNoRows` → `None` / other errors propagated.
+/// Convert a sqlx error to io::Result. Used by all `*_pool` async functions.
 #[inline]
-pub(crate) fn query_row_optional<T>(result: Result<T, rusqlite::Error>) -> io::Result<Option<T>> {
-    match result {
-        Ok(v) => Ok(Some(v)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
+pub(crate) fn sqlx_err(e: sqlx::Error) -> io::Error {
+    io::Error::other(e)
 }
 
 // ── RAII transaction guard ───────────────────────────
@@ -127,9 +119,12 @@ pub(crate) fn i64_to_u64(v: i64) -> u64 {
     })
 }
 
-/// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
+/// Path to the global operational database: `~/.harness/harness.db`
+///
+/// Shared across all projects alongside `memory.db`. Project scoping is handled
+/// via the `project` column in each table rather than separate DB files.
 pub fn harness_db_path() -> std::path::PathBuf {
-    paths::harness_dir().join("harness.db")
+    paths::global_harness_db_path()
 }
 
 /// Open the harness operational database.

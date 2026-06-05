@@ -73,7 +73,7 @@ Após o encerramento da sessão, o **loop evolve** analisa o que quebrou, gera h
 
 ## Instalação
 
-> **Primeira vez?** Leia o [Guia de Início Rápido (5 min)](../../docs/quickstart.md).
+> **Primeira vez?** Leia o [Guia de Início Rápido (5 min)](../../docs/quickstart.md). Para detalhes de armazenamento, veja o [Mapa de Dados](../../docs/data-map.md).
 
 ### Claude Code (recomendado)
 

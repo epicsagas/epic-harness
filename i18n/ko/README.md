@@ -73,7 +73,7 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 
 ## 설치
 
-> **처음이라면?** [빠른 시작 가이드 (5분)](../../docs/quickstart.md)를 읽어보세요.
+> **처음이라면?** [빠른 시작 가이드 (5분)](../../docs/quickstart.md)를 읽어보세요. 데이터 저장소 구조는 [데이터 맵](../../docs/data-map.md)을 참조하세요.
 
 ### Claude Code (권장)
 

@@ -1,6 +1,7 @@
 //! graph.rs — Graph build + traversal (related, rebuild)
 
 use serde::{Deserialize, Serialize};
+use sqlx::{Row, SqlitePool};
 use std::collections::HashSet;
 use std::io;
 
@@ -235,6 +236,173 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
         }
     };
     related_nodes_conn(&conn, start_id, depth)
+}
+
+// ── Async pool functions ─────────────────────────────
+
+use super::store::{list_node_ids_pool, read_edges_pool, read_nodes_pool};
+
+/// Build a `Graph` value using a sqlx pool.
+#[allow(dead_code)]
+pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
+    let ids = list_node_ids_pool(pool).await?;
+    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let nodes = read_nodes_pool(pool, &id_refs)
+        .await?
+        .into_iter()
+        .map(|node| GraphNode {
+            id: node.frontmatter.id,
+            title: node.frontmatter.title,
+            node_type: node.frontmatter.node_type,
+            tags: node.frontmatter.tags,
+            importance: node.frontmatter.importance,
+        })
+        .collect();
+    let edges = read_edges_pool(pool, MAX_GRAPH_EDGES as i64)
+        .await?
+        .into_iter()
+        .map(|e| GraphEdge {
+            source: e.source,
+            target: e.target,
+            relation: e.relation,
+            weight: e.weight,
+        })
+        .collect();
+    Ok(Graph { nodes, edges })
+}
+
+/// Build graph JSON string using a sqlx pool.
+#[allow(dead_code)]
+pub async fn rebuild_graph_json_pool(pool: &SqlitePool) -> io::Result<String> {
+    serde_json::to_string_pretty(&build_graph_pool(pool).await?)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
+/// Async 1-hop neighbors using QueryBuilder for the IN clause.
+#[allow(dead_code)]
+pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec<(String, f64)> {
+    if seed_ids.is_empty() {
+        return vec![];
+    }
+    let seed_ids = if seed_ids.len() > MAX_SEED_IDS {
+        eprintln!(
+            "[mem/graph] graph_neighbors_pool: seed_ids.len()={} exceeds MAX_SEED_IDS={}, truncating",
+            seed_ids.len(),
+            MAX_SEED_IDS
+        );
+        &seed_ids[..MAX_SEED_IDS]
+    } else {
+        seed_ids
+    };
+
+    // Build: SELECT target AS nb, SUM(weight) AS w FROM edges WHERE source IN (...) GROUP BY target
+    // UNION ALL SELECT source AS nb, SUM(weight) AS w FROM edges WHERE target IN (...) GROUP BY source
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT target AS nb, SUM(weight) AS w FROM edges WHERE source IN (",
+    );
+    let mut separated = qb.separated(", ");
+    for id in seed_ids {
+        separated.push_bind(id);
+    }
+    qb.push(") GROUP BY target UNION ALL SELECT source AS nb, SUM(weight) AS w FROM edges WHERE target IN (");
+    let mut separated2 = qb.separated(", ");
+    for id in seed_ids {
+        separated2.push_bind(id);
+    }
+    qb.push(") GROUP BY source");
+
+    let rows = match qb.build().fetch_all(pool).await {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    let raw: Vec<(String, f64)> = rows
+        .iter()
+        .filter_map(|r| {
+            let nid: String = r.try_get(0).ok()?;
+            let w: f64 = r.try_get(1).ok()?;
+            Some((nid, w))
+        })
+        .collect();
+
+    // Accumulate weights and exclude seeds.
+    let seed_set: HashSet<&str> = seed_ids.iter().map(String::as_str).collect();
+    let mut weights: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+    for (nid, w) in raw {
+        if !seed_set.contains(nid.as_str()) {
+            *weights.entry(nid).or_default() += w;
+        }
+    }
+
+    let mut result: Vec<(String, f64)> = weights.into_iter().collect();
+    result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    result
+}
+
+/// Async BFS traversal using a sqlx pool.
+#[allow(dead_code)]
+pub async fn related_nodes_pool(pool: &SqlitePool, start_id: &str, _depth: usize) -> Vec<String> {
+    let sql = "
+        WITH RECURSIVE bfs(node_id) AS (
+            SELECT target FROM edges WHERE source = ?
+            UNION SELECT source FROM edges WHERE target = ?
+            UNION SELECT e.target FROM edges e JOIN bfs ON e.source = bfs.node_id WHERE e.target != ?
+            UNION SELECT e.source FROM edges e JOIN bfs ON e.target = bfs.node_id WHERE e.source != ?
+        )
+        SELECT node_id FROM bfs
+        LIMIT 500
+    ";
+    sqlx::query(sql)
+        .bind(start_id)
+        .bind(start_id)
+        .bind(start_id)
+        .bind(start_id)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.try_get::<String, _>(0).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Async compute aggregate stats using a sqlx pool.
+#[allow(dead_code)]
+pub async fn compute_stats_pool(pool: &SqlitePool) -> io::Result<serde_json::Value> {
+    let total_nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    let total_edges: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    let avg_importance: f64 = sqlx::query_scalar("SELECT AVG(importance) FROM nodes")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0.0);
+
+    let rows = sqlx::query("SELECT type, COUNT(*) FROM nodes GROUP BY type")
+        .fetch_all(pool)
+        .await
+        .map_err(crate::store::sqlx_err)?;
+
+    let by_type: serde_json::Map<String, serde_json::Value> = rows
+        .iter()
+        .filter_map(|r| {
+            let t: String = r.try_get(0).ok()?;
+            let c: i64 = r.try_get(1).ok()?;
+            Some((t, serde_json::Value::from(c)))
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "total_nodes": total_nodes,
+        "total_edges": total_edges,
+        "avg_importance": (avg_importance * 100.0).round() / 100.0,
+        "by_type": serde_json::Value::Object(by_type),
+    }))
 }
 
 #[cfg(test)]

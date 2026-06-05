@@ -1,6 +1,7 @@
 //! schema.rs — Database schema initialization and legacy migration
 
 use rusqlite::Connection;
+use sqlx::SqlitePool;
 use std::fs;
 use std::io;
 
@@ -200,4 +201,135 @@ pub(crate) fn auto_migrate_legacy(conn: &Connection) {
 
     // Write marker so we never run again
     let _ = fs::write(&marker, format!("migrated {} nodes\n", count));
+}
+
+/// Async version of [`init_schema`] using a sqlx pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
+    sqlx::raw_sql("PRAGMA wal_autocheckpoint=100;")
+        .execute(pool)
+        .await
+        .map_err(crate::store::sqlx_err)?;
+
+    sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS nodes (
+            id           TEXT PRIMARY KEY,
+            type         TEXT NOT NULL,
+            title        TEXT NOT NULL,
+            tags         TEXT NOT NULL DEFAULT '',
+            projects     TEXT NOT NULL DEFAULT '',
+            agents       TEXT NOT NULL DEFAULT '',
+            created      TEXT NOT NULL,
+            updated      TEXT NOT NULL,
+            body         TEXT NOT NULL DEFAULT '',
+            importance   REAL NOT NULL DEFAULT 0.5,
+            access_count INTEGER NOT NULL DEFAULT 0,
+            accessed_at  TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts
+            USING fts5(title, body, tags, content=nodes, content_rowid=rowid, tokenize='trigram');
+
+        CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+            INSERT INTO nodes_fts(rowid, title, body, tags)
+            VALUES (new.rowid, new.title, new.body, new.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+            INSERT INTO nodes_fts(nodes_fts, rowid, title, body, tags)
+            VALUES('delete', old.rowid, old.title, old.body, old.tags);
+        END;
+        CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
+            INSERT INTO nodes_fts(nodes_fts, rowid, title, body, tags)
+            VALUES('delete', old.rowid, old.title, old.body, old.tags);
+            INSERT INTO nodes_fts(rowid, title, body, tags)
+            VALUES (new.rowid, new.title, new.body, new.tags);
+        END;",
+    )
+    .execute(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    // Migrate existing DBs: add new columns (ignore errors if already present)
+    let _ = sqlx::raw_sql("ALTER TABLE nodes ADD COLUMN importance REAL NOT NULL DEFAULT 0.5")
+        .execute(pool)
+        .await;
+    let _ = sqlx::raw_sql("ALTER TABLE nodes ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0")
+        .execute(pool)
+        .await;
+    let _ = sqlx::raw_sql("ALTER TABLE nodes ADD COLUMN accessed_at TEXT NOT NULL DEFAULT ''")
+        .execute(pool)
+        .await;
+
+    // Backfill importance for existing nodes based on type
+    let _ = sqlx::raw_sql(
+        "UPDATE nodes SET importance = 0.9 WHERE importance = 0.5 AND type = 'decision';
+         UPDATE nodes SET importance = 0.8 WHERE importance = 0.5 AND type = 'resolution';
+         UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'concept';
+         UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'project';
+         UPDATE nodes SET importance = 0.4 WHERE importance = 0.5 AND type = 'error';
+         UPDATE nodes SET importance = 0.05 WHERE importance = 0.5 AND type = 'session';",
+    )
+    .execute(pool)
+    .await;
+
+    // Downgrade session importance from 0.2 to 0.05
+    let _ = sqlx::raw_sql(
+        "UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;",
+    )
+    .execute(pool)
+    .await;
+
+    // Schema version tracking
+    let _ = sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+         INSERT OR IGNORE INTO _meta (key, value) VALUES ('schema_version', '2');",
+    )
+    .execute(pool)
+    .await;
+
+    // Migrate FTS to trigram tokenizer if needed (schema_version < 2)
+    let needs_fts_migrate: bool =
+        sqlx::query_scalar::<_, String>("SELECT value FROM _meta WHERE key = 'schema_version'")
+            .fetch_optional(pool)
+            .await
+            .map_err(crate::store::sqlx_err)?
+            .is_none_or(|v| v != "2");
+
+    if needs_fts_migrate {
+        let _ = sqlx::raw_sql(
+            "DROP TABLE IF EXISTS nodes_fts;
+             CREATE VIRTUAL TABLE nodes_fts
+                 USING fts5(title, body, tags, content=nodes, content_rowid=rowid, tokenize='trigram');
+             INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild');
+             UPDATE _meta SET value = '2' WHERE key = 'schema_version';",
+        )
+        .execute(pool)
+        .await;
+    }
+
+    sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS edges (
+            id       TEXT PRIMARY KEY,
+            source   TEXT NOT NULL,
+            target   TEXT NOT NULL,
+            relation TEXT NOT NULL DEFAULT 'related',
+            weight   REAL NOT NULL DEFAULT 1.0,
+            ts       TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_edges_source  ON edges(source);
+        CREATE INDEX IF NOT EXISTS idx_edges_target  ON edges(target);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_src_tgt_rel ON edges(source, target, relation);
+        CREATE INDEX IF NOT EXISTS idx_nodes_type    ON nodes(type);
+        CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);",
+    )
+    .execute(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    Ok(())
 }

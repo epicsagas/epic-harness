@@ -17,6 +17,7 @@ pub struct HarnessConfig {
     pub instinct: InstinctConfig,
     pub context: ContextConfig,
     pub dashboard: DashboardConfig,
+    pub db: DbConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,6 +258,35 @@ impl Default for DashboardConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct DbConfig {
+    /// Database driver: "sqlite" (only option in Phase 1).
+    pub driver: String,
+
+    /// Connection URL for harness.db.
+    /// Empty = default path (~/.harness/harness.db).
+    pub harness_url: String,
+
+    /// Connection URL for memory.db.
+    /// Empty = default path (~/.harness/memory.db).
+    pub memory_url: String,
+
+    /// Maximum number of connections in the pool.
+    pub max_connections: u32,
+}
+
+impl Default for DbConfig {
+    fn default() -> Self {
+        Self {
+            driver: "sqlite".into(),
+            harness_url: String::new(),
+            memory_url: String::new(),
+            max_connections: 5,
+        }
+    }
+}
+
 // ── Global Config Instance ──────────────────────────
 
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
@@ -274,7 +304,7 @@ fn load_config() -> HarnessConfig {
     }
     match std::fs::read_to_string(&path) {
         Ok(content) => {
-            let cfg = toml::from_str(&content).unwrap_or_else(|e| {
+            let mut cfg = toml::from_str(&content).unwrap_or_else(|e| {
                 eprintln!(
                     "[epic-harness] warning: failed to parse {}: {} — using defaults",
                     path.display(),
@@ -282,7 +312,7 @@ fn load_config() -> HarnessConfig {
                 );
                 HarnessConfig::default()
             });
-            validate_config(&cfg);
+            validate_config(&mut cfg);
             cfg
         }
         Err(e) => {
@@ -298,7 +328,7 @@ fn load_config() -> HarnessConfig {
 
 // ── Validation ───────────────────────────────────────
 
-fn validate_config(cfg: &HarnessConfig) {
+fn validate_config(cfg: &mut HarnessConfig) {
     let w = cfg.scoring.weights;
     let sum: f64 = w.iter().sum();
     if w.iter().any(|v| *v < 0.0) || sum.abs() < f64::EPSILON {
@@ -310,6 +340,17 @@ fn validate_config(cfg: &HarnessConfig) {
             "[epic-harness] warning: scoring weights sum to {:.3} (expected ~1.0) — scores may be unreliable",
             sum
         );
+    }
+
+    if cfg.db.driver != "sqlite" {
+        eprintln!(
+            "[harness] unsupported db.driver: '{}', only 'sqlite' is supported — correcting",
+            cfg.db.driver
+        );
+        cfg.db.driver = "sqlite".into();
+    }
+    if cfg.db.max_connections == 0 {
+        cfg.db.max_connections = 5;
     }
 }
 
@@ -455,6 +496,22 @@ max_docs = 20
 
 # Automatically open the browser on first session start.
 # auto_open = true
+
+# ── Database ──────────────────────────────────────────
+[db]
+# Database driver: "sqlite" (Phase 1 only).
+driver = "sqlite"
+
+# Connection URL for harness.db (operational data).
+# Empty = default path (~/.harness/harness.db).
+harness_url = ""
+
+# Connection URL for memory.db (knowledge graph).
+# Empty = default path (~/.harness/memory.db).
+memory_url = ""
+
+# Maximum number of connections per pool.
+max_connections = 5
 "#
 }
 
@@ -479,6 +536,10 @@ mod tests {
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.pattern.weak_ext_min_obs, 3);
         assert_eq!(c.instinct.confidence_threshold, 0.8);
+        assert_eq!(c.db.driver, "sqlite");
+        assert!(c.db.harness_url.is_empty());
+        assert!(c.db.memory_url.is_empty());
+        assert_eq!(c.db.max_connections, 5);
     }
 
     #[test]
@@ -587,6 +648,15 @@ max_docs = 5
     }
 
     #[test]
+    fn template_includes_db_section() {
+        let template = default_config_template();
+        assert!(template.contains("[db]"));
+        let c: HarnessConfig = toml::from_str(template).unwrap();
+        assert_eq!(c.db.driver, "sqlite");
+        assert_eq!(c.db.max_connections, 5);
+    }
+
+    #[test]
     fn template_is_valid_toml() {
         let template = default_config_template();
         let c: HarnessConfig = toml::from_str(template).unwrap();
@@ -598,29 +668,29 @@ max_docs = 5
 
     #[test]
     fn validate_weights_ok() {
-        let c = HarnessConfig::default();
-        validate_config(&c); // should not panic or warn
+        let mut c = HarnessConfig::default();
+        validate_config(&mut c); // should not panic or warn
     }
 
     #[test]
     fn validate_weights_negative_warns() {
-        let c = HarnessConfig {
+        let mut c = HarnessConfig {
             scoring: ScoringConfig {
                 weights: [-0.5, 0.3, 0.2],
             },
             ..Default::default()
         };
-        validate_config(&c); // warns but does not panic
+        validate_config(&mut c); // warns but does not panic
     }
 
     #[test]
     fn validate_weights_bad_sum_warns() {
-        let c = HarnessConfig {
+        let mut c = HarnessConfig {
             scoring: ScoringConfig {
                 weights: [5.0, 3.0, 2.0],
             },
             ..Default::default()
         };
-        validate_config(&c); // warns but does not panic
+        validate_config(&mut c); // warns but does not panic
     }
 }

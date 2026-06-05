@@ -2,12 +2,13 @@ use super::common::*;
 
 fn get_obs_summary() -> Option<String> {
     let today_str = today();
+    let slug = crate::shared::paths::project_slug();
 
-    // Try SQLite first
-    if let Ok(conn) = crate::store::open_harness_db() {
-        if let Ok(stats) =
-            crate::store::observations::query_obs_stats_conn(&conn, &today_str, &today_str)
-        {
+    // Try SQLite pool first
+    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
+        if let Ok(stats) = crate::store::runtime::block_on(
+            crate::store::observations::query_obs_stats_pool(&pool, &slug, &today_str, &today_str),
+        ) {
             if stats.total > 0 {
                 let success_rate = if stats.total > 0 {
                     ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
@@ -144,10 +145,14 @@ pub fn run(input: &HookInput) -> i32 {
     // accumulate stale files and resume.rs to surface stale data when the DB is
     // healthy but the file timestamp is newer.
     let filename = format!("snapshot_{}.json", millis);
-    let sqlite_ok = crate::store::open_harness_db()
+    let slug = crate::shared::paths::project_slug();
+    let sqlite_ok = crate::store::runtime::block_on(crate::store::pool::harness_pool())
         .ok()
-        .and_then(|conn| {
-            crate::store::sessions::insert_snapshot_conn(&conn, &snapshot, millis).ok()
+        .and_then(|pool| {
+            crate::store::runtime::block_on(crate::store::sessions::insert_snapshot_pool(
+                &pool, &slug, &snapshot, millis,
+            ))
+            .ok()
         })
         .is_some();
 
@@ -160,8 +165,10 @@ pub fn run(input: &HookInput) -> i32 {
 
     // Sync orbit pipeline files → SQLite so the REST API stays current during long sessions.
     // Best-effort: a failure here must not block the pre-compact snapshot.
-    if let Ok(conn) = crate::store::open_harness_db() {
-        let _ = crate::store::orbit_store::sync_orbit_files_to_db_conn(&conn, &orbit_dir());
+    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
+        let _ = crate::store::runtime::block_on(
+            crate::store::orbit_store::sync_orbit_files_to_db_pool(&pool, &orbit_dir()),
+        );
     }
 
     hint(

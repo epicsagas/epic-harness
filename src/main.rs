@@ -177,7 +177,12 @@ fn main() {
         "migrate" => {
             let dry_run = args.iter().any(|a| a == "--dry-run");
             let reset = args.iter().any(|a| a == "--reset");
-            store::migrate::run_subcommand(dry_run, reset)
+            let to_global = args.iter().any(|a| a == "--to-global");
+            if to_global {
+                store::migrate::run_to_global(dry_run)
+            } else {
+                store::migrate::run_subcommand(dry_run, reset)
+            }
         }
         "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
         | "update" => {
@@ -221,8 +226,9 @@ fn main() {
             );
             eprintln!("USER SUBCOMMANDS:");
             eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
-            eprintln!("    --dry-run  Preview what would be imported without writing");
-            eprintln!("    --reset    Clear an interrupted migration marker and retry");
+            eprintln!("    --to-global          Merge per-project harness.db files into global DB");
+            eprintln!("    --dry-run            Preview without writing");
+            eprintln!("    --reset              Retry interrupted migration");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");

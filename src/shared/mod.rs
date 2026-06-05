@@ -263,22 +263,33 @@ warned:
     #[test]
     fn project_slug_format() {
         let slug = project_slug();
-        // "{name}-{6 hex chars}"
-        let parts: Vec<&str> = slug.rsplitn(2, '-').collect();
-        assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0].len(), 6);
-        assert!(parts[0].chars().all(|c| c.is_ascii_hexdigit()));
+        // Name-only slug: no hash suffix
+        assert!(
+            slug.chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_'),
+            "slug must only contain [a-zA-Z0-9_-], got: {slug}"
+        );
+        // Must not end with a 6-char hex suffix (old format)
+        if slug.len() > 7 {
+            let maybe_hex = &slug[slug.len() - 6..];
+            let maybe_sep = &slug[slug.len() - 7..slug.len() - 6];
+            if maybe_sep == "-" {
+                assert!(
+                    !maybe_hex.chars().all(|c| c.is_ascii_hexdigit()),
+                    "slug must not have a hash suffix, got: {slug}"
+                );
+            }
+        }
     }
 
     #[test]
     fn project_slug_safe_chars_only() {
-        // slug before the hash must not contain filesystem-unsafe characters
+        // slug must not contain filesystem-unsafe characters
         let slug = project_slug();
-        let name_part = slug.rsplit_once('-').map(|x| x.0).unwrap_or("");
         assert!(
-            name_part
-                .chars()
-                .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+            slug.chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '_'),
+            "slug contains unsafe chars: {slug}"
         );
     }
 

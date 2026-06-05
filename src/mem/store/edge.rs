@@ -1,6 +1,7 @@
 //! edge.rs — Edge CRUD operations
 
 use rusqlite::{Connection, params};
+use sqlx::{Row, SqlitePool};
 use std::io;
 
 use super::types::Edge;
@@ -105,5 +106,71 @@ pub fn remove_edges_for_node_conn(conn: &Connection, node_id: &str) -> io::Resul
         params![node_id],
     )
     .map_err(io::Error::other)?;
+    Ok(())
+}
+
+// ── Async pool functions ─────────────────────────────
+
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn append_edge_pool(pool: &SqlitePool, edge: &Edge) -> io::Result<()> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
+         VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&edge.id)
+    .bind(&edge.source)
+    .bind(&edge.target)
+    .bind(&edge.relation)
+    .bind(edge.weight)
+    .bind(&edge.ts)
+    .execute(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+    Ok(())
+}
+
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn read_edges_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Edge>> {
+    let rows = sqlx::query("SELECT id, source, target, relation, weight, ts FROM edges LIMIT ?")
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(crate::store::sqlx_err)?;
+    rows.iter()
+        .map(|r| {
+            Ok(Edge {
+                id: r.try_get(0).map_err(crate::store::sqlx_err)?,
+                source: r.try_get(1).map_err(crate::store::sqlx_err)?,
+                target: r.try_get(2).map_err(crate::store::sqlx_err)?,
+                relation: r.try_get(3).map_err(crate::store::sqlx_err)?,
+                weight: r.try_get(4).map_err(crate::store::sqlx_err)?,
+                ts: r.try_get(5).map_err(crate::store::sqlx_err)?,
+            })
+        })
+        .collect()
+}
+
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn delete_edge_by_id_pool(pool: &SqlitePool, edge_id: &str) -> io::Result<()> {
+    sqlx::query("DELETE FROM edges WHERE id = ?")
+        .bind(edge_id)
+        .execute(pool)
+        .await
+        .map_err(crate::store::sqlx_err)?;
+    Ok(())
+}
+
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
+#[allow(dead_code)]
+pub async fn remove_edges_for_node_pool(pool: &SqlitePool, node_id: &str) -> io::Result<()> {
+    sqlx::query("DELETE FROM edges WHERE source = ? OR target = ?")
+        .bind(node_id)
+        .bind(node_id)
+        .execute(pool)
+        .await
+        .map_err(crate::store::sqlx_err)?;
     Ok(())
 }

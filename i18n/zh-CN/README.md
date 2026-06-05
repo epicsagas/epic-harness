@@ -73,7 +73,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 
 ## 安装
 
-> **首次使用？** 阅读[快速入门指南（5 分钟）](../../docs/quickstart.md)。
+> **首次使用？** 阅读[快速入门指南（5 分钟）](../../docs/quickstart.md)。数据存储详情请参阅[数据地图](../../docs/data-map.md)。
 
 ### Claude Code（推荐）
 

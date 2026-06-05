@@ -57,7 +57,8 @@ jobs:
         run: cargo install cargo-audit --locked
       - name: Run audit
         # RUSTSEC-2026-0009: time < 0.3.47 via tauri — ignored until tauri releases a fix
-        run: cargo audit --ignore RUSTSEC-2026-0009
+        # RUSTSEC-2023-0071: rsa Marvin Attack (CVE-2023-49092) via tauri — no fix available
+        run: cargo audit --ignore RUSTSEC-2026-0009 --ignore RUSTSEC-2023-0071
 
   sbom:
     name: Generate SBOM
