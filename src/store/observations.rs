@@ -322,28 +322,6 @@ pub async fn query_obs_stats_pool(
     })
 }
 
-/// Async query latest observations.
-#[cfg(test)]
-pub async fn query_latest_observations_pool(
-    pool: &SqlitePool,
-    project: &str,
-    limit: i64,
-) -> io::Result<Vec<ObsRecord>> {
-    let rows = sqlx::query(
-        "SELECT timestamp, tool, tool_category, action, result, score,
-                dim_success, dim_quality, dim_cost,
-                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
-         FROM observations WHERE project = ? ORDER BY id DESC LIMIT ?",
-    )
-    .bind(project)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-
-    rows.iter().map(row_to_obs_record).collect()
-}
-
 /// Async query last action for a session.
 pub async fn query_last_action_pool(
     pool: &SqlitePool,

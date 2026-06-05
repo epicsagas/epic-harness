@@ -209,24 +209,6 @@ pub async fn dismiss_pipeline_pool(pool: &SqlitePool, pipeline_id: &str) -> io::
 }
 
 #[cfg(test)]
-pub async fn update_pipeline_status_pool(
-    pool: &SqlitePool,
-    pipeline_id: &str,
-    status: &str,
-) -> io::Result<bool> {
-    let now = crate::shared::helpers::now_iso();
-    let result =
-        sqlx::query("UPDATE orbit_pipelines SET status = ?1, updated_at = ?2 WHERE id = ?3")
-            .bind(status)
-            .bind(&now)
-            .bind(pipeline_id)
-            .execute(pool)
-            .await
-            .map_err(crate::store::sqlx_err)?;
-    Ok(result.rows_affected() > 0)
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 

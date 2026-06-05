@@ -122,16 +122,6 @@ pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool
 }
 
 #[cfg(test)]
-pub async fn count_active_skills_pool(pool: &SqlitePool) -> io::Result<usize> {
-    let row = sqlx::query("SELECT COUNT(*) FROM evolved_skills WHERE active = 1")
-        .fetch_one(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    let count: i64 = row.try_get(0).map_err(crate::store::sqlx_err)?;
-    Ok(count as usize)
-}
-
-#[cfg(test)]
 pub async fn load_promotion_counters_pool(
     pool: &SqlitePool,
     project: &str,

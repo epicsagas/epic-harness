@@ -25,9 +25,6 @@ pub mod sessions;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
-pub(crate) use tests::in_memory_db;
-
 // ── Store error helpers ──────────────────────────────
 
 /// Convert a rusqlite result to io::Result, preserving context.
