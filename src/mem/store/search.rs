@@ -102,7 +102,12 @@ pub fn query_nodes(
 
 // ── Async pool functions ─────────────────────────────
 
-pub async fn search_nodes_pool(pool: &SqlitePool, query: &str, limit: i64) -> io::Result<Vec<Node>> {
+#[allow(dead_code)]
+pub async fn search_nodes_pool(
+    pool: &SqlitePool,
+    query: &str,
+    limit: i64,
+) -> io::Result<Vec<Node>> {
     let sql = format!(
         "SELECT n.{NODE_COLUMNS_PREFIXED}
          FROM nodes n
@@ -117,10 +122,11 @@ pub async fn search_nodes_pool(pool: &SqlitePool, query: &str, limit: i64) -> io
         .fetch_all(pool)
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
-    rows.iter().map(|r| row_to_node_pool(r)).collect()
+    rows.iter().map(row_to_node_pool).collect()
 }
 
 /// Async dynamic filter query using QueryBuilder.
+#[allow(dead_code)]
 pub async fn query_nodes_pool(
     pool: &SqlitePool,
     tag: Option<&str>,
@@ -155,5 +161,5 @@ pub async fn query_nodes_pool(
         .fetch_all(pool)
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
-    rows.iter().map(|r| row_to_node_pool(r)).collect()
+    rows.iter().map(row_to_node_pool).collect()
 }

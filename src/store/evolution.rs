@@ -99,6 +99,7 @@ pub fn query_all_records_conn(conn: &Connection) -> io::Result<Vec<EvolutionReco
 
 use sqlx::{Row, SqlitePool};
 
+#[allow(dead_code)]
 pub async fn insert_record_pool(
     pool: &SqlitePool,
     project: &str,
@@ -133,6 +134,7 @@ pub async fn insert_record_pool(
     Ok(result.last_insert_rowid())
 }
 
+#[allow(dead_code)]
 pub async fn query_recent_records_pool(
     pool: &SqlitePool,
     limit: i64,
@@ -145,26 +147,30 @@ pub async fn query_recent_records_pool(
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    let mut records: Vec<EvolutionRecord> = rows.iter().map(|r| {
-        let error_json: String = r.try_get(4).unwrap_or_else(|_| "{}".into());
-        let failure_json: String = r.try_get(5).unwrap_or_else(|_| "[]".into());
-        EvolutionRecord {
-            timestamp: r.try_get(0).unwrap_or_default(),
-            observations: r.try_get::<i64, _>(1).unwrap_or(0) as u64,
-            success_rate: r.try_get(2).unwrap_or(0.0),
-            avg_score: r.try_get(3).unwrap_or(0.0),
-            error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
-            failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
-            skills_seeded: r.try_get::<i64, _>(6).unwrap_or(0) as u64,
-            skills_rolled_back: r.try_get::<i64, _>(7).unwrap_or(0) as u64,
-            total_evolved: r.try_get::<i64, _>(8).unwrap_or(0) as u64,
-            analysis_summary: r.try_get(9).unwrap_or_default(),
-        }
-    }).collect();
+    let mut records: Vec<EvolutionRecord> = rows
+        .iter()
+        .map(|r| {
+            let error_json: String = r.try_get(4).unwrap_or_else(|_| "{}".into());
+            let failure_json: String = r.try_get(5).unwrap_or_else(|_| "[]".into());
+            EvolutionRecord {
+                timestamp: r.try_get(0).unwrap_or_default(),
+                observations: r.try_get::<i64, _>(1).unwrap_or(0) as u64,
+                success_rate: r.try_get(2).unwrap_or(0.0),
+                avg_score: r.try_get(3).unwrap_or(0.0),
+                error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
+                failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
+                skills_seeded: r.try_get::<i64, _>(6).unwrap_or(0) as u64,
+                skills_rolled_back: r.try_get::<i64, _>(7).unwrap_or(0) as u64,
+                total_evolved: r.try_get::<i64, _>(8).unwrap_or(0) as u64,
+                analysis_summary: r.try_get(9).unwrap_or_default(),
+            }
+        })
+        .collect();
     records.reverse();
     Ok(records)
 }
 
+#[allow(dead_code)]
 pub async fn query_all_records_pool(pool: &SqlitePool) -> io::Result<Vec<EvolutionRecord>> {
     query_recent_records_pool(pool, 10_000).await
 }

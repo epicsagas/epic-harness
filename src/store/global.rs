@@ -165,6 +165,7 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
 
 use sqlx::{Row, SqlitePool};
 
+#[allow(dead_code, clippy::too_many_arguments)]
 pub async fn insert_pattern_pool(
     pool: &SqlitePool,
     timestamp: &str,
@@ -191,6 +192,7 @@ pub async fn insert_pattern_pool(
     Ok(result.last_insert_rowid())
 }
 
+#[allow(dead_code)]
 pub async fn query_patterns_excluding_pool(
     pool: &SqlitePool,
     exclude_project: &str,
@@ -199,6 +201,7 @@ pub async fn query_patterns_excluding_pool(
     query_patterns_pool_inner(pool, Some(exclude_project), limit).await
 }
 
+#[allow(dead_code)]
 pub async fn query_all_patterns_pool(
     pool: &SqlitePool,
     limit: i64,
@@ -206,6 +209,7 @@ pub async fn query_all_patterns_pool(
     query_patterns_pool_inner(pool, None, limit).await
 }
 
+#[allow(dead_code)]
 async fn query_patterns_pool_inner(
     pool: &SqlitePool,
     exclude_project: Option<&str>,

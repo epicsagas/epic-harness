@@ -349,6 +349,7 @@ pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64>
 
 use sqlx::{Row, SqlitePool};
 
+#[allow(dead_code)]
 pub async fn init_run_pool(pool: &SqlitePool, project: &str, run: &OrchRun) -> io::Result<()> {
     sqlx::query(
         "INSERT OR REPLACE INTO orch_runs (id, project, status, agents_json, dep_graph_json, created_at, updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7)"
@@ -366,6 +367,7 @@ pub async fn init_run_pool(pool: &SqlitePool, project: &str, run: &OrchRun) -> i
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn read_run_pool(pool: &SqlitePool) -> io::Result<Option<OrchRun>> {
     let row = sqlx::query(
         "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at FROM orch_runs WHERE status = ?1 ORDER BY created_at DESC LIMIT 1"
@@ -377,18 +379,35 @@ pub async fn read_run_pool(pool: &SqlitePool) -> io::Result<Option<OrchRun>> {
 
     match row {
         Some(r) => Ok(Some(OrchRun {
-            id: r.try_get::<String, _>(0).map_err(|e| io::Error::other(e.to_string()))?,
-            status: r.try_get::<String, _>(1).map_err(|e| io::Error::other(e.to_string()))?,
-            agents_json: r.try_get::<String, _>(2).map_err(|e| io::Error::other(e.to_string()))?,
-            dep_graph_json: r.try_get::<String, _>(3).map_err(|e| io::Error::other(e.to_string()))?,
-            created_at: r.try_get::<String, _>(4).map_err(|e| io::Error::other(e.to_string()))?,
-            updated_at: r.try_get::<String, _>(5).map_err(|e| io::Error::other(e.to_string()))?,
+            id: r
+                .try_get::<String, _>(0)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            status: r
+                .try_get::<String, _>(1)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            agents_json: r
+                .try_get::<String, _>(2)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            dep_graph_json: r
+                .try_get::<String, _>(3)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            created_at: r
+                .try_get::<String, _>(4)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            updated_at: r
+                .try_get::<String, _>(5)
+                .map_err(|e| io::Error::other(e.to_string()))?,
         })),
         None => Ok(None),
     }
 }
 
-pub async fn update_run_status_pool(pool: &SqlitePool, run_id: &str, status: RunStatus) -> io::Result<()> {
+#[allow(dead_code)]
+pub async fn update_run_status_pool(
+    pool: &SqlitePool,
+    run_id: &str,
+    status: RunStatus,
+) -> io::Result<()> {
     sqlx::query("UPDATE orch_runs SET status = ?1, updated_at = ?2 WHERE id = ?3")
         .bind(status.as_str())
         .bind(crate::shared::helpers::now_iso())
@@ -399,6 +418,7 @@ pub async fn update_run_status_pool(pool: &SqlitePool, run_id: &str, status: Run
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn upsert_agent_pool(pool: &SqlitePool, agent: &OrchAgent) -> io::Result<()> {
     sqlx::query(
         "INSERT OR REPLACE INTO orch_agents (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat, started_at, completed_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)"
@@ -420,6 +440,7 @@ pub async fn upsert_agent_pool(pool: &SqlitePool, agent: &OrchAgent) -> io::Resu
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn read_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result<Option<OrchAgent>> {
     let row = sqlx::query(
         "SELECT id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat, started_at, completed_at FROM orch_agents WHERE id = ?1"
@@ -431,33 +452,59 @@ pub async fn read_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result<Op
 
     match row {
         Some(r) => Ok(Some(OrchAgent {
-            id: r.try_get::<String, _>(0).map_err(|e| io::Error::other(e.to_string()))?,
-            run_id: r.try_get::<String, _>(1).map_err(|e| io::Error::other(e.to_string()))?,
-            role: r.try_get::<String, _>(2).map_err(|e| io::Error::other(e.to_string()))?,
-            task: r.try_get::<String, _>(3).map_err(|e| io::Error::other(e.to_string()))?,
-            satisfies_json: r.try_get::<String, _>(4).map_err(|e| io::Error::other(e.to_string()))?,
-            status: r.try_get::<String, _>(5).map_err(|e| io::Error::other(e.to_string()))?,
-            phase: r.try_get::<String, _>(6).map_err(|e| io::Error::other(e.to_string()))?,
-            progress: r.try_get::<f64, _>(7).map_err(|e| io::Error::other(e.to_string()))?,
-            last_heartbeat: r.try_get::<String, _>(8).map_err(|e| io::Error::other(e.to_string()))?,
-            started_at: r.try_get::<Option<String>, _>(9).map_err(|e| io::Error::other(e.to_string()))?,
-            completed_at: r.try_get::<Option<String>, _>(10).map_err(|e| io::Error::other(e.to_string()))?,
+            id: r
+                .try_get::<String, _>(0)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            run_id: r
+                .try_get::<String, _>(1)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            role: r
+                .try_get::<String, _>(2)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            task: r
+                .try_get::<String, _>(3)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            satisfies_json: r
+                .try_get::<String, _>(4)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            status: r
+                .try_get::<String, _>(5)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            phase: r
+                .try_get::<String, _>(6)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            progress: r
+                .try_get::<f64, _>(7)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            last_heartbeat: r
+                .try_get::<String, _>(8)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            started_at: r
+                .try_get::<Option<String>, _>(9)
+                .map_err(|e| io::Error::other(e.to_string()))?,
+            completed_at: r
+                .try_get::<Option<String>, _>(10)
+                .map_err(|e| io::Error::other(e.to_string()))?,
         })),
         None => Ok(None),
     }
 }
 
+#[allow(dead_code)]
 pub async fn dismiss_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result<bool> {
-    let mut tx = pool.begin().await.map_err(|e| io::Error::other(e.to_string()))?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
-    let count_row = sqlx::query(
-        "SELECT COUNT(*) FROM orch_agents WHERE id = ?1"
-    )
-    .bind(agent_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
-    let count: i64 = count_row.try_get::<i64, _>(0).map_err(|e| io::Error::other(e.to_string()))?;
+    let count_row = sqlx::query("SELECT COUNT(*) FROM orch_agents WHERE id = ?1")
+        .bind(agent_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let count: i64 = count_row
+        .try_get::<i64, _>(0)
+        .map_err(|e| io::Error::other(e.to_string()))?;
     if count == 0 {
         return Ok(false);
     }
@@ -478,10 +525,13 @@ pub async fn dismiss_agent_pool(pool: &SqlitePool, agent_id: &str) -> io::Result
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
 
-    tx.commit().await.map_err(|e| io::Error::other(e.to_string()))?;
+    tx.commit()
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(true)
 }
 
+#[allow(dead_code)]
 pub async fn append_event_pool(
     pool: &SqlitePool,
     agent_id: &str,
@@ -502,6 +552,7 @@ pub async fn append_event_pool(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn post_inbox_pool(
     pool: &SqlitePool,
     agent_id: &str,
@@ -522,6 +573,7 @@ pub async fn post_inbox_pool(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn write_control_pool(
     pool: &SqlitePool,
     action: ControlAction,

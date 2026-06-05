@@ -80,7 +80,9 @@ pub use decay::{decay_importance_pool, tag_stale_nodes_pool, touch_nodes_pool};
 #[allow(unused_imports)]
 pub use dedup::write_node_dedup_pool;
 #[allow(unused_imports)]
-pub use edge::{append_edge_pool, delete_edge_by_id_pool, read_edges_pool, remove_edges_for_node_pool};
+pub use edge::{
+    append_edge_pool, delete_edge_by_id_pool, read_edges_pool, remove_edges_for_node_pool,
+};
 #[allow(unused_imports)]
 pub use node::{
     delete_node_pool, list_node_ids_pool, node_exists_pool, read_all_nodes_pool, read_node_pool,

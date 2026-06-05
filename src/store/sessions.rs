@@ -95,8 +95,11 @@ pub fn list_recent_snapshots_conn(
 use sqlx::{Row, SqlitePool};
 
 /// Map a sqlx row to a [`SessionSnapshot`].
+#[allow(dead_code)]
 fn row_to_snapshot_pool(r: &sqlx::sqlite::SqliteRow) -> io::Result<SessionSnapshot> {
-    let g = |col: &str| -> Result<String, io::Error> { r.try_get(col).map_err(|e| io::Error::other(e.to_string())) };
+    let g = |col: &str| -> Result<String, io::Error> {
+        r.try_get(col).map_err(|e| io::Error::other(e.to_string()))
+    };
     let pending_json: String = g("pending_tasks")?;
     let pending_tasks: Vec<String> = serde_json::from_str(&pending_json).unwrap_or_default();
     let pipeline_json: Option<String> = r.try_get("pipeline_state").unwrap_or(None);
@@ -113,6 +116,7 @@ fn row_to_snapshot_pool(r: &sqlx::sqlite::SqliteRow) -> io::Result<SessionSnapsh
     })
 }
 
+#[allow(dead_code)]
 pub async fn insert_snapshot_pool(
     pool: &SqlitePool,
     project: &str,
@@ -145,6 +149,7 @@ pub async fn insert_snapshot_pool(
     Ok(result.last_insert_rowid())
 }
 
+#[allow(dead_code)]
 pub async fn get_latest_snapshot_pool(pool: &SqlitePool) -> io::Result<Option<SessionSnapshot>> {
     let row = sqlx::query(
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions ORDER BY id DESC LIMIT 1"
@@ -159,7 +164,11 @@ pub async fn get_latest_snapshot_pool(pool: &SqlitePool) -> io::Result<Option<Se
     }
 }
 
-pub async fn list_recent_snapshots_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<SessionSnapshot>> {
+#[allow(dead_code)]
+pub async fn list_recent_snapshots_pool(
+    pool: &SqlitePool,
+    limit: i64,
+) -> io::Result<Vec<SessionSnapshot>> {
     let rows = sqlx::query(
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions ORDER BY id DESC LIMIT ?1"
     )
@@ -168,7 +177,7 @@ pub async fn list_recent_snapshots_pool(pool: &SqlitePool, limit: i64) -> io::Re
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    rows.iter().map(|r| row_to_snapshot_pool(r)).collect()
+    rows.iter().map(row_to_snapshot_pool).collect()
 }
 
 #[cfg(test)]

@@ -111,6 +111,7 @@ pub fn remove_edges_for_node_conn(conn: &Connection, node_id: &str) -> io::Resul
 
 // ── Async pool functions ─────────────────────────────
 
+#[allow(dead_code)]
 pub async fn append_edge_pool(pool: &SqlitePool, edge: &Edge) -> io::Result<()> {
     sqlx::query(
         "INSERT OR IGNORE INTO edges (id, source, target, relation, weight, ts)
@@ -128,6 +129,7 @@ pub async fn append_edge_pool(pool: &SqlitePool, edge: &Edge) -> io::Result<()> 
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn read_edges_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Edge>> {
     let rows = sqlx::query("SELECT id, source, target, relation, weight, ts FROM edges LIMIT ?")
         .bind(limit)
@@ -148,6 +150,7 @@ pub async fn read_edges_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Ed
         .collect()
 }
 
+#[allow(dead_code)]
 pub async fn delete_edge_by_id_pool(pool: &SqlitePool, edge_id: &str) -> io::Result<()> {
     sqlx::query("DELETE FROM edges WHERE id = ?")
         .bind(edge_id)
@@ -157,6 +160,7 @@ pub async fn delete_edge_by_id_pool(pool: &SqlitePool, edge_id: &str) -> io::Res
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn remove_edges_for_node_pool(pool: &SqlitePool, node_id: &str) -> io::Result<()> {
     sqlx::query("DELETE FROM edges WHERE source = ? OR target = ?")
         .bind(node_id)

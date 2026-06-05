@@ -18,8 +18,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{LazyLock, OnceLock};
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
 use crate::config::CONFIG;
 use crate::shared::paths;
@@ -62,6 +62,7 @@ fn memory_url() -> String {
 /// - Creates parent directories if needed.
 /// - Sets WAL mode, foreign_keys=ON, busy_timeout=5000ms.
 /// - Restricts file permissions to 0o600 on Unix.
+#[allow(dead_code)]
 async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
     // Extract filesystem path from "sqlite:/path/to/db" for directory/permission setup.
     let db_path = url.strip_prefix("sqlite:").unwrap_or(url);
@@ -101,6 +102,7 @@ static MEMORY_POOL: LazyLock<OnceLock<SqlitePool>> = LazyLock::new(OnceLock::new
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
 /// Uses `CONFIG.db` for URL and max_connections.
+#[allow(dead_code)]
 pub async fn harness_pool() -> io::Result<SqlitePool> {
     if let Some(pool) = HARNESS_POOL.get() {
         return Ok(pool.clone());
@@ -114,6 +116,7 @@ pub async fn harness_pool() -> io::Result<SqlitePool> {
 /// Returns a shared `SqlitePool` for `memory.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
+#[allow(dead_code)]
 pub async fn memory_pool() -> io::Result<SqlitePool> {
     if let Some(pool) = MEMORY_POOL.get() {
         return Ok(pool.clone());

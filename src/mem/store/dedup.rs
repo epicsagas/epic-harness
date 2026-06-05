@@ -64,7 +64,12 @@ pub fn write_node_dedup_conn(
 // ── Async pool functions ─────────────────────────────
 
 /// Async write-with-dedup using a sqlx pool.
-pub async fn write_node_dedup_pool(pool: &SqlitePool, node: &Node, window_hours: u64) -> io::Result<(String, bool)> {
+#[allow(dead_code)]
+pub async fn write_node_dedup_pool(
+    pool: &SqlitePool,
+    node: &Node,
+    window_hours: u64,
+) -> io::Result<(String, bool)> {
     let title = &node.frontmatter.title;
 
     if let Some(existing_id) = find_duplicate_in_pool(pool, title, window_hours).await? {
@@ -75,7 +80,12 @@ pub async fn write_node_dedup_pool(pool: &SqlitePool, node: &Node, window_hours:
     Ok((node.frontmatter.id.clone(), false))
 }
 
-async fn find_duplicate_in_pool(pool: &SqlitePool, title: &str, window_hours: u64) -> io::Result<Option<String>> {
+#[allow(dead_code)]
+async fn find_duplicate_in_pool(
+    pool: &SqlitePool,
+    title: &str,
+    window_hours: u64,
+) -> io::Result<Option<String>> {
     let cutoff_secs = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)
         .unwrap_or_default()

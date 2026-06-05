@@ -350,6 +350,7 @@ pub struct SessionStatRow {
 // ── Async pool functions ─────────────────────────────
 
 /// Map an sqlx observation row to ObsRecord.
+#[allow(dead_code)]
 fn row_to_obs_record(r: &sqlx::sqlite::SqliteRow) -> io::Result<ObsRecord> {
     let dim_s: Option<f64> = r.try_get(6).map_err(|e| io::Error::other(e.to_string()))?;
     let dim_q: Option<f64> = r.try_get(7).map_err(|e| io::Error::other(e.to_string()))?;
@@ -389,6 +390,7 @@ fn row_to_obs_record(r: &sqlx::sqlite::SqliteRow) -> io::Result<ObsRecord> {
 }
 
 /// Async insert observation using pool.
+#[allow(dead_code)]
 pub async fn insert_observation_pool(
     pool: &SqlitePool,
     project: &str,
@@ -433,6 +435,7 @@ pub async fn insert_observation_pool(
 }
 
 /// Async query observations for a date range.
+#[allow(dead_code)]
 pub async fn query_obs_for_date_range_pool(
     pool: &SqlitePool,
     from_ts: &str,
@@ -459,10 +462,11 @@ pub async fn query_obs_for_date_range_pool(
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    rows.iter().map(|r| row_to_obs_record(r)).collect()
+    rows.iter().map(row_to_obs_record).collect()
 }
 
 /// Async aggregate observation stats.
+#[allow(dead_code)]
 pub async fn query_obs_stats_pool(
     pool: &SqlitePool,
     from_ts: &str,
@@ -485,9 +489,15 @@ pub async fn query_obs_stats_pool(
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    let total: i64 = row.try_get(0).map_err(|e| io::Error::other(e.to_string()))?;
-    let successes: i64 = row.try_get(1).map_err(|e| io::Error::other(e.to_string()))?;
-    let avg_score: f64 = row.try_get(2).map_err(|e| io::Error::other(e.to_string()))?;
+    let total: i64 = row
+        .try_get(0)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let successes: i64 = row
+        .try_get(1)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let avg_score: f64 = row
+        .try_get(2)
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     // Per-tool stats
     let tool_rows = sqlx::query(
@@ -589,10 +599,11 @@ pub async fn query_latest_observations_pool(
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    rows.iter().map(|r| row_to_obs_record(r)).collect()
+    rows.iter().map(row_to_obs_record).collect()
 }
 
 /// Async query last action for a session.
+#[allow(dead_code)]
 pub async fn query_last_action_pool(
     pool: &SqlitePool,
     session_id: &str,

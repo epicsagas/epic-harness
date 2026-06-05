@@ -204,6 +204,7 @@ pub(crate) fn auto_migrate_legacy(conn: &Connection) {
 }
 
 /// Async version of [`init_schema`] using a sqlx pool.
+#[allow(dead_code)]
 pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     sqlx::raw_sql("PRAGMA wal_autocheckpoint=100;")
         .execute(pool)
@@ -287,13 +288,12 @@ pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     .await;
 
     // Migrate FTS to trigram tokenizer if needed (schema_version < 2)
-    let needs_fts_migrate: bool = sqlx::query_scalar::<_, String>(
-        "SELECT value FROM _meta WHERE key = 'schema_version'",
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?
-    .is_none_or(|v| v != "2");
+    let needs_fts_migrate: bool =
+        sqlx::query_scalar::<_, String>("SELECT value FROM _meta WHERE key = 'schema_version'")
+            .fetch_optional(pool)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))?
+            .is_none_or(|v| v != "2");
 
     if needs_fts_migrate {
         let _ = sqlx::raw_sql(

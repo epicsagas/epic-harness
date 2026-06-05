@@ -243,6 +243,7 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
 use super::store::{list_node_ids_pool, read_edges_pool, read_nodes_pool};
 
 /// Build a `Graph` value using a sqlx pool.
+#[allow(dead_code)]
 pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
     let ids = list_node_ids_pool(pool).await?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
@@ -271,12 +272,14 @@ pub async fn build_graph_pool(pool: &SqlitePool) -> io::Result<Graph> {
 }
 
 /// Build graph JSON string using a sqlx pool.
+#[allow(dead_code)]
 pub async fn rebuild_graph_json_pool(pool: &SqlitePool) -> io::Result<String> {
     serde_json::to_string_pretty(&build_graph_pool(pool).await?)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// Async 1-hop neighbors using QueryBuilder for the IN clause.
+#[allow(dead_code)]
 pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
@@ -337,6 +340,7 @@ pub async fn graph_neighbors_pool(pool: &SqlitePool, seed_ids: &[String]) -> Vec
 }
 
 /// Async BFS traversal using a sqlx pool.
+#[allow(dead_code)]
 pub async fn related_nodes_pool(pool: &SqlitePool, start_id: &str, _depth: usize) -> Vec<String> {
     let sql = "
         WITH RECURSIVE bfs(node_id) AS (
@@ -364,6 +368,7 @@ pub async fn related_nodes_pool(pool: &SqlitePool, start_id: &str, _depth: usize
 }
 
 /// Async compute aggregate stats using a sqlx pool.
+#[allow(dead_code)]
 pub async fn compute_stats_pool(pool: &SqlitePool) -> io::Result<serde_json::Value> {
     let total_nodes: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
         .fetch_one(pool)

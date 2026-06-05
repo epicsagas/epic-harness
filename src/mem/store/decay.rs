@@ -93,6 +93,7 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
 // ── Async pool functions ─────────────────────────────
 
 /// Async batch-touch using a transaction (replaces SAVEPOINT/RELEASE).
+#[allow(dead_code)]
 pub async fn touch_nodes_pool(pool: &SqlitePool, ids: &[String]) {
     if ids.is_empty() {
         return;
@@ -115,7 +116,13 @@ pub async fn touch_nodes_pool(pool: &SqlitePool, ids: &[String]) {
 }
 
 /// Async importance decay using pool.
-pub async fn decay_importance_pool(pool: &SqlitePool, days: u64, factor: f64, floor: f64) -> io::Result<u64> {
+#[allow(dead_code)]
+pub async fn decay_importance_pool(
+    pool: &SqlitePool,
+    days: u64,
+    factor: f64,
+    floor: f64,
+) -> io::Result<u64> {
     let cutoff = {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
@@ -147,6 +154,7 @@ pub async fn decay_importance_pool(pool: &SqlitePool, days: u64, factor: f64, fl
 }
 
 /// Async stale tagging using pool.
+#[allow(dead_code)]
 pub async fn tag_stale_nodes_pool(pool: &SqlitePool, days: u64) -> io::Result<u64> {
     let cutoff_secs = std::time::SystemTime::now()
         .duration_since(std::time::SystemTime::UNIX_EPOCH)

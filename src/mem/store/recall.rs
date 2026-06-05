@@ -194,6 +194,7 @@ pub(crate) fn compute_recency(updated: &str, now_secs: u64) -> f64 {
 // ── Async pool functions ─────────────────────────────
 
 /// Async smart recall using a sqlx pool.
+#[allow(dead_code)]
 pub async fn smart_recall_pool(
     pool: &SqlitePool,
     project: Option<&str>,
@@ -308,10 +309,7 @@ pub async fn smart_recall_pool(
         if let Ok(rows) = qb.build().fetch_all(pool).await {
             let mut weight_map: std::collections::HashMap<String, f64> = Default::default();
             for r in &rows {
-                if let (Ok(nid), Ok(w)) = (
-                    r.try_get::<String, _>(0),
-                    r.try_get::<f64, _>(1),
-                ) {
+                if let (Ok(nid), Ok(w)) = (r.try_get::<String, _>(0), r.try_get::<f64, _>(1)) {
                     *weight_map.entry(nid).or_default() += w;
                 }
             }

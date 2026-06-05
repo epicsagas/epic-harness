@@ -172,6 +172,7 @@ pub fn save_promotion_counters_conn(
 
 use sqlx::{Row, SqlitePool};
 
+#[allow(dead_code)]
 pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io::Result<()> {
     let active_int = if skill.active { 1 } else { 0 };
     sqlx::query(
@@ -191,15 +192,21 @@ pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn list_skills_pool(pool: &SqlitePool) -> io::Result<Vec<EvolvedSkillRow>> {
     list_skills_pool_inner(pool, false).await
 }
 
+#[allow(dead_code)]
 pub async fn list_skills_full_pool(pool: &SqlitePool) -> io::Result<Vec<EvolvedSkillRow>> {
     list_skills_pool_inner(pool, true).await
 }
 
-async fn list_skills_pool_inner(pool: &SqlitePool, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
+#[allow(dead_code)]
+async fn list_skills_pool_inner(
+    pool: &SqlitePool,
+    include_body: bool,
+) -> io::Result<Vec<EvolvedSkillRow>> {
     let rows = if include_body {
         sqlx::query(
             "SELECT name, origin, confidence, project, skill_md, active, created, updated FROM evolved_skills ORDER BY name"
@@ -215,41 +222,51 @@ async fn list_skills_pool_inner(pool: &SqlitePool, include_body: bool) -> io::Re
     }
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    let skills: Vec<EvolvedSkillRow> = rows.iter().map(|r| {
-        let (skill_md, active_col, created_col, updated_col) = if include_body {
-            (r.try_get::<String, _>(4).unwrap_or_default(), 5usize, 6usize, 7usize)
-        } else {
-            (String::new(), 4usize, 5usize, 6usize)
-        };
-        EvolvedSkillRow {
-            name: r.try_get(0).unwrap_or_default(),
-            origin: r.try_get(1).unwrap_or_default(),
-            confidence: r.try_get(2).unwrap_or(0.0),
-            project: r.try_get(3).unwrap_or_default(),
-            skill_md,
-            active: r.try_get::<i32, _>(active_col).unwrap_or(0) != 0,
-            created: r.try_get(created_col).unwrap_or_default(),
-            updated: r.try_get(updated_col).unwrap_or_default(),
-        }
-    }).collect();
+    let skills: Vec<EvolvedSkillRow> = rows
+        .iter()
+        .map(|r| {
+            let (skill_md, active_col, created_col, updated_col) = if include_body {
+                (
+                    r.try_get::<String, _>(4).unwrap_or_default(),
+                    5usize,
+                    6usize,
+                    7usize,
+                )
+            } else {
+                (String::new(), 4usize, 5usize, 6usize)
+            };
+            EvolvedSkillRow {
+                name: r.try_get(0).unwrap_or_default(),
+                origin: r.try_get(1).unwrap_or_default(),
+                confidence: r.try_get(2).unwrap_or(0.0),
+                project: r.try_get(3).unwrap_or_default(),
+                skill_md,
+                active: r.try_get::<i32, _>(active_col).unwrap_or(0) != 0,
+                created: r.try_get(created_col).unwrap_or_default(),
+                updated: r.try_get(updated_col).unwrap_or_default(),
+            }
+        })
+        .collect();
     Ok(skills)
 }
 
+#[allow(dead_code)]
 pub async fn read_skill_md_pool(pool: &SqlitePool, name: &str) -> io::Result<Option<String>> {
-    let row = sqlx::query(
-        "SELECT skill_md FROM evolved_skills WHERE name = ?1"
-    )
-    .bind(name)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = ?1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     match row {
-        Some(r) => Ok(Some(r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?)),
+        Some(r) => Ok(Some(
+            r.try_get(0).map_err(|e| io::Error::other(e.to_string()))?,
+        )),
         None => Ok(None),
     }
 }
 
+#[allow(dead_code)]
 pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool> {
     let result = sqlx::query("DELETE FROM evolved_skills WHERE name = ?1")
         .bind(name)
@@ -259,24 +276,24 @@ pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool
     Ok(result.rows_affected() > 0)
 }
 
+#[allow(dead_code)]
 pub async fn count_active_skills_pool(pool: &SqlitePool) -> io::Result<usize> {
-    let row = sqlx::query(
-        "SELECT COUNT(*) FROM evolved_skills WHERE active = 1"
-    )
-    .fetch_one(pool)
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
-    let count: i64 = row.try_get(0).map_err(|e| io::Error::other(e.to_string()))?;
+    let row = sqlx::query("SELECT COUNT(*) FROM evolved_skills WHERE active = 1")
+        .fetch_one(pool)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    let count: i64 = row
+        .try_get(0)
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(count as usize)
 }
 
+#[allow(dead_code)]
 pub async fn load_promotion_counters_pool(pool: &SqlitePool) -> io::Result<HashMap<String, u64>> {
-    let rows = sqlx::query(
-        "SELECT pattern_key, count FROM promotion_counters"
-    )
-    .fetch_all(pool)
-    .await
-    .map_err(|e| io::Error::other(e.to_string()))?;
+    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     let mut counters = HashMap::new();
     for r in &rows {
@@ -287,21 +304,32 @@ pub async fn load_promotion_counters_pool(pool: &SqlitePool) -> io::Result<HashM
     Ok(counters)
 }
 
-pub async fn save_promotion_counters_pool(pool: &SqlitePool, counters: &HashMap<String, u64>) -> io::Result<()> {
-    let mut tx = pool.begin().await.map_err(|e| io::Error::other(e.to_string()))?;
+#[allow(dead_code)]
+pub async fn save_promotion_counters_pool(
+    pool: &SqlitePool,
+    counters: &HashMap<String, u64>,
+) -> io::Result<()> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
     sqlx::query("DELETE FROM promotion_counters")
         .execute(&mut *tx)
         .await
         .map_err(|e| io::Error::other(e.to_string()))?;
     for (key, count) in counters {
-        sqlx::query("INSERT OR REPLACE INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)")
-            .bind(key)
-            .bind(*count as i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| io::Error::other(e.to_string()))?;
+        sqlx::query(
+            "INSERT OR REPLACE INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
+        )
+        .bind(key)
+        .bind(*count as i64)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
     }
-    tx.commit().await.map_err(|e| io::Error::other(e.to_string()))?;
+    tx.commit()
+        .await
+        .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(())
 }
 

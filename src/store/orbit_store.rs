@@ -225,6 +225,7 @@ pub fn sync_orbit_files_to_db_conn(
 
 use sqlx::{Row, SqlitePool};
 
+#[allow(dead_code)]
 pub async fn upsert_pipeline_pool(
     pool: &SqlitePool,
     id: &str,
@@ -252,6 +253,7 @@ pub async fn upsert_pipeline_pool(
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn read_running_pipeline_pool(
     pool: &SqlitePool,
     project: Option<&str>,
@@ -285,11 +287,15 @@ pub async fn read_running_pipeline_pool(
     }
 }
 
+#[allow(dead_code)]
 pub async fn list_all_pipelines_pool(pool: &SqlitePool) -> io::Result<Vec<serde_json::Value>> {
     list_all_pipelines_pool_limited(pool, MAX_PIPELINE_LIST as i64).await
 }
 
-pub async fn list_all_pipelines_pool_limited(pool: &SqlitePool, limit: i64) -> io::Result<Vec<serde_json::Value>> {
+pub async fn list_all_pipelines_pool_limited(
+    pool: &SqlitePool,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
     let rows = sqlx::query(
         "SELECT id, project, status, phase, mode, state_json, created_at, updated_at FROM orbit_pipelines ORDER BY created_at DESC LIMIT ?1"
     )
@@ -298,37 +304,48 @@ pub async fn list_all_pipelines_pool_limited(pool: &SqlitePool, limit: i64) -> i
     .await
     .map_err(|e| io::Error::other(e.to_string()))?;
 
-    let pipelines: Vec<serde_json::Value> = rows.iter().map(|r| {
-        let id: String = r.try_get(0).unwrap_or_default();
-        let project: String = r.try_get(1).unwrap_or_default();
-        let status: String = r.try_get(2).unwrap_or_default();
-        let phase: Option<String> = r.try_get(3).unwrap_or(None);
-        let mode: Option<String> = r.try_get(4).unwrap_or(None);
-        let state_json: String = r.try_get(5).unwrap_or_default();
-        let created_at: String = r.try_get(6).unwrap_or_default();
-        let updated_at: String = r.try_get(7).unwrap_or_default();
+    let pipelines: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            let id: String = r.try_get(0).unwrap_or_default();
+            let project: String = r.try_get(1).unwrap_or_default();
+            let status: String = r.try_get(2).unwrap_or_default();
+            let phase: Option<String> = r.try_get(3).unwrap_or(None);
+            let mode: Option<String> = r.try_get(4).unwrap_or(None);
+            let state_json: String = r.try_get(5).unwrap_or_default();
+            let created_at: String = r.try_get(6).unwrap_or_default();
+            let updated_at: String = r.try_get(7).unwrap_or_default();
 
-        let mut val: serde_json::Value = serde_json::from_str(&state_json).unwrap_or_else(|e| {
-            eprintln!("[store/orbit] malformed state_json in listing, using empty object: {e}");
-            serde_json::Value::Object(Default::default())
-        });
-        if !val.is_object() {
-            val = serde_json::Value::Object(Default::default());
-        }
-        if let Some(map) = val.as_object_mut() {
-            map.insert("id".into(), serde_json::Value::String(id));
-            map.insert("project".into(), serde_json::Value::String(project));
-            map.insert("status".into(), serde_json::Value::String(status));
-            if let Some(p) = phase { map.insert("phase".into(), serde_json::Value::String(p)); }
-            if let Some(m) = mode { map.insert("mode".into(), serde_json::Value::String(m)); }
-            map.insert("started_at".into(), serde_json::Value::String(created_at));
-            map.insert("updated_at".into(), serde_json::Value::String(updated_at));
-        }
-        val
-    }).collect();
+            let mut val: serde_json::Value =
+                serde_json::from_str(&state_json).unwrap_or_else(|e| {
+                    eprintln!(
+                        "[store/orbit] malformed state_json in listing, using empty object: {e}"
+                    );
+                    serde_json::Value::Object(Default::default())
+                });
+            if !val.is_object() {
+                val = serde_json::Value::Object(Default::default());
+            }
+            if let Some(map) = val.as_object_mut() {
+                map.insert("id".into(), serde_json::Value::String(id));
+                map.insert("project".into(), serde_json::Value::String(project));
+                map.insert("status".into(), serde_json::Value::String(status));
+                if let Some(p) = phase {
+                    map.insert("phase".into(), serde_json::Value::String(p));
+                }
+                if let Some(m) = mode {
+                    map.insert("mode".into(), serde_json::Value::String(m));
+                }
+                map.insert("started_at".into(), serde_json::Value::String(created_at));
+                map.insert("updated_at".into(), serde_json::Value::String(updated_at));
+            }
+            val
+        })
+        .collect();
     Ok(pipelines)
 }
 
+#[allow(dead_code)]
 pub async fn dismiss_pipeline_pool(pool: &SqlitePool, pipeline_id: &str) -> io::Result<bool> {
     let result = sqlx::query("DELETE FROM orbit_pipelines WHERE id = ?1")
         .bind(pipeline_id)
@@ -338,15 +355,21 @@ pub async fn dismiss_pipeline_pool(pool: &SqlitePool, pipeline_id: &str) -> io::
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn update_pipeline_status_pool(pool: &SqlitePool, pipeline_id: &str, status: &str) -> io::Result<bool> {
+#[allow(dead_code)]
+pub async fn update_pipeline_status_pool(
+    pool: &SqlitePool,
+    pipeline_id: &str,
+    status: &str,
+) -> io::Result<bool> {
     let now = crate::shared::helpers::now_iso();
-    let result = sqlx::query("UPDATE orbit_pipelines SET status = ?1, updated_at = ?2 WHERE id = ?3")
-        .bind(status)
-        .bind(&now)
-        .bind(pipeline_id)
-        .execute(pool)
-        .await
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let result =
+        sqlx::query("UPDATE orbit_pipelines SET status = ?1, updated_at = ?2 WHERE id = ?3")
+            .bind(status)
+            .bind(&now)
+            .bind(pipeline_id)
+            .execute(pool)
+            .await
+            .map_err(|e| io::Error::other(e.to_string()))?;
     Ok(result.rows_affected() > 0)
 }
 
