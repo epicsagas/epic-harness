@@ -494,4 +494,327 @@ mod tests {
             .unwrap();
         assert_eq!(migrated, "1");
     }
+
+    #[test]
+    fn to_global_merges_per_project_dbs() {
+        use std::path::Path;
+
+        let global_db = Connection::open_in_memory().unwrap();
+        super::super::schema::init_schema(&global_db).unwrap();
+
+        // Simulate a per-project DB (v3 schema — no project column)
+        let project_dir = std::env::temp_dir().join("harness-test-to-global");
+        let _ = std::fs::create_dir_all(&project_dir);
+        let db_path = project_dir.join("harness.db");
+        let src_conn = Connection::open(&db_path).unwrap();
+        // Apply a minimal v3-like schema manually
+        src_conn
+            .execute_batch(
+                "CREATE TABLE observations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    tool TEXT NOT NULL,
+                    tool_category TEXT NOT NULL,
+                    action TEXT, result TEXT, score REAL,
+                    dim_success REAL, dim_quality REAL, dim_cost REAL,
+                    failure_category TEXT, error_snippet TEXT,
+                    file_ext TEXT, sequence_id INTEGER, pipeline_id TEXT
+                );
+                INSERT INTO observations (timestamp, session_id, tool, tool_category)
+                VALUES ('2026-01-01T00:00:00Z', 'sess1', 'Bash', 'shell');
+                CREATE TABLE sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    snap_type TEXT NOT NULL,
+                    summary TEXT,
+                    snapshot_json TEXT NOT NULL,
+                    millis INTEGER NOT NULL
+                );
+                CREATE TABLE evolution_records (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL, observations INTEGER NOT NULL DEFAULT 0,
+                    success_rate REAL NOT NULL, avg_score REAL NOT NULL,
+                    error_patterns TEXT NOT NULL DEFAULT '{}',
+                    failure_patterns TEXT NOT NULL DEFAULT '[]',
+                    skills_seeded INTEGER NOT NULL DEFAULT 0,
+                    skills_rolled_back INTEGER NOT NULL DEFAULT 0,
+                    total_evolved INTEGER NOT NULL DEFAULT 0,
+                    analysis_summary TEXT NOT NULL DEFAULT ''
+                );",
+            )
+            .unwrap();
+        drop(src_conn);
+
+        // Attach and merge
+        let slug = "test-project";
+        global_db
+            .execute(&format!("ATTACH '{}' AS src", db_path.display()), [])
+            .unwrap();
+
+        let merged = super::merge_attached_db(&global_db, slug, "src").unwrap();
+        global_db.execute("DETACH src", []).unwrap();
+
+        assert_eq!(merged.obs, 1, "should merge 1 observation");
+        assert_eq!(merged.sessions, 0, "sessions table was empty");
+
+        // Verify the project column is set
+        let count: i64 = global_db
+            .query_row(
+                "SELECT COUNT(*) FROM observations WHERE project = ?1",
+                rusqlite::params![slug],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        let _ = std::fs::remove_dir_all(&project_dir);
+    }
+}
+
+// ── Per-project DB → Global DB consolidation ────────────
+
+/// Merge a per-project harness.db into the global DB using ATTACH.
+///
+/// `attach_name` is the SQLite schema name used in ATTACH (e.g., "src").
+/// All data from the attached DB is copied with `project` set to `slug`.
+/// Tables that already have rows for this project are skipped (INSERT OR IGNORE).
+pub fn merge_attached_db(
+    conn: &Connection,
+    slug: &str,
+    attach_name: &str,
+) -> io::Result<GlobalMergeStats> {
+    let mut stats = GlobalMergeStats::default();
+
+    // Tables with simple columns — direct INSERT with project appended.
+    let simple_tables = [
+        // (table, columns_without_project, src_columns_without_project)
+        ("observations",
+         "timestamp, session_id, tool, tool_category, action, result, score, \
+          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
+          file_ext, sequence_id, pipeline_id, project",
+         "timestamp, session_id, tool, tool_category, action, result, score, \
+          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
+          file_ext, sequence_id, pipeline_id"),
+        ("sessions",
+         "timestamp, snap_type, summary, snapshot_json, millis, project",
+         "timestamp, snap_type, summary, snapshot_json, millis"),
+        ("evolution_records",
+         "timestamp, observations, success_rate, avg_score, error_patterns, \
+          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
+          analysis_summary, project",
+         "timestamp, observations, success_rate, avg_score, error_patterns, \
+          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
+          analysis_summary"),
+        ("orch_runs",
+         "id, status, agents_json, dep_graph_json, created_at, updated_at, project",
+         "id, status, agents_json, dep_graph_json, created_at, updated_at"),
+        ("orch_control",
+         "action, target, message, generation, project",
+         "action, target, message, generation"),
+    ];
+
+    for (table, dest_cols, src_cols) in &simple_tables {
+        let sql = format!(
+            "INSERT OR IGNORE INTO main.{table} ({dest_cols}) \
+             SELECT {src_cols}, ?1 FROM {attach_name}.{table}"
+        );
+        match conn.execute(&sql, rusqlite::params![slug]) {
+            Ok(n) => match *table {
+                "observations" => stats.obs += n,
+                "sessions" => stats.sessions += n,
+                "evolution_records" => stats.evo += n,
+                _ => {}
+            },
+            Err(e) => {
+                // Table may not exist in the source DB — skip silently.
+                if !e.to_string().contains("no such table") {
+                    eprintln!("[migrate/to-global] {table}: {e}");
+                }
+            }
+        }
+    }
+
+    // metrics_state: key-value with project
+    if let Ok(n) = conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO main.metrics_state (key, value, project) \
+             SELECT key, value, ?1 FROM {attach_name}.metrics_state"
+        ),
+        rusqlite::params![slug],
+    ) {
+        stats.metrics += n;
+    }
+
+    // score_history: has UNIQUE(timestamp) so INSERT OR IGNORE deduplicates
+    if let Ok(n) = conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO main.score_history \
+             (timestamp, success_rate, avg_score, observations, \
+              dim_success, dim_quality, dim_cost, project) \
+             SELECT timestamp, success_rate, avg_score, observations, \
+                    dim_success, dim_quality, dim_cost, ?1 \
+             FROM {attach_name}.score_history"
+        ),
+        rusqlite::params![slug],
+    ) {
+        stats.score_history += n;
+    }
+
+    // skill_attribution: composite PK (skill_name, project) — safe to INSERT OR IGNORE
+    if let Ok(n) = conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO main.skill_attribution \
+             (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) \
+             SELECT skill_name, ?1, sessions_active, avg_score_with, avg_score_without, first_seen \
+             FROM {attach_name}.skill_attribution"
+        ),
+        rusqlite::params![slug],
+    ) {
+        stats.skill_attr += n;
+    }
+
+    // promotion_counters: composite PK (pattern_key, project)
+    if let Ok(n) = conn.execute(
+        &format!(
+            "INSERT OR IGNORE INTO main.promotion_counters (pattern_key, project, count) \
+             SELECT pattern_key, ?1, count FROM {attach_name}.promotion_counters"
+        ),
+        rusqlite::params![slug],
+    ) {
+        stats.promo += n;
+    }
+
+    // orch_agents, orch_agent_events, orch_agent_inbox: FK-linked to orch_runs
+    for table in ["orch_agents", "orch_agent_events", "orch_agent_inbox"] {
+        let _ = conn.execute(
+            &format!("INSERT OR IGNORE INTO main.{table} SELECT * FROM {attach_name}.{table}"),
+            [],
+        );
+    }
+
+    Ok(stats)
+}
+
+/// Entry point for `epic-harness migrate --to-global [--dry-run]`.
+///
+/// Scans `~/.harness/projects/*/harness.db` and merges each into the global DB.
+/// Returns an exit code (0 = success, 1 = error).
+pub fn run_to_global(dry_run: bool) -> i32 {
+    let projects_root = crate::shared::paths::harness_projects_root();
+    if !projects_root.is_dir() {
+        println!("no per-project directories found — nothing to do");
+        return 0;
+    }
+
+    // Collect candidate per-project DBs
+    let mut candidates: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(&projects_root)
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let slug_dir = entry.path();
+        if !slug_dir.is_dir() {
+            continue;
+        }
+        let db_path = slug_dir.join("harness.db");
+        if !db_path.is_file() {
+            continue;
+        }
+        let slug = entry
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        candidates.push((slug, db_path));
+    }
+
+    if candidates.is_empty() {
+        println!("no per-project harness.db files found — nothing to do");
+        return 0;
+    }
+
+    if dry_run {
+        println!("dry-run: would merge {} per-project DB(s) into global harness.db:", candidates.len());
+        for (slug, path) in &candidates {
+            println!("  {slug} ← {}", path.display());
+        }
+        println!("run without --dry-run to perform the merge");
+        return 0;
+    }
+
+    // Open global DB
+    let conn = match super::open_harness_db() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[migrate/to-global] failed to open global harness.db: {e}");
+            return 1;
+        }
+    };
+
+    let mut total = GlobalMergeStats::default();
+    for (slug, db_path) in &candidates {
+        // ATTACH the per-project DB read-only
+        let attach_name = "src";
+        if let Err(e) = conn.execute(
+            &format!("ATTACH '{}' AS {attach_name}", db_path.display()),
+            [],
+        ) {
+            eprintln!("[migrate/to-global] ATTACH failed for {slug}: {e}");
+            continue;
+        }
+
+        match merge_attached_db(&conn, slug, attach_name) {
+            Ok(stats) => {
+                println!(
+                    "  {slug}: {} obs, {} sessions, {} evo, {} metrics, {} score_history",
+                    stats.obs, stats.sessions, stats.evo, stats.metrics, stats.score_history
+                );
+                total += stats;
+            }
+            Err(e) => {
+                eprintln!("[migrate/to-global] merge failed for {slug}: {e}");
+            }
+        }
+
+        let _ = conn.execute("DETACH src", []);
+    }
+
+    // Mark consolidation complete
+    if let Err(e) = conn.execute(
+        "INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('global_consolidated', '1')",
+        [],
+    ) {
+        eprintln!("[migrate/to-global] failed to set consolidation marker: {e}");
+    }
+
+    println!(
+        "\nconsolidation complete: {} obs, {} sessions, {} evo records across {} project(s)",
+        total.obs, total.sessions, total.evo, candidates.len()
+    );
+    0
+}
+
+#[derive(Default)]
+/// Statistics for per-project → global DB merge.
+pub struct GlobalMergeStats {
+    pub obs: usize,
+    pub sessions: usize,
+    pub evo: usize,
+    pub metrics: usize,
+    pub score_history: usize,
+    pub skill_attr: usize,
+    pub promo: usize,
+}
+
+impl std::ops::AddAssign for GlobalMergeStats {
+    fn add_assign(&mut self, other: Self) {
+        self.obs += other.obs;
+        self.sessions += other.sessions;
+        self.evo += other.evo;
+        self.metrics += other.metrics;
+        self.score_history += other.score_history;
+        self.skill_attr += other.skill_attr;
+        self.promo += other.promo;
+    }
 }
