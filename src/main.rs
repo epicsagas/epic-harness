@@ -229,8 +229,6 @@ fn main() {
             eprintln!("    --to-global          Merge per-project harness.db files into global DB");
             eprintln!("    --dry-run            Preview without writing");
             eprintln!("    --reset              Retry interrupted migration");
-            eprintln!("    --dry-run  Preview what would be imported without writing");
-            eprintln!("    --reset    Clear an interrupted migration marker and retry");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");

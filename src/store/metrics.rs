@@ -68,16 +68,58 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
     let score_history: Vec<SessionScoreEntry> = sh_rows
         .iter()
         .filter_map(|r| {
-            let obs: i64 = r.try_get(3).ok()?;
+            let obs: i64 = match r.try_get(3) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                    return None;
+                }
+            };
             Some(SessionScoreEntry {
-                timestamp: r.try_get(0).ok()?,
-                success_rate: r.try_get(1).ok()?,
-                avg_score: r.try_get(2).ok()?,
+                timestamp: match r.try_get(0) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                        return None;
+                    }
+                },
+                success_rate: match r.try_get(1) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                        return None;
+                    }
+                },
+                avg_score: match r.try_get(2) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                        return None;
+                    }
+                },
                 observations: crate::store::i64_to_u64(obs),
                 dimension_averages: ScoreDimensions {
-                    tool_success: r.try_get(4).ok()?,
-                    output_quality: r.try_get(5).ok()?,
-                    execution_cost: r.try_get(6).ok()?,
+                    tool_success: match r.try_get(4) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                            return None;
+                        }
+                    },
+                    output_quality: match r.try_get(5) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                            return None;
+                        }
+                    },
+                    execution_cost: match r.try_get(6) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            eprintln!("[store/metrics] skipping malformed score_history row: {e}");
+                            return None;
+                        }
+                    },
                 },
             })
         })
@@ -95,12 +137,47 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
     let skill_attribution: HashMap<String, SkillAttribution> = sa_rows
         .iter()
         .filter_map(|r| {
+            let skill_name: String = match r.try_get(0) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[store/metrics] skipping malformed skill_attribution row: {e}");
+                    return None;
+                }
+            };
+            let sessions_active: i64 = match r.try_get(1) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[store/metrics] skipping malformed skill_attribution row: {e}");
+                    return None;
+                }
+            };
+            let avg_score_with: f64 = match r.try_get(2) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[store/metrics] skipping malformed skill_attribution row: {e}");
+                    return None;
+                }
+            };
+            let avg_score_without: f64 = match r.try_get(3) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[store/metrics] skipping malformed skill_attribution row: {e}");
+                    return None;
+                }
+            };
+            let first_seen: String = match r.try_get(4) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[store/metrics] skipping malformed skill_attribution row: {e}");
+                    return None;
+                }
+            };
             let sa = SkillAttribution {
-                skill_name: r.try_get(0).ok()?,
-                sessions_active: crate::store::i64_to_u64(r.try_get::<i64, _>(1).ok()?),
-                avg_score_with: r.try_get(2).ok()?,
-                avg_score_without: r.try_get(3).ok()?,
-                first_seen: r.try_get(4).ok()?,
+                skill_name,
+                sessions_active: crate::store::i64_to_u64(sessions_active),
+                avg_score_with,
+                avg_score_without,
+                first_seen,
             };
             Some((sa.skill_name.clone(), sa))
         })

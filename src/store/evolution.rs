@@ -186,11 +186,19 @@ mod tests {
             ..rec_a.clone()
         };
 
-        insert_record_pool(&pool, "project-a", &rec_a).await.unwrap();
-        insert_record_pool(&pool, "project-b", &rec_b).await.unwrap();
+        insert_record_pool(&pool, "project-a", &rec_a)
+            .await
+            .unwrap();
+        insert_record_pool(&pool, "project-b", &rec_b)
+            .await
+            .unwrap();
 
-        let a = query_recent_records_pool(&pool, "project-a", 10).await.unwrap();
-        let b = query_recent_records_pool(&pool, "project-b", 10).await.unwrap();
+        let a = query_recent_records_pool(&pool, "project-a", 10)
+            .await
+            .unwrap();
+        let b = query_recent_records_pool(&pool, "project-b", 10)
+            .await
+            .unwrap();
 
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 1);

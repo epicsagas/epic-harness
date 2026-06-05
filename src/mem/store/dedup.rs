@@ -64,6 +64,7 @@ pub fn write_node_dedup_conn(
 // ── Async pool functions ─────────────────────────────
 
 /// Async write-with-dedup using a sqlx pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn write_node_dedup_pool(
     pool: &SqlitePool,
@@ -80,6 +81,7 @@ pub async fn write_node_dedup_pool(
     Ok((node.frontmatter.id.clone(), false))
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 async fn find_duplicate_in_pool(
     pool: &SqlitePool,

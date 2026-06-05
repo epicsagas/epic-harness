@@ -563,18 +563,22 @@ async fn dismiss_agent_is_atomic() {
     upsert_agent_pool(&pool, &agent).await.unwrap();
 
     // First dismiss must succeed
-    let first = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
+    let first = dismiss_agent_pool(&pool, "test-project", "agent-atomic")
+        .await
+        .unwrap();
     assert!(first, "first dismiss must return true");
 
     // Second dismiss of the same agent must return false (not panic)
-    let second = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
+    let second = dismiss_agent_pool(&pool, "test-project", "agent-atomic")
+        .await
+        .unwrap();
     assert!(
         !second,
         "second dismiss of non-existent agent must return false"
     );
 
     assert!(
-        read_agent_pool(&pool, "agent-atomic")
+        read_agent_pool(&pool, "test-project", "agent-atomic")
             .await
             .unwrap()
             .is_none()
@@ -616,7 +620,7 @@ async fn cleanup_stale_is_atomic() {
     upsert_agent_pool(&pool, &agent).await.unwrap();
 
     // cleanup_stale must delete both run and orphaned agent atomically
-    let deleted = cleanup_stale_pool(&pool, "").await.unwrap();
+    let deleted = cleanup_stale_pool(&pool, "test-project", "").await.unwrap();
     assert!(deleted >= 2, "must delete run + agent, got {deleted}");
 
     // Neither should remain

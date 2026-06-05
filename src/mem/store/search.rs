@@ -102,6 +102,7 @@ pub fn query_nodes(
 
 // ── Async pool functions ─────────────────────────────
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn search_nodes_pool(
     pool: &SqlitePool,
@@ -126,6 +127,7 @@ pub async fn search_nodes_pool(
 }
 
 /// Async dynamic filter query using QueryBuilder.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn query_nodes_pool(
     pool: &SqlitePool,

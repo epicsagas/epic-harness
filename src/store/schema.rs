@@ -216,7 +216,6 @@ const DDL: &str = "
     CREATE INDEX IF NOT EXISTS idx_evolved_proj_act ON evolved_skills(project, active);
 ";
 
-
 /// Apply the full operational schema to an open connection.
 ///
 /// On first run (no `_harness_meta` table): applies all DDL + PRAGMA.
@@ -809,7 +808,11 @@ mod tests {
         for t in &expected {
             assert!(tables.contains(&t.to_string()), "missing table: {t}");
         }
-        assert_eq!(tables.len(), expected.len() + 1, "unexpected extra tables: {tables:?}");
+        assert_eq!(
+            tables.len(),
+            expected.len() + 1,
+            "unexpected extra tables: {tables:?}"
+        );
     }
 
     /// Verify DDL const works through the sqlx pool path (init_schema_pool).
@@ -827,12 +830,11 @@ mod tests {
         assert_eq!(count, 18, "expected 18 tables via sqlx path, got {count}");
 
         // Verify version was set
-        let v: String = sqlx::query_scalar(
-            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let v: String =
+            sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'schema_version'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(v, "4");
     }
 }

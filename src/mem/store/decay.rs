@@ -93,6 +93,7 @@ pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
 // ── Async pool functions ─────────────────────────────
 
 /// Async batch-touch using a single batched UPDATE (replaces N+1 per-row loop).
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn touch_nodes_pool(pool: &SqlitePool, ids: &[String]) {
     if ids.is_empty() {
@@ -124,6 +125,7 @@ pub async fn touch_nodes_pool(pool: &SqlitePool, ids: &[String]) {
 }
 
 /// Async importance decay using pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn decay_importance_pool(
     pool: &SqlitePool,
@@ -162,6 +164,7 @@ pub async fn decay_importance_pool(
 }
 
 /// Async stale tagging using pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn tag_stale_nodes_pool(pool: &SqlitePool, days: u64) -> io::Result<u64> {
     let cutoff_secs = std::time::SystemTime::now()

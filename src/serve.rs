@@ -369,21 +369,24 @@ fn handle_agent_status(
     if !orch::validate_agent_id(agent_id) {
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
+    let slug = crate::shared::paths::project_slug();
     try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orchestrator::read_agent_pool(p, agent_id))
-            .map(|opt| {
-                opt.map(|a| {
-                    serde_json::json!({
-                        "agent_id": a.id,
-                        "phase": a.phase,
-                        "progress": a.progress,
-                        "last_heartbeat": a.last_heartbeat,
-                        "status": a.status,
-                    })
-                    .to_string()
+        crate::store::runtime::block_on(crate::store::orchestrator::read_agent_pool(
+            p, &slug, agent_id,
+        ))
+        .map(|opt| {
+            opt.map(|a| {
+                serde_json::json!({
+                    "agent_id": a.id,
+                    "phase": a.phase,
+                    "progress": a.progress,
+                    "last_heartbeat": a.last_heartbeat,
+                    "status": a.status,
                 })
-                .unwrap_or_else(|| "{}".into())
+                .to_string()
             })
+            .unwrap_or_else(|| "{}".into())
+        })
     })
     .map(|body| json_response(&body))
     .unwrap_or_else(|| {
@@ -403,8 +406,11 @@ fn handle_agent_dismiss(
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
     // Pool-first: try DB dismiss, fall back to file-based if DB unavailable
+    let slug = crate::shared::paths::project_slug();
     let db_ok = try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orchestrator::dismiss_agent_pool(p, agent_id))
+        crate::store::runtime::block_on(crate::store::orchestrator::dismiss_agent_pool(
+            p, &slug, agent_id,
+        ))
     });
     let ok = db_ok.unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
     let body = serde_json::json!({"ok": ok, "dismissed": agent_id});

@@ -204,6 +204,7 @@ pub(crate) fn auto_migrate_legacy(conn: &Connection) {
 }
 
 /// Async version of [`init_schema`] using a sqlx pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
     sqlx::raw_sql("PRAGMA wal_autocheckpoint=100;")

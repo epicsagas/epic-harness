@@ -162,6 +162,7 @@ pub fn parse_node(content: &str) -> Option<Node> {
 
 // ── Async pool functions ─────────────────────────────
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn write_node_pool(pool: &SqlitePool, node: &Node) -> io::Result<()> {
     let fm = &node.frontmatter;
@@ -187,6 +188,7 @@ pub async fn write_node_pool(pool: &SqlitePool, node: &Node) -> io::Result<()> {
     Ok(())
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn read_node_pool(pool: &SqlitePool, id: &str) -> io::Result<Node> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?");
@@ -198,6 +200,7 @@ pub async fn read_node_pool(pool: &SqlitePool, id: &str) -> io::Result<Node> {
     row_to_node_pool(&row)
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn read_nodes_pool(pool: &SqlitePool, ids: &[&str]) -> io::Result<Vec<Node>> {
     if ids.is_empty() {
@@ -217,6 +220,7 @@ pub async fn read_nodes_pool(pool: &SqlitePool, ids: &[&str]) -> io::Result<Vec<
     rows.iter().map(row_to_node_pool).collect()
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn delete_node_pool(pool: &SqlitePool, id: &str) -> io::Result<()> {
     sqlx::query("DELETE FROM nodes WHERE id = ?")
@@ -227,6 +231,7 @@ pub async fn delete_node_pool(pool: &SqlitePool, id: &str) -> io::Result<()> {
     Ok(())
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn node_exists_pool(pool: &SqlitePool, id: &str) -> bool {
     sqlx::query_scalar::<_, i64>("SELECT EXISTS(SELECT 1 FROM nodes WHERE id = ?)")
@@ -236,6 +241,7 @@ pub async fn node_exists_pool(pool: &SqlitePool, id: &str) -> bool {
         .is_ok_and(|v| v != 0)
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn read_all_nodes_pool(pool: &SqlitePool) -> io::Result<Vec<Node>> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC");
@@ -246,6 +252,7 @@ pub async fn read_all_nodes_pool(pool: &SqlitePool) -> io::Result<Vec<Node>> {
     rows.iter().map(row_to_node_pool).collect()
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn read_nodes_limited_pool(pool: &SqlitePool, limit: i64) -> io::Result<Vec<Node>> {
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?");
@@ -257,6 +264,7 @@ pub async fn read_nodes_limited_pool(pool: &SqlitePool, limit: i64) -> io::Resul
     rows.iter().map(row_to_node_pool).collect()
 }
 
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn list_node_ids_pool(pool: &SqlitePool) -> io::Result<Vec<String>> {
     let rows = sqlx::query("SELECT id FROM nodes")

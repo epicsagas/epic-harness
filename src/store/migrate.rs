@@ -584,9 +584,8 @@ mod tests {
         super::super::schema::init_schema(&global_db).unwrap();
 
         // Simulate a per-project DB (v3 schema — no project column)
-        let project_dir = std::env::temp_dir().join("harness-test-to-global");
-        let _ = std::fs::create_dir_all(&project_dir);
-        let db_path = project_dir.join("harness.db");
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("harness.db");
         let src_conn = Connection::open(&db_path).unwrap();
         // Apply a minimal v3-like schema manually
         src_conn
@@ -649,8 +648,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
-
-        let _ = std::fs::remove_dir_all(&project_dir);
     }
 }
 

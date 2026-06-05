@@ -194,6 +194,7 @@ pub(crate) fn compute_recency(updated: &str, now_secs: u64) -> f64 {
 // ── Async pool functions ─────────────────────────────
 
 /// Async smart recall using a sqlx pool.
+// TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn smart_recall_pool(
     pool: &SqlitePool,
