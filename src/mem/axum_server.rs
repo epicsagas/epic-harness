@@ -11,8 +11,6 @@
 //!   still sync SQLite; they are offloaded with `spawn_blocking`)
 //! - Graceful shutdown via CTRL-C signal
 
-use std::sync::Arc;
-
 use axum::{
     Router,
     body::Body,
@@ -22,18 +20,18 @@ use axum::{
     routing::{delete, get, post, put},
 };
 use serde_json::{Value, json};
-use tokio::sync::Mutex;
+use sqlx::SqlitePool;
 use tower_http::cors::{Any, CorsLayer};
 
-use super::graph::{compute_stats, rebuild_graph_json_conn};
+use super::graph::{compute_stats, rebuild_graph_json_pool};
 use super::server::{
-    compute_centrality, handle_post_edge_inner, handle_post_node_conn_inner,
-    handle_put_node_conn_inner,
+    compute_centrality_pool, handle_post_edge_pool, handle_post_node_pool, handle_put_node_pool,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, open_db, read_index, read_node_conn,
-    remove_edges_for_node, remove_from_index, search_nodes_conn, validate_uuid,
+    delete_edge_by_id, delete_node_file, read_index, read_node_pool, remove_edges_for_node,
+    remove_from_index, search_nodes_pool, validate_uuid,
 };
+use crate::store::pool;
 
 const WEBVIEW_HTML: &str = include_str!("webview.html");
 const D3_JS: &str = include_str!("d3.min.js");
@@ -42,7 +40,7 @@ const D3_JS: &str = include_str!("d3.min.js");
 
 #[derive(Clone)]
 pub struct AppState {
-    pub conn: Arc<Mutex<rusqlite::Connection>>,
+    pub pool: SqlitePool,
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -56,17 +54,15 @@ pub fn serve_axum(args: &[String]) -> i32 {
         .and_then(|w| w[1].parse().ok())
         .unwrap_or(7700);
 
-    let conn = match open_db() {
-        Ok(c) => c,
+    let mem_pool = match crate::store::runtime::block_on(pool::memory_pool()) {
+        Ok(p) => p,
         Err(e) => {
-            eprintln!("Failed to open memory DB: {e}");
+            eprintln!("Failed to open memory DB pool: {e}");
             return 1;
         }
     };
 
-    let state = AppState {
-        conn: Arc::new(Mutex::new(conn)),
-    };
+    let state = AppState { pool: mem_pool };
 
     // Build tokio runtime (multi-thread)
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -177,8 +173,9 @@ async fn handle_stats() -> impl IntoResponse {
 }
 
 async fn handle_graph(State(state): State<AppState>) -> impl IntoResponse {
-    let conn = state.conn.lock().await;
-    let body = rebuild_graph_json_conn(&conn).unwrap_or_else(|_| "{}".to_string());
+    let body = rebuild_graph_json_pool(&state.pool)
+        .await
+        .unwrap_or_else(|_| "{}".to_string());
     json_ok(body)
 }
 
@@ -192,8 +189,7 @@ async fn handle_centrality(
     State(state): State<AppState>,
     Query(q): Query<CentralityQuery>,
 ) -> impl IntoResponse {
-    let conn = state.conn.lock().await;
-    let data = compute_centrality(&conn, q.limit);
+    let data = compute_centrality_pool(&state.pool, q.limit).await;
     Json(data).into_response()
 }
 
@@ -203,8 +199,7 @@ async fn handle_list_nodes() -> impl IntoResponse {
 }
 
 async fn handle_create_node(State(state): State<AppState>, body: String) -> impl IntoResponse {
-    let conn = state.conn.lock().await;
-    match handle_post_node_conn_inner(&body, &conn) {
+    match handle_post_node_pool(&body, &state.pool).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({"id": id}))).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
@@ -221,8 +216,7 @@ async fn handle_get_node(
         )
             .into_response();
     }
-    let conn = state.conn.lock().await;
-    match read_node_conn(&conn, &id) {
+    match read_node_pool(&state.pool, &id).await {
         Ok(node) => Json(json!({
             "id": node.frontmatter.id,
             "type": node.frontmatter.node_type,
@@ -253,8 +247,7 @@ async fn handle_update_node(
         )
             .into_response();
     }
-    let conn = state.conn.lock().await;
-    match handle_put_node_conn_inner(&id, &body, &conn) {
+    match handle_put_node_pool(&id, &body, &state.pool).await {
         Ok(_) => Json(json!({"id": id})).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
@@ -275,8 +268,7 @@ async fn handle_delete_node(Path(id): Path<String>) -> impl IntoResponse {
 }
 
 async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl IntoResponse {
-    let conn = state.conn.lock().await;
-    match handle_post_edge_inner(&body, &conn) {
+    match handle_post_edge_pool(&body, &state.pool).await {
         Ok(id) => (StatusCode::CREATED, Json(json!({"edge_id": id}))).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
@@ -310,8 +302,8 @@ async fn handle_search(
     Query(q): Query<SearchQuery>,
 ) -> impl IntoResponse {
     let query = q.q.unwrap_or_default();
-    let conn = state.conn.lock().await;
-    let results = search_nodes_conn(&conn, &query, 20)
+    let results = search_nodes_pool(&state.pool, &query, 20)
+        .await
         .unwrap_or_default()
         .into_iter()
         .map(|n| {
@@ -354,17 +346,17 @@ mod tests {
     use axum::http::StatusCode;
     use axum_test::TestServer;
 
-    fn make_state() -> AppState {
-        let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
-        super::super::store::init_schema(&conn).expect("schema");
-        AppState {
-            conn: Arc::new(Mutex::new(conn)),
-        }
+    async fn make_state() -> AppState {
+        let pool = crate::store::pool::test_memory_pool().await;
+        super::super::store::init_schema_pool(&pool)
+            .await
+            .expect("schema");
+        AppState { pool }
     }
 
     #[tokio::test]
     async fn root_returns_html() {
-        let app = build_router(make_state(), 7700);
+        let app = build_router(make_state().await, 7700);
         let server = TestServer::new(app);
         let res = server.get("/").await;
         assert_eq!(res.status_code(), StatusCode::OK);
@@ -373,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn stats_endpoint_returns_json() {
-        let app = build_router(make_state(), 7700);
+        let app = build_router(make_state().await, 7700);
         let server = TestServer::new(app);
         let res = server.get("/api/stats").await;
         assert_eq!(res.status_code(), StatusCode::OK);
@@ -381,7 +373,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_nodes_empty() {
-        let app = build_router(make_state(), 7700);
+        let app = build_router(make_state().await, 7700);
         let server = TestServer::new(app);
         let res = server.get("/api/nodes").await;
         assert_eq!(res.status_code(), StatusCode::OK);
@@ -389,7 +381,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_and_get_node() {
-        let app = build_router(make_state(), 7700);
+        let app = build_router(make_state().await, 7700);
         let server = TestServer::new(app);
 
         let payload = json!({
@@ -414,7 +406,7 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_node_id_returns_400() {
-        let app = build_router(make_state(), 7700);
+        let app = build_router(make_state().await, 7700);
         let server = TestServer::new(app);
         let res = server.get("/api/nodes/not-a-valid-uuid").await;
         assert_eq!(res.status_code(), StatusCode::BAD_REQUEST);
@@ -422,7 +414,7 @@ mod tests {
 
     #[tokio::test]
     async fn search_returns_results() {
-        let app = build_router(make_state(), 7700);
+        let app = build_router(make_state().await, 7700);
         let server = TestServer::new(app);
         let res = server.get("/api/search?q=test").await;
         assert_eq!(res.status_code(), StatusCode::OK);

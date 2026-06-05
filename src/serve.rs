@@ -82,10 +82,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
     // Open DB once and reuse across all requests (single-threaded server).
     // Avoids per-request schema init + migration check overhead.
     // Cross-session / cross-hook concurrency is handled at the SQLite layer:
-    // hooks run as separate processes each with their own connection, WAL mode
-    // allows concurrent reads without blocking, and busy_timeout=5000ms serializes
-    // concurrent writers. No thread-level sharing is needed here.
-    let db = crate::store::open_harness_db().ok();
+    // Open the shared pool once — serves all requests.
+    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
     let harness_dir = common::harness_dir();
 
     for request in server.incoming_requests() {
@@ -108,8 +106,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             // ── Orchestration API ───────────────────────────
-            (Method::Get, "/api/run") => handle_get_run(db.as_ref(), &harness_dir),
-            (Method::Get, "/api/events") => handle_get_events(db.as_ref(), &harness_dir),
+            (Method::Get, "/api/run") => handle_get_run(pool.as_ref(), &harness_dir),
+            (Method::Get, "/api/events") => handle_get_events(pool.as_ref(), &harness_dir),
 
             // ── Memory API (Graph/Stats) ─────────────────────
             (Method::Get, "/api/graph") => handle_get_graph(),
@@ -118,14 +116,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
-                let body = handle_harness_cmd(db.as_ref(), &cmd);
+                let body = handle_harness_cmd(pool.as_ref(), &cmd);
                 json_response(&body)
             }
 
             // ── Orbit Pipeline Dismiss ───────────────────────
             (Method::Delete, url) if url.starts_with("/api/orbit/") => {
                 let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
-                let body = dismiss_orbit_pipeline(db.as_ref(), pipeline_id, &harness_dir);
+                let body = dismiss_orbit_pipeline(pool.as_ref(), pipeline_id, &harness_dir);
                 json_response(&body)
             }
 
@@ -144,12 +142,12 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let agent_id = url
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
-                handle_agent_status(db.as_ref(), agent_id, &harness_dir)
+                handle_agent_status(pool.as_ref(), agent_id, &harness_dir)
             }
 
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
                 let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
-                handle_agent_dismiss(db.as_ref(), agent_id, &harness_dir)
+                handle_agent_dismiss(pool.as_ref(), agent_id, &harness_dir)
             }
 
             // ── CORS & Other ────────────────────────────────
@@ -192,13 +190,12 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
 // ── Route handlers ────────────────────────────────────
 
-/// Try a DB operation with a cached connection. Logs errors and returns None on failure.
-/// Replaces per-request `crate::store::with_harness_db()` calls with the pre-opened connection.
-fn try_db<T>(
-    db: Option<&rusqlite::Connection>,
-    f: impl FnOnce(&rusqlite::Connection) -> std::io::Result<T>,
+/// Try a pool operation with the shared SqlitePool. Logs errors and returns None on failure.
+fn try_pool<T>(
+    pool: Option<&sqlx::SqlitePool>,
+    f: impl FnOnce(&sqlx::SqlitePool) -> std::io::Result<T>,
 ) -> Option<T> {
-    db.and_then(|conn| match f(conn) {
+    pool.and_then(|p| match f(p) {
         Ok(v) => Some(v),
         Err(e) => {
             eprintln!("[serve] query failed: {e}");
@@ -208,15 +205,18 @@ fn try_db<T>(
 }
 
 fn handle_get_run(
-    db: Option<&rusqlite::Connection>,
+    pool: Option<&sqlx::SqlitePool>,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
-    let db_ok = try_db(db, |conn| {
-        crate::store::orchestrator::read_run_conn(conn).map(|opt| {
-            opt.as_ref()
-                .map(|r| json_or(r, "{}"))
-                .unwrap_or_else(|| "{}".into())
-        })
+    let slug = crate::shared::paths::project_slug();
+    let db_ok = try_pool(pool, |p| {
+        crate::store::runtime::block_on(crate::store::orchestrator::read_run_pool(p, &slug)).map(
+            |opt| {
+                opt.as_ref()
+                    .map(|r| json_or(r, "{}"))
+                    .unwrap_or_else(|| "{}".into())
+            },
+        )
     });
     let body = match db_ok {
         Some(body) => body,
@@ -232,15 +232,18 @@ fn handle_get_run(
 }
 
 fn handle_get_events(
-    db: Option<&rusqlite::Connection>,
+    pool: Option<&sqlx::SqlitePool>,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
-    let db_ok = try_db(db, |conn| {
-        crate::store::orchestrator::read_run_conn(conn).map(|opt| {
-            opt.as_ref()
-                .map(|r| json_or(r, "null"))
-                .unwrap_or_else(|| "null".into())
-        })
+    let slug = crate::shared::paths::project_slug();
+    let db_ok = try_pool(pool, |p| {
+        crate::store::runtime::block_on(crate::store::orchestrator::read_run_pool(p, &slug)).map(
+            |opt| {
+                opt.as_ref()
+                    .map(|r| json_or(r, "null"))
+                    .unwrap_or_else(|| "null".into())
+            },
+        )
     });
     let data = match db_ok {
         Some(data) => data,
@@ -353,27 +356,28 @@ fn handle_search(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
 }
 
 fn handle_agent_status(
-    db: Option<&rusqlite::Connection>,
+    pool: Option<&sqlx::SqlitePool>,
     agent_id: &str,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     if !orch::validate_agent_id(agent_id) {
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
-    try_db(db, |conn| {
-        crate::store::orchestrator::read_agent_conn(conn, agent_id).map(|opt| {
-            opt.map(|a| {
-                serde_json::json!({
-                    "agent_id": a.id,
-                    "phase": a.phase,
-                    "progress": a.progress,
-                    "last_heartbeat": a.last_heartbeat,
-                    "status": a.status,
+    try_pool(pool, |p| {
+        crate::store::runtime::block_on(crate::store::orchestrator::read_agent_pool(p, agent_id))
+            .map(|opt| {
+                opt.map(|a| {
+                    serde_json::json!({
+                        "agent_id": a.id,
+                        "phase": a.phase,
+                        "progress": a.progress,
+                        "last_heartbeat": a.last_heartbeat,
+                        "status": a.status,
+                    })
+                    .to_string()
                 })
-                .to_string()
+                .unwrap_or_else(|| "{}".into())
             })
-            .unwrap_or_else(|| "{}".into())
-        })
     })
     .map(|body| json_response(&body))
     .unwrap_or_else(|| {
@@ -385,16 +389,16 @@ fn handle_agent_status(
 }
 
 fn handle_agent_dismiss(
-    db: Option<&rusqlite::Connection>,
+    pool: Option<&sqlx::SqlitePool>,
     agent_id: &str,
     harness_dir: &std::path::Path,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     if !orch::validate_agent_id(agent_id) {
         return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
     }
-    // SQLite-first: try DB dismiss, fall back to file-based if DB unavailable
-    let db_ok = try_db(db, |conn| {
-        crate::store::orchestrator::dismiss_agent_conn(conn, agent_id)
+    // Pool-first: try DB dismiss, fall back to file-based if DB unavailable
+    let db_ok = try_pool(pool, |p| {
+        crate::store::runtime::block_on(crate::store::orchestrator::dismiss_agent_pool(p, agent_id))
     });
     let ok = db_ok.unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
     let body = serde_json::json!({"ok": ok, "dismissed": agent_id});
@@ -455,7 +459,7 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
 /// SQLite-first: deletes from `orbit_pipelines` table when DB is available.
 /// Falls back to scanning PIPELINE-*.json files in project orbit directories.
 fn dismiss_orbit_pipeline(
-    db: Option<&rusqlite::Connection>,
+    pool: Option<&sqlx::SqlitePool>,
     pipeline_id: &str,
     harness_dir: &std::path::Path,
 ) -> String {
@@ -469,9 +473,12 @@ fn dismiss_orbit_pipeline(
         return serde_json::json!({"ok": false, "error": "invalid pipeline id"}).to_string();
     }
 
-    // SQLite-first: remove the DB record
-    let db_deleted = try_db(db, |conn| {
-        crate::store::orbit_store::dismiss_pipeline_conn(conn, pipeline_id)
+    // Pool-first: remove the DB record
+    let db_deleted = try_pool(pool, |p| {
+        crate::store::runtime::block_on(crate::store::orbit_store::dismiss_pipeline_pool(
+            p,
+            pipeline_id,
+        ))
     })
     .unwrap_or(false);
 
@@ -509,12 +516,12 @@ fn dismiss_orbit_pipeline(
 
 // ── Harness command handler ───────────────────────────
 
-fn handle_harness_cmd(db: Option<&rusqlite::Connection>, cmd: &str) -> String {
+fn handle_harness_cmd(pool: Option<&sqlx::SqlitePool>, cmd: &str) -> String {
     match cmd {
-        "get_harness_metrics" => cmd_get_metrics(db),
-        "get_evolved_skills" => cmd_get_evolved_skills(db),
-        "get_obs_summary" => cmd_get_obs_summary(db),
-        "get_orbit_pipelines" => cmd_get_orbit_pipelines(db),
+        "get_harness_metrics" => cmd_get_metrics(pool),
+        "get_evolved_skills" => cmd_get_evolved_skills(pool),
+        "get_obs_summary" => cmd_get_obs_summary(pool),
+        "get_orbit_pipelines" => cmd_get_orbit_pipelines(pool),
         "get_integration_status" => cmd_get_integration_status(),
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
@@ -523,37 +530,41 @@ fn handle_harness_cmd(db: Option<&rusqlite::Connection>, cmd: &str) -> String {
     }
 }
 
-fn cmd_get_metrics(db: Option<&rusqlite::Connection>) -> String {
-    try_db(db, |conn| {
+fn cmd_get_metrics(pool: Option<&sqlx::SqlitePool>) -> String {
+    try_pool(pool, |p| {
         let slug = crate::shared::paths::project_slug();
-        crate::store::metrics::load_metrics_conn(conn, &slug)
+        crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
             .map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
     })
     .unwrap_or_else(|| "null".into())
 }
 
-fn cmd_get_evolved_skills(db: Option<&rusqlite::Connection>) -> String {
-    try_db(db, |conn| {
-        let skills = crate::store::evolved::list_skills_full_conn(conn)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|s| {
-                serde_json::json!({
-                    "name": s.name,
-                    "skill_md": s.skill_md,
-                    "created_at": s.created
-                })
-            })
-            .collect::<Vec<_>>();
-        let history = crate::store::evolution::query_recent_records_conn(conn, 50)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|r| serde_json::to_value(r).ok())
-            .collect::<Vec<_>>();
+fn cmd_get_evolved_skills(pool: Option<&sqlx::SqlitePool>) -> String {
+    try_pool(pool, |p| {
         let slug = crate::shared::paths::project_slug();
-        let total_sessions = crate::store::metrics::load_metrics_conn(conn, &slug)
-            .map(|m| m.total_sessions)
-            .unwrap_or(0);
+        let skills =
+            crate::store::runtime::block_on(crate::store::evolved::list_skills_full_pool(p))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "name": s.name,
+                        "skill_md": s.skill_md,
+                        "created_at": s.created
+                    })
+                })
+                .collect::<Vec<_>>();
+        let history = crate::store::runtime::block_on(
+            crate::store::evolution::query_recent_records_pool(p, &slug, 50),
+        )
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|r| serde_json::to_value(r).ok())
+        .collect::<Vec<_>>();
+        let total_sessions =
+            crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
+                .map(|m| m.total_sessions)
+                .unwrap_or(0);
         Ok(serde_json::json!({
             "evolved_skills": skills,
             "evolution_history": history,
@@ -573,13 +584,16 @@ fn cmd_get_evolved_skills(db: Option<&rusqlite::Connection>) -> String {
     })
 }
 
-fn cmd_get_obs_summary(db: Option<&rusqlite::Connection>) -> String {
-    try_db(db, |conn| {
-        let stats = crate::store::observations::query_obs_stats_conn(
-            conn,
-            "2020-01-01", // all data
-            "2099-12-31",
-        )?;
+fn cmd_get_obs_summary(pool: Option<&sqlx::SqlitePool>) -> String {
+    try_pool(pool, |p| {
+        let slug = crate::shared::paths::project_slug();
+        let stats =
+            crate::store::runtime::block_on(crate::store::observations::query_obs_stats_pool(
+                p,
+                &slug,
+                "2020-01-01", // all data
+                "2099-12-31",
+            ))?;
         let tool_stats: Vec<serde_json::Value> = {
             let mut v: Vec<_> = stats
                 .tool_stats
@@ -644,9 +658,10 @@ fn cmd_get_obs_summary(db: Option<&rusqlite::Connection>) -> String {
     })
 }
 
-fn cmd_get_orbit_pipelines(db: Option<&rusqlite::Connection>) -> String {
-    try_db(db, |conn| {
-        let pipelines = crate::store::orbit_store::list_all_pipelines_conn(conn)?;
+fn cmd_get_orbit_pipelines(pool: Option<&sqlx::SqlitePool>) -> String {
+    try_pool(pool, |p| {
+        let pipelines =
+            crate::store::runtime::block_on(crate::store::orbit_store::list_all_pipelines_pool(p))?;
         let mut sorted = pipelines;
         sorted.sort_by(|a, b| {
             let ta = a["started_at"].as_str().unwrap_or("");

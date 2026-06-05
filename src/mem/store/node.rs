@@ -272,41 +272,23 @@ pub async fn list_node_ids_pool(pool: &SqlitePool) -> io::Result<Vec<String>> {
 /// Map an sqlx row to a Node. Column order matches NODE_COLUMNS.
 pub(crate) fn row_to_node_pool(row: &sqlx::sqlite::SqliteRow) -> io::Result<Node> {
     use super::types::NodeFrontmatter;
-    let tags: String = row
-        .try_get(3)
-        .map_err(crate::store::sqlx_err)?;
-    let projects: String = row
-        .try_get(4)
-        .map_err(crate::store::sqlx_err)?;
-    let agents: String = row
-        .try_get(5)
-        .map_err(crate::store::sqlx_err)?;
+    let tags: String = row.try_get(3).map_err(crate::store::sqlx_err)?;
+    let projects: String = row.try_get(4).map_err(crate::store::sqlx_err)?;
+    let agents: String = row.try_get(5).map_err(crate::store::sqlx_err)?;
     Ok(Node {
         frontmatter: NodeFrontmatter {
-            id: row
-                .try_get(0)
-                .map_err(crate::store::sqlx_err)?,
-            node_type: row
-                .try_get(1)
-                .map_err(crate::store::sqlx_err)?,
-            title: row
-                .try_get(2)
-                .map_err(crate::store::sqlx_err)?,
+            id: row.try_get(0).map_err(crate::store::sqlx_err)?,
+            node_type: row.try_get(1).map_err(crate::store::sqlx_err)?,
+            title: row.try_get(2).map_err(crate::store::sqlx_err)?,
             tags: super::util::split_csv(&tags),
             projects: super::util::split_csv(&projects),
             agents: super::util::split_csv(&agents),
-            created: row
-                .try_get(6)
-                .map_err(crate::store::sqlx_err)?,
-            updated: row
-                .try_get(7)
-                .map_err(crate::store::sqlx_err)?,
+            created: row.try_get(6).map_err(crate::store::sqlx_err)?,
+            updated: row.try_get(7).map_err(crate::store::sqlx_err)?,
             importance: row.try_get(9).unwrap_or(0.5),
             access_count: row.try_get::<i64, _>(10).unwrap_or(0),
             accessed_at: row.try_get(11).unwrap_or_default(),
         },
-        body: row
-            .try_get(8)
-            .map_err(crate::store::sqlx_err)?,
+        body: row.try_get(8).map_err(crate::store::sqlx_err)?,
     })
 }

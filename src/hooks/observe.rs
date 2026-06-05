@@ -331,8 +331,8 @@ pub fn run(input: &HookInput) -> i32 {
     let sid = session_id();
     let slug = crate::shared::paths::project_slug();
 
-    // Open harness DB for SQLite writes (fallback to JSONL if DB unavailable)
-    let db = crate::store::open_harness_db().ok();
+    // Open harness pool for SQLite writes (fallback to JSONL if DB unavailable)
+    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
     let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
@@ -414,10 +414,12 @@ pub fn run(input: &HookInput) -> i32 {
                 score_bash(&combined, cmd)
             }
             "edit" => {
-                let prev = db.as_ref().and_then(|conn| {
-                    crate::store::observations::query_last_action_conn(conn, &sid)
-                        .ok()
-                        .flatten()
+                let prev = pool.as_ref().and_then(|p| {
+                    crate::store::runtime::block_on(
+                        crate::store::observations::query_last_action_pool(p, &sid),
+                    )
+                    .ok()
+                    .flatten()
                 });
                 score_edit(&combined, prev.as_deref(), action.as_deref())
             }
@@ -465,10 +467,10 @@ pub fn run(input: &HookInput) -> i32 {
     // Note: reflect.rs reads from SQLite only — if a write falls back to JSONL,
     // that observation is excluded from end-of-session analysis. This is an
     // acceptable tradeoff; persistent DB failures are treated as a setup problem.
-    if let Some(ref conn) = db {
-        if let Err(e) =
-            crate::store::observations::insert_observation_conn(conn, &slug, &record, &sid)
-        {
+    if let Some(ref p) = pool {
+        if let Err(e) = crate::store::runtime::block_on(
+            crate::store::observations::insert_observation_pool(p, &slug, &record, &sid),
+        ) {
             eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
             append_jsonl(&session_file, &record);
         }

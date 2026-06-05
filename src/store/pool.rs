@@ -7,9 +7,6 @@
 //! This module lives alongside the existing rusqlite sync code in `store/mod.rs`.
 //! No existing code is modified; the async pools are additive for the migration.
 
-// Functions will be called from migrated code in subsequent tasks.
-#![allow(dead_code)]
-
 use std::fs;
 use std::io;
 #[cfg(unix)]
@@ -59,12 +56,24 @@ fn memory_url() -> String {
 
 /// Build a `SqlitePool` from a `sqlite:` URL string.
 ///
+/// - Validates the URL scheme.
 /// - Creates parent directories if needed.
 /// - Sets WAL mode, foreign_keys=ON, busy_timeout=5000ms.
 /// - Restricts file permissions to 0o600 on Unix.
 async fn build_pool(url: &str, max_connections: u32) -> io::Result<SqlitePool> {
+    // URL validation: must use sqlite: scheme.
+    if !url.starts_with("sqlite:") {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("database URL must start with 'sqlite:': {url}"),
+        ));
+    }
+
     // Extract filesystem path from "sqlite:/path/to/db" for directory/permission setup.
-    let db_path = url.strip_prefix("sqlite:").unwrap_or(url);
+    let db_path = url
+        .strip_prefix("sqlite:")
+        .unwrap_or(url)
+        .trim_start_matches("//");
     let path = PathBuf::from(db_path);
 
     if let Some(parent) = path.parent() {
@@ -106,6 +115,8 @@ pub async fn harness_pool() -> io::Result<SqlitePool> {
         return Ok(pool.clone());
     }
     let pool = build_pool(&harness_url(), CONFIG.db.max_connections).await?;
+    // Initialize schema on first connection.
+    super::schema::init_schema_pool(&pool).await?;
     // If another thread beat us, that's fine — both pools are identical.
     let _ = HARNESS_POOL.set(pool.clone());
     Ok(pool)
@@ -128,6 +139,7 @@ pub async fn memory_pool() -> io::Result<SqlitePool> {
 /// Uses `get()` rather than `take()` because `OnceLock::take()` requires `&mut self`,
 /// which is unavailable on a `static`. After `close()`, any further pool operations
 /// will return an error — the desired behavior for a shutdown path.
+#[cfg(test)]
 pub async fn shutdown() {
     if let Some(pool) = HARNESS_POOL.get() {
         pool.close().await;
@@ -135,4 +147,20 @@ pub async fn shutdown() {
     if let Some(pool) = MEMORY_POOL.get() {
         pool.close().await;
     }
+}
+
+/// Create a transient in-memory `SqlitePool` for tests.
+/// Each call creates a fresh pool (no singleton reuse).
+#[cfg(test)]
+pub async fn test_memory_pool() -> SqlitePool {
+    let options = SqliteConnectOptions::from_str("sqlite::memory:")
+        .map_err(io::Error::other)
+        .unwrap()
+        .foreign_keys(true);
+
+    SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .unwrap()
 }

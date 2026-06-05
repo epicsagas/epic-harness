@@ -1,13 +1,8 @@
-//! evolved.rs — Evolved skills SQLite I/O
-//!
-//! See observations.rs for dead_code rationale.
-#![allow(dead_code)]
+//! evolved.rs — Evolved skills SQLite I/O (async pool)
 
-use rusqlite::Connection;
+#[cfg(test)]
 use std::collections::HashMap;
 use std::io;
-
-use super::{ImmediateTx, query_row_optional, store_err};
 
 /// Evolved skill metadata (mirrors evolve::skills::SkillMeta).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -22,157 +17,11 @@ pub struct EvolvedSkillRow {
     pub updated: String,
 }
 
-/// Insert or update an evolved skill.
-pub fn upsert_skill_conn(conn: &Connection, skill: &EvolvedSkillRow) -> io::Result<()> {
-    let active_int = if skill.active { 1 } else { 0 };
-    store_err(conn.execute(
-        "INSERT OR REPLACE INTO evolved_skills
-         (name, origin, confidence, project, skill_md, active, created, updated)
-         VALUES (?1,?2,?3,?4,?5,?6,
-                 COALESCE((SELECT created FROM evolved_skills WHERE name = ?1), ?7),
-                 ?8)",
-        rusqlite::params![
-            skill.name,
-            skill.origin,
-            skill.confidence,
-            skill.project,
-            skill.skill_md,
-            active_int,
-            skill.created,
-            skill.updated,
-        ],
-    ))?;
-    Ok(())
-}
-
-/// List all evolved skills (metadata only, no skill_md body).
-pub fn list_skills_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRow>> {
-    list_skills_inner(conn, false)
-}
-
-/// List all evolved skills including the full skill_md body.
-pub fn list_skills_full_conn(conn: &Connection) -> io::Result<Vec<EvolvedSkillRow>> {
-    list_skills_inner(conn, true)
-}
-
-/// Inner implementation shared by [`list_skills_conn`] and [`list_skills_full_conn`].
-///
-/// Uses separate SQL strings for metadata-only vs full queries to avoid fetching
-/// potentially large skill_md blobs when the caller only needs metadata.
-/// A single mapper handles both cases: when `include_body` is false, `skill_md` is
-/// absent from the SELECT so column indexes for `active`, `created`, `updated` shift
-/// by one — `col_offset` encodes that shift.
-fn list_skills_inner(conn: &Connection, include_body: bool) -> io::Result<Vec<EvolvedSkillRow>> {
-    let sql = if include_body {
-        "SELECT name, origin, confidence, project, skill_md, active, created, updated \
-         FROM evolved_skills ORDER BY name"
-    } else {
-        "SELECT name, origin, confidence, project, active, created, updated \
-         FROM evolved_skills ORDER BY name"
-    };
-
-    let mut stmt = store_err(conn.prepare(sql))?;
-    let rows = store_err(stmt.query_map([], |row| {
-        let (skill_md, active_col, created_col, updated_col) = if include_body {
-            (row.get::<_, String>(4)?, 5usize, 6usize, 7usize)
-        } else {
-            (String::new(), 4usize, 5usize, 6usize)
-        };
-        Ok(EvolvedSkillRow {
-            name: row.get(0)?,
-            origin: row.get(1)?,
-            confidence: row.get(2)?,
-            project: row.get(3)?,
-            skill_md,
-            active: row.get::<_, i32>(active_col)? != 0,
-            created: row.get(created_col)?,
-            updated: row.get(updated_col)?,
-        })
-    }))?;
-
-    let mut skills = Vec::new();
-    for r in rows {
-        skills.push(store_err(r)?);
-    }
-    Ok(skills)
-}
-
-/// Read a single skill's markdown content.
-pub fn read_skill_md_conn(conn: &Connection, name: &str) -> io::Result<Option<String>> {
-    query_row_optional(conn.query_row(
-        "SELECT skill_md FROM evolved_skills WHERE name = ?1",
-        rusqlite::params![name],
-        |row| row.get::<_, String>(0),
-    ))
-}
-
-/// Delete an evolved skill by name.
-pub fn delete_skill_conn(conn: &Connection, name: &str) -> io::Result<bool> {
-    let count = store_err(conn.execute(
-        "DELETE FROM evolved_skills WHERE name = ?1",
-        rusqlite::params![name],
-    ))?;
-    Ok(count > 0)
-}
-
-/// Count active evolved skills.
-pub fn count_active_skills_conn(conn: &Connection) -> io::Result<usize> {
-    let count: i64 = store_err(conn.query_row(
-        "SELECT COUNT(*) FROM evolved_skills WHERE active = 1",
-        [],
-        |row| row.get(0),
-    ))?;
-    Ok(count as usize)
-}
-
-// ── Promotion counters ───────────────────────────────
-
-/// Load all promotion counters.
-pub fn load_promotion_counters_conn(conn: &Connection) -> io::Result<HashMap<String, u64>> {
-    let mut stmt = store_err(conn.prepare("SELECT pattern_key, count FROM promotion_counters"))?;
-
-    let rows = store_err(stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            super::i64_to_u64(row.get::<_, i64>(1)?),
-        ))
-    }))?;
-
-    let mut counters = HashMap::new();
-    for r in rows {
-        let (k, v) = store_err(r)?;
-        counters.insert(k, v);
-    }
-    Ok(counters)
-}
-
-/// Save all promotion counters (replaces entire table).
-///
-/// Atomicity: DELETE + INSERT are wrapped in a single `BEGIN IMMEDIATE` transaction
-/// via `ImmediateTx`. Individual `conn.execute()` calls correctly participate in
-/// an outer `BEGIN`-level transaction (unlike `execute_batch`, which issues implicit
-/// autocommits). Callers must not hold an active transaction on this connection.
-pub fn save_promotion_counters_conn(
-    conn: &Connection,
-    counters: &HashMap<String, u64>,
-) -> io::Result<()> {
-    let tx = ImmediateTx::begin(conn)?;
-    store_err(conn.execute("DELETE FROM promotion_counters", []))?;
-    for (key, count) in counters {
-        store_err(conn.execute(
-            "INSERT OR REPLACE INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
-            rusqlite::params![key, super::u64_to_i64(*count)],
-        ))?;
-    }
-    tx.commit()?;
-    Ok(())
-}
-
 // ── Async pool functions ─────────────────────────────
 
 use sqlx::{Row, SqlitePool};
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io::Result<()> {
     let active_int = if skill.active { 1 } else { 0 };
     sqlx::query(
@@ -192,17 +41,15 @@ pub async fn upsert_skill_pool(pool: &SqlitePool, skill: &EvolvedSkillRow) -> io
     Ok(())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn list_skills_pool(pool: &SqlitePool) -> io::Result<Vec<EvolvedSkillRow>> {
     list_skills_pool_inner(pool, false).await
 }
 
-#[allow(dead_code)]
 pub async fn list_skills_full_pool(pool: &SqlitePool) -> io::Result<Vec<EvolvedSkillRow>> {
     list_skills_pool_inner(pool, true).await
 }
 
-#[allow(dead_code)]
 async fn list_skills_pool_inner(
     pool: &SqlitePool,
     include_body: bool,
@@ -250,7 +97,7 @@ async fn list_skills_pool_inner(
     Ok(skills)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn read_skill_md_pool(pool: &SqlitePool, name: &str) -> io::Result<Option<String>> {
     let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = ?1")
         .bind(name)
@@ -259,14 +106,12 @@ pub async fn read_skill_md_pool(pool: &SqlitePool, name: &str) -> io::Result<Opt
         .map_err(crate::store::sqlx_err)?;
 
     match row {
-        Some(r) => Ok(Some(
-            r.try_get(0).map_err(crate::store::sqlx_err)?,
-        )),
+        Some(r) => Ok(Some(r.try_get(0).map_err(crate::store::sqlx_err)?)),
         None => Ok(None),
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool> {
     let result = sqlx::query("DELETE FROM evolved_skills WHERE name = ?1")
         .bind(name)
@@ -276,21 +121,23 @@ pub async fn delete_skill_pool(pool: &SqlitePool, name: &str) -> io::Result<bool
     Ok(result.rows_affected() > 0)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn count_active_skills_pool(pool: &SqlitePool) -> io::Result<usize> {
     let row = sqlx::query("SELECT COUNT(*) FROM evolved_skills WHERE active = 1")
         .fetch_one(pool)
         .await
         .map_err(crate::store::sqlx_err)?;
-    let count: i64 = row
-        .try_get(0)
-        .map_err(crate::store::sqlx_err)?;
+    let count: i64 = row.try_get(0).map_err(crate::store::sqlx_err)?;
     Ok(count as usize)
 }
 
-#[allow(dead_code)]
-pub async fn load_promotion_counters_pool(pool: &SqlitePool) -> io::Result<HashMap<String, u64>> {
-    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters")
+#[cfg(test)]
+pub async fn load_promotion_counters_pool(
+    pool: &SqlitePool,
+    project: &str,
+) -> io::Result<HashMap<String, u64>> {
+    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters WHERE project = ?1")
+        .bind(project)
         .fetch_all(pool)
         .await
         .map_err(crate::store::sqlx_err)?;
@@ -304,32 +151,30 @@ pub async fn load_promotion_counters_pool(pool: &SqlitePool) -> io::Result<HashM
     Ok(counters)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub async fn save_promotion_counters_pool(
     pool: &SqlitePool,
+    project: &str,
     counters: &HashMap<String, u64>,
 ) -> io::Result<()> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    sqlx::query("DELETE FROM promotion_counters")
+    let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
+    sqlx::query("DELETE FROM promotion_counters WHERE project = ?1")
+        .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(crate::store::sqlx_err)?;
     for (key, count) in counters {
         sqlx::query(
-            "INSERT OR REPLACE INTO promotion_counters (pattern_key, count) VALUES (?1, ?2)",
+            "INSERT OR REPLACE INTO promotion_counters (pattern_key, project, count) VALUES (?1, ?2, ?3)",
         )
         .bind(key)
+        .bind(project)
         .bind(crate::store::u64_to_i64(*count))
         .execute(&mut *tx)
         .await
         .map_err(crate::store::sqlx_err)?;
     }
-    tx.commit()
-        .await
-        .map_err(crate::store::sqlx_err)?;
+    tx.commit().await.map_err(crate::store::sqlx_err)?;
     Ok(())
 }
 
@@ -337,8 +182,10 @@ pub async fn save_promotion_counters_pool(
 mod tests {
     use super::*;
 
-    fn in_memory_db() -> Connection {
-        crate::store::in_memory_db()
+    async fn in_memory_pool() -> sqlx::SqlitePool {
+        let pool = crate::store::pool::test_memory_pool().await;
+        crate::store::schema::init_schema_pool(&pool).await.unwrap();
+        pool
     }
 
     fn sample_skill(name: &str) -> EvolvedSkillRow {
@@ -354,41 +201,51 @@ mod tests {
         }
     }
 
-    #[test]
-    fn upsert_list_and_read() {
-        let conn = in_memory_db();
-        upsert_skill_conn(&conn, &sample_skill("rust-ownership")).unwrap();
-        upsert_skill_conn(&conn, &sample_skill("ts-async")).unwrap();
+    #[tokio::test]
+    async fn upsert_list_and_read() {
+        let pool = in_memory_pool().await;
+        upsert_skill_pool(&pool, &sample_skill("rust-ownership"))
+            .await
+            .unwrap();
+        upsert_skill_pool(&pool, &sample_skill("ts-async"))
+            .await
+            .unwrap();
 
-        let skills = list_skills_conn(&conn).unwrap();
+        let skills = list_skills_pool(&pool).await.unwrap();
         assert_eq!(skills.len(), 2);
 
-        let md = read_skill_md_conn(&conn, "rust-ownership").unwrap();
+        let md = read_skill_md_pool(&pool, "rust-ownership").await.unwrap();
         assert!(md.is_some());
         assert!(md.unwrap().contains("## Process"));
     }
 
-    #[test]
-    fn delete_skill() {
-        let conn = in_memory_db();
-        upsert_skill_conn(&conn, &sample_skill("to-delete")).unwrap();
+    #[tokio::test]
+    async fn delete_skill() {
+        let pool = in_memory_pool().await;
+        upsert_skill_pool(&pool, &sample_skill("to-delete"))
+            .await
+            .unwrap();
 
-        let deleted = delete_skill_conn(&conn, "to-delete").unwrap();
+        let deleted = delete_skill_pool(&pool, "to-delete").await.unwrap();
         assert!(deleted);
 
-        let skills = list_skills_conn(&conn).unwrap();
+        let skills = list_skills_pool(&pool).await.unwrap();
         assert!(skills.is_empty());
     }
 
-    #[test]
-    fn promotion_counters() {
-        let conn = in_memory_db();
+    #[tokio::test]
+    async fn promotion_counters() {
+        let pool = in_memory_pool().await;
         let mut counters = HashMap::new();
         counters.insert("pattern_a".into(), 5);
         counters.insert("pattern_b".into(), 3);
 
-        save_promotion_counters_conn(&conn, &counters).unwrap();
-        let loaded = load_promotion_counters_conn(&conn).unwrap();
+        save_promotion_counters_pool(&pool, "test-project", &counters)
+            .await
+            .unwrap();
+        let loaded = load_promotion_counters_pool(&pool, "test-project")
+            .await
+            .unwrap();
         assert_eq!(loaded.get("pattern_a"), Some(&5));
         assert_eq!(loaded.len(), 2);
     }

@@ -402,12 +402,13 @@ fn unique_constraint_on_score_history_timestamp() {
     );
 }
 
-#[test]
-fn obs_stats_tool_limit_is_enforced() {
-    use super::observations::{insert_observation_conn, query_obs_stats_conn};
+#[tokio::test]
+async fn obs_stats_tool_limit_is_enforced() {
+    use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let conn = in_memory_db();
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
 
     // Insert observations for 150 distinct tool names
     for i in 0..150usize {
@@ -425,10 +426,14 @@ fn obs_stats_tool_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, "test-project", &rec, "sess_limit_test").unwrap();
+        insert_observation_pool(&pool, "test-project", &rec, "sess_limit_test")
+            .await
+            .unwrap();
     }
 
-    let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
+    let stats = query_obs_stats_pool(&pool, "test-project", "2026-06-02", "2026-06-02")
+        .await
+        .unwrap();
     assert_eq!(stats.total, 150, "total should count all observations");
     assert!(
         stats.tool_stats.len() <= 100,
@@ -437,12 +442,13 @@ fn obs_stats_tool_limit_is_enforced() {
     );
 }
 
-#[test]
-fn obs_error_stats_limit_is_enforced() {
-    use super::observations::{insert_observation_conn, query_obs_stats_conn};
+#[tokio::test]
+async fn obs_error_stats_limit_is_enforced() {
+    use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let conn = in_memory_db();
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
 
     // Insert observations for 80 distinct failure categories
     for i in 0..80usize {
@@ -460,10 +466,14 @@ fn obs_error_stats_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, "test-project", &rec, "sess_err_limit").unwrap();
+        insert_observation_pool(&pool, "test-project", &rec, "sess_err_limit")
+            .await
+            .unwrap();
     }
 
-    let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
+    let stats = query_obs_stats_pool(&pool, "test-project", "2026-06-02", "2026-06-02")
+        .await
+        .unwrap();
     assert!(
         stats.error_stats.len() <= 50,
         "error_stats must be capped at 50, got {}",
@@ -471,22 +481,24 @@ fn obs_error_stats_limit_is_enforced() {
     );
 }
 
-#[test]
-fn global_json_field_parse_failure_uses_fallback() {
-    use super::global::{insert_pattern_conn, query_all_patterns_conn};
+#[tokio::test]
+async fn global_json_field_parse_failure_uses_fallback() {
+    use super::global::{insert_pattern_pool, query_all_patterns_pool};
 
-    let conn = in_memory_db();
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
     // Insert a row with intentionally malformed JSON in per_error_stats
-    conn.execute(
+    sqlx::query(
         "INSERT INTO global_patterns
          (timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools)
          VALUES ('2026-06-02T10:00:00Z', 'proj-x', 0.9, 0.85, 'NOT_JSON', '[]', '[]')",
-        [],
     )
+    .execute(&pool)
+    .await
     .unwrap();
 
     // Should not panic; malformed per_error_stats returns fallback {}
-    let patterns = query_all_patterns_conn(&conn, 10).unwrap();
+    let patterns = query_all_patterns_pool(&pool, 10).await.unwrap();
     assert_eq!(patterns.len(), 1);
     assert!(
         patterns[0]["per_error_stats"].is_object(),
@@ -500,8 +512,8 @@ fn global_json_field_parse_failure_uses_fallback() {
     );
 
     // Insert with valid JSON — must be preserved
-    insert_pattern_conn(
-        &conn,
+    insert_pattern_pool(
+        &pool,
         "2026-06-02T11:00:00Z",
         "proj-y",
         0.8,
@@ -510,19 +522,21 @@ fn global_json_field_parse_failure_uses_fallback() {
         "[]",
         "[]",
     )
+    .await
     .unwrap();
-    let all = query_all_patterns_conn(&conn, 10).unwrap();
+    let all = query_all_patterns_pool(&pool, 10).await.unwrap();
     let proj_y = all.iter().find(|p| p["project"] == "proj-y").unwrap();
     assert_eq!(proj_y["per_error_stats"]["type_error"], 3);
 }
 
-#[test]
-fn dismiss_agent_is_atomic() {
+#[tokio::test]
+async fn dismiss_agent_is_atomic() {
     use super::orchestrator::{
-        OrchAgent, OrchRun, dismiss_agent_conn, init_run_conn, read_agent_conn, upsert_agent_conn,
+        OrchAgent, OrchRun, dismiss_agent_pool, init_run_pool, read_agent_pool, upsert_agent_pool,
     };
 
-    let conn = in_memory_db();
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
     let run = OrchRun {
         id: "run-atomic".into(),
         status: "running".into(),
@@ -531,7 +545,7 @@ fn dismiss_agent_is_atomic() {
         created_at: "2026-06-02T10:00:00Z".into(),
         updated_at: "2026-06-02T10:00:00Z".into(),
     };
-    init_run_conn(&conn, "test-project", &run).unwrap();
+    init_run_pool(&pool, "test-project", &run).await.unwrap();
 
     let agent = OrchAgent {
         id: "agent-atomic".into(),
@@ -546,29 +560,36 @@ fn dismiss_agent_is_atomic() {
         started_at: None,
         completed_at: None,
     };
-    upsert_agent_conn(&conn, &agent).unwrap();
+    upsert_agent_pool(&pool, &agent).await.unwrap();
 
     // First dismiss must succeed
-    let first = dismiss_agent_conn(&conn, "agent-atomic").unwrap();
+    let first = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
     assert!(first, "first dismiss must return true");
 
     // Second dismiss of the same agent must return false (not panic)
-    let second = dismiss_agent_conn(&conn, "agent-atomic").unwrap();
+    let second = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
     assert!(
         !second,
         "second dismiss of non-existent agent must return false"
     );
 
-    assert!(read_agent_conn(&conn, "agent-atomic").unwrap().is_none());
+    assert!(
+        read_agent_pool(&pool, "agent-atomic")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
-#[test]
-fn cleanup_stale_is_atomic() {
+#[tokio::test]
+async fn cleanup_stale_is_atomic() {
     use super::orchestrator::{
-        OrchAgent, OrchRun, cleanup_stale_conn, init_run_conn, upsert_agent_conn,
+        OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool,
     };
+    use sqlx::Row;
 
-    let conn = in_memory_db();
+    let pool = crate::store::pool::test_memory_pool().await;
+    crate::store::schema::init_schema_pool(&pool).await.unwrap();
     let run = OrchRun {
         id: "run-stale".into(),
         status: "complete".into(),
@@ -577,7 +598,7 @@ fn cleanup_stale_is_atomic() {
         created_at: "2026-06-01T10:00:00Z".into(),
         updated_at: "2026-06-01T10:00:00Z".into(),
     };
-    init_run_conn(&conn, "test-project", &run).unwrap();
+    init_run_pool(&pool, "test-project", &run).await.unwrap();
 
     let agent = OrchAgent {
         id: "agent-stale".into(),
@@ -592,19 +613,23 @@ fn cleanup_stale_is_atomic() {
         started_at: None,
         completed_at: None,
     };
-    upsert_agent_conn(&conn, &agent).unwrap();
+    upsert_agent_pool(&pool, &agent).await.unwrap();
 
     // cleanup_stale must delete both run and orphaned agent atomically
-    let deleted = cleanup_stale_conn(&conn, "").unwrap();
+    let deleted = cleanup_stale_pool(&pool, "").await.unwrap();
     assert!(deleted >= 2, "must delete run + agent, got {deleted}");
 
     // Neither should remain
-    let run_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM orch_runs", [], |r| r.get(0))
+    let row = sqlx::query("SELECT COUNT(*) FROM orch_runs")
+        .fetch_one(&pool)
+        .await
         .unwrap();
-    let agent_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM orch_agents", [], |r| r.get(0))
+    let run_count: i64 = row.try_get(0).unwrap();
+    let row = sqlx::query("SELECT COUNT(*) FROM orch_agents")
+        .fetch_one(&pool)
+        .await
         .unwrap();
+    let agent_count: i64 = row.try_get(0).unwrap();
     assert_eq!(run_count, 0);
     assert_eq!(agent_count, 0);
 }

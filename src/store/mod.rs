@@ -4,8 +4,8 @@
 //! orchestrator state, orbit pipelines, evolved skills, global patterns) is
 //! stored in `harness.db` — separate from the knowledge graph `memory.db`.
 //!
-//! Follows the same dual-API pattern as `src/mem/store/`:
-//! standalone functions open their own connection, `_conn()` variants reuse one.
+//! Follows the same async pool pattern as `src/mem/store/`:
+//! all functions use `SqlitePool` for concurrent access.
 
 // ── Internal submodules ──────────────────────────────
 
@@ -18,6 +18,7 @@ pub mod observations;
 pub mod orbit_store;
 pub mod orchestrator;
 pub mod pool;
+pub mod runtime;
 pub(crate) mod schema;
 pub mod sessions;
 
@@ -39,19 +40,6 @@ pub(crate) fn store_err<T>(result: Result<T, rusqlite::Error>) -> io::Result<T> 
 #[inline]
 pub(crate) fn sqlx_err(e: sqlx::Error) -> io::Error {
     io::Error::other(e.to_string())
-}
-
-/// Convert a single-row query result to `Option<T>`, mapping "no rows" to `None`.
-///
-/// Used across all store submodules to handle the common pattern:
-/// `query_row()` → `Ok(v)` / `QueryReturnedNoRows` → `None` / other errors propagated.
-#[inline]
-pub(crate) fn query_row_optional<T>(result: Result<T, rusqlite::Error>) -> io::Result<Option<T>> {
-    match result {
-        Ok(v) => Ok(Some(v)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
-    }
 }
 
 // ── RAII transaction guard ───────────────────────────

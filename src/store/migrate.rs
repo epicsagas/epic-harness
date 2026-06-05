@@ -363,13 +363,33 @@ fn import_sessions(
 
         // Each file gets its own ImmediateTx to bound WAL growth.
         let tx = ImmediateTx::begin(conn)?;
-        if let Err(e) = super::sessions::insert_snapshot_conn(conn, slug, &snap, millis) {
-            eprintln!("[migrate] insert session error: {e}");
-            stats.errors += 1;
-            // tx drops → ROLLBACK; no partial state committed for this file
-        } else {
-            stats.sess_imported += 1;
-            tx.commit()?;
+        let pending_json = serde_json::to_string(&snap.pending_tasks).unwrap_or_else(|e| {
+            eprintln!("[migrate] pending_tasks serialization failed: {e}");
+            "[]".into()
+        });
+        let pipeline_json = snap.pipeline_state.as_ref().map(|v| {
+            serde_json::to_string(v).unwrap_or_else(|e| {
+                eprintln!("[migrate] pipeline_state serialization failed: {e}");
+                "{}".into()
+            })
+        });
+        let result = store_err(conn.execute(
+            "INSERT INTO sessions (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
+            rusqlite::params![
+                snap.timestamp, snap.snap_type, snap.summary, pending_json,
+                snap.context_usage, pipeline_json, millis, slug,
+            ],
+        ));
+        match result {
+            Ok(_) => {
+                stats.sess_imported += 1;
+                tx.commit()?;
+            }
+            Err(e) => {
+                eprintln!("[migrate] insert session error: {e}");
+                stats.errors += 1;
+                // tx drops → ROLLBACK; no partial state committed for this file
+            }
         }
     }
     Ok(())
@@ -411,7 +431,32 @@ fn import_evolution(
         }
         match serde_json::from_str::<crate::shared::evolution::EvolutionRecord>(&line) {
             Ok(rec) => {
-                if let Err(e) = super::evolution::insert_record_conn(conn, slug, &rec) {
+                let error_json = serde_json::to_string(&rec.error_patterns).unwrap_or_else(|e| {
+                    eprintln!("[migrate] error_patterns serialization failed: {e}");
+                    "{}".into()
+                });
+                let failure_json =
+                    serde_json::to_string(&rec.failure_patterns).unwrap_or_else(|e| {
+                        eprintln!("[migrate] failure_patterns serialization failed: {e}");
+                        "[]".into()
+                    });
+                let result = store_err(conn.execute(
+                    "INSERT INTO evolution_records (timestamp, observations, success_rate, avg_score, error_patterns, failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary, project) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                    rusqlite::params![
+                        rec.timestamp,
+                        super::u64_to_i64(rec.observations),
+                        rec.success_rate,
+                        rec.avg_score,
+                        error_json,
+                        failure_json,
+                        super::u64_to_i64(rec.skills_seeded),
+                        super::u64_to_i64(rec.skills_rolled_back),
+                        super::u64_to_i64(rec.total_evolved),
+                        rec.analysis_summary,
+                        slug,
+                    ],
+                ));
+                if let Err(e) = result {
                     eprintln!("[migrate] insert evo error: {e}");
                     stats.errors += 1;
                 } else {
@@ -456,7 +501,36 @@ fn import_metrics(
                     crate::shared::evolution::default_metrics()
                 }
             };
-            if let Err(e) = super::metrics::save_metrics_conn(conn, slug, &metrics) {
+            // Inline key-value metrics_state write (replaces deleted save_metrics_conn).
+            let kv = |k: &str, v: &str| -> io::Result<()> {
+                store_err(conn.execute(
+                    "INSERT OR REPLACE INTO metrics_state (key, value, project) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![k, v, slug],
+                ))?;
+                Ok(())
+            };
+            let result: io::Result<()> = (|| {
+                kv("total_sessions", &metrics.total_sessions.to_string())?;
+                kv("avg_success_rate", &metrics.avg_success_rate.to_string())?;
+                kv(
+                    "total_evolved_skills",
+                    &metrics.total_evolved_skills.to_string(),
+                )?;
+                if let Some(ref v) = metrics.last_session {
+                    kv("last_session", v)?;
+                }
+                if let Some(v) = metrics.best_score {
+                    kv("best_score", &v.to_string())?;
+                }
+                kv("best_session", &metrics.best_session)?;
+                kv("trend", &metrics.trend)?;
+                kv("stagnation_count", &metrics.stagnation_count.to_string())?;
+                if let Some(ref v) = metrics.last_error_context {
+                    kv("last_error_context", v)?;
+                }
+                Ok(())
+            })();
+            if let Err(e) = result {
                 eprintln!("[migrate] save metrics error: {e}");
                 stats.errors += 1;
             }

@@ -4,6 +4,7 @@
 //! orchestrator, orbit pipelines, evolved skills, and global patterns.
 
 use rusqlite::Connection;
+use sqlx::SqlitePool;
 use std::io;
 
 use super::store_err;
@@ -528,4 +529,232 @@ fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
         return false;
     };
     rows.filter_map(|r| r.ok()).any(|name| name == column)
+}
+
+// ── Async (sqlx) schema initialization ────────────
+
+/// Apply the full operational schema to a `SqlitePool`.
+///
+/// Async equivalent of `init_schema()` for use with sqlx pools.
+/// Called once during pool creation in `pool::harness_pool()`.
+pub(crate) async fn init_schema_pool(pool: &SqlitePool) -> io::Result<()> {
+    use sqlx::Executor;
+
+    // PRAGMA
+    pool.execute(
+        "PRAGMA journal_mode=WAL;
+         PRAGMA foreign_keys=ON;
+         PRAGMA wal_autocheckpoint=100;
+         PRAGMA busy_timeout=5000;",
+    )
+    .await
+    .map_err(super::sqlx_err)?;
+
+    // DDL — same statements as apply_ddl(), using sqlx::raw_sql for multi-statement batches.
+    sqlx::raw_sql(
+        "CREATE TABLE IF NOT EXISTS _harness_meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS observations (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        TEXT NOT NULL,
+            session_id       TEXT NOT NULL,
+            tool             TEXT NOT NULL,
+            tool_category    TEXT NOT NULL,
+            action           TEXT,
+            result           TEXT,
+            score            REAL,
+            dim_success      REAL,
+            dim_quality      REAL,
+            dim_cost         REAL,
+            failure_category TEXT,
+            error_snippet    TEXT,
+            file_ext         TEXT,
+            sequence_id      INTEGER,
+            pipeline_id      TEXT,
+            project          TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_obs_ts         ON observations(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_obs_session    ON observations(session_id);
+        CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
+        CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_obs_project    ON observations(project);
+
+        CREATE TABLE IF NOT EXISTS sessions (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp         TEXT NOT NULL,
+            snap_type         TEXT NOT NULL DEFAULT 'pre-compact',
+            summary           TEXT NOT NULL DEFAULT '',
+            pending_tasks     TEXT NOT NULL DEFAULT '[]',
+            context_usage     REAL,
+            pipeline_state    TEXT,
+            created_at_millis INTEGER NOT NULL,
+            project           TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_sessions_ts ON sessions(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
+
+        CREATE TABLE IF NOT EXISTS evolution_records (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp         TEXT NOT NULL,
+            observations      INTEGER NOT NULL DEFAULT 0,
+            success_rate      REAL NOT NULL DEFAULT 0.0,
+            avg_score         REAL NOT NULL DEFAULT 0.0,
+            error_patterns    TEXT NOT NULL DEFAULT '{}',
+            failure_patterns  TEXT NOT NULL DEFAULT '[]',
+            skills_seeded     INTEGER NOT NULL DEFAULT 0,
+            skills_rolled_back INTEGER NOT NULL DEFAULT 0,
+            total_evolved     INTEGER NOT NULL DEFAULT 0,
+            analysis_summary  TEXT NOT NULL DEFAULT '',
+            project           TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_evo_project ON evolution_records(project);
+
+        CREATE TABLE IF NOT EXISTS metrics_state (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            project TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS score_history (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp    TEXT NOT NULL UNIQUE,
+            success_rate REAL NOT NULL,
+            avg_score    REAL NOT NULL,
+            observations INTEGER NOT NULL DEFAULT 0,
+            dim_success  REAL NOT NULL DEFAULT 0.0,
+            dim_quality  REAL NOT NULL DEFAULT 0.0,
+            dim_cost     REAL NOT NULL DEFAULT 0.0,
+            project      TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS skill_attribution (
+            skill_name        TEXT NOT NULL,
+            project           TEXT NOT NULL DEFAULT '',
+            sessions_active   INTEGER NOT NULL DEFAULT 0,
+            avg_score_with    REAL NOT NULL DEFAULT 0.0,
+            avg_score_without REAL NOT NULL DEFAULT 0.0,
+            first_seen        TEXT NOT NULL,
+            PRIMARY KEY (skill_name, project)
+        );
+        CREATE INDEX IF NOT EXISTS idx_score_hist_project ON score_history(project);
+        CREATE INDEX IF NOT EXISTS idx_metrics_state_project ON metrics_state(project);
+
+        CREATE TABLE IF NOT EXISTS orch_runs (
+            id             TEXT PRIMARY KEY,
+            project        TEXT NOT NULL DEFAULT '',
+            status         TEXT NOT NULL DEFAULT 'running',
+            agents_json    TEXT NOT NULL DEFAULT '[]',
+            dep_graph_json TEXT NOT NULL DEFAULT '{}',
+            created_at     TEXT NOT NULL,
+            updated_at     TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS orch_agents (
+            id             TEXT PRIMARY KEY,
+            run_id         TEXT NOT NULL REFERENCES orch_runs(id),
+            role           TEXT NOT NULL DEFAULT '',
+            task           TEXT NOT NULL DEFAULT '',
+            satisfies_json TEXT NOT NULL DEFAULT '[]',
+            status         TEXT NOT NULL DEFAULT 'pending',
+            phase          TEXT NOT NULL DEFAULT '',
+            progress       REAL NOT NULL DEFAULT 0.0,
+            last_heartbeat TEXT NOT NULL DEFAULT '',
+            started_at     TEXT,
+            completed_at   TEXT
+        );
+        CREATE TABLE IF NOT EXISTS orch_agent_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id    TEXT NOT NULL REFERENCES orch_agents(id),
+            timestamp   TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            data_json   TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS orch_agent_inbox (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            agent_id    TEXT NOT NULL REFERENCES orch_agents(id),
+            from_agent  TEXT NOT NULL,
+            timestamp   TEXT NOT NULL,
+            message     TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS orch_control (
+            id         INTEGER PRIMARY KEY CHECK (id = 1),
+            project    TEXT NOT NULL DEFAULT '',
+            action     TEXT NOT NULL,
+            target     TEXT,
+            message    TEXT,
+            generation INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_orch_events ON orch_agent_events(agent_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_orch_inbox  ON orch_agent_inbox(agent_id, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_orch_runs_project ON orch_runs(project);
+
+        CREATE TABLE IF NOT EXISTS orbit_pipelines (
+            id          TEXT PRIMARY KEY,
+            project     TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'running',
+            phase       TEXT,
+            mode        TEXT,
+            state_json  TEXT NOT NULL DEFAULT '{}',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_orbit_status   ON orbit_pipelines(status);
+        CREATE INDEX IF NOT EXISTS idx_orbit_project  ON orbit_pipelines(project);
+        CREATE INDEX IF NOT EXISTS idx_orbit_created  ON orbit_pipelines(created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS evolved_skills (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            name        TEXT NOT NULL UNIQUE,
+            origin      TEXT NOT NULL DEFAULT '',
+            confidence  REAL NOT NULL DEFAULT 0.5,
+            project     TEXT NOT NULL,
+            skill_md    TEXT NOT NULL DEFAULT '',
+            active      INTEGER NOT NULL DEFAULT 1,
+            created     TEXT NOT NULL,
+            updated     TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS promotion_counters (
+            pattern_key TEXT NOT NULL,
+            project     TEXT NOT NULL DEFAULT '',
+            count       INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (pattern_key, project)
+        );
+        CREATE TABLE IF NOT EXISTS workspace_manifest (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            project     TEXT NOT NULL DEFAULT '',
+            version     TEXT NOT NULL DEFAULT '1.0',
+            updated     TEXT NOT NULL,
+            skills_json TEXT NOT NULL DEFAULT '[]'
+        );
+
+        CREATE TABLE IF NOT EXISTS global_patterns (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp        TEXT NOT NULL,
+            project          TEXT NOT NULL,
+            success_rate     REAL NOT NULL DEFAULT 0.0,
+            avg_score        REAL NOT NULL DEFAULT 0.0,
+            per_error_stats  TEXT NOT NULL DEFAULT '{}',
+            failure_patterns TEXT NOT NULL DEFAULT '[]',
+            weak_tools       TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE INDEX IF NOT EXISTS idx_global_ts      ON global_patterns(timestamp DESC);
+        CREATE INDEX IF NOT EXISTS idx_global_project  ON global_patterns(project);
+
+        CREATE INDEX IF NOT EXISTS idx_orch_agents_run ON orch_agents(run_id);
+        CREATE INDEX IF NOT EXISTS idx_obs_tool_ts     ON observations(tool, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_evolved_proj_act ON evolved_skills(project, active);",
+    )
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    // Set schema version.
+    sqlx::query("INSERT OR REPLACE INTO _harness_meta (key, value) VALUES ('schema_version', ?)")
+        .bind(SCHEMA_VERSION.to_string())
+        .execute(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    Ok(())
 }
