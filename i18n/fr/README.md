@@ -73,7 +73,7 @@ Apres la fin de la session, la **boucle evolve** analyse ce qui a echoue, genere
 
 ## Installation
 
-> **Premiere fois ?** Lisez le [Guide de demarrage rapide (5 min)](../../docs/quickstart.md).
+> **Premiere fois ?** Lisez le [Guide de demarrage rapide (5 min)](../../docs/quickstart.md). Pour le stockage des données, consultez la [Carte des données](../../docs/data-map.md).
 
 ### Claude Code (recommande)
 

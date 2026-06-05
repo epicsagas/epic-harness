@@ -73,7 +73,7 @@ Al cerrar la sesión, el **bucle evolve** analiza qué falló, genera habilidade
 
 ## Instalación
 
-> **¿Primera vez?** Lee la [Guía de inicio rápido (5 min)](../../docs/quickstart.md).
+> **¿Primera vez?** Lee la [Guía de inicio rápido (5 min)](../../docs/quickstart.md). Para detalles de almacenamiento, consulta el [Mapa de Datos](../../docs/data-map.md).
 
 ### Claude Code (recomendado)
 

@@ -73,7 +73,7 @@ Nachdem die Session endet, analysiert die **evolve-Schleife**, was fehlschlug, g
 
 ## Installation
 
-> **Zum ersten Mal hier?** Lesen Sie den [Schnellstart-Leitfaden (5 Min.)](../../docs/quickstart.md).
+> **Zum ersten Mal hier?** Lesen Sie den [Schnellstart-Leitfaden (5 Min.)](../../docs/quickstart.md). Details zur Datenspeicherung finden Sie in der [Data Map](../../docs/data-map.md).
 
 ### Claude Code (empfohlen)
 
