@@ -73,7 +73,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
                 timestamp: r.try_get(0).ok()?,
                 success_rate: r.try_get(1).ok()?,
                 avg_score: r.try_get(2).ok()?,
-                observations: obs as u64,
+                observations: crate::store::i64_to_u64(obs),
                 dimension_averages: ScoreDimensions {
                     tool_success: r.try_get(4).ok()?,
                     output_quality: r.try_get(5).ok()?,
@@ -97,7 +97,7 @@ pub async fn load_metrics_pool(pool: &SqlitePool, project: &str) -> io::Result<M
         .filter_map(|r| {
             let sa = SkillAttribution {
                 skill_name: r.try_get(0).ok()?,
-                sessions_active: r.try_get::<i64, _>(1).ok()? as u64,
+                sessions_active: crate::store::i64_to_u64(r.try_get::<i64, _>(1).ok()?),
                 avg_score_with: r.try_get(2).ok()?,
                 avg_score_without: r.try_get(3).ok()?,
                 first_seen: r.try_get(4).ok()?,

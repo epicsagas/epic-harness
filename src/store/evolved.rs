@@ -146,7 +146,7 @@ pub async fn load_promotion_counters_pool(
     for r in &rows {
         let key: String = r.try_get(0).map_err(crate::store::sqlx_err)?;
         let count: i64 = r.try_get(1).map_err(crate::store::sqlx_err)?;
-        counters.insert(key, count as u64);
+        counters.insert(key, crate::store::i64_to_u64(count));
     }
     Ok(counters)
 }

@@ -191,6 +191,12 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 // ── Route handlers ────────────────────────────────────
 
 /// Try a pool operation with the shared SqlitePool. Logs errors and returns None on failure.
+///
+/// The closure `f` receives a `&SqlitePool` and typically calls
+/// [`crate::store::runtime::block_on`] inside to bridge async pool queries.
+/// This is safe because `serve.rs` runs on tiny_http's blocking thread pool
+/// (not inside a tokio runtime), so `block_on` will never encounter an
+/// existing runtime and panic.
 fn try_pool<T>(
     pool: Option<&sqlx::SqlitePool>,
     f: impl FnOnce(&sqlx::SqlitePool) -> std::io::Result<T>,

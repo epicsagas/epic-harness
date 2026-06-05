@@ -2,6 +2,15 @@
 //!
 //! Invoked explicitly via `epic-harness migrate [--dry-run]`.
 //! Original files are NOT deleted after import.
+//!
+//! ## Why inline SQL instead of pool functions?
+//!
+//! This module uses rusqlite directly (not the async sqlx pool) because the
+//! `--to-global` consolidation path requires `ATTACH DATABASE` to merge
+//! per-project DBs into the global one. SQLite ATTACH only works on a raw
+//! connection — it cannot be issued through a sqlx pool. The import path
+//! (`do_migrate`) also needs transactional control (ImmediateTx) over a
+//! single connection to guarantee atomicity per file.
 
 use rusqlite::Connection;
 use std::io::{self, BufRead};
@@ -839,6 +848,9 @@ pub fn run_to_global(dry_run: bool) -> i32 {
     for (slug, db_path) in &candidates {
         // ATTACH the per-project DB read-only
         let attach_name = "src";
+        // SQLite ATTACH does not support parameterized arguments — the database
+        // path must be interpolated into the SQL string. Single-quote escaping
+        // prevents injection (unlikely in file paths but defensive).
         let escaped_path = db_path.display().to_string().replace('\'', "''");
         if let Err(e) = conn.execute(&format!("ATTACH '{escaped_path}' AS {attach_name}"), []) {
             eprintln!("[migrate/to-global] ATTACH failed for {slug}: {e}");

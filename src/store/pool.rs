@@ -125,9 +125,14 @@ pub async fn harness_pool() -> io::Result<SqlitePool> {
 /// Returns a shared `SqlitePool` for `memory.db`.
 ///
 /// Creates the pool on first call; subsequent calls return the same instance.
+/// Initializes the memory schema (nodes, edges, FTS5) on first creation.
 pub async fn memory_pool() -> io::Result<SqlitePool> {
     MEMORY_POOL
-        .get_or_try_init(|| async { build_pool(&memory_url(), CONFIG.db.max_connections).await })
+        .get_or_try_init(|| async {
+            let pool = build_pool(&memory_url(), CONFIG.db.max_connections).await?;
+            crate::mem::store::init_schema_pool(&pool).await?;
+            Ok(pool)
+        })
         .await
         .cloned()
 }

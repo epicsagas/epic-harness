@@ -63,14 +63,14 @@ pub async fn query_recent_records_pool(
             let failure_json: String = r.try_get(5).unwrap_or_else(|_| "[]".into());
             EvolutionRecord {
                 timestamp: r.try_get(0).unwrap_or_default(),
-                observations: r.try_get::<i64, _>(1).unwrap_or(0) as u64,
+                observations: crate::store::i64_to_u64(r.try_get::<i64, _>(1).unwrap_or(0)),
                 success_rate: r.try_get(2).unwrap_or(0.0),
                 avg_score: r.try_get(3).unwrap_or(0.0),
                 error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
                 failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
-                skills_seeded: r.try_get::<i64, _>(6).unwrap_or(0) as u64,
-                skills_rolled_back: r.try_get::<i64, _>(7).unwrap_or(0) as u64,
-                total_evolved: r.try_get::<i64, _>(8).unwrap_or(0) as u64,
+                skills_seeded: crate::store::i64_to_u64(r.try_get::<i64, _>(6).unwrap_or(0)),
+                skills_rolled_back: crate::store::i64_to_u64(r.try_get::<i64, _>(7).unwrap_or(0)),
+                total_evolved: crate::store::i64_to_u64(r.try_get::<i64, _>(8).unwrap_or(0)),
                 analysis_summary: r.try_get(9).unwrap_or_default(),
             }
         })
@@ -163,5 +163,38 @@ mod tests {
         assert_eq!(row.try_get::<i64, _>(1).unwrap(), i64::MAX);
         assert_eq!(row.try_get::<i64, _>(2).unwrap(), i64::MAX);
         assert_eq!(row.try_get::<i64, _>(3).unwrap(), i64::MAX);
+    }
+
+    #[tokio::test]
+    async fn records_are_isolated_per_project() {
+        let pool = in_memory_pool().await;
+
+        let rec_a = EvolutionRecord {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            observations: 10,
+            success_rate: 0.9,
+            avg_score: 0.8,
+            error_patterns: HashMap::new(),
+            failure_patterns: vec![],
+            skills_seeded: 1,
+            skills_rolled_back: 0,
+            total_evolved: 0,
+            analysis_summary: "Project A".into(),
+        };
+        let rec_b = EvolutionRecord {
+            observations: 99,
+            ..rec_a.clone()
+        };
+
+        insert_record_pool(&pool, "project-a", &rec_a).await.unwrap();
+        insert_record_pool(&pool, "project-b", &rec_b).await.unwrap();
+
+        let a = query_recent_records_pool(&pool, "project-a", 10).await.unwrap();
+        let b = query_recent_records_pool(&pool, "project-b", 10).await.unwrap();
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(a[0].observations, 10);
+        assert_eq!(b[0].observations, 99);
     }
 }
