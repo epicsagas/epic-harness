@@ -1554,7 +1554,14 @@ mod tests {
             .iter()
             .filter(|e| e["phase"] == "evolve")
             .collect();
-        assert_eq!(evolve_entries.len(), 1, "must not add duplicate evolve entry");
-        assert_eq!(evolve_entries[0]["status"], "failed", "original failed status preserved");
+        assert_eq!(
+            evolve_entries.len(),
+            1,
+            "must not add duplicate evolve entry"
+        );
+        assert_eq!(
+            evolve_entries[0]["status"], "failed",
+            "original failed status preserved"
+        );
     }
 }
