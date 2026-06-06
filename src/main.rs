@@ -202,12 +202,12 @@ fn main() {
                 eprintln!("error: unknown subcommand '{subcmd}'\n");
             }
             eprintln!(
-                "epic-harness {} — Self-evolving agent harness for Claude Code\n",
+                "epic-harness {} — Self-evolving agent harness\n",
                 env!("CARGO_PKG_VERSION")
             );
             eprintln!("USAGE:");
             eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
-            eprintln!("HOOK SUBCOMMANDS (invoked automatically by Claude Code hooks):");
+            eprintln!("HOOK SUBCOMMANDS (invoked automatically by agent hooks):");
             eprintln!("  resume       Restore session context on conversation start");
             eprintln!("  guard        Block/warn on dangerous shell commands");
             eprintln!("  observe      Record tool call observations for pattern analysis");
