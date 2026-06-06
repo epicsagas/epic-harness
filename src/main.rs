@@ -280,7 +280,18 @@ fn main() {
         print!("{stdin_buf}");
     }
 
-    std::process::exit(exit_code);
+    exit_with_cleanup(exit_code);
+}
+
+/// Gracefully close connection pools before exit to flush WAL.
+///
+/// # Safety
+/// Must only be called from a non-async context (e.g., `main()`).
+/// `store::runtime::block_on` panics if called inside a tokio runtime.
+fn exit_with_cleanup(code: i32) -> ! {
+    // SAFETY: Called only from main() which is not inside a tokio runtime.
+    store::runtime::block_on(store::pool::shutdown());
+    std::process::exit(code);
 }
 
 #[cfg(test)]

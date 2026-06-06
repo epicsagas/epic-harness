@@ -9,6 +9,42 @@ use std::io;
 
 use super::pool::DbType;
 
+/// Tables that participate in v3→v4 migration (column additions).
+const MIGRATION_V4_ADD_COLUMN: &[&str] = &[
+    "observations",
+    "sessions",
+    "evolution_records",
+    "metrics_state",
+    "score_history",
+    "orch_runs",
+    "orch_control",
+];
+
+/// Tables that participate in v3→v4 migration (composite-PK recreation).
+const MIGRATION_V4_RECREATE: &[&str] = &[
+    "metrics_state",
+    "score_history",
+    "skill_attribution",
+    "promotion_counters",
+    "workspace_manifest",
+];
+
+/// Validate a table name against the migration whitelist.
+///
+/// Prevents SQL injection via `format!()` in DDL/PRAGMA statements.
+/// All table names in migrations are compile-time constants, so this is
+/// defense-in-depth — a future refactor introducing dynamic names would be caught.
+fn validate_table(table: &str) -> io::Result<()> {
+    if MIGRATION_V4_ADD_COLUMN.contains(&table) || MIGRATION_V4_RECREATE.contains(&table) {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("table '{table}' not in migration whitelist"),
+        ))
+    }
+}
+
 /// Current schema version. Increment when adding migrations in `run_migrations_pool`.
 pub(crate) const SCHEMA_VERSION: u32 = 4;
 
@@ -247,7 +283,7 @@ const DDL_POSTGRES: &str = "
         timestamp         TEXT NOT NULL,
         snap_type         TEXT NOT NULL DEFAULT 'pre-compact',
         summary           TEXT NOT NULL DEFAULT '',
-        pending_tasks     TEXT NOT NULL DEFAULT '[]',
+        pending_tasks     JSONB NOT NULL DEFAULT '[]',
         context_usage     DOUBLE PRECISION,
         pipeline_state    TEXT,
         created_at_millis BIGINT NOT NULL,
@@ -262,8 +298,8 @@ const DDL_POSTGRES: &str = "
         observations      INTEGER NOT NULL DEFAULT 0,
         success_rate      DOUBLE PRECISION NOT NULL DEFAULT 0.0,
         avg_score         DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-        error_patterns    TEXT NOT NULL DEFAULT '{}',
-        failure_patterns  TEXT NOT NULL DEFAULT '[]',
+        error_patterns    JSONB NOT NULL DEFAULT '{}',
+        failure_patterns  JSONB NOT NULL DEFAULT '[]',
         skills_seeded     INTEGER NOT NULL DEFAULT 0,
         skills_rolled_back INTEGER NOT NULL DEFAULT 0,
         total_evolved     INTEGER NOT NULL DEFAULT 0,
@@ -307,8 +343,8 @@ const DDL_POSTGRES: &str = "
         id             TEXT PRIMARY KEY,
         project        TEXT NOT NULL DEFAULT '',
         status         TEXT NOT NULL DEFAULT 'running',
-        agents_json    TEXT NOT NULL DEFAULT '[]',
-        dep_graph_json TEXT NOT NULL DEFAULT '{}',
+        agents_json    JSONB NOT NULL DEFAULT '[]',
+        dep_graph_json JSONB NOT NULL DEFAULT '{}',
         created_at     TEXT NOT NULL,
         updated_at     TEXT NOT NULL
     );
@@ -317,7 +353,7 @@ const DDL_POSTGRES: &str = "
         run_id         TEXT NOT NULL REFERENCES orch_runs(id),
         role           TEXT NOT NULL DEFAULT '',
         task           TEXT NOT NULL DEFAULT '',
-        satisfies_json TEXT NOT NULL DEFAULT '[]',
+        satisfies_json JSONB NOT NULL DEFAULT '[]',
         status         TEXT NOT NULL DEFAULT 'pending',
         phase          TEXT NOT NULL DEFAULT '',
         progress       DOUBLE PRECISION NOT NULL DEFAULT 0.0,
@@ -330,7 +366,7 @@ const DDL_POSTGRES: &str = "
         agent_id    TEXT NOT NULL REFERENCES orch_agents(id),
         timestamp   TEXT NOT NULL,
         event_type  TEXT NOT NULL,
-        data_json   TEXT NOT NULL DEFAULT '{}'
+        data_json   JSONB NOT NULL DEFAULT '{}'
     );
     CREATE TABLE IF NOT EXISTS orch_agent_inbox (
         id          BIGSERIAL PRIMARY KEY,
@@ -357,7 +393,7 @@ const DDL_POSTGRES: &str = "
         status      TEXT NOT NULL DEFAULT 'running',
         phase       TEXT,
         mode        TEXT,
-        state_json  TEXT NOT NULL DEFAULT '{}',
+        state_json  JSONB NOT NULL DEFAULT '{}',
         created_at  TEXT NOT NULL,
         updated_at  TEXT NOT NULL
     );
@@ -387,7 +423,7 @@ const DDL_POSTGRES: &str = "
         project     TEXT NOT NULL DEFAULT '',
         version     TEXT NOT NULL DEFAULT '1.0',
         updated     TEXT NOT NULL,
-        skills_json TEXT NOT NULL DEFAULT '[]'
+        skills_json JSONB NOT NULL DEFAULT '[]'
     );
 
     CREATE TABLE IF NOT EXISTS global_patterns (
@@ -396,9 +432,9 @@ const DDL_POSTGRES: &str = "
         project          TEXT NOT NULL,
         success_rate     DOUBLE PRECISION NOT NULL DEFAULT 0.0,
         avg_score        DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-        per_error_stats  TEXT NOT NULL DEFAULT '{}',
-        failure_patterns TEXT NOT NULL DEFAULT '[]',
-        weak_tools       TEXT NOT NULL DEFAULT '[]'
+        per_error_stats  JSONB NOT NULL DEFAULT '{}',
+        failure_patterns JSONB NOT NULL DEFAULT '[]',
+        weak_tools       JSONB NOT NULL DEFAULT '[]'
     );
     CREATE INDEX IF NOT EXISTS idx_global_ts      ON global_patterns(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_global_project  ON global_patterns(project);
@@ -442,10 +478,8 @@ pub(crate) async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         .await
         .map_err(super::sqlx_err)?;
 
-    // Run pending migrations before setting version (SQLite only for now).
-    if db_type == DbType::Sqlite {
-        run_migrations_pool(pool).await?;
-    }
+    // Run pending migrations before setting version.
+    run_migrations_pool(pool, db_type).await?;
 
     // Set schema version.
     set_version_pool(pool, SCHEMA_VERSION).await?;
@@ -454,7 +488,7 @@ pub(crate) async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
 }
 
 /// Check schema version in the pool and run pending migrations.
-async fn run_migrations_pool(pool: &AnyPool) -> io::Result<()> {
+async fn run_migrations_pool(pool: &AnyPool, db_type: DbType) -> io::Result<()> {
     // Read current version — None means fresh DB (no rows yet).
     let current: u32 = sqlx::query_as::<_, (String,)>(
         "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
@@ -466,7 +500,11 @@ async fn run_migrations_pool(pool: &AnyPool) -> io::Result<()> {
     .unwrap_or(SCHEMA_VERSION); // Fresh DB: DDL already created v4 schema.
 
     if current < 4 {
-        migrate_v3_to_v4_pool(pool).await?;
+        match db_type {
+            DbType::Sqlite => migrate_v3_to_v4_sqlite(pool).await?,
+            DbType::Postgres => migrate_v3_to_v4_postgres(pool).await?,
+            DbType::Mysql => {} // Unsupported — build_mysql_pool returns Unsupported.
+        }
     }
 
     Ok(())
@@ -485,14 +523,12 @@ async fn set_version_pool(pool: &AnyPool, version: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// Async v3->v4 migration: add project column to tables that don't have it.
-/// Async v3->v4 migration: add project column to tables that don't have it.
+/// SQLite v3→v4 migration: add `project` column to tables that don't have it.
 ///
-/// Uses `PRAGMA table_info` which is SQLite-only. This is safe because
-/// `run_migrations_pool` is only called when `db_type == Sqlite`.
-/// When PostgreSQL migrations are needed, use `information_schema.columns` instead.
-async fn migrate_v3_to_v4_pool(pool: &AnyPool) -> io::Result<()> {
-    // Check if already migrated (project column exists in observations).
+/// Uses `PRAGMA table_info` (SQLite-only). Wrapped in a `sqlx::Transaction` so a
+/// partial failure leaves the database in a consistent v3 state.
+async fn migrate_v3_to_v4_sqlite(pool: &AnyPool) -> io::Result<()> {
+    // Pre-check: already migrated?
     let cols = sqlx::query("PRAGMA table_info(observations)")
         .fetch_all(pool)
         .await
@@ -508,20 +544,17 @@ async fn migrate_v3_to_v4_pool(pool: &AnyPool) -> io::Result<()> {
         return Ok(());
     }
 
-    // Add project column to tables that need it.
-    let tables = [
-        "observations",
-        "sessions",
-        "evolution_records",
-        "metrics_state",
-        "score_history",
-        "orch_runs",
-        "orch_control",
-    ];
+    // Begin transaction — all mutations are atomic.
+    // Auto-rollback on drop if commit is never reached.
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
 
-    for table in &tables {
+    // Add project column to tables that need it.
+    // N+1 PRAGMA is inherent to SQLite's column metadata API.
+    // With only 7 tables this is acceptable for a one-time migration.
+    for table in MIGRATION_V4_ADD_COLUMN {
+        validate_table(table)?;
         let cols = sqlx::query(&format!("PRAGMA table_info({table})"))
-            .fetch_all(pool)
+            .fetch_all(&mut *tx)
             .await
             .map_err(super::sqlx_err)?;
 
@@ -535,7 +568,7 @@ async fn migrate_v3_to_v4_pool(pool: &AnyPool) -> io::Result<()> {
             sqlx::query(&format!(
                 "ALTER TABLE {table} ADD COLUMN project TEXT NOT NULL DEFAULT ''"
             ))
-            .execute(pool)
+            .execute(&mut *tx)
             .await
             .map_err(super::sqlx_err)?;
         }
@@ -613,24 +646,31 @@ async fn migrate_v3_to_v4_pool(pool: &AnyPool) -> io::Result<()> {
     ];
 
     for (table, sql) in recreations {
+        validate_table(table)?;
         // Only recreate if the table exists and still has a single-column PK
         // (i.e., hasn't been migrated yet).
-        if table_has_single_pk(pool, table).await? {
+        if table_has_single_pk(&mut *tx, table).await? {
             sqlx::raw_sql(sql)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await
                 .map_err(super::sqlx_err)?;
         }
     }
 
+    tx.commit().await.map_err(super::sqlx_err)?;
     Ok(())
 }
 
 /// Check if a table exists and has a single-column primary key (not yet migrated to composite).
 /// SQLite-only: uses `PRAGMA table_info`.
-async fn table_has_single_pk(pool: &AnyPool, table: &str) -> io::Result<bool> {
+/// Accepts any executor (pool or transaction) so it works inside a `sqlx::Transaction`.
+async fn table_has_single_pk<'e, E>(executor: E, table: &str) -> io::Result<bool>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Any>,
+{
+    validate_table(table)?;
     let cols = sqlx::query(&format!("PRAGMA table_info({table})"))
-        .fetch_all(pool)
+        .fetch_all(executor)
         .await
         .map_err(super::sqlx_err)?;
     if cols.is_empty() {
@@ -641,6 +681,49 @@ async fn table_has_single_pk(pool: &AnyPool, table: &str) -> io::Result<bool> {
         .filter(|r| r.try_get::<i32, _>("pk").unwrap_or(0) > 0)
         .count();
     Ok(pk_count == 1)
+}
+
+/// PostgreSQL v3→v4 migration: add `project` column using `information_schema`.
+///
+/// PostgreSQL supports `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, making the
+/// per-table column check simpler than SQLite's PRAGMA approach.
+/// Composite-PK recreation is not included here because `DDL_POSTGRES` already
+/// creates the v4 schema — this path only handles databases created with a
+/// hypothetical v3 PostgreSQL DDL.
+async fn migrate_v3_to_v4_postgres(pool: &AnyPool) -> io::Result<()> {
+    // Pre-check: already migrated?
+    let row = sqlx::query(
+        "SELECT COUNT(*) FROM information_schema.columns \
+         WHERE table_name = 'observations' AND column_name = 'project'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let count: i64 = row.get(0);
+    if count > 0 {
+        return Ok(()); // Already migrated.
+    }
+
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+
+    for table in MIGRATION_V4_ADD_COLUMN {
+        validate_table(table)?;
+        sqlx::query(&format!(
+            "ALTER TABLE {table} ADD COLUMN IF NOT EXISTS project TEXT NOT NULL DEFAULT ''"
+        ))
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    }
+
+    tx.commit().await.map_err(super::sqlx_err)?;
+
+    // Composite-PK recreation skipped for PostgreSQL.
+    // DDL_POSTGRES creates v4 schema directly. If a v3 PG database exists,
+    // composite-PK tables would need manual migration or DB recreation.
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -668,5 +751,29 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(v, "4");
+    }
+
+    #[test]
+    fn validate_table_accepts_known_tables() {
+        // All v4 migration tables should pass validation
+        for table in MIGRATION_V4_ADD_COLUMN {
+            assert!(
+                validate_table(table).is_ok(),
+                "rejected valid table: {table}"
+            );
+        }
+        for table in MIGRATION_V4_RECREATE {
+            assert!(
+                validate_table(table).is_ok(),
+                "rejected valid table: {table}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_table_rejects_unknown() {
+        assert!(validate_table("users; DROP TABLE observations--").is_err());
+        assert!(validate_table("").is_err());
+        assert!(validate_table("nonexistent_table").is_err());
     }
 }
