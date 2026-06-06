@@ -176,7 +176,7 @@ export default {
   statBestScore: '최고 점수',
   labelLastErrorContext: '마지막 에러 컨텍스트',
   sessionSnapshotsTitle: '세션 스냅샷',
-  colType: '유형', colSummary: '요약', colContextUsage: '컨텍스트 %',
+  colSummary: '요약', colContextUsage: '컨텍스트 %',
   globalPatternsTitle: '프로젝트 간 패턴',
   colWeakTools: '취약 도구',
   statTotalNodes: '전체 노드', statTotalEdges: '전체 엣지', statAvgImportance: '평균 중요도',

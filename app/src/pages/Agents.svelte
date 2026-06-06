@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
   import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent, getAgentEvents, getAgentInbox } from '../lib/harness.js';
   import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus, AgentEvent, InboxMessage } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let run = $state<OrchestrationRun | null>(null);
   let agentStatuses = $state<Map<string, OrchAgentStatus>>(new Map());
@@ -45,7 +45,9 @@
     }
   }
 
-  onMount(() => {
+  $effect(() => {
+    $selectedProject;
+    loading = true;
     load();
     const id = setInterval(() => {
       if (!document.hidden) load();

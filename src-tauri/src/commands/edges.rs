@@ -1,10 +1,11 @@
-use crate::state::AppState;
 use epic_harness::mem::store::{
-    Edge, append_edge_conn, delete_edge_by_id_conn, new_uuid, node_exists_conn, now_iso,
-    read_edges_conn, validate_uuid,
+    Edge, append_edge_pool, delete_edge_by_id_pool, new_uuid, node_exists_pool, now_iso,
+    read_edges_pool, validate_uuid,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+use crate::state::AppState;
 
 const MAX_RELATION_LEN: usize = 128;
 
@@ -94,23 +95,18 @@ pub async fn create_edge(
         ts: now_iso(),
     };
     let id = edge.id.clone();
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        // Verify both endpoints exist before creating edge
-        if !node_exists_conn(&conn, &edge.source) {
-            return Err(format!("source node {} does not exist", edge.source));
-        }
-        if !node_exists_conn(&conn, &edge.target) {
-            return Err(format!("target node {} does not exist", edge.target));
-        }
-        append_edge_conn(&conn, &edge).map_err(|e| format!("failed to create edge: {e}"))?;
-        Ok(id)
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    // Verify both endpoints exist before creating edge
+    if !node_exists_pool(&pool, &edge.source).await {
+        return Err(format!("source node {} does not exist", edge.source));
+    }
+    if !node_exists_pool(&pool, &edge.target).await {
+        return Err(format!("target node {} does not exist", edge.target));
+    }
+    append_edge_pool(&pool, &edge)
+        .await
+        .map_err(|e| format!("failed to create edge: {e}"))?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -118,16 +114,11 @@ pub async fn delete_edge(id: String, state: State<'_, AppState>) -> Result<Strin
     if !validate_uuid(&id) {
         return Err("invalid edge id".into());
     }
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        delete_edge_by_id_conn(&conn, &id).map_err(|e| format!("failed to delete edge: {e}"))?;
-        Ok(id)
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    delete_edge_by_id_pool(&pool, &id)
+        .await
+        .map_err(|e| format!("failed to delete edge: {e}"))?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -135,16 +126,10 @@ pub async fn get_edges(
     limit: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<Vec<EdgeResponse>, String> {
-    let limit = limit.unwrap_or(2000).min(5000);
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        let edges =
-            read_edges_conn(&conn, limit).map_err(|e| format!("failed to read edges: {e}"))?;
-        Ok(edges.into_iter().map(EdgeResponse::from).collect())
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let limit = limit.unwrap_or(2000).min(5000) as i64;
+    let pool = state.db.clone();
+    let edges = read_edges_pool(&pool, limit)
+        .await
+        .map_err(|e| format!("failed to read edges: {e}"))?;
+    Ok(edges.into_iter().map(EdgeResponse::from).collect())
 }

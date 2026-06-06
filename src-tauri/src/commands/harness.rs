@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-
-use crate::state::AppState;
 use tauri::State;
 
+use crate::state::AppState;
+
 const MAX_SCORE_HISTORY: usize = 200;
-const MAX_EVOLUTION_ENTRIES: usize = 50;
-const MAX_ORBIT_PIPELINES: usize = 100;
+const MAX_EVOLUTION_ENTRIES: i64 = 50;
+const MAX_ORBIT_PIPELINES: i64 = 100;
 
 // ── Metrics ──────────────────────────────────────────────────────────────────
 
@@ -27,58 +27,56 @@ pub struct HarnessMetrics {
 
 #[tauri::command]
 pub async fn get_harness_metrics(state: State<'_, AppState>) -> Result<HarnessMetrics, String> {
-    let db = state.harness_db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
+    let pool = state.harness_db.clone();
 
-        let m = epic_harness::store::metrics::load_metrics_conn(&conn)
-            .map_err(|e| format!("load metrics: {e}"))?;
+    // Determine a project slug from the harness DB config.
+    // For Tauri desktop, we use the default project.
+    let project = crate::state::default_project_slug();
 
-        let all_scores: Vec<f64> = m.score_history.iter().map(|e| e.avg_score).collect();
-        let scores: Vec<f64> = all_scores
-            .iter()
-            .rev()
-            .take(MAX_SCORE_HISTORY)
-            .copied()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        let avg = if !scores.is_empty() {
-            scores.iter().sum::<f64>() / scores.len() as f64
-        } else {
-            0.0
-        };
+    let m = epic_harness::store::metrics::load_metrics_pool(&pool, &project)
+        .await
+        .map_err(|e| format!("load metrics: {e}"))?;
 
-        let skill_attribution: serde_json::Value =
-            serde_json::to_value(&m.skill_attribution).unwrap_or(serde_json::Value::Null);
+    let all_scores: Vec<f64> = m.score_history.iter().map(|e| e.avg_score).collect();
+    let scores: Vec<f64> = all_scores
+        .iter()
+        .rev()
+        .take(MAX_SCORE_HISTORY)
+        .copied()
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let avg = if !scores.is_empty() {
+        scores.iter().sum::<f64>() / scores.len() as f64
+    } else {
+        0.0
+    };
 
-        // Use configured weights, falling back to defaults [0.5, 0.3, 0.2].
-        let weights = &epic_harness::config::CONFIG.scoring.weights;
-        let score_weights = serde_json::json!({
-            "success": weights[0],
-            "quality": weights[1],
-            "cost": weights[2],
-        });
+    let skill_attribution: serde_json::Value =
+        serde_json::to_value(&m.skill_attribution).unwrap_or(serde_json::Value::Null);
 
-        Ok(HarnessMetrics {
-            score_history: scores,
-            trend: m.trend,
-            stagnation_count: m.stagnation_count as u32,
-            session_count: m.total_sessions as u32,
-            avg_score: (avg * 1000.0).round() / 1000.0,
-            skill_attribution,
-            score_weights,
-            total_sessions: m.total_sessions as u32,
-            avg_success_rate: (m.avg_success_rate * 1000.0).round() / 1000.0,
-            total_evolved_skills: m.total_evolved_skills as u32,
-            last_session: m.last_session,
-        })
+    // Use configured weights, falling back to defaults [0.5, 0.3, 0.2].
+    let weights = &epic_harness::config::CONFIG.scoring.weights;
+    let score_weights = serde_json::json!({
+        "success": weights[0],
+        "quality": weights[1],
+        "cost": weights[2],
+    });
+
+    Ok(HarnessMetrics {
+        score_history: scores,
+        trend: m.trend,
+        stagnation_count: m.stagnation_count as u32,
+        session_count: m.total_sessions as u32,
+        avg_score: (avg * 1000.0).round() / 1000.0,
+        skill_attribution,
+        score_weights,
+        total_sessions: m.total_sessions as u32,
+        avg_success_rate: (m.avg_success_rate * 1000.0).round() / 1000.0,
+        total_evolved_skills: m.total_evolved_skills as u32,
+        last_session: m.last_session,
     })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
 }
 
 // ── Orbit Pipelines ───────────────────────────────────────────────────────────
@@ -100,39 +98,34 @@ pub struct OrbitPipeline {
 
 #[tauri::command]
 pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<OrbitPipeline>, String> {
-    let db = state.harness_db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
+    let pool = state.harness_db.clone();
 
-        let pipelines = epic_harness::store::orbit_store::list_all_pipelines_conn_limited(
-            &conn,
+    let pipelines =
+        epic_harness::store::orbit_store::list_all_pipelines_pool_limited(
+            &pool,
             MAX_ORBIT_PIPELINES,
         )
+        .await
         .map_err(|e| format!("list pipelines: {e}"))?;
 
-        let result: Vec<OrbitPipeline> = pipelines
-            .into_iter()
-            .map(|v| OrbitPipeline {
-                id: v["id"].as_str().unwrap_or("").to_string(),
-                mode: v["mode"].as_str().map(str::to_string),
-                phase: v["phase"].as_str().unwrap_or("unknown").to_string(),
-                status: v["status"].as_str().unwrap_or("unknown").to_string(),
-                goal_slug: v["goal_slug"].as_str().map(str::to_string),
-                branch: v["branch"].as_str().map(str::to_string),
-                audit_fail_count: v["audit_fail_count"].as_u64().unwrap_or(0) as u32,
-                started_at: v["started_at"].as_str().unwrap_or("").to_string(),
-                updated_at: v["updated_at"].as_str().unwrap_or("").to_string(),
-                deadline: v["deadline"].as_str().map(str::to_string),
-                phase_history: v["phase_history"].as_array().cloned().unwrap_or_default(),
-            })
-            .collect();
+    let result: Vec<OrbitPipeline> = pipelines
+        .into_iter()
+        .map(|v| OrbitPipeline {
+            id: v["id"].as_str().unwrap_or("").to_string(),
+            mode: v["mode"].as_str().map(str::to_string),
+            phase: v["phase"].as_str().unwrap_or("unknown").to_string(),
+            status: v["status"].as_str().unwrap_or("unknown").to_string(),
+            goal_slug: v["goal_slug"].as_str().map(str::to_string),
+            branch: v["branch"].as_str().map(str::to_string),
+            audit_fail_count: v["audit_fail_count"].as_u64().unwrap_or(0) as u32,
+            started_at: v["started_at"].as_str().unwrap_or("").to_string(),
+            updated_at: v["updated_at"].as_str().unwrap_or("").to_string(),
+            deadline: v["deadline"].as_str().map(str::to_string),
+            phase_history: v["phase_history"].as_array().cloned().unwrap_or_default(),
+        })
+        .collect();
 
-        Ok(result)
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    Ok(result)
 }
 
 // ── Evolved Skills ────────────────────────────────────────────────────────────
@@ -154,50 +147,49 @@ pub struct EvolutionData {
 
 #[tauri::command]
 pub async fn get_evolved_skills(state: State<'_, AppState>) -> Result<EvolutionData, String> {
-    let db = state.harness_db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
+    let pool = state.harness_db.clone();
 
-        // Evolved skills
-        let skills = epic_harness::store::evolved::list_skills_full_conn(&conn)
-            .map_err(|e| format!("list evolved skills: {e}"))?;
-        let evolved_skills: Vec<EvolvedSkill> = skills
-            .into_iter()
-            .map(|s| EvolvedSkill {
-                name: s.name,
-                skill_md: s.skill_md,
-                created_at: Some(s.created),
-            })
-            .collect();
-
-        // Evolution history
-        let records =
-            epic_harness::store::evolution::query_recent_records_conn(&conn, MAX_EVOLUTION_ENTRIES)
-                .map_err(|e| format!("query evolution records: {e}"))?;
-
-        let total_sessions = records.len() as u32;
-        let patterns_detected: u32 = records
-            .iter()
-            .map(|r| r.error_patterns.len() as u32 + r.failure_patterns.len() as u32)
-            .sum();
-
-        let history: Vec<serde_json::Value> = records
-            .into_iter()
-            .rev()
-            .filter_map(|r| serde_json::to_value(r).ok())
-            .collect();
-
-        Ok(EvolutionData {
-            evolved_skills,
-            evolution_history: history,
-            total_sessions_analyzed: total_sessions,
-            patterns_detected,
+    // Evolved skills
+    let skills = epic_harness::store::evolved::list_skills_full_pool(&pool)
+        .await
+        .map_err(|e| format!("list evolved skills: {e}"))?;
+    let evolved_skills: Vec<EvolvedSkill> = skills
+        .into_iter()
+        .map(|s| EvolvedSkill {
+            name: s.name,
+            skill_md: s.skill_md,
+            created_at: Some(s.created),
         })
-    })
+        .collect();
+
+    // Evolution history
+    let project = crate::state::default_project_slug();
+    let records = epic_harness::store::evolution::query_recent_records_pool(
+        &pool,
+        &project,
+        MAX_EVOLUTION_ENTRIES,
+    )
     .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    .map_err(|e| format!("query evolution records: {e}"))?;
+
+    let total_sessions = records.len() as u32;
+    let patterns_detected: u32 = records
+        .iter()
+        .map(|r| r.error_patterns.len() as u32 + r.failure_patterns.len() as u32)
+        .sum();
+
+    let history: Vec<serde_json::Value> = records
+        .into_iter()
+        .rev()
+        .filter_map(|r| serde_json::to_value(r).ok())
+        .collect();
+
+    Ok(EvolutionData {
+        evolved_skills,
+        evolution_history: history,
+        total_sessions_analyzed: total_sessions,
+        patterns_detected,
+    })
 }
 
 // ── Obs Summary ───────────────────────────────────────────────────────────────
@@ -208,7 +200,7 @@ pub struct ObsSummary {
     pub tool_stats: Vec<ToolStat>,
     pub total_tool_calls: u32,
     pub avg_score: f64,
-    pub active_agents: Vec<ActiveAgent>,
+    pub failure_categories: Vec<FailureCategory>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -229,92 +221,77 @@ pub struct ToolStat {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct ActiveAgent {
-    pub name: String,
-    pub last_tool: String,
-    pub last_action: String,
-    pub score: f64,
-    pub timestamp: String,
+pub struct FailureCategory {
+    pub category: String,
+    pub count: u32,
 }
 
 #[tauri::command]
 pub async fn get_obs_summary(state: State<'_, AppState>) -> Result<ObsSummary, String> {
-    let db = state.harness_db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
+    let pool = state.harness_db.clone();
+    let project = crate::state::default_project_slug();
 
-        // Use a wide date range to cover all stored data.
-        // SQLite treats these as string comparisons; the padded format ensures
-        // correct lexicographic ordering against ISO-8601 timestamps.
-        let stats = epic_harness::store::observations::query_obs_stats_conn(
-            &conn,
-            "2000-01-01",
-            "2099-12-31",
-        )
-        .map_err(|e| format!("query obs stats: {e}"))?;
-
-        // Session summaries from aggregate stats
-        let session_summaries: Vec<SessionSummary> = stats
-            .session_stats
-            .iter()
-            .map(|s| {
-                let date = s.session_id.get(..8).unwrap_or("").to_string();
-                let calls = s.calls as u32;
-                let failures = s.failures as u32;
-                SessionSummary {
-                    session_id: s.session_id.clone(),
-                    date,
-                    tool_calls: calls,
-                    avg_score: (s.avg_score * 1000.0).round() / 1000.0,
-                    failures,
-                }
-            })
-            .collect();
-
-        let total_calls = stats.total as u32;
-
-        let tool_stats: Vec<ToolStat> = stats
-            .tool_stats
-            .iter()
-            .map(|t| ToolStat {
-                tool: t.tool.clone(),
-                calls: t.calls as u32,
-                success_rate: if t.calls > 0 {
-                    ((t.successes as f64 / t.calls as f64) * 1000.0).round() / 1000.0
-                } else {
-                    0.0
-                },
-                avg_score: (t.avg_score * 1000.0).round() / 1000.0,
-            })
-            .collect();
-
-        // Active agents: last 5 observations
-        let recent = epic_harness::store::observations::query_latest_observations_conn(&conn, 5)
-            .map_err(|e| format!("query latest observations: {e}"))?;
-
-        let active_agents: Vec<ActiveAgent> = recent
-            .into_iter()
-            .map(|r| ActiveAgent {
-                name: r.tool.clone(),
-                last_tool: r.tool,
-                last_action: r.action.unwrap_or_default(),
-                score: r.score.unwrap_or(0.0),
-                timestamp: r.timestamp,
-            })
-            .collect();
-
-        Ok(ObsSummary {
-            recent_sessions: session_summaries,
-            tool_stats,
-            total_tool_calls: total_calls,
-            avg_score: (stats.avg_score * 1000.0).round() / 1000.0,
-            active_agents,
-        })
-    })
+    // Use a wide date range to cover all stored data.
+    let stats = epic_harness::store::observations::query_obs_stats_pool(
+        &pool,
+        &project,
+        "2000-01-01",
+        "2099-12-31",
+    )
     .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    .map_err(|e| format!("query obs stats: {e}"))?;
+
+    // Session summaries from aggregate stats
+    let session_summaries: Vec<SessionSummary> = stats
+        .session_stats
+        .iter()
+        .map(|s| {
+            let date = s.session_id.get(..8).unwrap_or("").to_string();
+            let calls = s.calls as u32;
+            let failures = s.failures as u32;
+            SessionSummary {
+                session_id: s.session_id.clone(),
+                date,
+                tool_calls: calls,
+                avg_score: (s.avg_score * 1000.0).round() / 1000.0,
+                failures,
+            }
+        })
+        .collect();
+
+    let total_calls = stats.total as u32;
+
+    let tool_stats: Vec<ToolStat> = stats
+        .tool_stats
+        .iter()
+        .map(|t| ToolStat {
+            tool: t.tool.clone(),
+            calls: t.calls as u32,
+            success_rate: if t.calls > 0 {
+                ((t.successes as f64 / t.calls as f64) * 1000.0).round() / 1000.0
+            } else {
+                0.0
+            },
+            avg_score: (t.avg_score * 1000.0).round() / 1000.0,
+        })
+        .collect();
+
+    let failure_categories: Vec<FailureCategory> = stats
+        .error_stats
+        .iter()
+        .map(|(cat, cnt)| FailureCategory {
+            category: cat.clone(),
+            count: *cnt as u32,
+        })
+        .collect();
+
+    Ok(ObsSummary {
+        recent_sessions: session_summaries,
+        tool_stats,
+        total_tool_calls: total_calls,
+        avg_score: (stats.avg_score * 1000.0).round() / 1000.0,
+        failure_categories,
+    })
 }
 
 // ── Integration Status ────────────────────────────────────────────────────────

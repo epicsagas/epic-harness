@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { getHarnessMetrics, getObsSummary } from '../lib/harness.js';
   import type { HarnessMetrics, ObsSummary } from '../lib/harness.js';
   import { tStore } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let metrics = $state<HarnessMetrics | null>(null);
   let obs = $state<ObsSummary | null>(null);
@@ -57,7 +57,9 @@
     }
   }
 
-  onMount(() => {
+  $effect(() => {
+    $selectedProject;
+    loading = true;
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);

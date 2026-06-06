@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { getHarnessMetrics, getSessionSnapshots, getGlobalPatterns, type HarnessMetrics, type SessionSnapshotData, type GlobalPattern } from '../lib/harness.js';
   import { tStore } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let metrics = $state<HarnessMetrics | null>(null);
   let snapshots = $state<SessionSnapshotData[]>([]);
@@ -19,8 +19,9 @@
     return ts.slice(0, 10);
   }
 
-  onMount(async () => {
+  async function loadSettings() {
     try {
+      loading = true;
       [metrics, snapshots, patterns] = await Promise.all([
         getHarnessMetrics(),
         getSessionSnapshots(),
@@ -31,6 +32,11 @@
     } finally {
       loading = false;
     }
+  }
+
+  $effect(() => {
+    $selectedProject;
+    loadSettings();
   });
 
   const EVOLUTION_CONSTANTS = [

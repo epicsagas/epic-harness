@@ -1,23 +1,36 @@
-use std::sync::{Arc, Mutex};
-
-use rusqlite::Connection;
+use sqlx::AnyPool;
 
 pub struct AppState {
     /// Knowledge graph DB (`~/.harness/memory.db`).
-    pub db: Arc<Mutex<Connection>>,
+    pub db: AnyPool,
     /// Operational data DB (`~/.harness/projects/{slug}/harness.db`).
-    pub harness_db: Arc<Mutex<Connection>>,
+    pub harness_db: AnyPool,
 }
 
 impl AppState {
     pub fn new() -> Result<Self, String> {
-        let mem_conn = epic_harness::mem::store::open_db()
-            .map_err(|e| format!("Failed to open memory DB: {e}"))?;
-        let harness_conn = epic_harness::store::open_harness_db()
-            .map_err(|e| format!("Failed to open harness DB: {e}"))?;
-        Ok(Self {
-            db: Arc::new(Mutex::new(mem_conn)),
-            harness_db: Arc::new(Mutex::new(harness_conn)),
-        })
+        // Use tokio runtime already provided by Tauri to initialize pools.
+        let db = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                epic_harness::store::pool::memory_pool()
+                    .await
+                    .map_err(|e| format!("Failed to open memory DB: {e}"))
+            })
+        })?;
+
+        let harness_db = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                epic_harness::store::pool::harness_pool()
+                    .await
+                    .map_err(|e| format!("Failed to open harness DB: {e}"))
+            })
+        })?;
+
+        Ok(Self { db, harness_db })
     }
+}
+
+/// Determine the default project slug from CWD git repo, matching serve.rs behavior.
+pub fn default_project_slug() -> String {
+    epic_harness::shared::paths::project_slug()
 }

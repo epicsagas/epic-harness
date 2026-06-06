@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { getEvolvedSkills, getHarnessMetrics } from '../lib/harness.js';
   import type { EvolutionData, HarnessMetrics, SkillAttribution } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   const SEEDING_THRESHOLDS = [
     { typeKey: 'seedTypeWeakTool',       threshKey: 'seedThreshWeakTool' },
@@ -138,8 +138,11 @@
   }
 
   let pollInterval: ReturnType<typeof setInterval>;
-  onMount(() => {
+  $effect(() => {
+    $selectedProject;
+    loading = true;
     load();
+    clearInterval(pollInterval);
     pollInterval = setInterval(load, 30_000);
     return () => clearInterval(pollInterval);
   });
