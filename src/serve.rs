@@ -289,8 +289,8 @@ fn handle_get_stats(port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
 fn handle_list_nodes(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     let limit: usize = parse_query_param(url, "limit")
         .and_then(|v| v.parse().ok())
-        .unwrap_or(200)
-        .min(1000);
+        .unwrap_or(500)
+        .min(5000);
     // Note: uses the memory DB pool (memory.db for the knowledge graph),
     // not the harness operational DB passed as `db` to other handlers.
     let nodes = crate::store::runtime::block_on(async {
