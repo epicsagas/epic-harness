@@ -11,7 +11,7 @@ const MAX_ORBIT_PIPELINES: i64 = 100;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct HarnessMetrics {
-    pub score_history: Vec<f64>,
+    pub score_history: Vec<epic_harness::shared::evolution::SessionScoreEntry>,
     pub trend: String,
     pub stagnation_count: u32,
     pub session_count: u32,
@@ -40,18 +40,19 @@ pub async fn get_harness_metrics(
     }
     .map_err(|e| format!("load metrics: {e}"))?;
 
-    let all_scores: Vec<f64> = m.score_history.iter().map(|e| e.avg_score).collect();
-    let scores: Vec<f64> = all_scores
-        .iter()
+    // Keep the most recent MAX_SCORE_HISTORY entries (sorted chronologically).
+    let history: Vec<_> = m
+        .score_history
+        .into_iter()
         .rev()
         .take(MAX_SCORE_HISTORY)
-        .copied()
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
         .collect();
-    let avg = if !scores.is_empty() {
-        scores.iter().sum::<f64>() / scores.len() as f64
+
+    let avg = if !history.is_empty() {
+        history.iter().map(|e| e.avg_score).sum::<f64>() / history.len() as f64
     } else {
         0.0
     };
@@ -68,7 +69,7 @@ pub async fn get_harness_metrics(
     });
 
     Ok(HarnessMetrics {
-        score_history: scores,
+        score_history: history,
         trend: m.trend,
         stagnation_count: m.stagnation_count as u32,
         session_count: m.total_sessions as u32,
@@ -161,7 +162,7 @@ pub async fn get_evolved_skills(
         .map_err(|e| format!("list evolved skills: {e}"))?;
     let evolved_skills: Vec<EvolvedSkill> = skills
         .into_iter()
-        .filter(|s| project.as_ref().map_or(true, |p| s.project == *p))
+        .filter(|s| project.as_ref().is_none_or(|p| s.project == *p))
         .map(|s| EvolvedSkill {
             name: s.name,
             skill_md: s.skill_md,
