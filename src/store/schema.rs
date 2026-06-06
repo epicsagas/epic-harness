@@ -111,6 +111,7 @@ pub(crate) const DDL_SQLITE: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_evo_project ON evolution_records(project);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_evo_ts_project ON evolution_records(timestamp, project);
 
     CREATE TABLE IF NOT EXISTS metrics_state (
         key     TEXT NOT NULL,
@@ -310,6 +311,7 @@ const DDL_POSTGRES: &str = "
     );
     CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_evo_project ON evolution_records(project);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_evo_ts_project ON evolution_records(timestamp, project);
 
     CREATE TABLE IF NOT EXISTS metrics_state (
         key     TEXT NOT NULL,

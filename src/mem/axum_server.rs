@@ -64,20 +64,7 @@ pub fn serve_axum(args: &[String]) -> i32 {
 
     let state = AppState { pool: mem_pool };
 
-    // Build tokio runtime (multi-thread)
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-    {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to build tokio runtime: {e}");
-            return 1;
-        }
-    };
-
-    rt.block_on(async move {
+    crate::store::runtime::block_on(async move {
         let app = build_router(state, port);
 
         let addr = format!("127.0.0.1:{port}");

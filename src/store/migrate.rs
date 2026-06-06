@@ -537,7 +537,7 @@ async fn import_evolution(
                         "[]".into()
                     });
                 let result = sqlx::query(
-                    "INSERT INTO evolution_records \
+                    "INSERT OR IGNORE INTO evolution_records \
                      (timestamp, observations, success_rate, avg_score, error_patterns, \
                       failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
                       analysis_summary, project) \
