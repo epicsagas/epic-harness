@@ -28,7 +28,7 @@ use super::store::{
     Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, read_all_nodes_pool, read_node_pool,
+    delete_edge_by_id, delete_node_file, read_node_pool, read_nodes_limited_pool,
     remove_edges_for_node, remove_from_index, search_nodes_pool, validate_uuid,
 };
 use crate::store::pool;
@@ -401,11 +401,10 @@ async fn handle_list_nodes(
 ) -> impl IntoResponse {
     use super::store::IndexNode;
     let limit = q.limit.min(5000);
-    let nodes: Vec<IndexNode> = read_all_nodes_pool(&state.pool)
+    let nodes: Vec<IndexNode> = read_nodes_limited_pool(&state.pool, limit as i64)
         .await
         .unwrap_or_default()
         .into_iter()
-        .take(limit)
         .map(|n| IndexNode {
             id: n.frontmatter.id,
             title: n.frontmatter.title,
