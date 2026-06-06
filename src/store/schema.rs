@@ -79,6 +79,7 @@ pub(crate) const DDL_SQLITE: &str = "
     CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
     CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_obs_project    ON observations(project);
+    CREATE INDEX IF NOT EXISTS idx_obs_session_id_desc ON observations(session_id, id DESC);
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -277,6 +278,7 @@ const DDL_POSTGRES: &str = "
     CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
     CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_obs_project    ON observations(project);
+    CREATE INDEX IF NOT EXISTS idx_obs_session_id_desc ON observations(session_id, id DESC);
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                BIGSERIAL PRIMARY KEY,
@@ -378,7 +380,7 @@ const DDL_POSTGRES: &str = "
     CREATE TABLE IF NOT EXISTS orch_control (
         id         BIGSERIAL PRIMARY KEY,
         project    TEXT NOT NULL DEFAULT '',
-        action     TEXT,
+        action     TEXT NOT NULL,
         target     TEXT,
         message    TEXT,
         generation INTEGER NOT NULL DEFAULT 0

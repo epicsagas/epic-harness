@@ -21,7 +21,7 @@ use axum::{
 };
 use serde_json::{Value, json};
 use sqlx::AnyPool;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use super::graph::{compute_stats_pool, rebuild_graph_json_pool};
 use super::store::{
@@ -66,7 +66,7 @@ pub fn serve_axum(args: &[String]) -> i32 {
 
     // Build tokio runtime (multi-thread)
     let rt = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
+        .worker_threads(2)
         .enable_all()
         .build()
     {
@@ -325,7 +325,7 @@ pub fn build_router(state: AppState, port: u16) -> Router {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers(Any);
+        .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::AUTHORIZATION]);
 
     Router::new()
         // Static
@@ -398,12 +398,27 @@ async fn handle_centrality(
     Json(data).into_response()
 }
 
-async fn handle_list_nodes(State(state): State<AppState>) -> impl IntoResponse {
+#[derive(serde::Deserialize)]
+struct ListNodesQuery {
+    #[serde(default = "default_list_limit")]
+    limit: usize,
+}
+
+fn default_list_limit() -> usize {
+    500
+}
+
+async fn handle_list_nodes(
+    State(state): State<AppState>,
+    Query(q): Query<ListNodesQuery>,
+) -> impl IntoResponse {
     use super::store::IndexNode;
+    let limit = q.limit.min(5000);
     let nodes: Vec<IndexNode> = read_all_nodes_pool(&state.pool)
         .await
         .unwrap_or_default()
         .into_iter()
+        .take(limit)
         .map(|n| IndexNode {
             id: n.frontmatter.id,
             title: n.frontmatter.title,

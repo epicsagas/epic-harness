@@ -106,56 +106,59 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             // ── Orchestration API ───────────────────────────
-            (Method::Get, "/api/run") => handle_get_run(pool.as_ref(), &harness_dir),
+            (Method::Get, "/api/run") => handle_get_run(pool.as_ref(), &harness_dir, port),
             (Method::Get, "/api/events") => handle_get_events(pool.as_ref(), &harness_dir),
 
             // ── Memory API (Graph/Stats) ─────────────────────
-            (Method::Get, "/api/graph") => handle_get_graph(),
-            (Method::Get, "/api/stats") => handle_get_stats(),
+            (Method::Get, "/api/graph") => handle_get_graph(port),
+            (Method::Get, "/api/stats") => handle_get_stats(port),
 
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
                 let body = handle_harness_cmd(pool.as_ref(), &cmd);
-                json_response(&body)
+                json_response(&body, port)
             }
 
             // ── Orbit Pipeline Dismiss ───────────────────────
             (Method::Delete, url) if url.starts_with("/api/orbit/") => {
                 let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
                 let body = dismiss_orbit_pipeline(pool.as_ref(), pipeline_id, &harness_dir);
-                json_response(&body)
+                json_response(&body, port)
             }
 
             // ── Memory API (Nodes) ───────────────────────────
             (Method::Get, u) if u == "/api/nodes" || u.starts_with("/api/nodes?") => {
-                handle_list_nodes(u)
+                handle_list_nodes(u, port)
             }
 
-            (Method::Get, url) if url.starts_with("/api/nodes/") => handle_get_node(url),
+            (Method::Get, url) if url.starts_with("/api/nodes/") => handle_get_node(url, port),
 
             // ── Memory API (Search) ──────────────────────────
-            (Method::Get, url) if url.starts_with("/api/search") => handle_search(url),
+            (Method::Get, url) if url.starts_with("/api/search") => handle_search(url, port),
 
             // ── Agents API ───────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/status") => {
                 let agent_id = url
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
-                handle_agent_status(pool.as_ref(), agent_id, &harness_dir)
+                handle_agent_status(pool.as_ref(), agent_id, &harness_dir, port)
             }
 
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
                 let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
-                handle_agent_dismiss(pool.as_ref(), agent_id, &harness_dir)
+                handle_agent_dismiss(pool.as_ref(), agent_id, &harness_dir, port)
             }
 
             // ── CORS & Other ────────────────────────────────
             (Method::Options, _) => Response::from_string("{}")
                 .with_status_code(204)
                 .with_header(
-                    Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173")
-                        .unwrap(),
+                    Header::from_bytes(
+                        b"Access-Control-Allow-Origin",
+                        format!("http://localhost:{port}").as_bytes(),
+                    )
+                    .unwrap(),
                 )
                 .with_header(
                     Header::from_bytes(
@@ -213,6 +216,7 @@ fn try_pool<T>(
 fn handle_get_run(
     pool: Option<&sqlx::AnyPool>,
     harness_dir: &std::path::Path,
+    port: u16,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     let slug = crate::shared::paths::project_slug();
     let db_ok = try_pool(pool, |p| {
@@ -234,7 +238,7 @@ fn handle_get_run(
             body.to_string()
         }
     };
-    json_response(&body)
+    json_response(&body, port)
 }
 
 fn handle_get_events(
@@ -262,23 +266,23 @@ fn handle_get_events(
         .with_header(Header::from_bytes(b"Connection", b"keep-alive").unwrap())
 }
 
-fn handle_get_graph() -> Response<std::io::Cursor<Vec<u8>>> {
+fn handle_get_graph(port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = match graph::rebuild_graph_json() {
         Ok(json) => json,
         Err(_) => "{}".into(),
     };
-    json_response(&body)
+    json_response(&body, port)
 }
 
-fn handle_get_stats() -> Response<std::io::Cursor<Vec<u8>>> {
+fn handle_get_stats(port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     let body = match graph::compute_stats() {
         Ok(v) => v.to_string(),
         Err(_) => "{}".into(),
     };
-    json_response(&body)
+    json_response(&body, port)
 }
 
-fn handle_list_nodes(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+fn handle_list_nodes(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     let limit: usize = parse_query_param(url, "limit")
         .and_then(|v| v.parse().ok())
         .unwrap_or(200)
@@ -306,15 +310,21 @@ fn handle_list_nodes(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
             })
         })
         .collect();
-    json_response(&serde_json::to_string(&results).unwrap_or_else(|_| "[]".into()))
+    json_response(
+        &serde_json::to_string(&results).unwrap_or_else(|_| "[]".into()),
+        port,
+    )
 }
 
-fn handle_get_node(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+fn handle_get_node(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     let id = url
         .trim_start_matches("/api/nodes/")
         .split('?')
         .next()
         .unwrap_or("");
+    if !store::validate_uuid(id) {
+        return json_response("{\"error\":\"invalid node id\"}", port).with_status_code(400);
+    }
     let body = match store::read_node(id) {
         Ok(node) => {
             let v = serde_json::json!({
@@ -334,10 +344,10 @@ fn handle_get_node(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         }
         Err(_) => "{\"error\":\"not found\"}".into(),
     };
-    json_response(&body)
+    json_response(&body, port)
 }
 
-fn handle_search(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+fn handle_search(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     let query = url
         .split("q=")
         .nth(1)
@@ -359,16 +369,17 @@ fn handle_search(url: &str) -> Response<std::io::Cursor<Vec<u8>>> {
         })
         .collect();
     let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
-    json_response(&body)
+    json_response(&body, port)
 }
 
 fn handle_agent_status(
     pool: Option<&sqlx::AnyPool>,
     agent_id: &str,
     harness_dir: &std::path::Path,
+    port: u16,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     if !orch::validate_agent_id(agent_id) {
-        return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
+        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
     }
     let slug = crate::shared::paths::project_slug();
     try_pool(pool, |p| {
@@ -389,12 +400,12 @@ fn handle_agent_status(
             .unwrap_or_else(|| "{}".into())
         })
     })
-    .map(|body| json_response(&body))
+    .map(|body| json_response(&body, port))
     .unwrap_or_else(|| {
         let body: serde_json::Value = orch::read_agent_status(harness_dir, agent_id)
             .map(|s| serde_json::to_value(&s).unwrap_or_default())
             .unwrap_or_default();
-        json_response(&body.to_string())
+        json_response(&body.to_string(), port)
     })
 }
 
@@ -402,9 +413,10 @@ fn handle_agent_dismiss(
     pool: Option<&sqlx::AnyPool>,
     agent_id: &str,
     harness_dir: &std::path::Path,
+    port: u16,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
     if !orch::validate_agent_id(agent_id) {
-        return json_response("{\"error\":\"invalid agent id\"}").with_status_code(400);
+        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
     }
     // Pool-first: try DB dismiss, fall back to file-based if DB unavailable
     let slug = crate::shared::paths::project_slug();
@@ -415,16 +427,20 @@ fn handle_agent_dismiss(
     });
     let ok = db_ok.unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
     let body = serde_json::json!({"ok": ok, "dismissed": agent_id});
-    json_response(&body.to_string())
+    json_response(&body.to_string(), port)
 }
 
 // ── Response helpers ──────────────────────────────────
 
-fn json_response(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+fn json_response(body: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
         .with_header(
-            Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173").unwrap(),
+            Header::from_bytes(
+                b"Access-Control-Allow-Origin",
+                format!("http://localhost:{port}").as_bytes(),
+            )
+            .unwrap(),
         )
 }
 
