@@ -133,28 +133,18 @@ pub async fn smart_recall_pool(
             .collect();
 
         let mut qb = sqlx::QueryBuilder::new(
-            "SELECT source AS node_id, SUM(weight) AS w FROM edges WHERE source IN (",
+            "SELECT node_id, SUM(w) AS w FROM (SELECT source AS node_id, weight AS w FROM edges WHERE target IN (",
         );
         let mut separated = qb.separated(", ");
         for id in &boost_ids {
             separated.push_bind(*id);
         }
-        qb.push(") AND target IN (");
+        qb.push(") UNION ALL SELECT target AS node_id, weight AS w FROM edges WHERE source IN (");
         let mut separated2 = qb.separated(", ");
         for id in &boost_ids {
             separated2.push_bind(*id);
         }
-        qb.push(") GROUP BY source UNION ALL SELECT target AS node_id, SUM(weight) AS w FROM edges WHERE source IN (");
-        let mut separated3 = qb.separated(", ");
-        for id in &boost_ids {
-            separated3.push_bind(*id);
-        }
-        qb.push(") AND target IN (");
-        let mut separated4 = qb.separated(", ");
-        for id in &boost_ids {
-            separated4.push_bind(*id);
-        }
-        qb.push(") GROUP BY target");
+        qb.push(")) sub GROUP BY node_id");
 
         if let Ok(rows) = qb.build().fetch_all(pool).await {
             let mut weight_map: std::collections::HashMap<String, f64> = Default::default();

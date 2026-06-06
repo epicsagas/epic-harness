@@ -21,14 +21,14 @@ use axum::{
 };
 use serde_json::{Value, json};
 use sqlx::AnyPool;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 
 use super::graph::{compute_stats_pool, rebuild_graph_json_pool};
 use super::store::{
     Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, read_all_nodes_pool, read_node_pool,
+    delete_edge_by_id, delete_node_file, read_node_pool, read_nodes_limited_pool,
     remove_edges_for_node, remove_from_index, search_nodes_pool, validate_uuid,
 };
 use crate::store::pool;
@@ -64,20 +64,7 @@ pub fn serve_axum(args: &[String]) -> i32 {
 
     let state = AppState { pool: mem_pool };
 
-    // Build tokio runtime (multi-thread)
-    let rt = match tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .enable_all()
-        .build()
-    {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Failed to build tokio runtime: {e}");
-            return 1;
-        }
-    };
-
-    rt.block_on(async move {
+    crate::store::runtime::block_on(async move {
         let app = build_router(state, port);
 
         let addr = format!("127.0.0.1:{port}");
@@ -325,7 +312,7 @@ pub fn build_router(state: AppState, port: u16) -> Router {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers(Any);
+        .allow_headers([header::CONTENT_TYPE, header::ACCEPT, header::AUTHORIZATION]);
 
     Router::new()
         // Static
@@ -398,9 +385,23 @@ async fn handle_centrality(
     Json(data).into_response()
 }
 
-async fn handle_list_nodes(State(state): State<AppState>) -> impl IntoResponse {
+#[derive(serde::Deserialize)]
+struct ListNodesQuery {
+    #[serde(default = "default_list_limit")]
+    limit: usize,
+}
+
+fn default_list_limit() -> usize {
+    500
+}
+
+async fn handle_list_nodes(
+    State(state): State<AppState>,
+    Query(q): Query<ListNodesQuery>,
+) -> impl IntoResponse {
     use super::store::IndexNode;
-    let nodes: Vec<IndexNode> = read_all_nodes_pool(&state.pool)
+    let limit = q.limit.min(5000);
+    let nodes: Vec<IndexNode> = read_nodes_limited_pool(&state.pool, limit as i64)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -636,5 +637,51 @@ mod tests {
         let server = TestServer::new(app);
         let res = server.get("/api/search?q=test").await;
         assert_eq!(res.status_code(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn list_nodes_limit_parameter() {
+        let state = make_state().await;
+        let app = build_router(state.clone(), 7700);
+        let server = TestServer::new(app);
+
+        // Insert 5 nodes
+        for i in 0..5 {
+            let payload = json!({
+                "type": "concept",
+                "title": format!("Limit test node {i}"),
+                "body": format!("body {i}"),
+                "tags": ["limit-test"],
+                "projects": [],
+                "agents": []
+            });
+            let res = server.post("/api/nodes").json(&payload).await;
+            assert_eq!(res.status_code(), StatusCode::CREATED);
+        }
+
+        // Without limit — should return all 5 (default 500)
+        let all = server.get("/api/nodes").await;
+        assert_eq!(all.status_code(), StatusCode::OK);
+        let nodes: Value = all.json();
+        assert_eq!(nodes.as_array().unwrap().len(), 5);
+
+        // With limit=2 — should return exactly 2
+        let limited = server.get("/api/nodes?limit=2").await;
+        assert_eq!(limited.status_code(), StatusCode::OK);
+        let nodes: Value = limited.json();
+        assert_eq!(
+            nodes.as_array().unwrap().len(),
+            2,
+            "limit=2 should return exactly 2 nodes"
+        );
+
+        // With limit=0 — should return empty
+        let zero = server.get("/api/nodes?limit=0").await;
+        assert_eq!(zero.status_code(), StatusCode::OK);
+        let nodes: Value = zero.json();
+        assert!(
+            nodes.as_array().unwrap().is_empty(),
+            "limit=0 should return empty array"
+        );
     }
 }

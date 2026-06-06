@@ -63,7 +63,7 @@ pub async fn write_node_pool(pool: &AnyPool, node: &Node) -> io::Result<()> {
            type=EXCLUDED.type, title=EXCLUDED.title, tags=EXCLUDED.tags,
            projects=EXCLUDED.projects, agents=EXCLUDED.agents, created=EXCLUDED.created,
            updated=EXCLUDED.updated, body=EXCLUDED.body, importance=EXCLUDED.importance,
-           access_count=EXCLUDED.access_count, accessed_at=EXCLUDED.accessed_at",
+           access_count=CASE WHEN nodes.access_count >= EXCLUDED.access_count THEN nodes.access_count ELSE EXCLUDED.access_count END, accessed_at=EXCLUDED.accessed_at",
     )
     .bind(&fm.id)
     .bind(&fm.node_type)

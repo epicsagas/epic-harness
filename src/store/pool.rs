@@ -171,7 +171,12 @@ async fn build_sqlite_pool(url: &str, max_connections: u32) -> io::Result<AnyPoo
         #[cfg(unix)]
         {
             if path.exists() {
-                let _ = fs::set_permissions(&path, PermissionsExt::from_mode(0o600));
+                if let Err(e) = fs::set_permissions(&path, PermissionsExt::from_mode(0o600)) {
+                    eprintln!(
+                        "warning: failed to set permissions on {}: {e}",
+                        path.display()
+                    );
+                }
             }
         }
     }
@@ -187,7 +192,12 @@ async fn build_sqlite_pool(url: &str, max_connections: u32) -> io::Result<AnyPoo
     {
         if db_path != ":memory:" && !db_path.is_empty() {
             let path = PathBuf::from(db_path);
-            let _ = fs::set_permissions(&path, PermissionsExt::from_mode(0o600));
+            if let Err(e) = fs::set_permissions(&path, PermissionsExt::from_mode(0o600)) {
+                eprintln!(
+                    "warning: failed to set permissions on {}: {e}",
+                    path.display()
+                );
+            }
         }
     }
 
