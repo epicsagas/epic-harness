@@ -1526,4 +1526,35 @@ mod tests {
             "evolve entry should be present for shipped pipeline"
         );
     }
+
+    #[test]
+    fn patch_orbit_evolve_gap_skips_failed_evolve() {
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = serde_json::json!({
+            "id": "test-pipeline-5",
+            "status": "complete",
+            "phase_history": [
+                {"phase": "ship", "status": "complete", "at": "2026-01-01T00:00:00Z"},
+                {"phase": "evolve", "status": "failed", "at": "2026-01-01T00:01:00Z"},
+                {"phase": "complete", "status": "complete", "at": "2026-01-01T00:02:00Z"}
+            ]
+        });
+        let path = dir.path().join("PIPELINE-test5.json");
+        fs::write(&path, serde_json::to_string_pretty(&pipeline).unwrap()).unwrap();
+
+        let patched = patch_orbit_evolve_gap(dir.path(), "2026-01-01T00:03:00Z");
+        assert_eq!(patched, 0, "failed evolve must not be overwritten");
+
+        // Verify the failed entry is preserved as-is
+        let updated: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let evolve_entries: Vec<_> = updated["phase_history"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| e["phase"] == "evolve")
+            .collect();
+        assert_eq!(evolve_entries.len(), 1, "must not add duplicate evolve entry");
+        assert_eq!(evolve_entries[0]["status"], "failed", "original failed status preserved");
+    }
 }
