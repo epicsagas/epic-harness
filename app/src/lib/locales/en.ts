@@ -25,6 +25,15 @@ export default {
   toolStatsTitle: 'Tool Stats (Top 5)', recentActivityTitle: 'Recent Activity',
   sessionLabel: 'Session', callsAvgScore: 'calls, avg score', failuresLabel: 'failures',
   recentSessionNone: 'No recent sessions', failuresSub: 'combined from recent sessions',
+  // R1: Dimension labels
+  dimToolSuccess: 'Tool Success', dimOutputQuality: 'Output Quality', dimExecCost: 'Exec Cost',
+  // R2: Failure categories
+  failureCategoriesTitle: 'Failure Categories',
+  // R3: Skill attribution
+  skillAttributionTitle: 'Skill Attribution',
+  colSkillName: 'Skill', colSessionsActive: 'Sessions', colScoreWith: 'With', colScoreWithout: 'Without', colDelta: 'Delta',
+  // R4: Agent events
+  agentEventLog: 'Event Log', colEventType: 'Event', colTimestamp: 'Time', noEvents: 'No events',
   pageAgents: 'Internal Agents',
   pageAgentsLive: 'Live Agents',
   pageAgentsLiveDesc: 'Real-time agent spawn status from active coding tool orchestration',

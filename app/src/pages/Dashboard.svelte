@@ -17,6 +17,28 @@
     obs ? [...obs.tool_stats].sort((a, b) => b.calls - a.calls).slice(0, 5) : []
   );
 
+  // R5: Sparkline from score_history
+  const sparklinePoints = $derived(() => {
+    if (!metrics?.score_history?.length) return '';
+    const entries = metrics.score_history.slice(-20);
+    const w = 200, h = 40, pad = 4;
+    const max = Math.max(...entries.map(e => e.avg_score), 0.01);
+    const min = Math.min(...entries.map(e => e.avg_score));
+    const range = max - min || 0.01;
+    return entries.map((e, i) => {
+      const x = pad + (i / Math.max(entries.length - 1, 1)) * (w - 2 * pad);
+      const y = h - pad - ((e.avg_score - min) / range) * (h - 2 * pad);
+      return `${x},${y}`;
+    }).join(' ');
+  });
+
+  // R1: Latest dimension averages
+  const latestDims = $derived(() => {
+    if (!metrics?.score_history?.length) return null;
+    const last = metrics.score_history[metrics.score_history.length - 1];
+    return last.dimension_averages ?? null;
+  });
+
   // circumference = 2 * pi * 42 ≈ 264
   const evalRingOffset = $derived(
     metrics ? Math.round(264 * (1 - metrics.avg_score)) : 264
@@ -117,6 +139,13 @@
     {:else}
       <div class="stat-value">{metrics ? fmtScore(metrics.avg_score) : '--'}</div>
     {/if}
+    <!-- R5: Sparkline -->
+    {#if metrics?.score_history && metrics.score_history.length >= 2}
+      <svg width="200" height="40" style="display:block;margin-top:6px;">
+        <polyline fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round"
+                  points={sparklinePoints()} />
+      </svg>
+    {/if}
     <div class="stat-sub">{$tStore('statAvgScoreSub')}</div>
   </div>
   <!-- Trend -->
@@ -202,6 +231,25 @@
           = <strong style="color:var(--fg)">{fmtScore(metrics.avg_score)}</strong>
         {/if}
       </div>
+      <!-- R1: Dimension bars -->
+      {#if latestDims()}
+        <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px;">
+          {#each [
+            { key: 'tool_success', label: $tStore('dimToolSuccess'), color: 'var(--success)' },
+            { key: 'output_quality', label: $tStore('dimOutputQuality'), color: 'var(--accent)' },
+            { key: 'execution_cost', label: $tStore('dimExecCost'), color: 'var(--teal)' },
+          ] as dim}
+            {@const val = latestDims()[dim.key] ?? 0}
+            <div style="display:flex;align-items:center;gap:8px;font-size:11px;">
+              <span style="width:100px;color:var(--muted);text-align:right;">{dim.label}</span>
+              <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
+                <div style="width:{Math.round(val * 100)}%;height:100%;background:{dim.color};border-radius:3px;transition:width 0.3s;"></div>
+              </div>
+              <span style="font-family:var(--font-mono);width:36px;text-align:right;">{val.toFixed(2)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -243,6 +291,35 @@
     </div>
   </div>
 </div>
+
+<!-- R2: Failure Categories -->
+{#if obs?.failure_categories && obs.failure_categories.length > 0}
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header">
+      <h3>{$tStore('failureCategoriesTitle')}</h3>
+    </div>
+    <div class="panel-body" style="padding:0;">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>{$tStore('colFailureType')}</th>
+            <th>{$tStore('colCalls')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each obs.failure_categories as fc}
+            <tr>
+              <td style="color:var(--fg)"><code>{fc.category}</code></td>
+              <td>
+                <span class="pill {fc.count >= 10 ? 'danger' : fc.count >= 5 ? 'warning' : 'info'}">{fc.count}</span>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+  </div>
+{/if}
 
 <!-- Activity Log -->
 <div class="panel">

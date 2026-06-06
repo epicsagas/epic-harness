@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getEvolvedSkills } from '../lib/harness.js';
-  import type { EvolutionData } from '../lib/harness.js';
+  import { getEvolvedSkills, getHarnessMetrics } from '../lib/harness.js';
+  import type { EvolutionData, HarnessMetrics, SkillAttribution } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore } from '$lib/i18n.js';
 
@@ -77,6 +77,15 @@
   $effect(() => { filterDateFrom; filterDateTo; filterTrend; filterPattern; histPage = 1; });
 
   const hasFilter = $derived(!!(filterDateFrom || filterDateTo || filterTrend || filterPattern.trim()));
+
+  // R3: Skill attribution from metrics
+  let metrics = $state<HarnessMetrics | null>(null);
+  const sortedAttribution = $derived(() => {
+    if (!metrics?.skill_attribution) return [];
+    return Object.values(metrics.skill_attribution)
+      .map((s: SkillAttribution) => ({ ...s, delta: s.avg_score_with - s.avg_score_without }))
+      .sort((a, b) => b.delta - a.delta);
+  });
   function clearFilters() { filterDateFrom = ''; filterDateTo = ''; filterTrend = ''; filterPattern = ''; }
 
   const totalPatterns = $derived(
@@ -88,7 +97,9 @@
 
   async function load() {
     try {
-      data = await getEvolvedSkills();
+      const [evo, met] = await Promise.all([getEvolvedSkills(), getHarnessMetrics()]);
+      data = evo;
+      metrics = met;
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -197,6 +208,43 @@
       {/if}
     </div>
   </div>
+
+  <!-- R3: Skill Attribution -->
+  {#if sortedAttribution().length > 0}
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="panel-header">
+        <h3>{$tStore('skillAttributionTitle')}</h3>
+      </div>
+      <div class="panel-body" style="padding:0;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>{$tStore('colSkillName')}</th>
+              <th>{$tStore('colSessionsActive')}</th>
+              <th>{$tStore('colScoreWith')}</th>
+              <th>{$tStore('colScoreWithout')}</th>
+              <th>{$tStore('colDelta')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each sortedAttribution() as attr}
+              <tr>
+                <td style="color:var(--fg)"><code>{attr.skill_name}</code></td>
+                <td>{attr.sessions_active}</td>
+                <td style="font-family:var(--font-mono)">{attr.avg_score_with.toFixed(3)}</td>
+                <td style="font-family:var(--font-mono)">{attr.avg_score_without.toFixed(3)}</td>
+                <td>
+                  <span class="pill {attr.delta > 0 ? 'success' : attr.delta < 0 ? 'danger' : 'info'}">
+                    {attr.delta > 0 ? '+' : ''}{attr.delta.toFixed(3)}
+                  </span>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {/if}
 
   <!-- Evolution History -->
   <div class="panel" style="margin-bottom:16px;">

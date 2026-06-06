@@ -25,6 +25,15 @@ export default {
   toolStatsTitle: '툴 통계 (상위 5개)', recentActivityTitle: '최근 활동',
   sessionLabel: '세션', callsAvgScore: '호출, 평균 점수', failuresLabel: '실패',
   recentSessionNone: '최근 세션 없음', failuresSub: 'recent_sessions 합산',
+  // R1: Dimension labels
+  dimToolSuccess: '도구 성공', dimOutputQuality: '출력 품질', dimExecCost: '실행 비용',
+  // R2: Failure categories
+  failureCategoriesTitle: '실패 카테고리',
+  // R3: Skill attribution
+  skillAttributionTitle: '스킬 기여도',
+  colSkillName: '스킬', colSessionsActive: '세션', colScoreWith: '적용 시', colScoreWithout: '미적용 시', colDelta: '차이',
+  // R4: Agent events
+  agentEventLog: '이벤트 로그', colEventType: '이벤트', colTimestamp: '시간', noEvents: '이벤트 없음',
   pageAgents: '내부 에이전트',
   pageAgentsLive: '라이브 에이전트',
   pageAgentsLiveDesc: '활성 코딩 툴 오케스트레이션에서 실시간 에이전트 스폰 현황',

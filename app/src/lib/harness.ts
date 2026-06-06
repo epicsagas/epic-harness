@@ -44,6 +44,14 @@ export interface ScoreHistoryEntry {
   dimension_averages?: Record<string, number>;
 }
 
+export interface SkillAttribution {
+  skill_name: string;
+  sessions_active: number;
+  avg_score_with: number;
+  avg_score_without: number;
+  first_seen: string;
+}
+
 export interface HarnessMetrics {
   total_sessions: number;
   avg_success_rate: number;
@@ -52,7 +60,7 @@ export interface HarnessMetrics {
   score_history: ScoreHistoryEntry[];
   stagnation_count?: number;
   trend?: string;
-  skill_attribution?: Record<string, unknown>;
+  skill_attribution?: Record<string, SkillAttribution>;
   // derived by getHarnessMetrics()
   session_count: number;
   avg_score: number;
@@ -109,11 +117,17 @@ export interface ActiveAgent {
   timestamp: string;
 }
 
+export interface FailureCategory {
+  category: string;
+  count: number;
+}
+
 export interface ObsSummary {
   recent_sessions: SessionSummary[];
   tool_stats: ToolStat[];
   total_tool_calls: number;
   avg_score: number;
+  failure_categories: FailureCategory[];
   active_agents: ActiveAgent[];
 }
 
@@ -142,6 +156,12 @@ export interface OrchAgentStatus {
   progress: number;
   last_heartbeat: string;
   status: string;
+}
+
+export interface AgentEvent {
+  timestamp: string;
+  event_type: string;
+  data: Record<string, unknown>;
 }
 
 export interface GraphNode {
@@ -237,6 +257,16 @@ export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchA
 export async function dismissAgent(agentId: string): Promise<{ ok: boolean }> {
   const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' });
   return res.json();
+}
+
+export async function getAgentEvents(agentId: string): Promise<AgentEvent[]> {
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/events`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
 }
 
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────

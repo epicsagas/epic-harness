@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
-  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent } from '../lib/harness.js';
-  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
+  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent, getAgentEvents } from '../lib/harness.js';
+  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus, AgentEvent } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
 
@@ -11,6 +11,8 @@
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let expandedAgent = $state<string | null>(null);
+  let agentEvents = $state<Map<string, AgentEvent[]>>(new Map());
 
   async function load() {
     try {
@@ -49,6 +51,15 @@
     }, 5000);
     return () => clearInterval(id);
   });
+
+  async function toggleEvents(agentId: string) {
+    if (expandedAgent === agentId) { expandedAgent = null; return; }
+    expandedAgent = agentId;
+    if (!agentEvents.has(agentId)) {
+      const evts = await getAgentEvents(agentId);
+      agentEvents.set(agentId, evts);
+    }
+  }
 
   function statusPillClass(status: string): string {
     switch (status) {
@@ -217,6 +228,32 @@
                 {#each agent.satisfies as req}
                   <span class="pill info" style="font-size:10px;margin-right:4px;">{req}</span>
                 {/each}
+              </div>
+            {/if}
+            <!-- R4: Event log toggle -->
+            <button
+              onclick={() => toggleEvents(agent.id)}
+              style="margin-top:8px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;color:var(--muted);font-size:11px;cursor:pointer;width:100%;"
+            >
+              {$tStore('agentEventLog')} {expandedAgent === agent.id ? '▲' : '▼'}
+            </button>
+            {#if expandedAgent === agent.id}
+              <div style="margin-top:6px;max-height:150px;overflow-y:auto;font-size:11px;">
+                {#if agentEvents.get(agent.id)?.length}
+                  <table class="data-table" style="font-size:10px;">
+                    <thead><tr><th>{$tStore('colTimestamp')}</th><th>{$tStore('colEventType')}</th></tr></thead>
+                    <tbody>
+                      {#each agentEvents.get(agent.id) ?? [] as evt}
+                        <tr>
+                          <td style="font-family:var(--font-mono);color:var(--muted);">{evt.timestamp.slice(11, 19)}</td>
+                          <td><code>{evt.event_type}</code></td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                {:else}
+                  <div style="color:var(--muted);text-align:center;padding:8px;">{$tStore('noEvents')}</div>
+                {/if}
               </div>
             {/if}
           </div>
