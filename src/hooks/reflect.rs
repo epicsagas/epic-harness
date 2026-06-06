@@ -1002,10 +1002,7 @@ pub fn run(_input: &HookInput) -> i32 {
         }
     }
 
-    // 11.6. Orbit evolve gap — patch pipelines that completed ship but missed evolve
-    // (happens when CI wait causes session timeout before orbit can chain to evolve).
-    // reflect already performs the evolve analysis above, so retroactively marking
-    // these pipelines closes the gap without duplicating work.
+    // 11.6. Orbit evolve gap — retroactively close ship-but-no-evolve pipelines
     let evolve_patched = patch_orbit_evolve_gap(&orbit_dir(), &now_iso());
     if evolve_patched > 0 {
         hint(
@@ -1287,6 +1284,8 @@ fn patch_orbit_evolve_gap(orbit_dir: &std::path::Path, now: &str) -> usize {
         let has_ship = history
             .iter()
             .any(|e| e["phase"] == "ship" && e["status"] == "complete");
+        // Any evolve entry (including failed) blocks patching: if evolve ran and
+        // failed, patching it complete would misrepresent history.
         let has_evolve = history.iter().any(|e| e["phase"] == "evolve");
 
         if !has_ship || has_evolve {
@@ -1308,8 +1307,11 @@ fn patch_orbit_evolve_gap(orbit_dir: &std::path::Path, now: &str) -> usize {
         }
 
         if let Ok(updated) = serde_json::to_string_pretty(&pipeline) {
-            if fs::write(&path, updated).is_ok() {
+            let tmp = path.with_extension("json.tmp");
+            if fs::write(&tmp, updated).is_ok() && fs::rename(&tmp, &path).is_ok() {
                 patched += 1;
+            } else {
+                let _ = fs::remove_file(&tmp);
             }
         }
     }
@@ -1494,5 +1496,34 @@ mod tests {
 
         let patched = patch_orbit_evolve_gap(dir.path(), "2026-01-01T00:01:00Z");
         assert_eq!(patched, 0, "in-progress pipeline must not be patched");
+    }
+
+    #[test]
+    fn patch_orbit_evolve_gap_patches_shipped_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let pipeline = serde_json::json!({
+            "id": "test-pipeline-4",
+            "status": "shipped",
+            "phase_history": [
+                {"phase": "ship", "status": "complete", "at": "2026-01-01T00:00:00Z"},
+                {"phase": "complete", "status": "complete", "at": "2026-01-01T00:01:00Z"}
+            ]
+        });
+        let path = dir.path().join("PIPELINE-test4.json");
+        fs::write(&path, serde_json::to_string_pretty(&pipeline).unwrap()).unwrap();
+
+        let patched = patch_orbit_evolve_gap(dir.path(), "2026-01-01T00:02:00Z");
+        assert_eq!(patched, 1, "shipped status must be patched like complete");
+
+        let updated: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(
+            updated["phase_history"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|e| e["phase"] == "evolve"),
+            "evolve entry should be present for shipped pipeline"
+        );
     }
 }
