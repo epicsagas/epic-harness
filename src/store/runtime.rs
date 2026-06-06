@@ -7,13 +7,17 @@
 use std::future::Future;
 use std::sync::LazyLock;
 
+use crate::config::CONFIG;
+
 /// Global tokio runtime shared by all sync callers.
 ///
-/// Initialized once on first use. Two worker threads are sufficient for
-/// SQLite I/O (which is the only async work in this codebase).
+/// Initialized once on first use. Worker threads are set to
+/// `min(max_connections + 2, 16)` to prevent excessive thread creation
+/// when `max_connections` is set to a high value.
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    let workers = ((CONFIG.db.max_connections + 2) as usize).min(16);
     tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(workers)
         .enable_io()
         .enable_time()
         .build()

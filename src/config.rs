@@ -326,6 +326,10 @@ fn load_config() -> HarnessConfig {
                 HarnessConfig::default()
             });
             validate_config(&mut cfg);
+
+            apply_env_overrides(&mut cfg);
+            auto_correct_driver_from_url(&mut cfg);
+
             cfg
         }
         Err(e) => {
@@ -337,6 +341,44 @@ fn load_config() -> HarnessConfig {
             HarnessConfig::default()
         }
     }
+}
+
+/// Apply environment variable overrides to database URLs.
+/// HARNESS_DB_URL overrides `db.harness_url`, HARNESS_MEM_URL overrides `db.memory_url`.
+fn apply_env_overrides(cfg: &mut HarnessConfig) {
+    apply_url_overrides(
+        cfg,
+        std::env::var("HARNESS_DB_URL").ok(),
+        std::env::var("HARNESS_MEM_URL").ok(),
+    );
+}
+
+/// Apply URL overrides from explicit values (testable without env vars).
+fn apply_url_overrides(cfg: &mut HarnessConfig, db_url: Option<String>, mem_url: Option<String>) {
+    if let Some(url) = db_url {
+        cfg.db.harness_url = url;
+    }
+    if let Some(url) = mem_url {
+        cfg.db.memory_url = url;
+    }
+}
+
+/// Auto-correct `db.driver` to match the URL scheme after env var overrides.
+fn auto_correct_driver_from_url(cfg: &mut HarnessConfig) {
+    let url = &cfg.db.harness_url;
+    if url.is_empty() {
+        return;
+    }
+    let detected_driver = if url.starts_with("postgres:") || url.starts_with("postgresql:") {
+        "postgres"
+    } else if url.starts_with("mysql:") {
+        "mysql"
+    } else if url.starts_with("sqlite:") {
+        "sqlite"
+    } else {
+        return;
+    };
+    cfg.db.driver = detected_driver.to_string();
 }
 
 // ── Validation ───────────────────────────────────────
@@ -579,10 +621,12 @@ driver = "sqlite"
 # SQLite: empty = default path (~/.harness/harness.db)
 # PostgreSQL: postgres://user:pass@host:5432/dbname?sslmode=require
 # MySQL: mysql://user:pass@host:3306/dbname
+# Override: HARNESS_DB_URL env var takes precedence over this value.
 harness_url = ""
 
 # Connection URL for memory.db (knowledge graph).
 # Same URL format as harness_url.
+# Override: HARNESS_MEM_URL env var takes precedence over this value.
 memory_url = ""
 
 # Maximum number of connections per pool.
@@ -899,5 +943,44 @@ max_docs = 5
         };
         validate_config(&mut c);
         assert_eq!(c.db.driver, "postgres"); // unchanged
+    }
+
+    #[test]
+    fn apply_url_overrides_sets_values() {
+        let mut cfg = HarnessConfig::default();
+        cfg.db.harness_url = String::new();
+        cfg.db.memory_url = String::new();
+
+        apply_url_overrides(
+            &mut cfg,
+            Some("postgres://testhost/db".into()),
+            Some("postgres://testhost/mem".into()),
+        );
+
+        assert_eq!(cfg.db.harness_url, "postgres://testhost/db");
+        assert_eq!(cfg.db.memory_url, "postgres://testhost/mem");
+    }
+
+    #[test]
+    fn apply_url_overrides_preserves_existing_when_none() {
+        let mut cfg = HarnessConfig::default();
+        cfg.db.harness_url = "sqlite:test.db".to_string();
+        cfg.db.memory_url = "sqlite:mem.db".to_string();
+
+        apply_url_overrides(&mut cfg, None, None);
+
+        assert_eq!(cfg.db.harness_url, "sqlite:test.db");
+        assert_eq!(cfg.db.memory_url, "sqlite:mem.db");
+    }
+
+    #[test]
+    fn auto_correct_driver_matches_url_scheme() {
+        let mut cfg = HarnessConfig::default();
+        cfg.db.driver = "sqlite".to_string();
+        cfg.db.harness_url = "postgres://testhost/db".to_string();
+
+        auto_correct_driver_from_url(&mut cfg);
+
+        assert_eq!(cfg.db.driver, "postgres");
     }
 }

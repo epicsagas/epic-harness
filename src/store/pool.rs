@@ -3,7 +3,7 @@
 //! Creates lazily-initialized `AnyPool` instances for `harness.db` and `memory.db`.
 //! Supports SQLite (default), PostgreSQL, and MySQL via URL scheme detection.
 //!
-//! Each pool is stored in a `TokioMutex<Option<(url, pool)>>` — on every call the
+//! Each pool is stored in a `RwLock<Option<(url, pool)>>` — on every call the
 //! resolved URL is compared to the cached URL; if they differ the old pool is closed
 //! and a new one is opened.  This allows integration tests to redirect pool paths via
 //! `HARNESS_ROOT` without leaking state across tests.
@@ -16,9 +16,21 @@ use std::path::PathBuf;
 
 use sqlx::AnyPool;
 use sqlx::any::AnyPoolOptions;
+use std::sync::OnceLock;
 
 use crate::config::CONFIG;
 use crate::shared::paths;
+
+// ── Driver registration (once) ────────────────────────
+
+static DRIVERS_INSTALLED: OnceLock<()> = OnceLock::new();
+
+/// Ensure compiled-in sqlx drivers are registered. Runs once; subsequent calls are no-ops.
+fn ensure_drivers() {
+    DRIVERS_INSTALLED.get_or_init(|| {
+        sqlx::any::install_default_drivers();
+    });
+}
 
 // ── Database type detection ───────────────────────────
 
@@ -43,7 +55,8 @@ impl DbType {
             Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "unsupported database URL scheme (expected sqlite:, postgres:, or mysql:): {url}"
+                    "unsupported database URL scheme (expected sqlite:, postgres:, or mysql:): {}",
+                    mask_url(url)
                 ),
             ))
         }
@@ -65,12 +78,30 @@ fn default_harness_db_path() -> PathBuf {
     paths::global_harness_db_path()
 }
 
-fn default_memory_db_path() -> PathBuf {
-    // Honour HARNESS_ROOT if set (used by integration tests to redirect to a temp dir).
-    if let Ok(root) = std::env::var("HARNESS_ROOT") {
-        return PathBuf::from(root).join(".harness").join("memory.db");
+// ── Credential masking ─────────────────────────────────
+
+/// Strip password from a connection URL for safe error messages.
+/// `postgres://user:secret@host/db` → `postgres://user:***@host/db`
+fn mask_url(url: &str) -> String {
+    match url.parse::<url::Url>() {
+        Ok(mut u) => {
+            if u.password().is_some() {
+                let _ = u.set_password(Some("***"));
+            }
+            u.to_string()
+        }
+        Err(_) => "<invalid-url>".into(),
     }
-    paths::dirs_home().join(".harness").join("memory.db")
+}
+
+fn default_memory_db_path() -> PathBuf {
+    // Must check env var on every call — integration tests change HARNESS_ROOT
+    // between tests within the same process.
+    if let Ok(root) = std::env::var("HARNESS_ROOT") {
+        PathBuf::from(root).join(".harness").join("memory.db")
+    } else {
+        paths::dirs_home().join(".harness").join("memory.db")
+    }
 }
 
 // ── Pool construction ──────────────────────────────────
@@ -103,9 +134,7 @@ fn memory_url() -> String {
 /// - `postgres:` — TLS required for non-local connections
 /// - `mysql:` — TLS required for non-local connections
 async fn build_pool(url: &str, max_connections: u32) -> io::Result<AnyPool> {
-    // Ensure compiled-in drivers are registered for AnyPool.
-    // Idempotent — safe to call on every build_pool invocation.
-    sqlx::any::install_default_drivers();
+    ensure_drivers();
 
     let db_type = DbType::from_url(url)?;
 
@@ -166,8 +195,13 @@ async fn build_sqlite_pool(url: &str, max_connections: u32) -> io::Result<AnyPoo
 }
 
 /// Build a PostgreSQL pool with TLS enforced per `CONFIG.db.tls_mode`.
+///
+/// For remote hosts (non-localhost), if `tls_mode` is `"prefer"`, it is
+/// upgraded to `"require"` to prevent silent fallback to plaintext.
 async fn build_postgres_pool(url: &str, max_connections: u32) -> io::Result<AnyPool> {
-    let url = apply_tls_param(url, "sslmode", &CONFIG.db.tls_mode)?;
+    let tls_mode = effective_tls_mode(url, &CONFIG.db.tls_mode);
+    let url = apply_tls_param(url, "sslmode", &tls_mode)?;
+    let masked = mask_url(&url);
     let pool = AnyPoolOptions::new()
         .max_connections(max_connections)
         .connect(&url)
@@ -175,7 +209,7 @@ async fn build_postgres_pool(url: &str, max_connections: u32) -> io::Result<AnyP
         .map_err(|e| {
             io::Error::new(
                 io::ErrorKind::ConnectionRefused,
-                format!("PostgreSQL connection failed: {e}"),
+                format!("PostgreSQL connection failed ({masked}): {e}"),
             )
         })?;
 
@@ -191,6 +225,31 @@ async fn build_mysql_pool(_url: &str, _max_connections: u32) -> io::Result<AnyPo
         "MySQL driver is not yet supported — use 'sqlite' (default) or 'postgres'. \
          MySQL support will be added in a future release.",
     ))
+}
+
+/// Determine effective TLS mode. For remote (non-local) hosts,
+/// `"prefer"` is upgraded to `"require"` to prevent MITM attacks.
+fn effective_tls_mode(url: &str, configured: &str) -> String {
+    if configured != "prefer" {
+        return configured.to_string();
+    }
+    // Check if host is local
+    match url.parse::<url::Url>() {
+        Ok(u) => {
+            let host = u.host_str().unwrap_or("");
+            if host == "localhost"
+                || host == "127.0.0.1"
+                || host == "::1"
+                || host == "[::1]"
+                || host.starts_with('/')
+            {
+                "prefer".into()
+            } else {
+                "require".into()
+            }
+        }
+        Err(_) => "require".into(),
+    }
 }
 
 /// Inject or replace a TLS query parameter in the connection URL.
@@ -249,54 +308,116 @@ fn apply_tls_param(url: &str, param: &str, tls_mode: &str) -> io::Result<String>
 
 // ── Global pool singletons ─────────────────────────────
 //
-// In production (and in unit tests within the library crate), `HARNESS_ROOT` is
-// fixed for the lifetime of the process, so `OnceCell` is the right primitive.
-//
-// Integration tests (`tests/`) set `HARNESS_ROOT` to a fresh temp dir before each
-// test.  To support that pattern without forcing every integration test to call into
-// async pool machinery directly, each pool is stored as
-// `Mutex<Option<(url, pool)>>`.  On every call we check whether the resolved URL
-// still matches the cached URL; if not, the old pool is closed and a new one is
-// opened.  The mutex guarantees that concurrent async callers never see a torn
-// state.
+// Uses `std::sync::RwLock` for double-checked locking:
+// - Fast path: read lock for concurrent pool access (no contention)
+// - Slow path: write lock only on first call or URL change
+// This avoids holding an async mutex across schema initialization.
 
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::RwLock;
 
-static HARNESS_POOL: TokioMutex<Option<(String, AnyPool)>> = TokioMutex::const_new(None);
-static MEMORY_POOL: TokioMutex<Option<(String, AnyPool)>> = TokioMutex::const_new(None);
+static HARNESS_POOL: RwLock<Option<(String, AnyPool)>> = RwLock::new(None);
+static MEMORY_POOL: RwLock<Option<(String, AnyPool)>> = RwLock::new(None);
+
+/// Recover from a poisoned RwLock — the pool data is still valid even if a
+/// previous holder panicked. This is essential for integration tests that
+/// share the same process and statics.
+fn recover_read(
+    lock: &RwLock<Option<(String, AnyPool)>>,
+) -> std::sync::RwLockReadGuard<'_, Option<(String, AnyPool)>> {
+    lock.read().unwrap_or_else(|e| e.into_inner())
+}
+fn recover_write(
+    lock: &RwLock<Option<(String, AnyPool)>>,
+) -> std::sync::RwLockWriteGuard<'_, Option<(String, AnyPool)>> {
+    lock.write().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Returns a shared `AnyPool` for `harness.db`.
 ///
-/// Creates the pool on first call; subsequent calls return the same instance.
-/// Uses `CONFIG.db` for URL and max_connections.
+/// Uses a read lock for the fast path (already initialized); a write lock is
+/// acquired only on first call or when the resolved URL changes.
+/// The lock is dropped before any `.await` to satisfy clippy's
+/// `await_holding_lock` lint.
 pub async fn harness_pool() -> io::Result<AnyPool> {
     let url = harness_url();
-    let mut guard = HARNESS_POOL.lock().await;
-    if guard.as_ref().map(|(u, _)| u == &url).unwrap_or(false) {
-        return Ok(guard.as_ref().unwrap().1.clone());
+    // Fast path: read lock — no contention for concurrent readers.
+    {
+        let guard = recover_read(&HARNESS_POOL);
+        if let Some((cached_url, pool)) = guard.as_ref() {
+            if cached_url == &url {
+                return Ok(pool.clone());
+            }
+        }
     }
-    // URL changed (or first call) — close old pool and open a new one.
-    if let Some((_, old)) = guard.take() {
+    // Slow path: take old pool under write lock, then drop before async work.
+    let old_pool = {
+        let mut guard = recover_write(&HARNESS_POOL);
+        // Double-check after acquiring write lock.
+        if let Some((cached_url, pool)) = guard.as_ref() {
+            if cached_url == &url {
+                return Ok(pool.clone());
+            }
+        }
+        guard.take() // Take old pool; slot becomes None.
+    }; // Write lock dropped here.
+
+    // Async work — no lock held.
+    if let Some((_, old)) = old_pool {
         old.close().await;
     }
     let pool = build_pool(&url, CONFIG.db.max_connections).await?;
     super::schema::init_schema_pool(&pool).await?;
-    *guard = Some((url, pool.clone()));
+
+    // Re-acquire write lock to store the new pool.
+    let duplicate = {
+        let mut guard = recover_write(&HARNESS_POOL);
+        // Another writer may have stored a pool while we were working.
+        if let Some((cached_url, existing)) = guard.as_ref() {
+            if cached_url == &url {
+                Some(existing.clone())
+            } else {
+                *guard = Some((url.clone(), pool.clone()));
+                None
+            }
+        } else {
+            *guard = Some((url.clone(), pool.clone()));
+            None
+        }
+    }; // Write lock dropped here.
+    if let Some(existing) = duplicate {
+        pool.close().await;
+        return Ok(existing);
+    }
     Ok(pool)
 }
 
 /// Returns a shared `AnyPool` for `memory.db`.
 ///
-/// Creates the pool on first call; subsequent calls return the same instance.
-/// Initializes the memory schema (nodes, edges, FTS5) on first creation.
+/// Same lock-drop-await pattern as `harness_pool()`.
 pub async fn memory_pool() -> io::Result<AnyPool> {
     let url = memory_url();
-    let mut guard = MEMORY_POOL.lock().await;
-    if guard.as_ref().map(|(u, _)| u == &url).unwrap_or(false) {
-        return Ok(guard.as_ref().unwrap().1.clone());
+    // Fast path: read lock.
+    {
+        let guard = recover_read(&MEMORY_POOL);
+        if let Some((cached_url, pool)) = guard.as_ref() {
+            if cached_url == &url {
+                return Ok(pool.clone());
+            }
+        }
     }
-    // URL changed (or first call) — close old pool and open a new one.
-    if let Some((_, old)) = guard.take() {
+    // Slow path: take old pool under write lock, then drop before async work.
+    let old_pool = {
+        let mut guard = recover_write(&MEMORY_POOL);
+        if let Some((cached_url, pool)) = guard.as_ref() {
+            if cached_url == &url {
+                return Ok(pool.clone());
+            }
+        }
+        guard.take()
+    }; // Write lock dropped here.
+
+    // Async work — no lock held.
+    if let Some((_, old)) = old_pool {
         old.close().await;
     }
     let pool = build_pool(&url, CONFIG.db.max_connections).await?;
@@ -305,17 +426,44 @@ pub async fn memory_pool() -> io::Result<AnyPool> {
     if db_type == DbType::Sqlite {
         crate::mem::store::auto_migrate_legacy(&pool).await;
     }
-    *guard = Some((url, pool.clone()));
+
+    // Re-acquire write lock to store the new pool.
+    let duplicate = {
+        let mut guard = recover_write(&MEMORY_POOL);
+        if let Some((cached_url, existing)) = guard.as_ref() {
+            if cached_url == &url {
+                Some(existing.clone())
+            } else {
+                *guard = Some((url, pool.clone()));
+                None
+            }
+        } else {
+            *guard = Some((url, pool.clone()));
+            None
+        }
+    }; // Write lock dropped here.
+    if let Some(existing) = duplicate {
+        pool.close().await;
+        return Ok(existing);
+    }
     Ok(pool)
 }
 
 /// Gracefully close all pools. Call on process shutdown to flush WAL.
-#[allow(dead_code)]
 pub async fn shutdown() {
-    if let Some((_, pool)) = HARNESS_POOL.lock().await.take() {
+    // Take pools under write lock, drop lock, then close.
+    let harness = {
+        let mut guard = recover_write(&HARNESS_POOL);
+        guard.take()
+    }; // Write lock dropped here, before .await
+    if let Some((_, pool)) = harness {
         pool.close().await;
     }
-    if let Some((_, pool)) = MEMORY_POOL.lock().await.take() {
+    let memory = {
+        let mut guard = recover_write(&MEMORY_POOL);
+        guard.take()
+    }; // Write lock dropped here, before .await
+    if let Some((_, pool)) = memory {
         pool.close().await;
     }
 }
@@ -334,7 +482,7 @@ pub fn memory_db_type() -> DbType {
 /// Each call creates a fresh pool (no singleton reuse).
 #[cfg(test)]
 pub async fn test_memory_pool() -> AnyPool {
-    sqlx::any::install_default_drivers();
+    ensure_drivers();
     AnyPoolOptions::new()
         .max_connections(1)
         .connect("sqlite::memory:")
@@ -410,5 +558,88 @@ mod tests {
             let mode = fs::metadata(&db_path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
+    }
+
+    #[test]
+    fn mask_url_hides_password() {
+        assert_eq!(
+            mask_url("postgres://user:secret@db.example.com/mydb"),
+            "postgres://user:***@db.example.com/mydb"
+        );
+    }
+
+    #[test]
+    fn mask_url_no_password() {
+        assert_eq!(
+            mask_url("postgres://user@localhost/mydb"),
+            "postgres://user@localhost/mydb"
+        );
+    }
+
+    #[test]
+    fn mask_url_invalid() {
+        assert_eq!(mask_url("not a url"), "<invalid-url>");
+    }
+
+    #[test]
+    fn mask_url_sqlite() {
+        // SQLite URLs have no credentials — should pass through unchanged
+        assert_eq!(
+            mask_url("sqlite:/path/to/db.sqlite"),
+            "sqlite:/path/to/db.sqlite"
+        );
+    }
+
+    #[test]
+    fn tls_mode_prefer_upgrades_for_remote() {
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@db.example.com/mydb", "prefer"),
+            "require"
+        );
+    }
+
+    #[test]
+    fn tls_mode_prefer_keeps_for_localhost() {
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@localhost/mydb", "prefer"),
+            "prefer"
+        );
+    }
+
+    #[test]
+    fn tls_mode_prefer_keeps_for_127() {
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@127.0.0.1/mydb", "prefer"),
+            "prefer"
+        );
+    }
+
+    #[test]
+    fn tls_mode_prefer_keeps_for_ipv6_loopback() {
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@[::1]/mydb", "prefer"),
+            "prefer"
+        );
+    }
+
+    #[test]
+    fn tls_mode_require_stays() {
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@localhost/mydb", "require"),
+            "require"
+        );
+    }
+
+    #[test]
+    fn tls_mode_disable_stays() {
+        assert_eq!(
+            effective_tls_mode("postgres://u:p@localhost/mydb", "disable"),
+            "disable"
+        );
+    }
+
+    #[test]
+    fn tls_mode_invalid_url_defaults_require() {
+        assert_eq!(effective_tls_mode("not a url", "prefer"), "require");
     }
 }
