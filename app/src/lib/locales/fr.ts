@@ -172,4 +172,6 @@ export default {
   colUpdated: 'Updated', noSearchResults: 'No results found', noNodes: 'No memory nodes',
   showingFirst50: (n: number) => `Showing first 50 of ${n}`,
   agentInboxTitle: 'Inbox',
+  allProjects: 'Tous les projets',
+  selectProject: 'Sélectionner un projet',
 } as const;

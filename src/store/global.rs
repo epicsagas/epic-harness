@@ -59,7 +59,6 @@ pub async fn query_patterns_excluding_pool(
     query_patterns_pool_inner(pool, Some(exclude_project), limit).await
 }
 
-#[cfg(test)]
 pub async fn query_all_patterns_pool(
     pool: &AnyPool,
     limit: i64,

@@ -60,9 +60,11 @@
   }
 
   import { onMount } from 'svelte';
+  import { loadProjects } from '$lib/stores/project.js';
   onMount(() => {
     window.addEventListener('popstate', onPopState);
     currentScreen = screenFromPath();
+    loadProjects();
     return () => window.removeEventListener('popstate', onPopState);
   });
 

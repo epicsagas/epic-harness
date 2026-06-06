@@ -1,4 +1,6 @@
 // Tauri invoke bridge with browser fallback for non-Tauri environments
+import { get } from 'svelte/store';
+import { selectedProject } from '$lib/stores/project.js';
 
 type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -250,7 +252,7 @@ export interface MemoryNode {
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export async function getHarnessMetrics(): Promise<HarnessMetrics> {
-  const raw = await invoke<HarnessMetrics>('get_harness_metrics');
+  const raw = await invoke<HarnessMetrics>('get_harness_metrics', projectArgs());
   if (!raw) throw new Error('metrics.json not found');
 
   // Derive avg_score from score_history
@@ -281,12 +283,12 @@ export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }>
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();
 }
-export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills');
-export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary');
+export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills', projectArgs());
+export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary', projectArgs());
 export const getGraph = () => invoke<GraphData>('get_graph');
 export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integration_status');
-export const getSessionSnapshots = () => invoke<SessionSnapshotData[]>('get_session_snapshots');
-export const getGlobalPatterns = () => invoke<GlobalPattern[]>('get_global_patterns');
+export const getSessionSnapshots = () => invoke<SessionSnapshotData[]>('get_session_snapshots', projectArgs());
+export const getGlobalPatterns = () => invoke<GlobalPattern[]>('get_global_patterns', projectArgs());
 
 // ── Orchestration API ──────────────────────────────────────────────────────
 
@@ -380,13 +382,22 @@ export async function searchMemory(query: string): Promise<MemoryNode[]> {
 
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
-async function browserFallback(cmd: string, _args?: Record<string, unknown>): Promise<unknown> {
+/** Build project args from the store. `__all__` means aggregate → omit from request. */
+function projectArgs(): Record<string, unknown> | undefined {
+  const p = get(selectedProject);
+  return p && p !== '__all__' ? { project: p } : undefined;
+}
+
+async function browserFallback(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   // In Vite dev, the harnessApiPlugin middleware serves real harness data at /api/harness.
   // Attempt it first; fall through to static mock only on network error or missing data.
   // The middleware is configured in vite.config.ts and only applies during `vite dev` (apply: 'serve').
   if (typeof window !== 'undefined') {
     try {
-      const res = await fetch(`/api/harness?cmd=${encodeURIComponent(cmd)}`);
+      const project = args?.project as string | undefined;
+      let url = `/api/harness?cmd=${encodeURIComponent(cmd)}`;
+      if (project) url += `&project=${encodeURIComponent(project)}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data: unknown = await res.json();
         if (data !== null && data !== undefined && !(data as Record<string, unknown>).error) return data;
