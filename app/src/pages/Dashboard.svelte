@@ -67,6 +67,11 @@
     return v.toFixed(3);
   }
 
+  function dateOnly(ts: string | null | undefined): string {
+    if (!ts) return '—';
+    return ts.slice(0, 10);
+  }
+
   function trendPillClass(trend: string): string {
     if (trend === 'improving') return 'success';
     if (trend === 'declining') return 'danger';
@@ -174,6 +179,16 @@
     {/if}
     <div class="stat-sub">{$tStore('statStagnationSub')}</div>
   </div>
+  <!-- Best Score (R2) -->
+  {#if metrics?.best_score != null}
+    <div class="stat-card">
+      <div class="stat-label"><span class="dot" style="background:var(--teal)"></span> {$tStore('statBestScore')}</div>
+      <div class="stat-value">{fmtScore(metrics.best_score)}</div>
+      {#if metrics.best_session}
+        <div class="stat-sub" style="font-family:var(--font-mono);font-size:10px;">{dateOnly(metrics.best_session)}</div>
+      {/if}
+    </div>
+  {/if}
   <!-- Total Calls -->
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--purple)"></span> {$tStore('statTotalCalls')}</div>

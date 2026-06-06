@@ -172,4 +172,17 @@ export default {
   labelVersion: 'Version', dangerZoneTitle: 'Danger Zone',
   resetEvolutionLabel: 'Reset Evolution', resetEvolutionDesc: 'Removes all evolved skills',
   clearMetricsLabel: 'Clear Metrics', clearMetricsDesc: 'Resets score history',
+  // R2-R8 new keys
+  statBestScore: 'Best Score',
+  labelLastErrorContext: 'Last Error Context',
+  sessionSnapshotsTitle: 'Session Snapshots',
+  colType: 'Type', colSummary: 'Summary', colContextUsage: 'Context %',
+  globalPatternsTitle: 'Cross-Project Patterns',
+  colProject: 'Project', colWeakTools: 'Weak Tools',
+  statTotalNodes: 'Total Nodes', statTotalEdges: 'Total Edges', statAvgImportance: 'Avg Importance',
+  memorySearchTitle: 'Memory Nodes', memorySearchPlaceholder: 'Search nodes…',
+  searchButton: 'Search', colTitle: 'Title', colImportance: 'Importance',
+  colUpdated: 'Updated', noSearchResults: 'No results found', noNodes: 'No memory nodes',
+  showingFirst50: (n: number) => `Showing first 50 of ${n}`,
+  agentInboxTitle: 'Inbox',
 } as const;

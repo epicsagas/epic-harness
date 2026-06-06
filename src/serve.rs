@@ -152,6 +152,13 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 handle_agent_events(pool.as_ref(), agent_id, port)
             }
 
+            (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/inbox") => {
+                let agent_id = url
+                    .trim_start_matches("/api/agents/")
+                    .trim_end_matches("/inbox");
+                handle_agent_inbox(pool.as_ref(), agent_id, port)
+            }
+
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
                 let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
                 handle_agent_dismiss(pool.as_ref(), agent_id, &harness_dir, port)
@@ -435,6 +442,21 @@ fn handle_agent_events(
     json_response(&body, port)
 }
 
+fn handle_agent_inbox(
+    pool: Option<&sqlx::AnyPool>,
+    agent_id: &str,
+    port: u16,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    let body = try_pool(pool, |p| {
+        let msgs = crate::store::runtime::block_on(
+            crate::store::orchestrator::query_agent_inbox_pool(p, agent_id, 50),
+        )?;
+        Ok(serde_json::to_string(&msgs)?)
+    })
+    .unwrap_or_else(|| "[]".into());
+    json_response(&body, port)
+}
+
 fn handle_agent_dismiss(
     pool: Option<&sqlx::AnyPool>,
     agent_id: &str,
@@ -577,6 +599,8 @@ fn handle_harness_cmd(pool: Option<&sqlx::AnyPool>, cmd: &str) -> String {
         "get_evolved_skills" => cmd_get_evolved_skills(pool),
         "get_obs_summary" => cmd_get_obs_summary(pool),
         "get_orbit_pipelines" => cmd_get_orbit_pipelines(pool),
+        "get_session_snapshots" => cmd_get_session_snapshots(pool),
+        "get_global_patterns" => cmd_get_global_patterns(pool),
         "get_integration_status" => cmd_get_integration_status(),
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
@@ -604,8 +628,13 @@ fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>) -> String {
                 .map(|s| {
                     serde_json::json!({
                         "name": s.name,
+                        "origin": s.origin,
+                        "confidence": s.confidence,
+                        "project": s.project,
+                        "active": s.active,
                         "skill_md": s.skill_md,
-                        "created_at": s.created
+                        "created_at": s.created,
+                        "updated_at": s.updated,
                     })
                 })
                 .collect::<Vec<_>>();
@@ -732,6 +761,29 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>) -> String {
         })
         .to_string()
     })
+}
+
+fn cmd_get_session_snapshots(pool: Option<&sqlx::AnyPool>) -> String {
+    try_pool(pool, |p| {
+        let slug = crate::shared::paths::project_slug();
+        let snapshots =
+            crate::store::runtime::block_on(crate::store::sessions::list_recent_snapshots_pool(
+                p, &slug, 10,
+            ))?;
+        Ok(serde_json::to_string(&snapshots)?)
+    })
+    .unwrap_or_else(|| "[]".into())
+}
+
+fn cmd_get_global_patterns(pool: Option<&sqlx::AnyPool>) -> String {
+    try_pool(pool, |p| {
+        let slug = crate::shared::paths::project_slug();
+        let patterns = crate::store::runtime::block_on(
+            crate::store::global::query_patterns_excluding_pool(p, &slug, 20),
+        )?;
+        Ok(serde_json::to_string(&patterns)?)
+    })
+    .unwrap_or_else(|| "[]".into())
 }
 
 fn cmd_get_orbit_pipelines(pool: Option<&sqlx::AnyPool>) -> String {

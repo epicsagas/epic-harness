@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import * as d3 from 'd3';
-  import { getGraph, type GraphData, type GraphNode } from '../lib/harness.js';
+  import { getGraph, getGraphStats, getMemoryNodes, searchMemory, getMemoryNode, type GraphData, type GraphNode, type GraphStats, type MemoryNode } from '../lib/harness.js';
   import { tStore } from '$lib/i18n.js';
 
   let graphData = $state<GraphData>({ nodes: [], edges: [] });
@@ -9,6 +9,16 @@
   let svgEl = $state<SVGSVGElement | undefined>(undefined);
   let loading = $state(true);
   let error = $state('');
+
+  // R6: Graph stats
+  let stats = $state<GraphStats | null>(null);
+
+  // R8: Memory nodes + search
+  let nodes = $state<MemoryNode[]>([]);
+  let searchQuery = $state('');
+  let searchResults = $state<MemoryNode[]>([]);
+  let detailNode = $state<MemoryNode | null>(null);
+  let searching = $state(false);
 
   // node type → color
   const typeColor: Record<string, string> = {
@@ -19,13 +29,38 @@
 
   onMount(async () => {
     try {
-      graphData = await getGraph();
+      const [g, s, n] = await Promise.all([getGraph(), getGraphStats(), getMemoryNodes()]);
+      graphData = g;
+      stats = s;
+      nodes = n;
     } catch (e) {
       error = String(e);
     } finally {
       loading = false;
     }
   });
+
+  async function doSearch() {
+    if (!searchQuery.trim()) { searchResults = []; return; }
+    searching = true;
+    try {
+      searchResults = await searchMemory(searchQuery.trim());
+    } catch {
+      searchResults = [];
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function showDetail(id: string) {
+    try {
+      detailNode = await getMemoryNode(id);
+    } catch {
+      detailNode = null;
+    }
+  }
+
+  const displayNodes = $derived(searchResults.length > 0 ? searchResults : nodes);
 
   type SimNode = GraphNode & d3.SimulationNodeDatum;
 
@@ -121,6 +156,118 @@
     <h1>harness-mem</h1>
     <span class="badge badge-wip">WIP</span>
     <p>SQLite + FTS5 knowledge graph · {graphData.nodes.length} nodes · {graphData.edges.length} edges</p>
+  </div>
+
+  <!-- R6: Graph Stats -->
+  {#if stats}
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
+      <div class="panel">
+        <div class="panel-body" style="text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--purple);font-family:var(--font-mono);">{stats.total_nodes}</div>
+          <div style="font-size:11px;color:var(--fg-secondary);margin-top:4px;">{$tStore('statTotalNodes')}</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-body" style="text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--accent);font-family:var(--font-mono);">{stats.total_edges}</div>
+          <div style="font-size:11px;color:var(--fg-secondary);margin-top:4px;">{$tStore('statTotalEdges')}</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-body" style="text-align:center;">
+          <div style="font-size:28px;font-weight:700;color:var(--success);font-family:var(--font-mono);">{stats.avg_importance.toFixed(2)}</div>
+          <div style="font-size:11px;color:var(--fg-secondary);margin-top:4px;">{$tStore('statAvgImportance')}</div>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  <!-- R8: Search + Node List -->
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-header"><h3>{$tStore('memorySearchTitle')}</h3></div>
+    <div class="panel-body">
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <input
+          type="text"
+          placeholder={$tStore('memorySearchPlaceholder')}
+          bind:value={searchQuery}
+          onkeydown={(e) => { if (e.key === 'Enter') doSearch(); }}
+          style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;color:var(--fg);font-size:13px;outline:none;"
+        />
+        <button
+          onclick={doSearch}
+          disabled={searching}
+          style="padding:6px 16px;border:1px solid var(--accent);border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent);font-size:13px;cursor:pointer;"
+        >{$tStore('searchButton')}</button>
+      </div>
+
+      <!-- Search results or full node list -->
+      {#if displayNodes.length > 0}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>{$tStore('colTitle')}</th>
+              <th>{$tStore('colType')}</th>
+              <th>{$tStore('colTags')}</th>
+              <th style="text-align:right;">{$tStore('colImportance')}</th>
+              <th>{$tStore('colUpdated')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each displayNodes.slice(0, 50) as node}
+              <tr style="cursor:pointer;" onclick={() => showDetail(node.id)}>
+                <td style="color:var(--fg);">{node.title}</td>
+                <td><span class="pill info" style="font-size:10px;">{node.type}</span></td>
+                <td style="font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                  {#if node.tags}{node.tags.join(', ')}{/if}
+                </td>
+                <td style="font-family:var(--font-mono);text-align:right;">{node.importance?.toFixed(2) ?? '—'}</td>
+                <td style="font-family:var(--font-mono);font-size:11px;">{node.updated ? node.updated.slice(0, 10) : '—'}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        {#if displayNodes.length > 50}
+          <div style="text-align:center;font-size:11px;color:var(--muted);padding:8px;">
+            {$tStore('showingFirst50', displayNodes.length)}
+          </div>
+        {/if}
+      {:else if searchQuery.trim()}
+        <div style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">{$tStore('noSearchResults')}</div>
+      {:else}
+        <div style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">{$tStore('noNodes')}</div>
+      {/if}
+
+      <!-- Node detail panel -->
+      {#if detailNode}
+        <div style="margin-top:16px;padding:16px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <h4 style="margin:0;color:var(--fg);">{detailNode.title}</h4>
+            <button onclick={() => detailNode = null}
+              style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:16px;">✕</button>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+            <span class="pill info">{detailNode.type}</span>
+            {#if detailNode.importance != null}
+              <span style="font-size:10px;color:var(--muted);">importance: {detailNode.importance.toFixed(2)}</span>
+            {/if}
+            {#if detailNode.access_count != null}
+              <span style="font-size:10px;color:var(--muted);">accesses: {detailNode.access_count}</span>
+            {/if}
+          </div>
+          {#if detailNode.tags && detailNode.tags.length > 0}
+            <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px;">
+              {#each detailNode.tags as tag}
+                <span class="pill" style="font-size:9px;background:var(--accent-soft);color:var(--accent);">{tag}</span>
+              {/each}
+            </div>
+          {/if}
+          {#if detailNode.body}
+            <div style="font-size:12px;color:var(--fg-secondary);white-space:pre-wrap;line-height:1.6;max-height:300px;overflow-y:auto;">{detailNode.body}</div>
+          {/if}
+        </div>
+      {/if}
+    </div>
   </div>
 
   {#if loading}

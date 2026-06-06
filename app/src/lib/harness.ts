@@ -57,6 +57,9 @@ export interface HarnessMetrics {
   avg_success_rate: number;
   total_evolved_skills: number;
   last_session: string | null;
+  best_score?: number;
+  best_session?: string | null;
+  last_error_context?: string | null;
   score_history: ScoreHistoryEntry[];
   stagnation_count?: number;
   trend?: string;
@@ -83,8 +86,13 @@ export interface OrbitPipeline {
 
 export interface EvolvedSkill {
   name: string;
+  origin: string;
+  confidence: number;
+  project: string;
+  active: boolean;
   skill_md: string;
   created_at: string | null;
+  updated_at: string;
 }
 
 export interface EvolutionData {
@@ -191,6 +199,54 @@ export interface IntegrationStatus {
   version: string | null;
 }
 
+export interface InboxMessage {
+  to: string;
+  from: string;
+  timestamp: string;
+  message: string;
+}
+
+export interface SessionSnapshotData {
+  timestamp: string;
+  type: string;
+  summary: string;
+  pending_tasks: string[];
+  context_usage: number | null;
+  pipeline_state: Record<string, unknown> | null;
+}
+
+export interface GlobalPattern {
+  timestamp: string;
+  project: string;
+  success_rate: number;
+  avg_score: number;
+  per_error_stats: Record<string, unknown>;
+  failure_patterns: string[];
+  weak_tools: string[];
+}
+
+export interface GraphStats {
+  total_nodes: number;
+  total_edges: number;
+  avg_importance: number;
+  by_type: Record<string, number>;
+}
+
+export interface MemoryNode {
+  id: string;
+  type: string;
+  title: string;
+  tags: string[];
+  projects: string;
+  updated: string;
+  // detail fields
+  agents?: string;
+  created?: string;
+  importance?: number;
+  access_count?: number;
+  body?: string;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export async function getHarnessMetrics(): Promise<HarnessMetrics> {
@@ -229,6 +285,8 @@ export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills'
 export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary');
 export const getGraph = () => invoke<GraphData>('get_graph');
 export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integration_status');
+export const getSessionSnapshots = () => invoke<SessionSnapshotData[]>('get_session_snapshots');
+export const getGlobalPatterns = () => invoke<GlobalPattern[]>('get_global_patterns');
 
 // ── Orchestration API ──────────────────────────────────────────────────────
 
@@ -262,6 +320,57 @@ export async function dismissAgent(agentId: string): Promise<{ ok: boolean }> {
 export async function getAgentEvents(agentId: string): Promise<AgentEvent[]> {
   try {
     const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/events`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getAgentInbox(agentId: string): Promise<InboxMessage[]> {
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/inbox`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getGraphStats(): Promise<GraphStats | null> {
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && Object.keys(data).length > 0 ? data as GraphStats : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getMemoryNodes(): Promise<MemoryNode[]> {
+  try {
+    const res = await fetch('/api/nodes');
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getMemoryNode(id: string): Promise<MemoryNode | null> {
+  try {
+    const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function searchMemory(query: string): Promise<MemoryNode[]> {
+  try {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
     if (!res.ok) return [];
     return await res.json();
   } catch {

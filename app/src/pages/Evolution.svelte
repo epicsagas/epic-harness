@@ -86,6 +86,9 @@
       .map((s: SkillAttribution) => ({ ...s, delta: s.avg_score_with - s.avg_score_without }))
       .sort((a, b) => b.delta - a.delta);
   });
+  // R3: expanded detail rows
+  let expandedRow = $state<number | null>(null);
+
   function clearFilters() { filterDateFrom = ''; filterDateTo = ''; filterTrend = ''; filterPattern = ''; }
 
   const totalPatterns = $derived(
@@ -197,10 +200,19 @@
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
           {#each data.evolved_skills as skill}
             <div class="skill-card">
-              <div class="skill-name" style="color:var(--orange);">{skill.name}</div>
+              <div style="display:flex;align-items:center;justify-content:space-between;">
+                <div class="skill-name" style="color:var(--orange);">{skill.name}</div>
+                <span class="pill {skill.active ? 'success' : 'info'}" style="font-size:10px;">{skill.active ? 'active' : 'inactive'}</span>
+              </div>
+              <div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap;">
+                <span class="pill info" style="font-size:10px;">{skill.origin}</span>
+                {#if skill.confidence > 0}
+                  <span style="font-size:10px;color:var(--muted);">conf: {(skill.confidence * 100).toFixed(0)}%</span>
+                {/if}
+              </div>
               <div class="skill-desc" style="margin-top:4px;">{extractSkillDesc(skill.skill_md)}</div>
               <div style="margin-top:8px;font-size:11px;color:var(--muted);font-family:var(--font-mono);">
-                {dateOnly(skill.created_at)}
+                {dateOnly(skill.created_at)}{skill.updated_at && skill.updated_at !== skill.created_at ? ` → ${dateOnly(skill.updated_at)}` : ''}
               </div>
             </div>
           {/each}
@@ -304,9 +316,10 @@
             </tr>
           </thead>
           <tbody>
-            {#each histPageItems as row}
-              <tr>
+            {#each histPageItems as row, i}
+              <tr style="cursor:pointer;" onclick={() => expandedRow = expandedRow === i ? null : i}>
                 <td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap;">
+                  <span style="margin-right:4px;color:var(--muted);">{expandedRow === i ? '▾' : '▸'}</span>
                   {dateOnly(row['timestamp'])}
                 </td>
                 <td style="font-size:12px;color:var(--fg-secondary);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
@@ -332,6 +345,36 @@
                   {typeof row['avg_score'] === 'number' ? (row['avg_score'] as number).toFixed(3) : '—'}
                 </td>
               </tr>
+              {#if expandedRow === i}
+                <tr>
+                  <td colspan="6" style="padding:8px 16px 12px 40px;background:var(--bg-secondary);border-top:1px dashed var(--border);">
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;font-size:12px;">
+                      {#if row['analysis_summary']}
+                        <div style="grid-column:1/-1;"><strong style="color:var(--fg-secondary);">Summary:</strong> <span style="color:var(--fg);">{row['analysis_summary']}</span></div>
+                      {/if}
+                      {#if typeof row['success_rate'] === 'number'}
+                        <div><strong style="color:var(--fg-secondary);">Success rate:</strong> <span style="font-family:var(--font-mono);">{(row['success_rate'] as number * 100).toFixed(1)}%</span></div>
+                      {/if}
+                      {#if row['total_evolved'] != null}
+                        <div><strong style="color:var(--fg-secondary);">Total evolved:</strong> <span style="font-family:var(--font-mono);">{row['total_evolved']}</span></div>
+                      {/if}
+                      {#if row['skills_rolled_back']}
+                        <div style="grid-column:1/-1;"><strong style="color:var(--fg-secondary);">Rolled back:</strong> <span style="color:var(--danger);">{(row['skills_rolled_back'] as string[]).join(', ')}</span></div>
+                      {/if}
+                      {#if row['error_patterns'] && typeof row['error_patterns'] === 'object'}
+                        <div style="grid-column:1/-1;">
+                          <strong style="color:var(--fg-secondary);">Error patterns:</strong>
+                          <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">
+                            {#each Object.entries(row['error_patterns'] as Record<string, unknown>) as [cat, val]}
+                              <span class="pill danger" style="font-size:10px;">{cat}: {val}</span>
+                            {/each}
+                          </div>
+                        </div>
+                      {/if}
+                    </div>
+                  </td>
+                </tr>
+              {/if}
             {/each}
           </tbody>
         </table>

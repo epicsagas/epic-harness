@@ -172,4 +172,17 @@ export default {
   labelVersion: '버전', dangerZoneTitle: '위험 구역',
   resetEvolutionLabel: '진화 초기화', resetEvolutionDesc: '모든 진화된 스킬을 삭제합니다',
   clearMetricsLabel: '메트릭 초기화', clearMetricsDesc: '점수 히스토리를 초기화합니다',
+  // R2-R8 new keys
+  statBestScore: '최고 점수',
+  labelLastErrorContext: '마지막 에러 컨텍스트',
+  sessionSnapshotsTitle: '세션 스냅샷',
+  colType: '유형', colSummary: '요약', colContextUsage: '컨텍스트 %',
+  globalPatternsTitle: '프로젝트 간 패턴',
+  colWeakTools: '취약 도구',
+  statTotalNodes: '전체 노드', statTotalEdges: '전체 엣지', statAvgImportance: '평균 중요도',
+  memorySearchTitle: '메모리 노드', memorySearchPlaceholder: '노드 검색…',
+  searchButton: '검색', colTitle: '제목', colImportance: '중요도',
+  colUpdated: '수정일', noSearchResults: '검색 결과 없음', noNodes: '메모리 노드 없음',
+  showingFirst50: (n: number) => `${n}개 중 처음 50개 표시`,
+  agentInboxTitle: '받은 메시지',
 } as const;

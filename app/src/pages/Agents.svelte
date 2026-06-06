@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
-  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent, getAgentEvents } from '../lib/harness.js';
-  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus, AgentEvent } from '../lib/harness.js';
+  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent, getAgentEvents, getAgentInbox } from '../lib/harness.js';
+  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus, AgentEvent, InboxMessage } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
 
@@ -13,6 +13,7 @@
   let error = $state<string | null>(null);
   let expandedAgent = $state<string | null>(null);
   let agentEvents = $state<Map<string, AgentEvent[]>>(new Map());
+  let agentInboxes = $state<Map<string, InboxMessage[]>>(new Map());
 
   async function load() {
     try {
@@ -55,10 +56,14 @@
   async function toggleEvents(agentId: string) {
     if (expandedAgent === agentId) { expandedAgent = null; return; }
     expandedAgent = agentId;
+    const promises: Promise<void>[] = [];
     if (!agentEvents.has(agentId)) {
-      const evts = await getAgentEvents(agentId);
-      agentEvents.set(agentId, evts);
+      promises.push(getAgentEvents(agentId).then(evts => { agentEvents.set(agentId, evts); }));
     }
+    if (!agentInboxes.has(agentId)) {
+      promises.push(getAgentInbox(agentId).then(msgs => { agentInboxes.set(agentId, msgs); }));
+    }
+    await Promise.all(promises);
   }
 
   function statusPillClass(status: string): string {
@@ -255,6 +260,19 @@
                   <div style="color:var(--muted);text-align:center;padding:8px;">{$tStore('noEvents')}</div>
                 {/if}
               </div>
+              <!-- R7: Inbox messages -->
+              {#if (agentInboxes.get(agent.id)?.length ?? 0) > 0}
+                <div style="margin-top:6px;max-height:120px;overflow-y:auto;font-size:11px;">
+                  <div style="color:var(--muted);margin-bottom:4px;font-size:10px;font-weight:600;">{$tStore('agentInboxTitle')} ({agentInboxes.get(agent.id)!.length})</div>
+                  {#each agentInboxes.get(agent.id)!.slice(0, 10) as msg}
+                    <div style="padding:3px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:baseline;">
+                      <span style="font-family:var(--font-mono);color:var(--muted);font-size:9px;">{msg.timestamp.slice(11, 19)}</span>
+                      <span style="color:var(--accent);font-size:10px;">{msg.from} →</span>
+                      <span style="color:var(--fg-secondary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title={msg.message}>{msg.message}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             {/if}
           </div>
         {/each}
