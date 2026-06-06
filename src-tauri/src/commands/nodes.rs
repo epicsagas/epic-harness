@@ -145,17 +145,17 @@ pub async fn create_node(
             "title exceeds max length of {MAX_TITLE_LEN} characters"
         ));
     }
-    if let Some(ref body) = input.body {
-        if body.len() > MAX_BODY_LEN {
-            return Err(format!(
-                "body exceeds max length of {MAX_BODY_LEN} characters"
-            ));
-        }
+    if let Some(ref body) = input.body
+        && body.len() > MAX_BODY_LEN
+    {
+        return Err(format!(
+            "body exceeds max length of {MAX_BODY_LEN} characters"
+        ));
     }
-    if let Some(ref tags) = input.tags {
-        if tags.len() > MAX_TAGS {
-            return Err(format!("tags array exceeds max of {MAX_TAGS} entries"));
-        }
+    if let Some(ref tags) = input.tags
+        && tags.len() > MAX_TAGS
+    {
+        return Err(format!("tags array exceeds max of {MAX_TAGS} entries"));
     }
 
     let importance = input

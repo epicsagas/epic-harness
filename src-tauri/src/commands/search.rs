@@ -82,13 +82,13 @@ pub async fn query_nodes(
     filter: QueryFilter,
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
-    if let Some(ref nt) = filter.node_type {
-        if !VALID_NODE_TYPES.contains(&nt.as_str()) {
-            return Err(format!(
-                "invalid node_type: must be one of {}",
-                VALID_NODE_TYPES.join(", ")
-            ));
-        }
+    if let Some(ref nt) = filter.node_type
+        && !VALID_NODE_TYPES.contains(&nt.as_str())
+    {
+        return Err(format!(
+            "invalid node_type: must be one of {}",
+            VALID_NODE_TYPES.join(", ")
+        ));
     }
     let limit = filter.limit.unwrap_or(200).min(MAX_QUERY_LIMIT);
     let pool = state.db.clone();

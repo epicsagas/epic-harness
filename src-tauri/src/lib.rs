@@ -5,9 +5,21 @@ use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app_state = match AppState::new() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[epic-harness] FATAL: {e}");
+            // Show a native macOS dialog before exiting.
+            let _ = std::process::Command::new("osascript")
+                .args(["-e", &format!("display dialog \"Epic Harness failed to start:\\n\\n{e}\\n\\nCheck ~/.harness/ permissions.\" with title \"Epic Harness\" buttons {{\"OK\"}} default button \"OK\" with icon stop")])
+                .status();
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(AppState::new().expect("Failed to initialize app state"))
+        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             // Nodes
             commands::nodes::get_nodes,
@@ -34,7 +46,13 @@ pub fn run() {
             commands::harness::get_evolved_skills,
             commands::harness::get_obs_summary,
             commands::harness::get_integration_status,
+            commands::harness::get_session_snapshots,
+            commands::harness::get_global_patterns,
+            commands::harness::list_projects,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    {
+        eprintln!("[epic-harness] FATAL: {e}");
+        std::process::exit(1);
+    }
 }

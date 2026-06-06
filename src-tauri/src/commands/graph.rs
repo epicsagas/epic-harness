@@ -13,6 +13,8 @@ pub struct GraphNodeResponse {
     pub node_type: String,
     pub tags: Vec<String>,
     pub importance: f64,
+    pub projects: Vec<String>,
+    pub accessed_at: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -51,6 +53,8 @@ pub async fn get_graph(state: State<'_, AppState>) -> Result<GraphResponse, Stri
                 node_type: n.node_type,
                 tags: n.tags,
                 importance: n.importance,
+                projects: n.projects,
+                accessed_at: n.accessed_at,
             })
             .collect(),
         edges: graph

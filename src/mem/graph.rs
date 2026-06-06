@@ -18,6 +18,10 @@ pub struct GraphNode {
     pub tags: Vec<String>,
     #[serde(default = "default_graph_importance")]
     pub importance: f64,
+    #[serde(default)]
+    pub projects: Vec<String>,
+    #[serde(default)]
+    pub accessed_at: String,
 }
 
 fn default_graph_importance() -> f64 {
@@ -55,6 +59,8 @@ pub async fn build_graph_pool(pool: &AnyPool) -> io::Result<Graph> {
             node_type: node.frontmatter.node_type,
             tags: node.frontmatter.tags,
             importance: node.frontmatter.importance,
+            projects: node.frontmatter.projects,
+            accessed_at: node.frontmatter.accessed_at,
         })
         .collect();
     let edges = read_edges_pool(pool, MAX_GRAPH_EDGES as i64)
@@ -395,6 +401,8 @@ mod tests {
             node_type: "concept".to_string(),
             tags: vec![],
             importance: 0.85,
+            projects: vec![],
+            accessed_at: String::new(),
         };
         let json = serde_json::to_string(&n).unwrap();
         assert!(

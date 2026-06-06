@@ -8,22 +8,24 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Create a dedicated tokio runtime for pool initialization.
+    ///
+    /// Must NOT use `Handle::current()` because `.manage()` is evaluated
+    /// before Tauri's `.run()` sets up its own runtime.
     pub fn new() -> Result<Self, String> {
-        // Use tokio runtime already provided by Tauri to initialize pools.
-        let db = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                epic_harness::store::pool::memory_pool()
-                    .await
-                    .map_err(|e| format!("Failed to open memory DB: {e}"))
-            })
+        let rt = tokio::runtime::Runtime::new()
+            .map_err(|e| format!("Failed to create tokio runtime: {e}"))?;
+
+        let db = rt.block_on(async {
+            epic_harness::store::pool::memory_pool()
+                .await
+                .map_err(|e| format!("Failed to open memory DB: {e}"))
         })?;
 
-        let harness_db = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                epic_harness::store::pool::harness_pool()
-                    .await
-                    .map_err(|e| format!("Failed to open harness DB: {e}"))
-            })
+        let harness_db = rt.block_on(async {
+            epic_harness::store::pool::harness_pool()
+                .await
+                .map_err(|e| format!("Failed to open harness DB: {e}"))
         })?;
 
         Ok(Self { db, harness_db })

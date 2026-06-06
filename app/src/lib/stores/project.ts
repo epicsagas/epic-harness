@@ -25,6 +25,16 @@ if (typeof window !== 'undefined') {
 /** Fetch the project list from the backend. */
 export async function loadProjects(): Promise<void> {
   try {
+    // Tauri runtime: use invoke bridge (no HTTP server available)
+    const isTauri = typeof window !== 'undefined' &&
+      !!((window as unknown as Record<string, unknown>)['__TAURI_INTERNALS__']);
+    if (isTauri) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const slugs: string[] = await invoke('list_projects');
+      projectList.set(slugs.sort());
+      return;
+    }
+    // Browser / Vite dev: use HTTP endpoint
     const res = await fetch('/api/projects');
     if (!res.ok) return;
     const slugs: string[] = await res.json();

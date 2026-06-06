@@ -180,6 +180,8 @@ export interface GraphNode {
   type: string;
   tags: string[];
   importance: number;
+  projects: string[];
+  accessed_at: string;
 }
 
 export interface GraphEdge {
@@ -370,9 +372,11 @@ export async function getMemoryNode(id: string): Promise<MemoryNode | null> {
   }
 }
 
-export async function searchMemory(query: string): Promise<MemoryNode[]> {
+export async function searchMemory(query: string, type?: string): Promise<MemoryNode[]> {
   try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+    let url = `/api/search?q=${encodeURIComponent(query)}`;
+    if (type) url += `&type=${encodeURIComponent(type)}`;
+    const res = await fetch(url);
     if (!res.ok) return [];
     return await res.json();
   } catch {

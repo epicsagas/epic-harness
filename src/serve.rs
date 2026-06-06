@@ -657,18 +657,14 @@ fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -
                 })
                 .collect::<Vec<_>>();
         let history = match project {
-            Some(slug) => {
-                crate::store::runtime::block_on(
-                    crate::store::evolution::query_recent_records_pool(p, slug, 50),
-                )
-                .unwrap_or_default()
-            }
-            None => {
-                crate::store::runtime::block_on(
-                    crate::store::evolution::query_recent_records_all_pool(p, 50),
-                )
-                .unwrap_or_default()
-            }
+            Some(slug) => crate::store::runtime::block_on(
+                crate::store::evolution::query_recent_records_pool(p, slug, 50),
+            )
+            .unwrap_or_default(),
+            None => crate::store::runtime::block_on(
+                crate::store::evolution::query_recent_records_all_pool(p, 50),
+            )
+            .unwrap_or_default(),
         };
         let history_vals: Vec<_> = history
             .into_iter()
@@ -709,19 +705,16 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> S
     try_pool(pool, |p| {
         let stats = match project {
             Some(slug) => {
-                crate::store::runtime::block_on(
-                    crate::store::observations::query_obs_stats_pool(
-                        p, slug, "2020-01-01", "2099-12-31",
-                    ),
-                )?
+                crate::store::runtime::block_on(crate::store::observations::query_obs_stats_pool(
+                    p,
+                    slug,
+                    "2020-01-01",
+                    "2099-12-31",
+                ))?
             }
-            None => {
-                crate::store::runtime::block_on(
-                    crate::store::observations::query_obs_stats_all_pool(
-                        p, "2020-01-01", "2099-12-31",
-                    ),
-                )?
-            }
+            None => crate::store::runtime::block_on(
+                crate::store::observations::query_obs_stats_all_pool(p, "2020-01-01", "2099-12-31"),
+            )?,
         };
         let tool_stats: Vec<serde_json::Value> = {
             let mut v: Vec<_> = stats
@@ -829,9 +822,9 @@ fn cmd_get_global_patterns(pool: Option<&sqlx::AnyPool>, project: Option<&str>) 
             Some(slug) => crate::store::runtime::block_on(
                 crate::store::global::query_patterns_excluding_pool(p, slug, 20),
             ),
-            None => crate::store::runtime::block_on(
-                crate::store::global::query_all_patterns_pool(p, 20),
-            ),
+            None => crate::store::runtime::block_on(crate::store::global::query_all_patterns_pool(
+                p, 20,
+            )),
         }?;
         Ok(serde_json::to_string(&patterns)?)
     })
