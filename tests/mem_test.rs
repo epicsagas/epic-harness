@@ -984,3 +984,71 @@ fn epic_harness_days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     }
     (year, month, days + 1)
 }
+
+// ── M5: UPSERT preserves higher access_count ──────────
+
+#[test]
+fn test_upsert_preserves_higher_access_count() {
+    use epic_harness::mem::store::{
+        Node, NodeFrontmatter, new_uuid, now_iso, read_node, write_node,
+    };
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    set_root(&root);
+
+    let id = new_uuid();
+    let ts = now_iso();
+
+    // First write: access_count = 10
+    let node_v1 = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            node_type: "pattern".into(),
+            title: "access count test".into(),
+            tags: vec![],
+            projects: vec![],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts.clone(),
+            importance: 0.5,
+            access_count: 10,
+            accessed_at: ts.clone(),
+        },
+        body: "v1".into(),
+    };
+    write_node(&node_v1).unwrap();
+
+    // Second write: access_count = 3 (lower) — should preserve 10
+    let node_v2 = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            access_count: 3,
+            ..node_v1.frontmatter.clone()
+        },
+        body: "v2".into(),
+    };
+    write_node(&node_v2).unwrap();
+
+    let read_back = read_node(&id).unwrap();
+    assert_eq!(
+        read_back.frontmatter.access_count, 10,
+        "UPSERT should preserve higher access_count (10), not overwrite with lower (3)"
+    );
+
+    // Third write: access_count = 20 (higher) — should update to 20
+    let node_v3 = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            access_count: 20,
+            ..node_v1.frontmatter.clone()
+        },
+        body: "v3".into(),
+    };
+    write_node(&node_v3).unwrap();
+
+    let read_back = read_node(&id).unwrap();
+    assert_eq!(
+        read_back.frontmatter.access_count, 20,
+        "UPSERT should update to higher access_count (20)"
+    );
+}

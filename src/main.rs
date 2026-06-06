@@ -280,7 +280,11 @@ fn main() {
         print!("{stdin_buf}");
     }
 
-    exit_with_cleanup(exit_code);
+    let skip_shutdown = matches!(
+        subcmd,
+        "help" | "--help" | "-h" | "path" | "version" | "--version" | "-v"
+    );
+    exit_with_cleanup(exit_code, skip_shutdown);
 }
 
 /// Gracefully close connection pools before exit to flush WAL.
@@ -288,9 +292,11 @@ fn main() {
 /// # Safety
 /// Must only be called from a non-async context (e.g., `main()`).
 /// `store::runtime::block_on` panics if called inside a tokio runtime.
-fn exit_with_cleanup(code: i32) -> ! {
-    // SAFETY: Called only from main() which is not inside a tokio runtime.
-    store::runtime::block_on(store::pool::shutdown());
+fn exit_with_cleanup(code: i32, skip_shutdown: bool) -> ! {
+    if !skip_shutdown {
+        // SAFETY: Called only from main() which is not inside a tokio runtime.
+        store::runtime::block_on(store::pool::shutdown());
+    }
     std::process::exit(code);
 }
 

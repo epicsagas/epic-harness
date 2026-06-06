@@ -798,7 +798,11 @@ pub fn run(_input: &HookInput) -> i32 {
     let observations = match pool.as_ref() {
         Some(p) => match crate::store::runtime::block_on(
             crate::store::observations::query_obs_for_date_range_pool(
-                p, &slug, &today_str, &today_str, None,
+                p,
+                &slug,
+                &today_str,
+                &today_str,
+                Some(50_000),
             ),
         ) {
             Ok(recs) => recs,

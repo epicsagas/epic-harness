@@ -291,6 +291,12 @@ pub(crate) async fn do_migrate_async(
     Ok(stats)
 }
 
+/// Import observation records from a JSONL file.
+///
+/// Records are processed within a per-file transaction. If a parse error
+/// occurs on a specific line, that line is skipped and processing continues.
+/// Valid records within the same file are committed. Failed records cannot
+/// be re-imported without resetting the entire migration.
 async fn import_observations(
     conn: &mut sqlx::SqliteConnection,
     harness_dir: &std::path::Path,
@@ -531,7 +537,7 @@ async fn import_evolution(
                         "[]".into()
                     });
                 let result = sqlx::query(
-                    "INSERT INTO evolution_records \
+                    "INSERT OR IGNORE INTO evolution_records \
                      (timestamp, observations, success_rate, avg_score, error_patterns, \
                       failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
                       analysis_summary, project) \
@@ -570,6 +576,9 @@ async fn import_evolution(
             }
         }
     }
+    // SAFETY: If this final commit fails, the `?` propagates the error up through
+    // do_migrate_async Phase 2, which skips Phase 3 (clearing the `in_progress` marker).
+    // The marker remains, allowing `--reset` retry without duplicate inserts.
     commit(conn).await?;
     Ok(())
 }
@@ -788,9 +797,24 @@ pub async fn merge_attached_db_async(
     }
 
     // orch_agents, orch_agent_events, orch_agent_inbox: FK-linked to orch_runs
-    for table in ["orch_agents", "orch_agent_events", "orch_agent_inbox"] {
+    let orch_tables: &[(&str, &str)] = &[
+        (
+            "orch_agents",
+            "id, run_id, role, task, satisfies_json, status, phase, progress, \
+             last_heartbeat, started_at, completed_at",
+        ),
+        (
+            "orch_agent_events",
+            "id, agent_id, timestamp, event_type, data_json",
+        ),
+        (
+            "orch_agent_inbox",
+            "id, agent_id, from_agent, timestamp, message",
+        ),
+    ];
+    for (table, cols) in orch_tables {
         let _ = sqlx::query(&format!(
-            "INSERT OR IGNORE INTO main.{table} SELECT * FROM {attach_name}.{table}"
+            "INSERT OR IGNORE INTO main.{table} ({cols}) SELECT {cols} FROM {attach_name}.{table}"
         ))
         .execute(&mut *conn)
         .await;

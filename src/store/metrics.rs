@@ -261,29 +261,35 @@ pub async fn save_metrics_pool(pool: &AnyPool, project: &str, m: &Metrics) -> io
         .rev()
         .take(MAX_SCORE_HISTORY)
         .collect();
-    for entry in entries.into_iter().rev() {
-        sqlx::query(
-            "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost, project) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
-             ON CONFLICT(timestamp, project) DO UPDATE SET \
-                 success_rate = excluded.success_rate, \
-                 avg_score = excluded.avg_score, \
-                 observations = excluded.observations, \
-                 dim_success = excluded.dim_success, \
-                 dim_quality = excluded.dim_quality, \
-                 dim_cost = excluded.dim_cost"
-        )
-        .bind(&entry.timestamp)
-        .bind(entry.success_rate)
-        .bind(entry.avg_score)
-        .bind(crate::store::u64_to_i64(entry.observations))
-        .bind(entry.dimension_averages.tool_success)
-        .bind(entry.dimension_averages.output_quality)
-        .bind(entry.dimension_averages.execution_cost)
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+    if !entries.is_empty() {
+        let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(
+            "INSERT INTO score_history \
+             (timestamp, success_rate, avg_score, observations, \
+              dim_success, dim_quality, dim_cost, project) ",
+        );
+        qb.push_values(entries.into_iter().rev(), |mut b, entry| {
+            b.push_bind(&entry.timestamp)
+                .push_bind(entry.success_rate)
+                .push_bind(entry.avg_score)
+                .push_bind(crate::store::u64_to_i64(entry.observations))
+                .push_bind(entry.dimension_averages.tool_success)
+                .push_bind(entry.dimension_averages.output_quality)
+                .push_bind(entry.dimension_averages.execution_cost)
+                .push_bind(project);
+        });
+        qb.push(
+            " ON CONFLICT(timestamp, project) DO UPDATE SET \
+             success_rate = excluded.success_rate, \
+             avg_score = excluded.avg_score, \
+             observations = excluded.observations, \
+             dim_success = excluded.dim_success, \
+             dim_quality = excluded.dim_quality, \
+             dim_cost = excluded.dim_cost",
+        );
+        qb.build()
+            .execute(&mut *tx)
+            .await
+            .map_err(crate::store::sqlx_err)?;
     }
     sqlx::query(
         "DELETE FROM score_history WHERE project = $1 AND id NOT IN (SELECT id FROM score_history WHERE project = $1 ORDER BY id DESC LIMIT $2)"

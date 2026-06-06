@@ -140,7 +140,8 @@ async fn init_sqlite_schema(pool: &AnyPool) -> io::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
         CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
         CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
-        CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);",
+        CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_imp_upd ON nodes(importance DESC, updated DESC);",
     )
     .execute(pool)
     .await
@@ -178,7 +179,8 @@ async fn init_postgres_schema(pool: &AnyPool) -> io::Result<()> {
         CREATE INDEX IF NOT EXISTS idx_nodes_updated ON nodes(updated DESC);
         CREATE INDEX IF NOT EXISTS idx_nodes_title_updated ON nodes(title, updated DESC);
         CREATE INDEX IF NOT EXISTS idx_nodes_importance ON nodes(importance DESC);
-        CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);",
+        CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_nodes_imp_upd ON nodes(importance DESC, updated DESC);",
     )
     .execute(pool)
     .await
