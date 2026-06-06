@@ -168,7 +168,11 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     .unwrap(),
                 )
                 .with_header(
-                    Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
+                    Header::from_bytes(
+                        b"Access-Control-Allow-Headers",
+                        b"Content-Type, Accept, Authorization",
+                    )
+                    .unwrap(),
                 ),
 
             // ── SPA fallback: serve index.html for non-API, non-static-asset GET routes ──

@@ -652,4 +652,50 @@ mod tests {
         let res = server.get("/api/search?q=test").await;
         assert_eq!(res.status_code(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn list_nodes_limit_parameter() {
+        let state = make_state().await;
+        let app = build_router(state.clone(), 7700);
+        let server = TestServer::new(app);
+
+        // Insert 5 nodes
+        for i in 0..5 {
+            let payload = json!({
+                "type": "concept",
+                "title": format!("Limit test node {i}"),
+                "body": format!("body {i}"),
+                "tags": ["limit-test"],
+                "projects": [],
+                "agents": []
+            });
+            let res = server.post("/api/nodes").json(&payload).await;
+            assert_eq!(res.status_code(), StatusCode::CREATED);
+        }
+
+        // Without limit — should return all 5 (default 500)
+        let all = server.get("/api/nodes").await;
+        assert_eq!(all.status_code(), StatusCode::OK);
+        let nodes: Value = all.json();
+        assert_eq!(nodes.as_array().unwrap().len(), 5);
+
+        // With limit=2 — should return exactly 2
+        let limited = server.get("/api/nodes?limit=2").await;
+        assert_eq!(limited.status_code(), StatusCode::OK);
+        let nodes: Value = limited.json();
+        assert_eq!(
+            nodes.as_array().unwrap().len(),
+            2,
+            "limit=2 should return exactly 2 nodes"
+        );
+
+        // With limit=0 — should return empty
+        let zero = server.get("/api/nodes?limit=0").await;
+        assert_eq!(zero.status_code(), StatusCode::OK);
+        let nodes: Value = zero.json();
+        assert!(
+            nodes.as_array().unwrap().is_empty(),
+            "limit=0 should return empty array"
+        );
+    }
 }
