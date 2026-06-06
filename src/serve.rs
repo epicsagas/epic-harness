@@ -766,10 +766,9 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>) -> String {
 fn cmd_get_session_snapshots(pool: Option<&sqlx::AnyPool>) -> String {
     try_pool(pool, |p| {
         let slug = crate::shared::paths::project_slug();
-        let snapshots =
-            crate::store::runtime::block_on(crate::store::sessions::list_recent_snapshots_pool(
-                p, &slug, 10,
-            ))?;
+        let snapshots = crate::store::runtime::block_on(
+            crate::store::sessions::list_recent_snapshots_pool(p, &slug, 10),
+        )?;
         Ok(serde_json::to_string(&snapshots)?)
     })
     .unwrap_or_else(|| "[]".into())
