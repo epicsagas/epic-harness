@@ -471,6 +471,16 @@ pub(crate) async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         .map_err(super::sqlx_err)?;
     }
 
+    // Pre-migration: remove duplicate evolution_records before DDL applies the
+    // UNIQUE INDEX on (timestamp, project). Keeps the earliest row per pair.
+    // Silently ignored on fresh DBs where the table does not yet exist.
+    let _ = sqlx::query(
+        "DELETE FROM evolution_records WHERE id NOT IN \
+         (SELECT MIN(id) FROM evolution_records GROUP BY timestamp, project)",
+    )
+    .execute(pool)
+    .await;
+
     // DDL — select by backend
     let ddl = match db_type {
         DbType::Sqlite => DDL_SQLITE,

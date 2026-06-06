@@ -132,6 +132,9 @@ pub async fn smart_recall_pool(
             .map(|sn| sn.node.frontmatter.id.as_str())
             .collect();
 
+        // Intentionally collects all edges adjacent to top-result nodes (not just
+        // intra-cluster edges). This surfaces non-result nodes that are strongly
+        // connected to top results and deserve a score boost.
         let mut qb = sqlx::QueryBuilder::new(
             "SELECT node_id, SUM(w) AS w FROM (SELECT source AS node_id, weight AS w FROM edges WHERE target IN (",
         );
