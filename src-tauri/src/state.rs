@@ -31,8 +31,3 @@ impl AppState {
         Ok(Self { db, harness_db })
     }
 }
-
-/// Determine the default project slug from CWD git repo, matching serve.rs behavior.
-pub fn default_project_slug() -> String {
-    epic_harness::shared::paths::project_slug()
-}
