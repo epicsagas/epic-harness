@@ -19,7 +19,8 @@ pub fn run() {
             eprintln!("[epic-harness] FATAL: {e}");
             #[cfg(target_os = "macos")]
             {
-                let safe_msg = e.to_string()
+                let safe_msg = e
+                    .to_string()
                     .replace('\\', "\\\\")
                     .replace('"', "\\\"")
                     .replace('\n', " ")

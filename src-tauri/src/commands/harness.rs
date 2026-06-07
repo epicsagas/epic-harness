@@ -169,7 +169,11 @@ pub async fn get_evolved_skills(
             project: s.project,
             active: s.active,
             skill_md: s.skill_md,
-            created_at: if s.created.is_empty() { None } else { Some(s.created) },
+            created_at: if s.created.is_empty() {
+                None
+            } else {
+                Some(s.created)
+            },
             updated_at: s.updated,
         })
         .collect();
@@ -393,13 +397,9 @@ pub async fn get_global_patterns(
     let patterns = match project {
         Some(ref slug) => {
             // Cross-project patterns (excluding current project)
-            epic_harness::store::global::query_patterns_excluding_pool(&pool, slug, 100)
-                .await
+            epic_harness::store::global::query_patterns_excluding_pool(&pool, slug, 100).await
         }
-        None => {
-            epic_harness::store::global::query_all_patterns_pool(&pool, 100)
-                .await
-        }
+        None => epic_harness::store::global::query_all_patterns_pool(&pool, 100).await,
     }
     .map_err(|e| format!("query global patterns: {e}"))?;
     Ok(patterns)

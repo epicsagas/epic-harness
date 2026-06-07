@@ -302,7 +302,10 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
     }
 
     if !slugs.is_empty() && failed_slugs.len() == slugs.len() {
-        eprintln!("[epic-harness] warn: all {} project metrics failed to load", slugs.len());
+        eprintln!(
+            "[epic-harness] warn: all {} project metrics failed to load",
+            slugs.len()
+        );
     }
 
     // Sort and cap score history

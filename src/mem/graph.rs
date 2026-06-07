@@ -445,7 +445,13 @@ mod tests {
     fn graph_node_defaults_projects_and_accessed_at() {
         let json = r#"{"id":"x","title":"Y","type":"concept","tags":[],"importance":0.5}"#;
         let parsed: GraphNode = serde_json::from_str(json).unwrap();
-        assert!(parsed.projects.is_empty(), "projects should default to empty");
-        assert!(parsed.accessed_at.is_empty(), "accessed_at should default to empty string");
+        assert!(
+            parsed.projects.is_empty(),
+            "projects should default to empty"
+        );
+        assert!(
+            parsed.accessed_at.is_empty(),
+            "accessed_at should default to empty string"
+        );
     }
 }
