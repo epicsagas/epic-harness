@@ -1,6 +1,6 @@
 {
   "name": "epic",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Auto-trigger skills + self-evolving agent harness. Includes orbit, evolve, team, tdd, audit, ship and more.",
   "author": {
     "name": "epicsagas",
@@ -22,11 +22,14 @@
   "hooks": "./.codex-plugin/hooks.json",
   "interface": {
     "displayName": "Epic Harness",
-    "shortDescription": "Autonomous agent harness — auto-trigger skills, self-evolving engine.",
+    "shortDescription": "Autonomous agent harness \u2014 auto-trigger skills, self-evolving engine.",
     "longDescription": "Epic Harness provides auto-trigger quality skills (TDD, security, simplify, perf), pipeline skills (orbit, evolve, team), and a self-evolving skill engine. Less to remember, more automation.",
     "developerName": "epicsagas",
     "category": "Harness",
-    "capabilities": ["Read", "Write"],
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
     "websiteURL": "https://github.com/epicsagas/epic-harness"
   }
 }
