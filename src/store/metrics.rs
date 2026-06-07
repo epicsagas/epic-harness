@@ -252,10 +252,18 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
             skill_attribution
                 .entry(name)
                 .and_modify(|existing: &mut SkillAttribution| {
+                    let prev_sess = existing.sessions_active as f64;
+                    let new_sess = sa.sessions_active as f64;
+                    let total_sess = prev_sess + new_sess;
+                    if total_sess > 0.0 {
+                        existing.avg_score_with = (existing.avg_score_with * prev_sess
+                            + sa.avg_score_with * new_sess)
+                            / total_sess;
+                        existing.avg_score_without = (existing.avg_score_without * prev_sess
+                            + sa.avg_score_without * new_sess)
+                            / total_sess;
+                    }
                     existing.sessions_active += sa.sessions_active;
-                    existing.avg_score_with = (existing.avg_score_with + sa.avg_score_with) / 2.0;
-                    existing.avg_score_without =
-                        (existing.avg_score_without + sa.avg_score_without) / 2.0;
                     if sa.first_seen < existing.first_seen {
                         existing.first_seen = sa.first_seen.clone();
                     }

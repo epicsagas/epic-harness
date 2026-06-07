@@ -138,7 +138,7 @@ export interface ObsSummary {
   total_tool_calls: number;
   avg_score: number;
   failure_categories: FailureCategory[];
-  active_agents: ActiveAgent[];
+  active_agents: ActiveAgent[]; // kept for backward compat; currently empty from backend
 }
 
 export interface OrchAgentDef {

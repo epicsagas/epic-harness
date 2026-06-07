@@ -35,7 +35,7 @@
   }
 
   $effect(() => {
-    $selectedProject;
+    const _project = $selectedProject; // reactive dependency
     loadSettings();
   });
 

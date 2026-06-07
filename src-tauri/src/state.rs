@@ -8,7 +8,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// Create a dedicated tokio runtime for pool initialization.
+    /// Initialize database connection pools.
+    ///
+    /// Creates a short-lived tokio Runtime to drive the async pool setup,
+    /// then drops it. The `AnyPool` handles maintain their own internal
+    /// runtime for subsequent queries, so the ephemeral Runtime is only
+    /// needed for the initial `connect()` calls.
     ///
     /// Must NOT use `Handle::current()` because `.manage()` is evaluated
     /// before Tauri's `.run()` sets up its own runtime.
@@ -27,6 +32,9 @@ impl AppState {
                 .await
                 .map_err(|e| format!("Failed to open harness DB: {e}"))
         })?;
+
+        // rt drops here — pools keep their own connections alive internally.
+        drop(rt);
 
         Ok(Self { db, harness_db })
     }

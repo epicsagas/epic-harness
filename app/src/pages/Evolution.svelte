@@ -139,7 +139,7 @@
 
   let pollInterval: ReturnType<typeof setInterval>;
   $effect(() => {
-    $selectedProject;
+    const _project = $selectedProject; // reactive dependency
     loading = true;
     load();
     clearInterval(pollInterval);
@@ -356,7 +356,7 @@
                         <div style="grid-column:1/-1;"><strong style="color:var(--fg-secondary);">Summary:</strong> <span style="color:var(--fg);">{row['analysis_summary']}</span></div>
                       {/if}
                       {#if typeof row['success_rate'] === 'number'}
-                        <div><strong style="color:var(--fg-secondary);">Success rate:</strong> <span style="font-family:var(--font-mono);">{(row['success_rate'] as number * 100).toFixed(1)}%</span></div>
+                        <div><strong style="color:var(--fg-secondary);">Success rate:</strong> <span style="font-family:var(--font-mono);">{((row['success_rate'] as number) * 100).toFixed(1)}%</span></div>
                       {/if}
                       {#if row['total_evolved'] != null}
                         <div><strong style="color:var(--fg-secondary);">Total evolved:</strong> <span style="font-family:var(--font-mono);">{row['total_evolved']}</span></div>

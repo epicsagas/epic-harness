@@ -33,9 +33,7 @@ pub async fn get_harness_metrics(
     let pool = state.harness_db.clone();
 
     let m = match project {
-        Some(ref slug) => {
-            epic_harness::store::metrics::load_metrics_pool(&pool, slug).await
-        }
+        Some(ref slug) => epic_harness::store::metrics::load_metrics_pool(&pool, slug).await,
         None => epic_harness::store::metrics::load_metrics_all_pool(&pool).await,
     }
     .map_err(|e| format!("load metrics: {e}"))?;
@@ -136,8 +134,13 @@ pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<Orbit
 #[derive(Serialize, Deserialize)]
 pub struct EvolvedSkill {
     pub name: String,
+    pub origin: String,
+    pub confidence: f64,
+    pub project: String,
+    pub active: bool,
     pub skill_md: String,
     pub created_at: Option<String>,
+    pub updated_at: String,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -165,8 +168,13 @@ pub async fn get_evolved_skills(
         .filter(|s| project.as_ref().is_none_or(|p| s.project == *p))
         .map(|s| EvolvedSkill {
             name: s.name,
+            origin: s.origin,
+            confidence: s.confidence,
+            project: s.project,
+            active: s.active,
             skill_md: s.skill_md,
             created_at: Some(s.created),
+            updated_at: s.updated,
         })
         .collect();
 
@@ -349,9 +357,7 @@ pub async fn get_session_snapshots(
         Some(ref slug) => {
             epic_harness::store::sessions::list_recent_snapshots_pool(&pool, slug, 50).await
         }
-        None => {
-            epic_harness::store::sessions::list_recent_snapshots_all_pool(&pool, 50).await
-        }
+        None => epic_harness::store::sessions::list_recent_snapshots_all_pool(&pool, 50).await,
     }
     .map_err(|e| format!("query session snapshots: {e}"))?;
 

@@ -15,10 +15,12 @@ function loadSavedProject(): string {
 export const projectList = writable<string[]>([]);
 export const selectedProject = writable<string>(loadSavedProject());
 
-// Persist selection changes to localStorage
+// Persist selection changes to localStorage.
+// This module-level subscribe runs for the app's lifetime — no cleanup needed
+// since the store outlives all consumers and localStorage writes are idempotent.
 if (typeof window !== 'undefined') {
   selectedProject.subscribe((value) => {
-    try { localStorage.setItem(STORAGE_KEY, value); } catch { /* ignore */ }
+    try { localStorage.setItem(STORAGE_KEY, value); } catch { /* ignore quota errors */ }
   });
 }
 

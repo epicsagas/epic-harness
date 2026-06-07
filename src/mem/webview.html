@@ -854,8 +854,15 @@ async function loadGraph() {
     updateStats(statsData);
     buildSidebar();
     renderGraph();
-    // Auto-focus the most recently accessed project node after simulation settles
-    setTimeout(autoFocusMostRecentProject, 800);
+    // Auto-focus the most recently accessed project node once the simulation settles.
+    // Listen for "end" (fully cooled) rather than a fixed timeout so it works
+    // reliably regardless of graph size.
+    if (sim) {
+      sim.on('end.autoFocus', () => {
+        sim.on('end.autoFocus', null); // one-shot
+        autoFocusMostRecentProject();
+      });
+    }
   } catch (e) {
     updateConnStatus('offline');
     showErr(t('err_load_graph') + ' ' + e.message);

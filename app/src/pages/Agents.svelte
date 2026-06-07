@@ -46,7 +46,7 @@
   }
 
   $effect(() => {
-    $selectedProject;
+    const _project = $selectedProject; // reactive dependency
     loading = true;
     load();
     const id = setInterval(() => {

@@ -28,12 +28,18 @@ function getHarnessDir(): string {
   }
 }
 
-/** Read observation summary from a single project directory. */
+/**
+ * Read observation summary from a single project directory.
+ * Dev-server-only — Tauri runtime uses the async pool API instead.
+ * Reads at most MAX_LINES_PER_FILE lines from the tail of each session file
+ * to keep dev-server response times reasonable.
+ */
+const MAX_LINES_PER_FILE = 5000;
 function readObsFromDir(dir: string): unknown {
   const obsDir = path.join(dir, 'obs');
   const empty = { recent_sessions: [], tool_stats: [], total_tool_calls: 0, avg_score: 0, active_agents: [] };
   if (!fs.existsSync(obsDir)) return empty;
-  const files = fs.readdirSync(obsDir).filter(f => f.endsWith('.jsonl')).sort();
+  const files = fs.readdirSync(obsDir).filter(f => f.endsWith('.jsonl')).sort().slice(-20); // last 20 sessions only
   const toolMap: Record<string, { calls: number; successes: number; score_sum: number }> = {};
   const sessionMap: Record<string, { tool_calls: number; score_sum: number; failures: number }> = {};
   for (const f of files) {
@@ -41,7 +47,7 @@ function readObsFromDir(dir: string): unknown {
     const dateMatch = f.match(/session_(\d{8})/);
     const date = dateMatch ? dateMatch[1] : 'unknown';
     if (!sessionMap[sessionKey]) sessionMap[sessionKey] = { tool_calls: 0, score_sum: 0, failures: 0 };
-    const lines = fs.readFileSync(path.join(obsDir, f), 'utf8').trim().split('\n').filter(Boolean).slice(-10000);
+    const lines = fs.readFileSync(path.join(obsDir, f), 'utf8').trim().split('\n').filter(Boolean).slice(-MAX_LINES_PER_FILE);
     for (const l of lines) {
       try {
         const e = JSON.parse(l) as Record<string, unknown>;
