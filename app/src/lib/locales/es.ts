@@ -171,7 +171,7 @@ export default {
   searchButton: 'Buscar', colTitle: 'Título', colImportance: 'Importancia',
   colUpdated: 'Actualizado', noSearchResults: 'Sin resultados', noNodes: 'Sin nodos de memoria',
   showingFirst50: (n: number) => `Mostrando primeros 50 de ${n}`,
-  showMore: 'Show more',
+  showMore: 'Mostrar más',
   agentInboxTitle: 'Bandeja de entrada',
   allProjects: 'Todos los proyectos',
   selectProject: 'Seleccionar proyecto',

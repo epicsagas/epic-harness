@@ -19,8 +19,9 @@ pub fn run() {
             eprintln!("[epic-harness] FATAL: {e}");
             #[cfg(target_os = "macos")]
             {
+                let safe_msg = e.to_string().replace('\\', "\\\\").replace('"', "\\\"");
                 let _ = std::process::Command::new("osascript")
-                    .args(["-e", &format!("display dialog \"Epic Harness failed to start:\\n\\n{e}\\n\\nCheck ~/.harness/ permissions.\" with title \"Epic Harness\" buttons {{\"OK\"}} default button \"OK\" with icon stop")])
+                    .args(["-e", &format!("display dialog \"Epic Harness failed to start:\\n\\n{safe_msg}\\n\\nCheck ~/.harness/ permissions.\" with title \"Epic Harness\" buttons {{\"OK\"}} default button \"OK\" with icon stop")])
                     .status();
             }
             std::process::exit(1);

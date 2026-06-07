@@ -223,10 +223,16 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
     let mut skill_attribution: HashMap<String, SkillAttribution> = HashMap::new();
     let mut last_error_context: Option<String> = None;
 
+    let mut failed_slugs: Vec<String> = Vec::new();
+
     for slug in &slugs {
         let m = match load_metrics_pool(pool, slug).await {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("[epic-harness] warn: load_metrics_pool({slug}): {e}");
+                failed_slugs.push(slug.clone());
+                continue;
+            }
         };
         total_sessions += m.total_sessions;
         weighted_success_sum += m.avg_success_rate * m.total_sessions as f64;
@@ -273,6 +279,10 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
         if last_error_context.is_none() && m.last_error_context.is_some() {
             last_error_context = m.last_error_context;
         }
+    }
+
+    if !slugs.is_empty() && failed_slugs.len() == slugs.len() {
+        eprintln!("[epic-harness] warn: all {} project metrics failed to load", slugs.len());
     }
 
     // Sort and cap score history

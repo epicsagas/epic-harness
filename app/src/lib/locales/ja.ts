@@ -171,7 +171,7 @@ export default {
   searchButton: '検索', colTitle: 'タイトル', colImportance: '重要度',
   colUpdated: '更新日', noSearchResults: '結果なし', noNodes: 'メモリノードなし',
   showingFirst50: (n: number) => `${n}件中最初の50件を表示`,
-  showMore: 'Show more',
+  showMore: 'もっと見る',
   agentInboxTitle: '受信箱',
   allProjects: 'すべてのプロジェクト',
   selectProject: 'プロジェクトを選択',

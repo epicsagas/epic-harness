@@ -17,12 +17,14 @@ pub struct HarnessMetrics {
     pub session_count: u32,
     pub avg_score: f64,
     pub skill_attribution: serde_json::Value,
-    pub score_weights: serde_json::Value,
     // Fields expected by the TS HarnessMetrics interface
     pub total_sessions: u32,
     pub avg_success_rate: f64,
     pub total_evolved_skills: u32,
     pub last_session: Option<String>,
+    pub best_score: Option<f64>,
+    pub best_session: Option<String>,
+    pub last_error_context: Option<String>,
 }
 
 #[tauri::command]
@@ -58,14 +60,6 @@ pub async fn get_harness_metrics(
     let skill_attribution: serde_json::Value =
         serde_json::to_value(&m.skill_attribution).unwrap_or(serde_json::Value::Null);
 
-    // Use configured weights, falling back to defaults [0.5, 0.3, 0.2].
-    let weights = &epic_harness::config::CONFIG.scoring.weights;
-    let score_weights = serde_json::json!({
-        "success": weights[0],
-        "quality": weights[1],
-        "cost": weights[2],
-    });
-
     Ok(HarnessMetrics {
         score_history: history,
         trend: m.trend,
@@ -73,11 +67,13 @@ pub async fn get_harness_metrics(
         session_count: m.total_sessions as u32,
         avg_score: (avg * 1000.0).round() / 1000.0,
         skill_attribution,
-        score_weights,
         total_sessions: m.total_sessions as u32,
         avg_success_rate: (m.avg_success_rate * 1000.0).round() / 1000.0,
         total_evolved_skills: m.total_evolved_skills as u32,
         last_session: m.last_session,
+        best_score: m.best_score,
+        best_session: Some(m.best_session).filter(|s| !s.is_empty()),
+        last_error_context: m.last_error_context,
     })
 }
 
@@ -139,7 +135,7 @@ pub struct EvolvedSkill {
     pub project: String,
     pub active: bool,
     pub skill_md: String,
-    pub created_at: Option<String>,
+    pub created_at: String,
     pub updated_at: String,
 }
 
@@ -173,7 +169,7 @@ pub async fn get_evolved_skills(
             project: s.project,
             active: s.active,
             skill_md: s.skill_md,
-            created_at: Some(s.created),
+            created_at: s.created,
             updated_at: s.updated,
         })
         .collect();
@@ -227,6 +223,8 @@ pub struct ObsSummary {
     pub total_tool_calls: u32,
     pub avg_score: f64,
     pub failure_categories: Vec<FailureCategory>,
+    #[serde(default)]
+    pub active_agents: Vec<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -331,6 +329,7 @@ pub async fn get_obs_summary(
         total_tool_calls: total_calls,
         avg_score: (stats.avg_score * 1000.0).round() / 1000.0,
         failure_categories,
+        active_agents: vec![],
     })
 }
 
@@ -384,8 +383,8 @@ pub async fn get_global_patterns(
     let pool = state.harness_db.clone();
     let patterns = match project {
         Some(ref slug) => {
-            // Show patterns for this project only
-            epic_harness::store::global::query_patterns_for_project_pool(&pool, slug, 100)
+            // Cross-project patterns (excluding current project)
+            epic_harness::store::global::query_patterns_excluding_pool(&pool, slug, 100)
                 .await
         }
         None => {

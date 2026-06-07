@@ -241,7 +241,7 @@ export interface MemoryNode {
   type: string;
   title: string;
   tags: string[];
-  projects: string;
+  projects: string[];
   updated: string;
   // detail fields
   agents?: string;

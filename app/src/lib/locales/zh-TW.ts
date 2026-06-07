@@ -171,7 +171,7 @@ export default {
   searchButton: '搜尋', colTitle: '標題', colImportance: '重要性',
   colUpdated: '更新', noSearchResults: '未找到結果', noNodes: '無記憶節點',
   showingFirst50: (n: number) => `顯示 ${n} 筆中的前 50 筆`,
-  showMore: 'Show more',
+  showMore: '顯示更多',
   agentInboxTitle: '收件匣',
   allProjects: '所有專案',
   selectProject: '選擇專案',

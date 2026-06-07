@@ -37,6 +37,7 @@
       onchange={(e) => $selectedProject = (e.target as HTMLSelectElement).value}
       style="{SEL};max-width:160px;"
       title={$tStore('selectProject')}
+      aria-label={$tStore('selectProject')}
     >
       <option value="__all__">{$tStore('allProjects')}</option>
       {#each $projectList as slug}

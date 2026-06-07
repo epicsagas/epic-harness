@@ -171,7 +171,7 @@ export default {
   searchButton: 'खोजें', colTitle: 'शीर्षक', colImportance: 'महत्व',
   colUpdated: 'अपडेट किया', noSearchResults: 'कोई परिणाम नहीं', noNodes: 'कोई मेमोरी नोड नहीं',
   showingFirst50: (n: number) => `${n} में से पहले 50 दिखा रहे हैं`,
-  showMore: 'Show more',
+  showMore: 'और दिखाएं',
   agentInboxTitle: 'इनबॉक्स',
   allProjects: 'सभी प्रोजेक्ट',
   selectProject: 'प्रोजेक्ट चुनें',

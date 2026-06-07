@@ -3,12 +3,14 @@
   import * as d3 from 'd3';
   import { getGraph, getGraphStats, getMemoryNodes, searchMemory, getMemoryNode, type GraphData, type GraphNode, type GraphStats, type MemoryNode } from '../lib/harness.js';
   import { tStore } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let graphData = $state<GraphData>({ nodes: [], edges: [] });
   let selectedNode = $state<GraphNode | null>(null);
   let svgEl = $state<SVGSVGElement | undefined>(undefined);
   let loading = $state(true);
   let error = $state('');
+  let loadGeneration = $state(0);
 
   // R6: Graph stats
   let stats = $state<GraphStats | null>(null);
@@ -28,17 +30,26 @@
     resolution: '#06b6d4', default: '#94a3b8',
   };
 
-  onMount(async () => {
+  async function loadData(gen: number) {
     try {
       const [g, s, n] = await Promise.all([getGraph(), getGraphStats(), getMemoryNodes()]);
+      if (gen !== loadGeneration) return;
       graphData = g;
       stats = s;
       nodes = n;
     } catch (e) {
+      if (gen !== loadGeneration) return;
       error = String(e);
     } finally {
-      loading = false;
+      if (gen === loadGeneration) loading = false;
     }
+  }
+
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
+    const gen = ++loadGeneration;
+    loading = true;
+    loadData(gen);
   });
 
   async function doSearch() {
@@ -221,7 +232,7 @@
                 <td style="color:var(--fg);">{node.title}</td>
                 <td><span class="pill info" style="font-size:10px;">{node.type}</span></td>
                 <td style="font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                  {#if Array.isArray(node.tags) && node.tags.length > 0}{node.tags.join(', ')}{/if}
+                  {#if node.tags.length > 0}{node.tags.join(', ')}{/if}
                 </td>
                 <td style="font-family:var(--font-mono);text-align:right;">{node.importance?.toFixed(2) ?? '—'}</td>
                 <td style="font-family:var(--font-mono);font-size:11px;">{node.updated ? node.updated.slice(0, 10) : '—'}</td>

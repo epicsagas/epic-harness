@@ -52,6 +52,10 @@
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
     const gen = ++loadGeneration;
+    // Reset cached agent data on project switch
+    agentEvents = new Map();
+    agentInboxes = new Map();
+    expandedAgent = null;
     loading = true;
     load(gen);
     const id = setInterval(() => {

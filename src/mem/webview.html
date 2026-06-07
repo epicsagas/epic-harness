@@ -160,7 +160,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 .type-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 
 /* ── Graph Canvas ──────────────────────────────────────────── */
-#graph-wrap { position: relative; overflow: hidden; background: var(--bg); }
+#graph-wrap { position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
 #graph-svg { width: 100%; height: 100%; display: block; }
 .graph-link { stroke-opacity: 0.4; fill: none; }
 .graph-link-label { font-size: 9px; fill: var(--text-muted); pointer-events: none; }
@@ -407,12 +407,12 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 
   <!-- Graph Canvas -->
   <div id="graph-wrap">
-    <svg id="graph-svg"></svg>
-    <button id="focus-reset-btn">&#8635; All Nodes</button>
+    <svg id="graph-svg" role="img" aria-label="Knowledge graph visualization"></svg>
+    <button id="focus-reset-btn" aria-label="Reset graph to show all nodes">&#8635; All Nodes</button>
     <div id="zoom-controls">
-      <button class="zoom-btn" id="btn-zoom-in">+</button>
-      <button class="zoom-btn" id="btn-zoom-reset">&#8857;</button>
-      <button class="zoom-btn" id="btn-zoom-out">&#8722;</button>
+      <button class="zoom-btn" id="btn-zoom-in" aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="btn-zoom-reset" aria-label="Reset zoom">&#8857;</button>
+      <button class="zoom-btn" id="btn-zoom-out" aria-label="Zoom out">&#8722;</button>
     </div>
     <div id="graph-tooltip"></div>
     <div id="loading-overlay">
@@ -1025,7 +1025,22 @@ function initD3() {
     .on('zoom', ev => gMain.attr('transform', ev.transform));
   svg.call(zoomB).on('dblclick.zoom', null);
 
+  // Track zoom transforms to distinguish click from micro-pan
+  let zoomTransformAtDown = null;
+  svg.on('mousedown.zoomcheck', () => {
+    zoomTransformAtDown = d3.zoomTransform(svg.node());
+  });
+
   svg.on('click', () => {
+    // Ignore click if a pan/zoom occurred during mousedown→mouseup
+    if (zoomTransformAtDown) {
+      const current = d3.zoomTransform(svg.node());
+      if (current.x !== zoomTransformAtDown.x || current.y !== zoomTransformAtDown.y || current.k !== zoomTransformAtDown.k) {
+        zoomTransformAtDown = null;
+        return;
+      }
+    }
+    zoomTransformAtDown = null;
     if (S.focusedProjectId) {
       clearFocus();
       return;
@@ -1196,7 +1211,7 @@ function renderGraph() {
     .attr('y', d => nodeR(d) + 13)
     .text(d => {
       const title = d.title || d.id;
-      return title.length > 16 ? title.slice(0,15)+'…' : title;
+      return title.length > 12 ? title.slice(0,11)+'…' : title;
     });
 
   // re-apply selection state
@@ -1330,10 +1345,18 @@ function focusOn(nodeId) {
     const H = document.getElementById('graph-wrap').clientHeight;
     simNode.fx = W / 2;
     simNode.fy = H / 2;
-    sim.alpha(0.3).restart();
+    sim.alpha(0.05).restart();
+    // Zoom to the pinned position directly (fx/fy), not stale x/y
+    requestAnimationFrame(() => {
+      const scale = 1.5;
+      const transform = d3.zoomIdentity
+        .translate(W/2 - simNode.fx * scale, H/2 - simNode.fy * scale)
+        .scale(scale);
+      svg.transition().duration(500).call(zoomB.transform, transform);
+    });
+  } else {
+    zoomToNode(nodeId);
   }
-
-  zoomToNode(nodeId);
   document.getElementById('focus-reset-btn').style.display = 'block';
 }
 

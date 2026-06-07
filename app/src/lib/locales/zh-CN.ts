@@ -171,7 +171,7 @@ export default {
   searchButton: '搜索', colTitle: '标题', colImportance: '重要性',
   colUpdated: '更新', noSearchResults: '未找到结果', noNodes: '无记忆节点',
   showingFirst50: (n: number) => `显示 ${n} 条中的前 50 条`,
-  showMore: 'Show more',
+  showMore: '显示更多',
   agentInboxTitle: '收件箱',
   allProjects: '所有项目',
   selectProject: '选择项目',

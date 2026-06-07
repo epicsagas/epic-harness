@@ -184,7 +184,7 @@ export default {
   searchButton: '검색', colTitle: '제목', colImportance: '중요도',
   colUpdated: '수정일', noSearchResults: '검색 결과 없음', noNodes: '메모리 노드 없음',
   showingFirst50: (n: number) => `${n}개 중 처음 50개 표시`,
-  showMore: 'Show more',
+  showMore: '더 보기',
   agentInboxTitle: '받은 메시지',
   allProjects: '모든 프로젝트',
   selectProject: '프로젝트 선택',
