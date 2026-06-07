@@ -22,14 +22,34 @@ const marked = { parse(md) {
     .replace(/\n/g,'<br>');
 }};
 function sanitize(html) {
-  // Defense-in-depth: strip dangerous tags and event handlers.
-  // The marked parser already HTML-escapes input before transforms,
-  // so this is an additional safety net.
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/<iframe\b[^>]*>.*?<\/iframe>/gi, '')
-    .replace(/<form\b[^>]*>.*?<\/form>/gi, '');
+  // Defense-in-depth: DOM-based allowlist sanitizer.
+  // Parses HTML into a real DOM tree, then removes any element or attribute
+  // not on the allowlist. This avoids regex-based bypasses flagged by CodeQL.
+  const ALLOWED_TAGS = new Set([
+    'h1','h2','h3','h4','h5','h6','p','br','hr','blockquote','pre','code',
+    'ul','ol','li','a','strong','em','b','i','u','s','del','ins','mark',
+    'table','thead','tbody','tr','th','td','img','details','summary',
+    'div','span','sup','sub','abbr'
+  ]);
+  const ALLOWED_ATTRS = new Set(['href','src','alt','title','class','id','target','rel']);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  function walk(node) {
+    const children = [...node.childNodes];
+    for (const child of children) {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const tag = child.tagName.toLowerCase();
+        if (!ALLOWED_TAGS.has(tag)) { child.remove(); continue; }
+        for (const attr of [...child.attributes]) {
+          if (!ALLOWED_ATTRS.has(attr.name.toLowerCase())) {
+            child.removeAttribute(attr.name);
+          }
+        }
+        walk(child);
+      }
+    }
+  }
+  walk(doc.body);
+  return doc.body.innerHTML;
 }
 </script>
 <style>
