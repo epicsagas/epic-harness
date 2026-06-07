@@ -139,7 +139,7 @@
     return '—';
   }
 
-  let pollGeneration = $state(0);
+  let pollGeneration = 0;
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
     const gen = ++pollGeneration;

@@ -8,7 +8,7 @@
   let patterns = $state<GlobalPattern[]>([]);
   let loading = $state(true);
   let error = $state('');
-  let staleGeneration = $state(0);
+  let staleGeneration = 0;
 
   // Score weights are compile-time constants defined in common.rs
   const successWeight = 0.5;

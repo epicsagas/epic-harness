@@ -18,7 +18,40 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 use sqlx::{AnyPool, Row};
 
+/// Load metrics from a legacy `metrics.json` file.
+/// Used as fallback when the DB has no rows for a project.
+fn load_metrics_from_json(project: &str) -> Option<Metrics> {
+    let dir = crate::shared::paths::harness_dir_for_slug(project);
+    let path = dir.join("metrics.json");
+    if !path.exists() {
+        return None;
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(content) => serde_json::from_str::<Metrics>(&content)
+            .map_err(|e| {
+                eprintln!("[store/metrics] parse metrics.json for {project}: {e}");
+                e
+            })
+            .ok(),
+        Err(e) => {
+            eprintln!("[store/metrics] read metrics.json for {project}: {e}");
+            None
+        }
+    }
+}
+
+/// Try to persist a JSON-loaded Metrics into DB so future reads use the fast path.
+async fn seed_metrics_from_json(pool: &AnyPool, project: &str, m: &Metrics) {
+    if let Err(e) = save_metrics_pool(pool, project, m).await {
+        eprintln!("[store/metrics] seed from json for {project}: {e}");
+    }
+}
+
 /// Load the full Metrics struct from SQLite using a pool.
+///
+/// Falls back to reading `metrics.json` when the DB has no rows for the project.
+/// On successful JSON fallback, the data is seeded into the DB so future reads
+/// avoid the filesystem path.
 pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metrics> {
     // Scalar state
     let kv_rows = sqlx::query("SELECT key, value FROM metrics_state WHERE project = $1")
@@ -183,7 +216,7 @@ pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metr
         })
         .collect();
 
-    Ok(Metrics {
+    let metrics = Metrics {
         total_sessions,
         avg_success_rate,
         total_evolved_skills,
@@ -195,7 +228,23 @@ pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metr
         stagnation_count,
         skill_attribution,
         last_error_context,
-    })
+    };
+
+    // JSON fallback: if DB had no scalar state for this project, try metrics.json.
+    if state.is_empty() {
+        if let Some(json_metrics) = load_metrics_from_json(project) {
+            // Seed DB in background so future reads use the fast path.
+            let pool = pool.clone();
+            let project = project.to_string();
+            let m = json_metrics.clone();
+            tokio::spawn(async move {
+                seed_metrics_from_json(&pool, &project, &m).await;
+            });
+            return Ok(json_metrics);
+        }
+    }
+
+    Ok(metrics)
 }
 
 /// Load aggregated metrics across all projects.

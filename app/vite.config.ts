@@ -455,6 +455,14 @@ export default defineConfig({
   plugins: [svelte(), viteSingleFile(), harnessApiPlugin()],
   appType: 'spa',
   base: '/',
+  build: {
+    rollupOptions: {
+      // @tauri-apps/api accesses window.__TAURI_INTERNALS__ at module level,
+      // crashing in plain browsers. Externalize so the dynamic import in
+      // harness.ts falls through to browserFallback at runtime.
+      external: ['@tauri-apps/api/core'],
+    },
+  },
   resolve: {
     alias: {
       '$lib': path.resolve('./src/lib'),

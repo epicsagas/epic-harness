@@ -8,7 +8,7 @@
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let loadGeneration = $state(0);
+  let loadGeneration = 0;
 
   const totalFailures = $derived(
     obs ? obs.recent_sessions.reduce((sum, s) => sum + s.failures, 0) : 0

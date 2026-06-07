@@ -10,7 +10,7 @@
   let svgEl = $state<SVGSVGElement | undefined>(undefined);
   let loading = $state(true);
   let error = $state('');
-  let loadGeneration = $state(0);
+  let loadGeneration = 0;
 
   // R6: Graph stats
   let stats = $state<GraphStats | null>(null);

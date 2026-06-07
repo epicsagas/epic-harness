@@ -14,7 +14,7 @@
   let expandedAgent = $state<string | null>(null);
   let agentEvents = $state<Map<string, AgentEvent[]>>(new Map());
   let agentInboxes = $state<Map<string, InboxMessage[]>>(new Map());
-  let loadGeneration = $state(0);
+  let loadGeneration = 0;
 
   async function load(generation: number) {
     try {
