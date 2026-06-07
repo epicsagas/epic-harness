@@ -34,48 +34,53 @@ function getHarnessDir(): string {
  * Reads at most MAX_LINES_PER_FILE lines from the tail of each session file
  * to keep dev-server response times reasonable.
  */
+const fsp = fs.promises;
 const MAX_LINES_PER_FILE = 5000;
-function readObsFromDir(dir: string): unknown {
+async function readObsFromDir(dir: string): Promise<unknown> {
   const obsDir = path.join(dir, 'obs');
   const empty = { recent_sessions: [], tool_stats: [], total_tool_calls: 0, avg_score: 0, active_agents: [] };
-  if (!fs.existsSync(obsDir)) return empty;
-  const files = fs.readdirSync(obsDir).filter(f => f.endsWith('.jsonl')).sort().slice(-20); // last 20 sessions only
-  const toolMap: Record<string, { calls: number; successes: number; score_sum: number }> = {};
-  const sessionMap: Record<string, { tool_calls: number; score_sum: number; failures: number }> = {};
-  for (const f of files) {
-    const sessionKey = f.replace('.jsonl', '');
-    const dateMatch = f.match(/session_(\d{8})/);
-    const date = dateMatch ? dateMatch[1] : 'unknown';
-    if (!sessionMap[sessionKey]) sessionMap[sessionKey] = { tool_calls: 0, score_sum: 0, failures: 0 };
-    const lines = fs.readFileSync(path.join(obsDir, f), 'utf8').trim().split('\n').filter(Boolean).slice(-MAX_LINES_PER_FILE);
-    for (const l of lines) {
-      try {
-        const e = JSON.parse(l) as Record<string, unknown>;
-        const t = (e.tool as string) ?? 'unknown';
-        const isSuccess = e.result === 'success' || e.tool_success === true;
-        const score = (e.score as number) ?? (e.composite_score as number) ?? 0;
-        if (!toolMap[t]) toolMap[t] = { calls: 0, successes: 0, score_sum: 0 };
-        toolMap[t].calls++;
-        if (isSuccess) toolMap[t].successes++;
-        toolMap[t].score_sum += score;
-        sessionMap[sessionKey].tool_calls++;
-        sessionMap[sessionKey].score_sum += score;
-        if (!isSuccess) sessionMap[sessionKey].failures++;
-      } catch { /* skip malformed */ }
+  try {
+    const entries = await fsp.readdir(obsDir);
+    const files = entries.filter(f => f.endsWith('.jsonl')).sort().slice(-20);
+    if (!files.length) return empty;
+    const toolMap: Record<string, { calls: number; successes: number; score_sum: number }> = {};
+    const sessionMap: Record<string, { tool_calls: number; score_sum: number; failures: number }> = {};
+    for (const f of files) {
+      const sessionKey = f.replace('.jsonl', '');
+      const dateMatch = f.match(/session_(\d{8})/);
+      const date = dateMatch ? dateMatch[1] : 'unknown';
+      if (!sessionMap[sessionKey]) sessionMap[sessionKey] = { tool_calls: 0, score_sum: 0, failures: 0 };
+      const raw = await fsp.readFile(path.join(obsDir, f), 'utf8');
+      const lines = raw.trim().split('\n').filter(Boolean).slice(-MAX_LINES_PER_FILE);
+      for (const l of lines) {
+        try {
+          const e = JSON.parse(l) as Record<string, unknown>;
+          const t = (e.tool as string) ?? 'unknown';
+          const isSuccess = e.result === 'success' || e.tool_success === true;
+          const score = (e.score as number) ?? (e.composite_score as number) ?? 0;
+          if (!toolMap[t]) toolMap[t] = { calls: 0, successes: 0, score_sum: 0 };
+          toolMap[t].calls++;
+          if (isSuccess) toolMap[t].successes++;
+          toolMap[t].score_sum += score;
+          sessionMap[sessionKey].tool_calls++;
+          sessionMap[sessionKey].score_sum += score;
+          if (!isSuccess) sessionMap[sessionKey].failures++;
+        } catch { /* skip malformed */ }
+      }
+      (sessionMap[sessionKey] as Record<string, unknown>)['date'] = date;
+      (sessionMap[sessionKey] as Record<string, unknown>)['session_id'] = sessionKey;
     }
-    (sessionMap[sessionKey] as Record<string, unknown>)['date'] = date;
-    (sessionMap[sessionKey] as Record<string, unknown>)['session_id'] = sessionKey;
-  }
-  const tool_stats = Object.entries(toolMap)
-    .map(([tool, s]) => ({ tool, calls: s.calls, success_rate: s.calls ? Math.round((s.successes / s.calls) * 1000) / 1000 : 0, avg_score: s.calls ? Math.round((s.score_sum / s.calls) * 1000) / 1000 : 0 }))
-    .sort((a, b) => b.calls - a.calls);
-  const recent_sessions = Object.values(sessionMap)
-    .sort((a, b) => String((b as Record<string, unknown>)['session_id']).localeCompare(String((a as Record<string, unknown>)['session_id'])))
-    .slice(0, 10)
-    .map(s => { const rec = s as Record<string, unknown>; return { session_id: rec['session_id'] as string, date: rec['date'] as string, tool_calls: rec['tool_calls'] as number, avg_score: (rec['tool_calls'] as number) ? Math.round(((rec['score_sum'] as number) / (rec['tool_calls'] as number)) * 1000) / 1000 : 0, failures: rec['failures'] as number }; });
-  const total = tool_stats.reduce((s, t) => s + t.calls, 0);
-  const avg = total ? tool_stats.reduce((s, t) => s + t.avg_score * t.calls, 0) / total : 0;
-  return { recent_sessions, tool_stats, total_tool_calls: total, avg_score: Math.round(avg * 1000) / 1000, active_agents: [] };
+    const tool_stats = Object.entries(toolMap)
+      .map(([tool, s]) => ({ tool, calls: s.calls, success_rate: s.calls ? Math.round((s.successes / s.calls) * 1000) / 1000 : 0, avg_score: s.calls ? Math.round((s.score_sum / s.calls) * 1000) / 1000 : 0 }))
+      .sort((a, b) => b.calls - a.calls);
+    const recent_sessions = Object.values(sessionMap)
+      .sort((a, b) => String((b as Record<string, unknown>)['session_id']).localeCompare(String((a as Record<string, unknown>)['session_id'])))
+      .slice(0, 10)
+      .map(s => { const rec = s as Record<string, unknown>; return { session_id: rec['session_id'] as string, date: rec['date'] as string, tool_calls: rec['tool_calls'] as number, avg_score: (rec['tool_calls'] as number) ? Math.round(((rec['score_sum'] as number) / (rec['tool_calls'] as number)) * 1000) / 1000 : 0, failures: rec['failures'] as number }; });
+    const total = tool_stats.reduce((s, t) => s + t.calls, 0);
+    const avg = total ? tool_stats.reduce((s, t) => s + t.avg_score * t.calls, 0) / total : 0;
+    return { recent_sessions, tool_stats, total_tool_calls: total, avg_score: Math.round(avg * 1000) / 1000, active_agents: [] };
+  } catch { return empty; }
 }
 
 function harnessApiPlugin(): Plugin {
@@ -203,7 +208,7 @@ function harnessApiPlugin(): Plugin {
         res.end(JSON.stringify({ ok: dismissed, dismissed: agentId }));
       });
 
-      server.middlewares.use('/api/harness', (req, res) => {
+      server.middlewares.use('/api/harness', async (req, res) => {
         const urlObj = new URL(req.url ?? '/', 'http://localhost');
         const cmd = urlObj.searchParams.get('cmd') ?? '';
         const projectParam = urlObj.searchParams.get('project');
@@ -311,7 +316,7 @@ function harnessApiPlugin(): Plugin {
           } else if (cmd === 'get_obs_summary') {
             const dir = projectDir;
             if (dir) {
-              data = readObsFromDir(dir);
+              data = await readObsFromDir(dir);
             } else {
               // Aggregate across all projects
               const projectsRoot = path.resolve(harnessDir, '..');
@@ -320,7 +325,7 @@ function harnessApiPlugin(): Plugin {
                 for (const proj of fs.readdirSync(projectsRoot)) {
                   const projDir = path.join(projectsRoot, proj);
                   if (!fs.statSync(projDir).isDirectory()) continue;
-                  const d = readObsFromDir(projDir) as Record<string, unknown>;
+                  const d = (await readObsFromDir(projDir)) as Record<string, unknown>;
                   if (!d) continue;
                   (merged.recent_sessions as unknown[]).push(...((d.recent_sessions as unknown[]) ?? []));
                   (merged.tool_stats as unknown[]).push(...((d.tool_stats as unknown[]) ?? []));

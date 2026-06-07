@@ -56,22 +56,40 @@ pub async fn query_patterns_excluding_pool(
     exclude_project: &str,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
-    query_patterns_pool_inner(pool, Some(exclude_project), limit).await
+    query_patterns_pool_inner(pool, None, Some(exclude_project), limit).await
 }
 
 pub async fn query_all_patterns_pool(
     pool: &AnyPool,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
-    query_patterns_pool_inner(pool, None, limit).await
+    query_patterns_pool_inner(pool, None, None, limit).await
+}
+
+#[allow(dead_code)] // Used by Tauri binary only (commands/harness.rs)
+pub async fn query_patterns_for_project_pool(
+    pool: &AnyPool,
+    project: &str,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
+    query_patterns_pool_inner(pool, Some(project), None, limit).await
 }
 
 async fn query_patterns_pool_inner(
     pool: &AnyPool,
+    include_project: Option<&str>,
     exclude_project: Option<&str>,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let rows = if let Some(proj) = exclude_project {
+    let rows = if let Some(proj) = include_project {
+        sqlx::query(
+            "SELECT timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools FROM global_patterns WHERE project = ?1 ORDER BY timestamp DESC LIMIT ?2"
+        )
+        .bind(proj)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    } else if let Some(proj) = exclude_project {
         sqlx::query(
             "SELECT timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools FROM global_patterns WHERE project != ?1 ORDER BY timestamp DESC LIMIT ?2"
         )

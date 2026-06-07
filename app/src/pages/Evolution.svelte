@@ -140,9 +140,9 @@
   let pollInterval: ReturnType<typeof setInterval>;
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
+    clearInterval(pollInterval);
     loading = true;
     load();
-    clearInterval(pollInterval);
     pollInterval = setInterval(load, 30_000);
     return () => clearInterval(pollInterval);
   });

@@ -1,7 +1,6 @@
 use epic_harness::mem::store::{
-    Node, NodeFrontmatter, delete_node_pool, importance_for_type, new_uuid, now_iso,
-    read_all_nodes_pool, read_node_pool, remove_edges_for_node_pool, validate_uuid,
-    write_node_pool,
+    Node, NodeFrontmatter, importance_for_type, new_uuid, now_iso,
+    read_all_nodes_pool, read_node_pool, validate_uuid, write_node_pool,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -253,11 +252,19 @@ pub async fn delete_node(id: String, state: State<'_, AppState>) -> Result<Strin
         return Err("invalid node id".into());
     }
     let pool = state.db.clone();
-    remove_edges_for_node_pool(&pool, &id)
+    // Wrap in a transaction for atomicity — if node delete fails, edges are preserved.
+    let mut tx = pool.begin().await.map_err(|e| format!("failed to begin transaction: {e}"))?;
+    sqlx::query("DELETE FROM edges WHERE source = $1 OR target = $2")
+        .bind(&id)
+        .bind(&id)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("failed to remove edges: {e}"))?;
-    delete_node_pool(&pool, &id)
+    sqlx::query("DELETE FROM nodes WHERE id = $1")
+        .bind(&id)
+        .execute(&mut *tx)
         .await
         .map_err(|e| format!("failed to delete node: {e}"))?;
+    tx.commit().await.map_err(|e| format!("failed to commit transaction: {e}"))?;
     Ok(id)
 }

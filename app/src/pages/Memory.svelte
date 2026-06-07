@@ -219,7 +219,7 @@
                 <td style="color:var(--fg);">{node.title}</td>
                 <td><span class="pill info" style="font-size:10px;">{node.type}</span></td>
                 <td style="font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                  {#if node.tags}{node.tags.join(', ')}{/if}
+                  {#if Array.isArray(node.tags) && node.tags.length > 0}{node.tags.join(', ')}{/if}
                 </td>
                 <td style="font-family:var(--font-mono);text-align:right;">{node.importance?.toFixed(2) ?? '—'}</td>
                 <td style="font-family:var(--font-mono);font-size:11px;">{node.updated ? node.updated.slice(0, 10) : '—'}</td>

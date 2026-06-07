@@ -378,12 +378,22 @@ pub async fn get_session_snapshots(
 
 #[tauri::command]
 pub async fn get_global_patterns(
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, String> {
     let pool = state.harness_db.clone();
-    let patterns = epic_harness::store::global::query_all_patterns_pool(&pool, 100)
-        .await
-        .map_err(|e| format!("query global patterns: {e}"))?;
+    let patterns = match project {
+        Some(ref slug) => {
+            // Show patterns for this project only
+            epic_harness::store::global::query_patterns_for_project_pool(&pool, slug, 100)
+                .await
+        }
+        None => {
+            epic_harness::store::global::query_all_patterns_pool(&pool, 100)
+                .await
+        }
+    }
+    .map_err(|e| format!("query global patterns: {e}"))?;
     Ok(patterns)
 }
 

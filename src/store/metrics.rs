@@ -238,7 +238,7 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
         if m.best_score > best_score {
             best_score = m.best_score;
         }
-        if m.best_session.len() > best_session.len() {
+        if m.best_session > best_session {
             best_session = m.best_session;
         }
         // Worst trend: declining > stable > improving

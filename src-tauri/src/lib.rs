@@ -9,10 +9,12 @@ pub fn run() {
         Ok(s) => s,
         Err(e) => {
             eprintln!("[epic-harness] FATAL: {e}");
-            // Show a native macOS dialog before exiting.
-            let _ = std::process::Command::new("osascript")
-                .args(["-e", &format!("display dialog \"Epic Harness failed to start:\\n\\n{e}\\n\\nCheck ~/.harness/ permissions.\" with title \"Epic Harness\" buttons {{\"OK\"}} default button \"OK\" with icon stop")])
-                .status();
+            #[cfg(target_os = "macos")]
+            {
+                let _ = std::process::Command::new("osascript")
+                    .args(["-e", &format!("display dialog \"Epic Harness failed to start:\\n\\n{e}\\n\\nCheck ~/.harness/ permissions.\" with title \"Epic Harness\" buttons {{\"OK\"}} default button \"OK\" with icon stop")])
+                    .status();
+            }
             std::process::exit(1);
         }
     };
