@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { getLang, setLang, LANGS, type Lang } from '$lib/i18n.js';
+  import { getLang, setLang, LANGS, type Lang, tStore } from '$lib/i18n.js';
+  import { projectList, selectedProject } from '$lib/stores/project.js';
 
   interface Props {
     currentLabel: string;
@@ -29,6 +30,20 @@
     </div>
   </div>
   <div class="topbar-right" style="display:flex;align-items:center;gap:8px;">
+
+    <!-- Project selector -->
+    <select
+      value={$selectedProject}
+      onchange={(e) => $selectedProject = (e.target as HTMLSelectElement).value}
+      style="{SEL};max-width:160px;"
+      title={$tStore('selectProject')}
+      aria-label={$tStore('selectProject')}
+    >
+      <option value="__all__">{$tStore('allProjects')}</option>
+      {#each $projectList as slug}
+        <option value={slug}>{slug}</option>
+      {/each}
+    </select>
 
     <!-- Language selector -->
     <select

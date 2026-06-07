@@ -1,24 +1,29 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
-  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent } from '../lib/harness.js';
-  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
+  import { getOrchestratorRun, getOrchestratorAgentStatus, dismissAgent, getAgentEvents, getAgentInbox } from '../lib/harness.js';
+  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus, AgentEvent, InboxMessage } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let run = $state<OrchestrationRun | null>(null);
   let agentStatuses = $state<Map<string, OrchAgentStatus>>(new Map());
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let expandedAgent = $state<string | null>(null);
+  let agentEvents = $state<Map<string, AgentEvent[]>>(new Map());
+  let agentInboxes = $state<Map<string, InboxMessage[]>>(new Map());
+  let loadGeneration = $state(0);
 
-  async function load() {
+  async function load(generation: number) {
     try {
       error = null;
       const [orchRun, orchObs] = await Promise.all([
         getOrchestratorRun(),
         getObsSummary(),
       ]);
+      if (generation !== loadGeneration) return;
       run = orchRun;
       obs = orchObs;
 
@@ -33,22 +38,49 @@
             } catch { /* skip missing */ }
           })
         );
+        if (generation !== loadGeneration) return;
         agentStatuses = statusMap;
       }
     } catch (e) {
+      if (generation !== loadGeneration) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
-  onMount(() => {
-    load();
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
+    const gen = ++loadGeneration;
+    // Reset cached agent data on project switch
+    agentEvents = new Map();
+    agentInboxes = new Map();
+    expandedAgent = null;
+    loading = true;
+    load(gen);
     const id = setInterval(() => {
-      if (!document.hidden) load();
+      if (!document.hidden) load(gen);
     }, 5000);
     return () => clearInterval(id);
   });
+
+  const MAX_CACHED_AGENTS = 20;
+
+  async function toggleEvents(agentId: string) {
+    if (expandedAgent === agentId) { expandedAgent = null; return; }
+    expandedAgent = agentId;
+    // Reset caches if they exceed reasonable bounds (also cleared on project switch)
+    if (agentEvents.size > MAX_CACHED_AGENTS) agentEvents = new Map();
+    if (agentInboxes.size > MAX_CACHED_AGENTS) agentInboxes = new Map();
+    const promises: Promise<void>[] = [];
+    if (!agentEvents.has(agentId)) {
+      promises.push(getAgentEvents(agentId).then(evts => { agentEvents.set(agentId, evts); }));
+    }
+    if (!agentInboxes.has(agentId)) {
+      promises.push(getAgentInbox(agentId).then(msgs => { agentInboxes.set(agentId, msgs); }));
+    }
+    await Promise.all(promises);
+  }
 
   function statusPillClass(status: string): string {
     switch (status) {
@@ -190,7 +222,7 @@
                 <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
               </div>
               <button
-                onclick={async () => { await dismissAgent(agent.id); await load(); }}
+                onclick={async () => { await dismissAgent(agent.id); await load(loadGeneration); }}
                 title="Dismiss"
                 style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
               >✕</button>
@@ -218,6 +250,45 @@
                   <span class="pill info" style="font-size:10px;margin-right:4px;">{req}</span>
                 {/each}
               </div>
+            {/if}
+            <!-- R4: Event log toggle -->
+            <button
+              onclick={() => toggleEvents(agent.id)}
+              style="margin-top:8px;background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 8px;color:var(--muted);font-size:11px;cursor:pointer;width:100%;"
+            >
+              {$tStore('agentEventLog')} {expandedAgent === agent.id ? '▲' : '▼'}
+            </button>
+            {#if expandedAgent === agent.id}
+              <div style="margin-top:6px;max-height:150px;overflow-y:auto;font-size:11px;">
+                {#if agentEvents.get(agent.id)?.length}
+                  <table class="data-table" style="font-size:10px;">
+                    <thead><tr><th>{$tStore('colTimestamp')}</th><th>{$tStore('colEventType')}</th></tr></thead>
+                    <tbody>
+                      {#each agentEvents.get(agent.id) ?? [] as evt}
+                        <tr>
+                          <td style="font-family:var(--font-mono);color:var(--muted);">{evt.timestamp.slice(11, 19)}</td>
+                          <td><code>{evt.event_type}</code></td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                {:else}
+                  <div style="color:var(--muted);text-align:center;padding:8px;">{$tStore('noEvents')}</div>
+                {/if}
+              </div>
+              <!-- R7: Inbox messages -->
+              {#if (agentInboxes.get(agent.id)?.length ?? 0) > 0}
+                <div style="margin-top:6px;max-height:120px;overflow-y:auto;font-size:11px;">
+                  <div style="color:var(--muted);margin-bottom:4px;font-size:10px;font-weight:600;">{$tStore('agentInboxTitle')} ({agentInboxes.get(agent.id)!.length})</div>
+                  {#each agentInboxes.get(agent.id)!.slice(0, 10) as msg}
+                    <div style="padding:3px 0;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:baseline;">
+                      <span style="font-family:var(--font-mono);color:var(--muted);font-size:9px;">{msg.timestamp.slice(11, 19)}</span>
+                      <span style="color:var(--accent);font-size:10px;">{msg.from} →</span>
+                      <span style="color:var(--fg-secondary);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title={msg.message}>{msg.message}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             {/if}
           </div>
         {/each}

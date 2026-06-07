@@ -82,6 +82,45 @@ pub async fn query_recent_records_pool(
     Ok(records)
 }
 
+/// Load recent evolution records across all projects.
+///
+/// Intentionally omits project filter — this aggregates the full evolution
+/// history for cross-project analysis in the dashboard.
+pub async fn query_recent_records_all_pool(
+    pool: &AnyPool,
+    limit: i64,
+) -> io::Result<Vec<EvolutionRecord>> {
+    let rows = sqlx::query(
+        "SELECT timestamp, observations, success_rate, avg_score, error_patterns, failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary FROM evolution_records ORDER BY id DESC LIMIT ?1"
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    let mut records: Vec<EvolutionRecord> = rows
+        .iter()
+        .map(|r| {
+            let error_json: String = r.try_get(4).unwrap_or_else(|_| "{}".into());
+            let failure_json: String = r.try_get(5).unwrap_or_else(|_| "[]".into());
+            EvolutionRecord {
+                timestamp: r.try_get(0).unwrap_or_default(),
+                observations: crate::store::i64_to_u64(r.try_get::<i64, _>(1).unwrap_or(0)),
+                success_rate: r.try_get(2).unwrap_or(0.0),
+                avg_score: r.try_get(3).unwrap_or(0.0),
+                error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
+                failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
+                skills_seeded: crate::store::i64_to_u64(r.try_get::<i64, _>(6).unwrap_or(0)),
+                skills_rolled_back: crate::store::i64_to_u64(r.try_get::<i64, _>(7).unwrap_or(0)),
+                total_evolved: crate::store::i64_to_u64(r.try_get::<i64, _>(8).unwrap_or(0)),
+                analysis_summary: r.try_get(9).unwrap_or_default(),
+            }
+        })
+        .collect();
+    records.reverse();
+    Ok(records)
+}
+
 pub async fn query_all_records_pool(
     pool: &AnyPool,
     project: &str,

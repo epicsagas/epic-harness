@@ -1,11 +1,11 @@
-use crate::state::AppState;
 use epic_harness::mem::store::{
-    Node, NodeFrontmatter, delete_node_file_conn, importance_for_type, new_uuid, now_iso,
-    read_all_nodes_conn, read_node_conn, remove_edges_for_node_conn, validate_uuid,
-    write_node_conn,
+    Node, NodeFrontmatter, importance_for_type, new_uuid, now_iso, read_all_nodes_pool,
+    read_node_pool, validate_uuid, write_node_pool,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+use crate::state::AppState;
 
 const VALID_NODE_TYPES: &[&str] = &[
     "decision",
@@ -103,16 +103,11 @@ impl From<Node> for NodeDetailResponse {
 
 #[tauri::command]
 pub async fn get_nodes(state: State<'_, AppState>) -> Result<Vec<NodeResponse>, String> {
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        let nodes = read_all_nodes_conn(&conn).map_err(|e| format!("failed to read nodes: {e}"))?;
-        Ok(nodes.iter().map(NodeResponse::from).collect())
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    let nodes = read_all_nodes_pool(&pool)
+        .await
+        .map_err(|e| format!("failed to read nodes: {e}"))?;
+    Ok(nodes.iter().map(NodeResponse::from).collect())
 }
 
 #[tauri::command]
@@ -123,16 +118,11 @@ pub async fn get_node(
     if !validate_uuid(&id) {
         return Err("invalid node id".into());
     }
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        let node = read_node_conn(&conn, &id).map_err(|e| format!("failed to read node: {e}"))?;
-        Ok(NodeDetailResponse::from(node))
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    let node = read_node_pool(&pool, &id)
+        .await
+        .map_err(|e| format!("failed to read node: {e}"))?;
+    Ok(NodeDetailResponse::from(node))
 }
 
 #[tauri::command]
@@ -154,17 +144,17 @@ pub async fn create_node(
             "title exceeds max length of {MAX_TITLE_LEN} characters"
         ));
     }
-    if let Some(ref body) = input.body {
-        if body.len() > MAX_BODY_LEN {
-            return Err(format!(
-                "body exceeds max length of {MAX_BODY_LEN} characters"
-            ));
-        }
+    if let Some(ref body) = input.body
+        && body.len() > MAX_BODY_LEN
+    {
+        return Err(format!(
+            "body exceeds max length of {MAX_BODY_LEN} characters"
+        ));
     }
-    if let Some(ref tags) = input.tags {
-        if tags.len() > MAX_TAGS {
-            return Err(format!("tags array exceeds max of {MAX_TAGS} entries"));
-        }
+    if let Some(ref tags) = input.tags
+        && tags.len() > MAX_TAGS
+    {
+        return Err(format!("tags array exceeds max of {MAX_TAGS} entries"));
     }
 
     let importance = input
@@ -192,16 +182,11 @@ pub async fn create_node(
         body: input.body.unwrap_or_default(),
     };
     let id = node.frontmatter.id.clone();
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        write_node_conn(&conn, &node).map_err(|e| format!("failed to create node: {e}"))?;
-        Ok(id)
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    write_node_pool(&pool, &node)
+        .await
+        .map_err(|e| format!("failed to create node: {e}"))?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -213,56 +198,52 @@ pub async fn update_node(
     if !validate_uuid(&id) {
         return Err("invalid node id".into());
     }
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        let mut node =
-            read_node_conn(&conn, &id).map_err(|e| format!("failed to read node: {e}"))?;
-        if let Some(t) = input.title {
-            if t.trim().is_empty() {
-                return Err("title must not be empty".to_string());
-            }
-            if t.len() > MAX_TITLE_LEN {
-                return Err(format!(
-                    "title exceeds max length of {MAX_TITLE_LEN} characters"
-                ));
-            }
-            node.frontmatter.title = t;
+    let pool = state.db.clone();
+    let mut node = read_node_pool(&pool, &id)
+        .await
+        .map_err(|e| format!("failed to read node: {e}"))?;
+    if let Some(t) = input.title {
+        if t.trim().is_empty() {
+            return Err("title must not be empty".to_string());
         }
-        if let Some(t) = input.node_type {
-            if !VALID_NODE_TYPES.contains(&t.as_str()) {
-                return Err(format!(
-                    "invalid node_type: must be one of {}",
-                    VALID_NODE_TYPES.join(", ")
-                ));
-            }
-            node.frontmatter.node_type = t;
+        if t.len() > MAX_TITLE_LEN {
+            return Err(format!(
+                "title exceeds max length of {MAX_TITLE_LEN} characters"
+            ));
         }
-        if let Some(b) = input.body {
-            if b.len() > MAX_BODY_LEN {
-                return Err(format!(
-                    "body exceeds max length of {MAX_BODY_LEN} characters"
-                ));
-            }
-            node.body = b;
+        node.frontmatter.title = t;
+    }
+    if let Some(t) = input.node_type {
+        if !VALID_NODE_TYPES.contains(&t.as_str()) {
+            return Err(format!(
+                "invalid node_type: must be one of {}",
+                VALID_NODE_TYPES.join(", ")
+            ));
         }
-        if let Some(tags) = input.tags {
-            if tags.len() > MAX_TAGS {
-                return Err(format!("tags array exceeds max of {MAX_TAGS} entries"));
-            }
-            node.frontmatter.tags = tags;
+        node.frontmatter.node_type = t;
+    }
+    if let Some(b) = input.body {
+        if b.len() > MAX_BODY_LEN {
+            return Err(format!(
+                "body exceeds max length of {MAX_BODY_LEN} characters"
+            ));
         }
-        if let Some(imp) = input.importance {
-            node.frontmatter.importance = imp.clamp(0.0, 1.0);
+        node.body = b;
+    }
+    if let Some(tags) = input.tags {
+        if tags.len() > MAX_TAGS {
+            return Err(format!("tags array exceeds max of {MAX_TAGS} entries"));
         }
-        node.frontmatter.updated = now_iso();
-        write_node_conn(&conn, &node).map_err(|e| format!("failed to update node: {e}"))?;
-        Ok(id)
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+        node.frontmatter.tags = tags;
+    }
+    if let Some(imp) = input.importance {
+        node.frontmatter.importance = imp.clamp(0.0, 1.0);
+    }
+    node.frontmatter.updated = now_iso();
+    write_node_pool(&pool, &node)
+        .await
+        .map_err(|e| format!("failed to update node: {e}"))?;
+    Ok(id)
 }
 
 #[tauri::command]
@@ -270,21 +251,24 @@ pub async fn delete_node(id: String, state: State<'_, AppState>) -> Result<Strin
     if !validate_uuid(&id) {
         return Err("invalid node id".into());
     }
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        // Wrap in transaction for atomicity — if node delete fails, edges are preserved
-        conn.execute_batch("BEGIN")
-            .map_err(|e| format!("failed to begin transaction: {e}"))?;
-        remove_edges_for_node_conn(&conn, &id)
-            .map_err(|e| format!("failed to remove edges: {e}"))?;
-        delete_node_file_conn(&conn, &id).map_err(|e| format!("failed to delete node: {e}"))?;
-        conn.execute_batch("COMMIT")
-            .map_err(|e| format!("failed to commit transaction: {e}"))?;
-        Ok(id)
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    // Wrap in a transaction for atomicity — if node delete fails, edges are preserved.
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("failed to begin transaction: {e}"))?;
+    sqlx::query("DELETE FROM edges WHERE source = $1 OR target = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("failed to remove edges: {e}"))?;
+    sqlx::query("DELETE FROM nodes WHERE id = $1")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("failed to delete node: {e}"))?;
+    tx.commit()
+        .await
+        .map_err(|e| format!("failed to commit transaction: {e}"))?;
+    Ok(id)
 }

@@ -98,6 +98,21 @@ pub async fn list_recent_snapshots_pool(
     rows.iter().map(row_to_snapshot_pool).collect()
 }
 
+pub async fn list_recent_snapshots_all_pool(
+    pool: &AnyPool,
+    limit: i64,
+) -> io::Result<Vec<SessionSnapshot>> {
+    let rows = sqlx::query(
+        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state FROM sessions ORDER BY id DESC LIMIT $1"
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    rows.iter().map(row_to_snapshot_pool).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

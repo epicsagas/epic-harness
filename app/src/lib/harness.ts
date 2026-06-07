@@ -1,4 +1,6 @@
 // Tauri invoke bridge with browser fallback for non-Tauri environments
+import { get } from 'svelte/store';
+import { selectedProject } from '$lib/stores/project.js';
 
 type InvokeFn = (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
 
@@ -44,15 +46,26 @@ export interface ScoreHistoryEntry {
   dimension_averages?: Record<string, number>;
 }
 
+export interface SkillAttribution {
+  skill_name: string;
+  sessions_active: number;
+  avg_score_with: number;
+  avg_score_without: number;
+  first_seen: string;
+}
+
 export interface HarnessMetrics {
   total_sessions: number;
   avg_success_rate: number;
   total_evolved_skills: number;
   last_session: string | null;
+  best_score?: number;
+  best_session?: string | null;
+  last_error_context?: string | null;
   score_history: ScoreHistoryEntry[];
   stagnation_count?: number;
   trend?: string;
-  skill_attribution?: Record<string, unknown>;
+  skill_attribution?: Record<string, SkillAttribution>;
   // derived by getHarnessMetrics()
   session_count: number;
   avg_score: number;
@@ -75,8 +88,13 @@ export interface OrbitPipeline {
 
 export interface EvolvedSkill {
   name: string;
+  origin: string;
+  confidence: number;
+  project: string;
+  active: boolean;
   skill_md: string;
   created_at: string | null;
+  updated_at: string;
 }
 
 export interface EvolutionData {
@@ -109,12 +127,18 @@ export interface ActiveAgent {
   timestamp: string;
 }
 
+export interface FailureCategory {
+  category: string;
+  count: number;
+}
+
 export interface ObsSummary {
   recent_sessions: SessionSummary[];
   tool_stats: ToolStat[];
   total_tool_calls: number;
   avg_score: number;
-  active_agents: ActiveAgent[];
+  failure_categories: FailureCategory[];
+  active_agents: ActiveAgent[]; // kept for backward compat; currently empty from backend
 }
 
 export interface OrchAgentDef {
@@ -144,12 +168,20 @@ export interface OrchAgentStatus {
   status: string;
 }
 
+export interface AgentEvent {
+  timestamp: string;
+  event_type: string;
+  data: Record<string, unknown>;
+}
+
 export interface GraphNode {
   id: string;
   title: string;
   type: string;
   tags: string[];
   importance: number;
+  projects: string[];
+  accessed_at: string;
 }
 
 export interface GraphEdge {
@@ -171,10 +203,58 @@ export interface IntegrationStatus {
   version: string | null;
 }
 
+export interface InboxMessage {
+  to: string;
+  from: string;
+  timestamp: string;
+  message: string;
+}
+
+export interface SessionSnapshotData {
+  timestamp: string;
+  type: string;
+  summary: string;
+  pending_tasks: string[];
+  context_usage: number | null;
+  pipeline_state: Record<string, unknown> | null;
+}
+
+export interface GlobalPattern {
+  timestamp: string;
+  project: string;
+  success_rate: number;
+  avg_score: number;
+  per_error_stats: Record<string, unknown>;
+  failure_patterns: string[];
+  weak_tools: string[];
+}
+
+export interface GraphStats {
+  total_nodes: number;
+  total_edges: number;
+  avg_importance: number;
+  by_type: Record<string, number>;
+}
+
+export interface MemoryNode {
+  id: string;
+  type: string;
+  title: string;
+  tags: string[];
+  projects: string[];
+  updated: string;
+  // detail fields
+  agents?: string;
+  created?: string;
+  importance?: number;
+  access_count?: number;
+  body?: string;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export async function getHarnessMetrics(): Promise<HarnessMetrics> {
-  const raw = await invoke<HarnessMetrics>('get_harness_metrics');
+  const raw = await invoke<HarnessMetrics>('get_harness_metrics', projectArgs());
   if (!raw) throw new Error('metrics.json not found');
 
   // Derive avg_score from score_history
@@ -205,10 +285,12 @@ export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }>
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();
 }
-export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills');
-export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary');
+export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills', projectArgs());
+export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary', projectArgs());
 export const getGraph = () => invoke<GraphData>('get_graph');
 export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integration_status');
+export const getSessionSnapshots = () => invoke<SessionSnapshotData[]>('get_session_snapshots', projectArgs());
+export const getGlobalPatterns = () => invoke<GlobalPattern[]>('get_global_patterns', projectArgs());
 
 // ── Orchestration API ──────────────────────────────────────────────────────
 
@@ -239,15 +321,87 @@ export async function dismissAgent(agentId: string): Promise<{ ok: boolean }> {
   return res.json();
 }
 
+export async function getAgentEvents(agentId: string): Promise<AgentEvent[]> {
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/events`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getAgentInbox(agentId: string): Promise<InboxMessage[]> {
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/inbox`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getGraphStats(): Promise<GraphStats | null> {
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && Object.keys(data).length > 0 ? data as GraphStats : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getMemoryNodes(): Promise<MemoryNode[]> {
+  try {
+    const res = await fetch('/api/nodes');
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
+export async function getMemoryNode(id: string): Promise<MemoryNode | null> {
+  try {
+    const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export async function searchMemory(query: string, type?: string): Promise<MemoryNode[]> {
+  try {
+    let url = `/api/search?q=${encodeURIComponent(query)}`;
+    if (type) url += `&type=${encodeURIComponent(type)}`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch {
+    return [];
+  }
+}
+
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
-async function browserFallback(cmd: string, _args?: Record<string, unknown>): Promise<unknown> {
+/** Build project args from the store. `__all__` means aggregate → omit from request. */
+function projectArgs(): Record<string, unknown> | undefined {
+  const p = get(selectedProject);
+  return p && p !== '__all__' ? { project: p } : undefined;
+}
+
+async function browserFallback(cmd: string, args?: Record<string, unknown>): Promise<unknown> {
   // In Vite dev, the harnessApiPlugin middleware serves real harness data at /api/harness.
   // Attempt it first; fall through to static mock only on network error or missing data.
   // The middleware is configured in vite.config.ts and only applies during `vite dev` (apply: 'serve').
   if (typeof window !== 'undefined') {
     try {
-      const res = await fetch(`/api/harness?cmd=${encodeURIComponent(cmd)}`);
+      const project = args?.project as string | undefined;
+      let url = `/api/harness?cmd=${encodeURIComponent(cmd)}`;
+      if (project) url += `&project=${encodeURIComponent(project)}`;
+      const res = await fetch(url);
       if (res.ok) {
         const data: unknown = await res.json();
         if (data !== null && data !== undefined && !(data as Record<string, unknown>).error) return data;
@@ -311,8 +465,8 @@ async function browserFallback(cmd: string, _args?: Record<string, unknown>): Pr
     case 'get_evolved_skills':
       return {
         evolved_skills: [
-          { name: 'pattern-fix-then-break', skill_md: '# Fix-Then-Break Recovery\nDetected alternating edit/error cycle. Pause and re-read the file before editing.', created_at: null },
-          { name: 'tool-bash-weak', skill_md: '# Bash Tool Guidance\nBash success rate below threshold. Prefer Read/Edit for file operations.', created_at: null },
+          { name: 'pattern-fix-then-break', origin: 'pattern', confidence: 0.8, project: 'demo', active: true, skill_md: '# Fix-Then-Break Recovery\nDetected alternating edit/error cycle. Pause and re-read the file before editing.', created_at: null, updated_at: '2026-06-01' },
+          { name: 'tool-bash-weak', origin: 'weak_tool', confidence: 0.7, project: 'demo', active: true, skill_md: '# Bash Tool Guidance\nBash success rate below threshold. Prefer Read/Edit for file operations.', created_at: null, updated_at: '2026-06-01' },
         ],
         evolution_history: [
           { timestamp: new Date().toISOString(), patterns: ['fix_then_break'], skills_seeded: 1, trend: 'improving', avg_score: 0.82 },
@@ -337,19 +491,23 @@ async function browserFallback(cmd: string, _args?: Record<string, unknown>): Pr
         ],
         total_tool_calls: 133,
         avg_score: 0.891,
+        failure_categories: [
+          { category: 'syntax_error', count: 3 },
+          { category: 'test_fail', count: 2 },
+        ],
         active_agents: [],
       } satisfies ObsSummary;
 
     case 'get_graph':
       return {
         nodes: [
-          { id: '1', title: 'epic-harness', type: 'project', tags: ['harness'], importance: 0.9 },
-          { id: '2', title: 'harness-mem', type: 'concept', tags: ['memory', 'sqlite'], importance: 0.8 },
-          { id: '3', title: 'orbit pipeline', type: 'pattern', tags: ['automation'], importance: 0.85 },
-          { id: '4', title: '4-Ring Architecture', type: 'concept', tags: ['architecture'], importance: 0.9 },
-          { id: '5', title: 'eval system', type: 'concept', tags: ['scoring'], importance: 0.75 },
-          { id: '6', title: 'Ring 0 Hooks', type: 'concept', tags: ['autopilot'], importance: 0.7 },
-          { id: '7', title: '_dispatch', type: 'pattern', tags: ['skills'], importance: 0.8 },
+          { id: '1', title: 'epic-harness', type: 'project', tags: ['harness'], importance: 0.9, projects: ['epic-harness'], accessed_at: '2026-06-01T12:00:00Z' },
+          { id: '2', title: 'harness-mem', type: 'concept', tags: ['memory', 'sqlite'], importance: 0.8, projects: ['epic-harness'], accessed_at: '2026-06-01T11:00:00Z' },
+          { id: '3', title: 'orbit pipeline', type: 'pattern', tags: ['automation'], importance: 0.85, projects: ['epic-harness'], accessed_at: '2026-05-30T10:00:00Z' },
+          { id: '4', title: '4-Ring Architecture', type: 'concept', tags: ['architecture'], importance: 0.9, projects: ['epic-harness'], accessed_at: '2026-05-28T09:00:00Z' },
+          { id: '5', title: 'eval system', type: 'concept', tags: ['scoring'], importance: 0.75, projects: ['epic-harness'], accessed_at: '2026-05-25T08:00:00Z' },
+          { id: '6', title: 'Ring 0 Hooks', type: 'concept', tags: ['autopilot'], importance: 0.7, projects: ['epic-harness'], accessed_at: '2026-05-20T07:00:00Z' },
+          { id: '7', title: '_dispatch', type: 'pattern', tags: ['skills'], importance: 0.8, projects: ['epic-harness'], accessed_at: '2026-05-15T06:00:00Z' },
         ],
         edges: [
           { source: '1', target: '2', relation: 'contains', weight: 0.9 },

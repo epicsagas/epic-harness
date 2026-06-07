@@ -251,6 +251,55 @@ pub async fn append_event_pool(
     Ok(())
 }
 
+pub async fn query_agent_events_pool(
+    pool: &AnyPool,
+    agent_id: &str,
+    limit: i64,
+) -> io::Result<Vec<crate::orchestrate::state::AgentEvent>> {
+    let rows = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT timestamp, event_type, data_json FROM orch_agent_events WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT $2",
+    )
+    .bind(agent_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+    Ok(rows
+        .into_iter()
+        .map(|(ts, etype, data)| crate::orchestrate::state::AgentEvent {
+            timestamp: ts,
+            event_type: etype,
+            data: serde_json::from_str(&data).unwrap_or(serde_json::Value::Null),
+        })
+        .collect())
+}
+
+pub async fn query_agent_inbox_pool(
+    pool: &AnyPool,
+    agent_id: &str,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
+    let rows = sqlx::query_as::<_, (String, String, String, String)>(
+        "SELECT agent_id, from_agent, timestamp, message FROM orch_agent_inbox WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT $2",
+    )
+    .bind(agent_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+    Ok(rows
+        .into_iter()
+        .map(|(to, from, ts, msg)| {
+            serde_json::json!({
+                "to": to,
+                "from": from,
+                "timestamp": ts,
+                "message": msg,
+            })
+        })
+        .collect())
+}
+
 // TODO: Wire up when remaining sync callers migrate to pool (R4).
 #[allow(dead_code)]
 pub async fn post_inbox_pool(

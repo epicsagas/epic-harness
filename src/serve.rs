@@ -113,10 +113,18 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             (Method::Get, "/api/graph") => handle_get_graph(port),
             (Method::Get, "/api/stats") => handle_get_stats(port),
 
+            // ── Projects API ────────────────────────────────
+            (Method::Get, "/api/projects") => {
+                let slugs = crate::shared::paths::list_harness_project_slugs();
+                let body = serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into());
+                json_response(&body, port)
+            }
+
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
-                let body = handle_harness_cmd(pool.as_ref(), &cmd);
+                let project = parse_query_param(url, "project");
+                let body = handle_harness_cmd(pool.as_ref(), &cmd, project.as_deref());
                 json_response(&body, port)
             }
 
@@ -143,6 +151,20 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
                 handle_agent_status(pool.as_ref(), agent_id, &harness_dir, port)
+            }
+
+            (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/events") => {
+                let agent_id = url
+                    .trim_start_matches("/api/agents/")
+                    .trim_end_matches("/events");
+                handle_agent_events(pool.as_ref(), agent_id, port)
+            }
+
+            (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/inbox") => {
+                let agent_id = url
+                    .trim_start_matches("/api/agents/")
+                    .trim_end_matches("/inbox");
+                handle_agent_inbox(pool.as_ref(), agent_id, port)
             }
 
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
@@ -413,6 +435,42 @@ fn handle_agent_status(
     })
 }
 
+fn handle_agent_events(
+    pool: Option<&sqlx::AnyPool>,
+    agent_id: &str,
+    port: u16,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    if !orch::validate_agent_id(agent_id) {
+        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
+    }
+    let body = try_pool(pool, |p| {
+        let events = crate::store::runtime::block_on(
+            crate::store::orchestrator::query_agent_events_pool(p, agent_id, 100),
+        )?;
+        Ok(serde_json::to_string(&events)?)
+    })
+    .unwrap_or_else(|| "[]".into());
+    json_response(&body, port)
+}
+
+fn handle_agent_inbox(
+    pool: Option<&sqlx::AnyPool>,
+    agent_id: &str,
+    port: u16,
+) -> Response<std::io::Cursor<Vec<u8>>> {
+    if !orch::validate_agent_id(agent_id) {
+        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
+    }
+    let body = try_pool(pool, |p| {
+        let msgs = crate::store::runtime::block_on(
+            crate::store::orchestrator::query_agent_inbox_pool(p, agent_id, 50),
+        )?;
+        Ok(serde_json::to_string(&msgs)?)
+    })
+    .unwrap_or_else(|| "[]".into());
+    json_response(&body, port)
+}
+
 fn handle_agent_dismiss(
     pool: Option<&sqlx::AnyPool>,
     agent_id: &str,
@@ -549,12 +607,15 @@ fn dismiss_orbit_pipeline(
 
 // ── Harness command handler ───────────────────────────
 
-fn handle_harness_cmd(pool: Option<&sqlx::AnyPool>, cmd: &str) -> String {
+fn handle_harness_cmd(pool: Option<&sqlx::AnyPool>, cmd: &str, project: Option<&str>) -> String {
+    // project: Some("slug") = specific project, None = aggregate all projects
     match cmd {
-        "get_harness_metrics" => cmd_get_metrics(pool),
-        "get_evolved_skills" => cmd_get_evolved_skills(pool),
-        "get_obs_summary" => cmd_get_obs_summary(pool),
+        "get_harness_metrics" => cmd_get_metrics(pool, project),
+        "get_evolved_skills" => cmd_get_evolved_skills(pool, project),
+        "get_obs_summary" => cmd_get_obs_summary(pool, project),
         "get_orbit_pipelines" => cmd_get_orbit_pipelines(pool),
+        "get_session_snapshots" => cmd_get_session_snapshots(pool, project),
+        "get_global_patterns" => cmd_get_global_patterns(pool, project),
         "get_integration_status" => cmd_get_integration_status(),
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
@@ -563,46 +624,75 @@ fn handle_harness_cmd(pool: Option<&sqlx::AnyPool>, cmd: &str) -> String {
     }
 }
 
-fn cmd_get_metrics(pool: Option<&sqlx::AnyPool>) -> String {
+fn cmd_get_metrics(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
     try_pool(pool, |p| {
-        let slug = crate::shared::paths::project_slug();
-        crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
-            .map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
+        let metrics = match project {
+            Some(slug) => {
+                crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, slug))
+            }
+            None => {
+                crate::store::runtime::block_on(crate::store::metrics::load_metrics_all_pool(p))
+            }
+        };
+        metrics.map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
     })
     .unwrap_or_else(|| "null".into())
 }
 
-fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>) -> String {
+fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
     try_pool(pool, |p| {
-        let slug = crate::shared::paths::project_slug();
-        let skills =
+        let all_skills =
             crate::store::runtime::block_on(crate::store::evolved::list_skills_full_pool(p))
                 .unwrap_or_default()
                 .into_iter()
+                .filter(|s| match project {
+                    Some(slug) => s.project == slug,
+                    None => true,
+                })
                 .map(|s| {
                     serde_json::json!({
                         "name": s.name,
+                        "origin": s.origin,
+                        "confidence": s.confidence,
+                        "project": s.project,
+                        "active": s.active,
                         "skill_md": s.skill_md,
-                        "created_at": s.created
+                        "created_at": s.created,
+                        "updated_at": s.updated,
                     })
                 })
                 .collect::<Vec<_>>();
-        let history = crate::store::runtime::block_on(
-            crate::store::evolution::query_recent_records_pool(p, &slug, 50),
-        )
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|r| serde_json::to_value(r).ok())
-        .collect::<Vec<_>>();
-        let total_sessions =
-            crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
-                .map(|m| m.total_sessions)
-                .unwrap_or(0);
+        let history = match project {
+            Some(slug) => crate::store::runtime::block_on(
+                crate::store::evolution::query_recent_records_pool(p, slug, 50),
+            )
+            .unwrap_or_default(),
+            None => crate::store::runtime::block_on(
+                crate::store::evolution::query_recent_records_all_pool(p, 50),
+            )
+            .unwrap_or_default(),
+        };
+        let history_vals: Vec<_> = history
+            .into_iter()
+            .filter_map(|r| serde_json::to_value(r).ok())
+            .collect();
+        let total_sessions = match project {
+            Some(slug) => {
+                crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, slug))
+                    .map(|m| m.total_sessions)
+                    .unwrap_or(0)
+            }
+            None => {
+                crate::store::runtime::block_on(crate::store::metrics::load_metrics_all_pool(p))
+                    .map(|m| m.total_sessions)
+                    .unwrap_or(0)
+            }
+        };
         Ok(serde_json::json!({
-            "evolved_skills": skills,
-            "evolution_history": history,
+            "evolved_skills": all_skills,
+            "evolution_history": history_vals,
             "total_sessions_analyzed": total_sessions,
-            "patterns_detected": history.len()
+            "patterns_detected": history_vals.len()
         })
         .to_string())
     })
@@ -617,16 +707,21 @@ fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>) -> String {
     })
 }
 
-fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>) -> String {
+fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
     try_pool(pool, |p| {
-        let slug = crate::shared::paths::project_slug();
-        let stats =
-            crate::store::runtime::block_on(crate::store::observations::query_obs_stats_pool(
-                p,
-                &slug,
-                "2020-01-01", // all data
-                "2099-12-31",
-            ))?;
+        let stats = match project {
+            Some(slug) => {
+                crate::store::runtime::block_on(crate::store::observations::query_obs_stats_pool(
+                    p,
+                    slug,
+                    "2000-01-01",
+                    "2099-12-31",
+                ))?
+            }
+            None => crate::store::runtime::block_on(
+                crate::store::observations::query_obs_stats_all_pool(p, "2000-01-01", "2099-12-31"),
+            )?,
+        };
         let tool_stats: Vec<serde_json::Value> = {
             let mut v: Vec<_> = stats
                 .tool_stats
@@ -670,11 +765,31 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>) -> String {
                 })
             })
             .collect();
+        let failure_categories: Vec<serde_json::Value> = {
+            let mut v: Vec<_> = stats
+                .error_stats
+                .iter()
+                .map(|(cat, count)| {
+                    serde_json::json!({
+                        "category": cat,
+                        "count": count
+                    })
+                })
+                .collect();
+            v.sort_by(|a, b| {
+                b["count"]
+                    .as_i64()
+                    .unwrap_or(0)
+                    .cmp(&a["count"].as_i64().unwrap_or(0))
+            });
+            v
+        };
         Ok(serde_json::json!({
             "recent_sessions": recent_sessions,
             "tool_stats": tool_stats,
             "total_tool_calls": stats.total,
             "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
+            "failure_categories": failure_categories,
             "active_agents": []
         })
         .to_string())
@@ -685,10 +800,41 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>) -> String {
             "tool_stats": [],
             "total_tool_calls": 0,
             "avg_score": 0.0,
+            "failure_categories": [],
             "active_agents": []
         })
         .to_string()
     })
+}
+
+fn cmd_get_session_snapshots(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
+    try_pool(pool, |p| {
+        let snapshots = match project {
+            Some(slug) => crate::store::runtime::block_on(
+                crate::store::sessions::list_recent_snapshots_pool(p, slug, 10),
+            ),
+            None => crate::store::runtime::block_on(
+                crate::store::sessions::list_recent_snapshots_all_pool(p, 10),
+            ),
+        }?;
+        Ok(serde_json::to_string(&snapshots)?)
+    })
+    .unwrap_or_else(|| "[]".into())
+}
+
+fn cmd_get_global_patterns(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
+    try_pool(pool, |p| {
+        let patterns = match project {
+            Some(slug) => crate::store::runtime::block_on(
+                crate::store::global::query_patterns_excluding_pool(p, slug, 20),
+            ),
+            None => crate::store::runtime::block_on(crate::store::global::query_all_patterns_pool(
+                p, 20,
+            )),
+        }?;
+        Ok(serde_json::to_string(&patterns)?)
+    })
+    .unwrap_or_else(|| "[]".into())
 }
 
 fn cmd_get_orbit_pipelines(pool: Option<&sqlx::AnyPool>) -> String {

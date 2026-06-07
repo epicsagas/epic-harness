@@ -25,9 +25,9 @@ function nodeRadius(importance: number): number {
 
 const mockGraph: GraphData = {
   nodes: [
-    { id: '1', title: 'epic-harness', type: 'project', tags: ['harness'], importance: 0.9 },
-    { id: '2', title: 'harness-mem', type: 'concept', tags: ['memory'], importance: 0.8 },
-    { id: '3', title: 'a very long node title indeed', type: 'pattern', tags: [], importance: 0.5 },
+    { id: '1', title: 'epic-harness', type: 'project', tags: ['harness'], importance: 0.9, projects: ['epic-harness'], accessed_at: '' },
+    { id: '2', title: 'harness-mem', type: 'concept', tags: ['memory'], importance: 0.8, projects: [], accessed_at: '' },
+    { id: '3', title: 'a very long node title indeed', type: 'pattern', tags: [], importance: 0.5, projects: [], accessed_at: '' },
   ],
   edges: [
     { source: '1', target: '2', relation: 'contains', weight: 0.9 },
@@ -156,7 +156,9 @@ const mockMetrics: HarnessMetrics = {
   stagnation_count: 0,
   session_count: 42,
   avg_score: 0.763,
-  skill_attribution: { success: 0.5, quality: 0.3, cost: 0.2 },
+  skill_attribution: {
+    'test-skill': { skill_name: 'test-skill', sessions_active: 5, avg_score_with: 0.85, avg_score_without: 0.78, first_seen: '2026-05-10' },
+  },
 };
 
 describe('Settings — scoreWeightTotal', () => {

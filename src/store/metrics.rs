@@ -198,6 +198,141 @@ pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metr
     })
 }
 
+/// Load aggregated metrics across all projects.
+///
+/// Aggregation strategy:
+/// - Scalar sums: total_sessions, total_evolved_skills, stagnation_count
+/// - Weighted avg: avg_success_rate (weighted by session count)
+/// - Best/worst: best_score (max), trend (worst: "declining" > "stable" > "improving")
+/// - Merge: score_history (all projects combined, sorted by timestamp)
+/// - Merge: skill_attribution (aggregate across projects)
+/// - First non-empty: last_session, last_error_context
+pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
+    use crate::shared::paths::list_harness_project_slugs;
+    let slugs = list_harness_project_slugs();
+
+    let mut total_sessions: u64 = 0;
+    let mut weighted_success_sum: f64 = 0.0;
+    let mut total_evolved_skills: u64 = 0;
+    let mut last_session: Option<String> = None;
+    let mut all_scores: Vec<SessionScoreEntry> = Vec::new();
+    let mut best_score: Option<f64> = None;
+    let mut best_session = String::new();
+    let mut worst_trend = "stable".to_string();
+    let mut stagnation_count: u64 = 0;
+    let mut skill_attribution: HashMap<String, SkillAttribution> = HashMap::new();
+    let mut last_error_context: Option<String> = None;
+
+    let mut failed_slugs: Vec<String> = Vec::new();
+
+    // Load all project metrics concurrently (pool is Arc-based, cheap to clone).
+    let handles: Vec<_> = slugs
+        .iter()
+        .map(|slug| {
+            let pool = pool.clone();
+            let slug = slug.clone();
+            tokio::spawn(async move {
+                let result = load_metrics_pool(&pool, &slug).await;
+                (slug, result)
+            })
+        })
+        .collect();
+
+    for h in handles {
+        let (slug, result) = match h.await {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("[epic-harness] warn: metrics join error: {e}");
+                continue;
+            }
+        };
+        let m = match result {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[epic-harness] warn: load_metrics_pool({slug}): {e}");
+                failed_slugs.push(slug);
+                continue;
+            }
+        };
+        total_sessions += m.total_sessions;
+        weighted_success_sum += m.avg_success_rate * m.total_sessions as f64;
+        total_evolved_skills += m.total_evolved_skills;
+        if last_session.is_none() && m.last_session.is_some() {
+            last_session = m.last_session;
+        }
+        all_scores.extend(m.score_history);
+        if m.best_score > best_score {
+            best_score = m.best_score;
+        }
+        if m.best_session > best_session {
+            best_session = m.best_session;
+        }
+        // Worst trend: declining > stable > improving
+        match m.trend.as_str() {
+            "declining" => worst_trend = "declining".into(),
+            "stable" if worst_trend != "declining" => worst_trend = "stable".into(),
+            _ => {}
+        }
+        stagnation_count = stagnation_count.max(m.stagnation_count);
+        for (name, sa) in m.skill_attribution {
+            skill_attribution
+                .entry(name)
+                .and_modify(|existing: &mut SkillAttribution| {
+                    let prev_sess = existing.sessions_active as f64;
+                    let new_sess = sa.sessions_active as f64;
+                    let total_sess = prev_sess + new_sess;
+                    if total_sess > 0.0 {
+                        existing.avg_score_with = (existing.avg_score_with * prev_sess
+                            + sa.avg_score_with * new_sess)
+                            / total_sess;
+                        existing.avg_score_without = (existing.avg_score_without * prev_sess
+                            + sa.avg_score_without * new_sess)
+                            / total_sess;
+                    }
+                    existing.sessions_active += sa.sessions_active;
+                    if sa.first_seen < existing.first_seen {
+                        existing.first_seen = sa.first_seen.clone();
+                    }
+                })
+                .or_insert(sa);
+        }
+        if last_error_context.is_none() && m.last_error_context.is_some() {
+            last_error_context = m.last_error_context;
+        }
+    }
+
+    if !slugs.is_empty() && failed_slugs.len() == slugs.len() {
+        eprintln!(
+            "[epic-harness] warn: all {} project metrics failed to load",
+            slugs.len()
+        );
+    }
+
+    // Sort and cap score history
+    all_scores.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    all_scores.truncate(MAX_SCORE_HISTORY * 3); // Allow more for multi-project
+
+    let avg_success_rate = if total_sessions > 0 {
+        weighted_success_sum / total_sessions as f64
+    } else {
+        0.0
+    };
+
+    Ok(Metrics {
+        total_sessions,
+        avg_success_rate,
+        total_evolved_skills,
+        last_session,
+        score_history: all_scores,
+        best_score,
+        best_session,
+        trend: worst_trend,
+        stagnation_count,
+        skill_attribution,
+        last_error_context,
+    })
+}
+
 /// Save the full Metrics struct to SQLite using a pool.
 pub async fn save_metrics_pool(pool: &AnyPool, project: &str, m: &Metrics) -> io::Result<()> {
     let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;

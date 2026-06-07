@@ -3,11 +3,39 @@ mod state;
 
 use state::AppState;
 
+/// Application entry point.
+///
+/// # Error handling
+///
+/// Fatal startup errors (e.g. corrupted DB, missing harness dir) are reported
+/// to the user via an osascript dialog on macOS, then the process exits with
+/// code 1. This is intentional: the Tauri event loop cannot start without valid
+/// DB pools, so graceful shutdown is not possible.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let app_state = match AppState::new() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[epic-harness] FATAL: {e}");
+            #[cfg(target_os = "macos")]
+            {
+                let safe_msg = e
+                    .to_string()
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('\n', " ")
+                    .replace('\r', "");
+                let _ = std::process::Command::new("osascript")
+                    .args(["-e", &format!("display dialog \"Epic Harness failed to start:\\n\\n{safe_msg}\\n\\nCheck ~/.harness/ permissions.\" with title \"Epic Harness\" buttons {{\"OK\"}} default button \"OK\" with icon stop")])
+                    .status();
+            }
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(AppState::new().expect("Failed to initialize app state"))
+        .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             // Nodes
             commands::nodes::get_nodes,
@@ -34,7 +62,13 @@ pub fn run() {
             commands::harness::get_evolved_skills,
             commands::harness::get_obs_summary,
             commands::harness::get_integration_status,
+            commands::harness::get_session_snapshots,
+            commands::harness::get_global_patterns,
+            commands::harness::list_projects,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    {
+        eprintln!("[epic-harness] FATAL: {e}");
+        std::process::exit(1);
+    }
 }

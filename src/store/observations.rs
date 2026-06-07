@@ -325,6 +325,112 @@ pub async fn query_obs_stats_pool(
     })
 }
 
+/// Async aggregate observation stats across all projects.
+pub async fn query_obs_stats_all_pool(
+    pool: &AnyPool,
+    from_ts: &str,
+    to_ts: &str,
+) -> io::Result<ObsStats> {
+    let from = pad_date(from_ts, false);
+    let to = pad_date(to_ts, true);
+
+    let row = sqlx::query(
+        "SELECT COUNT(*),
+                COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
+                COALESCE(AVG(score), 0.0)
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_one(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    let total: i64 = row.try_get(0).map_err(crate::store::sqlx_err)?;
+    let successes: i64 = row.try_get(1).map_err(crate::store::sqlx_err)?;
+    let avg_score: f64 = row.try_get(2).map_err(crate::store::sqlx_err)?;
+
+    let tool_rows = sqlx::query(
+        "SELECT tool, COUNT(*) as calls,
+                SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
+                COALESCE(AVG(score), 0.0) as avg_score
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+         GROUP BY tool ORDER BY calls DESC LIMIT 100",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    let tool_stats: Vec<ToolStatRow> = tool_rows
+        .iter()
+        .map(|r| ToolStatRow {
+            tool: r.try_get(0).unwrap_or_default(),
+            calls: r.try_get(1).unwrap_or(0),
+            successes: r.try_get(2).unwrap_or(0),
+            avg_score: r.try_get(3).unwrap_or(0.0),
+        })
+        .collect();
+
+    let err_rows = sqlx::query(
+        "SELECT failure_category, COUNT(*) as cnt
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+           AND failure_category IS NOT NULL
+         GROUP BY failure_category ORDER BY cnt DESC LIMIT 50",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    let error_stats: Vec<(String, i64)> = err_rows
+        .iter()
+        .filter_map(|r| {
+            let cat: String = r.try_get(0).ok()?;
+            let cnt: i64 = r.try_get(1).ok()?;
+            Some((cat, cnt))
+        })
+        .collect();
+
+    let sess_rows = sqlx::query(
+        "SELECT session_id, COUNT(*) as calls,
+                COALESCE(AVG(score), 0.0) as avg_score,
+                SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+         FROM observations
+         WHERE timestamp >= ? AND timestamp <= ?
+         GROUP BY session_id ORDER BY session_id DESC LIMIT 20",
+    )
+    .bind(&from)
+    .bind(&to)
+    .fetch_all(pool)
+    .await
+    .map_err(crate::store::sqlx_err)?;
+
+    let session_stats: Vec<SessionStatRow> = sess_rows
+        .iter()
+        .map(|r| SessionStatRow {
+            session_id: r.try_get(0).unwrap_or_default(),
+            calls: r.try_get(1).unwrap_or(0),
+            avg_score: r.try_get(2).unwrap_or(0.0),
+            failures: r.try_get(3).unwrap_or(0),
+        })
+        .collect();
+
+    Ok(ObsStats {
+        total,
+        successes,
+        avg_score,
+        tool_stats,
+        error_stats,
+        session_stats,
+    })
+}
+
 /// Async query last action for a session.
 pub async fn query_last_action_pool(
     pool: &AnyPool,

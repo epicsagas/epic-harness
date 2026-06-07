@@ -21,6 +21,16 @@ const marked = { parse(md) {
     .replace(/\n{2,}/g,'<br><br>')
     .replace(/\n/g,'<br>');
 }};
+function sanitize(html) {
+  // Defense-in-depth: strip dangerous tags and event handlers.
+  // The marked parser already HTML-escapes input before transforms,
+  // so this is an additional safety net.
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/<iframe\b[^>]*>.*?<\/iframe>/gi, '')
+    .replace(/<form\b[^>]*>.*?<\/form>/gi, '');
+}
 </script>
 <style>
 /* ── CSS Variables ─────────────────────────────────────────── */
@@ -160,7 +170,7 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 .type-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
 
 /* ── Graph Canvas ──────────────────────────────────────────── */
-#graph-wrap { position: relative; overflow: hidden; background: var(--bg); }
+#graph-wrap { position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
 #graph-svg { width: 100%; height: 100%; display: block; }
 .graph-link { stroke-opacity: 0.4; fill: none; }
 .graph-link-label { font-size: 9px; fill: var(--text-muted); pointer-events: none; }
@@ -173,6 +183,17 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 .graph-node text { pointer-events: none; font-size: 10px; fill: var(--text); }
 .graph-link.dimmed { opacity: 0.03; }
 .graph-node.neighbor circle { stroke-width: 2.5px; }
+.graph-node.focus-center circle { stroke-width: 4px; stroke: #fff !important; }
+.graph-node.focus-hop1 { opacity: 1; }
+.graph-node.focus-hop2-plus { opacity: 0.25; }
+.graph-node.focus-noproj { opacity: 0.15; }
+#focus-reset-btn {
+  position: absolute; top: 8px; right: 8px; display: none;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); font-size: 11px;
+  padding: 4px 10px; cursor: pointer; z-index: 20;
+}
+#focus-reset-btn:hover { background: var(--surface2); }
 #zoom-controls { position: absolute; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 4px; }
 .zoom-btn {
   width: 30px; height: 30px; background: var(--surface); border: 1px solid var(--border);
@@ -396,11 +417,12 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 
   <!-- Graph Canvas -->
   <div id="graph-wrap">
-    <svg id="graph-svg"></svg>
+    <svg id="graph-svg" role="img" aria-label="Knowledge graph visualization"></svg>
+    <button id="focus-reset-btn" aria-label="Reset graph to show all nodes">&#8635; All Nodes</button>
     <div id="zoom-controls">
-      <button class="zoom-btn" id="btn-zoom-in">+</button>
-      <button class="zoom-btn" id="btn-zoom-reset">&#8857;</button>
-      <button class="zoom-btn" id="btn-zoom-out">&#8722;</button>
+      <button class="zoom-btn" id="btn-zoom-in" aria-label="Zoom in">+</button>
+      <button class="zoom-btn" id="btn-zoom-reset" aria-label="Reset zoom">&#8857;</button>
+      <button class="zoom-btn" id="btn-zoom-out" aria-label="Zoom out">&#8722;</button>
     </div>
     <div id="graph-tooltip"></div>
     <div id="loading-overlay">
@@ -755,6 +777,8 @@ const S = {
   selectedId: null,
   currentNode: null,
   connected: false,
+  focusedProjectId: null,
+  searchTypeFilter: null,
 };
 
 /* ════════════════════════════════════════════════════
@@ -840,6 +864,15 @@ async function loadGraph() {
     updateStats(statsData);
     buildSidebar();
     renderGraph();
+    // Auto-focus the most recently accessed project node once the simulation settles.
+    // Listen for "end" (fully cooled) rather than a fixed timeout so it works
+    // reliably regardless of graph size.
+    if (sim) {
+      sim.on('end.autoFocus', () => {
+        sim.on('end.autoFocus', null); // one-shot
+        autoFocusMostRecentProject();
+      });
+    }
   } catch (e) {
     updateConnStatus('offline');
     showErr(t('err_load_graph') + ' ' + e.message);
@@ -1002,7 +1035,26 @@ function initD3() {
     .on('zoom', ev => gMain.attr('transform', ev.transform));
   svg.call(zoomB).on('dblclick.zoom', null);
 
+  // Track zoom transforms to distinguish click from micro-pan
+  let zoomTransformAtDown = null;
+  svg.on('mousedown.zoomcheck', () => {
+    zoomTransformAtDown = d3.zoomTransform(svg.node());
+  });
+
   svg.on('click', () => {
+    // Ignore click if a pan/zoom occurred during mousedown→mouseup
+    if (zoomTransformAtDown) {
+      const current = d3.zoomTransform(svg.node());
+      if (current.x !== zoomTransformAtDown.x || current.y !== zoomTransformAtDown.y || current.k !== zoomTransformAtDown.k) {
+        zoomTransformAtDown = null;
+        return;
+      }
+    }
+    zoomTransformAtDown = null;
+    if (S.focusedProjectId) {
+      clearFocus();
+      return;
+    }
     S.selectedId = null;
     closeDetailPanel();
     if (nodeSel) {
@@ -1169,7 +1221,7 @@ function renderGraph() {
     .attr('y', d => nodeR(d) + 13)
     .text(d => {
       const title = d.title || d.id;
-      return title.length > 16 ? title.slice(0,15)+'…' : title;
+      return title.length > 12 ? title.slice(0,11)+'…' : title;
     });
 
   // re-apply selection state
@@ -1190,7 +1242,14 @@ function renderGraph() {
   const tooltip = document.getElementById('graph-tooltip');
   const wrap    = document.getElementById('graph-wrap');
   nodeSel
-    .on('click', (ev, d) => { ev.stopPropagation(); selectNode(d.id); })
+    .on('click', (ev, d) => {
+      ev.stopPropagation();
+      if (d.type === 'project') {
+        focusOn(d.id);
+      } else {
+        selectNode(d.id);
+      }
+    })
     .on('dblclick', (ev, d) => { ev.stopPropagation(); selectNode(d.id).then(openEditForm); })
     .on('mouseenter', (ev, d) => {
       tooltip.style.display = 'block';
@@ -1255,6 +1314,91 @@ function highlightNeighbors(nodeId) {
       return neighborEdges.has(`${s}::${t}`);
     });
   }
+}
+
+/* ════════════════════════════════════════════════════
+   Project-Centric Focus
+   ════════════════════════════════════════════════════ */
+function focusOn(nodeId) {
+  if (!nodeSel) return;
+  S.focusedProjectId = nodeId;
+
+  const hop1 = getNeighbors(nodeId, 1);
+  const hop2 = getNeighbors(nodeId, 2);
+
+  // Visual hierarchy: center > hop1 > hop2+ > other project nodes
+  nodeSel
+    .classed('focus-center',   d => d.id === nodeId)
+    .classed('focus-hop1',     d => d.id !== nodeId && hop1.has(d.id))
+    .classed('focus-hop2-plus',d => d.id !== nodeId && !hop1.has(d.id) && hop2.has(d.id))
+    .classed('focus-noproj',   d => d.id !== nodeId && !hop2.has(d.id))
+    .classed('dimmed', false)
+    .classed('selected', d => d.id === nodeId);
+
+  if (linkSel) {
+    linkSel.classed('dimmed', d => {
+      const s = typeof d.source === 'object' ? d.source.id : d.source;
+      const t = typeof d.target === 'object' ? d.target.id : d.target;
+      return s !== nodeId && t !== nodeId && !hop1.has(s) && !hop1.has(t);
+    });
+    linkSel.classed('highlighted', d => {
+      const s = typeof d.source === 'object' ? d.source.id : d.source;
+      const t = typeof d.target === 'object' ? d.target.id : d.target;
+      return s === nodeId || t === nodeId;
+    });
+  }
+
+  // Pin center node to viewport center and resize
+  const simNode = nodeSel.data().find(d => d.id === nodeId);
+  if (simNode && sim) {
+    const W = document.getElementById('graph-wrap').clientWidth;
+    const H = document.getElementById('graph-wrap').clientHeight;
+    simNode.fx = W / 2;
+    simNode.fy = H / 2;
+    sim.alpha(0.05).restart();
+    // Zoom to the pinned position directly (fx/fy), not stale x/y
+    requestAnimationFrame(() => {
+      const scale = 1.5;
+      const transform = d3.zoomIdentity
+        .translate(W/2 - simNode.fx * scale, H/2 - simNode.fy * scale)
+        .scale(scale);
+      svg.transition().duration(500).call(zoomB.transform, transform);
+    });
+  } else {
+    zoomToNode(nodeId);
+  }
+  document.getElementById('focus-reset-btn').style.display = 'block';
+}
+
+function clearFocus() {
+  S.focusedProjectId = null;
+  if (nodeSel) {
+    nodeSel
+      .classed('focus-center', false)
+      .classed('focus-hop1', false)
+      .classed('focus-hop2-plus', false)
+      .classed('focus-noproj', false)
+      .classed('dimmed', false)
+      .classed('selected', false);
+  }
+  if (linkSel) {
+    linkSel.classed('dimmed', false).classed('highlighted', false);
+  }
+  // Release all fx/fy pins
+  if (nodeSel) {
+    nodeSel.each(d => { if (!pinned[d.id]) { d.fx = null; d.fy = null; } });
+  }
+  if (sim) sim.alpha(0.2).restart();
+  document.getElementById('focus-reset-btn').style.display = 'none';
+  applyFilters();
+}
+
+function autoFocusMostRecentProject() {
+  const projects = S.nodes.filter(n => n.type === 'project' && n.accessed_at);
+  if (!projects.length) return;
+  projects.sort((a, b) => (b.accessed_at || '').localeCompare(a.accessed_at || ''));
+  const latest = projects[0];
+  if (latest) focusOn(latest.id);
 }
 
 /* ════════════════════════════════════════════════════
@@ -1329,7 +1473,7 @@ function renderDetail(node) {
   // markdown
   const md = document.getElementById('detail-markdown');
   md.innerHTML = node.body
-    ? marked.parse(node.body)
+    ? sanitize(marked.parse(node.body))
     : `<span style="color:var(--text-muted)">${t('no_body')}</span>`;
 
   // edges — show connected nodes with context
@@ -1390,7 +1534,8 @@ const doSearch = debounce(async (q) => {
     return;
   }
   try {
-    const res = await api('/search?q=' + encodeURIComponent(qTrim));
+    const typeParam = S.searchTypeFilter ? `&type=${encodeURIComponent(S.searchTypeFilter)}` : '';
+    const res = await api('/search?q=' + encodeURIComponent(qTrim) + typeParam);
     const hitSet = new Set(res.map(r => r.id));
     S.searchHits = hitSet;
 
@@ -1469,6 +1614,9 @@ function bindUI() {
       applyFilters();
     });
   });
+
+  /* focus reset */
+  document.getElementById('focus-reset-btn').addEventListener('click', clearFocus);
 
   /* project filter */
   document.getElementById('project-select').addEventListener('change', e => {

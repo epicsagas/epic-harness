@@ -10,7 +10,7 @@ export default {
   colHook: '훅', colCommand: '커맨드', colTrigger: '트리거', colEffect: '효과',
   colPolishResult: 'Polish 결과', colFailureType: '기록되는 실패 유형',
   colPatternDetection: '패턴 감지', colResource: '리소스', colPurpose: '목적',
-  colConstant: '상수', colThreshold: '임계값', colId: 'ID', colProject: '프로젝트',
+  colConstant: '상수', colThreshold: '임계값', colId: 'ID', colProject: '프로젝트', colTags: '태그',
   colGoal: '목표', colMode: '모드', colStarted: '시작 시각', colDuration: '소요 시간',
   pageDashboard: '대시보드',
   pageDashboardDesc: '4-Ring 아키텍처 상태 · 평가 점수 · 시스템 상태',
@@ -25,6 +25,15 @@ export default {
   toolStatsTitle: '툴 통계 (상위 5개)', recentActivityTitle: '최근 활동',
   sessionLabel: '세션', callsAvgScore: '호출, 평균 점수', failuresLabel: '실패',
   recentSessionNone: '최근 세션 없음', failuresSub: 'recent_sessions 합산',
+  // R1: Dimension labels
+  dimToolSuccess: '도구 성공', dimOutputQuality: '출력 품질', dimExecCost: '실행 비용',
+  // R2: Failure categories
+  failureCategoriesTitle: '실패 카테고리',
+  // R3: Skill attribution
+  skillAttributionTitle: '스킬 기여도',
+  colSkillName: '스킬', colSessionsActive: '세션', colScoreWith: '적용 시', colScoreWithout: '미적용 시', colDelta: '차이',
+  // R4: Agent events
+  agentEventLog: '이벤트 로그', colEventType: '이벤트', colTimestamp: '시간', noEvents: '이벤트 없음',
   pageAgents: '내부 에이전트',
   pageAgentsLive: '라이브 에이전트',
   pageAgentsLiveDesc: '활성 코딩 툴 오케스트레이션에서 실시간 에이전트 스폰 현황',
@@ -163,4 +172,20 @@ export default {
   labelVersion: '버전', dangerZoneTitle: '위험 구역',
   resetEvolutionLabel: '진화 초기화', resetEvolutionDesc: '모든 진화된 스킬을 삭제합니다',
   clearMetricsLabel: '메트릭 초기화', clearMetricsDesc: '점수 히스토리를 초기화합니다',
+  // R2-R8 new keys
+  statBestScore: '최고 점수',
+  labelLastErrorContext: '마지막 에러 컨텍스트',
+  sessionSnapshotsTitle: '세션 스냅샷',
+  colSummary: '요약', colContextUsage: '컨텍스트 %',
+  globalPatternsTitle: '프로젝트 간 패턴',
+  colWeakTools: '취약 도구',
+  statTotalNodes: '전체 노드', statTotalEdges: '전체 엣지', statAvgImportance: '평균 중요도',
+  memorySearchTitle: '메모리 노드', memorySearchPlaceholder: '노드 검색…',
+  searchButton: '검색', colTitle: '제목', colImportance: '중요도',
+  colUpdated: '수정일', noSearchResults: '검색 결과 없음', noNodes: '메모리 노드 없음',
+  showingFirst50: (n: number) => `${n}개 중 처음 50개 표시`,
+  showMore: '더 보기',
+  agentInboxTitle: '받은 메시지',
+  allProjects: '모든 프로젝트',
+  selectProject: '프로젝트 선택',
 } as const;

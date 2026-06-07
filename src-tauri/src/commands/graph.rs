@@ -1,8 +1,9 @@
-use crate::state::AppState;
-use epic_harness::mem::graph::{build_graph_conn, graph_neighbors_conn};
+use epic_harness::mem::graph::{build_graph_pool, graph_neighbors_pool};
 use epic_harness::mem::store::validate_uuid;
 use serde::{Deserialize, Serialize};
 use tauri::State;
+
+use crate::state::AppState;
 
 #[derive(Serialize, Deserialize)]
 pub struct GraphNodeResponse {
@@ -12,6 +13,8 @@ pub struct GraphNodeResponse {
     pub node_type: String,
     pub tags: Vec<String>,
     pub importance: f64,
+    pub projects: Vec<String>,
+    pub accessed_at: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -36,38 +39,35 @@ pub struct NeighborResponse {
 
 #[tauri::command]
 pub async fn get_graph(state: State<'_, AppState>) -> Result<GraphResponse, String> {
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        let graph = build_graph_conn(&conn).map_err(|e| format!("failed to build graph: {e}"))?;
-        Ok(GraphResponse {
-            nodes: graph
-                .nodes
-                .into_iter()
-                .map(|n| GraphNodeResponse {
-                    id: n.id,
-                    title: n.title,
-                    node_type: n.node_type,
-                    tags: n.tags,
-                    importance: n.importance,
-                })
-                .collect(),
-            edges: graph
-                .edges
-                .into_iter()
-                .map(|e| GraphEdgeResponse {
-                    source: e.source,
-                    target: e.target,
-                    relation: e.relation,
-                    weight: e.weight,
-                })
-                .collect(),
-        })
+    let pool = state.db.clone();
+    let graph = build_graph_pool(&pool)
+        .await
+        .map_err(|e| format!("failed to build graph: {e}"))?;
+    Ok(GraphResponse {
+        nodes: graph
+            .nodes
+            .into_iter()
+            .map(|n| GraphNodeResponse {
+                id: n.id,
+                title: n.title,
+                node_type: n.node_type,
+                tags: n.tags,
+                importance: n.importance,
+                projects: n.projects,
+                accessed_at: n.accessed_at,
+            })
+            .collect(),
+        edges: graph
+            .edges
+            .into_iter()
+            .map(|e| GraphEdgeResponse {
+                source: e.source,
+                target: e.target,
+                relation: e.relation,
+                weight: e.weight,
+            })
+            .collect(),
     })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
 }
 
 #[tauri::command]
@@ -80,17 +80,10 @@ pub async fn get_neighbors(
             return Err(format!("invalid node id: {id}"));
         }
     }
-    let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db
-            .lock()
-            .map_err(|e| format!("database temporarily unavailable: {e}"))?;
-        let neighbors = graph_neighbors_conn(&conn, &ids);
-        Ok(neighbors
-            .into_iter()
-            .map(|(id, weight)| NeighborResponse { id, weight })
-            .collect())
-    })
-    .await
-    .map_err(|e| format!("operation cancelled: {e}"))?
+    let pool = state.db.clone();
+    let neighbors = graph_neighbors_pool(&pool, &ids).await;
+    Ok(neighbors
+        .into_iter()
+        .map(|(id, weight)| NeighborResponse { id, weight })
+        .collect())
 }

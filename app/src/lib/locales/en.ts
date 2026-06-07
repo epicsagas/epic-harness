@@ -10,7 +10,7 @@ export default {
   colHook: 'Hook', colCommand: 'Command', colTrigger: 'Trigger', colEffect: 'Effect',
   colPolishResult: 'Polish result', colFailureType: 'Failure type recorded',
   colPatternDetection: 'Pattern detection', colResource: 'Resource', colPurpose: 'Purpose',
-  colConstant: 'Constant', colThreshold: 'Threshold', colId: 'ID', colProject: 'Project',
+  colConstant: 'Constant', colThreshold: 'Threshold', colId: 'ID', colProject: 'Project', colTags: 'Tags',
   colGoal: 'Goal', colMode: 'Mode', colStarted: 'Started', colDuration: 'Duration',
   pageDashboard: 'Dashboard',
   pageDashboardDesc: '4-Ring architecture status · eval scores · system health',
@@ -25,6 +25,15 @@ export default {
   toolStatsTitle: 'Tool Stats (Top 5)', recentActivityTitle: 'Recent Activity',
   sessionLabel: 'Session', callsAvgScore: 'calls, avg score', failuresLabel: 'failures',
   recentSessionNone: 'No recent sessions', failuresSub: 'combined from recent sessions',
+  // R1: Dimension labels
+  dimToolSuccess: 'Tool Success', dimOutputQuality: 'Output Quality', dimExecCost: 'Exec Cost',
+  // R2: Failure categories
+  failureCategoriesTitle: 'Failure Categories',
+  // R3: Skill attribution
+  skillAttributionTitle: 'Skill Attribution',
+  colSkillName: 'Skill', colSessionsActive: 'Sessions', colScoreWith: 'With', colScoreWithout: 'Without', colDelta: 'Delta',
+  // R4: Agent events
+  agentEventLog: 'Event Log', colEventType: 'Event', colTimestamp: 'Time', noEvents: 'No events',
   pageAgents: 'Internal Agents',
   pageAgentsLive: 'Live Agents',
   pageAgentsLiveDesc: 'Real-time agent spawn status from active coding tool orchestration',
@@ -163,4 +172,20 @@ export default {
   labelVersion: 'Version', dangerZoneTitle: 'Danger Zone',
   resetEvolutionLabel: 'Reset Evolution', resetEvolutionDesc: 'Removes all evolved skills',
   clearMetricsLabel: 'Clear Metrics', clearMetricsDesc: 'Resets score history',
+  // R2-R8 new keys
+  statBestScore: 'Best Score',
+  labelLastErrorContext: 'Last Error Context',
+  sessionSnapshotsTitle: 'Session Snapshots',
+  colSummary: 'Summary', colContextUsage: 'Context %',
+  globalPatternsTitle: 'Cross-Project Patterns',
+  colWeakTools: 'Weak Tools',
+  statTotalNodes: 'Total Nodes', statTotalEdges: 'Total Edges', statAvgImportance: 'Avg Importance',
+  memorySearchTitle: 'Memory Nodes', memorySearchPlaceholder: 'Search nodes…',
+  searchButton: 'Search', colTitle: 'Title', colImportance: 'Importance',
+  colUpdated: 'Updated', noSearchResults: 'No results found', noNodes: 'No memory nodes',
+  showingFirst50: (n: number) => `Showing first 50 of ${n}`,
+  showMore: 'Show more',
+  agentInboxTitle: 'Inbox',
+  allProjects: 'All Projects',
+  selectProject: 'Select project',
 } as const;

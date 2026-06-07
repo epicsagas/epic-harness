@@ -91,6 +91,7 @@ const mockObs: ObsSummary = {
   ],
   total_tool_calls: 133,
   avg_score: 0.891,
+  failure_categories: [],
   active_agents: [
     { name: 'builder', last_tool: 'Edit', last_action: 'writing Dashboard.svelte', score: 0.91, timestamp: new Date().toISOString() },
   ],
