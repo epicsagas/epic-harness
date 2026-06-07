@@ -65,7 +65,7 @@
     const gen = ++loadGeneration;
     loading = true;
     load(gen);
-    const id = setInterval(() => load(gen), 30000);
+    const id = setInterval(() => { if (!document.hidden) load(gen); }, 30000);
     return () => clearInterval(id);
   });
 

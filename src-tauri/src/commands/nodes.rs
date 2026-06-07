@@ -254,8 +254,7 @@ pub async fn delete_node(id: String, state: State<'_, AppState>) -> Result<Strin
     let pool = state.db.clone();
     // Wrap in a transaction for atomicity — if node delete fails, edges are preserved.
     let mut tx = pool.begin().await.map_err(|e| format!("failed to begin transaction: {e}"))?;
-    sqlx::query("DELETE FROM edges WHERE source = $1 OR target = $2")
-        .bind(&id)
+    sqlx::query("DELETE FROM edges WHERE source = $1 OR target = $1")
         .bind(&id)
         .execute(&mut *tx)
         .await

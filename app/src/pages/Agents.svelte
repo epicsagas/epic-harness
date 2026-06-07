@@ -64,9 +64,14 @@
     return () => clearInterval(id);
   });
 
+  const MAX_CACHED_AGENTS = 20;
+
   async function toggleEvents(agentId: string) {
     if (expandedAgent === agentId) { expandedAgent = null; return; }
     expandedAgent = agentId;
+    // Reset caches if they exceed reasonable bounds (also cleared on project switch)
+    if (agentEvents.size > MAX_CACHED_AGENTS) agentEvents = new Map();
+    if (agentInboxes.size > MAX_CACHED_AGENTS) agentInboxes = new Map();
     const promises: Promise<void>[] = [];
     if (!agentEvents.has(agentId)) {
       promises.push(getAgentEvents(agentId).then(evts => { agentEvents.set(agentId, evts); }));

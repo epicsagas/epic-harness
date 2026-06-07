@@ -96,9 +96,11 @@ function harnessApiPlugin(): Plugin {
         if (!project || project === '__all__') return null;
         const projectsRoot = path.resolve(harnessDir, '..');
         const resolved = path.join(projectsRoot, project);
-        // Path traversal defense
-        if (!resolved.startsWith(projectsRoot + path.sep) && resolved !== projectsRoot) return null;
+        // Path traversal defense (resolve symlinks to prevent bypass)
         if (!fs.existsSync(resolved)) return null;
+        const realRoot = fs.realpathSync(projectsRoot);
+        const realResolved = fs.realpathSync(resolved);
+        if (!realResolved.startsWith(realRoot + path.sep) && realResolved !== realRoot) return null;
         return resolved;
       }
 
@@ -323,7 +325,7 @@ function harnessApiPlugin(): Plugin {
             } else {
               // Aggregate across all projects
               const projectsRoot = path.resolve(harnessDir, '..');
-              const merged = { recent_sessions: [] as unknown[], tool_stats: [] as unknown[], total_tool_calls: 0, avg_score: 0, active_agents: [] as unknown[] };
+              const merged = { recent_sessions: [] as unknown[], tool_stats: [] as unknown[], total_tool_calls: 0, avg_score: 0, active_agents: [] as unknown[], failure_categories: [] as unknown[] };
               if (fs.existsSync(projectsRoot)) {
                 for (const proj of fs.readdirSync(projectsRoot)) {
                   const projDir = path.join(projectsRoot, proj);
@@ -333,6 +335,9 @@ function harnessApiPlugin(): Plugin {
                   (merged.recent_sessions as unknown[]).push(...((d.recent_sessions as unknown[]) ?? []));
                   (merged.tool_stats as unknown[]).push(...((d.tool_stats as unknown[]) ?? []));
                   merged.total_tool_calls += (d.total_tool_calls as number) ?? 0;
+                  ((d as any).failure_categories ?? []).forEach((fc: any) => {
+                    (merged.failure_categories as any[]).push(fc);
+                  });
                 }
               }
               // Re-aggregate tool stats (merge duplicates across projects)
@@ -349,6 +354,14 @@ function harnessApiPlugin(): Plugin {
                 .sort((a, b) => b.calls - a.calls);
               const total = (merged.tool_stats as any[]).reduce((s, t) => s + t.calls, 0);
               merged.avg_score = total ? Math.round(((merged.tool_stats as any[]).reduce((s, t) => s + t.avg_score * t.calls, 0) / total) * 1000) / 1000 : 0;
+              // Re-aggregate failure categories (merge duplicates across projects)
+              const fcMap: Record<string, number> = {};
+              for (const fc of (merged as any).failure_categories ?? []) {
+                fcMap[fc.category] = (fcMap[fc.category] ?? 0) + (fc.count ?? 0);
+              }
+              (merged as any).failure_categories = Object.entries(fcMap)
+                .map(([category, count]) => ({ category, count }))
+                .sort((a: any, b: any) => b.count - a.count);
               // Keep top 10 sessions by date
               (merged.recent_sessions as any[]).sort((a, b) => String(b.session_id ?? '').localeCompare(String(a.session_id ?? '')));
               merged.recent_sessions = (merged.recent_sessions as any[]).slice(0, 10);

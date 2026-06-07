@@ -440,6 +440,9 @@ fn handle_agent_events(
     agent_id: &str,
     port: u16,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
+    if !orch::validate_agent_id(agent_id) {
+        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
+    }
     let body = try_pool(pool, |p| {
         let events = crate::store::runtime::block_on(
             crate::store::orchestrator::query_agent_events_pool(p, agent_id, 100),
@@ -455,6 +458,9 @@ fn handle_agent_inbox(
     agent_id: &str,
     port: u16,
 ) -> Response<std::io::Cursor<Vec<u8>>> {
+    if !orch::validate_agent_id(agent_id) {
+        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
+    }
     let body = try_pool(pool, |p| {
         let msgs = crate::store::runtime::block_on(
             crate::store::orchestrator::query_agent_inbox_pool(p, agent_id, 50),
@@ -708,12 +714,12 @@ fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> S
                 crate::store::runtime::block_on(crate::store::observations::query_obs_stats_pool(
                     p,
                     slug,
-                    "2020-01-01",
+                    "2000-01-01",
                     "2099-12-31",
                 ))?
             }
             None => crate::store::runtime::block_on(
-                crate::store::observations::query_obs_stats_all_pool(p, "2020-01-01", "2099-12-31"),
+                crate::store::observations::query_obs_stats_all_pool(p, "2000-01-01", "2099-12-31"),
             )?,
         };
         let tool_stats: Vec<serde_json::Value> = {

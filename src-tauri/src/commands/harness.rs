@@ -135,7 +135,7 @@ pub struct EvolvedSkill {
     pub project: String,
     pub active: bool,
     pub skill_md: String,
-    pub created_at: String,
+    pub created_at: Option<String>,
     pub updated_at: String,
 }
 
@@ -169,7 +169,7 @@ pub async fn get_evolved_skills(
             project: s.project,
             active: s.active,
             skill_md: s.skill_md,
-            created_at: s.created,
+            created_at: if s.created.is_empty() { None } else { Some(s.created) },
             updated_at: s.updated,
         })
         .collect();
@@ -224,7 +224,16 @@ pub struct ObsSummary {
     pub avg_score: f64,
     pub failure_categories: Vec<FailureCategory>,
     #[serde(default)]
-    pub active_agents: Vec<serde_json::Value>,
+    pub active_agents: Vec<ActiveAgent>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ActiveAgent {
+    pub name: String,
+    pub last_tool: String,
+    pub last_action: String,
+    pub score: f64,
+    pub timestamp: String,
 }
 
 #[derive(Serialize, Deserialize)]

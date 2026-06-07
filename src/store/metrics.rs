@@ -225,12 +225,32 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
 
     let mut failed_slugs: Vec<String> = Vec::new();
 
-    for slug in &slugs {
-        let m = match load_metrics_pool(pool, slug).await {
+    // Load all project metrics concurrently (pool is Arc-based, cheap to clone).
+    let handles: Vec<_> = slugs
+        .iter()
+        .map(|slug| {
+            let pool = pool.clone();
+            let slug = slug.clone();
+            tokio::spawn(async move {
+                let result = load_metrics_pool(&pool, &slug).await;
+                (slug, result)
+            })
+        })
+        .collect();
+
+    for h in handles {
+        let (slug, result) = match h.await {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("[epic-harness] warn: metrics join error: {e}");
+                continue;
+            }
+        };
+        let m = match result {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("[epic-harness] warn: load_metrics_pool({slug}): {e}");
-                failed_slugs.push(slug.clone());
+                failed_slugs.push(slug);
                 continue;
             }
         };

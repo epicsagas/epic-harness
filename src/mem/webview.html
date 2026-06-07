@@ -21,6 +21,16 @@ const marked = { parse(md) {
     .replace(/\n{2,}/g,'<br><br>')
     .replace(/\n/g,'<br>');
 }};
+function sanitize(html) {
+  // Defense-in-depth: strip dangerous tags and event handlers.
+  // The marked parser already HTML-escapes input before transforms,
+  // so this is an additional safety net.
+  return html
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/<iframe\b[^>]*>.*?<\/iframe>/gi, '')
+    .replace(/<form\b[^>]*>.*?<\/form>/gi, '');
+}
 </script>
 <style>
 /* ── CSS Variables ─────────────────────────────────────────── */
@@ -1463,7 +1473,7 @@ function renderDetail(node) {
   // markdown
   const md = document.getElementById('detail-markdown');
   md.innerHTML = node.body
-    ? marked.parse(node.body)
+    ? sanitize(marked.parse(node.body))
     : `<span style="color:var(--text-muted)">${t('no_body')}</span>`;
 
   // edges — show connected nodes with context

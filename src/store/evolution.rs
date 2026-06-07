@@ -82,6 +82,10 @@ pub async fn query_recent_records_pool(
     Ok(records)
 }
 
+/// Load recent evolution records across all projects.
+///
+/// Intentionally omits project filter — this aggregates the full evolution
+/// history for cross-project analysis in the dashboard.
 pub async fn query_recent_records_all_pool(
     pool: &AnyPool,
     limit: i64,
