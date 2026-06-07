@@ -8,6 +8,7 @@
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let loadGeneration = $state(0);
 
   const totalFailures = $derived(
     obs ? obs.recent_sessions.reduce((sum, s) => sum + s.failures, 0) : 0
@@ -44,24 +45,27 @@
     metrics ? Math.round(264 * (1 - metrics.avg_score)) : 264
   );
 
-  async function load() {
+  async function load(generation: number) {
     try {
       error = null;
       const [m, o] = await Promise.all([getHarnessMetrics(), getObsSummary()]);
+      if (generation !== loadGeneration) return;
       metrics = m;
       obs = o;
     } catch (e) {
+      if (generation !== loadGeneration) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
+    const gen = ++loadGeneration;
     loading = true;
-    load();
-    const id = setInterval(load, 30000);
+    load(gen);
+    const id = setInterval(() => load(gen), 30000);
     return () => clearInterval(id);
   });
 
@@ -132,7 +136,7 @@
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('statSessions')}</div>
     {#if loading}
-      <div class="stat-value skeleton" style="width:40px;height:28px;border-radius:4px;background:var(--border);"></div>
+      <div class="stat-value skeleton" style="width:40px;height:28px;"></div>
     {:else}
       <div class="stat-value">{metrics?.session_count ?? '--'}</div>
     {/if}
@@ -142,7 +146,7 @@
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--accent)"></span> {$tStore('statAvgScore')}</div>
     {#if loading}
-      <div class="stat-value skeleton" style="width:60px;height:28px;border-radius:4px;background:var(--border);"></div>
+      <div class="stat-value skeleton" style="width:60px;height:28px;"></div>
     {:else}
       <div class="stat-value">{metrics ? fmtScore(metrics.avg_score) : '--'}</div>
     {/if}
@@ -159,7 +163,7 @@
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--teal)"></span> {$tStore('statTrend')}</div>
     {#if loading}
-      <div class="stat-value skeleton" style="width:80px;height:28px;border-radius:4px;background:var(--border);"></div>
+      <div class="stat-value skeleton" style="width:80px;height:28px;"></div>
     {:else}
       <div class="stat-value">
         {#if metrics}
@@ -175,7 +179,7 @@
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--warning)"></span> {$tStore('statStagnation')}</div>
     {#if loading}
-      <div class="stat-value skeleton" style="width:30px;height:28px;border-radius:4px;background:var(--border);"></div>
+      <div class="stat-value skeleton" style="width:30px;height:28px;"></div>
     {:else}
       <div class="stat-value">{metrics?.stagnation_count ?? '--'}</div>
     {/if}
@@ -187,7 +191,7 @@
       <div class="stat-label"><span class="dot" style="background:var(--teal)"></span> {$tStore('statBestScore')}</div>
       <div class="stat-value">{fmtScore(metrics.best_score)}</div>
       {#if metrics.best_session}
-        <div class="stat-sub" style="font-family:var(--font-mono);font-size:10px;">{dateOnly(metrics.best_session)}</div>
+        <div class="stat-sub mono-sm">{dateOnly(metrics.best_session)}</div>
       {/if}
     </div>
   {/if}
@@ -195,7 +199,7 @@
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--purple)"></span> {$tStore('statTotalCalls')}</div>
     {#if loading}
-      <div class="stat-value skeleton" style="width:50px;height:28px;border-radius:4px;background:var(--border);"></div>
+      <div class="stat-value skeleton" style="width:50px;height:28px;"></div>
     {:else}
       <div class="stat-value">{obs?.total_tool_calls ?? '--'}</div>
     {/if}
@@ -205,7 +209,7 @@
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> {$tStore('statFailures')}</div>
     {#if loading}
-      <div class="stat-value skeleton" style="width:30px;height:28px;border-radius:4px;background:var(--border);"></div>
+      <div class="stat-value skeleton" style="width:30px;height:28px;"></div>
     {:else}
       <div class="stat-value">{obs ? totalFailures : '--'}</div>
     {/if}
@@ -250,13 +254,14 @@
       </div>
       <!-- R1: Dimension bars -->
       {#if latestDims()}
+        {@const dims = latestDims()}
         <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px;">
           {#each [
             { key: 'tool_success', label: $tStore('dimToolSuccess'), color: 'var(--success)' },
             { key: 'output_quality', label: $tStore('dimOutputQuality'), color: 'var(--accent)' },
             { key: 'execution_cost', label: $tStore('dimExecCost'), color: 'var(--teal)' },
           ] as dim}
-            {@const val = latestDims()[dim.key] ?? 0}
+            {@const val = dims![dim.key] ?? 0}
             <div style="display:flex;align-items:center;gap:8px;font-size:11px;">
               <span style="width:100px;color:var(--muted);text-align:right;">{dim.label}</span>
               <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;">
@@ -349,8 +354,8 @@
         <div class="activity-item" style="margin-bottom:10px;">
           <span class="activity-dot" style="background:var(--border)"></span>
           <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
-            <div class="skeleton" style="width:60%;height:13px;border-radius:3px;background:var(--border);"></div>
-            <div class="skeleton" style="width:30%;height:11px;border-radius:3px;background:var(--border);"></div>
+            <div class="skeleton" style="width:60%;height:13px;"></div>
+            <div class="skeleton" style="width:30%;height:11px;"></div>
           </div>
         </div>
       {/each}

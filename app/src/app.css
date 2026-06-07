@@ -868,3 +868,31 @@ body {
   border-radius: var(--radius);
   font-size: 13px;
 }
+
+/* TEXT UTILITIES — replaces common inline style patterns */
+.mono { font-family: var(--font-mono); }
+.mono-sm { font-family: var(--font-mono); font-size: 11px; }
+.text-center { text-align: center; }
+.text-muted { color: var(--muted); }
+.text-secondary { color: var(--fg-secondary); }
+.text-sm { font-size: 12px; }
+.text-xs { font-size: 11px; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nowrap { white-space: nowrap; }
+
+/* LAYOUT UTILITIES */
+.flex-center { display: flex; align-items: center; justify-content: center; }
+.flex-between { display: flex; align-items: center; justify-content: space-between; }
+.flex-col { display: flex; flex-direction: column; }
+.gap-xs { gap: 4px; }
+.gap-sm { gap: 8px; }
+.gap-md { gap: 12px; }
+.mb-sm { margin-bottom: 8px; }
+.mb-md { margin-bottom: 16px; }
+.p-md { padding: 16px; }
+
+/* SKELETON LOADER */
+.skeleton {
+  border-radius: 4px;
+  background: var(--border);
+}

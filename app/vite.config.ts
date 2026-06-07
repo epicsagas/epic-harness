@@ -231,32 +231,35 @@ function harnessApiPlugin(): Plugin {
             } else {
               // Aggregate across all projects
               const projectsRoot = path.resolve(harnessDir, '..');
-              let totalSessions = 0, weightedSum = 0, totalEvolved = 0, bestScore = 0, stagnation = 0;
+              let totalSessions = 0, weightedSum = 0, totalEvolved = 0, stagnation = 0;
+              let bestScore: number | null = null;
               let worstTrend = 'stable';
-              const allScores: any[] = [];
+              interface ScoreEntry { timestamp?: string; avg_score?: number }
+              const allScores: ScoreEntry[] = [];
               if (fs.existsSync(projectsRoot)) {
                 for (const proj of fs.readdirSync(projectsRoot)) {
                   const mp = path.join(projectsRoot, proj, 'metrics.json');
                   if (!fs.existsSync(mp)) continue;
                   try {
-                    const m = JSON.parse(fs.readFileSync(mp, 'utf8'));
-                    totalSessions += (m.total_sessions ?? 0);
-                    weightedSum += (m.avg_success_rate ?? 0) * (m.total_sessions ?? 0);
-                    totalEvolved += (m.total_evolved_skills ?? 0);
-                    if ((m.best_score ?? 0) > bestScore) bestScore = m.best_score;
+                    const m: Record<string, unknown> = JSON.parse(fs.readFileSync(mp, 'utf8'));
+                    totalSessions += (m.total_sessions as number) ?? 0;
+                    weightedSum += ((m.avg_success_rate as number) ?? 0) * ((m.total_sessions as number) ?? 0);
+                    totalEvolved += (m.total_evolved_skills as number) ?? 0;
+                    const mbs = m.best_score as number | null | undefined;
+                    if (mbs != null && (bestScore == null || mbs > bestScore)) bestScore = mbs;
                     if (m.trend === 'declining') worstTrend = 'declining';
                     else if (m.trend === 'stable' && worstTrend === 'improving') worstTrend = 'stable';
-                    stagnation = Math.max(stagnation, m.stagnation_count ?? 0);
-                    allScores.push(...(m.score_history ?? []));
+                    stagnation = Math.max(stagnation, (m.stagnation_count as number) ?? 0);
+                    allScores.push(...(m.score_history as ScoreEntry[] ?? []));
                   } catch { /* skip */ }
                 }
               }
-              allScores.sort((a: any, b: any) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')));
+              allScores.sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')));
               allScores.splice(0, Math.max(0, allScores.length - 150));
-              const avg = allScores.length ? allScores.reduce((s: number, e: any) => s + (e.avg_score ?? 0), 0) / allScores.length : 0;
+              const avg = allScores.length ? allScores.reduce((s, e) => s + (e.avg_score ?? 0), 0) / allScores.length : 0;
               data = {
                 total_sessions: totalSessions, avg_success_rate: totalSessions ? weightedSum / totalSessions : 0,
-                total_evolved_skills: totalEvolved, best_score: bestScore || null, trend: worstTrend,
+                total_evolved_skills: totalEvolved, best_score: bestScore, trend: worstTrend,
                 stagnation_count: stagnation, score_history: allScores,
                 session_count: totalSessions, avg_score: Math.round(avg * 1000) / 1000,
                 last_session: null, skill_attribution: {},
@@ -309,7 +312,7 @@ function harnessApiPlugin(): Plugin {
                   if (fs.existsSync(mp)) { try { totalSessions += (JSON.parse(fs.readFileSync(mp, 'utf8')).total_sessions ?? 0); } catch { /* skip */ } }
                 }
               }
-              allHistory.sort((a: any, b: any) => String(b.timestamp ?? '').localeCompare(String(a.timestamp ?? '')));
+              allHistory.sort((a: Record<string, unknown>, b: Record<string, unknown>) => String(b.timestamp ?? '').localeCompare(String(a.timestamp ?? '')));
               data = { evolved_skills: allSkills, evolution_history: allHistory.slice(0, 50), total_sessions_analyzed: totalSessions, patterns_detected: allHistory.length };
             }
 

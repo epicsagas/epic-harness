@@ -14,14 +14,16 @@
   let expandedAgent = $state<string | null>(null);
   let agentEvents = $state<Map<string, AgentEvent[]>>(new Map());
   let agentInboxes = $state<Map<string, InboxMessage[]>>(new Map());
+  let loadGeneration = $state(0);
 
-  async function load() {
+  async function load(generation: number) {
     try {
       error = null;
       const [orchRun, orchObs] = await Promise.all([
         getOrchestratorRun(),
         getObsSummary(),
       ]);
+      if (generation !== loadGeneration) return;
       run = orchRun;
       obs = orchObs;
 
@@ -36,21 +38,24 @@
             } catch { /* skip missing */ }
           })
         );
+        if (generation !== loadGeneration) return;
         agentStatuses = statusMap;
       }
     } catch (e) {
+      if (generation !== loadGeneration) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
+    const gen = ++loadGeneration;
     loading = true;
-    load();
+    load(gen);
     const id = setInterval(() => {
-      if (!document.hidden) load();
+      if (!document.hidden) load(gen);
     }, 5000);
     return () => clearInterval(id);
   });
@@ -208,7 +213,7 @@
                 <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
               </div>
               <button
-                onclick={async () => { await dismissAgent(agent.id); await load(); }}
+                onclick={async () => { await dismissAgent(agent.id); await load(loadGeneration); }}
                 title="Dismiss"
                 style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
               >✕</button>

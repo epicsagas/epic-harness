@@ -8,6 +8,7 @@
   let patterns = $state<GlobalPattern[]>([]);
   let loading = $state(true);
   let error = $state('');
+  let staleGeneration = $state(0);
 
   // Score weights are compile-time constants defined in common.rs
   const successWeight = 0.5;
@@ -19,24 +20,31 @@
     return ts.slice(0, 10);
   }
 
-  async function loadSettings() {
+  async function loadSettings(generation: number) {
     try {
       loading = true;
-      [metrics, snapshots, patterns] = await Promise.all([
+      const [m, s, p] = await Promise.all([
         getHarnessMetrics(),
         getSessionSnapshots(),
         getGlobalPatterns(),
       ]);
+      // Discard stale results if project changed while loading
+      if (generation !== staleGeneration) return;
+      metrics = m;
+      snapshots = s;
+      patterns = p;
     } catch (e) {
+      if (generation !== staleGeneration) return;
       error = String(e);
     } finally {
-      loading = false;
+      if (generation === staleGeneration) loading = false;
     }
   }
 
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
-    loadSettings();
+    const gen = ++staleGeneration;
+    loadSettings(gen);
   });
 
   const EVOLUTION_CONSTANTS = [

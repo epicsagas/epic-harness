@@ -3,6 +3,14 @@ mod state;
 
 use state::AppState;
 
+/// Application entry point.
+///
+/// # Error handling
+///
+/// Fatal startup errors (e.g. corrupted DB, missing harness dir) are reported
+/// to the user via an osascript dialog on macOS, then the process exits with
+/// code 1. This is intentional: the Tauri event loop cannot start without valid
+/// DB pools, so graceful shutdown is not possible.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app_state = match AppState::new() {

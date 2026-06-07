@@ -413,4 +413,39 @@ mod tests {
         let parsed: GraphNode = serde_json::from_str(&json).unwrap();
         assert!((parsed.importance - 0.85).abs() < f64::EPSILON);
     }
+
+    /// GraphNode projects and accessed_at round-trip through JSON.
+    #[test]
+    fn graph_node_projects_and_accessed_at_roundtrip() {
+        let n = GraphNode {
+            id: "n1".to_string(),
+            title: "Node".to_string(),
+            node_type: "pattern".to_string(),
+            tags: vec!["a".to_string()],
+            importance: 0.5,
+            projects: vec!["proj-a".to_string(), "proj-b".to_string()],
+            accessed_at: "2026-06-01T12:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&n).unwrap();
+        assert!(
+            json.contains("\"projects\":[\"proj-a\",\"proj-b\"]"),
+            "projects should appear in JSON: {json}"
+        );
+        assert!(
+            json.contains("\"accessed_at\":\"2026-06-01T12:00:00Z\""),
+            "accessed_at should appear in JSON: {json}"
+        );
+        let parsed: GraphNode = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.projects, vec!["proj-a", "proj-b"]);
+        assert_eq!(parsed.accessed_at, "2026-06-01T12:00:00Z");
+    }
+
+    /// GraphNode deserializes with default empty projects and accessed_at when absent.
+    #[test]
+    fn graph_node_defaults_projects_and_accessed_at() {
+        let json = r#"{"id":"x","title":"Y","type":"concept","tags":[],"importance":0.5}"#;
+        let parsed: GraphNode = serde_json::from_str(json).unwrap();
+        assert!(parsed.projects.is_empty(), "projects should default to empty");
+        assert!(parsed.accessed_at.is_empty(), "accessed_at should default to empty string");
+    }
 }

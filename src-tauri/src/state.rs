@@ -15,8 +15,13 @@ impl AppState {
     /// runtime for subsequent queries, so the ephemeral Runtime is only
     /// needed for the initial `connect()` calls.
     ///
-    /// Must NOT use `Handle::current()` because `.manage()` is evaluated
-    /// before Tauri's `.run()` sets up its own runtime.
+    /// # Why an ephemeral runtime?
+    ///
+    /// This is a known Tauri limitation: `.manage()` is evaluated during
+    /// `Builder::build()`, which runs *before* `tauri::run()` sets up its
+    /// own tokio runtime. Therefore `Handle::current()` is unavailable and
+    /// we must create our own temporary runtime for the async pool setup.
+    /// See: https://github.com/tauri-apps/tauri/issues/3422
     pub fn new() -> Result<Self, String> {
         let rt = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create tokio runtime: {e}"))?;

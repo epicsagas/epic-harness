@@ -98,16 +98,18 @@
     }, 0)
   );
 
-  async function load() {
+  async function load(generation?: number) {
     try {
       const [evo, met] = await Promise.all([getEvolvedSkills(), getHarnessMetrics()]);
+      if (generation != null && generation !== pollGeneration) return;
       data = evo;
       metrics = met;
       error = null;
     } catch (e) {
+      if (generation != null && generation !== pollGeneration) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (generation == null || generation === pollGeneration) loading = false;
     }
   }
 
@@ -137,14 +139,14 @@
     return '—';
   }
 
-  let pollInterval: ReturnType<typeof setInterval>;
+  let pollGeneration = $state(0);
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
-    clearInterval(pollInterval);
+    const gen = ++pollGeneration;
     loading = true;
-    load();
-    pollInterval = setInterval(load, 30_000);
-    return () => clearInterval(pollInterval);
+    load(gen);
+    const id = setInterval(() => load(gen), 30_000);
+    return () => { clearInterval(id); };
   });
 </script>
 

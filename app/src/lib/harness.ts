@@ -465,8 +465,8 @@ async function browserFallback(cmd: string, args?: Record<string, unknown>): Pro
     case 'get_evolved_skills':
       return {
         evolved_skills: [
-          { name: 'pattern-fix-then-break', skill_md: '# Fix-Then-Break Recovery\nDetected alternating edit/error cycle. Pause and re-read the file before editing.', created_at: null },
-          { name: 'tool-bash-weak', skill_md: '# Bash Tool Guidance\nBash success rate below threshold. Prefer Read/Edit for file operations.', created_at: null },
+          { name: 'pattern-fix-then-break', origin: 'pattern', confidence: 0.8, project: 'demo', active: true, skill_md: '# Fix-Then-Break Recovery\nDetected alternating edit/error cycle. Pause and re-read the file before editing.', created_at: null, updated_at: '2026-06-01' },
+          { name: 'tool-bash-weak', origin: 'weak_tool', confidence: 0.7, project: 'demo', active: true, skill_md: '# Bash Tool Guidance\nBash success rate below threshold. Prefer Read/Edit for file operations.', created_at: null, updated_at: '2026-06-01' },
         ],
         evolution_history: [
           { timestamp: new Date().toISOString(), patterns: ['fix_then_break'], skills_seeded: 1, trend: 'improving', avg_score: 0.82 },
@@ -491,19 +491,23 @@ async function browserFallback(cmd: string, args?: Record<string, unknown>): Pro
         ],
         total_tool_calls: 133,
         avg_score: 0.891,
+        failure_categories: [
+          { category: 'syntax_error', count: 3 },
+          { category: 'test_fail', count: 2 },
+        ],
         active_agents: [],
       } satisfies ObsSummary;
 
     case 'get_graph':
       return {
         nodes: [
-          { id: '1', title: 'epic-harness', type: 'project', tags: ['harness'], importance: 0.9 },
-          { id: '2', title: 'harness-mem', type: 'concept', tags: ['memory', 'sqlite'], importance: 0.8 },
-          { id: '3', title: 'orbit pipeline', type: 'pattern', tags: ['automation'], importance: 0.85 },
-          { id: '4', title: '4-Ring Architecture', type: 'concept', tags: ['architecture'], importance: 0.9 },
-          { id: '5', title: 'eval system', type: 'concept', tags: ['scoring'], importance: 0.75 },
-          { id: '6', title: 'Ring 0 Hooks', type: 'concept', tags: ['autopilot'], importance: 0.7 },
-          { id: '7', title: '_dispatch', type: 'pattern', tags: ['skills'], importance: 0.8 },
+          { id: '1', title: 'epic-harness', type: 'project', tags: ['harness'], importance: 0.9, projects: ['epic-harness'], accessed_at: '2026-06-01T12:00:00Z' },
+          { id: '2', title: 'harness-mem', type: 'concept', tags: ['memory', 'sqlite'], importance: 0.8, projects: ['epic-harness'], accessed_at: '2026-06-01T11:00:00Z' },
+          { id: '3', title: 'orbit pipeline', type: 'pattern', tags: ['automation'], importance: 0.85, projects: ['epic-harness'], accessed_at: '2026-05-30T10:00:00Z' },
+          { id: '4', title: '4-Ring Architecture', type: 'concept', tags: ['architecture'], importance: 0.9, projects: ['epic-harness'], accessed_at: '2026-05-28T09:00:00Z' },
+          { id: '5', title: 'eval system', type: 'concept', tags: ['scoring'], importance: 0.75, projects: ['epic-harness'], accessed_at: '2026-05-25T08:00:00Z' },
+          { id: '6', title: 'Ring 0 Hooks', type: 'concept', tags: ['autopilot'], importance: 0.7, projects: ['epic-harness'], accessed_at: '2026-05-20T07:00:00Z' },
+          { id: '7', title: '_dispatch', type: 'pattern', tags: ['skills'], importance: 0.8, projects: ['epic-harness'], accessed_at: '2026-05-15T06:00:00Z' },
         ],
         edges: [
           { source: '1', target: '2', relation: 'contains', weight: 0.9 },

@@ -19,6 +19,7 @@
   let searchResults = $state<MemoryNode[]>([]);
   let detailNode = $state<MemoryNode | null>(null);
   let searching = $state(false);
+  let nodeDisplayLimit = $state(50);
 
   // node type → color
   const typeColor: Record<string, string> = {
@@ -41,8 +42,9 @@
   });
 
   async function doSearch() {
-    if (!searchQuery.trim()) { searchResults = []; return; }
+    if (!searchQuery.trim()) { searchResults = []; nodeDisplayLimit = 50; return; }
     searching = true;
+    nodeDisplayLimit = 50;
     try {
       searchResults = await searchMemory(searchQuery.trim());
     } catch {
@@ -214,7 +216,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each displayNodes.slice(0, 50) as node}
+            {#each displayNodes.slice(0, nodeDisplayLimit) as node}
               <tr style="cursor:pointer;" onclick={() => showDetail(node.id)}>
                 <td style="color:var(--fg);">{node.title}</td>
                 <td><span class="pill info" style="font-size:10px;">{node.type}</span></td>
@@ -227,9 +229,13 @@
             {/each}
           </tbody>
         </table>
-        {#if displayNodes.length > 50}
+        {#if displayNodes.length > nodeDisplayLimit}
           <div style="text-align:center;font-size:11px;color:var(--muted);padding:8px;">
             {$tStore('showingFirst50', displayNodes.length)}
+            <button
+              onclick={() => nodeDisplayLimit += 50}
+              style="margin-left:8px;padding:2px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg);color:var(--accent);font-size:11px;cursor:pointer;"
+            >{$tStore('showMore') ?? 'Show more'}</button>
           </div>
         {/if}
       {:else if searchQuery.trim()}
