@@ -281,6 +281,18 @@ Reload (próxima sessão — resume carrega habilidades evoluídas)
 
 Semeadura de habilidades: ferramenta fraca (sucesso <60%, mín. 5 obs), tipo de arquivo fraco (sucesso <50%, mín. 3 obs), erro de alta frequência (5+ ocorrências).
 
+### Otimização inspirada no SkillOpt
+
+Três técnicas inspiradas em aprendizado profundo aplicadas à evolução de habilidades em linguagem natural:
+
+| Técnica | O que faz |
+|---------|-----------|
+| **Buffer de feedback negativo** | Persiste propostas de habilidades rejeitadas com expiração baseada em TTL — impede a regeneração de habilidades conhecidas como ruins |
+| **Reflexão por mini-lote** | Decompõe observações em lotes de tamanho fixo para extração de padrões estruturais — captura micropadrões ocultos pelas médias de sessão |
+| **Atualização lenta/meta** | Classifica épocas (Improving/Regressing/PersistentFailure/StableSuccess) e registra atualizações lentas de parâmetros — adapta a estratégia de evolução às tendências de longo prazo |
+
+Adaptado do [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurável via `rejected_buffer_ttl` e `minibatch_size` em `[evolution]`.
+
 Estagnação: 3 sessões sem melhoria de 5% → rollback automático para o melhor checkpoint.
 
 ### Efetividade das Habilidades
@@ -573,6 +585,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # sessões antes da expiração de propostas rejeitadas
+# minibatch_size = 8          # observações por mini-lote para extração de padrões
 
 [pattern]
 # repeated_error_min = 3
@@ -687,6 +701,7 @@ Os hooks procuram o binário em dois lugares: `hooks/bin/epic-harness` (plugin l
 
 ## Agradecimentos
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — Otimização de habilidades inspirada em aprendizado profundo (buffer de feedback negativo, reflexão por mini-lote, atualizações lentas/meta)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Padrões de evolução automatizada e benchmarks
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de habilidades de agente do Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Padrões abrangentes do Claude Code

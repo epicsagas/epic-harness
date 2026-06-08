@@ -282,6 +282,18 @@ Reload (siguiente sesión — resume carga habilidades evolucionadas)
 
 Siembra de habilidades: herramienta débil (éxito <60%, mín. 5 obs), tipo de archivo débil (éxito <50%, mín. 3 obs), error de alta frecuencia (5+ ocurrencias).
 
+### Optimización inspirada en SkillOpt
+
+Tres técnicas inspiradas en el aprendizaje profundo aplicadas a la evolución de habilidades en lenguaje natural:
+
+| Técnica | Qué hace |
+|---------|----------|
+| **Búfer de retroalimentación negativa** | Persiste las propuestas de habilidades rechazadas con expiración basada en TTL — evita regenerar habilidades conocidas como malas |
+| **Reflexión por minilotes** | Descompone las observaciones en lotes de tamaño fijo para la extracción de patrones estructurales — captura micropatrones ocultos por los promedios de sesión |
+| **Actualización lenta/meta** | Clifica épocas (Improving/Regressing/PersistentFailure/StableSuccess) y registra actualizaciones lentas de parámetros — adapta la estrategia de evolución a las tendencias a largo plazo |
+
+Adaptado de [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable mediante `rejected_buffer_ttl` y `minibatch_size` en `[evolution]`.
+
 Estancamiento: 3 sesiones sin una mejora del 5% → rollback automático al mejor punto de control.
 
 ### Efectividad de Habilidades
@@ -574,6 +586,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # sesiones antes de que expiren las propuestas rechazadas
+# minibatch_size = 8          # observaciones por minilote para extracción de patrones
 
 [pattern]
 # repeated_error_min = 3
@@ -688,6 +702,7 @@ Los hooks buscan el binario en dos lugares: `hooks/bin/epic-harness` (plugin loc
 
 ## Agradecimientos
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — Optimización de habilidades inspirada en aprendizaje profundo (búfer de retroalimentación negativa, reflexión por minilotes, actualizaciones lentas/meta)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Patrones de evolución automatizada y benchmarks
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de habilidades de agente de Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Patrones exhaustivos de Claude Code

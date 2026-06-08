@@ -847,6 +847,8 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 4. Seed evolved skills
     ensure_dir(&evolved_dir());
+    // Prune expired entries from the negative feedback buffer (SkillOpt §4)
+    evolve::prune_rejected_buffer();
     let existing = list_dirs(&evolved_dir());
     let seeded = if !should_rollback {
         evolve::seed_smart_skills(&analysis, &existing)
@@ -973,6 +975,14 @@ pub fn run(_input: &HookInput) -> i32 {
         metrics.stagnation_count = 0;
     }
     metrics.trend = evolve::compute_trend(&metrics.score_history).into();
+
+    // SkillOpt §4 Slow/Meta Update: classify epoch for adaptive strategy
+    metrics.epoch_class = Some(evolve::classify_epoch(&metrics.score_history));
+
+    // Update evolved skill meta files with epoch classification
+    if let Some(ref epoch) = metrics.epoch_class {
+        evolve::update_meta_field(&evolved_dirs, epoch, analysis.avg_score);
+    }
 
     // SQLite-first: fall back to file only when DB write fails or DB is unavailable.
     if let Some(ref p) = pool {

@@ -144,6 +144,28 @@ On next session start, weak patterns from other projects shown as hints.
 - `avg_score_without`: Average score in sessions where skill was absent
 - Positive delta = effective, negative delta = consider removing
 
+## SkillOpt-Inspired Optimization
+
+Three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.org/abs/2605.23904) applied to natural language skill evolution.
+
+### Negative Feedback Buffer
+- Rejected proposals stored in `rejected_buffer.json` with TTL-based expiry (default: 10 sessions)
+- `curate_proposal()` Rule 0: check buffer before generating proposals
+- `gate_skills()` auto-registers invalid skills with rejection reasons
+- Config: `rejected_buffer_ttl` in `[evolution]`
+
+### Minibatch Reflection
+- Observations decomposed into fixed-size batches (default: 8) for structural pattern extraction
+- Batches analyzed for dominant error, file clusters, and success rate
+- `reusable` when: dominant error ≥60% + ≥2 distinct files + category ≠ "other"
+- Reusable insights → skill proposals with origin "minibatch"
+- Config: `minibatch_size` in `[evolution]`
+
+### Slow/Meta Update
+- Epoch classification via linear regression over last 5 sessions: `Improving` / `Regressing` / `PersistentFailure` / `StableSuccess`
+- `meta.json` per evolved skill tracks `slow_updates` array (capped at 20)
+- Auto-eviction: `sessions_active ≥ 3 && avg_score_with < avg_score_without - 0.02` → remove + add to rejected buffer
+
 ## Polish → Observe Feedback
 
 Polish hook (format/typecheck) results auto-record into observe pipeline.
