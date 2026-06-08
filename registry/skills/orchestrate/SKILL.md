@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: "Trigger: active multi-agent run. Manages inbox, dependency resolution, message formatting, and agent handoffs."
+description: "Multi-agent orchestrator. Manages inbox, dependency resolution, message formatting, and agent handoffs during active multi-agent runs."
 modes:
   - auto       # auto-triggered during active orchestration
   - status     # /status — read-only orchestration dashboard
