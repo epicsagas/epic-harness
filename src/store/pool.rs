@@ -432,10 +432,6 @@ pub async fn memory_pool() -> io::Result<AnyPool> {
     }
     let pool = build_pool(&url, CONFIG.db.max_connections).await?;
     crate::mem::store::init_schema_pool(&pool).await?;
-    let db_type = DbType::from_url(&url).unwrap_or(DbType::Sqlite);
-    if db_type == DbType::Sqlite {
-        crate::mem::store::auto_migrate_legacy(&pool).await;
-    }
 
     // Re-acquire write lock to store the new pool.
     let duplicate = {
@@ -484,6 +480,7 @@ pub fn harness_db_type() -> DbType {
 }
 
 /// Detect the database type for the memory.db pool.
+#[allow(dead_code)]
 pub fn memory_db_type() -> DbType {
     DbType::from_url(&memory_url()).unwrap_or(DbType::Sqlite)
 }

@@ -1,6 +1,11 @@
 //! types.rs — Node, Edge, Index, ScoredNode, and type-level helpers
+//!
+//! Keeps the two-tier `Node { frontmatter, body }` as the public API type.
+//! Conversion functions bridge to llm-kernel's flat `GraphNode`.
 
 use serde::{Deserialize, Serialize};
+
+pub use llm_kernel::graph::types::importance_for_type;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NodeFrontmatter {
@@ -29,22 +34,6 @@ pub struct NodeFrontmatter {
 
 pub fn default_importance() -> f64 {
     0.5
-}
-
-/// Default importance by node type.
-pub fn importance_for_type(node_type: &str) -> f64 {
-    match node_type {
-        "decision" => 0.9,
-        "resolution" => 0.8,
-        "psychographic" => 0.8,
-        "instinct" => 0.7,
-        "concept" => 0.7,
-        "project" => 0.7,
-        "pattern" => 0.5,
-        "error" => 0.4,
-        "session" => 0.05,
-        _ => 0.5,
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,4 +77,68 @@ pub struct IndexNode {
 pub struct ScoredNode {
     pub node: Node,
     pub score: f64,
+}
+
+// ── Conversion helpers ──────────────────────────────────
+
+/// Convert two-tier Node → flat GraphNode for llm-kernel.
+pub fn node_to_graph(node: Node) -> llm_kernel::graph::types::GraphNode {
+    llm_kernel::graph::types::GraphNode {
+        id: node.frontmatter.id,
+        node_type: node.frontmatter.node_type,
+        title: node.frontmatter.title,
+        body: node.body,
+        tags: node.frontmatter.tags,
+        projects: node.frontmatter.projects,
+        agents: node.frontmatter.agents,
+        created: node.frontmatter.created,
+        updated: node.frontmatter.updated,
+        importance: node.frontmatter.importance,
+        access_count: node.frontmatter.access_count,
+        accessed_at: node.frontmatter.accessed_at,
+    }
+}
+
+/// Convert flat GraphNode → two-tier Node for public API.
+pub fn graph_to_node(gn: llm_kernel::graph::types::GraphNode) -> Node {
+    Node {
+        frontmatter: NodeFrontmatter {
+            id: gn.id,
+            node_type: gn.node_type,
+            title: gn.title,
+            tags: gn.tags,
+            projects: gn.projects,
+            agents: gn.agents,
+            created: gn.created,
+            updated: gn.updated,
+            importance: gn.importance,
+            access_count: gn.access_count,
+            accessed_at: gn.accessed_at,
+        },
+        body: gn.body,
+    }
+}
+
+/// Convert Edge → GraphEdge.
+pub fn edge_to_graph(edge: Edge) -> llm_kernel::graph::types::GraphEdge {
+    llm_kernel::graph::types::GraphEdge {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        relation: edge.relation,
+        weight: edge.weight,
+        ts: edge.ts,
+    }
+}
+
+/// Convert GraphEdge → Edge.
+pub fn graph_to_edge(ge: llm_kernel::graph::types::GraphEdge) -> Edge {
+    Edge {
+        id: ge.id,
+        source: ge.source,
+        target: ge.target,
+        relation: ge.relation,
+        weight: ge.weight,
+        ts: ge.ts,
+    }
 }

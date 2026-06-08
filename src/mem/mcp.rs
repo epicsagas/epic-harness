@@ -214,7 +214,7 @@ fn tool_mem_search(pool: &AnyPool, args: &Value) -> Value {
 
     // Touch retrieved nodes
     let ids: Vec<String> = nodes.iter().map(|n| n.frontmatter.id.clone()).collect();
-    runtime::block_on(touch_nodes_pool(pool, &ids));
+    touch_nodes_pool(pool, &ids);
 
     let results: Vec<Value> = nodes
         .iter()
