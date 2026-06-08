@@ -114,6 +114,8 @@ pub fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         ScoreDimensions::default()
     };
 
+    let minibatch_insights = analyze_minibatches(&scored);
+
     SessionAnalysis {
         total_observations: total,
         success_rate,
@@ -124,7 +126,93 @@ pub fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         per_ext_stats: ext_map,
         failure_patterns: vec![],
         dimension_averages: dim_avg,
+        minibatch_insights,
     }
+}
+
+/// SkillOpt Minibatch Reflection: partition observations into fixed-size batches
+/// and extract per-batch insights for richer skill seeding context.
+pub fn analyze_minibatches(scored: &[&ObsRecord]) -> Vec<MinibatchInsight> {
+    let batch_size = CONFIG.evolution.minibatch_size;
+    if batch_size == 0 || scored.is_empty() {
+        return vec![];
+    }
+
+    let mut insights = Vec::new();
+    for (idx, chunk) in scored.chunks(batch_size).enumerate() {
+        let batch_total = chunk.len() as f64;
+        let errors: Vec<_> = chunk
+            .iter()
+            .filter(|o| o.result.as_deref() == Some("error"))
+            .collect();
+        let success_rate = round3((batch_total - errors.len() as f64) / batch_total);
+
+        // Dominant error category
+        let mut err_counts: HashMap<String, u64> = HashMap::new();
+        for e in &errors {
+            let cat = e.failure_category.as_deref().unwrap_or("other");
+            *err_counts.entry(cat.into()).or_default() += 1;
+        }
+        let dominant_error_category = err_counts
+            .iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(k, _)| k.clone());
+
+        // Dominant tool
+        let mut tool_counts: HashMap<&str, u64> = HashMap::new();
+        for o in chunk {
+            *tool_counts.entry(&o.tool_category).or_default() += 1;
+        }
+        let dominant_tool = tool_counts
+            .iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(k, _)| k.to_string())
+            .unwrap_or_else(|| "unknown".into());
+
+        // File cluster (top 3 files)
+        let mut file_counts: HashMap<String, u64> = HashMap::new();
+        for o in chunk {
+            if let Some(action) = o.action.as_deref() {
+                if let Some(f) = crate::shared::classify::extract_file(action) {
+                    *file_counts.entry(f.to_string()).or_default() += 1;
+                }
+            }
+        }
+        let mut files: Vec<_> = file_counts.into_iter().collect();
+        files.sort_by(|a, b| b.1.cmp(&a.1).reverse());
+        let file_cluster: Vec<String> = files.into_iter().take(3).map(|(f, _)| f).collect();
+
+        // Pattern summary
+        let pattern = if success_rate >= 0.8 {
+            "smooth".into()
+        } else if success_rate >= 0.5 {
+            "mixed".into()
+        } else {
+            format!("struggle:{}", dominant_error_category.as_deref().unwrap_or("unknown"))
+        };
+
+        // Reusable: dominant error category covers ≥60% of batch errors AND ≥2 distinct files
+        let dominant_error_ratio = if !errors.is_empty() {
+            err_counts.values().max().copied().unwrap_or(0) as f64 / errors.len() as f64
+        } else {
+            0.0
+        };
+        let reusable = dominant_error_ratio >= 0.6
+            && dominant_error_category.as_ref().is_some_and(|c| c != "other")
+            && file_cluster.len() >= 2;
+
+        insights.push(MinibatchInsight {
+            batch_index: idx,
+            success_rate,
+            dominant_error_category,
+            dominant_tool,
+            file_cluster,
+            pattern,
+            reusable,
+        });
+    }
+
+    insights
 }
 
 pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
@@ -638,5 +726,83 @@ mod tests {
         assert_eq!(round3(0.12345), 0.123);
         assert_eq!(round3(0.9999), 1.0);
         assert_eq!(round3(0.0), 0.0);
+    }
+
+    #[test]
+    fn minibatch_decomposition_splits_correctly() {
+        // 20 observations, batch_size=8 → 3 batches (8+8+4)
+        let obs: Vec<ObsRecord> = (0..20)
+            .map(|i| make_obs("Bash", "bash", if i % 3 == 0 { "error" } else { "success" }, if i % 3 == 0 { 0.0 } else { 0.9 }, Some(&format!("/src/file{}.ts", i % 4))))
+            .collect();
+        let scored: Vec<&ObsRecord> = obs.iter().collect();
+        let insights = analyze_minibatches(&scored);
+        assert_eq!(insights.len(), 3, "should have 3 batches");
+        assert_eq!(insights[0].batch_index, 0);
+        assert_eq!(insights[1].batch_index, 1);
+        assert_eq!(insights[2].batch_index, 2);
+    }
+
+    #[test]
+    fn minibatch_reusable_requires_two_files_and_dominant_error() {
+        // All errors of same category on 2+ files → should be reusable
+        let obs: Vec<ObsRecord> = (0..8)
+            .map(|i| {
+                let mut o = make_obs("Bash", "bash", "error", 0.0, Some(&format!("/src/a{}.ts", i % 3)));
+                o.failure_category = Some("type_error".into());
+                o.error_snippet = Some("TypeError".into());
+                o
+            })
+            .collect();
+        let scored: Vec<&ObsRecord> = obs.iter().collect();
+        let insights = analyze_minibatches(&scored);
+        assert!(!insights.is_empty());
+        assert!(insights[0].reusable, "all same error + 3 files should be reusable");
+        assert_eq!(insights[0].dominant_error_category.as_deref(), Some("type_error"));
+    }
+
+    #[test]
+    fn minibatch_not_reusable_with_single_file() {
+        // All errors on same file → not reusable (need 2+ files)
+        let obs: Vec<ObsRecord> = (0..8)
+            .map(|_| {
+                let mut o = make_obs("Bash", "bash", "error", 0.0, Some("/src/only.ts"));
+                o.failure_category = Some("type_error".into());
+                o
+            })
+            .collect();
+        let scored: Vec<&ObsRecord> = obs.iter().collect();
+        let insights = analyze_minibatches(&scored);
+        assert!(!insights.is_empty());
+        assert!(!insights[0].reusable, "single file should not be reusable");
+    }
+
+    #[test]
+    fn minibatch_not_reusable_with_other_category() {
+        // "other" error category → not reusable
+        let obs: Vec<ObsRecord> = (0..8)
+            .map(|i| {
+                let mut o = make_obs("Bash", "bash", "error", 0.0, Some(&format!("/src/f{}.ts", i % 2)));
+                o.failure_category = Some("other".into());
+                o
+            })
+            .collect();
+        let scored: Vec<&ObsRecord> = obs.iter().collect();
+        let insights = analyze_minibatches(&scored);
+        assert!(!insights.is_empty());
+        assert!(!insights[0].reusable, "other category should not be reusable");
+    }
+
+    #[test]
+    fn minibatch_pattern_struggle_on_low_success() {
+        let obs: Vec<ObsRecord> = (0..8)
+            .map(|_| {
+                let mut o = make_obs("Bash", "bash", "error", 0.0, Some("/src/a.ts"));
+                o.failure_category = Some("syntax_error".into());
+                o
+            })
+            .collect();
+        let scored: Vec<&ObsRecord> = obs.iter().collect();
+        let insights = analyze_minibatches(&scored);
+        assert!(insights[0].pattern.starts_with("struggle:"));
     }
 }

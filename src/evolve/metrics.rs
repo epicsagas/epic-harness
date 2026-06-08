@@ -122,6 +122,69 @@ pub fn compute_trend(history: &[SessionScoreEntry]) -> &'static str {
     }
 }
 
+/// SkillOpt Slow/Meta Update: classify the current epoch from score history.
+///
+/// Uses the last 5 sessions' avg_score to determine epoch class:
+/// - **Improving**: recent scores consistently rising
+/// - **Regressing**: recent scores consistently falling
+/// - **PersistentFailure**: recent average below 0.4
+/// - **StableSuccess**: recent average above 0.8 with minimal variance
+pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
+    let window = 5;
+    let start = history.len().saturating_sub(window);
+    let recent = &history[start..];
+    if recent.len() < 2 {
+        return EpochClass::StableSuccess; // not enough data, assume neutral
+    }
+
+    let avg: f64 = recent.iter().map(|e| e.avg_score).sum::<f64>() / recent.len() as f64;
+
+    // Persistent failure: average score below 0.4
+    if avg < 0.4 {
+        return EpochClass::PersistentFailure;
+    }
+
+    // Check trend direction via linear regression slope
+    let n = recent.len() as f64;
+    let (mut sx, mut sy, mut sxy, mut sxx) = (0.0, 0.0, 0.0, 0.0);
+    for (i, e) in recent.iter().enumerate() {
+        let x = i as f64;
+        sx += x;
+        sy += e.avg_score;
+        sxy += x * e.avg_score;
+        sxx += x * x;
+    }
+    let denom = n * sxx - sx * sx;
+    let slope = if denom.abs() > f64::EPSILON {
+        (n * sxy - sx * sy) / denom
+    } else {
+        0.0
+    };
+
+    if slope > 0.02 {
+        return EpochClass::Improving;
+    }
+    if slope < -0.02 {
+        return EpochClass::Regressing;
+    }
+
+    // Stable success: high average with low variance
+    if avg > 0.8 {
+        let variance: f64 =
+            recent.iter().map(|e| (e.avg_score - avg).powi(2)).sum::<f64>() / recent.len() as f64;
+        if variance < 0.01 {
+            return EpochClass::StableSuccess;
+        }
+    }
+
+    // Default: if not clearly anything, classify based on score level
+    if avg > 0.6 {
+        EpochClass::StableSuccess
+    } else {
+        EpochClass::PersistentFailure
+    }
+}
+
 pub fn update_skill_attribution(
     metrics: &mut Metrics,
     analysis: &crate::shared::evolution::SessionAnalysis,
@@ -160,6 +223,31 @@ pub fn update_skill_attribution(
             attr.avg_score_without = super::analysis::round3(
                 (all_scores_sum - (attr.avg_score_with * attr.sessions_active as f64))
                     / without as f64,
+            );
+        }
+    }
+
+    // SkillOpt negative feedback: evict skills that are demonstrably ineffective
+    // (sessions_active >= 3 AND avg_score_with < avg_score_without by > 0.02)
+    let mut evicted: Vec<String> = Vec::new();
+    for (name, attr) in &metrics.skill_attribution {
+        if attr.sessions_active >= 3
+            && attr.avg_score_with < attr.avg_score_without - 0.02
+        {
+            evicted.push(name.clone());
+        }
+    }
+    for name in &evicted {
+        // Remove from disk
+        let evolved = crate::shared::paths::evolved_dir();
+        let dir = evolved.join(name);
+        if dir.is_dir() {
+            crate::shared::helpers::rm_dir(&dir);
+            crate::evolve::skills::add_rejected(
+                name,
+                "ineffective_attribution",
+                0.0,
+                "attribution",
             );
         }
     }
@@ -406,5 +494,74 @@ mod tests {
             "avg_score_without should be ~0.60 (from score_history avg_score), got {}",
             attr.avg_score_without
         );
+    }
+
+    #[test]
+    fn classify_epoch_improving() {
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|i| SessionScoreEntry {
+                timestamp: format!("2026-04-0{}", i + 1),
+                success_rate: 0.5 + i as f64 * 0.1,
+                avg_score: 0.5 + i as f64 * 0.1,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
+        assert_eq!(classify_epoch(&history), EpochClass::Improving);
+    }
+
+    #[test]
+    fn classify_epoch_regressing() {
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|i| SessionScoreEntry {
+                timestamp: format!("2026-04-0{}", i + 1),
+                success_rate: 0.9 - i as f64 * 0.1,
+                avg_score: 0.9 - i as f64 * 0.1,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
+        assert_eq!(classify_epoch(&history), EpochClass::Regressing);
+    }
+
+    #[test]
+    fn classify_epoch_persistent_failure() {
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|_| SessionScoreEntry {
+                timestamp: "2026-04-09".into(),
+                success_rate: 0.2,
+                avg_score: 0.2,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
+        assert_eq!(classify_epoch(&history), EpochClass::PersistentFailure);
+    }
+
+    #[test]
+    fn classify_epoch_stable_success() {
+        let history: Vec<SessionScoreEntry> = (0..5)
+            .map(|_| SessionScoreEntry {
+                timestamp: "2026-04-09".into(),
+                success_rate: 0.95,
+                avg_score: 0.90,
+                observations: 10,
+                dimension_averages: ScoreDimensions::default(),
+            })
+            .collect();
+        assert_eq!(classify_epoch(&history), EpochClass::StableSuccess);
+    }
+
+    #[test]
+    fn classify_epoch_single_entry_defaults_stable() {
+        let history = vec![SessionScoreEntry {
+            timestamp: "2026-04-09".into(),
+            success_rate: 0.5,
+            avg_score: 0.5,
+            observations: 10,
+            dimension_averages: ScoreDimensions::default(),
+        }];
+        // With <2 entries, defaults to StableSuccess
+        assert_eq!(classify_epoch(&history), EpochClass::StableSuccess);
     }
 }

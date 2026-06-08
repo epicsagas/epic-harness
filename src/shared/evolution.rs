@@ -3,6 +3,43 @@ use std::collections::HashMap;
 
 use super::scoring::ScoreDimensions;
 
+// ── SkillOpt-inspired types ───────────────────────────
+
+/// A single entry in the negative feedback buffer — records why a skill proposal was rejected
+/// so the curator can avoid proposing the same skill again.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RejectedEntry {
+    pub name: String,
+    pub reason: String,
+    pub timestamp: String,
+    pub confidence: f64,
+    pub origin: String,
+}
+
+/// Insight extracted from a minibatch of observations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MinibatchInsight {
+    pub batch_index: usize,
+    pub success_rate: f64,
+    pub dominant_error_category: Option<String>,
+    pub dominant_tool: String,
+    pub file_cluster: Vec<String>,
+    /// Human-readable pattern description extracted from this batch.
+    pub pattern: String,
+    /// True when the same error appears in ≥ 60% of errors AND ≥ 2 distinct files.
+    pub reusable: bool,
+}
+
+/// Epoch classification for slow/meta update (SkillOpt §5).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum EpochClass {
+    Improving,
+    Regressing,
+    PersistentFailure,
+    StableSuccess,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolStats {
     pub tool_category: String,
@@ -39,6 +76,7 @@ pub struct SessionAnalysis {
     pub per_error_stats: HashMap<String, u64>,
     pub per_ext_stats: HashMap<String, ExtStats>,
     pub failure_patterns: Vec<DetectedPattern>,
+    pub minibatch_insights: Vec<MinibatchInsight>,
     pub dimension_averages: ScoreDimensions,
 }
 
@@ -74,6 +112,9 @@ pub struct Metrics {
     pub stagnation_count: u64,
     #[serde(default)]
     pub skill_attribution: HashMap<String, SkillAttribution>,
+    /// Most recent epoch classification (SkillOpt slow/meta update).
+    #[serde(default)]
+    pub epoch_class: Option<EpochClass>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error_context: Option<String>,
 }
@@ -104,6 +145,7 @@ pub fn default_metrics() -> Metrics {
         trend: "stable".into(),
         stagnation_count: 0,
         skill_attribution: HashMap::new(),
+        epoch_class: None,
         last_error_context: None,
     }
 }

@@ -89,6 +89,14 @@ pub struct EvolutionConfig {
     /// Number of recent sessions averaged for stagnation detection.
     /// Prevents outlier sessions from permanently gating improvement.
     pub stagnation_rolling_window: usize,
+
+    /// Number of sessions a rejected skill stays in the negative feedback buffer
+    /// before it is eligible for re-proposal. (SkillOpt rejected_edit_buffer)
+    pub rejected_buffer_ttl: u64,
+
+    /// Number of observations per minibatch for structural pattern analysis.
+    /// (SkillOpt reflection minibatch size)
+    pub minibatch_size: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -183,6 +191,8 @@ impl Default for EvolutionConfig {
             rollback_degradation: 0.05,
             rollback_best_floor: 0.90,
             stagnation_rolling_window: 3,
+            rejected_buffer_ttl: 10,
+            minibatch_size: 8,
         }
     }
 }
@@ -529,6 +539,14 @@ gated_promotion_min = 2
 # Number of recent sessions used for rolling-average stagnation check.
 # stagnation_rolling_window = 3
 
+# Number of sessions a rejected skill stays in the negative feedback buffer
+# before it becomes eligible for re-proposal. Set higher for conservative evolution.
+# rejected_buffer_ttl = 10
+
+# Number of observations per minibatch for structural pattern analysis.
+# Larger batches find more structural patterns but need more observations.
+# minibatch_size = 8
+
 # ── Pattern detection (power-user) ──────────────────
 # These thresholds control when failure patterns are detected.
 # Defaults work well for most projects — only adjust if you have
@@ -656,6 +674,8 @@ mod tests {
         assert_eq!(c.evolution.stagnation_limit, 3);
         assert_eq!(c.evolution.gated_promotion_min, 2);
         assert_eq!(c.evolution.stagnation_rolling_window, 3);
+        assert_eq!(c.evolution.rejected_buffer_ttl, 10);
+        assert_eq!(c.evolution.minibatch_size, 8);
         assert_eq!(c.pattern.repeated_error_min, 3);
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);

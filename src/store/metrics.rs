@@ -227,6 +227,7 @@ pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metr
         trend,
         stagnation_count,
         skill_attribution,
+        epoch_class: None,
         last_error_context,
     };
 
@@ -379,6 +380,7 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
         stagnation_count,
         skill_attribution,
         last_error_context,
+        epoch_class: None,
     })
 }
 
@@ -550,6 +552,7 @@ mod tests {
                 m
             },
             last_error_context: Some("type_error in main.rs".into()),
+            epoch_class: None,
         }
     }
 
