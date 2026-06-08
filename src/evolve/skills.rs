@@ -223,7 +223,11 @@ pub(crate) struct SkillProposal {
 /// Curator: decides whether to accept a proposal based on masked feedback.
 /// The curator only sees pass/fail signals (existing names, confidence thresholds),
 /// not raw observation scores. Also checks the negative feedback buffer (SkillOpt §4).
-pub(crate) fn curate_proposal(proposal: &SkillProposal, existing: &[String], buf: &RejectedBuffer) -> ProposalAction {
+pub(crate) fn curate_proposal(
+    proposal: &SkillProposal,
+    existing: &[String],
+    buf: &RejectedBuffer,
+) -> ProposalAction {
     // Rule 0 (SkillOpt): If in rejected buffer, skip
     if is_rejected(&proposal.name, buf) {
         return ProposalAction::Skip;
