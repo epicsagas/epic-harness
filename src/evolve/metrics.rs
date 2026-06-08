@@ -122,13 +122,24 @@ pub fn compute_trend(history: &[SessionScoreEntry]) -> &'static str {
     }
 }
 
+/// Slope threshold for classifying a trend as improving or regressing.
+const EPOCH_SLOPE_THRESHOLD: f64 = 0.02;
+/// Average score below this is classified as persistent failure.
+const EPOCH_PERSISTENT_FAILURE_THRESHOLD: f64 = 0.4;
+/// Average score above this (with low variance) is stable success.
+const EPOCH_STABLE_SUCCESS_THRESHOLD: f64 = 0.8;
+/// Variance below this indicates stable scores.
+const EPOCH_VARIANCE_THRESHOLD: f64 = 0.01;
+/// Default score threshold for classifying as stable success when trend is flat.
+const EPOCH_DEFAULT_THRESHOLD: f64 = 0.6;
+
 /// SkillOpt Slow/Meta Update: classify the current epoch from score history.
 ///
 /// Uses the last 5 sessions' avg_score to determine epoch class:
 /// - **Improving**: recent scores consistently rising
 /// - **Regressing**: recent scores consistently falling
-/// - **PersistentFailure**: recent average below 0.4
-/// - **StableSuccess**: recent average above 0.8 with minimal variance
+/// - **PersistentFailure**: recent average below EPOCH_PERSISTENT_FAILURE_THRESHOLD
+/// - **StableSuccess**: recent average above EPOCH_STABLE_SUCCESS_THRESHOLD with minimal variance
 pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
     let window = 5;
     let start = history.len().saturating_sub(window);
@@ -139,8 +150,8 @@ pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
 
     let avg: f64 = recent.iter().map(|e| e.avg_score).sum::<f64>() / recent.len() as f64;
 
-    // Persistent failure: average score below 0.4
-    if avg < 0.4 {
+    // Persistent failure: average score below threshold
+    if avg < EPOCH_PERSISTENT_FAILURE_THRESHOLD {
         return EpochClass::PersistentFailure;
     }
 
@@ -161,27 +172,27 @@ pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
         0.0
     };
 
-    if slope > 0.02 {
+    if slope > EPOCH_SLOPE_THRESHOLD {
         return EpochClass::Improving;
     }
-    if slope < -0.02 {
+    if slope < -EPOCH_SLOPE_THRESHOLD {
         return EpochClass::Regressing;
     }
 
     // Stable success: high average with low variance
-    if avg > 0.8 {
+    if avg > EPOCH_STABLE_SUCCESS_THRESHOLD {
         let variance: f64 = recent
             .iter()
             .map(|e| (e.avg_score - avg).powi(2))
             .sum::<f64>()
             / recent.len() as f64;
-        if variance < 0.01 {
+        if variance < EPOCH_VARIANCE_THRESHOLD {
             return EpochClass::StableSuccess;
         }
     }
 
     // Default: if not clearly anything, classify based on score level
-    if avg > 0.6 {
+    if avg > EPOCH_DEFAULT_THRESHOLD {
         EpochClass::StableSuccess
     } else {
         EpochClass::PersistentFailure

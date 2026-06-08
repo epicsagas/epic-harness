@@ -848,7 +848,7 @@ pub fn run(_input: &HookInput) -> i32 {
     // 4. Seed evolved skills
     ensure_dir(&evolved_dir());
     // Prune expired entries from the negative feedback buffer (SkillOpt §4)
-    evolve::prune_rejected_buffer(metrics.total_sessions);
+    evolve::prune_rejected_buffer();
     let existing = list_dirs(&evolved_dir());
     let seeded = if !should_rollback {
         evolve::seed_smart_skills(&analysis, &existing)

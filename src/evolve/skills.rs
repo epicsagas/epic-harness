@@ -51,7 +51,7 @@ pub fn add_rejected(name: &str, reason: &str, confidence: f64, origin: &str) {
 /// Prune expired entries from the rejected buffer.
 /// Each reflect call increments a "session_seen" counter stored alongside entries.
 /// An entry is expired when the number of sessions since it was added exceeds `rejected_buffer_ttl`.
-pub fn prune_rejected_buffer(_current_session: u64) {
+pub fn prune_rejected_buffer() {
     let mut buf = load_rejected_buffer();
     let ttl = CONFIG.evolution.rejected_buffer_ttl;
     let before = buf.entries.len();
@@ -70,15 +70,15 @@ pub fn prune_rejected_buffer(_current_session: u64) {
 }
 
 /// Approximate number of days since an ISO timestamp.
-/// Returns 0.0 for malformed timestamps (conservative — keeps them in buffer).
+/// Returns f64::MAX for malformed timestamps so they get pruned (fail-open).
 fn days_since(iso: &str) -> f64 {
     let date_part = match iso.get(..10) {
         Some(d) => d,
-        None => return 0.0,
+        None => return f64::MAX,
     };
     let parts: Vec<&str> = date_part.split('-').collect();
     if parts.len() != 3 {
-        return 0.0;
+        return f64::MAX;
     }
     let y: i32 = parts[0].parse().unwrap_or(2026);
     let m: u32 = parts[1].parse().unwrap_or(1);
@@ -122,14 +122,14 @@ fn date_to_ordinal(y: i32, m: u32, d: u32) -> i64 {
 // ── Slow/Meta Update (SkillOpt §4) ────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SlowUpdateEntry {
+pub(crate) struct SlowUpdateEntry {
     epoch_class: String,
     score: f64,
     timestamp: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct SkillSlowMeta {
+pub(crate) struct SkillSlowMeta {
     slow_updates: Vec<SlowUpdateEntry>,
 }
 
@@ -170,8 +170,7 @@ pub fn update_meta_field(skills: &[String], epoch: &EpochClass, score: f64) {
 }
 
 /// Check if a skill name is in the rejected buffer.
-pub fn is_rejected(name: &str) -> bool {
-    let buf = load_rejected_buffer();
+pub(crate) fn is_rejected(name: &str, buf: &RejectedBuffer) -> bool {
     buf.entries.iter().any(|e| e.name == name)
 }
 
@@ -224,9 +223,9 @@ pub(crate) struct SkillProposal {
 /// Curator: decides whether to accept a proposal based on masked feedback.
 /// The curator only sees pass/fail signals (existing names, confidence thresholds),
 /// not raw observation scores. Also checks the negative feedback buffer (SkillOpt §4).
-pub(crate) fn curate_proposal(proposal: &SkillProposal, existing: &[String]) -> ProposalAction {
+pub(crate) fn curate_proposal(proposal: &SkillProposal, existing: &[String], buf: &RejectedBuffer) -> ProposalAction {
     // Rule 0 (SkillOpt): If in rejected buffer, skip
-    if is_rejected(&proposal.name) {
+    if is_rejected(&proposal.name, buf) {
         return ProposalAction::Skip;
     }
 
@@ -346,15 +345,15 @@ pub(crate) fn build_proposals(analysis: &SessionAnalysis) -> Vec<SkillProposal> 
                 name,
                 content: format!(
                     "# Minibatch {} Insight\n\n\
-                     Batch success rate: {:.0}%\n\n\
-                     Dominant error: {err_cat}\n\
-                     Dominant tool: {}\n\
-                     Files: {files}\n\n\
-                     ## Guidance\n\
-                     When encountering {err_cat} errors with {} operations on {files}:\n\
-                     1. Read the full error message before acting\n\
-                     2. Check surrounding context (50+ lines)\n\
-                     3. Verify the fix compiles before moving on\n",
+Batch success rate: {:.0}%\n\n\
+Dominant error: {err_cat}\n\
+Dominant tool: {}\n\
+Files: {files}\n\n\
+## Guidance\n\
+When encountering {err_cat} errors with {} operations on {files}:\n\
+1. Read the full error message before acting\n\
+2. Check surrounding context (50+ lines)\n\
+3. Verify the fix compiles before moving on\n",
                     mb.batch_index + 1,
                     mb.success_rate * 100.0,
                     mb.dominant_tool,
@@ -400,6 +399,7 @@ pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64
     }
 
     let mut counters = load_promotion_counters();
+    let rejected_buf = load_rejected_buffer();
     let mut seeded = 0u64;
     let mut promoted_count = 0u64;
     let cap = CONFIG.evolution.max_skills.saturating_sub(existing.len());
@@ -423,7 +423,7 @@ pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64
         }
 
         // Curate: decide whether to accept
-        let action = curate_proposal(proposal, existing);
+        let action = curate_proposal(proposal, existing, &rejected_buf);
         match action {
             ProposalAction::Skip => continue,
             ProposalAction::Merge | ProposalAction::Accept => {
@@ -929,7 +929,7 @@ mod tests {
         };
         let existing = vec!["evo-test".into()];
         assert!(matches!(
-            curate_proposal(&proposal, &existing),
+            curate_proposal(&proposal, &existing, &RejectedBuffer::default()),
             ProposalAction::Skip
         ));
     }
@@ -944,7 +944,7 @@ mod tests {
             rationale: "test".into(),
         };
         assert!(matches!(
-            curate_proposal(&proposal, &[]),
+            curate_proposal(&proposal, &[], &RejectedBuffer::default()),
             ProposalAction::Skip
         ));
     }
@@ -959,7 +959,7 @@ mod tests {
             rationale: "test".into(),
         };
         assert!(matches!(
-            curate_proposal(&proposal, &[]),
+            curate_proposal(&proposal, &[], &RejectedBuffer::default()),
             ProposalAction::Accept
         ));
     }
@@ -974,7 +974,7 @@ mod tests {
             rationale: "test".into(),
         };
         assert!(matches!(
-            curate_proposal(&proposal, &[]),
+            curate_proposal(&proposal, &[], &RejectedBuffer::default()),
             ProposalAction::Merge
         ));
     }
@@ -1176,8 +1176,6 @@ mod tests {
 
     #[test]
     fn curate_proposal_skips_rejected() {
-        // This test verifies that is_rejected() returns true when an entry exists.
-        // Direct integration with the file system is tested via the buffer load/save tests.
         let proposal = SkillProposal {
             name: "evo-some-rejected-skill".into(),
             content: "content".into(),
@@ -1185,12 +1183,20 @@ mod tests {
             confidence: 0.8,
             rationale: "test".into(),
         };
-        // The skill is not actually rejected in the buffer file in this unit test
-        // because the buffer path depends on evolved_dir(). Just verify the logic path:
-        // if the buffer is empty (default), is_rejected returns false, so curate works normally.
-        let action = curate_proposal(&proposal, &[]);
-        // With confidence 0.8, this should be Accept (no rejection in default buffer)
-        assert!(matches!(action, ProposalAction::Accept));
+        let buf = RejectedBuffer {
+            entries: vec![RejectedEntry {
+                name: "evo-some-rejected-skill".into(),
+                reason: "low_confidence".into(),
+                timestamp: "2026-06-08T12:00:00Z".into(),
+                confidence: 0.1,
+                origin: "pattern".into(),
+            }],
+        };
+        let action = curate_proposal(&proposal, &[], &buf);
+        assert!(
+            matches!(action, ProposalAction::Skip),
+            "rejected skill should be skipped"
+        );
     }
 
     #[test]
