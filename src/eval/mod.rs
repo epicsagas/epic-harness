@@ -58,12 +58,10 @@ pub fn run(args: &[String]) -> i32 {
     let dims = &cfg.dimensions;
     let run_all = dimension_filter.is_none();
 
-    if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled
-    {
+    if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled {
         results.push(runner::run_correctness(&effective));
     }
-    if (run_all || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled
-    {
+    if (run_all || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled {
         results.push(runner::run_performance(&effective));
     }
     if (run_all || dimension_filter.as_deref() == Some("quality")) && dims.quality.enabled {
@@ -81,7 +79,13 @@ pub fn run(args: &[String]) -> i32 {
     let baseline_path = if baseline_path.is_absolute() {
         baseline_path
     } else {
-        harness.join(dims.regression.extra.baseline_dir.as_deref().unwrap_or("eval/baselines"))
+        harness.join(
+            dims.regression
+                .extra
+                .baseline_dir
+                .as_deref()
+                .unwrap_or("eval/baselines"),
+        )
     };
 
     let prev = if dims.regression.enabled {
@@ -92,7 +96,11 @@ pub fn run(args: &[String]) -> i32 {
 
     // Compute regression dimension
     if dims.regression.enabled && (run_all || dimension_filter.as_deref() == Some("regression")) {
-        results.push(runner::compute_regression(&results, prev.as_ref(), dims.regression.extra.threshold));
+        results.push(runner::compute_regression(
+            &results,
+            prev.as_ref(),
+            dims.regression.extra.threshold,
+        ));
     }
 
     // Build report
@@ -132,11 +140,7 @@ pub fn run(args: &[String]) -> i32 {
         report::print_table(&rpt);
     }
 
-    if rpt.overall_verdict == "FAIL" {
-        1
-    } else {
-        0
-    }
+    if rpt.overall_verdict == "FAIL" { 1 } else { 0 }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────

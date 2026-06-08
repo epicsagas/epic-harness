@@ -109,7 +109,7 @@ fn main() {
         std::process::exit(code);
     }
     if subcmd == "eval" {
-        let code = eval::run(&args[2..].to_vec());
+        let code = eval::run(&args[2..]);
         std::process::exit(code);
     }
     if subcmd == "serve" {
@@ -189,8 +189,8 @@ fn main() {
                 store::migrate::run_subcommand(dry_run, reset)
             }
         }
-        "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "telemetry" | "serve" | "dashboard"
-        | "update" => {
+        "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "telemetry" | "serve"
+        | "dashboard" | "update" => {
             unreachable!()
         }
         "path" => {

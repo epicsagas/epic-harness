@@ -19,10 +19,9 @@ pub fn load_latest(baseline_dir: &Path) -> Result<serde_json::Value, String> {
 }
 
 fn load_json(path: &Path) -> Result<serde_json::Value, String> {
-    let contents = std::fs::read_to_string(path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
-    serde_json::from_str(&contents)
-        .map_err(|e| format!("parse {}: {e}", path.display()))
+    let contents =
+        std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    serde_json::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
 /// Find the most recent BASELINE-*.json file in a directory.
@@ -30,8 +29,7 @@ fn find_newest_baseline(dir: &Path) -> Result<Option<std::path::PathBuf>, String
     if !dir.exists() {
         return Ok(None);
     }
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("read dir {}: {e}", dir.display()))?;
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("read dir {}: {e}", dir.display()))?;
 
     let mut newest: Option<(std::path::PathBuf, String)> = None;
     for entry in entries.flatten() {

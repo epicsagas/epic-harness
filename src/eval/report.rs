@@ -82,14 +82,8 @@ pub fn print_table(report: &Report) {
     println!("  {}", "─".repeat(35));
 
     for (name, data) in dims {
-        let score = data
-            .get("score")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
-        let verdict = data
-            .get("verdict")
-            .and_then(|v| v.as_str())
-            .unwrap_or("?");
+        let score = data.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let verdict = data.get("verdict").and_then(|v| v.as_str()).unwrap_or("?");
 
         let icon = match verdict {
             "PASS" => "✓",

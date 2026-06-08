@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::config::ResolvedCommands;
 
@@ -238,9 +238,7 @@ fn exec_command(cmd: &str) -> CmdOutput {
         }
     };
 
-    let output = std::process::Command::new(program)
-        .args(&args)
-        .output();
+    let output = std::process::Command::new(program).args(&args).output();
 
     match output {
         Ok(o) => CmdOutput {
@@ -357,9 +355,13 @@ fn extract_number(haystack: &str, needle: &str) -> Option<usize> {
 
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
-        s.to_string()
-    } else {
-        let end = s.len() - max;
-        format!("...{}", &s[end..])
+        return s.to_string();
     }
+    // Find a safe char boundary for the tail
+    let end = s.len() - max;
+    let end = (0..=end)
+        .rev()
+        .find(|&i| s.is_char_boundary(i))
+        .unwrap_or(0);
+    format!("...{}", &s[end..])
 }

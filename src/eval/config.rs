@@ -79,6 +79,7 @@ pub struct ResolvedCommands {
     pub test_command: Option<String>,
     pub lint_command: Option<String>,
     pub bench_command: Option<String>,
+    #[expect(dead_code)]
     pub mutation_command: Option<String>,
     pub stack: String,
 }
@@ -219,15 +220,14 @@ pub fn load(eval_dir: &Path) -> Result<EvalConfig, String> {
     if !path.exists() {
         return Err(format!("eval config not found: {}", path.display()));
     }
-    let contents = std::fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let contents =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     serde_yaml::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
 /// Scaffold a minimal eval.yaml with auto-detected stack.
 pub fn scaffold(eval_dir: &Path) -> Result<std::path::PathBuf, String> {
-    std::fs::create_dir_all(eval_dir)
-        .map_err(|e| format!("create dir: {e}"))?;
+    std::fs::create_dir_all(eval_dir).map_err(|e| format!("create dir: {e}"))?;
 
     let path = eval_dir.join("eval.yaml");
     if path.exists() {
@@ -235,11 +235,12 @@ pub fn scaffold(eval_dir: &Path) -> Result<std::path::PathBuf, String> {
     }
 
     let stack = detect_stack();
-    let mut cfg = EvalConfig::default();
-    cfg.stack = stack;
+    let cfg = EvalConfig {
+        stack,
+        ..EvalConfig::default()
+    };
 
-    let yaml = serde_yaml::to_string(&cfg)
-        .map_err(|e| format!("serialize: {e}"))?;
+    let yaml = serde_yaml::to_string(&cfg).map_err(|e| format!("serialize: {e}"))?;
 
     // Add helpful comments
     let commented = format!(
@@ -248,8 +249,7 @@ pub fn scaffold(eval_dir: &Path) -> Result<std::path::PathBuf, String> {
          {yaml}"
     );
 
-    std::fs::write(&path, &commented)
-        .map_err(|e| format!("write {}: {e}", path.display()))?;
+    std::fs::write(&path, &commented).map_err(|e| format!("write {}: {e}", path.display()))?;
 
     // Also create baseline and results dirs
     let _ = std::fs::create_dir_all(eval_dir.join("baselines"));
@@ -327,19 +327,9 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         });
 
     Ok(ResolvedCommands {
-        test_command: cfg
-            .dimensions
-            .correctness
-            .command
-            .clone()
-            .or(test_cmd),
+        test_command: cfg.dimensions.correctness.command.clone().or(test_cmd),
         lint_command: cfg.dimensions.quality.command.clone().or(lint_cmd),
-        bench_command: cfg
-            .dimensions
-            .performance
-            .command
-            .clone()
-            .or(bench_cmd),
+        bench_command: cfg.dimensions.performance.command.clone().or(bench_cmd),
         mutation_command: mutation_cmd,
         stack,
     })
