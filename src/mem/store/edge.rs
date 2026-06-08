@@ -1,102 +1,75 @@
-//! edge.rs — Edge CRUD operations
+//! edge.rs — Edge CRUD operations via llm-kernel graph
 
-use sqlx::{AnyPool, Row};
 use std::io;
 
-use super::types::Edge;
+use super::conn::memory_conn;
+use super::types::{Edge, edge_to_graph, graph_to_edge};
 
 pub fn append_edge(edge: &Edge) -> io::Result<()> {
-    crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::memory_pool().await?;
-        append_edge_pool(&pool, edge).await
-    })
+    let conn = memory_conn()?;
+    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
+    llm_kernel::graph::store::append_edge(&guard, &edge_to_graph(edge.clone()))
+        .map_err(|e| io::Error::other(e.to_string()))
 }
 
-#[allow(dead_code)] // used by integration tests (tests/mem_test.rs)
+#[allow(dead_code)]
 pub fn read_edges() -> Vec<Edge> {
     read_edges_limit(5000)
 }
 
 pub fn read_edges_limit(limit: usize) -> Vec<Edge> {
-    crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::memory_pool().await?;
-        read_edges_pool(&pool, limit as i64).await
-    })
-    .unwrap_or_else(|e| {
-        eprintln!("[mem/store] read_edges: {e}");
-        vec![]
-    })
+    let conn = match memory_conn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[mem/store] read_edges: {e}");
+            return vec![];
+        }
+    };
+    let guard = match conn.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("[mem/store] read_edges: {e}");
+            return vec![];
+        }
+    };
+    llm_kernel::graph::store::read_edges(&guard, limit)
+        .map(|edges| edges.into_iter().map(graph_to_edge).collect())
+        .unwrap_or_else(|_| vec![])
 }
 
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
-    crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::memory_pool().await?;
-        delete_edge_by_id_pool(&pool, edge_id).await
-    })
+    let conn = memory_conn()?;
+    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
+    llm_kernel::graph::store::delete_edge(&guard, edge_id)
+        .map_err(|e| io::Error::other(e.to_string()))?;
+    Ok(())
 }
 
 pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
-    crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::memory_pool().await?;
-        remove_edges_for_node_pool(&pool, node_id).await
-    })
+    let conn = memory_conn()?;
+    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
+    llm_kernel::graph::store::remove_edges_for_node(&guard, node_id)
+        .map_err(|e| io::Error::other(e.to_string()))
 }
 
-// ── Async pool functions ─────────────────────────────
+// ── Pool-compatible wrappers ─────────────────────────────
 
-pub async fn append_edge_pool(pool: &AnyPool, edge: &Edge) -> io::Result<()> {
-    sqlx::query(
-        "INSERT INTO edges (id, source, target, relation, weight, ts)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (id) DO NOTHING",
-    )
-    .bind(&edge.id)
-    .bind(&edge.source)
-    .bind(&edge.target)
-    .bind(&edge.relation)
-    .bind(edge.weight)
-    .bind(&edge.ts)
-    .execute(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-    Ok(())
+#[allow(dead_code)]
+pub async fn append_edge_pool(_pool: &sqlx::AnyPool, edge: &Edge) -> io::Result<()> {
+    append_edge(edge)
 }
 
-pub async fn read_edges_pool(pool: &AnyPool, limit: i64) -> io::Result<Vec<Edge>> {
-    let rows = sqlx::query("SELECT id, source, target, relation, weight, ts FROM edges LIMIT $1")
-        .bind(limit)
-        .fetch_all(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    rows.iter()
-        .map(|r| {
-            Ok(Edge {
-                id: r.try_get(0).map_err(crate::store::sqlx_err)?,
-                source: r.try_get(1).map_err(crate::store::sqlx_err)?,
-                target: r.try_get(2).map_err(crate::store::sqlx_err)?,
-                relation: r.try_get(3).map_err(crate::store::sqlx_err)?,
-                weight: r.try_get(4).map_err(crate::store::sqlx_err)?,
-                ts: r.try_get(5).map_err(crate::store::sqlx_err)?,
-            })
-        })
-        .collect()
+#[allow(dead_code)]
+pub async fn read_edges_pool(_pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec<Edge>> {
+    Ok(read_edges_limit(limit as usize))
 }
 
-pub async fn delete_edge_by_id_pool(pool: &AnyPool, edge_id: &str) -> io::Result<()> {
-    sqlx::query("DELETE FROM edges WHERE id = $1")
-        .bind(edge_id)
-        .execute(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    Ok(())
+#[allow(dead_code)]
+pub async fn delete_edge_by_id_pool(_pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<()> {
+    delete_edge_by_id(edge_id)
 }
 
-pub async fn remove_edges_for_node_pool(pool: &AnyPool, node_id: &str) -> io::Result<()> {
-    sqlx::query("DELETE FROM edges WHERE source = $1 OR target = $2")
-        .bind(node_id)
-        .bind(node_id)
-        .execute(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    Ok(())
+#[allow(dead_code)]
+pub async fn remove_edges_for_node_pool(_pool: &sqlx::AnyPool, node_id: &str) -> io::Result<()> {
+    remove_edges_for_node(node_id)
 }

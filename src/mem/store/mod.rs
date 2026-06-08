@@ -1,9 +1,10 @@
-//! store/ — Node/Edge SQLite I/O (replaces file-based store)
+//! store/ — Node/Edge SQLite I/O via llm-kernel graph
 //!
 //! Re-exports all public items from focused submodules.
 
 // ── Internal submodules ──────────────────────────────
 
+pub(crate) mod conn;
 mod decay;
 mod dedup;
 mod edge;
@@ -32,8 +33,7 @@ pub use util::{
 
 // ── Re-exports: schema ───────────────────────────────
 
-pub(crate) use schema::auto_migrate_legacy;
-pub use schema::init_schema_pool;
+pub(crate) use schema::init_schema_pool;
 
 // ── Re-exports: node ─────────────────────────────────
 
@@ -69,7 +69,7 @@ pub use recall::{smart_recall, smart_recall_pool};
 
 pub use search::{query_nodes, search_nodes, search_nodes_pool};
 
-// ── Re-exports: async pool functions ──────────────────
+// ── Re-exports: async pool functions (backward compat) ──
 
 #[allow(unused_imports)]
 pub use decay::{decay_importance_pool, tag_stale_nodes_pool};

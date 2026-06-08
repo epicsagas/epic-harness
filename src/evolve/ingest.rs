@@ -7,20 +7,33 @@ use super::analysis::build_summary;
 
 /// Query pattern types detected in the previous session (the session that the
 /// current session "follows"). Extracts non-generic tags from CSV tag strings.
-pub async fn query_prev_pattern_types_async(pool: &AnyPool, session_node_id: &str) -> Vec<String> {
-    let sql = "SELECT n.tags FROM nodes n
+pub async fn query_prev_pattern_types_async(_pool: &AnyPool, session_node_id: &str) -> Vec<String> {
+    let conn = match store::conn::memory_conn() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    let guard = match conn.lock() {
+        Ok(g) => g,
+        Err(_) => return vec![],
+    };
+    let mut stmt = match guard.prepare(
+        "SELECT n.tags FROM nodes n
          JOIN edges e ON e.source = n.id
          WHERE n.type = 'pattern'
          AND e.relation = 'detected_in'
          AND e.target IN (
             SELECT e2.source FROM edges e2
             WHERE e2.target = ? AND e2.relation = 'follows'
-         )";
-    let tags_rows: Vec<String> = sqlx::query_scalar::<_, String>(sql)
-        .bind(session_node_id)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+         )",
+    ) {
+        Ok(s) => s,
+        Err(_) => return vec![],
+    };
+    let tags_rows: Vec<String> =
+        match stmt.query_map((session_node_id,), |row| row.get::<_, String>(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        };
 
     let mut results = Vec::new();
     for tags_str in tags_rows {
@@ -35,18 +48,25 @@ pub async fn query_prev_pattern_types_async(pool: &AnyPool, session_node_id: &st
 }
 
 /// Find or create a project hub node. Returns the hub node's ID.
-pub async fn ensure_project_hub_async(pool: &AnyPool, slug: &str) -> std::io::Result<String> {
+pub async fn ensure_project_hub_async(_pool: &AnyPool, slug: &str) -> std::io::Result<String> {
     let title = format!("project: {}", slug);
-    let existing: Option<String> = sqlx::query_scalar::<_, String>(
-        "SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1",
-    )
-    .bind(&title)
-    .fetch_optional(pool)
-    .await
-    .unwrap_or(None);
 
-    if let Some(id) = existing {
-        return Ok(id);
+    // Check if project hub already exists (via rusqlite)
+    {
+        let conn = store::conn::memory_conn()?;
+        let guard = conn
+            .lock()
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
+        let existing: Option<String> = guard
+            .query_row(
+                "SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1",
+                (&title,),
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(id) = existing {
+            return Ok(id);
+        }
     }
 
     // Create new project hub
@@ -68,8 +88,23 @@ pub async fn ensure_project_hub_async(pool: &AnyPool, slug: &str) -> std::io::Re
         },
         body: format!("Project hub node for {}", slug),
     };
-    store::write_node_pool(pool, &node).await?;
+    store::write_node(&node)?;
     Ok(id)
+}
+
+/// Find the most recent previous session node for a project slug.
+fn find_prev_session(session_node_id: &str, slug: &str) -> Option<String> {
+    let conn = store::conn::memory_conn().ok()?;
+    let guard = conn.lock().ok()?;
+    guard
+        .query_row(
+            "SELECT id FROM nodes WHERE type = 'session' AND id != ?
+             AND (',' || projects || ',' LIKE '%,' || ? || ',%')
+             ORDER BY updated DESC LIMIT 1",
+            (session_node_id, slug),
+            |row| row.get(0),
+        )
+        .ok()
 }
 
 /// Ingest session analysis results into the knowledge graph.
@@ -412,16 +447,7 @@ async fn ingest_to_memory_async(
 
     // 8g. Session chain: link to previous session in same project
     if !session_node_id.is_empty() {
-        let prev_session: Option<String> = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM nodes WHERE type = 'session' AND id != ?
-             AND (',' || projects || ',' LIKE '%,' || ? || ',%')
-             ORDER BY updated DESC LIMIT 1",
-        )
-        .bind(&session_node_id)
-        .bind(&slug)
-        .fetch_optional(pool)
-        .await
-        .unwrap_or(None);
+        let prev_session = find_prev_session(&session_node_id, &slug);
 
         if let Some(prev_id) = prev_session {
             let _ = store::append_edge_pool(
@@ -489,9 +515,9 @@ mod tests {
     use crate::mem::store;
 
     async fn open_test_mem_pool() -> AnyPool {
-        let pool = crate::store::pool::test_memory_pool().await;
-        store::init_schema_pool(&pool).await.expect("schema");
-        pool
+        // Use an isolated in-memory rusqlite connection for each test
+        crate::mem::store::conn::set_test_conn(crate::mem::store::conn::test_conn());
+        crate::store::pool::test_memory_pool().await
     }
 
     #[tokio::test]
@@ -609,16 +635,7 @@ mod tests {
         };
         store::write_node_pool(&pool, &curr_node).await.unwrap();
 
-        let prev_session: Option<String> = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM nodes WHERE type = 'session' AND id != ?
-             AND (',' || projects || ',' LIKE '%,' || ? || ',%')
-             ORDER BY updated DESC LIMIT 1",
-        )
-        .bind(&curr_id)
-        .bind("chain-proj")
-        .fetch_optional(&pool)
-        .await
-        .unwrap();
+        let prev_session = find_prev_session(&curr_id, "chain-proj");
 
         assert!(prev_session.is_some(), "should find a previous session");
         assert_eq!(prev_session.unwrap(), prev_id);

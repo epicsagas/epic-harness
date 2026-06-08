@@ -37,6 +37,8 @@ toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
 sqlx = { version = "0.8.1", features = ["runtime-tokio", "sqlite", "migrate", "any"] }
+llm-kernel = { version = "0.3.1", features = ["graph"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 url = "2"
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
@@ -58,8 +60,8 @@ default = ["sqlite"]
 # via the base dependency. The flag exists for symmetry with `postgres`/`mysql`
 # and for use in `cfg!(feature = "sqlite")` guards.
 sqlite = []
-postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki"]
-mysql = ["sqlx/mysql", "sqlx/tls-rustls-ring-webpki"]
+postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring"]
+mysql = ["sqlx/mysql", "sqlx/tls-rustls-ring"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.xz"
