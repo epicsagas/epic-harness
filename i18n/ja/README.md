@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">すべてのセッションから学習するマルチツールAIエージェントハーネス — 22のスキル、自律パイプライン、自己進化エンジン。</p></blockquote>
+<blockquote><p align="center">すべてのセッションから学習するマルチツールAIエージェントハーネス — 23のスキル、自律パイプライン、自己進化エンジン。</p></blockquote>
 
 <p align="center"><b>1つのハーネス、6つのAIツール。スペックからPRまで自律実行。セッションを重ねるほどスマートに。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**22のスキル（8パイプライン + 14品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
+**23のスキル（9パイプライン + 14品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "ログインAPIにJWT認証を追加"
-→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → eval → ship (PR + CI) → evolve
 ```
 
 パイプラインスキルを直接呼び出すこともできます:
@@ -90,7 +90,7 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 codex plugin marketplace add epicsagas/plugins
 ```
 
-22のスキルをすべて自動インストールし、フックを登録します。追加の手順なしですぐに利用可能です。`codex plugin update epic@epicsagas` で更新できます。
+23のスキルをすべて自動インストールし、フックを登録します。追加の手順なしですぐに利用可能です。`codex plugin update epic@epicsagas` で更新できます。
 
 ### macOS / Linux
 
@@ -166,16 +166,17 @@ Claude Codeセッション内: `/evolve status`
 
 | スキル | 機能 |
 |-------|------|
-| **/orbit** | **完全自律パイプライン**: discover → spec → go → audit → ship → evolve を一括実行 |
+| **/orbit** | **完全自律パイプライン**: discover → spec → go → audit → eval → ship → evolve を一括実行 |
 | **discover** | 曖昧なリクエストを明確化 — 5 Whys、JTBD、ソクラテス対話 |
 | **spec** | 要件を番号付きR + ACドキュメントに変換 |
 | **go** | 自動計画 → TDDサブエージェント → 並列実行 → AC検証 |
 | **audit** | 並列コードレビュー + セキュリティ監査 + テスト |
+| **eval** | 評価フェーズ — 4次元品質・リグレッションチェック (正確性、パフォーマンス、品質、リグレッション) |
 | **ship** | 分離テスト → チェックレポート付きPR → CI監視 + 自動修正 |
 | **evolve** | 手動進化トリガー — セッション分析、ダッシュボード表示、スキル有効性確認、ロールバック |
 | **team** | orgのライブラリを閲覧、既存チームを雇用、または新規設計（3–6エージェント、`.claude/agents/` に同期） |
 
-`discover` → `spec` → `go` → `audit` → `ship` → `evolve` は `/orbit` でラップされます。`team` と `evolve` は手動呼び出しです。
+`discover` → `spec` → `go` → `audit` → `eval` → `ship` → `evolve` は `/orbit` でラップされます。`team` と `evolve` は手動呼び出しです。
 
 ---
 
@@ -194,7 +195,10 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|"PASS / WARN"| EVAL{"eval.yaml"}
+    EVAL -->|"yes"| EVAL_RUN["Eval\n4-dimension quality check"]:::auto
+    EVAL_RUN -->|"PASS"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    EVAL -->|"no"| SHIP["Ship\nisolated test → PR → CI"]:::auto
     AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
@@ -409,8 +413,8 @@ epic team delete backend --global      # orgストアから永久に削除
 
 | ツール | Ring 0 フック | スキル | エージェント |
 |------|-------------|--------|----------|
-| **Claude Code** | ✓ フル | ✓ 22スキル | Live |
-| **Codex CLI** | ✓ フル¹ | ✓ 22 | — |
+| **Claude Code** | ✓ フル | ✓ 23スキル | Live |
+| **Codex CLI** | ✓ フル¹ | ✓ 23 | — |
 | **Cursor** | ✓ フル³ | ✓ ルール経由 | Live |
 | **OpenCode** | ✓ 部分⁴ | — | — |
 | **Cline** | ✓ フル⁵ | — | — |
@@ -429,11 +433,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (8)"]
+    subgraph R1["Ring 1 — Pipeline Skills (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1(discover) --> c2(spec) --> c3(go) --> c4(audit) --> c5(ship) --> c6(evolve)
+            c1(discover) --> c2(spec) --> c3(go) --> c4(audit) --> c4b(eval) --> c5(ship) --> c6(evolve)
         end
         c7("/team")
         c8("/evolve (manual)")

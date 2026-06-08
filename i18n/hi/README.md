@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">हर सेशन से सीखने वाला मल्टी-टूल AI एजेंट हार्नेस — 22 स्किल्स, स्वायत्त पाइपलाइन, और स्व-विकास इंजन।</p></blockquote>
+<blockquote><p align="center">हर सेशन से सीखने वाला मल्टी-टूल AI एजेंट हार्नेस — 23 स्किल्स, स्वायत्त पाइपलाइन, और स्व-विकास इंजन।</p></blockquote>
 
 <p align="center"><b>एक हार्नेस, छह AI टूल। स्पेक से PR तक स्वायत्त। हर सेशन के साथ और स्मार्ट।</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **22 स्किल्स (8 पाइपलाइन + 14 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
+एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **23 स्किल्स (9 पाइपलाइन + 14 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "लॉगिन API में JWT auth जोड़ो"
-→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → eval → ship (PR + CI) → evolve
 ```
 
 या पाइपलाइन स्किल्स को सीधे इनवोक करें:
@@ -90,7 +90,7 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 codex plugin marketplace add epicsagas/plugins
 ```
 
-सभी 22 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
+सभी 23 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
 
 ### macOS / Linux
 
@@ -171,6 +171,7 @@ Claude Code सेशन के अंदर: `/evolve status`
 | `/spec` | आवश्यकताओं को परिभाषित करता है — क्रमांकित R + AC दस्तावेज़ |
 | `/go` | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन |
 | `/audit` | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट |
+| /eval | मूल्यांकन चरण — 4-आयामी गुणवत्ता और प्रतिगमन जाँच (शुद्धता, प्रदर्शन, गुणवत्ता, प्रतिगमन) |
 | `/ship` | शिपिंग चरण — आइसोलेटेड टेस्ट → PR → CI मॉनिटरिंग + ऑटो-फिक्स |
 | `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर — सेशन विश्लेषण, डैशबोर्ड देखें, स्किल प्रभावशीलता निरीक्षण, rollback |
 | `/team` | ऑर्ग लाइब्रेरी ब्राउज़ करें, मौजूदा टीमों को हायर करें, या नई डिज़ाइन करें (3–6 एजेंट, `.claude/agents/` में सिंक) |
@@ -192,7 +193,9 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|"PASS / WARN"| EVAL{"Eval\nquality gates?"}:::auto
+    EVAL -->|"PASS"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    EVAL -->|"FAIL"| GO
     AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
@@ -413,8 +416,8 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 
 | टूल | Ring 0 Hooks | स्किल्स | एजेंट |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 22 स्किल्स | Live |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 22 | — |
+| **Claude Code** | ✓ पूर्ण | ✓ 23 स्किल्स | Live |
+| **Codex CLI** | ✓ पूर्ण¹ | ✓ 23 | — |
 | **Cursor** | ✓ पूर्ण³ | ✓ rules के माध्यम से | Live |
 | **OpenCode** | ✓ आंशिक⁴ | — | — |
 | **Cline** | ✓ पूर्ण⁵ | — | — |
@@ -433,11 +436,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (8)"]
+    subgraph R1["Ring 1 — Pipeline Skills (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

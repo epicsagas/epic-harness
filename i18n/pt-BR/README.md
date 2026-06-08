@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Um harness de agente IA multi-ferramenta que aprende com cada sessão — 22 skills, pipelines autônomos e motor autoevolutivo.</p></blockquote>
+<blockquote><p align="center">Um harness de agente IA multi-ferramenta que aprende com cada sessão — 23 skills, pipelines autônomos e motor autoevolutivo.</p></blockquote>
 
 <p align="center"><b>Um harness, cinco ferramentas IA. Autônomo do spec ao PR. Mais inteligente a cada sessão.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Um harness de agente IA multi-ferramenta com **22 skills (8 pipeline + 14 quality gates)**, um **motor autoevolutivo**, **memória unificada** e uma **pipeline autônoma de comando único** (`/orbit`). Funciona com Claude Code, Codex, Cursor, OpenCode e Cline — todos compartilhando o mesmo diretório `~/.harness/`. Após cada sessão, o loop de evolução analisa falhas, gera skills direcionados e os carrega na próxima sessão.
+Um harness de agente IA multi-ferramenta com **23 skills (9 pipeline + 14 quality gates)**, um **motor autoevolutivo**, **memória unificada** e uma **pipeline autônoma de comando único** (`/orbit`). Funciona com Claude Code, Codex, Cursor, OpenCode e Cline — todos compartilhando o mesmo diretório `~/.harness/`. Após cada sessão, o loop de evolução analisa falhas, gera skills direcionados e os carrega na próxima sessão.
 
 <p align="center">
   <img src="../../assets/features.png" alt="funcionalidades do epic harness" width="100%" />
@@ -46,7 +46,7 @@ Um comando entrega uma funcionalidade de ponta a ponta. As habilidades são ativ
 
 ```bash
 $ /orbit "Adicionar autenticação JWT à API de login"
-→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → eval → ship (PR + CI) → evolve
 ```
 
 Ou invoque as skills do pipeline diretamente:
@@ -90,7 +90,7 @@ Instala automaticamente o binário e registra todos os hooks em uma única etapa
 codex plugin marketplace add epicsagas/plugins
 ```
 
-Instala automaticamente todas as 22 habilidades e registra os hooks. Disponível imediatamente — sem etapas adicionais. Atualiza com `codex plugin update epic@epicsagas`.
+Instala automaticamente todas as 23 habilidades e registra os hooks. Disponível imediatamente — sem etapas adicionais. Atualiza com `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -164,7 +164,7 @@ Dentro de uma sessão do Claude Code: `/evolve status`
 
 ## Pipeline Skills (Ring 1)
 
-8 skills que formam o pipeline autônomo e ferramentas de gerenciamento:
+9 skills que formam o pipeline autônomo e ferramentas de gerenciamento:
 
 | Habilidade | O que faz |
 |------------|-----------|
@@ -172,6 +172,7 @@ Dentro de uma sessão do Claude Code: `/evolve status`
 | **spec** | Define requisitos — converte em documento R + AC numerado |
 | **go** | Fase de build — planejamento automático → sub-agentes TDD → execução paralela → verificação AC |
 | **audit** | Fase de revisão — revisão de código paralela + auditoria de segurança + testes com extras por escopo |
+| /eval | Fase de avaliação — verificação de qualidade e regressão em 4 dimensões (correção, desempenho, qualidade, regressão) |
 | **ship** | Fase de entrega — teste isolado → PR com relatório completo → monitoramento CI + auto-fix |
 | **evolve** | Análise de evolução — analise sessões, visualize o painel, inspecione a efetividade das habilidades, rollback |
 | **/orbit** | **Pipeline autônomo completo**: discover → spec → go → audit → ship → evolve em uma única execução |
@@ -196,7 +197,9 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|"PASS / WARN"| EVAL{"Eval\nquality gates?"}:::auto
+    EVAL -->|"PASS"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    EVAL -->|"FAIL"| GO
     AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
@@ -417,8 +420,8 @@ Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projec
 
 | Ferramenta | Ring 0 Hooks | Habilidades | Agentes |
 |------------|-------------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 22 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 22 | — |
+| **Claude Code** | ✓ Completo | ✓ 23 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 23 | — |
 | **Cursor** | ✓ Completo² | ✓ via rules | Live |
 | **OpenCode** | ✓ Parcial³ | — | — |
 | **Cline** | ✓ Completo⁴ | — | — |
@@ -437,11 +440,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (8)"]
+    subgraph R1["Ring 1 — Pipeline Skills (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

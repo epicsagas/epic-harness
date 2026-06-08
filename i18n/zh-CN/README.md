@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 22 个技能、自主流水线、自我进化引擎。</p></blockquote>
+<blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 23 个技能、自主流水线、自我进化引擎。</p></blockquote>
 
 <p align="center"><b>一个框架，五个 AI 工具。从规格到 PR 自主执行。每次会话都更智能。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个多工具 AI 智能体框架，拥有 **22 个技能（8 流水线 + 14 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
+一个多工具 AI 智能体框架，拥有 **23 个技能（9 流水线 + 14 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
@@ -90,7 +90,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 codex plugin marketplace add epicsagas/plugins
 ```
 
-自动安装全部 22 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
+自动安装全部 23 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
 
 ### macOS / Linux
 
@@ -170,12 +170,13 @@ ls ~/.harness/              # 数据目录存在
 | **spec** | 需求定义 — 转换为编号的 R + AC 文档 |
 | **go** | 构建阶段 — 自动规划 → TDD 子智能体 → 并行执行 → AC 验证 |
 | **audit** | 审查阶段 — 并行代码审查 + 安全审计 + 测试 |
+| **eval** | 评估阶段 — 4维质量与回归检查（正确性、性能、质量、回归） |
 | **ship** | 发布阶段 — 隔离测试 → PR → CI 监控 + 自动修复 |
 | **evolve** | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
 | **team** | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
 | **orchestrate** | 多智能体编排状态和实时智能体控制 |
 
-`/orbit` 将 `discover → spec → go → audit → ship → evolve` 封装为一次自主执行。`/team` 和 `/evolve` 可单独调用。所有技能根据上下文自动触发，也可以按名称直接调用。
+`/orbit` 将 `discover → spec → go → audit → eval → ship → evolve` 封装为一次自主执行。`/team` 和 `/evolve` 可单独调用。所有技能根据上下文自动触发，也可以按名称直接调用。
 
 ---
 
@@ -194,7 +195,8 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|"PASS / WARN"| EVAL{"Eval\n4-dim quality check"}:::auto
+    EVAL -->|PASS| SHIP["Ship\nisolated test → PR → CI"]:::auto
     AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
@@ -414,7 +416,7 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 | 工具 | Ring 0 Hooks | 技能 | 智能体 |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 22 个技能（含 /orbit） | Live |
+| **Claude Code** | ✓ 完整 | ✓ 23 个技能（含 /orbit） | Live |
 | **Codex CLI** | ✓ 完整¹ | ✓ 7 | — |
 | **Cursor** | ✓ 完整² | ✓ 通过 rules | Live |
 | **OpenCode** | ✓ 部分³ | — | — |
@@ -434,11 +436,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (8)"]
+    subgraph R1["Ring 1 — Pipeline Skills (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
         end
         c7("/team (manual)")
         c8("/evolve (manual)")

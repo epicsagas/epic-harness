@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">모든 세션에서 학습하는 멀티툴 AI 에이전트 하네스 — 22개 스킬, 자율 파이프라인, 자기 진화 엔진.</p></blockquote>
+<blockquote><p align="center">모든 세션에서 학습하는 멀티툴 AI 에이전트 하네스 — 23개 스킬, 자율 파이프라인, 자기 진화 엔진.</p></blockquote>
 
 <p align="center"><b>하나의 하네스, 6개 AI 툴. 스펙에서 PR까지 자율 실행. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**22개 스킬(8 파이프라인 + 14 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
+**23개 스킬(9 파이프라인 + 14 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "로그인 API에 JWT 인증 추가"
-→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → audit (PASS) → eval → ship (PR + CI) → evolve
 ```
 
 원하면 파이프라인 스킬을 직접 호출할 수도 있습니다:
@@ -90,7 +90,7 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 codex plugin marketplace add epicsagas/plugins
 ```
 
-22개 스킬 전체를 자동 설치하고 훅을 등록합니다. 추가 설정 없이 바로 사용할 수 있습니다.
+23개 스킬 전체를 자동 설치하고 훅을 등록합니다. 추가 설정 없이 바로 사용할 수 있습니다.
 
 `codex plugin update epic@epicsagas`로 업데이트합니다.
 
@@ -172,6 +172,7 @@ Claude Code 세션 안에서: `/evolve status`
 | **spec** | 요구사항 정의 — 번호가 매겨진 R + AC 문서로 변환 |
 | **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
 | **audit** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
+| **eval** | 평가 단계 — 4차원 품질/회귀 검사 (정확성, 성능, 품질, 회귀) |
 | **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
 | **evolve** | 진화 — 자동 세션 분석, 패턴 감지, 스킬 시딩, 메트릭 업데이트 |
 | **/team** | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
@@ -196,7 +197,10 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|"PASS / WARN"| EVAL{"eval.yaml"}
+    EVAL -->|"yes"| EVAL_RUN["Eval\n4-dimension quality check"]:::auto
+    EVAL_RUN -->|"PASS"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    EVAL -->|"no"| SHIP["Ship\nisolated test → PR → CI"]:::auto
     AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
@@ -417,8 +421,8 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 | 도구 | Ring 0 훅 | 스킬 | 에이전트 |
 |------|-----------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 22개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 22개 | — |
+| **Claude Code** | ✓ 전체 | ✓ 23개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 23개 | — |
 | **Cursor** | ✓ 전체³ | ✓ 규칙 경유 | Live |
 | **OpenCode** | ✓ 부분⁴ | — | — |
 | **Cline** | ✓ 전체⁵ | — | — |
@@ -437,11 +441,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — 파이프라인 스킬 (8)"]
+    subgraph R1["Ring 1 — 파이프라인 스킬 (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A multi-tool AI agent harness with **22 skills (8 pipeline + 14 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
+A multi-tool AI agent harness with **23 skills (9 pipeline + 14 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -179,7 +179,7 @@ Inside a Claude Code session: `/evolve status`
 
 ## Pipeline Skills (Ring 1)
 
-8 skills that orchestrate multi-step workflows. Invoke with `/skill-name` or let `/orbit` chain them.
+9 skills that orchestrate multi-step workflows. Invoke with `/skill-name` or let `/orbit` chain them.
 
 | Skill | What it does |
 |-------|-------------|
@@ -188,6 +188,7 @@ Inside a Claude Code session: `/evolve status`
 | `/spec` | Define requirements — converts to numbered R + AC document |
 | `/go` | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
 | `/audit` | Audit phase — parallel code review + security audit + tests |
+| `/eval` | Eval phase — 4-dimension quality & regression check (correctness, performance, quality, regression) |
 | `/ship` | Shipping phase — isolated test → PR with full audit report → CI watch |
 | `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, rollback |
 | `/team` | Browse org libraries, hire existing teams, or design new ones |
@@ -209,8 +210,12 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    AUDIT -->|FAIL| RETRY{"retry < 3?"}
+    AUDIT -->|"PASS / WARN"| EVAL{"eval.yaml\nexists?"}:::auto
+    EVAL -->|"yes"| EVAL_RUN["Eval\n4-dim quality check"]:::auto
+    EVAL -->|"no"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    EVAL_RUN -->|"PASS"| SHIP
+    EVAL_RUN -->|"FAIL"| RETRY{"retry < 3?"}
+    AUDIT -->|FAIL| RETRY
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -251,7 +256,7 @@ State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives c
 | **reflect** | On-demand `/reflect`: evidence-based human self-assessment — "Am I using AI as a thought amplifier?" Scores 5 dimensions from hook-collected data |
 | **commit** | Conventional Commits generation — auto-generates from git diff |
 
-> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 22 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 23 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -458,11 +463,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (8)"]
+    subgraph R1["Ring 1 — Pipeline Skills (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")

@@ -1,11 +1,11 @@
 # epic-harness
 
-22 skills (8 pipeline + 14 quality) + self-evolving agent harness.
+23 skills (9 pipeline + 14 quality) + self-evolving agent harness.
 
 ## Structure
 
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
-  - `skills/` — 22 skills + _dispatch engine
+  - `skills/` — 23 skills + _dispatch engine
   - `presets/` — Cold-start skill templates
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
@@ -23,7 +23,7 @@
 ## Architecture: 4-Ring Model
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
-- **Ring 1 (Pipeline)**: 8 skills that orchestrate multi-step workflows (discover → spec → go → audit → ship, orbit, evolve, team)
+- **Ring 1 (Pipeline)**: 9 skills that orchestrate multi-step workflows (discover → spec → go → audit → eval → ship, orbit, evolve, team)
 - **Ring 2 (Quality Gates)**: 14 skills that auto-trigger on context signals (tdd, debug, secure, verify, etc.)
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
 
@@ -230,6 +230,7 @@ _dispatch skill runs `epic mem recall` with current task context before invoking
 - `orchestrator/` — Multi-agent orchestration state (run.json, control.json, agents/{id}/)
 - `dispatch/` — Skill dispatch logs (JSONL)
 - `orbit/` — /orbit pipeline state files (PIPELINE-*.json)
+- `eval/` — Eval config, baselines, and results (eval.yaml, baselines/*.json, results/*.json)
 - `metrics.json` — Aggregate stats (score_history, trend, stagnation_count, skill_attribution)
 - `evolution.jsonl` — Evolution history (SessionAnalysis + patterns)
 - `.cross-project-enabled` — Cross-project learning opt-in marker (optional)

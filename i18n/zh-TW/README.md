@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">從每次工作階段中學習的多工具 AI 智慧型代理框架 — 22 個技能、自主流水線、自我進化引擎。</p></blockquote>
+<blockquote><p align="center">從每次工作階段中學習的多工具 AI 智慧型代理框架 — 23 個技能、自主流水線、自我進化引擎。</p></blockquote>
 
 <p align="center"><b>一個框架，六個 AI 工具。從規格到 PR 自主執行。每次工作階段都更智慧。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一個多工具 AI 智慧型代理框架，擁有 **22 個技能（8 流水線 + 14 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
+一個多工具 AI 智慧型代理框架，擁有 **23 個技能（9 流水線 + 14 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 功能" width="100%" />
@@ -90,7 +90,7 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 codex plugin marketplace add epicsagas/plugins
 ```
 
-自動安裝全部 22 個技能並註冊掛鉤。安裝後立即可用，無需額外步驟。
+自動安裝全部 23 個技能並註冊掛鉤。安裝後立即可用，無需額外步驟。
 使用 `codex plugin update epic@epicsagas` 進行更新。
 
 ### macOS / Linux
@@ -165,7 +165,7 @@ ls ~/.harness/              # 資料目錄存在
 
 ## 管道技能（Ring 1）
 
-8 個管道技能。6 個由 `/orbit` 包裝為自主流水線，2 個手動呼叫。
+9 個管道技能。7 個由 `/orbit` 包裝為自主流水線，2 個手動呼叫。
 
 | 技能 | 呼叫方式 | 功能 |
 |-------|----------|------|
@@ -173,10 +173,11 @@ ls ~/.harness/              # 資料目錄存在
 | **spec** | 自動或 `/spec` | 將需求轉換為編號的 R + AC 文件 |
 | **go** | 自動或 `/go` | 建構階段 — 自動規劃 → TDD 子代理 → 平行執行 → AC 驗證 |
 | **audit** | 自動或 `/audit` | 審查階段 — 平行程式碼審查 + 安全稽核 + 測試 |
+| **eval** | 自動或 `/eval` | 評估階段 — 4維品質與回歸檢查（正確性、效能、品質、回歸） |
 | **ship** | 自動或 `/ship` | 發佈階段 — 隔離測試 → PR → CI 監控 + 自動修復 |
 | **evolve** | 自動或 `/evolve` | 工作階段分析、儀表板、技能效果檢查、回滾 |
 | **team** | `/team` | 瀏覽組織庫、聘請現有團隊，或設計新團隊（3-6 個智能體） |
-| **orbit** | `/orbit` | **完整自主流水線**：discover → spec → go → audit → ship → evolve 一次執行 |
+| **orbit** | `/orbit` | **完整自主流水線**：discover → spec → go → audit → eval → ship → evolve 一次執行 |
 
 所有管道技能均可按名稱直接呼叫，也會根據上下文自動觸發。
 
@@ -197,7 +198,8 @@ flowchart TD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
     GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    AUDIT -->|"PASS / WARN"| EVAL{"Eval\n4-dim quality check"}:::auto
+    EVAL -->|PASS| SHIP["Ship\nisolated test → PR → CI"]:::auto
     AUDIT -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
@@ -418,9 +420,9 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 
 | 工具 | Ring 0 掛鉤 | 技能 | 智能體 |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 22 個技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 22 | — |
-| **Cursor** | ✓ 完整³ | ✓ 22 | Live |
+| **Claude Code** | ✓ 完整 | ✓ 23 個技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 23 | — |
+| **Cursor** | ✓ 完整³ | ✓ 23 | Live |
 | **OpenCode** | ✓ 部分⁴ | — | — |
 | **Cline** | ✓ 完整⁵ | — | — |
 | **Aider** | —⁶ | — | — |
@@ -438,11 +440,11 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (8)"]
+    subgraph R1["Ring 1 — Pipeline Skills (9)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c5("ship") --> c6("evolve")
+            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
         end
         c7("/team")
         c8("/evolve (manual)")
