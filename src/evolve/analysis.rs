@@ -188,7 +188,10 @@ pub fn analyze_minibatches(scored: &[&ObsRecord]) -> Vec<MinibatchInsight> {
         } else if success_rate >= 0.5 {
             "mixed".into()
         } else {
-            format!("struggle:{}", dominant_error_category.as_deref().unwrap_or("unknown"))
+            format!(
+                "struggle:{}",
+                dominant_error_category.as_deref().unwrap_or("unknown")
+            )
         };
 
         // Reusable: dominant error category covers ≥60% of batch errors AND ≥2 distinct files
@@ -198,7 +201,9 @@ pub fn analyze_minibatches(scored: &[&ObsRecord]) -> Vec<MinibatchInsight> {
             0.0
         };
         let reusable = dominant_error_ratio >= 0.6
-            && dominant_error_category.as_ref().is_some_and(|c| c != "other")
+            && dominant_error_category
+                .as_ref()
+                .is_some_and(|c| c != "other")
             && file_cluster.len() >= 2;
 
         insights.push(MinibatchInsight {
@@ -732,7 +737,15 @@ mod tests {
     fn minibatch_decomposition_splits_correctly() {
         // 20 observations, batch_size=8 → 3 batches (8+8+4)
         let obs: Vec<ObsRecord> = (0..20)
-            .map(|i| make_obs("Bash", "bash", if i % 3 == 0 { "error" } else { "success" }, if i % 3 == 0 { 0.0 } else { 0.9 }, Some(&format!("/src/file{}.ts", i % 4))))
+            .map(|i| {
+                make_obs(
+                    "Bash",
+                    "bash",
+                    if i % 3 == 0 { "error" } else { "success" },
+                    if i % 3 == 0 { 0.0 } else { 0.9 },
+                    Some(&format!("/src/file{}.ts", i % 4)),
+                )
+            })
             .collect();
         let scored: Vec<&ObsRecord> = obs.iter().collect();
         let insights = analyze_minibatches(&scored);
@@ -747,7 +760,13 @@ mod tests {
         // All errors of same category on 2+ files → should be reusable
         let obs: Vec<ObsRecord> = (0..8)
             .map(|i| {
-                let mut o = make_obs("Bash", "bash", "error", 0.0, Some(&format!("/src/a{}.ts", i % 3)));
+                let mut o = make_obs(
+                    "Bash",
+                    "bash",
+                    "error",
+                    0.0,
+                    Some(&format!("/src/a{}.ts", i % 3)),
+                );
                 o.failure_category = Some("type_error".into());
                 o.error_snippet = Some("TypeError".into());
                 o
@@ -756,8 +775,14 @@ mod tests {
         let scored: Vec<&ObsRecord> = obs.iter().collect();
         let insights = analyze_minibatches(&scored);
         assert!(!insights.is_empty());
-        assert!(insights[0].reusable, "all same error + 3 files should be reusable");
-        assert_eq!(insights[0].dominant_error_category.as_deref(), Some("type_error"));
+        assert!(
+            insights[0].reusable,
+            "all same error + 3 files should be reusable"
+        );
+        assert_eq!(
+            insights[0].dominant_error_category.as_deref(),
+            Some("type_error")
+        );
     }
 
     #[test]
@@ -781,7 +806,13 @@ mod tests {
         // "other" error category → not reusable
         let obs: Vec<ObsRecord> = (0..8)
             .map(|i| {
-                let mut o = make_obs("Bash", "bash", "error", 0.0, Some(&format!("/src/f{}.ts", i % 2)));
+                let mut o = make_obs(
+                    "Bash",
+                    "bash",
+                    "error",
+                    0.0,
+                    Some(&format!("/src/f{}.ts", i % 2)),
+                );
                 o.failure_category = Some("other".into());
                 o
             })
@@ -789,7 +820,10 @@ mod tests {
         let scored: Vec<&ObsRecord> = obs.iter().collect();
         let insights = analyze_minibatches(&scored);
         assert!(!insights.is_empty());
-        assert!(!insights[0].reusable, "other category should not be reusable");
+        assert!(
+            !insights[0].reusable,
+            "other category should not be reusable"
+        );
     }
 
     #[test]

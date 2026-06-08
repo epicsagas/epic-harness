@@ -170,8 +170,11 @@ pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
 
     // Stable success: high average with low variance
     if avg > 0.8 {
-        let variance: f64 =
-            recent.iter().map(|e| (e.avg_score - avg).powi(2)).sum::<f64>() / recent.len() as f64;
+        let variance: f64 = recent
+            .iter()
+            .map(|e| (e.avg_score - avg).powi(2))
+            .sum::<f64>()
+            / recent.len() as f64;
         if variance < 0.01 {
             return EpochClass::StableSuccess;
         }
@@ -231,9 +234,7 @@ pub fn update_skill_attribution(
     // (sessions_active >= 3 AND avg_score_with < avg_score_without by > 0.02)
     let mut evicted: Vec<String> = Vec::new();
     for (name, attr) in &metrics.skill_attribution {
-        if attr.sessions_active >= 3
-            && attr.avg_score_with < attr.avg_score_without - 0.02
-        {
+        if attr.sessions_active >= 3 && attr.avg_score_with < attr.avg_score_without - 0.02 {
             evicted.push(name.clone());
         }
     }

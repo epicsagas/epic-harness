@@ -88,8 +88,15 @@ fn days_since(iso: &str) -> f64 {
     let ordinal = date_to_ordinal(y, m, d);
     // "Now" from the helper's perspective — use UTC date
     let now_iso = now_iso();
-    let now_parts: Vec<&str> = now_iso.get(..10).unwrap_or("2026-01-01").split('-').collect();
-    let ny: i32 = now_parts.first().and_then(|s| s.parse().ok()).unwrap_or(2026);
+    let now_parts: Vec<&str> = now_iso
+        .get(..10)
+        .unwrap_or("2026-01-01")
+        .split('-')
+        .collect();
+    let ny: i32 = now_parts
+        .first()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2026);
     let nm: u32 = now_parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
     let nd: u32 = now_parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(1);
     let now_ordinal = date_to_ordinal(ny, nm, nd);
