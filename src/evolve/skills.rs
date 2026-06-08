@@ -143,6 +143,7 @@ pub fn update_meta_field(skills: &[String], epoch: &EpochClass, score: f64) {
         EpochClass::Regressing => "regressing",
         EpochClass::PersistentFailure => "persistent_failure",
         EpochClass::StableSuccess => "stable_success",
+        EpochClass::InsufficientData => return, // skip meta update when data is insufficient
     };
     let entry = SlowUpdateEntry {
         epoch_class: epoch_str.into(),
