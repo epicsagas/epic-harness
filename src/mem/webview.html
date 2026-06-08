@@ -193,6 +193,8 @@ html, body { height: 100%; overflow: hidden; font-family: var(--font); backgroun
 #graph-wrap { position: relative; overflow: hidden; background: var(--bg); touch-action: none; }
 #graph-svg { width: 100%; height: 100%; display: block; }
 .graph-link { stroke-opacity: 0.4; fill: none; }
+.graph-link.virtual { stroke-dasharray: 4 3; stroke-opacity: 0.25; }
+.graph-link.virtual.highlighted { stroke-opacity: 0.7; }
 .graph-link-label { font-size: 9px; fill: var(--text-muted); pointer-events: none; }
 .graph-link.highlighted { stroke-opacity: 0.9; }
 .graph-node circle { cursor: pointer; stroke-width: 1.5px; transition: stroke-width 0.1s; }
@@ -765,6 +767,7 @@ const REL_HEX = {
   references:     '#94a3b8',
   relates_to:     '#64748b',
   detected_in:    '#475569',
+  shared_tag:     '#38bdf8',
 };
 
 // Cluster center positions for type grouping
@@ -1199,9 +1202,9 @@ function renderGraph() {
     .selectAll('line.graph-link')
     .data(simEdges, d => (d.id || `${d.source.id}::${d.target.id}`))
     .join('line')
-    .attr('class', 'graph-link')
+    .attr('class', d => 'graph-link' + (d.virtual ? ' virtual' : ''))
     .attr('stroke', d => relHex(d.relation))
-    .attr('stroke-width', d => Math.max(1.2, (d.weight||1)*2.5));
+    .attr('stroke-width', d => Math.max(1.0, (d.weight||1)*(d.virtual ? 1.8 : 2.5)));
 
   /* -- Link labels (skip when large) -- */
   if (!isLarge) {
@@ -1508,11 +1511,12 @@ function renderDetail(node) {
       const othId = out ? edge.target : edge.source;
       const oth = S.nodeMap[othId] || { id: othId, title: othId, type: 'unknown' };
       const item = document.createElement('div');
-      item.className = 'edge-item';
+      item.className = 'edge-item' + (edge.virtual ? ' virtual' : '');
       const rc = relHex(edge.relation);
+      const virtualBadge = edge.virtual ? ' <span style="font-size:9px;color:var(--text-muted)">(auto)</span>' : '';
       item.innerHTML = `
         <span class="edge-dir">${out ? '→' : '←'}</span>
-        <span class="edge-rel" style="background:${rc}22;border:1px solid ${rc}55;color:${rc}">${esc(edge.relation||'?')}</span>
+        <span class="edge-rel" style="background:${rc}22;border:1px solid ${rc}55;color:${rc}">${esc(edge.relation||'?')}</span>${virtualBadge}
         <span class="type-dot" style="background:${typeHex(oth.type)}"></span>
         <span class="edge-target">${esc(oth.title||oth.id)}</span>
       `;
