@@ -1,6 +1,6 @@
 ---
 name: secure
-description: "Trigger: auth, DB, API, infra, or secrets code touched — security checklist with optional engagement scoping."
+description: "Security review checklist with optional engagement scoping. Use when auth, DB, API, infra, or secrets code is touched."
 ---
 
 # Secure — Security Review

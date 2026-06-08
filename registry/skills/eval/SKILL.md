@@ -1,6 +1,6 @@
 ---
 name: eval
-description: "Trigger: quality/performance regression check, baseline comparison, pre-ship eval. Sub-modes: correctness, performance, quality, regression. Outputs PASS/WARN/FAIL per dimension."
+description: "Quality and performance evaluation with baseline comparison. Sub-modes: correctness, performance, quality, regression. Outputs PASS/WARN/FAIL per dimension. Use for pre-ship evaluation or regression checks."
 ---
 
 # Eval — Quality & Regression Gate

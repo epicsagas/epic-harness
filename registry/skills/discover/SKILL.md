@@ -1,6 +1,6 @@
 ---
 name: discover
-description: "Trigger: vague/unfocused request or solution-without-problem. Reframes goal before coding."
+description: "Problem discovery and reframing. Use when requests are vague, unfocused, or solution-first. Ensures the right problem is defined before coding."
 modes:
   - auto   # auto-triggered on vague/unfocused requests
   - /discover  # explicit invocation
