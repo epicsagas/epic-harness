@@ -380,6 +380,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn run_pre_returns_0_when_disabled() {
         unsafe {
             std::env::remove_var("EPIC_ORCHESTRATION");
@@ -393,6 +394,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn run_post_returns_0_when_disabled() {
         unsafe {
             std::env::remove_var("EPIC_ORCHESTRATION");
