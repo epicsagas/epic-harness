@@ -486,6 +486,7 @@ pub fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence
         created: now_iso(),
         updated: now_iso(),
         active: true,
+        prompt_tuning_history: vec![],
     };
     let json = match serde_json::to_string_pretty(&meta) {
         Ok(j) => j,
@@ -539,6 +540,7 @@ pub fn write_workspace_manifest() {
                 created: now_iso(),
                 updated: now_iso(),
                 active,
+                prompt_tuning_history: vec![],
             }
         };
         skills.push(SkillMeta { active, ..meta });
@@ -728,6 +730,200 @@ pub fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
     append_jsonl(&global_patterns_file(), &record);
 }
 
+// ── Prompt Auto-Tuning (#49) ─────────────────────────
+
+/// One tuning mutation applied to an evolved skill's SKILL.md.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptTuningEntry {
+    pub timestamp: String,
+    pub score_before: f64,
+    pub section: String,
+    /// Updated on the next session that observes this skill.
+    pub score_after: Option<f64>,
+}
+
+// Prompt auto-tuning constants and functions.
+// These are called by the evolve loop after metrics analysis.
+// Allow dead_code until the evolve loop integration lands.
+#[allow(dead_code)]
+const MAX_TUNING_HISTORY: usize = 10;
+#[allow(dead_code)]
+const TUNING_DECLINE_LIMIT: usize = 3;
+
+/// Append a tuning section to an evolved skill's SKILL.md.
+/// **Never modifies or deletes existing content** — only appends after a delimiter.
+#[allow(dead_code)]
+fn append_tuning_section(name: &str, section: &str) {
+    let dir = evolved_dir().join(name);
+    let skill_file = dir.join("SKILL.md");
+    let existing = fs::read_to_string(&skill_file).unwrap_or_default();
+
+    // Delimiter marks auto-tuned content
+    let delimiter = "\n\n---\n<!-- auto-tuned -->\n";
+    if existing.contains("<!-- auto-tuned -->") {
+        // Already has a tuning section — replace only the last one
+        let idx = existing.rfind("<!-- auto-tuned -->").unwrap_or(0);
+        let base = existing[..idx].trim_end_matches('\n');
+        let updated = format!("{base}{delimiter}{section}\n");
+        let _ = fs::write(&skill_file, sanitize_skill_content(&updated));
+    } else {
+        let updated = format!("{existing}{delimiter}{section}\n");
+        let _ = fs::write(&skill_file, sanitize_skill_content(&updated));
+    }
+}
+
+/// Strip all auto-tuned sections, restoring the original SKILL.md content.
+#[allow(dead_code)]
+fn strip_tuning_sections(name: &str) -> Option<String> {
+    let dir = evolved_dir().join(name);
+    let skill_file = dir.join("SKILL.md");
+    let content = fs::read_to_string(&skill_file).ok()?;
+    if let Some(idx) = content.find("\n\n---\n<!-- auto-tuned -->") {
+        let original = content[..idx].to_string();
+        let _ = fs::write(&skill_file, sanitize_skill_content(&original));
+        Some(original)
+    } else {
+        None
+    }
+}
+
+/// Generate a tuning section based on the performance gap and failure patterns.
+#[allow(dead_code)]
+fn build_tuning_section(skill_name: &str, score_with: f64, score_without: f64) -> String {
+    let gap = score_without - score_with;
+    let guidance = if gap > 0.3 {
+        "This skill is significantly underperforming. Consider:\n\
+         1. Narrowing the trigger conditions\n\
+         2. Adding more specific remediation steps\n\
+         3. Including explicit anti-patterns to avoid"
+    } else if gap > 0.1 {
+        "This skill has room for improvement:\n\
+         1. Review recent failure patterns\n\
+         2. Add targeted guidance for common pitfalls"
+    } else {
+        "Minor tuning applied. Monitor performance over next session."
+    };
+    format!(
+        "## Auto-Tuning (session)\n\
+         \n\
+         Performance gap: {gap:.3} (with={score_with:.3}, without={score_without:.3})\n\
+         \n\
+         {guidance}\n\
+         \n\
+         Skill: {skill_name}"
+    )
+}
+
+/// Check all evolved skills and auto-tune those that are underperforming.
+/// Returns the number of skills tuned.
+#[allow(dead_code)]
+pub fn auto_tune_skills(metrics: &serde_json::Value) -> usize {
+    let evolved = evolved_dir();
+    if !evolved.is_dir() {
+        return 0;
+    }
+
+    let mut tuned = 0;
+    for name in list_dirs(&evolved) {
+        let meta_path = evolved.join(&name).join("meta.json");
+        if !meta_path.is_file() {
+            continue;
+        }
+
+        // Read current meta
+        let mut meta: SkillMeta = read_json(&meta_path, SkillMeta::default());
+
+        // Get A/B scores from metrics
+        let (score_with, score_without) = get_skill_scores(metrics, &name);
+
+        // Only tune if we have enough data and skill is underperforming
+        if score_with <= 0.0 || score_without <= 0.0 {
+            continue;
+        }
+        if score_with >= score_without {
+            // Skill is performing well — update score_after on last tuning entry
+            if let Some(last) = meta.prompt_tuning_history.last_mut() {
+                last.score_after = Some(score_with);
+            }
+            write_meta(&meta_path, &meta);
+            continue;
+        }
+
+        // Check if we should rollback (3 consecutive declines)
+        let decline_streak = count_consecutive_declines(&meta.prompt_tuning_history);
+        if decline_streak >= TUNING_DECLINE_LIMIT {
+            hint(
+                "reflect",
+                &format!(
+                    "Prompt tuning rollback: {name} declined {decline_streak} sessions in a row"
+                ),
+            );
+            strip_tuning_sections(&name);
+            meta.prompt_tuning_history.clear();
+            write_meta(&meta_path, &meta);
+            continue;
+        }
+
+        // Generate and apply tuning
+        let section = build_tuning_section(&name, score_with, score_without);
+        append_tuning_section(&name, &section);
+
+        meta.prompt_tuning_history.push(PromptTuningEntry {
+            timestamp: now_iso(),
+            score_before: score_with,
+            section: section.clone(),
+            score_after: None,
+        });
+
+        // Cap history
+        if meta.prompt_tuning_history.len() > MAX_TUNING_HISTORY {
+            let start = meta.prompt_tuning_history.len() - MAX_TUNING_HISTORY;
+            meta.prompt_tuning_history = meta.prompt_tuning_history[start..].to_vec();
+        }
+
+        write_meta(&meta_path, &meta);
+        tuned += 1;
+    }
+    tuned
+}
+
+/// Extract A/B scores from metrics.json for a given skill.
+#[allow(dead_code)]
+fn get_skill_scores(metrics: &serde_json::Value, skill_name: &str) -> (f64, f64) {
+    let attr = metrics
+        .get("skill_attribution")
+        .and_then(|a| a.get(skill_name));
+    let score_with = attr
+        .and_then(|a| a.get("avg_score_with"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let score_without = metrics
+        .get("skill_attribution")
+        .and_then(|a| a.get(skill_name))
+        .and_then(|a| a.get("avg_score_without"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    (score_with, score_without)
+}
+
+/// Count how many consecutive tuning entries show decline (score_after < score_before).
+#[allow(dead_code)]
+fn count_consecutive_declines(history: &[PromptTuningEntry]) -> usize {
+    history
+        .iter()
+        .rev()
+        .take_while(|e| e.score_after.is_some_and(|after| after < e.score_before))
+        .count()
+}
+
+/// Write meta.json for a skill.
+#[allow(dead_code)]
+fn write_meta(path: &std::path::Path, meta: &SkillMeta) {
+    if let Ok(json) = serde_json::to_string_pretty(meta) {
+        let _ = fs::write(path, json);
+    }
+}
+
 // -- Phase 9: Workspace Contract (R13) --
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -739,6 +935,8 @@ pub struct SkillMeta {
     pub created: String,
     pub updated: String,
     pub active: bool,
+    #[serde(default)]
+    pub prompt_tuning_history: Vec<PromptTuningEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1079,6 +1277,7 @@ mod tests {
                 created: "2026-01-01T00:00:00Z".into(),
                 updated: "2026-01-01T00:00:00Z".into(),
                 active,
+                prompt_tuning_history: vec![],
             });
         }
         let manifest = WorkspaceManifest {
@@ -1108,6 +1307,7 @@ mod tests {
             created: "2026-01-01T00:00:00Z".into(),
             updated: "2026-01-01T00:00:00Z".into(),
             active: true,
+            prompt_tuning_history: vec![],
         };
         let json = serde_json::to_string_pretty(&meta).expect("serialize");
         let roundtrip: SkillMeta = serde_json::from_str(&json).expect("deserialize");
@@ -1138,6 +1338,7 @@ mod tests {
             created: "2026-01-01T00:00:00Z".into(),
             updated: "2026-01-01T00:00:00Z".into(),
             active: true,
+            prompt_tuning_history: vec![],
         };
         let json = serde_json::to_string_pretty(&meta).expect("serialize meta");
         let _ = fs::write(skill_dir.join("meta.json"), &json);
@@ -1236,5 +1437,146 @@ mod tests {
         }
         assert_eq!(buf.entries.len(), 1);
         assert_eq!(buf.entries[0].reason, "updated");
+    }
+
+    // ── Prompt Auto-Tuning tests (#49) ──────────────────
+
+    #[test]
+    fn prompt_tuning_entry_serializes() {
+        let entry = PromptTuningEntry {
+            timestamp: "2026-06-09T00:00:00Z".into(),
+            score_before: 0.5,
+            section: "## Auto-Tuning".into(),
+            score_after: Some(0.6),
+        };
+        let json = serde_json::to_string_pretty(&entry).expect("serialize");
+        let rt: PromptTuningEntry = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(rt.timestamp, "2026-06-09T00:00:00Z");
+        assert!((rt.score_before - 0.5).abs() < f64::EPSILON);
+        assert_eq!(rt.score_after, Some(0.6));
+    }
+
+    #[test]
+    fn skill_meta_with_tuning_history_roundtrips() {
+        let meta = SkillMeta {
+            name: "evo-test".into(),
+            origin: "pattern".into(),
+            confidence: 0.5,
+            project: "test".into(),
+            created: "2026-01-01T00:00:00Z".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+            active: true,
+            prompt_tuning_history: vec![PromptTuningEntry {
+                timestamp: "2026-06-09T00:00:00Z".into(),
+                score_before: 0.4,
+                section: "test".into(),
+                score_after: None,
+            }],
+        };
+        let json = serde_json::to_string_pretty(&meta).expect("serialize");
+        let rt: SkillMeta = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(rt.prompt_tuning_history.len(), 1);
+        assert!((rt.prompt_tuning_history[0].score_before - 0.4).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn skill_meta_deserializes_without_tuning_history() {
+        // Backward compat: old meta.json without prompt_tuning_history field
+        let json = r#"{"name":"evo-test","origin":"pattern","confidence":0.5,"project":"test","created":"2026-01-01","updated":"2026-01-01","active":true}"#;
+        let meta: SkillMeta = serde_json::from_str(json).expect("deserialize old format");
+        assert_eq!(meta.name, "evo-test");
+        assert!(meta.prompt_tuning_history.is_empty());
+    }
+
+    #[test]
+    fn consecutive_declines_counted_correctly() {
+        let history = vec![
+            PromptTuningEntry {
+                timestamp: "2026-06-07".into(),
+                score_before: 0.5,
+                section: "s1".into(),
+                score_after: Some(0.6), // improvement
+            },
+            PromptTuningEntry {
+                timestamp: "2026-06-08".into(),
+                score_before: 0.6,
+                section: "s2".into(),
+                score_after: Some(0.4), // decline
+            },
+            PromptTuningEntry {
+                timestamp: "2026-06-09".into(),
+                score_before: 0.4,
+                section: "s3".into(),
+                score_after: Some(0.3), // decline
+            },
+            PromptTuningEntry {
+                timestamp: "2026-06-10".into(),
+                score_before: 0.3,
+                section: "s4".into(),
+                score_after: Some(0.2), // decline
+            },
+        ];
+        assert_eq!(count_consecutive_declines(&history), 3);
+    }
+
+    #[test]
+    fn no_declines_when_improving() {
+        let history = vec![
+            PromptTuningEntry {
+                timestamp: "2026-06-08".into(),
+                score_before: 0.5,
+                section: "s1".into(),
+                score_after: Some(0.6),
+            },
+            PromptTuningEntry {
+                timestamp: "2026-06-09".into(),
+                score_before: 0.6,
+                section: "s2".into(),
+                score_after: Some(0.7),
+            },
+        ];
+        assert_eq!(count_consecutive_declines(&history), 0);
+    }
+
+    #[test]
+    fn no_declines_when_score_after_is_none() {
+        let history = vec![PromptTuningEntry {
+            timestamp: "2026-06-09".into(),
+            score_before: 0.5,
+            section: "s1".into(),
+            score_after: None, // no data yet
+        }];
+        assert_eq!(count_consecutive_declines(&history), 0);
+    }
+
+    #[test]
+    fn build_tuning_section_contains_gap() {
+        let section = build_tuning_section("evo-test", 0.3, 0.7);
+        assert!(section.contains("0.400"), "should show gap: {section}");
+        assert!(section.contains("with=0.3"));
+        assert!(section.contains("without=0.7"));
+    }
+
+    #[test]
+    fn get_skill_scores_extracts_from_metrics() {
+        let metrics = serde_json::json!({
+            "skill_attribution": {
+                "evo-test": {
+                    "avg_score_with": 0.4,
+                    "avg_score_without": 0.8
+                }
+            }
+        });
+        let (with, without) = get_skill_scores(&metrics, "evo-test");
+        assert!((with - 0.4).abs() < f64::EPSILON);
+        assert!((without - 0.8).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn get_skill_scores_defaults_to_zero() {
+        let metrics = serde_json::json!({});
+        let (with, without) = get_skill_scores(&metrics, "nonexistent");
+        assert_eq!(with, 0.0);
+        assert_eq!(without, 0.0);
     }
 }
