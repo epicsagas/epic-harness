@@ -145,7 +145,7 @@ pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
     let start = history.len().saturating_sub(window);
     let recent = &history[start..];
     if recent.len() < 2 {
-        return EpochClass::StableSuccess; // not enough data, assume neutral
+        return EpochClass::InsufficientData;
     }
 
     let avg: f64 = recent.iter().map(|e| e.avg_score).sum::<f64>() / recent.len() as f64;
@@ -565,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn classify_epoch_single_entry_defaults_stable() {
+    fn classify_epoch_single_entry_defaults_insufficient_data() {
         let history = vec![SessionScoreEntry {
             timestamp: "2026-04-09".into(),
             success_rate: 0.5,
@@ -573,7 +573,13 @@ mod tests {
             observations: 10,
             dimension_averages: ScoreDimensions::default(),
         }];
-        // With <2 entries, defaults to StableSuccess
-        assert_eq!(classify_epoch(&history), EpochClass::StableSuccess);
+        // With <2 entries, returns InsufficientData
+        assert_eq!(classify_epoch(&history), EpochClass::InsufficientData);
+    }
+
+    #[test]
+    fn classify_epoch_empty_history_is_insufficient_data() {
+        let history: Vec<SessionScoreEntry> = vec![];
+        assert_eq!(classify_epoch(&history), EpochClass::InsufficientData);
     }
 }

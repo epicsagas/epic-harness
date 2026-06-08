@@ -38,6 +38,8 @@ pub enum EpochClass {
     Regressing,
     PersistentFailure,
     StableSuccess,
+    /// Not enough score history to determine a meaningful epoch class (< 2 entries).
+    InsufficientData,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
