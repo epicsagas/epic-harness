@@ -280,6 +280,18 @@ Reload (nächste Session — Resume lädt entwickelte Skills)
 
 Skill-Seeding: schwaches Tool (Erfolgsrate <60%, mind. 5 Beobachtungen), schwacher Dateityp (Erfolgsrate <50%, mind. 3 Beobachtungen), hochfrequenter Fehler (5+ Vorkommen).
 
+### SkillOpt-inspirierte Optimierung
+
+Drei vom Deep Learning inspirierte Techniken, angewendet auf die Evolution natürlichsprachlicher Skills:
+
+| Technik | Beschreibung |
+|----------|-------------|
+| **Negative-Feedback-Puffer** | Speichert abgelehnte Skill-Vorschläge mit TTL-basiertem Ablauf — verhindert erneute Generierung bekannter schlechter Skills |
+| **Minibatch-Reflexion** | Zerlegt Beobachtungen in feste Batch-Größen zur strukturellen Musterextraktion — erkennt Mikromuster, die in Sitzungsdurchschnitten verborgen bleiben |
+| **Slow/Meta-Update** | Klassifiziert Epochen (Improving/Regressing/PersistentFailure/StableSuccess) und zeichnet langsame Parameteraktualisierungen auf — passt die Evolutionsstrategie an langfristige Trends an |
+
+Angelehnt an [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Konfigurierbar über `rejected_buffer_ttl` und `minibatch_size` in `[evolution]`.
+
 Stagnation: 3 Sessions ohne 5% Verbesserung → automatischer Rollback zum besten Checkpoint.
 
 ### Skill-Effektivität
@@ -572,6 +584,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # Sitzungen bis zum Ablauf abgelehnter Vorschläge
+# minibatch_size = 8          # Beobachtungen pro Minibatch zur Musterextraktion
 
 [pattern]
 # repeated_error_min = 3
@@ -686,6 +700,7 @@ Hooks suchen das Binary an zwei Orten: `hooks/bin/epic-harness` (Plugin-lokal) �
 
 ## Danksagung
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — Deep-Learning-inspirierte Skill-Optimierung (Negative-Feedback-Puffer, Minibatch-Reflexion, Slow/Meta-Updates)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Automatisierte Evolution und Benchmark-Muster
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code Agent-Skill-System
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Umfassende Claude Code-Muster

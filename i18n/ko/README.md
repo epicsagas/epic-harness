@@ -281,6 +281,18 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 
 스킬 시드: 약한 도구 (성공률 <60%, 최소 5회 관측), 약한 파일 유형 (성공률 <50%, 최소 3회 관측), 고빈도 에러 (5회 이상).
 
+### SkillOpt 기반 최적화
+
+자연어 스킬 진화에 딥러닝에서 영감받은 세 가지 기법을 적용합니다:
+
+| 기법 | 설명 |
+|------|------|
+| **네거티브 피드백 버퍼** | 거부된 스킬 제안을 TTL 기반으로 보관 — 동일한 나쁜 스킬 재생성 방지 |
+| **미니배치 리플렉션** | 관측 데이터를 고정 크기 배치로 분해하여 구조적 패턴 추출 — 세션 평균에 묻히는 미세 패턴 포착 |
+| **슬로우/메타 업데이트** | 에포크 분류(Improving/Regressing/PersistentFailure/StableSuccess) 및 느린 파라미터 업데이트 기록 — 장기 트렌드에 맞춘 진화 전략 조정 |
+
+[SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)에서 차용. `[evolution]`의 `rejected_buffer_ttl`과 `minibatch_size`로 설정 가능.
+
 정체: 3세션 동안 5% 개선 없음 → 최적 체크포인트로 자동 롤백.
 
 ### 스킬 효과
@@ -573,6 +585,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # 거부된 제안 만료 전 세션 수
+# minibatch_size = 8          # 패턴 추출용 미니배치 크기
 
 [pattern]
 # repeated_error_min = 3
@@ -687,6 +701,7 @@ cargo test                                                    # 테스트
 
 ## 감사의 말
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — 딥러닝 기반 스킬 최적화 (네거티브 피드백 버퍼, 미니배치 리플렉션, 슬로우/메타 업데이트)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 자동화된 진화 및 벤치마크 패턴
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 에이전트 스킬 시스템
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 종합 Claude Code 패턴

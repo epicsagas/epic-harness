@@ -280,6 +280,18 @@ Reload (prochaine session — resume charge les competences evoluees)
 
 Seeding de competences : outil faible (succes <60 %, min 5 obs), type de fichier faible (succes <50 %, min 3 obs), erreur frequente (5+ occurrences).
 
+### Optimisation inspiree de SkillOpt
+
+Trois techniques inspirees de l'apprentissage profond appliquees a l'evolution des competences en langage naturel :
+
+| Technique | Description |
+|-----------|-------------|
+| **Tampon de retroaction negative** | Conserve les propositions de competences rejetees avec expiration basee sur le TTL — empeche la regeneration de competences connues comme mauvaises |
+| **Reflection par mini-lot** | Decompose les observations en lots de taille fixe pour l'extraction de motifs structurels — capture les micro-motifs masques par les moyennes de session |
+| **Mise a jour lente/meta** | Classifie les epoques (Improving/Regressing/PersistentFailure/StableSuccess) et enregistre les mises a jour lentes des parametres — adapte la strategie d'evolution aux tendances a long terme |
+
+Adapte de [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable via `rejected_buffer_ttl` et `minibatch_size` dans `[evolution]`.
+
 Stagnation : 3 sessions sans 5 % d'amelioration → retour automatique au meilleur point de controle.
 
 ### Efficacite des competences
@@ -572,6 +584,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # sessions avant expiration des propositions rejetees
+# minibatch_size = 8          # observations par mini-lot pour l'extraction de motifs
 
 [pattern]
 # repeated_error_min = 3
@@ -686,6 +700,7 @@ Les hooks cherchent le binaire a deux endroits : `hooks/bin/epic-harness` (local
 
 ## Remerciements
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — Optimisation des competences inspiree de l'apprentissage profond (tampon de retroaction negative, reflexion par mini-lot, mises a jour lentes/meta)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Evolution automatisee et schemas de benchmark
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Systeme de competences d'agent Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Patterns complets Claude Code

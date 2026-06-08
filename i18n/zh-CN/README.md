@@ -278,6 +278,18 @@ Reload（下次会话 — resume 加载进化技能）
 
 技能播种：弱工具（成功率 <60%，最少 5 次观测），弱文件类型（成功率 <50%，最少 3 次观测），高频错误（5+ 次出现）。
 
+### SkillOpt 启发的优化
+
+将三种受深度学习启发的技术应用于自然语言技能进化：
+
+| 技术 | 功能 |
+|------|------|
+| **负反馈缓冲区** | 持久化被拒绝的技能提案并设置 TTL 过期机制 — 防止重复生成已知的不良技能 |
+| **小批量反思** | 将观测数据分解为固定大小的批次进行结构化模式提取 — 捕捉被会话平均值掩盖的微模式 |
+| **慢速/元更新** | 对时期进行分类（Improving/Regressing/PersistentFailure/StableSuccess）并记录慢参数更新 — 根据长期趋势调整进化策略 |
+
+改编自 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)。可通过 `[evolution]` 中的 `rejected_buffer_ttl` 和 `minibatch_size` 配置。
+
 停滞：连续 3 次会话无 5% 提升 → 自动回滚到最佳检查点。
 
 ### 技能效果
@@ -570,6 +582,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # 被拒绝提案过期前的会话数
+# minibatch_size = 8          # 用于模式提取的小批量观测数
 
 [pattern]
 # repeated_error_min = 3
@@ -684,6 +698,7 @@ Hooks 在两个位置查找二进制文件：`hooks/bin/epic-harness`（插件�
 
 ## 致谢
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — 受深度学习启发的技能优化（负反馈缓冲区、小批量反思、慢速/元更新）
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自动进化和基准测试模式
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 智能体技能系统
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 综合 Claude Code 模式

@@ -277,6 +277,18 @@ Reload (अगला सेशन — resume विकसित स्किल�
 
 स्किल सीडिंग: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences)।
 
+### SkillOpt-प्रेरित अनुकूलन
+
+प्राकृतिक भाषा कौशल विकास पर लागू डीप लर्निंग से प्रेरित तीन तकनीकें:
+
+| तकनीक | क्या करती है |
+|--------|-------------|
+| **नेगेटिव फीडबैक बफर** | अस्वीकृत कौशल प्रस्तावों को TTL-आधारित समाप्ति के साथ संग्रहित करता है — ज्ञात खराब कौशल को पुनः उत्पन्न होने से रोकता है |
+| **मिनीबैच प्रतिबिंब** | संरचनात्मक पैटर्न निष्कर्षण के लिए अवलोकनों को निश्चित-आकार बैचों में विघटित करता है — सत्र औसत से छिपे माइक्रो-पैटर्न को पकड़ता है |
+| **स्लो/मेटा अपडेट** | युगों को वर्गीकृत करता है (Improving/Regressing/PersistentFailure/StableSuccess) और धीमे पैरामीटर अपडेट रिकॉर्ड करता है — दीर्घकालिक रुझानों के अनुसार विकास रणनीति को अनुकूलित करता है |
+
+[SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904) से अनुकूलित। `[evolution]` में `rejected_buffer_ttl` और `minibatch_size` के माध्यम से कॉन्फ़िगर करने योग्य।
+
 स्थिरता: 5% सुधार के बिना 3 सेशन → best checkpoint पर ऑटो-rollback।
 
 ### स्किल प्रभावशीलता
@@ -569,6 +581,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # अस्वीकृत प्रस्तावों की समाप्ति से पहले सत्र
+# minibatch_size = 8          # पैटर्न निष्कर्षण के लिए प्रति मिनीबैच अवलोकन
 
 [pattern]
 # repeated_error_min = 3
@@ -683,6 +697,7 @@ Hooks binary दो जगहों पर ढूंढते हैं: `hooks/
 
 ## आभार
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — डीप लर्निंग-प्रेरित कौशल अनुकूलन (नेगेटिव फीडबैक बफर, मिनीबैच प्रतिबिंब, स्लो/मेटा अपडेट)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — स्वचालित एवोल्यूशन और benchmark patterns
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code एजेंट skill system
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — व्यापक Claude Code patterns

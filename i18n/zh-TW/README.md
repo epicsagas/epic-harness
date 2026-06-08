@@ -282,6 +282,18 @@ Reload (next session — resume loads evolved skills)
 
 技能播種：弱工具（成功率 <60%，最少 5 次觀測）、弱檔案類型（成功率 <50%，最少 3 次觀測）、高頻錯誤（5+ 次出現）。
 
+### SkillOpt 啟發的優化
+
+將三種受深度學習啟發的技術應用於自然語言技能進化：
+
+| 技術 | 功能 |
+|------|------|
+| **負回饋緩衝區** | 持久化被拒絕的技能提案並設定 TTL 過期機制 — 防止重複生成已知的不良技能 |
+| **小批量反思** | 將觀測資料分解為固定大小的批次進行結構化模式提取 — 捕捉被工作階段平均值掩蓋的微模式 |
+| **慢速/元更新** | 對時期進行分類（Improving/Regressing/PersistentFailure/StableSuccess）並記錄慢參數更新 — 根據長期趨勢調整進化策略 |
+
+改編自 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)。可透過 `[evolution]` 中的 `rejected_buffer_ttl` 和 `minibatch_size` 設定。
+
 停滯處理：連續 3 個工作階段無 5% 改善 → 自動回滾到最佳檢查點。
 
 ### 技能有效性
@@ -574,6 +586,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # 被拒絕提案過期前的工作階段數
+# minibatch_size = 8          # 用於模式提取的小批量觀測數
 
 [pattern]
 # repeated_error_min = 3
@@ -688,6 +702,7 @@ cargo test                                                    # 測試
 
 ## 致謝
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — 受深度學習啟發的技能最佳化（負回饋緩衝區、小批量反思、慢速/元更新）
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自動化進化與基準測試模式
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 智能體技能系統
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 全面的 Claude Code 模式

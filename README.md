@@ -302,6 +302,18 @@ Reload (next session — resume loads evolved skills)
 
 Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences).
 
+### SkillOpt-Inspired Optimization
+
+Three deep learning-inspired techniques applied to natural language skill evolution:
+
+| Technique | What it does |
+|-----------|-------------|
+| **Negative Feedback Buffer** | Persists rejected skill proposals with TTL-based expiry — prevents re-generating known-bad skills |
+| **Minibatch Reflection** | Decomposes observations into fixed-size batches for structural pattern extraction — catches micro-patterns hidden by session averages |
+| **Slow/Meta Update** | Classifies epochs (Improving/Regressing/PersistentFailure/StableSuccess) and records slow parameter updates — adapts evolution strategy to long-term trends |
+
+Adapted from [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable via `rejected_buffer_ttl` and `minibatch_size` in `[evolution]`.
+
 Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
 
 ### Skill Effectiveness
@@ -606,6 +618,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # sessions before rejected proposals expire
+# minibatch_size = 8          # observations per minibatch for pattern extraction
 
 [pattern]
 # repeated_error_min = 3
@@ -720,6 +734,7 @@ Hooks look for the binary in two places: `hooks/bin/epic-harness` (plugin local)
 
 ## Acknowledgments
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — Deep learning-inspired skill optimization (negative feedback buffer, minibatch reflection, slow/meta updates)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Automated evolution and benchmark patterns
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code agent skill system
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Comprehensive Claude Code patterns

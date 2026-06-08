@@ -273,6 +273,18 @@ Reload (next session — resume loads evolved skills)
 
 スキルシーディング: 弱いツール（成功率 <60%、最低5観測）、弱いファイルタイプ（成功率 <50%、最低3観測）、高頻度エラー（5回以上）。
 
+### SkillOptに基づく最適化
+
+自然言語スキルの進化にディープラーニングに着想を得た3つの手法を適用します:
+
+| 手法 | 説明 |
+|------|------|
+| **ネガティブフィードバックバッファ** | 拒否されたスキル提案をTTLベースで保持 — 同じ悪いスキルの再生成を防止 |
+| **ミニバッチリフレクション** | 観測データを固定サイズのバッチに分解し構造的パターンを抽出 — セッション平均に隠れた微小パターンを捕捉 |
+| **スロー/メタアップデート** | エポック分類(Improving/Regressing/PersistentFailure/StableSuccess)とスローパラメータ更新の記録 — 長期トレンドに応じた進化戦略の調整 |
+
+[SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)より適用。`[evolution]`の`rejected_buffer_ttl`と`minibatch_size`で設定可能。
+
 停滞: 5%改善なしで3セッション → ベストチェックポイントに自動ロールバック。
 
 ### スキル有効性
@@ -565,6 +577,8 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
+# rejected_buffer_ttl = 10    # 拒否された提案が期限切れになるまでのセッション数
+# minibatch_size = 8          # パターン抽出用ミニバッチサイズ
 
 [pattern]
 # repeated_error_min = 3
@@ -679,6 +693,7 @@ cargo test                                                    # テスト
 
 ## 謝辞
 
+- [SkillOpt](https://arxiv.org/abs/2605.23904) — ディープラーニングに基づくスキル最適化(ネガティブフィードバックバッファ、ミニバッチリフレクション、スロー/メタアップデート)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自動進化とベンチマークパターン
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Codeエージェントスキルシステム
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 包括的なClaude Codeパターン

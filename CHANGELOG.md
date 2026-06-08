@@ -5,6 +5,18 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **SkillOpt-inspired evolution optimization**: three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.org/abs/2605.23904) for natural language skill evolution
+  - **Negative Feedback Buffer**: persists rejected skill proposals with TTL-based expiry to prevent re-generating known-bad skills
+  - **Minibatch Reflection**: decomposes observations into fixed-size batches for structural pattern extraction, catching micro-patterns hidden by session averages
+  - **Slow/Meta Update**: epoch classification (Improving/Regressing/PersistentFailure/StableSuccess) with slow parameter tracking per evolved skill
+- Ineffective skill auto-eviction: skills that demonstrably lower session scores are automatically removed after 3+ sessions of negative attribution
+- New config options: `rejected_buffer_ttl` (default: 10) and `minibatch_size` (default: 8) in `[evolution]` section
+- New types: `RejectedEntry`, `MinibatchInsight`, `EpochClass` in `src/shared/evolution.rs`
+- New functions: `analyze_minibatches()`, `classify_epoch()`, `update_meta_field()`, rejected buffer CRUD
+
 ## [0.5.0]
 
 ### Added
