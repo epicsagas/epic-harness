@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">從每次工作階段中學習的多工具 AI 智慧型代理框架 — 23 個技能、自主流水線、自我進化引擎。</p></blockquote>
+<blockquote><p align="center">從每次工作階段中學習的多工具 AI 智慧型代理框架 — 26 個技能、自主流水線、自我進化引擎。</p></blockquote>
 
 <p align="center"><b>一個框架，六個 AI 工具。從規格到 PR 自主執行。每次工作階段都更智慧。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一個多工具 AI 智慧型代理框架，擁有 **23 個技能（9 流水線 + 14 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
+一個多工具 AI 智慧型代理框架，擁有 **26 個技能（9 流水線 + 17 品質門）**、**自我進化引擎**、**統一記憶系統**和 **單命令自主流水線**（`/orbit`）。支援 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一個 `~/.harness/` 資料目錄。每次工作階段結束後，evolve 迴圈會分析失敗、生成針對性技能，並在下次工作階段時載入。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 功能" width="100%" />
@@ -90,7 +90,7 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 codex plugin marketplace add epicsagas/plugins
 ```
 
-自動安裝全部 23 個技能並註冊掛鉤。安裝後立即可用，無需額外步驟。
+自動安裝全部 26 個技能並註冊掛鉤。安裝後立即可用，無需額外步驟。
 使用 `codex plugin update epic@epicsagas` 進行更新。
 
 ### macOS / Linux
@@ -230,6 +230,9 @@ flowchart TD
 | **tdd** | 新功能實作或錯誤修復 |
 | **debug** | 測試失敗或執行時期錯誤 |
 | **secure** | 涉及 Auth / DB / API / secrets 的程式碼 |
+| **threat-model** | 安全評估、攻擊面分析需要時 |
+| **vuln-scan** | 注入、認證、資料暴露、依賴項漏洞掃描 |
+| **triage** | 安全發現的對立驗證，嚴重性調整 |
 | **perf** | 迴圈、查詢、渲染、批次操作 |
 | **simplify** | 檔案超過 200 行或圈複雜度過高 |
 | **document** | 新增或修改了公開 API 簽名 |
@@ -297,6 +300,14 @@ Reload (next session — resume loads evolved skills)
 改編自 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)。可透過 `[evolution]` 中的 `rejected_buffer_ttl` 和 `minibatch_size` 設定。
 
 停滯處理：連續 3 個工作階段無 5% 改善 → 自動回滾到最佳檢查點。
+
+### 提示詞自動調優
+
+表現不佳的進化技能（avg_score_with < avg_score_without）會在其SKILL.md中添加針對性的調優指導。原始內容不會被修改——調優部分位於 `<!-- auto-tuned -->` 分隔符之後。
+
+- **自動回滾**：連續3次工作階段分數下降後，調優被移除，歷史記錄清空
+- **歷史上限**：每個技能10條調優記錄，在 `meta.json` 中追蹤
+- **差距驅動指導**：調優嚴重程度與A/B分數差距匹配（輕微 → 顯著 → 重大）
 
 ### 技能有效性
 
@@ -420,7 +431,7 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 
 | 工具 | Ring 0 掛鉤 | 技能 | 智能體 |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 23 個技能 | Live |
+| **Claude Code** | ✓ 完整 | ✓ 26 個技能 | Live |
 | **Codex CLI** | ✓ 完整¹ | ✓ 23 | — |
 | **Cursor** | ✓ 完整³ | ✓ 23 | Live |
 | **OpenCode** | ✓ 部分⁴ | — | — |
@@ -450,9 +461,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -705,6 +716,7 @@ cargo test                                                    # 測試
 ## 致謝
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — 受深度學習啟發的技能最佳化（負回饋緩衝區、小批量反思、慢速/元更新）
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — 安全評估模式（威脅建模、漏洞掃描、對抗性分診、雙容器信任邊界）
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自動化進化與基準測試模式
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 智能體技能系統
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 全面的 Claude Code 模式

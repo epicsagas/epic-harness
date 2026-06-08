@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un arnés de agente IA multiherramienta que aprende de cada sesión — 23 skills, pipelines autónomos y motor autoevolutivo.</p></blockquote>
+<blockquote><p align="center">Un arnés de agente IA multiherramienta que aprende de cada sesión — 26 skills, pipelines autónomos y motor autoevolutivo.</p></blockquote>
 
 <p align="center"><b>Un arnés, seis herramientas IA. Autónomo del spec al PR. Más inteligente cada sesión.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un arnés de agente IA multiherramienta con **23 skills (9 pipeline + 14 quality gates)**, un **motor autoevolutivo**, **memoria unificada** y una **pipeline autónoma de un solo comando** (`/orbit`). Funciona con Claude Code, Codex, Cursor, OpenCode y Cline — todos compartiendo el mismo directorio `~/.harness/`. Después de cada sesión, el bucle de evolución analiza fallos, genera skills dirigidos y los carga en la próxima sesión.
+Un arnés de agente IA multiherramienta con **26 skills (9 pipeline + 17 quality gates)**, un **motor autoevolutivo**, **memoria unificada** y una **pipeline autónoma de un solo comando** (`/orbit`). Funciona con Claude Code, Codex, Cursor, OpenCode y Cline — todos compartiendo el mismo directorio `~/.harness/`. Después de cada sesión, el bucle de evolución analiza fallos, genera skills dirigidos y los carga en la próxima sesión.
 
 <p align="center">
   <img src="../../assets/features.png" alt="características de epic harness" width="100%" />
@@ -90,7 +90,7 @@ Instala automáticamente el binario y registra todos los hooks en un solo paso.
 codex plugin marketplace add epicsagas/plugins
 ```
 
-Instala automáticamente las 23 habilidades y registra los hooks. Disponibles inmediatamente — no se necesitan pasos adicionales.
+Instala automáticamente las 26 habilidades y registra los hooks. Disponibles inmediatamente — no se necesitan pasos adicionales.
 Se actualiza con `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
@@ -230,6 +230,9 @@ Las habilidades se activan automáticamente según el contexto. No las invocas t
 | **tdd** | Implementación de nueva funcionalidad o corrección de errores |
 | **debug** | Fallo de prueba o error en tiempo de ejecución |
 | **secure** | Código de auth / BD / API / secrets modificado |
+| **threat-model** | Evaluación de seguridad, análisis de superficie de ataque necesario |
+| **vuln-scan** | Escaneo de vulnerabilidades — inyección, autenticación, exposición de datos, dependencias |
+| **triage** | Validación adversarial de hallazgos de seguridad, ajuste de severidad |
 | **perf** | Bucles, consultas, renderizado, operaciones por lotes |
 | **simplify** | Archivo > 200 líneas o alta complejidad ciclomática |
 | **verify** | Antes de completar `/go` o `/ship` |
@@ -297,6 +300,14 @@ Tres técnicas inspiradas en el aprendizaje profundo aplicadas a la evolución d
 Adaptado de [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable mediante `rejected_buffer_ttl` y `minibatch_size` en `[evolution]`.
 
 Estancamiento: 3 sesiones sin una mejora del 5% → rollback automático al mejor punto de control.
+
+### Autoajuste de Prompts
+
+Las habilidades evolucionadas con bajo rendimiento (donde `avg_score_with < avg_score_without`) reciben orientación de ajuste dirigida añadida a su SKILL.md. El contenido original nunca se modifica — las secciones de ajuste viven detrás de un delimitador `<!-- auto-tuned -->`.
+
+- **Reversión automática**: después de 3 sesiones consecutivas con puntajes decrecientes, el ajuste se elimina y el historial se borra
+- **Límite de historial**: 10 entradas de ajuste por habilidad, rastreadas en `meta.json`
+- **Orientación basada en brecha**: la severidad del ajuste coincide con la brecha de puntajes A/B (menor → significativo → mayor)
 
 ### Efectividad de Habilidades
 
@@ -420,8 +431,8 @@ Todas las herramientas comparten el mismo directorio de datos `~/.harness/projec
 
 | Herramienta | Ring 0 Hooks | Habilidades | Agentes |
 |-------------|-------------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 23 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 23 | — |
+| **Claude Code** | ✓ Completo | ✓ 26 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 26 | — |
 | **Cursor** | ✓ Completo³ | ✓ vía rules | Live |
 | **OpenCode** | ✓ Parcial⁴ | — | — |
 | **Cline** | ✓ Completo⁵ | — | — |
@@ -450,9 +461,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council) --- s8(document) --- s9(context) --- s10(orchestrate) --- s11(commit) --- s12(agent-introspection) --- s13(reflect) --- s14(discover)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -705,6 +716,7 @@ Los hooks buscan el binario en dos lugares: `hooks/bin/epic-harness` (plugin loc
 ## Agradecimientos
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — Optimización de habilidades inspirada en aprendizaje profundo (búfer de retroalimentación negativa, reflexión por minilotes, actualizaciones lentas/meta)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — Patrones de evaluación de seguridad (modelado de amenazas, escaneo de vulnerabilidades, triaje adversarial, límite de confianza de dos contenedores)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Patrones de evolución automatizada y benchmarks
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de habilidades de agente de Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Patrones exhaustivos de Claude Code

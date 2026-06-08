@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">すべてのセッションから学習するマルチツールAIエージェントハーネス — 23のスキル、自律パイプライン、自己進化エンジン。</p></blockquote>
+<blockquote><p align="center">すべてのセッションから学習するマルチツールAIエージェントハーネス — 26のスキル、自律パイプライン、自己進化エンジン。</p></blockquote>
 
 <p align="center"><b>1つのハーネス、6つのAIツール。スペックからPRまで自律実行。セッションを重ねるほどスマートに。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**23のスキル（9パイプライン + 14品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
+**26のスキル（9パイプライン + 17品質ゲート）**、**自己進化エンジン**、**統合メモリ**、**単一コマンド自律パイプライン**（`/orbit`）を備えたマルチツールAIエージェントハーネス。Claude Code、Codex、Cursor、OpenCode、Clineに対応し、すべてのツールが同じ `~/.harness/` データディレクトリを共有します。各セッション終了後、evolveループが失敗を分析し、ターゲットを絞ったスキルを生成して次回のセッションに読み込みます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -90,7 +90,7 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 codex plugin marketplace add epicsagas/plugins
 ```
 
-23のスキルをすべて自動インストールし、フックを登録します。追加の手順なしですぐに利用可能です。`codex plugin update epic@epicsagas` で更新できます。
+26のスキルをすべて自動インストールし、フックを登録します。追加の手順なしですぐに利用可能です。`codex plugin update epic@epicsagas` で更新できます。
 
 ### macOS / Linux
 
@@ -229,6 +229,9 @@ flowchart TD
 | **tdd** | 新機能の実装またはバグ修正 |
 | **debug** | テスト失敗またはランタイムエラー |
 | **secure** | auth / DB / API / シークレットのコードに触れた場合 |
+| **threat-model** | セキュリティ評価、攻撃表面分析が必要な場合 |
+| **vuln-scan** | インジェクション、認証、データ露出、依存関係の脆弱性スキャン |
+| **triage** | セキュリティ発見事項の敵対的検証、重大度調整 |
 | **perf** | ループ、クエリ、レンダリング、バッチ操作 |
 | **simplify** | ファイルが200行超または高サイクロマティック複雑度 |
 | **verify** | `/go` または `/ship` 完了前 |
@@ -290,6 +293,14 @@ Reload (next session — resume loads evolved skills)
 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)より適用。`[evolution]`の`rejected_buffer_ttl`と`minibatch_size`で設定可能。
 
 停滞: 5%改善なしで3セッション → ベストチェックポイントに自動ロールバック。
+
+### プロンプト自動チューニング
+
+パフォーマンスの低い進化スキル（avg_score_with < avg_score_without）は、SKILL.mdにターゲットを絞ったチューニングガイダンスが追加されます。元のコンテンツは変更されず、チューニングセクションは `<!-- auto-tuned -->` デリミタの後に配置されます。
+
+- **自動ロールバック**: 3セッション連続でスコアが低下した場合、チューニングを削除し履歴をクリア
+- **履歴上限**: スキルあたり10件のチューニングエントリ、`meta.json` で追跡
+- **ギャップベースのガイダンス**: チューニングの重大度はA/Bスコアギャップに一致（minor → significant → major）
 
 ### スキル有効性
 
@@ -413,8 +424,8 @@ epic team delete backend --global      # orgストアから永久に削除
 
 | ツール | Ring 0 フック | スキル | エージェント |
 |------|-------------|--------|----------|
-| **Claude Code** | ✓ フル | ✓ 23スキル | Live |
-| **Codex CLI** | ✓ フル¹ | ✓ 23 | — |
+| **Claude Code** | ✓ フル | ✓ 26スキル | Live |
+| **Codex CLI** | ✓ フル¹ | ✓ 26 | — |
 | **Cursor** | ✓ フル³ | ✓ ルール経由 | Live |
 | **OpenCode** | ✓ 部分⁴ | — | — |
 | **Cline** | ✓ フル⁵ | — | — |
@@ -443,9 +454,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -698,6 +709,7 @@ cargo test                                                    # テスト
 ## 謝辞
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — ディープラーニングに基づくスキル最適化(ネガティブフィードバックバッファ、ミニバッチリフレクション、スロー/メタアップデート)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — セキュリティ評価パターン（脅威モデリング、脆弱性スキャン、敵対的トリアージ、ツーコンテナ信頼境界）
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自動進化とベンチマークパターン
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Codeエージェントスキルシステム
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 包括的なClaude Codeパターン

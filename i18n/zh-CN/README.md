@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 23 个技能、自主流水线、自我进化引擎。</p></blockquote>
+<blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 26 个技能、自主流水线、自我进化引擎。</p></blockquote>
 
 <p align="center"><b>一个框架，五个 AI 工具。从规格到 PR 自主执行。每次会话都更智能。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个多工具 AI 智能体框架，拥有 **23 个技能（9 流水线 + 14 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
+一个多工具 AI 智能体框架，拥有 **26 个技能（9 流水线 + 17 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
@@ -90,7 +90,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 codex plugin marketplace add epicsagas/plugins
 ```
 
-自动安装全部 23 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
+自动安装全部 26 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
 
 ### macOS / Linux
 
@@ -228,6 +228,9 @@ flowchart TD
 | **tdd** | 新功能实现或 Bug 修复 |
 | **debug** | 测试失败或运行时错误 |
 | **secure** | 涉及认证 / 数据库 / API / 密钥代码 |
+| **threat-model** | 安全评估、攻击面分析需要时 |
+| **vuln-scan** | 注入、认证、数据暴露、依赖项漏洞扫描 |
+| **triage** | 安全发现的对立验证，严重性调整 |
 | **perf** | 循环、查询、渲染、批量操作 |
 | **simplify** | 文件超过 200 行或圈复杂度过高 |
 | **document** | 公共 API 新增或签名变更 |
@@ -293,6 +296,14 @@ Reload（下次会话 — resume 加载进化技能）
 改编自 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)。可通过 `[evolution]` 中的 `rejected_buffer_ttl` 和 `minibatch_size` 配置。
 
 停滞：连续 3 次会话无 5% 提升 → 自动回滚到最佳检查点。
+
+### 提示词自动调优
+
+表现不佳的进化技能（avg_score_with < avg_score_without）会在其SKILL.md中添加针对性的调优指导。原始内容不会被修改——调优部分位于 `<!-- auto-tuned -->` 分隔符之后。
+
+- **自动回滚**：连续3次会话分数下降后，调优被移除，历史记录清空
+- **历史上限**：每个技能10条调优记录，在 `meta.json` 中跟踪
+- **差距驱动指导**：调优严重程度与A/B分数差距匹配（轻微 → 显著 → 重大）
 
 ### 技能效果
 
@@ -416,7 +427,7 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 | 工具 | Ring 0 Hooks | 技能 | 智能体 |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 23 个技能（含 /orbit） | Live |
+| **Claude Code** | ✓ 完整 | ✓ 26 个技能（含 /orbit） | Live |
 | **Codex CLI** | ✓ 完整¹ | ✓ 7 | — |
 | **Cursor** | ✓ 完整² | ✓ 通过 rules | Live |
 | **OpenCode** | ✓ 部分³ | — | — |
@@ -446,9 +457,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -701,6 +712,7 @@ Hooks 在两个位置查找二进制文件：`hooks/bin/epic-harness`（插件�
 ## 致谢
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — 受深度学习启发的技能优化（负反馈缓冲区、小批量反思、慢速/元更新）
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — 安全评估模式（威胁建模、漏洞扫描、对抗性分诊、双容器信任边界）
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自动进化和基准测试模式
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 智能体技能系统
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 综合 Claude Code 模式
