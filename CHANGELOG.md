@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New config options: `rejected_buffer_ttl` (default: 10) and `minibatch_size` (default: 8) in `[evolution]` section
 - New types: `RejectedEntry`, `MinibatchInsight`, `EpochClass` in `src/shared/evolution.rs`
 - New functions: `analyze_minibatches()`, `classify_epoch()`, `update_meta_field()`, rejected buffer CRUD
+- **Eval skill + CLI**: project quality & regression evaluation with 4 dimensions (correctness, performance, quality, regression)
+  - `epic eval --init` scaffolds eval.yaml with auto-detected stack (Rust/Node/Python/Go/Java)
+  - `epic eval --json` outputs structured results for CI pipelines
+  - `epic eval --baseline-update` saves current run as baseline for regression comparison
+  - LLM-as-judge integration in SKILL.md for quality dimension (deferred to LLM session)
+  - Orbit integration: Step 5.5 Eval phase inserted automatically when eval.yaml exists
+  - New modules: `src/eval/{mod,config,runner,baseline,report}.rs`
 
 ## [0.5.0]
 
