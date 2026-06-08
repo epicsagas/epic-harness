@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un harnais d'agent IA multi-outil qui apprend de chaque session — 23 skills, pipelines autonomes et moteur auto-evolutif.</p></blockquote>
+<blockquote><p align="center">Un harnais d'agent IA multi-outil qui apprend de chaque session — 26 skills, pipelines autonomes et moteur auto-evolutif.</p></blockquote>
 
 <p align="center"><b>Un harnais, cinq outils IA. Autonome du spec au PR. Plus intelligent a chaque session.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un harnais d'agent IA multi-outil avec **23 skills (9 pipeline + 14 quality gates)**, un **moteur auto-evolutif**, une **memoire unifiee** et une **pipeline autonome en une commande** (`/orbit`). Compatible avec Claude Code, Codex, Cursor, OpenCode et Cline — tous partageant le meme repertoire `~/.harness/`. Apres chaque session, la boucle d'evolution analyse les echecs, genere des skills cibles et les charge pour la prochaine session.
+Un harnais d'agent IA multi-outil avec **26 skills (9 pipeline + 17 quality gates)**, un **moteur auto-evolutif**, une **memoire unifiee** et une **pipeline autonome en une commande** (`/orbit`). Compatible avec Claude Code, Codex, Cursor, OpenCode et Cline — tous partageant le meme repertoire `~/.harness/`. Apres chaque session, la boucle d'evolution analyse les echecs, genere des skills cibles et les charge pour la prochaine session.
 
 <p align="center">
   <img src="./assets/features.png" alt="fonctionnalites epic harness" width="100%" />
@@ -90,7 +90,7 @@ Installe automatiquement le binaire et enregistre tous les hooks en une seule et
 codex plugin marketplace add epicsagas/plugins
 ```
 
-Installe automatiquement les 23 competences et enregistre les hooks. Disponible immediatement — aucune etape supplementaire necessaire.
+Installe automatiquement les 26 competences et enregistre les hooks. Disponible immediatement — aucune etape supplementaire necessaire.
 Mise a jour avec `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
@@ -228,6 +228,9 @@ Les competences se declenchent automatiquement en fonction du contexte. Vous ne 
 | **tdd** | Implementation d'une nouvelle fonctionnalite ou correction de bug |
 | **debug** | Echec de test ou erreur d'execution |
 | **secure** | Code d'auth / BDD / API / secrets modifie |
+| **threat-model** | Évaluation de sécurité, analyse de surface d'attaque nécessaire |
+| **vuln-scan** | Scan de vulnérabilités — injection, auth, exposition de données, dépendances |
+| **triage** | Validation adverse des résultats de sécurité, ajustement de sévérité |
 | **perf** | Boucles, requetes, rendu, operations par lot |
 | **simplify** | Fichier > 200 lignes ou complexite cyclomatique elevee |
 | **verify** | Avant de completer `/go` ou `/ship` |
@@ -295,6 +298,14 @@ Trois techniques inspirees de l'apprentissage profond appliquees a l'evolution d
 Adapte de [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable via `rejected_buffer_ttl` et `minibatch_size` dans `[evolution]`.
 
 Stagnation : 3 sessions sans 5 % d'amelioration → retour automatique au meilleur point de controle.
+
+### Réglage automatique des prompts
+
+Les compétences évoluées sous-performantes (où `avg_score_with < avg_score_without`) reçoivent des conseils de réglage ciblés ajoutés à leur SKILL.md. Le contenu original n'est jamais modifié — les sections de réglage se trouvent derrière un délimiteur `<!-- auto-tuned -->`.
+
+- **Retour automatique** : après 3 sessions consécutives de scores décroissants, le réglage est supprimé et l'historique effacé
+- **Limite d'historique** : 10 entrées de réglage par compétence, suivies dans `meta.json`
+- **Guidage basé sur l'écart** : la sévérité du réglage correspond à l'écart de scores A/B (mineur → significatif → majeur)
 
 ### Efficacite des competences
 
@@ -418,9 +429,9 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 
 | Outil | Hooks Ring 0 | Competences | Agents |
 |-------|-------------|-------------|--------|
-| **Claude Code** | ✓ Complet | ✓ 23 competences | Live |
-| **Codex CLI** | ✓ Complet¹ | ✓ 23 | — |
-| **Cursor** | ✓ Complet² | ✓ 23 | Live |
+| **Claude Code** | ✓ Complet | ✓ 26 competences | Live |
+| **Codex CLI** | ✓ Complet¹ | ✓ 26 | — |
+| **Cursor** | ✓ Complet² | ✓ 26 | Live |
 | **OpenCode** | ✓ Partiel³ | — | — |
 | **Cline** | ✓ Complet⁴ | — | — |
 | **Aider** | —⁵ | — | — |
@@ -448,9 +459,9 @@ flowchart TB
         c8("/evolve (manuel)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (auto-amelioration)"]
@@ -703,6 +714,7 @@ Les hooks cherchent le binaire a deux endroits : `hooks/bin/epic-harness` (local
 ## Remerciements
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — Optimisation des competences inspiree de l'apprentissage profond (tampon de retroaction negative, reflexion par mini-lot, mises a jour lentes/meta)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — Modèles d'évaluation de sécurité (modélisation des menaces, scan de vulnérabilités, triage adverse, frontière de confiance à deux conteneurs)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Evolution automatisee et schemas de benchmark
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Systeme de competences d'agent Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Patterns complets Claude Code

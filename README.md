@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">A multi-tool AI agent harness that learns from every session — 22 skills, autonomous pipelines, and a self-evolving engine.</p></blockquote>
+<blockquote><p align="center">A multi-tool AI agent harness that learns from every session — 26 skills, autonomous pipelines, and a self-evolving engine.</p></blockquote>
 
 <p align="center"><b>One harness, six AI tools. Autonomous from spec to PR. Smarter every session.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A multi-tool AI agent harness with **23 skills (9 pipeline + 14 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
+A multi-tool AI agent harness with **26 skills (9 pipeline + 17 quality gates)**, a **self-evolving engine**, **unified memory**, and a **single-command autonomous pipeline** (`/orbit`). Works with Claude Code, Codex, Cursor, OpenCode, and Cline — all sharing the same `~/.harness/` data directory. After each session, the evolve loop analyzes failures, generates targeted skills, and loads them next time.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # set to 0 to disable auto-launch
 auto_open = true  # open browser on first session
 ```
 
-Screens: **Dashboard** · /orbit Pipeline · Skills (22) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+Screens: **Dashboard** · /orbit Pipeline · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -187,7 +187,7 @@ Inside a Claude Code session: `/evolve status`
 | `/discover` | Problem discovery — 5 Whys, JTBD, Socratic questioning |
 | `/spec` | Define requirements — converts to numbered R + AC document |
 | `/go` | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
-| `/audit` | Audit phase — parallel code review + security audit + tests |
+| `/audit` | Audit phase — parallel code review + security audit + tests. Supports `--strict` mode for trust boundary isolation |
 | `/eval` | Eval phase — 4-dimension quality & regression check (correctness, performance, quality, regression) |
 | `/ship` | Shipping phase — isolated test → PR with full audit report → CI watch |
 | `/evolve` | Manual evolution trigger — analyze sessions, view dashboard, rollback |
@@ -238,13 +238,16 @@ State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives c
 
 ## Quality Gates (Ring 2)
 
-14 skills that auto-trigger based on context. You don't invoke them.
+17 skills that auto-trigger based on context. You don't invoke them.
 
 | Skill | Triggers when |
 |-------|--------------|
 | **tdd** | New feature implementation or bug fix |
 | **debug** | Test failure or runtime error |
 | **secure** | Auth / DB / API / secrets code touched |
+| **threat-model** | Security assessment, attack surface analysis needed |
+| **vuln-scan** | Vulnerability scanning across injection, auth, exposure, dependencies |
+| **triage** | Adversarial validation of security findings, severity adjustment |
 | **perf** | Loops, queries, rendering, batch operations |
 | **simplify** | File > 200 lines or high cyclomatic complexity |
 | **document** | Public API added or signature changed |
@@ -256,7 +259,7 @@ State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives c
 | **reflect** | On-demand `/reflect`: evidence-based human self-assessment — "Am I using AI as a thought amplifier?" Scores 5 dimensions from hook-collected data |
 | **commit** | Conventional Commits generation — auto-generates from git diff |
 
-> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 23 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 26 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -320,6 +323,14 @@ Three deep learning-inspired techniques applied to natural language skill evolut
 Adapted from [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable via `rejected_buffer_ttl` and `minibatch_size` in `[evolution]`.
 
 Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
+
+### Prompt Auto-Tuning
+
+Underperforming evolved skills (where `avg_score_with < avg_score_without`) receive targeted tuning guidance appended to their SKILL.md. The original content is never modified — tuning sections live behind an `<!-- auto-tuned -->` delimiter.
+
+- **Auto-rollback**: after 3 consecutive sessions of declining scores, tuning is stripped and history cleared
+- **History cap**: 10 tuning entries per skill, tracked in `meta.json`
+- **Gap-driven guidance**: severity of tuning matches the A/B score gap (minor → significant → major)
 
 ### Skill Effectiveness
 
@@ -473,9 +484,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -740,6 +751,7 @@ Hooks look for the binary in two places: `hooks/bin/epic-harness` (plugin local)
 ## Acknowledgments
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — Deep learning-inspired skill optimization (negative feedback buffer, minibatch reflection, slow/meta updates)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — Security assessment patterns (threat modeling, vulnerability scanning, adversarial triage, two-container trust boundary)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Automated evolution and benchmark patterns
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code agent skill system
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Comprehensive Claude Code patterns

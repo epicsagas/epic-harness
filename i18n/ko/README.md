@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">모든 세션에서 학습하는 멀티툴 AI 에이전트 하네스 — 23개 스킬, 자율 파이프라인, 자기 진화 엔진.</p></blockquote>
+<blockquote><p align="center">모든 세션에서 학습하는 멀티툴 AI 에이전트 하네스 — 26개 스킬, 자율 파이프라인, 자기 진화 엔진.</p></blockquote>
 
 <p align="center"><b>하나의 하네스, 6개 AI 툴. 스펙에서 PR까지 자율 실행. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**23개 스킬(9 파이프라인 + 14 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
+**26개 스킬(9 파이프라인 + 17 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -90,7 +90,7 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 codex plugin marketplace add epicsagas/plugins
 ```
 
-23개 스킬 전체를 자동 설치하고 훅을 등록합니다. 추가 설정 없이 바로 사용할 수 있습니다.
+26개 스킬 전체를 자동 설치하고 훅을 등록합니다. 추가 설정 없이 바로 사용할 수 있습니다.
 
 `codex plugin update epic@epicsagas`로 업데이트합니다.
 
@@ -231,6 +231,9 @@ flowchart TD
 | **tdd** | 새로운 기능 구현 또는 버그 수정 |
 | **debug** | 테스트 실패 또는 런타임 에러 |
 | **secure** | 인증/DB/API/시크릿 코드 수정 시 |
+| **threat-model** | 보안 평가, 공격 표면 분석 필요 시 |
+| **vuln-scan** | 인젝션, 인증, 데이터 노출, 의존성 전체 취약점 스캔 |
+| **triage** | 보안 발견 사항의 적대적 검증, 심각도 조정 |
 | **perf** | 루프, 쿼리, 렌더링, 배치 작업 |
 | **simplify** | 파일이 200줄 초과이거나 순환 복잡도가 높을 때 |
 | **verify** | `/go` 또는 `/ship` 완료 전 |
@@ -298,6 +301,14 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)에서 차용. `[evolution]`의 `rejected_buffer_ttl`과 `minibatch_size`로 설정 가능.
 
 정체: 3세션 동안 5% 개선 없음 → 최적 체크포인트로 자동 롤백.
+
+### 프롬프트 자동 튜닝
+
+성과가 낮은 진화 스킬(avg_score_with < avg_score_without)은 SKILL.md에 타겟팅된 튜닝 가이드가 추가됩니다. 원본 콘텐츠는 수정되지 않으며, 튜닝 섹션은 `<!-- auto-tuned -->` 구분자 뒤에 위치합니다.
+
+- **자동 롤백**: 3회 연속 점수 하락 시 튜닝 제거 및 이력 초기화
+- **이력 상한**: 스킬당 10개 튜닝 엔트리, `meta.json`에 추적
+- **격차 기반 가이드**: 튜닝 심각도가 A/B 점수 격차에 일치 (minor → significant → major)
 
 ### 스킬 효과
 
@@ -421,8 +432,8 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 | 도구 | Ring 0 훅 | 스킬 | 에이전트 |
 |------|-----------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 23개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 23개 | — |
+| **Claude Code** | ✓ 전체 | ✓ 26개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 26개 | — |
 | **Cursor** | ✓ 전체³ | ✓ 규칙 경유 | Live |
 | **OpenCode** | ✓ 부분⁴ | — | — |
 | **Cline** | ✓ 전체⁵ | — | — |
@@ -451,9 +462,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — 품질 게이트 (14, context-triggered)"]
+    subgraph R2["Ring 2 — 품질 게이트 (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — 진화 (자기 개선)"]
@@ -706,6 +717,7 @@ cargo test                                                    # 테스트
 ## 감사의 말
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — 딥러닝 기반 스킬 최적화 (네거티브 피드백 버퍼, 미니배치 리플렉션, 슬로우/메타 업데이트)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — 보안 평가 패턴 (위협 모델링, 취약점 스캔, 적대적 트리아지, 투 컨테이너 신뢰 경계)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 자동화된 진화 및 벤치마크 패턴
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 에이전트 스킬 시스템
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 종합 Claude Code 패턴

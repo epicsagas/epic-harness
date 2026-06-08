@@ -1,11 +1,11 @@
 # epic-harness
 
-23 skills (9 pipeline + 14 quality) + self-evolving agent harness.
+26 skills (9 pipeline + 17 quality) + self-evolving agent harness.
 
 ## Structure
 
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
-  - `skills/` — 23 skills + _dispatch engine
+  - `skills/` — 26 skills + _dispatch engine
   - `presets/` — Cold-start skill templates
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
@@ -24,7 +24,7 @@
 
 - **Ring 0 (Autopilot)**: Hooks auto-maintain quality, restore sessions, learn
 - **Ring 1 (Pipeline)**: 9 skills that orchestrate multi-step workflows (discover → spec → go → audit → eval → ship, orbit, evolve, team)
-- **Ring 2 (Quality Gates)**: 14 skills that auto-trigger on context signals (tdd, debug, secure, verify, etc.)
+- **Ring 2 (Quality Gates)**: 17 skills that auto-trigger on context signals (tdd, debug, secure, threat-model, vuln-scan, triage, verify, etc.)
 - **Ring 3 (Evolve)**: Observe → Analyze → Evolve → Gate → Reload self-improvement loop
 
 ## /orbit — Autonomous Pipeline
@@ -165,6 +165,36 @@ Three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.or
 - Epoch classification via linear regression over last 5 sessions: `Improving` / `Regressing` / `PersistentFailure` / `StableSuccess`
 - `meta.json` per evolved skill tracks `slow_updates` array (capped at 20)
 - Auto-eviction: `sessions_active ≥ 3 && avg_score_with < avg_score_without - 0.02` → remove + add to rejected buffer
+
+### Prompt Auto-Tuning
+- Underperforming evolved skills (where `avg_score_with < avg_score_without`) receive targeted tuning guidance
+- Tuning sections appended after `<!-- auto-tuned -->` delimiter in SKILL.md — original content never modified
+- Auto-rollback: 3 consecutive declining sessions → tuning stripped, history cleared
+- History tracked in `SkillMeta.prompt_tuning_history` (capped at 10 entries per skill)
+- Entry point: `auto_tune_skills(metrics)` in `src/evolve/skills.rs`
+
+## Security Pipeline (Ring 2)
+
+Three security assessment skills ported from [defending-code](https://github.com/anthropics/defending-code-reference-harness):
+
+1. **threat-model**: Trust boundary enumeration, threat actor analysis, threat scenario generation → `THREAT_MODEL.md`
+2. **vuln-scan**: 4-dimension systematic scanner (injection, auth, data exposure, dependencies) → `VULN-FINDINGS.json`
+3. **triage**: Adversarial validation with severity adjustment, chaining analysis, root-cause grouping → `TRIAGE.json`
+
+Pipeline flow: `/threat-model` → `/vuln-scan` → `/triage`
+
+### Audit `--strict` Mode
+- Artifact-only delivery: audit modes receive only diff + spec, no builder context
+- Cross-check independence: code/security/test modes run blind until synthesis
+- Blind scoring: prevents anchoring bias between modes
+- No self-review: builder session excluded from audit agent selection
+- Activation: `--strict` flag or `mode: strict` in `.harness/engagement.md`
+
+### Engagement Context
+- Optional `.harness/engagement.md` in project root for security assessment scoping
+- Defines: Authorization, Scope (in/out), Constraints, Environment, Exclusions
+- `secure` skill checks for engagement context and loads scope if present
+- Reference template: `docs/references/engagement.md`
 
 ## Polish → Observe Feedback
 

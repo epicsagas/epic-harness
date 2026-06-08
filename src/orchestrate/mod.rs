@@ -387,6 +387,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn run_pre_returns_0_when_disabled() {
         with_env(None, || {
             let input = HookInput {
@@ -399,6 +400,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn run_post_returns_0_when_disabled() {
         with_env(None, || {
             let input = HookInput::default();

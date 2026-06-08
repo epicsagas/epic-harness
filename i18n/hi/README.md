@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">हर सेशन से सीखने वाला मल्टी-टूल AI एजेंट हार्नेस — 23 स्किल्स, स्वायत्त पाइपलाइन, और स्व-विकास इंजन।</p></blockquote>
+<blockquote><p align="center">हर सेशन से सीखने वाला मल्टी-टूल AI एजेंट हार्नेस — 26 स्किल्स, स्वायत्त पाइपलाइन, और स्व-विकास इंजन।</p></blockquote>
 
 <p align="center"><b>एक हार्नेस, छह AI टूल। स्पेक से PR तक स्वायत्त। हर सेशन के साथ और स्मार्ट।</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **23 स्किल्स (9 पाइपलाइन + 14 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
+एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **26 स्किल्स (9 पाइपलाइन + 17 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -90,7 +90,7 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 codex plugin marketplace add epicsagas/plugins
 ```
 
-सभी 23 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
+सभी 26 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
 
 ### macOS / Linux
 
@@ -226,6 +226,9 @@ flowchart TD
 | **tdd** | नई फीचर इम्प्लीमेंटेशन या बग फिक्स |
 | **debug** | टेस्ट विफलता या runtime error |
 | **secure** | Auth / DB / API / secrets कोड छूा गया |
+| **threat-model** | सुरक्षा मूल्यांकन, हमले की सतह विश्लेषण आवश्यक |
+| **vuln-scan** | कमजोरी स्कैनिंग — इंजेक्शन, प्रमाणीकरण, डेटा एक्सपोजर, निर्भरताएँ |
+| **triage** | सुरक्षा निष्कर्षों का प्रतिकूल सत्यापन, गंभीरता समायोजन |
 | **perf** | लूप, क्वेरी, रेंडरिंग, batch operations |
 | **simplify** | फ़ाइल > 200 लाइनें या उच्च cyclomatic complexity |
 | **verify** | `/go` या `/ship` पूरा करने से पहले |
@@ -293,6 +296,14 @@ Reload (अगला सेशन — resume विकसित स्किल�
 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904) से अनुकूलित। `[evolution]` में `rejected_buffer_ttl` और `minibatch_size` के माध्यम से कॉन्फ़िगर करने योग्य।
 
 स्थिरता: 5% सुधार के बिना 3 सेशन → best checkpoint पर ऑटो-rollback।
+
+### प्रॉम्प्ट ऑटो-ट्यूनिंग
+
+कम प्रदर्शन वाले विकसित स्किल्स (जहाँ `avg_score_with < avg_score_without`) को उनके SKILL.md में लक्षित ट्यूनिंग मार्गदर्शन प्राप्त होता है। मूल सामग्री कभी संशोधित नहीं होती — ट्यूनिंग अनुभाग `<!-- auto-tuned -->` सीमांकक के पीछे होते हैं।
+
+- **स्वतः रोलबैक**: लगातार 3 सत्रों में घटते स्कोर के बाद, ट्यूनिंग हटा दी जाती है और इतिहास साफ़ होता है
+- **इतिहास सीमा**: प्रति स्किल 10 ट्यूनिंग प्रविष्टियाँ, `meta.json` में ट्रैक की गई
+- **अंतर-आधारित मार्गदर्शन**: ट्यूनिंग की गंभीरता A/B स्कोर अंतर से मेल खाती है (मामूली → महत्वपूर्ण → प्रमुख)
 
 ### स्किल प्रभावशीलता
 
@@ -416,8 +427,8 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 
 | टूल | Ring 0 Hooks | स्किल्स | एजेंट |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 23 स्किल्स | Live |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 23 | — |
+| **Claude Code** | ✓ पूर्ण | ✓ 26 स्किल्स | Live |
+| **Codex CLI** | ✓ पूर्ण¹ | ✓ 26 | — |
 | **Cursor** | ✓ पूर्ण³ | ✓ rules के माध्यम से | Live |
 | **OpenCode** | ✓ आंशिक⁴ | — | — |
 | **Cline** | ✓ पूर्ण⁵ | — | — |
@@ -446,9 +457,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council) --- s8(document) --- s9(context) --- s10(agent-introspection) --- s11(reflect) --- s12(orchestrate) --- s13(commit)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -701,6 +712,7 @@ Hooks binary दो जगहों पर ढूंढते हैं: `hooks/
 ## आभार
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — डीप लर्निंग-प्रेरित कौशल अनुकूलन (नेगेटिव फीडबैक बफर, मिनीबैच प्रतिबिंब, स्लो/मेटा अपडेट)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — सुरक्षा मूल्यांकन पैटर्न (खतरे का मॉडलिंग, कमजोरी स्कैनिंग, प्रतिकूल ट्रायेज, दो-कंटेनर विश्वास सीमा)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — स्वचालित एवोल्यूशन और benchmark patterns
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code एजेंट skill system
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — व्यापक Claude Code patterns

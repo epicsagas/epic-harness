@@ -8,6 +8,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Security pipeline (Ring 2)**: three new skills ported from [defending-code](https://github.com/anthropics/defending-code-reference-harness)
+  - **threat-model**: trust boundary analysis, threat actor enumeration, threat scenario generation → `THREAT_MODEL.md`
+  - **vuln-scan**: 4-dimension systematic scanner (injection, auth, data exposure, dependencies) → `VULN-FINDINGS.json`
+  - **triage**: adversarial validation with severity adjustment, chaining analysis, root-cause grouping → `TRIAGE.json`
+  - Pipeline flow: `/threat-model` → `/vuln-scan` → `/triage`
+- **Prompt auto-tuning for evolved skills**: underperforming skills receive targeted tuning guidance based on A/B score gaps
+  - Tuning sections appended after `<!-- auto-tuned -->` delimiter — original content never modified
+  - Auto-rollback after 3 consecutive declining sessions (`TUNING_DECLINE_LIMIT`)
+  - History tracked in `SkillMeta.prompt_tuning_history` (capped at 10 entries)
+  - New functions: `auto_tune_skills()`, `append_tuning_section()`, `strip_tuning_sections()`, `build_tuning_section()`
+  - 10 new unit tests covering serialization, scoring, decline counting
+- **Audit `--strict` mode**: trust boundary isolation for reviewer/auditor independence
+  - Artifact-only delivery: audit modes receive only diff + spec, no builder context
+  - Cross-check independence: code/security/test modes run blind until synthesis
+  - Blind scoring: prevents anchoring bias between modes
+  - No self-review: builder session excluded from audit agent selection
+  - Activation: `--strict` flag or `mode: strict` in `.harness/engagement.md`
+- **Engagement context**: optional `.harness/engagement.md` for security assessment scoping
+  - Defines: Authorization, Scope (in/out), Constraints, Environment, Exclusions
+  - `secure` skill checks for engagement context and loads scope if present
+  - Reference template: `docs/references/engagement.md`
+- **Tiered verification ladder** in `/ship`: T0 (build) → T1 (tests+lint+fmt) → T2 (AC verification) → T3 (security)
+  - T1/T2 auto-retry ≤3 times
+  - T3 conditional on engagement.md or security-scope diff
+- **Semantic deduplication** in `/audit`: cross-mode finding dedup between parallel checks and synthesis
+  - NEW/DUP_BETTER/DUP_SKIP classification
+  - Severity reassessment across modes (highest severity wins)
 - **SkillOpt-inspired evolution optimization**: three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.org/abs/2605.23904) for natural language skill evolution
   - **Negative Feedback Buffer**: persists rejected skill proposals with TTL-based expiry to prevent re-generating known-bad skills
   - **Minibatch Reflection**: decomposes observations into fixed-size batches for structural pattern extraction, catching micro-patterns hidden by session averages
@@ -23,6 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - LLM-as-judge integration in SKILL.md for quality dimension (deferred to LLM session)
   - Orbit integration: Step 5.5 Eval phase inserted automatically when eval.yaml exists
   - New modules: `src/eval/{mod,config,runner,baseline,report}.rs`
+
+### Changed
+- **Skill descriptions normalized**: removed `Trigger:` prefix from all 14 skill descriptions, applied consistent `[What it does]. [When to use]` pattern
+- Skill count: 23 → 26 (9 pipeline + 17 quality gates)
 
 ## [0.5.0]
 

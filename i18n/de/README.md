@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Ein Multi-Tool-KI-Agenten-Harness, das aus jeder Session lernt — 23 Skills, autonome Pipelines und eine selbstentwickelnde Engine.</p></blockquote>
+<blockquote><p align="center">Ein Multi-Tool-KI-Agenten-Harness, das aus jeder Session lernt — 26 Skills, autonome Pipelines und eine selbstentwickelnde Engine.</p></blockquote>
 
 <p align="center"><b>Ein Harness, sechs KI-Tools. Autonom von Spec bis PR. Intelligenter nach jeder Session.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Ein Multi-Tool-KI-Agenten-Harness mit **23 Skills (9 Pipeline + 14 Quality Gates)**, einer **selbstentwickelnden Engine**, **einheitlichem Speicher** und einer **autonomen Ein-Befehl-Pipeline** (`/orbit`). Funktioniert mit Claude Code, Codex, Cursor, OpenCode und Cline — alle teilen dasselbe `~/.harness/` Datenverzeichnis. Nach jeder Session analysiert die Evolve-Schleife Fehler, generiert gezielte Skills und lädt sie beim nächsten Mal.
+Ein Multi-Tool-KI-Agenten-Harness mit **26 Skills (9 Pipeline + 17 Quality Gates)**, einer **selbstentwickelnden Engine**, **einheitlichem Speicher** und einer **autonomen Ein-Befehl-Pipeline** (`/orbit`). Funktioniert mit Claude Code, Codex, Cursor, OpenCode und Cline — alle teilen dasselbe `~/.harness/` Datenverzeichnis. Nach jeder Session analysiert die Evolve-Schleife Fehler, generiert gezielte Skills und lädt sie beim nächsten Mal.
 
 <p align="center">
   <img src="../../assets/features.png" alt="Epic Harness Funktionen" width="100%" />
@@ -90,7 +90,7 @@ Installiert das Binary automatisch und registriert alle Hooks in einem Schritt.
 codex plugin marketplace add epicsagas/plugins
 ```
 
-Installiert automatisch alle 23 Skills und registriert Hooks. Sofort verfügbar — keine weiteren Schritte erforderlich. Aktualisierungen mit `codex plugin update epic@epicsagas`.
+Installiert automatisch alle 26 Skills und registriert Hooks. Sofort verfügbar — keine weiteren Schritte erforderlich. Aktualisierungen mit `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -231,6 +231,9 @@ Skills werden automatisch basierend auf dem Kontext ausgelöst. Sie rufen sie ni
 | **tdd** | Neues Feature-Implementation oder Bug-Fix |
 | **debug** | Testfehler oder Laufzeitfehler |
 | **secure** | Auth / DB / API / Secrets-Code wird berührt |
+| **threat-model** | Sicherheitsbewertung, Angriffsflächenanalyse erforderlich |
+| **vuln-scan** | Schwachstellen-Scan über Injection, Auth, Datenexposition, Abhängigkeiten |
+| **triage** | Adversariele Validierung von Sicherheitsfunden, Schweregradanpassung |
 | **perf** | Schleifen, Abfragen, Rendering, Batch-Operationen |
 | **simplify** | Datei > 200 Zeilen oder hohe zyklomatische Komplexität |
 | **document** | Öffentliche API hinzugefügt oder Signatur geändert |
@@ -297,6 +300,14 @@ Drei vom Deep Learning inspirierte Techniken, angewendet auf die Evolution natü
 Angelehnt an [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Konfigurierbar über `rejected_buffer_ttl` und `minibatch_size` in `[evolution]`.
 
 Stagnation: 3 Sessions ohne 5% Verbesserung → automatischer Rollback zum besten Checkpoint.
+
+### Prompt-Auto-Tuning
+
+Unterperformende evolvierte Skills (bei denen `avg_score_with < avg_score_without`) erhalten gezielte Tuning-Anleitung, die an ihre SKILL.md angehängt wird. Der Originalinhalt wird nie modifiziert — Tuning-Abschnitte leben hinter einem `<!-- auto-tuned -->`-Trennzeichen.
+
+- **Automatischer Rollback**: nach 3 aufeinanderfolgenden Sessions mit sinkenden Scores wird das Tuning entfernt und der Verlauf gelöscht
+- **Verlaufsbegrenzung**: 10 Tuning-Einträge pro Skill, verfolgt in `meta.json`
+- **Lückengesteuerte Anleitung**: Schweregrad des Tunings entspricht der A/B-Score-Lücke (minor → significant → major)
 
 ### Skill-Effektivität
 
@@ -420,8 +431,8 @@ Alle Tools teilen dasselbe `~/.harness/projects/{slug}/`-Datenverzeichnis.
 
 | Tool | Ring 0 Hooks | Skills | Agents |
 |------|-------------|--------|--------|
-| **Claude Code** | ✓ Vollständig | ✓ 23 Skills | Live |
-| **Codex CLI** | ✓ Vollständig¹ | ✓ 23 | — |
+| **Claude Code** | ✓ Vollständig | ✓ 26 Skills | Live |
+| **Codex CLI** | ✓ Vollständig¹ | ✓ 26 | — |
 | **Cursor** | ✓ Vollständig² | ✓ über Rules | Live |
 | **OpenCode** | ✓ Teilweise³ | — | — |
 | **Cline** | ✓ Vollständig⁴ | — | — |
@@ -450,9 +461,9 @@ flowchart TB
         c8("/evolve (manuell)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, kontextgesteuert)"]
+    subgraph R2["Ring 2 — Quality Gates (17, kontextgesteuert)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (selbstverbessernd)"]
@@ -705,6 +716,7 @@ Hooks suchen das Binary an zwei Orten: `hooks/bin/epic-harness` (Plugin-lokal) �
 ## Danksagung
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — Deep-Learning-inspirierte Skill-Optimierung (Negative-Feedback-Puffer, Minibatch-Reflexion, Slow/Meta-Updates)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — Sicherheitsbewertungsmuster (Bedrohungsmodellierung, Schwachstellen-Scan, adversarielles Triage, Two-Container-Vertrauensgrenze)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Automatisierte Evolution und Benchmark-Muster
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code Agent-Skill-System
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Umfassende Claude Code-Muster

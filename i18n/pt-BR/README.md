@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Um harness de agente IA multi-ferramenta que aprende com cada sessão — 23 skills, pipelines autônomos e motor autoevolutivo.</p></blockquote>
+<blockquote><p align="center">Um harness de agente IA multi-ferramenta que aprende com cada sessão — 26 skills, pipelines autônomos e motor autoevolutivo.</p></blockquote>
 
 <p align="center"><b>Um harness, cinco ferramentas IA. Autônomo do spec ao PR. Mais inteligente a cada sessão.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Um harness de agente IA multi-ferramenta com **23 skills (9 pipeline + 14 quality gates)**, um **motor autoevolutivo**, **memória unificada** e uma **pipeline autônoma de comando único** (`/orbit`). Funciona com Claude Code, Codex, Cursor, OpenCode e Cline — todos compartilhando o mesmo diretório `~/.harness/`. Após cada sessão, o loop de evolução analisa falhas, gera skills direcionados e os carrega na próxima sessão.
+Um harness de agente IA multi-ferramenta com **26 skills (9 pipeline + 17 quality gates)**, um **motor autoevolutivo**, **memória unificada** e uma **pipeline autônoma de comando único** (`/orbit`). Funciona com Claude Code, Codex, Cursor, OpenCode e Cline — todos compartilhando o mesmo diretório `~/.harness/`. Após cada sessão, o loop de evolução analisa falhas, gera skills direcionados e os carrega na próxima sessão.
 
 <p align="center">
   <img src="../../assets/features.png" alt="funcionalidades do epic harness" width="100%" />
@@ -90,7 +90,7 @@ Instala automaticamente o binário e registra todos os hooks em uma única etapa
 codex plugin marketplace add epicsagas/plugins
 ```
 
-Instala automaticamente todas as 23 habilidades e registra os hooks. Disponível imediatamente — sem etapas adicionais. Atualiza com `codex plugin update epic@epicsagas`.
+Instala automaticamente todas as 26 habilidades e registra os hooks. Disponível imediatamente — sem etapas adicionais. Atualiza com `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -223,13 +223,16 @@ Estado persistido em `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobreviv
 
 ## Quality Gates (Ring 2)
 
-14 habilidades ativadas automaticamente com base no contexto. Você não as invoca.
+17 habilidades ativadas automaticamente com base no contexto. Você não as invoca.
 
 | Habilidade | Ativa quando |
 |------------|-------------|
 | **tdd** | Implementação de nova funcionalidade ou correção de bug |
 | **debug** | Falha de teste ou erro em tempo de execução |
 | **secure** | Código de Auth / DB / API / secrets modificado |
+| **threat-model** | Avaliação de segurança, análise de superfície de ataque necessária |
+| **vuln-scan** | Escaneamento de vulnerabilidades — injeção, autenticação, exposição de dados, dependências |
+| **triage** | Validação adversarial de descobertas de segurança, ajuste de severidade |
 | **perf** | Loops, consultas, renderização, operações em lote |
 | **simplify** | Arquivo com mais de 200 linhas ou alta complexidade ciclomática |
 | **verify** | Antes de completar `/go` ou `/ship` |
@@ -297,6 +300,14 @@ Três técnicas inspiradas em aprendizado profundo aplicadas à evolução de ha
 Adaptado do [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurável via `rejected_buffer_ttl` e `minibatch_size` em `[evolution]`.
 
 Estagnação: 3 sessões sem melhoria de 5% → rollback automático para o melhor checkpoint.
+
+### Autoajuste de Prompts
+
+Skills evoluídos com baixo desempenho (onde `avg_score_with < avg_score_without`) recebem orientação de ajuste direcionada adicionada ao seu SKILL.md. O conteúdo original nunca é modificado — as seções de ajuste vivem atrás de um delimitador `<!-- auto-tuned -->`.
+
+- **Reversão automática**: após 3 sessões consecutivas com pontuações decrescentes, o ajuste é removido e o histórico é limpo
+- **Limite de histórico**: 10 entradas de ajuste por skill, rastreadas em `meta.json`
+- **Orientação baseada em lacuna**: a severidade do ajuste corresponde à lacuna de pontuações A/B (menor → significativo → maior)
 
 ### Efetividade das Habilidades
 
@@ -420,8 +431,8 @@ Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projec
 
 | Ferramenta | Ring 0 Hooks | Habilidades | Agentes |
 |------------|-------------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 23 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 23 | — |
+| **Claude Code** | ✓ Completo | ✓ 26 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 26 | — |
 | **Cursor** | ✓ Completo² | ✓ via rules | Live |
 | **OpenCode** | ✓ Parcial³ | — | — |
 | **Cline** | ✓ Completo⁴ | — | — |
@@ -450,9 +461,9 @@ flowchart TB
         c8("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (14, context-triggered)"]
+    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -705,6 +716,7 @@ Os hooks procuram o binário em dois lugares: `hooks/bin/epic-harness` (plugin l
 ## Agradecimentos
 
 - [SkillOpt](https://arxiv.org/abs/2605.23904) — Otimização de habilidades inspirada em aprendizado profundo (buffer de feedback negativo, reflexão por mini-lote, atualizações lentas/meta)
+- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — Padrões de avaliação de segurança (modelagem de ameaças, escaneamento de vulnerabilidades, triagem adversarial, limite de confiança de dois contêineres)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Padrões de evolução automatizada e benchmarks
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de habilidades de agente do Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Padrões abrangentes do Claude Code
