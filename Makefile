@@ -2,7 +2,7 @@ PLUGIN_CACHE := $(HOME)/.claude/plugins/cache/epicsagas/epic/0.1.0/hooks/bin/epi
 CARGO_BIN    := $(HOME)/.cargo/bin/epic-harness
 HOOKS_BIN    := hooks/bin/epic-harness
 
-.PHONY: build install dashboard-build gen-skills gen-skills-dry lint-skills demo-record demo-gif demo-clean
+.PHONY: build install dashboard-build gen-skills gen-skills-dry lint-skills eval demo-record demo-gif demo-clean
 
 # Build the Svelte dashboard and copy into assets/ (called automatically by build.rs during cargo build)
 dashboard-build:
@@ -83,6 +83,12 @@ lint-skills:
 	else \
 		echo "All skill descriptions pass CSO lint."; \
 	fi
+
+# Run project quality & regression evaluation
+eval:
+	@echo "Running eval..."
+	@epic-harness eval --json
+	@echo "Eval complete."
 
 # ── Demo recording (episteme + orbit) ────────────────────────────
 DEMO_DIR  := docs/demo

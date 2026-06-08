@@ -133,11 +133,21 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 
 ## Step 5: Verdict
 
-- **All PASS + all AC verified** → proceed to Ship
+- **All PASS + all AC verified** → proceed to Eval (if eval.yaml exists) or Ship
 - **WARN** → log, auto-proceed
 - **FAIL** → increment `audit_fail_count`:
   - `< 3`: plan fixes from action items, execute, return to Step 4
   - `≥ 3`: **PAUSE** — ask user "continue or abort?"
+
+## Step 5.5: Eval (optional — only if eval.yaml exists)
+
+1. Check if `$HARNESS_DIR/eval/eval.yaml` exists
+2. If it does, run `epic eval --json` via the **eval** skill
+3. **Eval PASS** → proceed to Ship
+4. **Eval FAIL (regression detected)** → increment `audit_fail_count`:
+   - `< 3`: plan fixes, execute, return to Step 4
+   - `≥ 3`: **PAUSE** — ask user "continue or abort?"
+5. If eval.yaml does not exist, skip this step entirely
 
 ## Step 6: Ship
 

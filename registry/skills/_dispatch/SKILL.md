@@ -33,6 +33,7 @@ You have access to the following skills. **Invoke the matching skill BEFORE resp
 | 빌드/구현 시작, 스펙 승인됨 | **go** |
 | 리뷰/감사/테스트 필요 | **audit** |
 | PR 생성 / CI / 배포 준비 | **ship** |
+| Quality/performance regression check, baseline comparison, eval suite | **eval** |
 
 ## Alias Routing
 
@@ -42,6 +43,7 @@ Users can still type legacy command names. Map them:
 - `/audit` → invoke skill **audit** directly
 - `/check` → invoke skill **audit** directly (legacy alias)
 - `/ship` → invoke skill **ship** directly
+- `/eval` → invoke skill **eval** directly
 - `/discover` → invoke skill **discover** directly
 - `/intervene` → invoke skill **orchestrate** (intervene mode)
 - `/status` → invoke skill **orchestrate** (status mode)
@@ -57,6 +59,9 @@ When a phase completes, prompt the user toward the next step. Do NOT auto-procee
 | `/go` report done | All tasks complete, tests green | "Build complete. Run `/audit` to verify before shipping." |
 | `/audit` report done | All PASS + all AC verified | "Audit passed. Run `/ship` to create a PR." |
 | `/audit` report done | Any FAIL or AC missing | "Fix blockers with `/go`, then re-run `/audit`." |
+| `/ship` pre-check | eval.yaml exists | "Run `/eval` to check for regressions before shipping." |
+| `/eval` report done | All PASS + no regression | "Eval passed. Run `/ship` to create a PR." |
+| `/eval` report done | FAIL or regression detected | "Fix issues with `/go`, then re-run `/eval`." |
 | `/ship` report done | PR created, CI green | "Shipped. Loop complete." |
 | `/orbit` phase done | Pipeline `status: running` | "(orbit) Phase complete. Continuing to next phase..." |
 | `/orbit` audit FAIL × 3 | `audit_fail_count >= max_retries` | "(orbit) 3 audit failures reached. Pausing for your input." |
