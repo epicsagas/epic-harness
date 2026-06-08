@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::io;
 
-use crate::shared::evolution::{Metrics, SessionScoreEntry, SkillAttribution};
+use crate::shared::evolution::{EpochClass, Metrics, SessionScoreEntry, SkillAttribution};
 use crate::shared::scoring::ScoreDimensions;
 
 /// Maximum score history entries to retain.
@@ -88,6 +88,10 @@ pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metr
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let last_error_context = get("last_error_context").filter(|v| !v.is_empty());
+
+    // epoch_class: deserialize from snake_case string (e.g. "improving", "insufficient_data")
+    let epoch_class: Option<EpochClass> =
+        get("epoch_class").and_then(|v| serde_json::from_value(serde_json::Value::String(v)).ok());
 
     // Score history
     let sh_rows = sqlx::query(
@@ -227,7 +231,7 @@ pub async fn load_metrics_pool(pool: &AnyPool, project: &str) -> io::Result<Metr
         trend,
         stagnation_count,
         skill_attribution,
-        epoch_class: None,
+        epoch_class,
         last_error_context,
     };
 
@@ -415,6 +419,15 @@ pub async fn save_metrics_pool(pool: &AnyPool, project: &str, m: &Metrics) -> io
         ("last_session", m.last_session.clone()),
         ("best_score", m.best_score.map(|v| v.to_string())),
         ("last_error_context", m.last_error_context.clone()),
+        (
+            "epoch_class",
+            m.epoch_class.as_ref().map(|ec| {
+                serde_json::to_value(ec)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+                    .unwrap_or_default()
+            }),
+        ),
     ];
     for (key, opt_val) in optional {
         match opt_val {
@@ -552,7 +565,7 @@ mod tests {
                 m
             },
             last_error_context: Some("type_error in main.rs".into()),
-            epoch_class: None,
+            epoch_class: Some(EpochClass::Improving),
         }
     }
 
@@ -569,6 +582,7 @@ mod tests {
         assert_eq!(loaded.score_history[0].observations, 42);
         assert_eq!(loaded.trend, "improving");
         assert!(loaded.skill_attribution.contains_key("rust-borrow-checker"));
+        assert_eq!(loaded.epoch_class, Some(EpochClass::Improving));
     }
 
     #[tokio::test]
@@ -577,6 +591,41 @@ mod tests {
         let loaded = load_metrics_pool(&pool, "test-project").await.unwrap();
         assert_eq!(loaded.total_sessions, 0);
         assert!(loaded.score_history.is_empty());
+        assert_eq!(loaded.epoch_class, None);
+    }
+
+    #[tokio::test]
+    async fn epoch_class_roundtrip_all_variants() {
+        let pool = in_memory_pool().await;
+        let variants = [
+            EpochClass::Improving,
+            EpochClass::Regressing,
+            EpochClass::PersistentFailure,
+            EpochClass::StableSuccess,
+            EpochClass::InsufficientData,
+        ];
+        for (i, variant) in variants.into_iter().enumerate() {
+            let mut m = sample_metrics();
+            m.epoch_class = Some(variant.clone());
+            let project = format!("epoch-test-{i}");
+            save_metrics_pool(&pool, &project, &m).await.unwrap();
+            let loaded = load_metrics_pool(&pool, &project).await.unwrap();
+            assert_eq!(
+                loaded.epoch_class,
+                Some(variant),
+                "roundtrip failed for project {project}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn epoch_class_none_roundtrip() {
+        let pool = in_memory_pool().await;
+        let mut m = sample_metrics();
+        m.epoch_class = None;
+        save_metrics_pool(&pool, "epoch-none", &m).await.unwrap();
+        let loaded = load_metrics_pool(&pool, "epoch-none").await.unwrap();
+        assert_eq!(loaded.epoch_class, None);
     }
 
     #[tokio::test]
