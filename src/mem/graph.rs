@@ -1,6 +1,7 @@
 //! graph.rs — Graph build + traversal via llm-kernel
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io;
 
 use super::store::conn::memory_conn;
@@ -30,6 +31,12 @@ pub struct GraphEdge {
     pub target: String,
     pub relation: String,
     pub weight: f64,
+    #[serde(
+        rename = "virtual",
+        skip_serializing_if = "std::ops::Not::not",
+        default
+    )]
+    pub virtual_: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -40,20 +47,31 @@ pub struct Graph {
 
 /// Maximum number of edges returned in a graph payload.
 const MAX_GRAPH_EDGES: usize = 2000;
+/// Maximum number of virtual (computed) cross-project edges.
+const MAX_VIRTUAL_EDGES: usize = 500;
 
 /// Build a `Graph` value from the DB.
 #[allow(dead_code)]
 pub async fn build_graph_pool(_pool: &sqlx::AnyPool) -> io::Result<Graph> {
-    build_graph_sync()
+    build_graph_sync(true)
 }
 
-fn build_graph_sync() -> io::Result<Graph> {
+/// Build a `Graph` value from the DB with optional virtual edges.
+#[allow(dead_code)]
+pub async fn build_graph_pool_virtual(
+    _pool: &sqlx::AnyPool,
+    include_virtual: bool,
+) -> io::Result<Graph> {
+    build_graph_sync(include_virtual)
+}
+
+fn build_graph_sync(include_virtual: bool) -> io::Result<Graph> {
     let conn = memory_conn()?;
     let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
     let ids = llm_kernel::graph::store::list_node_ids(&guard)
         .map_err(|e| io::Error::other(e.to_string()))?;
     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let nodes = llm_kernel::graph::store::read_nodes(&guard, &id_refs)
+    let nodes: Vec<GraphNode> = llm_kernel::graph::store::read_nodes(&guard, &id_refs)
         .map_err(|e| io::Error::other(e.to_string()))?
         .into_iter()
         .map(|n| GraphNode {
@@ -66,7 +84,7 @@ fn build_graph_sync() -> io::Result<Graph> {
             accessed_at: n.accessed_at,
         })
         .collect();
-    let edges = llm_kernel::graph::store::read_edges(&guard, MAX_GRAPH_EDGES)
+    let mut edges: Vec<GraphEdge> = llm_kernel::graph::store::read_edges(&guard, MAX_GRAPH_EDGES)
         .map_err(|e| io::Error::other(e.to_string()))?
         .into_iter()
         .map(|e| GraphEdge {
@@ -74,25 +92,130 @@ fn build_graph_sync() -> io::Result<Graph> {
             target: e.target,
             relation: e.relation,
             weight: e.weight,
+            virtual_: false,
         })
         .collect();
+
+    if include_virtual {
+        let persisted = edges.len();
+        let budget = MAX_GRAPH_EDGES
+            .saturating_sub(persisted)
+            .min(MAX_VIRTUAL_EDGES);
+        if budget > 0 {
+            let mut vedges = generate_virtual_edges(&nodes);
+            vedges.truncate(budget);
+            edges.extend(vedges);
+        }
+    }
+
     Ok(Graph { nodes, edges })
 }
 
+/// Generate virtual cross-project edges based on shared tags.
+///
+/// For each pair of nodes in different projects sharing at least one tag,
+/// creates a virtual edge with weight = Jaccard similarity of their tag sets.
+pub fn generate_virtual_edges(nodes: &[GraphNode]) -> Vec<GraphEdge> {
+    // Build inverted index: tag -> list of node indices
+    let mut tag_index: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, n) in nodes.iter().enumerate() {
+        for tag in &n.tags {
+            tag_index.entry(tag.as_str()).or_default().push(i);
+        }
+    }
+
+    // Accumulate shared tag counts per cross-project pair
+    let mut pair_shared: HashMap<(String, String), usize> = HashMap::new();
+    for indices in tag_index.values() {
+        if indices.len() < 2 {
+            continue;
+        }
+        for i in 0..indices.len() {
+            for j in (i + 1)..indices.len() {
+                let a = &nodes[indices[i]];
+                let b = &nodes[indices[j]];
+                // Only cross-project pairs
+                if a.projects.iter().any(|p| b.projects.contains(p)) {
+                    continue;
+                }
+                let key = if a.id <= b.id {
+                    (a.id.clone(), b.id.clone())
+                } else {
+                    (b.id.clone(), a.id.clone())
+                };
+                *pair_shared.entry(key).or_default() += 1;
+            }
+        }
+    }
+
+    // Build per-node tag sets for Jaccard
+    let tag_sets: Vec<std::collections::HashSet<&str>> = nodes
+        .iter()
+        .map(|n| n.tags.iter().map(|t| t.as_str()).collect())
+        .collect();
+    let node_idx: HashMap<&str, usize> = nodes.iter().map(|n| (n.id.as_str(), n.id.as_str())).fold(
+        HashMap::new(),
+        |mut m, (id, _)| {
+            if let Some(idx) = nodes.iter().position(|n| n.id == id) {
+                m.insert(id, idx);
+            }
+            m
+        },
+    );
+
+    let mut result: Vec<GraphEdge> = pair_shared
+        .into_iter()
+        .filter_map(|((a_id, b_id), shared)| {
+            let ai = node_idx.get(a_id.as_str())?;
+            let bi = node_idx.get(b_id.as_str())?;
+            let union_size = tag_sets[*ai].union(&tag_sets[*bi]).count();
+            if union_size == 0 {
+                return None;
+            }
+            let weight = (shared as f64 / union_size as f64).clamp(0.1, 1.0);
+            Some(GraphEdge {
+                source: a_id,
+                target: b_id,
+                relation: "shared_tag".to_string(),
+                weight,
+                virtual_: true,
+            })
+        })
+        .collect();
+
+    result.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    result.truncate(MAX_VIRTUAL_EDGES);
+    result
+}
+
 /// Build graph JSON string — sync wrapper.
+#[allow(dead_code)]
 pub async fn rebuild_graph_json_pool(_pool: &sqlx::AnyPool) -> io::Result<String> {
     rebuild_graph_json()
 }
 
+/// Build graph JSON string — sync wrapper with virtual edges control.
+pub async fn rebuild_graph_json_pool_virtual(
+    _pool: &sqlx::AnyPool,
+    include_virtual: bool,
+) -> io::Result<String> {
+    let graph = build_graph_sync(include_virtual)?;
+    serde_json::to_string_pretty(&graph).map_err(io::Error::other)
+}
+
 /// Build graph JSON string — sync wrapper.
 pub fn rebuild_graph_json() -> io::Result<String> {
-    let graph = build_graph_sync()?;
+    let graph = build_graph_sync(true)?;
     serde_json::to_string_pretty(&graph).map_err(io::Error::other)
 }
 
 /// Write the graph JSON to the graph file on disk.
 pub fn rebuild_graph() -> io::Result<()> {
-    let graph = build_graph_sync()?;
+    let graph = build_graph_sync(true)?;
     let data = serde_json::to_vec_pretty(&graph).map_err(io::Error::other)?;
     use super::store::atomic_write;
     use super::store::graph_path;
@@ -223,6 +346,120 @@ mod tests {
         assert!(
             json.contains("\"importance\":0.85"),
             "importance should appear in JSON: {json}"
+        );
+    }
+
+    // ── Virtual edge tests ──────────────────────────────────────
+
+    fn make_node(id: &str, tags: Vec<&str>, projects: Vec<&str>) -> GraphNode {
+        GraphNode {
+            id: id.to_string(),
+            title: id.to_string(),
+            node_type: "concept".to_string(),
+            tags: tags.into_iter().map(|t| t.to_string()).collect(),
+            importance: 0.5,
+            projects: projects.into_iter().map(|p| p.to_string()).collect(),
+            accessed_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn generate_virtual_edges_cross_project_only() {
+        let nodes = vec![
+            make_node("a", vec!["rust"], vec!["proj1"]),
+            make_node("b", vec!["rust"], vec!["proj2"]),
+            make_node("c", vec!["rust"], vec!["proj1"]),
+        ];
+        let edges = generate_virtual_edges(&nodes);
+        // a-b: cross-project (proj1 vs proj2) -> virtual edge
+        assert!(edges.iter().any(|e| e.source == "a" && e.target == "b"));
+        // a-c: same project (proj1) -> no edge
+        assert!(
+            !edges
+                .iter()
+                .any(|e| (e.source == "a" && e.target == "c")
+                    || (e.source == "c" && e.target == "a"))
+        );
+    }
+
+    #[test]
+    fn generate_virtual_edges_weight_jaccard() {
+        let nodes = vec![
+            make_node("a", vec!["x", "y"], vec!["p1"]),
+            make_node("b", vec!["x", "y", "z"], vec!["p2"]),
+            make_node("c", vec!["x"], vec!["p3"]),
+        ];
+        let edges = generate_virtual_edges(&nodes);
+        let ab = edges
+            .iter()
+            .find(|e| e.source == "a" && e.target == "b")
+            .unwrap();
+        let ac = edges
+            .iter()
+            .find(|e| e.source == "a" && e.target == "c")
+            .unwrap();
+        // Jaccard(a,b) = 2/3 ≈ 0.67, Jaccard(a,c) = 1/2 = 0.5
+        assert!(
+            ab.weight > ac.weight,
+            "ab weight ({}) should be > ac weight ({})",
+            ab.weight,
+            ac.weight
+        );
+    }
+
+    #[test]
+    fn generate_virtual_edges_no_tags() {
+        let nodes = vec![
+            make_node("a", vec![], vec!["p1"]),
+            make_node("b", vec![], vec!["p2"]),
+        ];
+        let edges = generate_virtual_edges(&nodes);
+        assert!(edges.is_empty(), "no tags -> no virtual edges");
+    }
+
+    #[test]
+    fn generate_virtual_edges_dedup() {
+        let nodes = vec![
+            make_node("a", vec!["x", "y", "z"], vec!["p1"]),
+            make_node("b", vec!["x", "y", "z"], vec!["p2"]),
+        ];
+        let edges = generate_virtual_edges(&nodes);
+        // Only one edge between a and b despite 3 shared tags
+        let count = edges
+            .iter()
+            .filter(|e| {
+                (e.source == "a" && e.target == "b") || (e.source == "b" && e.target == "a")
+            })
+            .count();
+        assert_eq!(count, 1, "should have exactly 1 edge between a and b");
+    }
+
+    #[test]
+    fn graph_edge_virtual_field_serialization() {
+        let persisted = GraphEdge {
+            source: "a".to_string(),
+            target: "b".to_string(),
+            relation: "related".to_string(),
+            weight: 1.0,
+            virtual_: false,
+        };
+        let json = serde_json::to_string(&persisted).unwrap();
+        assert!(
+            !json.contains("virtual"),
+            "persisted edge should not have virtual field: {json}"
+        );
+
+        let virt = GraphEdge {
+            source: "a".to_string(),
+            target: "b".to_string(),
+            relation: "shared_tag".to_string(),
+            weight: 0.5,
+            virtual_: true,
+        };
+        let vjson = serde_json::to_string(&virt).unwrap();
+        assert!(
+            vjson.contains("\"virtual\":true"),
+            "virtual edge should have virtual: true: {vjson}"
         );
     }
 }

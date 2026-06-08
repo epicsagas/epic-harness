@@ -23,7 +23,7 @@ use serde_json::{Value, json};
 use sqlx::AnyPool;
 use tower_http::cors::CorsLayer;
 
-use super::graph::{compute_stats_pool, rebuild_graph_json_pool};
+use super::graph::{compute_stats_pool, rebuild_graph_json_pool_virtual};
 use super::store::{
     Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
 };
@@ -364,8 +364,21 @@ async fn handle_stats(State(state): State<AppState>) -> impl IntoResponse {
     json_ok(body)
 }
 
-async fn handle_graph(State(state): State<AppState>) -> impl IntoResponse {
-    let body = rebuild_graph_json_pool(&state.pool)
+#[derive(serde::Deserialize)]
+struct GraphQuery {
+    #[serde(default = "default_true")]
+    include_virtual: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+async fn handle_graph(
+    State(state): State<AppState>,
+    Query(q): Query<GraphQuery>,
+) -> impl IntoResponse {
+    let body = rebuild_graph_json_pool_virtual(&state.pool, q.include_virtual)
         .await
         .unwrap_or_else(|_| "{}".to_string());
     json_ok(body)
