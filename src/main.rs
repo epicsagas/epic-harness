@@ -1,5 +1,6 @@
 mod config;
 mod episteme_client;
+mod eval;
 mod evolve;
 mod hooks;
 mod install;
@@ -107,6 +108,10 @@ fn main() {
         let code = team::run_org(&args[1..]);
         std::process::exit(code);
     }
+    if subcmd == "eval" {
+        let code = eval::run(&args[2..]);
+        std::process::exit(code);
+    }
     if subcmd == "serve" {
         let port = parse_flag_u32(&args, "--port").map(|p| p as u16);
         std::process::exit(serve::run_serve(port));
@@ -184,8 +189,8 @@ fn main() {
                 store::migrate::run_subcommand(dry_run, reset)
             }
         }
-        "install" | "uninstall" | "mem" | "team" | "org" | "telemetry" | "serve" | "dashboard"
-        | "update" => {
+        "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "telemetry" | "serve"
+        | "dashboard" | "update" => {
             unreachable!()
         }
         "path" => {
@@ -225,6 +230,11 @@ fn main() {
                 "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
             );
             eprintln!("USER SUBCOMMANDS:");
+            eprintln!("  eval         Project quality & regression evaluation  (epic eval --init)");
+            eprintln!("    --init             Scaffold eval.yaml config");
+            eprintln!("    --json             Output as JSON (for CI)");
+            eprintln!("    --baseline-update  Save current results as new baseline");
+            eprintln!("    --dimension <dim>  Run specific dimension only");
             eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
             eprintln!("    --to-global          Merge per-project harness.db files into global DB");
             eprintln!("    --dry-run            Preview without writing");

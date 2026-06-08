@@ -1,0 +1,163 @@
+---
+name: eval
+description: "Trigger: quality/performance regression check, baseline comparison, pre-ship eval. Sub-modes: correctness, performance, quality, regression. Outputs PASS/WARN/FAIL per dimension."
+---
+
+# Eval — Quality & Regression Gate
+
+**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. Never use `.harness/` in the project directory.
+
+## When to Trigger
+- Before `/ship` creates a PR (automatic if eval.yaml exists)
+- After `/go` completes a feature
+- On explicit `/eval` command
+- When user mentions "regression", "baseline", "eval suite", "quality check"
+- CI: `make eval` or `epic eval --json`
+
+## Execution Modes
+
+4 dimensions run in parallel where possible:
+
+1. **eval:correctness** — Test pass rate, mutation score, assertion density
+2. **eval:performance** — Throughput, latency, memory (opt-in)
+3. **eval:quality** — Lint, code quality, LLM-as-judge
+4. **eval:regression** — Baseline comparison, score deltas
+
+---
+
+## Process
+
+### Step 0: Prerequisites
+
+```bash
+HARNESS_DIR=$(epic path)
+```
+
+If `$HARNESS_DIR/eval/eval.yaml` does not exist, run scaffold:
+```bash
+epic eval --init
+```
+
+Read the config:
+```bash
+cat $HARNESS_DIR/eval/eval.yaml
+```
+
+### Step 1: Run Rust CLI
+
+Execute the structured evaluation via the Rust binary:
+```bash
+epic eval --json
+```
+
+This runs all enabled dimensions and outputs a JSON result. Capture the output.
+
+If the CLI reports `llm_judge: SKIPPED` (no LLM available in CLI mode), proceed to Step 2 for LLM-as-judge. Otherwise, skip to Step 3.
+
+### Step 2: LLM-as-Judge (when llm_judge enabled)
+
+If the quality dimension has `llm_judge: true` and CLI marked it SKIPPED:
+
+1. Sample 3–5 changed files from the current branch:
+   ```bash
+   git diff --name-only $(git merge-base HEAD main)
+   ```
+
+2. For each sampled file, evaluate on a 1-10 rubric:
+   - **Readability** (naming, structure, flow)
+   - **Correctness** (logic, edge cases, error handling)
+   - **DRY** (no unjustified duplication)
+   - **Security** (no obvious vulnerabilities)
+
+3. Average scores across files. Map to 0.0–1.0 scale.
+
+4. Record results alongside CLI output.
+
+### Step 3: Load Baseline
+
+```bash
+cat $HARNESS_DIR/eval/baselines/latest.json
+```
+
+If no baseline exists, the current run BECOMES the first baseline. Save it:
+```bash
+epic eval --baseline-update
+```
+
+Report: "First baseline established. Future runs will compare against this."
+
+### Step 4: Synthesize Report
+
+Combine CLI output + LLM-as-judge results into a single report:
+
+```
+## Eval Report
+- Branch: {branch}
+- Commit: {commit_short}
+
+### Correctness: [PASS/WARN/FAIL] — score: {score}
+- Tests: {passed}/{total} passing ({pass_rate}%)
+- Mutation score: {mutation_score}% (if enabled)
+- Delta vs baseline: {+/-delta}
+
+### Performance: [PASS/WARN/FAIL] — score: {score} (if enabled)
+- Avg latency: {latency}ms (delta: {+/-delta})
+- Throughput: {throughput} (delta: {+/-delta})
+
+### Quality: [PASS/WARN/FAIL] — score: {score}
+- Lint errors: {count}
+- LLM judge: {score}/10 (if enabled)
+
+### Regression: [PASS/FAIL]
+| Dimension | Baseline | Current | Delta | Verdict |
+|-----------|----------|---------|-------|---------|
+| correctness | {prev} | {cur} | {delta} | {pass/fail} |
+| quality | {prev} | {cur} | {delta} | {pass/fail} |
+
+### Overall: [PASS/WARN/FAIL] — {overall_score}
+```
+
+### Step 5: Act
+
+- **All PASS + no regression**: "Eval passed. Run `/ship` to create a PR."
+- **WARN**: Show warnings. Ask whether to fix before shipping.
+- **FAIL or regression detected**: List each failure with fix hint. "Fix with `/go`, then re-run `/eval`."
+
+### Step 6: Save Results
+
+```bash
+epic eval --baseline-update  # if user approves this as new baseline
+```
+
+Results auto-saved to `$HARNESS_DIR/eval/results/EVAL-{timestamp}.json`.
+
+---
+
+## Anti-Rationalization
+
+| Excuse | Rebuttal | What to do instead |
+|--------|----------|-------------------|
+| "Tests pass, no need for eval" | Tests pass today but regress tomorrow without baselines | Run eval and establish a baseline |
+| "Performance testing is premature" | Latency regressions are invisible until users complain | Enable performance dimension, run benchmarks now |
+| "Mutation testing is too slow" | Slow mutation catches bugs fast tests miss | Run on changed modules only (`--dimension correctness`) |
+| "LLM-as-judge is subjective" | Subjective beats absent — fixed rubric + averaging reduces variance | Use the 4-axis rubric, average across 3+ files |
+| "We can add eval later" | Later never comes; regressions accumulate silently | Start with correctness+quality, add dimensions incrementally |
+| "CI will catch regressions" | CI only catches build/test failures, not quality drift | Eval measures what CI misses: mutation score, LLM quality |
+
+## Evidence Required
+
+- [ ] `epic eval --json` output captured (all enabled dimensions scored)
+- [ ] Baseline comparison performed (or first baseline established)
+- [ ] Each dimension has PASS/WARN/FAIL verdict
+- [ ] No dimension regressed beyond threshold (or explicit user override)
+- [ ] Results saved to `$HARNESS_DIR/eval/results/`
+- [ ] LLM-as-judge scores recorded (if enabled)
+
+## Red Flags
+
+- Reporting PASS without actual `epic eval` output
+- Skipping regression comparison "because it's the first run" (first run should ESTABLISH baseline)
+- Reporting PASS with 0 test coverage
+- Ignoring mutation score drops >5%
+- Marking eval PASS when any dimension below minimum threshold
+- Running eval on main branch instead of feature branch
