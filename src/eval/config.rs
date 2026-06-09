@@ -6,21 +6,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EvalConfig {
+    /// Informational only — used by `verify`, not by eval itself.
     #[serde(default = "default_stack")]
     pub stack: String,
     #[serde(default)]
     pub dimensions: Dimensions,
+    /// Project-specific benchmark commands. Auto-detected by `--init`.
     #[serde(default)]
     pub benchmarks: Vec<Benchmark>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Dimensions {
-    #[serde(default = "default_correctness")]
+    /// Run a custom correctness command (no default — delegate to verify).
+    #[serde(default)]
     pub correctness: DimensionConfig<CorrectnessExtra>,
     #[serde(default)]
     pub performance: DimensionConfig<PerformanceExtra>,
-    #[serde(default = "default_quality")]
+    /// Run a custom quality command (no default — delegate to verify).
+    #[serde(default)]
     pub quality: DimensionConfig<QualityExtra>,
     #[serde(default = "default_regression")]
     pub regression: DimensionConfig<RegressionExtra>,
@@ -58,7 +62,8 @@ pub struct QualityExtra {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RegressionExtra {
-    #[serde(default = "default_baseline_dir")]
+    /// Baseline directory. `None` = auto-resolve (in-repo `benchmarks/baselines/` first).
+    #[serde(default)]
     pub baseline_dir: Option<String>,
     #[serde(default = "default_true")]
     pub fail_on_regression: bool,
@@ -66,18 +71,26 @@ pub struct RegressionExtra {
     pub threshold: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Benchmark {
     pub name: String,
-    #[serde(default)]
-    pub config: serde_json::Value,
+    /// Shell command to execute.
+    pub command: String,
+    /// How to interpret the result:
+    /// - `"exit_code"` (default): 0 = PASS, non-zero = FAIL, score 1.0 / 0.0
+    /// - `"composite"`: parse JSON stdout for `composite` or `score` field (0.0–1.0)
+    #[serde(default = "default_result_type")]
+    pub result_type: String,
 }
 
 // ── Resolved commands (after auto-detection) ────────────────────────
 
 pub struct ResolvedCommands {
+    /// Explicit correctness command only — no stack-based default.
     pub test_command: Option<String>,
+    /// Explicit quality/lint command only — no stack-based default.
     pub lint_command: Option<String>,
+    /// Explicit performance/bench command only — no stack-based default.
     pub bench_command: Option<String>,
     #[expect(dead_code)]
     pub mutation_command: Option<String>,
@@ -98,32 +111,19 @@ fn default_pass_rate() -> f64 {
 fn default_regression_pct() -> f64 {
     10.0
 }
-fn default_baseline_dir() -> Option<String> {
-    Some("eval/baselines".to_string())
-}
 fn default_threshold() -> f64 {
     0.05
+}
+fn default_result_type() -> String {
+    "exit_code".to_string()
 }
 
 impl Default for Dimensions {
     fn default() -> Self {
         Self {
-            correctness: DimensionConfig {
-                enabled: true,
-                command: None,
-                extra: CorrectnessExtra {
-                    mutation_tool: None,
-                    min_pass_rate: 1.0,
-                },
-            },
-            performance: DimensionConfig {
-                enabled: false,
-                command: None,
-                extra: PerformanceExtra {
-                    max_regression_pct: 10.0,
-                },
-            },
-            quality: default_quality(),
+            correctness: DimensionConfig::default(),
+            performance: DimensionConfig::default(),
+            quality: DimensionConfig::default(),
             regression: default_regression(),
         }
     }
@@ -139,34 +139,11 @@ impl Default for EvalConfig {
     }
 }
 
-fn default_quality() -> DimensionConfig<QualityExtra> {
-    DimensionConfig {
-        enabled: true,
-        command: None,
-        extra: QualityExtra { llm_judge: true },
-    }
-}
-
-fn default_correctness() -> DimensionConfig<CorrectnessExtra> {
-    DimensionConfig {
-        enabled: true,
-        command: None,
-        extra: CorrectnessExtra {
-            mutation_tool: None,
-            min_pass_rate: 1.0,
-        },
-    }
-}
-
 fn default_regression() -> DimensionConfig<RegressionExtra> {
     DimensionConfig {
         enabled: true,
         command: None,
-        extra: RegressionExtra {
-            baseline_dir: Some("eval/baselines".to_string()),
-            fail_on_regression: true,
-            threshold: 0.05,
-        },
+        extra: RegressionExtra::default(),
     }
 }
 
@@ -206,7 +183,7 @@ impl Default for QualityExtra {
 impl Default for RegressionExtra {
     fn default() -> Self {
         Self {
-            baseline_dir: Some("eval/baselines".to_string()),
+            baseline_dir: None,
             fail_on_regression: true,
             threshold: 0.05,
         }
@@ -225,7 +202,7 @@ pub fn load(eval_dir: &Path) -> Result<EvalConfig, String> {
     serde_yaml::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
-/// Scaffold a minimal eval.yaml with auto-detected stack.
+/// Scaffold a minimal eval.yaml with auto-detected stack and benchmarks.
 pub fn scaffold(eval_dir: &Path) -> Result<std::path::PathBuf, String> {
     std::fs::create_dir_all(eval_dir).map_err(|e| format!("create dir: {e}"))?;
 
@@ -234,33 +211,46 @@ pub fn scaffold(eval_dir: &Path) -> Result<std::path::PathBuf, String> {
         return Err(format!("eval.yaml already exists: {}", path.display()));
     }
 
-    let stack = detect_stack();
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let stack = detect_stack(&cwd);
+    let benchmarks = detect_benchmarks(&cwd);
+
+    if benchmarks.is_empty() {
+        eprintln!(
+            "warning: no benchmark files detected in {}\n\
+             Add commands to `benchmarks:` in eval.yaml to enable domain-specific evaluation.",
+            cwd.display()
+        );
+    }
+
     let cfg = EvalConfig {
         stack,
+        benchmarks,
         ..EvalConfig::default()
     };
 
     let yaml = serde_yaml::to_string(&cfg).map_err(|e| format!("serialize: {e}"))?;
 
-    // Add helpful comments
     let commented = format!(
         "# eval.yaml — auto-generated by `epic eval --init`\n\
-         # Edit to customize evaluation dimensions.\n\n\
+         # Correctness/quality dimensions are disabled by default.\n\
+         # eval delegates build/test/lint to `verify` and focuses on domain benchmarks.\n\
+         # Add benchmark commands to the `benchmarks:` list to measure domain quality.\n\n\
          {yaml}"
     );
 
     std::fs::write(&path, &commented).map_err(|e| format!("write {}: {e}", path.display()))?;
 
-    // Also create baseline and results dirs
-    let _ = std::fs::create_dir_all(eval_dir.join("baselines"));
-    let _ = std::fs::create_dir_all(eval_dir.join("results"));
+    // Create in-repo baseline and results dirs
+    let bench_dir = cwd.join("benchmarks");
+    let _ = std::fs::create_dir_all(bench_dir.join("baselines"));
+    let _ = std::fs::create_dir_all(bench_dir.join("results"));
 
     Ok(path)
 }
 
-/// Detect project stack from marker files in CWD.
-fn detect_stack() -> String {
-    let cwd = std::env::current_dir().unwrap_or_default();
+/// Detect project stack from marker files.
+fn detect_stack(cwd: &Path) -> String {
     if cwd.join("Cargo.toml").exists() {
         "rust".to_string()
     } else if cwd.join("package.json").exists() {
@@ -276,41 +266,53 @@ fn detect_stack() -> String {
     }
 }
 
-/// Resolve auto-detected commands from stack.
+/// Scan for existing benchmark infrastructure and pre-populate benchmark entries.
+fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
+    let mut found = Vec::new();
+
+    // Python eval runner (e.g. Episteme pattern)
+    if cwd.join("benchmarks").join("eval_runner.py").exists() {
+        found.push(Benchmark {
+            name: "eval_runner".into(),
+            command: "python3 benchmarks/eval_runner.py full".into(),
+            result_type: "composite".into(),
+        });
+    }
+
+    // Makefile `eval` target
+    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile")) {
+        if content.lines().any(|l| l.starts_with("eval:") || l.starts_with("eval :")) {
+            found.push(Benchmark {
+                name: "make_eval".into(),
+                command: "make eval".into(),
+                result_type: "exit_code".into(),
+            });
+        }
+    }
+
+    // justfile `eval` recipe
+    if let Ok(content) = std::fs::read_to_string(cwd.join("justfile")) {
+        if content.lines().any(|l| l.starts_with("eval:") || l.starts_with("eval :")) {
+            found.push(Benchmark {
+                name: "just_eval".into(),
+                command: "just eval".into(),
+                result_type: "exit_code".into(),
+            });
+        }
+    }
+
+    found
+}
+
+/// Resolve commands from explicit config only — no stack-based defaults.
+///
+/// eval delegates build/test/lint to `verify`. Only explicitly configured
+/// dimension commands are returned; stack is informational.
 pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
     let stack = if cfg.stack == "auto" {
-        detect_stack()
+        detect_stack(&std::env::current_dir().unwrap_or_default())
     } else {
         cfg.stack.clone()
-    };
-
-    let (test_cmd, lint_cmd, bench_cmd) = match stack.as_str() {
-        "rust" => (
-            Some("cargo test".to_string()),
-            Some("cargo clippy -- -D warnings".to_string()),
-            Some("cargo bench".to_string()),
-        ),
-        "node" => (
-            Some("npm test".to_string()),
-            Some("npm run lint".to_string()),
-            Some("npm run bench".to_string()),
-        ),
-        "python" => (
-            Some("pytest".to_string()),
-            Some("ruff check .".to_string()),
-            Some("pytest --benchmark-only".to_string()),
-        ),
-        "go" => (
-            Some("go test ./...".to_string()),
-            Some("golangci-lint run".to_string()),
-            Some("go test -bench=.".to_string()),
-        ),
-        "java" => (
-            Some("mvn test".to_string()),
-            Some("mvn checkstyle:check".to_string()),
-            None,
-        ),
-        _ => (None, None, None),
     };
 
     let mutation_cmd = cfg
@@ -327,9 +329,9 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         });
 
     Ok(ResolvedCommands {
-        test_command: cfg.dimensions.correctness.command.clone().or(test_cmd),
-        lint_command: cfg.dimensions.quality.command.clone().or(lint_cmd),
-        bench_command: cfg.dimensions.performance.command.clone().or(bench_cmd),
+        test_command: cfg.dimensions.correctness.command.clone(),
+        lint_command: cfg.dimensions.quality.command.clone(),
+        bench_command: cfg.dimensions.performance.command.clone(),
         mutation_command: mutation_cmd,
         stack,
     })

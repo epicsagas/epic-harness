@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::config::ResolvedCommands;
+use super::config::{Benchmark, ResolvedCommands};
 
 /// Single dimension evaluation result.
 #[derive(Debug, Clone)]
@@ -214,6 +214,62 @@ pub fn compute_regression(
         details: json!({ "deltas": deltas, "threshold": threshold }),
         duration_ms: start.elapsed().as_millis() as u64,
     }
+}
+
+// ── Benchmark ───────────────────────────────────────────────────────
+
+/// Run a single configured benchmark command and return its result.
+pub fn run_benchmark(bench: &Benchmark) -> DimResult {
+    let start = Instant::now();
+    let output = exec_command(&bench.command);
+    let duration = start.elapsed().as_millis() as u64;
+    let exit_ok = output.exit_code == 0;
+
+    let score = match bench.result_type.as_str() {
+        "composite" => {
+            parse_composite_score(&output.stdout).unwrap_or(if exit_ok { 1.0 } else { 0.0 })
+        }
+        _ => {
+            if exit_ok { 1.0 } else { 0.0 }
+        }
+    };
+
+    let verdict = if exit_ok { "PASS" } else { "FAIL" };
+
+    DimResult {
+        dimension: format!("benchmark:{}", bench.name),
+        score,
+        passed: exit_ok,
+        verdict: verdict.into(),
+        details: json!({
+            "command": bench.command,
+            "result_type": bench.result_type,
+            "exit_code": output.exit_code,
+            "score": score,
+            "stdout_tail": truncate(&output.stdout, 500),
+            "stderr_tail": truncate(&output.stderr, 200),
+        }),
+        duration_ms: duration,
+    }
+}
+
+/// Try to extract a composite/score float from JSON stdout (last JSON line wins).
+fn parse_composite_score(stdout: &str) -> Option<f64> {
+    for line in stdout.lines().rev() {
+        let line = line.trim();
+        if line.starts_with('{') {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                if let Some(s) = v
+                    .get("composite")
+                    .or_else(|| v.get("score"))
+                    .and_then(|v| v.as_f64())
+                {
+                    return Some(s.clamp(0.0, 1.0));
+                }
+            }
+        }
+    }
+    None
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

@@ -51,6 +51,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Orbit integration: Step 5.5 Eval phase inserted automatically when eval.yaml exists
   - New modules: `src/eval/{mod,config,runner,baseline,report}.rs`
 
+- **`eval` benchmark auto-detect and in-repo baselines** (#73)
+  - `Benchmark` struct gains `command` and `result_type` fields; benchmarks are now executed
+  - `eval --init` scans for `benchmarks/eval_runner.py`, `Makefile eval`, `justfile eval` and pre-populates `benchmarks:` list
+  - Baselines default to in-repo `benchmarks/baselines/latest.json`; results save to `benchmarks/results/`
+  - `result_type: composite` parses `composite`/`score` float from JSON stdout (e.g. Episteme eval_runner.py output)
+  - Warns at runtime when benchmark infrastructure exists but `benchmarks:` is empty
+  - `correctness` and `quality` dimensions no longer inject stack-based defaults (`cargo test`, `cargo clippy`) — eval delegates build/test/lint to `verify`
+
 - **`merge-project` subcommand**: consolidate duplicate project slugs into one
   - Three-layer merge: global `harness.db` (UPDATE project column), per-project `harness.db` (ATTACH + INSERT OR IGNORE), file-based data (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`)
   - `--dry-run` previews row/file counts without writing
