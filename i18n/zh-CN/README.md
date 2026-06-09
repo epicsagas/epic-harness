@@ -567,6 +567,29 @@ epic mem export --out ./docs/memory                    # 导出为 Markdown
     └── metrics.json           # 聚合统计 + 技能归因
 ```
 
+### 迁移（JSONL → SQLite）
+
+自 v0.4.9 起，运营数据存储在 `harness.db`（SQLite）中。已有 JSONL/JSON 文件的用户在升级后需运行一次：
+
+```bash
+epic-harness migrate --dry-run   # 预览将导入的内容
+epic-harness migrate             # 执行导入
+```
+
+原始文件在导入后**不会被删除**。新用户自动使用 SQLite — 无需任何操作。
+
+### Slug 合并
+
+同一个项目克隆到不同路径时可能积累多个 slug（例如 `/Volumes/T5/projects/…` 与 `~/projects/…` 会产生不同的后缀）。使用以下命令合并：
+
+```bash
+epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # 预览
+epic-harness merge-project --from <source-slug> --to <target-slug>              # 应用
+epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # 应用 + 删除源
+```
+
+合并涵盖三个数据层：全局 `harness.db`（重新标记 `project` 列）、项目级 `harness.db`（ATTACH + INSERT OR IGNORE），以及文件型数据（`obs/`、`sessions/`、`evolved/`、`evolution.jsonl`、`orbit/`）。已存在于目标中的文件不会被覆盖 — 仅将源中独有的文件复制过去。
+
 与团队共享安全规则：在项目根目录放置 `.harness/guard-rules.yaml`（提交到 git）。
 
 </details>

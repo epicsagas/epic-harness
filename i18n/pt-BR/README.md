@@ -571,6 +571,29 @@ Todos os dados ficam em `~/.harness/` (diretório home), não na raiz do seu pro
     └── metrics.json           # Estatísticas agregadas + atribuição de habilidades
 ```
 
+### Migração (JSONL → SQLite)
+
+A partir da v0.4.9, os dados operacionais são armazenados em `harness.db` (SQLite). Usuários existentes com arquivos JSONL/JSON devem executar uma vez após atualizar:
+
+```bash
+epic-harness migrate --dry-run   # visualizar o que seria importado
+epic-harness migrate             # realizar a importação
+```
+
+Os arquivos originais **não são excluídos** após a importação. Novos usuários já utilizam SQLite automaticamente — nenhuma ação necessária.
+
+### Consolidação de Slugs
+
+O mesmo projeto pode acumular múltiplos slugs quando clonado em caminhos diferentes (por exemplo, `/Volumes/T5/projects/…` vs `~/projects/…` gera sufixos diferentes). Mescle-os com:
+
+```bash
+epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # visualizar
+epic-harness merge-project --from <source-slug> --to <target-slug>              # aplicar
+epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # aplicar + remover origem
+```
+
+Mescla as três camadas de dados: `harness.db` global (rerotula a coluna `project`), `harness.db` por projeto (ATTACH + INSERT OR IGNORE) e dados baseados em arquivos (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`). Arquivos já presentes no destino nunca são sobrescritos — apenas arquivos exclusivos da origem são copiados.
+
 Compartilhe regras de segurança com sua equipe: `.harness/guard-rules.yaml` na raiz do projeto (commitado no git).
 
 </details>

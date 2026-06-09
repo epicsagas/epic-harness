@@ -567,6 +567,29 @@ Lifecycle: 30+ दिन बिना access → 10% importance decay (floor 0.0
     └── metrics.json           # Aggregate stats + skill attribution
 ```
 
+### माइग्रेशन (JSONL → SQLite)
+
+v0.4.9 से, operational data `harness.db` (SQLite) में संग्रहीत होता है। JSONL/JSON फ़ाइलों वाले मौजूदा उपयोगकर्ताओं को upgrade के बाद एक बार चलाना चाहिए:
+
+```bash
+epic-harness migrate --dry-run   # preview what would be imported
+epic-harness migrate             # perform the import
+```
+
+import के बाद मूल फ़ाइलें **हटाई नहीं जाती**। नए उपयोगकर्ता स्वचालित रूप से SQLite पर होते हैं — कोई कार्रवाई आवश्यक नहीं।
+
+### Slug एकीकरण
+
+जब किसी प्रोजेक्ट को अलग-अलग पथों पर clone किया जाता है (जैसे `/Volumes/T5/projects/…` बनाम `~/projects/…` अलग-अलग suffix बनाता है) तो एक ही प्रोजेक्ट कई slugs जमा कर सकता है। उन्हें इस प्रकार merge करें:
+
+```bash
+epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # preview
+epic-harness merge-project --from <source-slug> --to <target-slug>              # apply
+epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # apply + remove source
+```
+
+तीनों data layers merge करता है: global `harness.db` (`project` column को re-label करता है), per-project `harness.db` (ATTACH + INSERT OR IGNORE), और file-based data (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`)। target में पहले से मौजूद फ़ाइलें कभी overwrite नहीं होतीं — केवल source-only फ़ाइलें copy की जाती हैं।
+
 अपनी टीम के साथ safety rules साझा करें: प्रोजेक्ट रूट में `.harness/guard-rules.yaml` (git में committed)।
 
 </details>

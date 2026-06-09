@@ -564,6 +564,29 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
     └── metrics.json           # 集計統計 + スキルアトリビューション
 ```
 
+### マイグレーション（JSONL → SQLite）
+
+v0.4.9以降、運用データは `harness.db`（SQLite）に保存されます。既存のJSONL/JSONファイルを持つユーザーはアップグレード後に一度だけ実行してください:
+
+```bash
+epic-harness migrate --dry-run   # preview what would be imported
+epic-harness migrate             # perform the import
+```
+
+インポート後、元のファイルは**削除されません**。新規ユーザーは自動的にSQLiteが使用されるため、何もする必要はありません。
+
+### スラグの統合
+
+同じプロジェクトを異なるパスにクローンすると（例: `/Volumes/T5/projects/…` と `~/projects/…` では異なるサフィックスが生成される）、複数のスラグが蓄積される場合があります。次のコマンドでマージできます:
+
+```bash
+epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # preview
+epic-harness merge-project --from <source-slug> --to <target-slug>              # apply
+epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # apply + remove source
+```
+
+3つのデータレイヤーすべてをマージします: グローバルの `harness.db`（`project` カラムを再ラベル）、プロジェクト別の `harness.db`（ATTACH + INSERT OR IGNORE）、ファイルベースのデータ（`obs/`、`sessions/`、`evolved/`、`evolution.jsonl`、`orbit/`）。ターゲットにすでに存在するファイルは上書きされません — ソースにのみ存在するファイルがコピーされます。
+
 安全ルールをチームと共有: プロジェクトルートの `.harness/guard-rules.yaml`（gitにコミット）。
 
 </details>

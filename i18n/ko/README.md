@@ -572,6 +572,29 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
     └── metrics.json           # 집계 통계 + 스킬 기여도
 ```
 
+### 마이그레이션 (JSONL → SQLite)
+
+v0.4.9부터 운영 데이터는 `harness.db`(SQLite)에 저장됩니다. JSONL/JSON 파일을 보유한 기존 사용자는 업그레이드 후 한 번 실행해야 합니다:
+
+```bash
+epic-harness migrate --dry-run   # 가져올 데이터 미리 보기
+epic-harness migrate             # 실제 가져오기 실행
+```
+
+원본 파일은 가져오기 후 **삭제되지 않습니다**. 신규 사용자는 자동으로 SQLite를 사용하므로 별도 작업이 필요 없습니다.
+
+### 슬러그 통합
+
+같은 프로젝트를 다른 경로에 클론하면 여러 슬러그가 생길 수 있습니다 (예: `/Volumes/T5/projects/…`와 `~/projects/…`는 서로 다른 접미사를 생성). 다음 명령어로 병합할 수 있습니다:
+
+```bash
+epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # 미리 보기
+epic-harness merge-project --from <source-slug> --to <target-slug>              # 적용
+epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # 적용 + 소스 제거
+```
+
+세 가지 데이터 계층을 모두 병합합니다: 글로벌 `harness.db`(`project` 컬럼 재레이블링), 프로젝트별 `harness.db`(ATTACH + INSERT OR IGNORE), 파일 기반 데이터(`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`). 대상에 이미 존재하는 파일은 절대 덮어쓰지 않으며 — 소스 전용 파일만 복사됩니다.
+
 프로젝트 루트의 `.harness/guard-rules.yaml`을 통해 팀과 안전 규칙을 공유할 수 있습니다 (git에 커밋됨).
 
 </details>
