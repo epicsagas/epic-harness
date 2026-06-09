@@ -4,6 +4,7 @@ mod baseline;
 mod config;
 mod report;
 mod runner;
+mod scaffold;
 
 use crate::shared::paths::harness_dir;
 
@@ -11,12 +12,58 @@ use crate::shared::paths::harness_dir;
 pub fn run(args: &[String]) -> i32 {
     let json_mode = args.iter().any(|a| a == "--json");
     let init_mode = args.iter().any(|a| a == "--init");
+    let scaffold_mode = args.iter().any(|a| a == "--scaffold");
     let baseline_update = args.iter().any(|a| a == "--baseline-update");
     let dimension_filter = parse_flag_str(args, "--dimension");
 
     let harness = harness_dir();
     let eval_dir = harness.join("eval");
     let cwd = std::env::current_dir().unwrap_or_default();
+
+    // --scaffold: generate benchmark files for detected stack
+    if scaffold_mode {
+        let stack = config::detect_stack(&cwd);
+        eprintln!("[eval] detected stack: {stack}");
+        return match scaffold::scaffold_benchmarks(&cwd, &stack) {
+            Ok(result) => {
+                for path in &result.created {
+                    println!("created: {}", path.display());
+                }
+                for path in &result.skipped {
+                    println!("skipped (exists): {}", path.display());
+                }
+                if result.created.is_empty() {
+                    println!("nothing to create — all benchmark files already exist");
+                } else {
+                    println!(
+                        "\n{} file(s) created for stack '{}'",
+                        result.created.len(),
+                        result.stack
+                    );
+                    println!("Next: review the generated files, fill in TODO sections, then run:");
+                    println!("  epic eval --init   # scaffold eval.yaml if not yet done");
+                    println!("  epic eval          # run evaluation");
+                }
+                if json_mode {
+                    let created: Vec<_> = result.created.iter().map(|p| p.display().to_string()).collect();
+                    let skipped: Vec<_> = result.skipped.iter().map(|p| p.display().to_string()).collect();
+                    if let Ok(j) = serde_json::to_string(&serde_json::json!({
+                        "action": "scaffold",
+                        "stack": result.stack,
+                        "created": created,
+                        "skipped": skipped,
+                    })) {
+                        println!("{j}");
+                    }
+                }
+                0
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                1
+            }
+        };
+    }
 
     // --init: scaffold config and exit
     if init_mode {

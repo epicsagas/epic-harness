@@ -43,6 +43,52 @@ Read the config:
 cat $HARNESS_DIR/eval/eval.yaml
 ```
 
+### Step 0.5: Scaffold benchmarks (when no benchmark infrastructure exists)
+
+If `eval.yaml` has `benchmarks: []` and no benchmark files are found in the project:
+
+1. **Generate stub files** using the CLI:
+   ```bash
+   epic eval --scaffold
+   ```
+   Supported stacks (auto-detected from project markers):
+
+   | Stack | Detected by | Generated file | Output format |
+   |-------|-------------|----------------|---------------|
+   | Rust | `Cargo.toml` | `benches/eval_harness.rs` | criterion (exit code) |
+   | Python | `pyproject.toml` / `setup.py` | `benchmarks/eval_runner.py` | JSON composite |
+   | TypeScript | `tsconfig.json` | `benchmarks/eval.ts` | JSON composite |
+   | Node.js | `package.json` | `benchmarks/eval.mjs` | JSON composite |
+   | Go | `go.mod` | `benchmarks/eval_test.go` | JSON composite |
+   | Java | `pom.xml` / `build.gradle` | `benchmarks/EvalBenchmark.java` | exit code |
+   | Kotlin | `build.gradle.kts` | `benchmarks/EvalBenchmark.kt` | exit code |
+   | Ruby | `Gemfile` | `benchmarks/eval_benchmark.rb` | JSON composite |
+   | PHP | `composer.json` | `benchmarks/eval_benchmark.php` | JSON composite |
+   | C# | `*.csproj` / `*.sln` | `Benchmarks/EvalBenchmark.cs` | JSON composite |
+   | Swift | `Package.swift` | `benchmarks/EvalBenchmark.swift` | JSON composite |
+   | Elixir | `mix.exs` | `benchmarks/eval_benchmark.exs` | JSON composite |
+   | C++ | `CMakeLists.txt` | `benchmarks/eval_benchmark.cpp` | exit code |
+
+2. **Customize the generated file** — every file has `# TODO` / `// TODO` markers:
+   - Replace placeholder logic with calls to your actual domain functions
+   - Adjust the composite score weights to reflect your domain priorities
+   - For precision/recall benchmarks: wire in your real test set and model
+
+3. **If `--scaffold` can't generate a useful stub** (domain too complex, custom evaluation logic needed), generate a custom benchmark with LLM assistance:
+   - Read the project's main source files to understand the domain
+   - Identify the 2–3 most critical quality signals (latency, accuracy, throughput, precision/recall)
+   - Write a benchmark that measures those signals and outputs `{"composite": 0.0–1.0, ...}`
+   - Save to `benchmarks/eval_runner.{ext}` matching the project language
+
+4. **Wire into eval.yaml**:
+   ```yaml
+   benchmarks:
+     - name: eval_runner
+       command: python3 benchmarks/eval_runner.py full
+       result_type: composite   # parse composite field from JSON stdout
+   ```
+   Use `result_type: exit_code` for frameworks (criterion, JMH, BenchmarkDotNet) that manage their own output.
+
 ### Step 1: Run Rust CLI
 
 Execute the structured evaluation via the Rust binary:

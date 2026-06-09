@@ -247,6 +247,9 @@ fn main() {
             eprintln!("USER SUBCOMMANDS:");
             eprintln!("  eval         Project quality & regression evaluation  (epic eval --init)");
             eprintln!("    --init             Scaffold eval.yaml config");
+            eprintln!("    --scaffold         Generate stack-appropriate benchmark files");
+            eprintln!("                       Supports: rust python typescript node go java kotlin");
+            eprintln!("                                 ruby php csharp swift elixir cpp");
             eprintln!("    --json             Output as JSON (for CI)");
             eprintln!("    --baseline-update  Save current results as new baseline");
             eprintln!("    --dimension <dim>  Run specific dimension only");

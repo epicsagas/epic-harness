@@ -250,17 +250,64 @@ pub fn scaffold(eval_dir: &Path) -> Result<std::path::PathBuf, String> {
 }
 
 /// Detect project stack from marker files.
-fn detect_stack(cwd: &Path) -> String {
+pub fn detect_stack(cwd: &Path) -> String {
     if cwd.join("Cargo.toml").exists() {
         "rust".to_string()
-    } else if cwd.join("package.json").exists() {
-        "node".to_string()
-    } else if cwd.join("pyproject.toml").exists() || cwd.join("setup.py").exists() {
-        "python".to_string()
+    } else if cwd.join("mix.exs").exists() {
+        "elixir".to_string()
+    } else if cwd.join("Package.swift").exists() {
+        "swift".to_string()
+    } else if cwd.join("CMakeLists.txt").exists() {
+        "cpp".to_string()
+    } else if cwd.join("Gemfile").exists() {
+        "ruby".to_string()
+    } else if cwd.join("composer.json").exists() {
+        "php".to_string()
+    } else if cwd
+        .read_dir()
+        .ok()
+        .and_then(|mut e| e.find(|f| {
+            f.as_ref().ok().map(|f| {
+                let n = f.file_name();
+                let s = n.to_string_lossy();
+                s.ends_with(".csproj") || s.ends_with(".sln")
+            }).unwrap_or(false)
+        }))
+        .is_some()
+    {
+        "csharp".to_string()
+    } else if cwd.join("build.gradle.kts").exists() {
+        // Kotlin DSL build takes precedence over plain Gradle
+        "kotlin".to_string()
+    } else if cwd.join("pom.xml").exists()
+        || cwd.join("build.gradle").exists()
+    {
+        // Check for Kotlin source files before falling back to Java
+        if cwd.join("src").exists()
+            && std::fs::read_dir(cwd.join("src"))
+                .ok()
+                .map(|e| {
+                    e.flatten().any(|f| {
+                        f.path()
+                            .extension()
+                            .map(|x| x == "kt")
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        {
+            "kotlin".to_string()
+        } else {
+            "java".to_string()
+        }
     } else if cwd.join("go.mod").exists() {
         "go".to_string()
-    } else if cwd.join("pom.xml").exists() || cwd.join("build.gradle").exists() {
-        "java".to_string()
+    } else if cwd.join("pyproject.toml").exists() || cwd.join("setup.py").exists() {
+        "python".to_string()
+    } else if cwd.join("tsconfig.json").exists() {
+        "typescript".to_string()
+    } else if cwd.join("package.json").exists() {
+        "node".to_string()
     } else {
         "unknown".to_string()
     }
