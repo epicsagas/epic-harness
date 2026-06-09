@@ -308,8 +308,6 @@ pub fn compute_stats() -> io::Result<serde_json::Value> {
 mod tests {
     use super::super::store::conn::test_conn;
     use super::*;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// Test graph_neighbors using a test connection.
     #[test]

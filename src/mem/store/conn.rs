@@ -15,10 +15,9 @@ use super::util::db_path;
 /// Reinitializes when the resolved path changes (e.g., HARNESS_ROOT override in integration tests).
 static MEMORY_CONN: Mutex<Option<(PathBuf, Arc<Mutex<Connection>>)>> = Mutex::new(None);
 
-/// Per-thread override used by tests for isolation.
 #[cfg(test)]
 thread_local! {
-    static TEST_CONN_OVERRIDE: RefCell<Option<Arc<Mutex<Connection>>>> = RefCell::new(None);
+    static TEST_CONN_OVERRIDE: RefCell<Option<Arc<Mutex<Connection>>>> = const { RefCell::new(None) };
 }
 
 /// Returns the shared rusqlite connection for memory.db.
