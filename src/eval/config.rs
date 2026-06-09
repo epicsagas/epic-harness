@@ -266,33 +266,32 @@ pub fn detect_stack(cwd: &Path) -> String {
     } else if cwd
         .read_dir()
         .ok()
-        .and_then(|mut e| e.find(|f| {
-            f.as_ref().ok().map(|f| {
-                let n = f.file_name();
-                let s = n.to_string_lossy();
-                s.ends_with(".csproj") || s.ends_with(".sln")
-            }).unwrap_or(false)
-        }))
+        .and_then(|mut e| {
+            e.find(|f| {
+                f.as_ref()
+                    .ok()
+                    .map(|f| {
+                        let n = f.file_name();
+                        let s = n.to_string_lossy();
+                        s.ends_with(".csproj") || s.ends_with(".sln")
+                    })
+                    .unwrap_or(false)
+            })
+        })
         .is_some()
     {
         "csharp".to_string()
     } else if cwd.join("build.gradle.kts").exists() {
         // Kotlin DSL build takes precedence over plain Gradle
         "kotlin".to_string()
-    } else if cwd.join("pom.xml").exists()
-        || cwd.join("build.gradle").exists()
-    {
+    } else if cwd.join("pom.xml").exists() || cwd.join("build.gradle").exists() {
         // Check for Kotlin source files before falling back to Java
         if cwd.join("src").exists()
             && std::fs::read_dir(cwd.join("src"))
                 .ok()
                 .map(|e| {
-                    e.flatten().any(|f| {
-                        f.path()
-                            .extension()
-                            .map(|x| x == "kt")
-                            .unwrap_or(false)
-                    })
+                    e.flatten()
+                        .any(|f| f.path().extension().map(|x| x == "kt").unwrap_or(false))
                 })
                 .unwrap_or(false)
         {
@@ -328,7 +327,10 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 
     // Makefile `eval` target
     if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile")) {
-        if content.lines().any(|l| l.starts_with("eval:") || l.starts_with("eval :")) {
+        if content
+            .lines()
+            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
+        {
             found.push(Benchmark {
                 name: "make_eval".into(),
                 command: "make eval".into(),
@@ -339,7 +341,10 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 
     // justfile `eval` recipe
     if let Ok(content) = std::fs::read_to_string(cwd.join("justfile")) {
-        if content.lines().any(|l| l.starts_with("eval:") || l.starts_with("eval :")) {
+        if content
+            .lines()
+            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
+        {
             found.push(Benchmark {
                 name: "just_eval".into(),
                 command: "just eval".into(),

@@ -5,6 +5,11 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] — 2026-06-10
+
+### Fixed
+- **`cargo fmt` failure**: reformatted `detect_stack()` C# detection block and Java/Kotlin `pom.xml`/`build.gradle` condition in `src/eval/config.rs` to satisfy rustfmt
+
 ## [0.6.0] — 2026-06-09
 
 ### Added

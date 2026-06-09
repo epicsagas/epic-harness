@@ -199,7 +199,9 @@ fn main() {
                     store::merge_project::run_merge(&f, &t, dry_run, delete_source)
                 }
                 _ => {
-                    eprintln!("Usage: epic-harness merge-project --from <slug> --to <slug> [--dry-run] [--delete-source]");
+                    eprintln!(
+                        "Usage: epic-harness merge-project --from <slug> --to <slug> [--dry-run] [--delete-source]"
+                    );
                     1
                 }
             }
@@ -248,7 +250,9 @@ fn main() {
             eprintln!("  eval         Project quality & regression evaluation  (epic eval --init)");
             eprintln!("    --init             Scaffold eval.yaml config");
             eprintln!("    --scaffold         Generate stack-appropriate benchmark files");
-            eprintln!("                       Supports: rust python typescript node go java kotlin");
+            eprintln!(
+                "                       Supports: rust python typescript node go java kotlin"
+            );
             eprintln!("                                 ruby php csharp swift elixir cpp");
             eprintln!("    --json             Output as JSON (for CI)");
             eprintln!("    --baseline-update  Save current results as new baseline");

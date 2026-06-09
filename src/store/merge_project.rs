@@ -13,8 +13,8 @@ use std::io;
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::shared::paths::{global_harness_db_path, harness_projects_root};
 use super::sqlx_err;
+use crate::shared::paths::{global_harness_db_path, harness_projects_root};
 
 // ── Public entry point ───────────────────────────────────────────────────────
 
@@ -90,18 +90,20 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
 
     // ── 3. File-based data ───────────────────────────────────────────────────
     let obs_files = copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run);
-    let session_files =
-        copy_dir_files(&from_dir.join("sessions"), &to_dir.join("sessions"), dry_run);
+    let session_files = copy_dir_files(
+        &from_dir.join("sessions"),
+        &to_dir.join("sessions"),
+        dry_run,
+    );
     let orbit_files = copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run);
-    let evolved_dirs = copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run);
+    let evolved_dirs =
+        copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run);
     let evo_lines = append_evolution_jsonl(&from_dir, &to_dir, dry_run).unwrap_or(0);
 
     // ── Summary ──────────────────────────────────────────────────────────────
     println!("\n[merge-project] ─── summary ───────────────────────────");
     println!("  global DB rows updated   : {global_rows}");
-    println!(
-        "  per-project DB merged    : obs={db_obs} sessions={db_sessions} evo={db_evo}"
-    );
+    println!("  per-project DB merged    : obs={db_obs} sessions={db_sessions} evo={db_evo}");
     println!("  obs files copied         : {obs_files}");
     println!("  session files copied     : {session_files}");
     println!("  evolved dirs copied      : {evolved_dirs}");
@@ -134,12 +136,7 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
 
 // ── Global DB: UPDATE project column ────────────────────────────────────────
 
-async fn merge_global_db(
-    db_path: &Path,
-    from: &str,
-    to: &str,
-    dry_run: bool,
-) -> io::Result<usize> {
+async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) -> io::Result<usize> {
     let url = format!("sqlite:{}", db_path.display());
     let mut conn = SqliteConnectOptions::from_str(&url)
         .map_err(sqlx_err)?
@@ -303,9 +300,7 @@ async fn merge_per_project_dbs(
             .fetch_one(&mut conn)
             .await
             .unwrap_or(0);
-        println!(
-            "  [dry-run] per-project DB would merge: obs={obs} sessions={sess} evo={evo}"
-        );
+        println!("  [dry-run] per-project DB would merge: obs={obs} sessions={sess} evo={evo}");
         return Ok((obs as usize, sess as usize, evo as usize));
     }
 

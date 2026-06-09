@@ -12,8 +12,8 @@
 pub mod evolution;
 pub mod evolved;
 pub mod global;
-pub mod metrics;
 pub mod merge_project;
+pub mod metrics;
 pub mod migrate;
 pub mod observations;
 pub mod orbit_store;

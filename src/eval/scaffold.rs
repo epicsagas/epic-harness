@@ -25,51 +25,26 @@ pub fn scaffold_benchmarks(cwd: &Path, stack: &str) -> Result<ScaffoldResult, St
     };
 
     let bench_dir = cwd.join("benchmarks");
-    std::fs::create_dir_all(&bench_dir)
-        .map_err(|e| format!("create benchmarks/: {e}"))?;
+    std::fs::create_dir_all(&bench_dir).map_err(|e| format!("create benchmarks/: {e}"))?;
 
     let tasks: &[(&str, &str, &str)] = match stack {
-        "rust" => &[
-            ("benches/eval_harness.rs", RUST_BENCH, "benches/"),
-        ],
-        "python" => &[
-            ("benchmarks/eval_runner.py", PYTHON_BENCH, "benchmarks/"),
-        ],
-        "node" => &[
-            ("benchmarks/eval.mjs", NODE_BENCH, "benchmarks/"),
-        ],
-        "typescript" => &[
-            ("benchmarks/eval.ts", TS_BENCH, "benchmarks/"),
-        ],
-        "go" => &[
-            ("benchmarks/eval_test.go", GO_BENCH, "benchmarks/"),
-        ],
-        "java" => &[
-            ("benchmarks/EvalBenchmark.java", JAVA_BENCH, "benchmarks/"),
-        ],
-        "kotlin" => &[
-            ("benchmarks/EvalBenchmark.kt", KOTLIN_BENCH, "benchmarks/"),
-        ],
-        "ruby" => &[
-            ("benchmarks/eval_benchmark.rb", RUBY_BENCH, "benchmarks/"),
-        ],
-        "php" => &[
-            ("benchmarks/eval_benchmark.php", PHP_BENCH, "benchmarks/"),
-        ],
-        "csharp" => &[
-            ("Benchmarks/EvalBenchmark.cs", CSHARP_BENCH, "Benchmarks/"),
-        ],
-        "swift" => &[
-            ("benchmarks/EvalBenchmark.swift", SWIFT_BENCH, "benchmarks/"),
-        ],
-        "elixir" => &[
-            ("benchmarks/eval_benchmark.exs", ELIXIR_BENCH, "benchmarks/"),
-        ],
-        "cpp" => &[
-            ("benchmarks/eval_benchmark.cpp", CPP_BENCH, "benchmarks/"),
-        ],
+        "rust" => &[("benches/eval_harness.rs", RUST_BENCH, "benches/")],
+        "python" => &[("benchmarks/eval_runner.py", PYTHON_BENCH, "benchmarks/")],
+        "node" => &[("benchmarks/eval.mjs", NODE_BENCH, "benchmarks/")],
+        "typescript" => &[("benchmarks/eval.ts", TS_BENCH, "benchmarks/")],
+        "go" => &[("benchmarks/eval_test.go", GO_BENCH, "benchmarks/")],
+        "java" => &[("benchmarks/EvalBenchmark.java", JAVA_BENCH, "benchmarks/")],
+        "kotlin" => &[("benchmarks/EvalBenchmark.kt", KOTLIN_BENCH, "benchmarks/")],
+        "ruby" => &[("benchmarks/eval_benchmark.rb", RUBY_BENCH, "benchmarks/")],
+        "php" => &[("benchmarks/eval_benchmark.php", PHP_BENCH, "benchmarks/")],
+        "csharp" => &[("Benchmarks/EvalBenchmark.cs", CSHARP_BENCH, "Benchmarks/")],
+        "swift" => &[("benchmarks/EvalBenchmark.swift", SWIFT_BENCH, "benchmarks/")],
+        "elixir" => &[("benchmarks/eval_benchmark.exs", ELIXIR_BENCH, "benchmarks/")],
+        "cpp" => &[("benchmarks/eval_benchmark.cpp", CPP_BENCH, "benchmarks/")],
         _ => {
-            eprintln!("warning: no scaffold template for stack '{stack}' — writing generic shell script");
+            eprintln!(
+                "warning: no scaffold template for stack '{stack}' — writing generic shell script"
+            );
             &[("benchmarks/eval.sh", SHELL_BENCH, "benchmarks/")]
         }
     };
@@ -77,15 +52,13 @@ pub fn scaffold_benchmarks(cwd: &Path, stack: &str) -> Result<ScaffoldResult, St
     for (rel_path, template, subdir) in tasks {
         let abs_path = cwd.join(rel_path);
         if let Some(parent) = abs_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create {subdir}: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("create {subdir}: {e}"))?;
         }
         if abs_path.exists() {
             result.skipped.push(abs_path);
             continue;
         }
-        std::fs::write(&abs_path, template)
-            .map_err(|e| format!("write {rel_path}: {e}"))?;
+        std::fs::write(&abs_path, template).map_err(|e| format!("write {rel_path}: {e}"))?;
         result.created.push(abs_path);
     }
 

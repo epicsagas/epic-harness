@@ -230,7 +230,11 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
             parse_composite_score(&output.stdout).unwrap_or(if exit_ok { 1.0 } else { 0.0 })
         }
         _ => {
-            if exit_ok { 1.0 } else { 0.0 }
+            if exit_ok {
+                1.0
+            } else {
+                0.0
+            }
         }
     };
 

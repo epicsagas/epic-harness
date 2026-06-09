@@ -45,8 +45,16 @@ pub fn run(args: &[String]) -> i32 {
                     println!("  epic eval          # run evaluation");
                 }
                 if json_mode {
-                    let created: Vec<_> = result.created.iter().map(|p| p.display().to_string()).collect();
-                    let skipped: Vec<_> = result.skipped.iter().map(|p| p.display().to_string()).collect();
+                    let created: Vec<_> = result
+                        .created
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect();
+                    let skipped: Vec<_> = result
+                        .skipped
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect();
                     if let Ok(j) = serde_json::to_string(&serde_json::json!({
                         "action": "scaffold",
                         "stack": result.stack,
@@ -222,9 +230,7 @@ fn check_unconfigured_benchmarks(cwd: &std::path::Path, cfg: &config::EvalConfig
     if !cfg.benchmarks.is_empty() {
         return;
     }
-    let candidates = [
-        cwd.join("benchmarks").join("eval_runner.py"),
-    ];
+    let candidates = [cwd.join("benchmarks").join("eval_runner.py")];
     for path in &candidates {
         if path.exists() {
             eprintln!(
@@ -237,7 +243,10 @@ fn check_unconfigured_benchmarks(cwd: &std::path::Path, cfg: &config::EvalConfig
     }
     // Also check Makefile/justfile for eval target
     if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile")) {
-        if content.lines().any(|l| l.starts_with("eval:") || l.starts_with("eval :")) {
+        if content
+            .lines()
+            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
+        {
             eprintln!(
                 "warning: Makefile has an `eval` target but no benchmarks are configured in eval.yaml"
             );
