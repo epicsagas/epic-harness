@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Orbit integration: Step 5.5 Eval phase inserted automatically when eval.yaml exists
   - New modules: `src/eval/{mod,config,runner,baseline,report}.rs`
 
+- **`merge-project` subcommand**: consolidate duplicate project slugs into one
+  - Three-layer merge: global `harness.db` (UPDATE project column), per-project `harness.db` (ATTACH + INSERT OR IGNORE), file-based data (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`)
+  - `--dry-run` previews row/file counts without writing
+  - `--delete-source` removes the source directory after a successful merge
+  - Handles composite-PK tables (`metrics_state`, `skill_attribution`, `promotion_counters`) with conflict-aware merge strategies
+
 ### Changed
 - **Skill descriptions normalized**: removed `Trigger:` prefix from all 14 skill descriptions, applied consistent `[What it does]. [When to use]` pattern
 - Skill count: 23 → 26 (9 pipeline + 17 quality gates)

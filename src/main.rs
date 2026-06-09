@@ -189,6 +189,21 @@ fn main() {
                 store::migrate::run_subcommand(dry_run, reset)
             }
         }
+        "merge-project" => {
+            let from = parse_flag_str(&args, "--from");
+            let to = parse_flag_str(&args, "--to");
+            let dry_run = args.iter().any(|a| a == "--dry-run");
+            let delete_source = args.iter().any(|a| a == "--delete-source");
+            match (from, to) {
+                (Some(f), Some(t)) => {
+                    store::merge_project::run_merge(&f, &t, dry_run, delete_source)
+                }
+                _ => {
+                    eprintln!("Usage: epic-harness merge-project --from <slug> --to <slug> [--dry-run] [--delete-source]");
+                    1
+                }
+            }
+        }
         "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "telemetry" | "serve"
         | "dashboard" | "update" => {
             unreachable!()
@@ -239,6 +254,11 @@ fn main() {
             eprintln!("    --to-global          Merge per-project harness.db files into global DB");
             eprintln!("    --dry-run            Preview without writing");
             eprintln!("    --reset              Retry interrupted migration");
+            eprintln!("  merge-project  Consolidate two project slugs into one");
+            eprintln!("    --from <slug>        Source slug to merge from");
+            eprintln!("    --to <slug>          Target slug to merge into");
+            eprintln!("    --dry-run            Preview without writing");
+            eprintln!("    --delete-source      Remove source directory after merge");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");

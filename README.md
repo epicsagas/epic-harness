@@ -606,6 +606,18 @@ epic-harness migrate             # perform the import
 
 Original files are **not deleted** after import. New users are automatically on SQLite — no action needed.
 
+### Slug Consolidation
+
+The same project can accumulate multiple slugs when cloned to different paths (e.g. `/Volumes/T5/projects/…` vs `~/projects/…` produces different suffixes). Merge them with:
+
+```bash
+epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # preview
+epic-harness merge-project --from <source-slug> --to <target-slug>              # apply
+epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # apply + remove source
+```
+
+Merges all three data layers: global `harness.db` (re-labels the `project` column), per-project `harness.db` (ATTACH + INSERT OR IGNORE), and file-based data (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`). Files already present in the target are never overwritten — source-only files are copied in.
+
 Share safety rules with your team: `.harness/guard-rules.yaml` in the project root (committed to git).
 
 </details>
