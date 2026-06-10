@@ -55,6 +55,7 @@ pub(crate) fn u64_to_i64(v: u64) -> i64 {
 }
 
 /// Convert i64 back to u64. Clamps negative values to 0.
+#[allow(dead_code)]
 #[inline]
 pub(crate) fn i64_to_u64(v: i64) -> u64 {
     v.try_into().unwrap_or(0)

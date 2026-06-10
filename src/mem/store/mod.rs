@@ -25,12 +25,14 @@ pub use types::{Edge, IndexNode, Node, NodeFrontmatter, importance_for_type};
 
 // ── Re-exports: util ─────────────────────────────────
 
+#[allow(unused_imports)]
 pub use util::{
     atomic_write, db_path, graph_path, new_uuid, nodes_dir, now_iso, parse_iso_to_secs,
     validate_uuid,
 };
 
 #[cfg(test)]
+#[allow(unused_imports)]
 pub(crate) use util::parse_iso_to_secs as _parse_iso_to_secs;
 
 // ── Re-exports: schema ───────────────────────────────
@@ -56,6 +58,7 @@ pub use edge::{
 
 // ── Re-exports: index ─────────────────────────────────
 
+#[allow(unused_imports)]
 pub use index::{read_index, remove_from_index, upsert_index};
 
 // ── Re-exports: dedup ─────────────────────────────────

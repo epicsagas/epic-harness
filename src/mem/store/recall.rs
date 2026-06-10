@@ -5,8 +5,6 @@
 
 use std::io;
 
-use sqlx::Row;
-
 use super::conn::memory_pool_sync;
 use super::types::{ScoredNode, graph_to_node};
 use super::util::{NODE_COLUMNS, now_iso, parse_iso_to_secs, row_to_graph_node};
@@ -21,95 +19,103 @@ pub fn smart_recall(
     limit: usize,
 ) -> io::Result<Vec<ScoredNode>> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        let now_secs = parse_iso_to_secs(&now_iso()) as f64;
+    runtime::block_on(smart_recall_async(&pool, project, hint, limit))
+}
 
-        // Step 1: Get candidate nodes filtered by project and/or FTS hint
-        let candidates = if let Some(query) = hint {
-            let fts_query = escape_fts(query);
-            if let Some(proj) = project {
-                let csv_proj = format!("%{proj}%");
-                sqlx::query(&format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
-                     (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ?) \
-                     AND projects LIKE ? ORDER BY importance DESC LIMIT ?"
-                ))
-                    .bind(&fts_query)
-                    .bind(&csv_proj)
-                    .bind(limit as i64 * 3) // overfetch for scoring
-                    .fetch_all(&pool)
-                    .await
-            } else {
-                sqlx::query(&format!(
-                    "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
-                     (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ?) \
-                     ORDER BY importance DESC LIMIT ?"
-                ))
-                    .bind(&fts_query)
-                    .bind(limit as i64 * 3)
-                    .fetch_all(&pool)
-                    .await
-            }
-        } else if let Some(proj) = project {
+/// Async core — shared by sync wrapper and pool variant.
+pub(crate) async fn smart_recall_async(
+    pool: &sqlx::AnyPool,
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> io::Result<Vec<ScoredNode>> {
+    let now_secs = parse_iso_to_secs(&now_iso()) as f64;
+
+    // Step 1: Get candidate nodes filtered by project and/or FTS hint
+    let candidates = if let Some(query) = hint {
+        let fts_query = escape_fts(query);
+        if let Some(proj) = project {
             let csv_proj = format!("%{proj}%");
             sqlx::query(&format!(
-                "SELECT {NODE_COLUMNS} FROM nodes WHERE projects LIKE ? \
-                 ORDER BY importance DESC LIMIT ?"
+                "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
+                 (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ?) \
+                 AND projects LIKE ? ORDER BY importance DESC LIMIT ?"
             ))
+                .bind(&fts_query)
                 .bind(&csv_proj)
-                .bind(limit as i64 * 3)
-                .fetch_all(&pool)
+                .bind(limit as i64 * 3) // overfetch for scoring
+                .fetch_all(pool)
                 .await
         } else {
             sqlx::query(&format!(
-                "SELECT {NODE_COLUMNS} FROM nodes ORDER BY importance DESC LIMIT ?"
+                "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
+                 (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ?) \
+                 ORDER BY importance DESC LIMIT ?"
             ))
+                .bind(&fts_query)
                 .bind(limit as i64 * 3)
-                .fetch_all(&pool)
+                .fetch_all(pool)
                 .await
-        };
-
-        let rows = candidates.map_err(io::Error::other)?;
-
-        // Step 2: Score each candidate
-        let mut scored: Vec<ScoredNode> = rows
-            .iter()
-            .map(|r| {
-                let gn = row_to_graph_node(r);
-                let node = graph_to_node(gn.clone());
-
-                // Recency: exponential decay
-                let updated_secs = parse_iso_to_secs(&gn.updated) as f64;
-                let age_secs = (now_secs - updated_secs).max(0.0);
-                let recency = (-age_secs * 0.693 / HALF_LIFE_SECS).exp();
-
-                // Importance: direct
-                let importance = gn.importance;
-
-                // Access frequency: saturates at 20 accesses
-                let access_freq = (gn.access_count as f64 / 20.0).min(1.0);
-
-                // FTS match: 1.0 if hint was provided and matched, 0.0 otherwise
-                let fts_match = if hint.is_some() { 1.0 } else { 0.0 };
-
-                let score = 0.25 * recency + 0.35 * importance + 0.15 * access_freq + 0.25 * fts_match;
-
-                ScoredNode { node, score }
-            })
-            .collect();
-
-        // Step 3: Sort by score descending, truncate to limit
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
-        scored.truncate(limit);
-
-        // Step 4: Touch accessed nodes (increment access_count)
-        let ids: Vec<String> = scored.iter().map(|s| s.node.frontmatter.id.clone()).collect();
-        if !ids.is_empty() {
-            let _ = touch_nodes_async(&pool, &ids).await;
         }
+    } else if let Some(proj) = project {
+        let csv_proj = format!("%{proj}%");
+        sqlx::query(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE projects LIKE ? \
+             ORDER BY importance DESC LIMIT ?"
+        ))
+            .bind(&csv_proj)
+            .bind(limit as i64 * 3)
+            .fetch_all(pool)
+            .await
+    } else {
+        sqlx::query(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes ORDER BY importance DESC LIMIT ?"
+        ))
+            .bind(limit as i64 * 3)
+            .fetch_all(pool)
+            .await
+    };
 
-        Ok(scored)
-    })
+    let rows = candidates.map_err(io::Error::other)?;
+
+    // Step 2: Score each candidate
+    let mut scored: Vec<ScoredNode> = rows
+        .iter()
+        .map(|r| {
+            let gn = row_to_graph_node(r);
+            let node = graph_to_node(gn.clone());
+
+            // Recency: exponential decay
+            let updated_secs = parse_iso_to_secs(&gn.updated) as f64;
+            let age_secs = (now_secs - updated_secs).max(0.0);
+            let recency = (-age_secs * 0.693 / HALF_LIFE_SECS).exp();
+
+            // Importance: direct
+            let importance = gn.importance;
+
+            // Access frequency: saturates at 20 accesses
+            let access_freq = (gn.access_count as f64 / 20.0).min(1.0);
+
+            // FTS match: 1.0 if hint was provided and matched, 0.0 otherwise
+            let fts_match = if hint.is_some() { 1.0 } else { 0.0 };
+
+            let score = 0.25 * recency + 0.35 * importance + 0.15 * access_freq + 0.25 * fts_match;
+
+            ScoredNode { node, score }
+        })
+        .collect();
+
+    // Step 3: Sort by score descending, truncate to limit
+    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(limit);
+
+    // Step 4: Touch accessed nodes (increment access_count)
+    let ids: Vec<String> = scored.iter().map(|s| s.node.frontmatter.id.clone()).collect();
+    if !ids.is_empty() {
+        let _ = touch_nodes_async(pool, &ids).await;
+    }
+
+    Ok(scored)
 }
 
 /// Increment access_count and update accessed_at for the given node IDs.
@@ -130,17 +136,12 @@ async fn touch_nodes_async(pool: &sqlx::AnyPool, ids: &[String]) -> io::Result<(
 fn escape_fts(s: &str) -> String {
     // For FTS5, wrap terms in quotes if they contain special chars
     let sanitized: String = s
-        .replace('"', "")
-        .replace('*', "")
+        .replace(['"', '*'], "")
         .replace(':', " ")
         .replace("AND", "")
         .replace("OR", "")
         .replace("NOT", "")
-        .replace('^', "")
-        .replace('{', "")
-        .replace('}', "")
-        .replace('(', "")
-        .replace(')', "")
+        .replace(['^', '{', '}', '(', ')'], "")
         .trim()
         .to_string();
 
@@ -159,10 +160,10 @@ fn escape_fts(s: &str) -> String {
 // ── Pool-compatible wrappers ─────────────────────────────────
 
 pub async fn smart_recall_pool(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     project: Option<&str>,
     hint: Option<&str>,
     limit: usize,
 ) -> io::Result<Vec<ScoredNode>> {
-    smart_recall(project, hint, limit)
+    smart_recall_async(pool, project, hint, limit).await
 }

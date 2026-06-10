@@ -12,45 +12,55 @@ use crate::store::runtime;
 
 pub fn write_node(node: &Node) -> io::Result<()> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        // Preserve monotonically-increasing fields from existing node
-        let mut gn = node_to_graph(node.clone());
-        let existing: Option<super::types::GraphNode> = sqlx::query(&format!(
-            "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
-        ))
-            .bind(&gn.id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .map(|r| row_to_graph_node(&r));
+    runtime::block_on(write_node_async(&pool, node))
+}
 
-        if let Some(ex) = existing {
-            gn.access_count = gn.access_count.max(ex.access_count);
-            if ex.accessed_at > gn.accessed_at {
-                gn.accessed_at = ex.accessed_at;
-            }
+/// Async core — shared by sync wrapper and pool variant.
+async fn write_node_async(pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
+    // Preserve monotonically-increasing fields from existing node
+    let mut gn = node_to_graph(node.clone());
+    let existing: Option<super::types::GraphNode> = sqlx::query(&format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
+    ))
+        .bind(&gn.id)
+        .fetch_optional(pool)
+        .await
+        .map_err(io::Error::other)?
+        .map(|r| row_to_graph_node(&r));
+
+    if let Some(ex) = existing {
+        gn.access_count = gn.access_count.max(ex.access_count);
+        if ex.accessed_at > gn.accessed_at {
+            gn.accessed_at = ex.accessed_at;
         }
+    }
 
-        upsert_graph_node(&pool, &gn).await
-    })
+    upsert_graph_node(pool, &gn).await
 }
 
 pub fn read_node(id: &str) -> io::Result<Node> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"))
-            .bind(id)
-            .fetch_optional(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .map(|r| graph_to_node(row_to_graph_node(&r)))
-            .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
-    })
+    runtime::block_on(read_node_async(&pool, id))
+}
+
+async fn read_node_async(pool: &sqlx::AnyPool, id: &str) -> io::Result<Node> {
+    sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"))
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+        .map_err(io::Error::other)?
+        .map(|r| graph_to_node(row_to_graph_node(&r)))
+        .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
 }
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {
     let pool = memory_pool_sync()?;
     runtime::block_on(async {
+        // Remove from FTS first
+        let _ = sqlx::query("DELETE FROM nodes_fts WHERE id = ?")
+            .bind(id)
+            .execute(&pool)
+            .await;
         sqlx::query("DELETE FROM nodes WHERE id = ?")
             .bind(id)
             .execute(&pool)
@@ -92,79 +102,86 @@ pub fn parse_node(content: &str) -> Option<Node> {
 
 // ── Pool-compatible async wrappers ────────────────────────────
 
-pub async fn write_node_pool(_pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
-    write_node(node)
+pub async fn write_node_pool(pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
+    write_node_async(pool, node).await
 }
 
-pub async fn read_node_pool(_pool: &sqlx::AnyPool, id: &str) -> io::Result<Node> {
-    read_node(id)
+pub async fn read_node_pool(pool: &sqlx::AnyPool, id: &str) -> io::Result<Node> {
+    read_node_async(pool, id).await
 }
 
-pub async fn read_nodes_pool(_pool: &sqlx::AnyPool, ids: &[&str]) -> io::Result<Vec<Node>> {
+pub async fn read_nodes_pool(pool: &sqlx::AnyPool, ids: &[&str]) -> io::Result<Vec<Node>> {
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        // Build parameterized IN clause
-        let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
-        let sql = format!(
-            "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({})",
-            placeholders.join(",")
-        );
-        let mut query = sqlx::query(&sql);
-        for id in ids {
-            query = query.bind(*id);
-        }
-        query
-            .fetch_all(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .iter()
-            .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
-            .collect()
-    })
+    // Build parameterized IN clause
+    let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
+    let sql = format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({})",
+        placeholders.join(",")
+    );
+    let mut query = sqlx::query(&sql);
+    for id in ids {
+        query = query.bind(*id);
+    }
+    query
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?
+        .iter()
+        .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+        .collect()
 }
 
 #[allow(dead_code)]
-pub async fn delete_node_pool(_pool: &sqlx::AnyPool, id: &str) -> io::Result<()> {
-    delete_node_file(id)
+pub async fn delete_node_pool(pool: &sqlx::AnyPool, id: &str) -> io::Result<()> {
+    // Remove from FTS first
+    let _ = sqlx::query("DELETE FROM nodes_fts WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await;
+    sqlx::query("DELETE FROM nodes WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(io::Error::other)?;
+    Ok(())
 }
 
 #[allow(dead_code)]
-pub async fn node_exists_pool(_pool: &sqlx::AnyPool, id: &str) -> bool {
-    read_node(id).is_ok()
+pub async fn node_exists_pool(pool: &sqlx::AnyPool, id: &str) -> bool {
+    read_node_async(pool, id).await.is_ok()
 }
 
 #[allow(dead_code)]
-pub async fn read_all_nodes_pool(_pool: &sqlx::AnyPool) -> io::Result<Vec<Node>> {
-    let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"))
-            .fetch_all(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .iter()
-            .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
-            .collect()
-    })
+pub async fn read_all_nodes_pool(pool: &sqlx::AnyPool) -> io::Result<Vec<Node>> {
+    sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"))
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?
+        .iter()
+        .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+        .collect()
 }
 
-pub async fn read_nodes_limited_pool(_pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec<Node>> {
-    let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?"))
-            .bind(limit)
-            .fetch_all(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .iter()
-            .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
-            .collect()
-    })
+pub async fn read_nodes_limited_pool(pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec<Node>> {
+    sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?"))
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?
+        .iter()
+        .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+        .collect()
 }
 
 #[allow(dead_code)]
-pub async fn list_node_ids_pool(_pool: &sqlx::AnyPool) -> io::Result<Vec<String>> {
-    list_node_ids()
+pub async fn list_node_ids_pool(pool: &sqlx::AnyPool) -> io::Result<Vec<String>> {
+    sqlx::query("SELECT id FROM nodes ORDER BY updated DESC")
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?
+        .iter()
+        .map(|r| r.try_get::<String, _>(0).map_err(io::Error::other))
+        .collect()
 }

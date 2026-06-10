@@ -55,76 +55,78 @@ const MAX_VIRTUAL_EDGES: usize = 500;
 
 /// Build a `Graph` value from the DB.
 #[allow(dead_code)]
-pub async fn build_graph_pool(_pool: &sqlx::AnyPool) -> io::Result<Graph> {
-    build_graph_sync(true)
+pub async fn build_graph_pool(pool: &sqlx::AnyPool) -> io::Result<Graph> {
+    build_graph_async(pool, true).await
 }
 
 /// Build a `Graph` value from the DB with optional virtual edges.
 #[allow(dead_code)]
 pub async fn build_graph_pool_virtual(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     include_virtual: bool,
 ) -> io::Result<Graph> {
-    build_graph_sync(include_virtual)
+    build_graph_async(pool, include_virtual).await
 }
 
 fn build_graph_sync(include_virtual: bool) -> io::Result<Graph> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        let rows = sqlx::query(&format!(
-            "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC"
-        ))
-            .fetch_all(&pool)
-            .await
-            .map_err(io::Error::other)?;
+    runtime::block_on(build_graph_async(&pool, include_virtual))
+}
 
-        let nodes: Vec<GraphNode> = rows
-            .iter()
-            .map(|r| {
-                let gn = row_to_graph_node(r);
-                GraphNode {
-                    id: gn.id,
-                    title: gn.title,
-                    node_type: gn.node_type,
-                    tags: super::store::util::split_csv(&gn.tags),
-                    importance: gn.importance,
-                    projects: super::store::util::split_csv(&gn.projects),
-                    accessed_at: gn.accessed_at,
-                }
-            })
-            .collect();
+async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::Result<Graph> {
+    let rows = sqlx::query(&format!(
+        "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC"
+    ))
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?;
 
-        let mut edges: Vec<GraphEdge> = sqlx::query(
-            "SELECT source, target, label, created FROM edges ORDER BY created DESC LIMIT ?"
-        )
-            .bind(MAX_GRAPH_EDGES as i64)
-            .fetch_all(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .iter()
-            .map(|r| GraphEdge {
-                source: r.get::<String, _>(0),
-                target: r.get::<String, _>(1),
-                relation: r.get::<String, _>(2),
-                weight: 1.0,
-                virtual_: false,
-            })
-            .collect();
-
-        if include_virtual {
-            let persisted = edges.len();
-            let budget = MAX_GRAPH_EDGES
-                .saturating_sub(persisted)
-                .min(MAX_VIRTUAL_EDGES);
-            if budget > 0 {
-                let mut vedges = generate_virtual_edges(&nodes);
-                vedges.truncate(budget);
-                edges.extend(vedges);
+    let nodes: Vec<GraphNode> = rows
+        .iter()
+        .map(|r| {
+            let gn = row_to_graph_node(r);
+            GraphNode {
+                id: gn.id,
+                title: gn.title,
+                node_type: gn.node_type,
+                tags: super::store::util::split_csv(&gn.tags),
+                importance: gn.importance,
+                projects: super::store::util::split_csv(&gn.projects),
+                accessed_at: gn.accessed_at,
             }
-        }
+        })
+        .collect();
 
-        Ok(Graph { nodes, edges })
-    })
+    let mut edges: Vec<GraphEdge> = sqlx::query(
+        "SELECT source, target, label, created FROM edges ORDER BY created DESC LIMIT ?"
+    )
+        .bind(MAX_GRAPH_EDGES as i64)
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?
+        .iter()
+        .map(|r| GraphEdge {
+            source: r.get::<String, _>(0),
+            target: r.get::<String, _>(1),
+            relation: r.get::<String, _>(2),
+            weight: 1.0,
+            virtual_: false,
+        })
+        .collect();
+
+    if include_virtual {
+        let persisted = edges.len();
+        let budget = MAX_GRAPH_EDGES
+            .saturating_sub(persisted)
+            .min(MAX_VIRTUAL_EDGES);
+        if budget > 0 {
+            let mut vedges = generate_virtual_edges(&nodes);
+            vedges.truncate(budget);
+            edges.extend(vedges);
+        }
+    }
+
+    Ok(Graph { nodes, edges })
 }
 
 /// Generate virtual cross-project edges based on shared tags.
@@ -208,18 +210,19 @@ pub fn generate_virtual_edges(nodes: &[GraphNode]) -> Vec<GraphEdge> {
     result
 }
 
-/// Build graph JSON string — sync wrapper.
+/// Build graph JSON string — pool variant.
 #[allow(dead_code)]
-pub async fn rebuild_graph_json_pool(_pool: &sqlx::AnyPool) -> io::Result<String> {
-    rebuild_graph_json()
+pub async fn rebuild_graph_json_pool(pool: &sqlx::AnyPool) -> io::Result<String> {
+    let graph = build_graph_async(pool, true).await?;
+    serde_json::to_string_pretty(&graph).map_err(io::Error::other)
 }
 
-/// Build graph JSON string — sync wrapper with virtual edges control.
+/// Build graph JSON string — pool variant with virtual edges control.
 pub async fn rebuild_graph_json_pool_virtual(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     include_virtual: bool,
 ) -> io::Result<String> {
-    let graph = build_graph_sync(include_virtual)?;
+    let graph = build_graph_async(pool, include_virtual).await?;
     serde_json::to_string_pretty(&graph).map_err(io::Error::other)
 }
 
@@ -243,13 +246,21 @@ const MAX_SEED_IDS: usize = 100;
 
 /// Async 1-hop neighbors.
 pub async fn graph_neighbors_pool(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     seed_ids: &[String],
 ) -> Vec<(String, f64)> {
-    graph_neighbors_sync(seed_ids)
+    graph_neighbors_async(pool, seed_ids).await
 }
 
 fn graph_neighbors_sync(seed_ids: &[String]) -> Vec<(String, f64)> {
+    let pool = match memory_pool_sync() {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+    runtime::block_on(graph_neighbors_async(&pool, seed_ids))
+}
+
+async fn graph_neighbors_async(pool: &sqlx::AnyPool, seed_ids: &[String]) -> Vec<(String, f64)> {
     if seed_ids.is_empty() {
         return vec![];
     }
@@ -263,39 +274,33 @@ fn graph_neighbors_sync(seed_ids: &[String]) -> Vec<(String, f64)> {
     } else {
         seed_ids
     };
-    let pool = match memory_pool_sync() {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    runtime::block_on(async {
-        // Find all nodes connected to any seed via edges
-        let mut results: Vec<(String, f64)> = vec![];
+    // Find all nodes connected to any seed via edges
+    let mut results: Vec<(String, f64)> = vec![];
 
-        for seed_id in seed_ids {
-            let rows = sqlx::query(
-                "SELECT target FROM edges WHERE source = ? \
-                 UNION \
-                 SELECT source FROM edges WHERE target = ?"
-            )
-                .bind(seed_id)
-                .bind(seed_id)
-                .fetch_all(&pool)
-                .await
-                .unwrap_or_default();
+    for seed_id in seed_ids {
+        let rows = sqlx::query(
+            "SELECT target FROM edges WHERE source = ? \
+             UNION \
+             SELECT source FROM edges WHERE target = ?"
+        )
+            .bind(seed_id)
+            .bind(seed_id)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
 
-            for row in rows {
-                let neighbor_id: String = row.get(0);
-                // Check if we already have this neighbor
-                if let Some(entry) = results.iter_mut().find(|(id, _)| id == &neighbor_id) {
-                    entry.1 += 1.0; // Increment weight for additional connections
-                } else {
-                    results.push((neighbor_id, 1.0));
-                }
+        for row in rows {
+            let neighbor_id: String = row.get(0);
+            // Check if we already have this neighbor
+            if let Some(entry) = results.iter_mut().find(|(id, _)| id == &neighbor_id) {
+                entry.1 += 1.0; // Increment weight for additional connections
+            } else {
+                results.push((neighbor_id, 1.0));
             }
         }
+    }
 
-        results
-    })
+    results
 }
 
 /// Get 1-hop neighbors — sync wrapper.
@@ -306,11 +311,11 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
 
 /// Async BFS traversal.
 pub async fn related_nodes_pool(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     start_id: &str,
     depth: usize,
 ) -> Vec<String> {
-    related_nodes_sync(start_id, depth)
+    related_nodes_async(pool, start_id, depth).await
 }
 
 fn related_nodes_sync(start_id: &str, depth: usize) -> Vec<String> {
@@ -318,41 +323,43 @@ fn related_nodes_sync(start_id: &str, depth: usize) -> Vec<String> {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    runtime::block_on(async {
-        let mut visited = std::collections::HashSet::new();
-        visited.insert(start_id.to_string());
-        let mut frontier: Vec<String> = vec![start_id.to_string()];
+    runtime::block_on(related_nodes_async(&pool, start_id, depth))
+}
 
-        for _ in 0..depth {
-            let mut next_frontier = vec![];
-            for node_id in &frontier {
-                let rows = sqlx::query(
-                    "SELECT target FROM edges WHERE source = ? \
-                     UNION \
-                     SELECT source FROM edges WHERE target = ?"
-                )
-                    .bind(node_id)
-                    .bind(node_id)
-                    .fetch_all(&pool)
-                    .await
-                    .unwrap_or_default();
+async fn related_nodes_async(pool: &sqlx::AnyPool, start_id: &str, depth: usize) -> Vec<String> {
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(start_id.to_string());
+    let mut frontier: Vec<String> = vec![start_id.to_string()];
 
-                for row in rows {
-                    let neighbor: String = row.get(0);
-                    if visited.insert(neighbor.clone()) {
-                        next_frontier.push(neighbor);
-                    }
+    for _ in 0..depth {
+        let mut next_frontier = vec![];
+        for node_id in &frontier {
+            let rows = sqlx::query(
+                "SELECT target FROM edges WHERE source = ? \
+                 UNION \
+                 SELECT source FROM edges WHERE target = ?"
+            )
+                .bind(node_id)
+                .bind(node_id)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+
+            for row in rows {
+                let neighbor: String = row.get(0);
+                if visited.insert(neighbor.clone()) {
+                    next_frontier.push(neighbor);
                 }
             }
-            frontier = next_frontier;
-            if frontier.is_empty() {
-                break;
-            }
         }
+        frontier = next_frontier;
+        if frontier.is_empty() {
+            break;
+        }
+    }
 
-        visited.remove(start_id); // Don't include start node
-        visited.into_iter().collect()
-    })
+    visited.remove(start_id); // Don't include start node
+    visited.into_iter().collect()
 }
 
 /// BFS traversal from `start_id` — sync wrapper.
@@ -361,50 +368,52 @@ pub fn related_nodes(start_id: &str, depth: usize) -> Vec<String> {
 }
 
 /// Async compute aggregate stats.
-pub async fn compute_stats_pool(_pool: &sqlx::AnyPool) -> io::Result<serde_json::Value> {
-    compute_stats()
+pub async fn compute_stats_pool(pool: &sqlx::AnyPool) -> io::Result<serde_json::Value> {
+    compute_stats_async(pool).await
 }
 
 /// Compute aggregate stats — sync.
 pub fn compute_stats() -> io::Result<serde_json::Value> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(async {
-        let node_count: i64 = sqlx::query("SELECT COUNT(*) FROM nodes")
-            .fetch_one(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .get(0);
+    runtime::block_on(compute_stats_async(&pool))
+}
 
-        let edge_count: i64 = sqlx::query("SELECT COUNT(*) FROM edges")
-            .fetch_one(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .get(0);
+async fn compute_stats_async(pool: &sqlx::AnyPool) -> io::Result<serde_json::Value> {
+    let node_count: i64 = sqlx::query("SELECT COUNT(*) FROM nodes")
+        .fetch_one(pool)
+        .await
+        .map_err(io::Error::other)?
+        .get(0);
 
-        let avg_importance: f64 = sqlx::query("SELECT AVG(importance) FROM nodes")
-            .fetch_one(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .try_get(0)
-            .unwrap_or(0.0);
+    let edge_count: i64 = sqlx::query("SELECT COUNT(*) FROM edges")
+        .fetch_one(pool)
+        .await
+        .map_err(io::Error::other)?
+        .get(0);
 
-        let type_counts: std::collections::HashMap<String, i64> = sqlx::query(
-            "SELECT type, COUNT(*) FROM nodes GROUP BY type"
-        )
-            .fetch_all(&pool)
-            .await
-            .map_err(io::Error::other)?
-            .iter()
-            .map(|r| (r.get::<String, _>(0), r.get::<i64, _>(1)))
-            .collect();
+    let avg_importance: f64 = sqlx::query("SELECT AVG(importance) FROM nodes")
+        .fetch_one(pool)
+        .await
+        .map_err(io::Error::other)?
+        .try_get(0)
+        .unwrap_or(0.0);
 
-        Ok(serde_json::json!({
-            "nodes": node_count,
-            "edges": edge_count,
-            "avg_importance": (avg_importance * 1000.0).round() / 1000.0,
-            "types": type_counts,
-        }))
-    })
+    let type_counts: std::collections::HashMap<String, i64> = sqlx::query(
+        "SELECT type, COUNT(*) FROM nodes GROUP BY type"
+    )
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?
+        .iter()
+        .map(|r| (r.get::<String, _>(0), r.get::<i64, _>(1)))
+        .collect();
+
+    Ok(serde_json::json!({
+        "nodes": node_count,
+        "edges": edge_count,
+        "avg_importance": (avg_importance * 1000.0).round() / 1000.0,
+        "types": type_counts,
+    }))
 }
 
 #[cfg(test)]

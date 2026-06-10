@@ -326,6 +326,7 @@ mod tests {
             best_score: Some(0.95),
             best_session: "2026-06-01".into(),
             trend: "improving".into(),
+            epoch_class: None,
             stagnation_count: 0,
             skill_attribution: {
                 let mut m = HashMap::new();

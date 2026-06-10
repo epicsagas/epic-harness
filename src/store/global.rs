@@ -60,7 +60,7 @@ pub async fn query_patterns_excluding_pool(
     .await
     .map_err(super::sqlx_err)?;
 
-    Ok(rows.iter().map(|r| row_to_pattern(r)).collect())
+    Ok(rows.iter().map(row_to_pattern).collect())
 }
 
 /// Query all patterns (regardless of project).
@@ -78,7 +78,7 @@ pub async fn query_all_patterns_pool(
     .await
     .map_err(super::sqlx_err)?;
 
-    Ok(rows.iter().map(|r| row_to_pattern(r)).collect())
+    Ok(rows.iter().map(row_to_pattern).collect())
 }
 
 /// Convert a row to a JSON value.

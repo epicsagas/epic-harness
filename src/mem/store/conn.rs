@@ -33,6 +33,7 @@ pub fn memory_pool_sync() -> io::Result<AnyPool> {
 ///     sqlx::query("SELECT ...").fetch_optional(pool).await
 /// })
 /// ```
+#[allow(dead_code)]
 pub(crate) fn with_pool<F, Fut, T>(f: F) -> io::Result<T>
 where
     F: FnOnce(AnyPool) -> Fut,

@@ -144,6 +144,13 @@ async fn migrate_legacy_files(pool: &AnyPool) {
 
 /// Upsert a GraphNode into the nodes table.
 pub(crate) async fn upsert_graph_node(pool: &AnyPool, gn: &super::types::GraphNode) -> io::Result<()> {
+    // Delete from FTS first (INSERT OR REPLACE doesn't trigger FTS content sync)
+    sqlx::query("DELETE FROM nodes_fts WHERE id = ?")
+        .bind(&gn.id)
+        .execute(pool)
+        .await
+        .map_err(io::Error::other)?;
+
     sqlx::query(
         "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -163,6 +170,20 @@ pub(crate) async fn upsert_graph_node(pool: &AnyPool, gn: &super::types::GraphNo
         .execute(pool)
         .await
         .map_err(io::Error::other)?;
+
+    // Insert into FTS for full-text search
+    sqlx::query(
+        "INSERT INTO nodes_fts (id, title, body, tags, projects) VALUES (?, ?, ?, ?, ?)"
+    )
+        .bind(&gn.id)
+        .bind(&gn.title)
+        .bind(&gn.body)
+        .bind(&gn.tags)
+        .bind(&gn.projects)
+        .execute(pool)
+        .await
+        .map_err(io::Error::other)?;
+
     Ok(())
 }
 

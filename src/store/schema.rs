@@ -6,6 +6,10 @@
 use sqlx::AnyPool;
 use std::io;
 
+/// Current schema version. Bump when DDL changes.
+#[cfg(test)]
+pub(crate) const SCHEMA_VERSION: u32 = 1;
+
 /// Apply the full operational schema to a pool.
 /// Safe to call multiple times (uses `IF NOT EXISTS`).
 pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
@@ -50,7 +54,8 @@ pub(crate) const DDL_SQLITE: &str = r#"
         error_snippet    TEXT,
         file_ext         TEXT,
         sequence_id      INTEGER,
-        pipeline_id      TEXT
+        pipeline_id      TEXT,
+        project          TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_obs_ts         ON observations(timestamp);

@@ -11,10 +11,12 @@ use std::path::{Path, PathBuf};
 pub(crate) const NODE_COLUMNS: &str = "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
 
 /// Same columns but table-prefixed for JOIN queries.
+#[allow(dead_code)]
 pub(crate) const NODE_COLUMNS_PREFIXED: &str = "n.id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
 
 // ── CSV helpers ───────────────────────────────────────
 
+#[allow(dead_code)]
 pub(crate) fn join_csv(v: &[String]) -> String {
     v.join(",")
 }
