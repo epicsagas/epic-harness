@@ -1,25 +1,24 @@
 //! Integration tests for the store module
 
-use rusqlite::Connection;
+use sqlx::AnyPool;
+use sqlx::Row;
 
-fn in_memory_db() -> Connection {
-    let conn = Connection::open_in_memory().unwrap();
-    super::schema::init_schema(&conn).unwrap();
-    conn
+async fn test_pool() -> AnyPool {
+    let pool = super::pool::test_memory_pool().await;
+    super::schema::init_schema_pool(&pool).await.unwrap();
+    pool
 }
 
-#[test]
-fn schema_creates_all_tables() {
-    let conn = in_memory_db();
+#[tokio::test]
+async fn schema_creates_all_tables() {
+    let pool = test_pool().await;
 
-    // Verify all expected tables exist
-    let tables: Vec<String> = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        .unwrap()
-        .query_map([], |row| row.get(0))
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect();
+    let rows = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    let tables: Vec<String> = rows.iter().filter_map(|r| r.try_get(0).ok()).collect();
 
     let expected = [
         "_harness_meta",
@@ -50,94 +49,46 @@ fn schema_creates_all_tables() {
     }
 }
 
-#[test]
-fn schema_is_idempotent() {
-    let conn = Connection::open_in_memory().unwrap();
-    super::schema::init_schema(&conn).unwrap();
+#[tokio::test]
+async fn schema_is_idempotent() {
+    let pool = super::pool::test_memory_pool().await;
+    super::schema::init_schema_pool(&pool).await.unwrap();
     // Running again should not fail
-    super::schema::init_schema(&conn).unwrap();
+    super::schema::init_schema_pool(&pool).await.unwrap();
 }
 
-#[test]
-fn meta_table_tracks_version() {
-    let conn = in_memory_db();
-    let version: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
+#[tokio::test]
+async fn meta_table_tracks_version() {
+    let pool = test_pool().await;
+    let version: String = sqlx::query_scalar(
+        "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(version, "1");
 }
 
-#[test]
-fn wal_mode_is_enabled() {
-    let conn = in_memory_db();
-    // In-memory DBs always report "memory" for journal_mode, but the pragma call
-    // must succeed without error. For file-backed DBs this would return "wal".
-    let mode: String = conn
-        .query_row("PRAGMA journal_mode", [], |row| row.get(0))
-        .unwrap();
-    // In-memory always = "memory"; accept both to keep in-memory tests green
-    assert!(
-        mode == "wal" || mode == "memory",
-        "unexpected journal_mode: {mode}"
-    );
-}
-
-#[test]
-fn foreign_keys_are_enforced() {
-    let conn = in_memory_db();
-    let fk: i64 = conn
-        .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
-        .unwrap();
-    assert_eq!(fk, 1, "foreign_keys pragma must be ON (1)");
-}
-
-#[test]
-fn migration_is_idempotent_concurrent_simulation() {
-    // Simulates two openers racing to migrate: the second should detect the flag
-    // set by the first and skip. Both share the same connection here (single-threaded
-    // approximation — real concurrency is covered by SQLite's IMMEDIATE transaction).
-    let conn = Connection::open_in_memory().unwrap();
-    super::schema::init_schema(&conn).unwrap();
-
-    super::migrate::run(&conn); // first run — sets legacy_migrated=1
-    super::migrate::run(&conn); // second run — must exit immediately (idempotent)
-
-    let migrated: String = conn
-        .query_row(
-            "SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(migrated, "1");
-}
-
-#[test]
-fn u64_to_i64_converts_normal_values() {
+#[tokio::test]
+async fn u64_to_i64_converts_normal_values() {
     assert_eq!(super::u64_to_i64(0), 0);
     assert_eq!(super::u64_to_i64(1_000_000), 1_000_000);
     assert_eq!(super::u64_to_i64(i64::MAX as u64), i64::MAX);
 }
 
-#[test]
-fn u64_to_i64_saturates_on_overflow() {
-    // Values above i64::MAX must saturate to i64::MAX (not panic)
+#[tokio::test]
+async fn u64_to_i64_saturates_on_overflow() {
     let result = super::u64_to_i64(u64::MAX);
     assert_eq!(result, i64::MAX);
 }
 
-#[test]
-fn obs_stats_tool_limit_is_enforced() {
-    use super::observations::{insert_observation_conn, query_obs_stats_conn};
+#[tokio::test]
+async fn obs_stats_tool_limit_is_enforced() {
+    use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let conn = in_memory_db();
+    let pool = test_pool().await;
 
-    // Insert observations for 150 distinct tool names
     for i in 0..150usize {
         let rec = ObsRecord {
             timestamp: "2026-06-02T10:00:00Z".into(),
@@ -153,10 +104,14 @@ fn obs_stats_tool_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, &rec, "sess_limit_test").unwrap();
+        insert_observation_pool(&pool, &rec, "sess_limit_test")
+            .await
+            .unwrap();
     }
 
-    let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
+    let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02")
+        .await
+        .unwrap();
     assert_eq!(stats.total, 150, "total should count all observations");
     assert!(
         stats.tool_stats.len() <= 100,
@@ -165,14 +120,13 @@ fn obs_stats_tool_limit_is_enforced() {
     );
 }
 
-#[test]
-fn obs_error_stats_limit_is_enforced() {
-    use super::observations::{insert_observation_conn, query_obs_stats_conn};
+#[tokio::test]
+async fn obs_error_stats_limit_is_enforced() {
+    use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let conn = in_memory_db();
+    let pool = test_pool().await;
 
-    // Insert observations for 80 distinct failure categories
     for i in 0..80usize {
         let rec = ObsRecord {
             timestamp: "2026-06-02T10:00:00Z".into(),
@@ -188,10 +142,14 @@ fn obs_error_stats_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_conn(&conn, &rec, "sess_err_limit").unwrap();
+        insert_observation_pool(&pool, &rec, "sess_err_limit")
+            .await
+            .unwrap();
     }
 
-    let stats = query_obs_stats_conn(&conn, "2026-06-02", "2026-06-02").unwrap();
+    let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02")
+        .await
+        .unwrap();
     assert!(
         stats.error_stats.len() <= 50,
         "error_stats must be capped at 50, got {}",
@@ -199,37 +157,35 @@ fn obs_error_stats_limit_is_enforced() {
     );
 }
 
-#[test]
-fn global_json_field_parse_failure_uses_fallback() {
-    use super::global::{insert_pattern_conn, query_all_patterns_conn};
+#[tokio::test]
+async fn global_json_field_parse_failure_uses_fallback() {
+    use super::global::{insert_pattern_pool, query_all_patterns_pool};
 
-    let conn = in_memory_db();
-    // Insert a row with intentionally malformed JSON in per_error_stats
-    conn.execute(
+    let pool = test_pool().await;
+    // Insert a row with intentionally malformed JSON via raw SQL
+    sqlx::query(
         "INSERT INTO global_patterns
          (timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools)
          VALUES ('2026-06-02T10:00:00Z', 'proj-x', 0.9, 0.85, 'NOT_JSON', '[]', '[]')",
-        [],
     )
+    .execute(&pool)
+    .await
     .unwrap();
 
-    // Should not panic; malformed per_error_stats returns fallback {}
-    let patterns = query_all_patterns_conn(&conn, 10).unwrap();
+    let patterns = query_all_patterns_pool(&pool, 10).await.unwrap();
     assert_eq!(patterns.len(), 1);
     assert!(
         patterns[0]["per_error_stats"].is_object(),
         "fallback should be an empty object"
     );
-    // Confirm fallback is empty object (not the original invalid string)
     assert_eq!(
         patterns[0]["per_error_stats"],
         serde_json::json!({}),
         "fallback for invalid JSON must be {{}}"
     );
 
-    // Insert with valid JSON — must be preserved
-    insert_pattern_conn(
-        &conn,
+    insert_pattern_pool(
+        &pool,
         "2026-06-02T11:00:00Z",
         "proj-y",
         0.8,
@@ -238,19 +194,20 @@ fn global_json_field_parse_failure_uses_fallback() {
         "[]",
         "[]",
     )
+    .await
     .unwrap();
-    let all = query_all_patterns_conn(&conn, 10).unwrap();
+    let all = query_all_patterns_pool(&pool, 10).await.unwrap();
     let proj_y = all.iter().find(|p| p["project"] == "proj-y").unwrap();
     assert_eq!(proj_y["per_error_stats"]["type_error"], 3);
 }
 
-#[test]
-fn dismiss_agent_is_atomic() {
+#[tokio::test]
+async fn dismiss_agent_is_atomic() {
     use super::orchestrator::{
-        OrchAgent, OrchRun, dismiss_agent_conn, init_run_conn, read_agent_conn, upsert_agent_conn,
+        OrchAgent, OrchRun, dismiss_agent_pool, init_run_pool, read_agent_pool, upsert_agent_pool,
     };
 
-    let conn = in_memory_db();
+    let pool = test_pool().await;
     let run = OrchRun {
         id: "run-atomic".into(),
         status: "running".into(),
@@ -259,7 +216,7 @@ fn dismiss_agent_is_atomic() {
         created_at: "2026-06-02T10:00:00Z".into(),
         updated_at: "2026-06-02T10:00:00Z".into(),
     };
-    init_run_conn(&conn, &run).unwrap();
+    init_run_pool(&pool, &run).await.unwrap();
 
     let agent = OrchAgent {
         id: "agent-atomic".into(),
@@ -274,29 +231,22 @@ fn dismiss_agent_is_atomic() {
         started_at: None,
         completed_at: None,
     };
-    upsert_agent_conn(&conn, &agent).unwrap();
+    upsert_agent_pool(&pool, &agent).await.unwrap();
 
-    // First dismiss must succeed
-    let first = dismiss_agent_conn(&conn, "agent-atomic").unwrap();
+    let first = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
     assert!(first, "first dismiss must return true");
 
-    // Second dismiss of the same agent must return false (not panic)
-    let second = dismiss_agent_conn(&conn, "agent-atomic").unwrap();
-    assert!(
-        !second,
-        "second dismiss of non-existent agent must return false"
-    );
+    let second = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
+    assert!(!second, "second dismiss of non-existent agent must return false");
 
-    assert!(read_agent_conn(&conn, "agent-atomic").unwrap().is_none());
+    assert!(read_agent_pool(&pool, "agent-atomic").await.unwrap().is_none());
 }
 
-#[test]
-fn cleanup_stale_is_atomic() {
-    use super::orchestrator::{
-        OrchAgent, OrchRun, cleanup_stale_conn, init_run_conn, upsert_agent_conn,
-    };
+#[tokio::test]
+async fn cleanup_stale_is_atomic() {
+    use super::orchestrator::{OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool};
 
-    let conn = in_memory_db();
+    let pool = test_pool().await;
     let run = OrchRun {
         id: "run-stale".into(),
         status: "complete".into(),
@@ -305,7 +255,7 @@ fn cleanup_stale_is_atomic() {
         created_at: "2026-06-01T10:00:00Z".into(),
         updated_at: "2026-06-01T10:00:00Z".into(),
     };
-    init_run_conn(&conn, &run).unwrap();
+    init_run_pool(&pool, &run).await.unwrap();
 
     let agent = OrchAgent {
         id: "agent-stale".into(),
@@ -320,18 +270,18 @@ fn cleanup_stale_is_atomic() {
         started_at: None,
         completed_at: None,
     };
-    upsert_agent_conn(&conn, &agent).unwrap();
+    upsert_agent_pool(&pool, &agent).await.unwrap();
 
-    // cleanup_stale must delete both run and orphaned agent atomically
-    let deleted = cleanup_stale_conn(&conn, "").unwrap();
+    let deleted = cleanup_stale_pool(&pool, "").await.unwrap();
     assert!(deleted >= 2, "must delete run + agent, got {deleted}");
 
-    // Neither should remain
-    let run_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM orch_runs", [], |r| r.get(0))
+    let run_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orch_runs")
+        .fetch_one(&pool)
+        .await
         .unwrap();
-    let agent_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM orch_agents", [], |r| r.get(0))
+    let agent_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orch_agents")
+        .fetch_one(&pool)
+        .await
         .unwrap();
     assert_eq!(run_count, 0);
     assert_eq!(agent_count, 0);

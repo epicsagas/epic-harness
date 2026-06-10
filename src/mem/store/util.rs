@@ -1,17 +1,17 @@
-//! util.rs — Shared helpers: paths, UUID, timestamps, CSV, row mapping, constants
+//! util.rs — Shared helpers: paths, UUID, timestamps, CSV, constants
 
-use super::types::Node;
+use super::types::{GraphNode, Node};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 // ── Column constants ──────────────────────────────────
 
-/// Standard SELECT columns for node queries. Use with row_to_node().
+/// Standard SELECT columns for node queries. Use with row_to_graph_node().
 pub(crate) const NODE_COLUMNS: &str = "id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at";
 
 /// Same columns but table-prefixed for JOIN queries.
-pub(crate) const NODE_COLUMNS_PREFIXED: &str = "id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
+pub(crate) const NODE_COLUMNS_PREFIXED: &str = "n.id, n.type, n.title, n.tags, n.projects, n.agents, n.created, n.updated, n.body, n.importance, n.access_count, n.accessed_at";
 
 // ── CSV helpers ───────────────────────────────────────
 
@@ -26,29 +26,31 @@ pub(crate) fn split_csv(s: &str) -> Vec<String> {
         .collect()
 }
 
-// ── Row mapping ───────────────────────────────────────
+// ── Row mapping (sqlx) ────────────────────────────────
 
-pub(crate) fn row_to_node(row: &rusqlite::Row<'_>) -> rusqlite::Result<Node> {
-    use super::types::NodeFrontmatter;
-    let tags: String = row.get(3)?;
-    let projects: String = row.get(4)?;
-    let agents: String = row.get(5)?;
-    Ok(Node {
-        frontmatter: NodeFrontmatter {
-            id: row.get(0)?,
-            node_type: row.get(1)?,
-            title: row.get(2)?,
-            tags: split_csv(&tags),
-            projects: split_csv(&projects),
-            agents: split_csv(&agents),
-            created: row.get(6)?,
-            updated: row.get(7)?,
-            importance: row.get(9).unwrap_or(0.5),
-            access_count: row.get::<_, i64>(10).unwrap_or(0),
-            accessed_at: row.get(11).unwrap_or_default(),
-        },
-        body: row.get(8)?,
-    })
+/// Map a sqlx row to a flat GraphNode. Column order must match NODE_COLUMNS.
+pub(crate) fn row_to_graph_node(row: &sqlx::any::AnyRow) -> GraphNode {
+    use sqlx::Row;
+    GraphNode {
+        id: row.get::<String, _>(0),
+        node_type: row.get::<String, _>(1),
+        title: row.get::<String, _>(2),
+        tags: row.get::<String, _>(3),
+        projects: row.get::<String, _>(4),
+        agents: row.get::<String, _>(5),
+        created: row.get::<String, _>(6),
+        updated: row.get::<String, _>(7),
+        body: row.get::<String, _>(8),
+        importance: row.try_get::<f64, _>(9).unwrap_or(0.5),
+        access_count: row.try_get::<i64, _>(10).unwrap_or(0),
+        accessed_at: row.try_get::<String, _>(11).unwrap_or_default(),
+    }
+}
+
+/// Map a sqlx row to a public Node. Column order must match NODE_COLUMNS.
+pub(crate) fn row_to_node(row: &sqlx::any::AnyRow) -> Node {
+    let gn = row_to_graph_node(row);
+    super::types::graph_to_node(gn)
 }
 
 // ── Paths ─────────────────────────────────────────────

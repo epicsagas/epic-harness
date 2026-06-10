@@ -1,47 +1,76 @@
-//! node.rs — Node CRUD operations via llm-kernel graph
+//! node.rs — Node CRUD operations via sqlx
 
 use std::io;
 
-use super::conn::memory_conn;
+use sqlx::Row;
+
+use super::conn::memory_pool_sync;
+use super::schema::upsert_graph_node;
 use super::types::{Node, NodeFrontmatter, graph_to_node, node_to_graph};
+use super::util::{NODE_COLUMNS, row_to_graph_node};
+use crate::store::runtime;
 
 pub fn write_node(node: &Node) -> io::Result<()> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        // Preserve monotonically-increasing fields from existing node
+        let mut gn = node_to_graph(node.clone());
+        let existing: Option<super::types::GraphNode> = sqlx::query(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
+        ))
+            .bind(&gn.id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(io::Error::other)?
+            .map(|r| row_to_graph_node(&r));
 
-    // Preserve monotonically-increasing fields from existing node
-    let mut gn = node_to_graph(node.clone());
-    if let Ok(Some(existing)) = llm_kernel::graph::store::read_node(&guard, &gn.id) {
-        gn.access_count = gn.access_count.max(existing.access_count);
-        if existing.accessed_at > gn.accessed_at {
-            gn.accessed_at = existing.accessed_at;
+        if let Some(ex) = existing {
+            gn.access_count = gn.access_count.max(ex.access_count);
+            if ex.accessed_at > gn.accessed_at {
+                gn.accessed_at = ex.accessed_at;
+            }
         }
-    }
 
-    llm_kernel::graph::store::upsert_node(&guard, &gn).map_err(|e| io::Error::other(e.to_string()))
+        upsert_graph_node(&pool, &gn).await
+    })
 }
 
 pub fn read_node(id: &str) -> io::Result<Node> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::store::read_node(&guard, id)
-        .map_err(|e| io::Error::other(e.to_string()))?
-        .map(graph_to_node)
-        .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"))
+            .bind(id)
+            .fetch_optional(&pool)
+            .await
+            .map_err(io::Error::other)?
+            .map(|r| graph_to_node(row_to_graph_node(&r)))
+            .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
+    })
 }
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::store::delete_node(&guard, id)
-        .map_err(|e| io::Error::other(e.to_string()))?;
-    Ok(())
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        sqlx::query("DELETE FROM nodes WHERE id = ?")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .map_err(io::Error::other)?;
+        Ok(())
+    })
 }
 
 pub fn list_node_ids() -> io::Result<Vec<String>> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::store::list_node_ids(&guard).map_err(|e| io::Error::other(e.to_string()))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        sqlx::query("SELECT id FROM nodes ORDER BY updated DESC")
+            .fetch_all(&pool)
+            .await
+            .map_err(io::Error::other)?
+            .iter()
+            .map(|r| r.try_get::<String, _>(0).map_err(io::Error::other))
+            .collect()
+    })
 }
 
 // ── Node serialization (kept for legacy migration import) ──────
@@ -61,7 +90,7 @@ pub fn parse_node(content: &str) -> Option<Node> {
     })
 }
 
-// ── Pool-compatible wrappers (keep signatures for callers) ─────
+// ── Pool-compatible async wrappers ────────────────────────────
 
 pub async fn write_node_pool(_pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
     write_node(node)
@@ -75,11 +104,26 @@ pub async fn read_nodes_pool(_pool: &sqlx::AnyPool, ids: &[&str]) -> io::Result<
     if ids.is_empty() {
         return Ok(vec![]);
     }
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::store::read_nodes(&guard, ids)
-        .map(|nodes| nodes.into_iter().map(graph_to_node).collect())
-        .map_err(|e| io::Error::other(e.to_string()))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        // Build parameterized IN clause
+        let placeholders: Vec<&str> = ids.iter().map(|_| "?").collect();
+        let sql = format!(
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({})",
+            placeholders.join(",")
+        );
+        let mut query = sqlx::query(&sql);
+        for id in ids {
+            query = query.bind(*id);
+        }
+        query
+            .fetch_all(&pool)
+            .await
+            .map_err(io::Error::other)?
+            .iter()
+            .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+            .collect()
+    })
 }
 
 #[allow(dead_code)]
@@ -94,20 +138,30 @@ pub async fn node_exists_pool(_pool: &sqlx::AnyPool, id: &str) -> bool {
 
 #[allow(dead_code)]
 pub async fn read_all_nodes_pool(_pool: &sqlx::AnyPool) -> io::Result<Vec<Node>> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    // Read all by using a very large limit
-    llm_kernel::graph::store::read_nodes_limited(&guard, 1_000_000)
-        .map(|nodes| nodes.into_iter().map(graph_to_node).collect())
-        .map_err(|e| io::Error::other(e.to_string()))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"))
+            .fetch_all(&pool)
+            .await
+            .map_err(io::Error::other)?
+            .iter()
+            .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+            .collect()
+    })
 }
 
 pub async fn read_nodes_limited_pool(_pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec<Node>> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::store::read_nodes_limited(&guard, limit as usize)
-        .map(|nodes| nodes.into_iter().map(graph_to_node).collect())
-        .map_err(|e| io::Error::other(e.to_string()))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?"))
+            .bind(limit)
+            .fetch_all(&pool)
+            .await
+            .map_err(io::Error::other)?
+            .iter()
+            .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+            .collect()
+    })
 }
 
 #[allow(dead_code)]

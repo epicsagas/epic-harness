@@ -1,13 +1,14 @@
 //! sessions.rs — Session snapshot SQLite I/O
 
-use rusqlite::Connection;
+use sqlx::AnyPool;
+use sqlx::Row;
 use std::io;
 
 use crate::shared::types::SessionSnapshot;
 
 /// Insert a session snapshot.
-pub fn insert_snapshot_conn(
-    conn: &Connection,
+pub async fn insert_snapshot_pool(
+    pool: &AnyPool,
     snap: &SessionSnapshot,
     created_at_millis: i64,
 ) -> io::Result<i64> {
@@ -17,91 +18,92 @@ pub fn insert_snapshot_conn(
         .as_ref()
         .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "{}".into()));
 
-    conn.execute(
+    sqlx::query(
         "INSERT INTO sessions
          (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
-        rusqlite::params![
-            snap.timestamp,
-            snap.snap_type,
-            snap.summary,
-            pending_json,
-            snap.context_usage,
-            pipeline_json,
-            created_at_millis,
-        ],
+         VALUES (?,?,?,?,?,?,?)",
     )
-    .map_err(io::Error::other)?;
-    Ok(conn.last_insert_rowid())
+    .bind(&snap.timestamp)
+    .bind(&snap.snap_type)
+    .bind(&snap.summary)
+    .bind(&pending_json)
+    .bind(snap.context_usage)
+    .bind(&pipeline_json)
+    .bind(created_at_millis)
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+        .fetch_one(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+    Ok(id)
 }
 
 /// Get the most recent session snapshot.
-pub fn get_latest_snapshot_conn(conn: &Connection) -> io::Result<Option<SessionSnapshot>> {
-    let result = conn.query_row(
+pub async fn get_latest_snapshot_pool(pool: &AnyPool) -> io::Result<Option<SessionSnapshot>> {
+    let row = sqlx::query(
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
          FROM sessions ORDER BY id DESC LIMIT 1",
-        [],
-        |row| {
-            let pending_json: String = row.get(3)?;
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    match row {
+        Some(r) => {
+            let pending_json: String = r.try_get(3).map_err(super::sqlx_err)?;
             let pending_tasks: Vec<String> =
                 serde_json::from_str(&pending_json).unwrap_or_default();
-            let pipeline_json: Option<String> = row.get(5)?;
+            let pipeline_json: Option<String> = r.try_get(5).map_err(super::sqlx_err)?;
             let pipeline_state: Option<serde_json::Value> = pipeline_json
                 .as_deref()
                 .and_then(|s| serde_json::from_str(s).ok());
-            Ok(SessionSnapshot {
-                timestamp: row.get(0)?,
-                snap_type: row.get(1)?,
-                summary: row.get(2)?,
+            Ok(Some(SessionSnapshot {
+                timestamp: r.try_get(0).map_err(super::sqlx_err)?,
+                snap_type: r.try_get(1).map_err(super::sqlx_err)?,
+                summary: r.try_get(2).map_err(super::sqlx_err)?,
                 pending_tasks,
-                context_usage: row.get(4)?,
+                context_usage: r.try_get(4).map_err(super::sqlx_err)?,
                 pipeline_state,
-            })
-        },
-    );
-
-    match result {
-        Ok(snap) => Ok(Some(snap)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(io::Error::other(e)),
+            }))
+        }
+        None => Ok(None),
     }
 }
 
 /// List the N most recent session snapshots.
-pub fn list_recent_snapshots_conn(
-    conn: &Connection,
-    limit: usize,
+pub async fn list_recent_snapshots_pool(
+    pool: &AnyPool,
+    limit: i64,
 ) -> io::Result<Vec<SessionSnapshot>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
-             FROM sessions ORDER BY id DESC LIMIT ?1",
-        )
-        .map_err(io::Error::other)?;
+    let rows = sqlx::query(
+        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
+         FROM sessions ORDER BY id DESC LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![limit as i64], |row| {
-            let pending_json: String = row.get(3)?;
-            let pending_tasks: Vec<String> =
-                serde_json::from_str(&pending_json).unwrap_or_default();
-            let pipeline_json: Option<String> = row.get(5)?;
-            let pipeline_state: Option<serde_json::Value> = pipeline_json
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
-            Ok(SessionSnapshot {
-                timestamp: row.get(0)?,
-                snap_type: row.get(1)?,
-                summary: row.get(2)?,
-                pending_tasks,
-                context_usage: row.get(4)?,
-                pipeline_state,
-            })
-        })
-        .map_err(io::Error::other)?;
-
-    let mut snaps = Vec::new();
+    let mut snaps = Vec::with_capacity(rows.len());
     for r in rows {
-        snaps.push(r.map_err(io::Error::other)?);
+        let pending_json: String = r.try_get(3).map_err(super::sqlx_err)?;
+        let pending_tasks: Vec<String> =
+            serde_json::from_str(&pending_json).unwrap_or_default();
+        let pipeline_json: Option<String> = r.try_get(5).map_err(super::sqlx_err)?;
+        let pipeline_state: Option<serde_json::Value> = pipeline_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok());
+        snaps.push(SessionSnapshot {
+            timestamp: r.try_get(0).map_err(super::sqlx_err)?,
+            snap_type: r.try_get(1).map_err(super::sqlx_err)?,
+            summary: r.try_get(2).map_err(super::sqlx_err)?,
+            pending_tasks,
+            context_usage: r.try_get(4).map_err(super::sqlx_err)?,
+            pipeline_state,
+        });
     }
     Ok(snaps)
 }
@@ -110,15 +112,15 @@ pub fn list_recent_snapshots_conn(
 mod tests {
     use super::*;
 
-    fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+    async fn test_pool() -> AnyPool {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+        pool
     }
 
-    #[test]
-    fn insert_and_get_latest() {
-        let conn = in_memory_db();
+    #[tokio::test]
+    async fn insert_and_get_latest() {
+        let pool = test_pool().await;
         let snap = SessionSnapshot {
             timestamp: "2026-06-02T10:00:00Z".into(),
             snap_type: "pre-compact".into(),
@@ -128,25 +130,25 @@ mod tests {
             pipeline_state: None,
         };
 
-        insert_snapshot_conn(&conn, &snap, 1000).unwrap();
+        insert_snapshot_pool(&pool, &snap, 1000).await.unwrap();
 
-        let latest = get_latest_snapshot_conn(&conn).unwrap();
+        let latest = get_latest_snapshot_pool(&pool).await.unwrap();
         assert!(latest.is_some());
         let s = latest.unwrap();
         assert_eq!(s.summary, "Test summary");
         assert_eq!(s.pending_tasks.len(), 2);
     }
 
-    #[test]
-    fn get_latest_when_empty() {
-        let conn = in_memory_db();
-        let result = get_latest_snapshot_conn(&conn).unwrap();
+    #[tokio::test]
+    async fn get_latest_when_empty() {
+        let pool = test_pool().await;
+        let result = get_latest_snapshot_pool(&pool).await.unwrap();
         assert!(result.is_none());
     }
 
-    #[test]
-    fn list_recent_snapshots() {
-        let conn = in_memory_db();
+    #[tokio::test]
+    async fn list_recent_snapshots() {
+        let pool = test_pool().await;
 
         for i in 0..5 {
             let snap = SessionSnapshot {
@@ -157,12 +159,11 @@ mod tests {
                 context_usage: None,
                 pipeline_state: None,
             };
-            insert_snapshot_conn(&conn, &snap, 1000 + i as i64).unwrap();
+            insert_snapshot_pool(&pool, &snap, 1000 + i as i64).await.unwrap();
         }
 
-        let recent = list_recent_snapshots_conn(&conn, 3).unwrap();
+        let recent = list_recent_snapshots_pool(&pool, 3).await.unwrap();
         assert_eq!(recent.len(), 3);
-        // Most recent first (id DESC)
         assert_eq!(recent[0].summary, "Session 4");
     }
 }

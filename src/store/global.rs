@@ -1,13 +1,14 @@
 //! global.rs — Cross-project pattern SQLite I/O
 #![allow(dead_code)]
 
-use rusqlite::Connection;
+use sqlx::AnyPool;
+use sqlx::Row;
 use std::io;
 
 /// Insert a global pattern record.
 #[allow(clippy::too_many_arguments)]
-pub fn insert_pattern_conn(
-    conn: &Connection,
+pub async fn insert_pattern_pool(
+    pool: &AnyPool,
     timestamp: &str,
     project: &str,
     success_rate: f64,
@@ -16,126 +17,93 @@ pub fn insert_pattern_conn(
     failure_patterns_json: &str,
     weak_tools_json: &str,
 ) -> io::Result<i64> {
-    conn.execute(
+    sqlx::query(
         "INSERT INTO global_patterns
          (timestamp, project, success_rate, avg_score, per_error_stats,
           failure_patterns, weak_tools)
-         VALUES (?1,?2,?3,?4,?5,?6,?7)",
-        rusqlite::params![
-            timestamp,
-            project,
-            success_rate,
-            avg_score,
-            per_error_stats_json,
-            failure_patterns_json,
-            weak_tools_json,
-        ],
+         VALUES (?,?,?,?,?,?,?)",
     )
-    .map_err(io::Error::other)?;
-    Ok(conn.last_insert_rowid())
+    .bind(timestamp)
+    .bind(project)
+    .bind(success_rate)
+    .bind(avg_score)
+    .bind(per_error_stats_json)
+    .bind(failure_patterns_json)
+    .bind(weak_tools_json)
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+        .fetch_one(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+    Ok(id)
 }
 
 /// Query patterns for all projects except the given one.
-pub fn query_patterns_excluding_conn(
-    conn: &Connection,
+pub async fn query_patterns_excluding_pool(
+    pool: &AnyPool,
     exclude_project: &str,
-    limit: usize,
+    limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, project, success_rate, avg_score,
-                    per_error_stats, failure_patterns, weak_tools
-             FROM global_patterns
-             WHERE project != ?1
-             ORDER BY timestamp DESC LIMIT ?2",
-        )
-        .map_err(io::Error::other)?;
+    let rows = sqlx::query(
+        "SELECT timestamp, project, success_rate, avg_score,
+                per_error_stats, failure_patterns, weak_tools
+         FROM global_patterns
+         WHERE project != ?
+         ORDER BY timestamp DESC LIMIT ?",
+    )
+    .bind(exclude_project)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![exclude_project, limit as i64], |row| {
-            let per_error_raw: String = row.get::<_, String>(4).unwrap_or_else(|_| "{}".into());
-            let failure_raw: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".into());
-            let weak_raw: String = row.get::<_, String>(6).unwrap_or_else(|_| "[]".into());
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, f64>(2)?,
-                row.get::<_, f64>(3)?,
-                per_error_raw,
-                failure_raw,
-                weak_raw,
-            ))
-        })
-        .map_err(io::Error::other)?;
-
-    let mut patterns = Vec::new();
-    for r in rows {
-        let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
-            r.map_err(io::Error::other)?;
-        let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
-        let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
-        let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
-        patterns.push(serde_json::json!({
-            "timestamp": ts,
-            "project": project,
-            "success_rate": success_rate,
-            "avg_score": avg_score,
-            "per_error_stats": per_error_stats,
-            "failure_patterns": failure_patterns,
-            "weak_tools": weak_tools,
-        }));
-    }
-    Ok(patterns)
+    Ok(rows.iter().map(|r| row_to_pattern(r)).collect())
 }
 
 /// Query all patterns (regardless of project).
-pub fn query_all_patterns_conn(
-    conn: &Connection,
-    limit: usize,
+pub async fn query_all_patterns_pool(
+    pool: &AnyPool,
+    limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT timestamp, project, success_rate, avg_score,
-                    per_error_stats, failure_patterns, weak_tools
-             FROM global_patterns ORDER BY timestamp DESC LIMIT ?1",
-        )
-        .map_err(io::Error::other)?;
+    let rows = sqlx::query(
+        "SELECT timestamp, project, success_rate, avg_score,
+                per_error_stats, failure_patterns, weak_tools
+         FROM global_patterns ORDER BY timestamp DESC LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
-    let rows = stmt
-        .query_map(rusqlite::params![limit as i64], |row| {
-            let per_error_raw: String = row.get::<_, String>(4).unwrap_or_else(|_| "{}".into());
-            let failure_raw: String = row.get::<_, String>(5).unwrap_or_else(|_| "[]".into());
-            let weak_raw: String = row.get::<_, String>(6).unwrap_or_else(|_| "[]".into());
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, f64>(2)?,
-                row.get::<_, f64>(3)?,
-                per_error_raw,
-                failure_raw,
-                weak_raw,
-            ))
-        })
-        .map_err(io::Error::other)?;
+    Ok(rows.iter().map(|r| row_to_pattern(r)).collect())
+}
 
-    let mut patterns = Vec::new();
-    for r in rows {
-        let (ts, project, success_rate, avg_score, per_error_raw, failure_raw, weak_raw) =
-            r.map_err(io::Error::other)?;
-        let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
-        let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
-        let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
-        patterns.push(serde_json::json!({
-            "timestamp": ts,
-            "project": project,
-            "success_rate": success_rate,
-            "avg_score": avg_score,
-            "per_error_stats": per_error_stats,
-            "failure_patterns": failure_patterns,
-            "weak_tools": weak_tools,
-        }));
-    }
-    Ok(patterns)
+/// Convert a row to a JSON value.
+fn row_to_pattern(r: &sqlx::any::AnyRow) -> serde_json::Value {
+    let ts: String = r.try_get(0).unwrap_or_default();
+    let project: String = r.try_get(1).unwrap_or_default();
+    let success_rate: f64 = r.try_get(2).unwrap_or(0.0);
+    let avg_score: f64 = r.try_get(3).unwrap_or(0.0);
+    let per_error_raw: String = r.try_get(4).unwrap_or_else(|_| "{}".into());
+    let failure_raw: String = r.try_get(5).unwrap_or_else(|_| "[]".into());
+    let weak_raw: String = r.try_get(6).unwrap_or_else(|_| "[]".into());
+
+    let per_error_stats = parse_json_field(&per_error_raw, serde_json::json!({}));
+    let failure_patterns = parse_json_field(&failure_raw, serde_json::json!([]));
+    let weak_tools = parse_json_field(&weak_raw, serde_json::json!([]));
+
+    serde_json::json!({
+        "timestamp": ts,
+        "project": project,
+        "success_rate": success_rate,
+        "avg_score": avg_score,
+        "per_error_stats": per_error_stats,
+        "failure_patterns": failure_patterns,
+        "weak_tools": weak_tools,
+    })
 }
 
 /// Parse a JSON field from a DB column, logging a warning on failure.
@@ -157,17 +125,17 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
 mod tests {
     use super::*;
 
-    fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+    async fn test_pool() -> AnyPool {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+        pool
     }
 
-    #[test]
-    fn insert_and_query() {
-        let conn = in_memory_db();
-        insert_pattern_conn(
-            &conn,
+    #[tokio::test]
+    async fn insert_and_query() {
+        let pool = test_pool().await;
+        insert_pattern_pool(
+            &pool,
             "2026-06-02T10:00:00Z",
             "project-a",
             0.9,
@@ -176,9 +144,10 @@ mod tests {
             "[]",
             "[]",
         )
+        .await
         .unwrap();
 
-        let patterns = query_all_patterns_conn(&conn, 10).unwrap();
+        let patterns = query_all_patterns_pool(&pool, 10).await.unwrap();
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0]["project"], "project-a");
         assert!(patterns[0]["per_error_stats"].is_object());
@@ -186,11 +155,11 @@ mod tests {
         assert!(patterns[0]["weak_tools"].is_array());
     }
 
-    #[test]
-    fn query_excluding_project() {
-        let conn = in_memory_db();
-        insert_pattern_conn(
-            &conn,
+    #[tokio::test]
+    async fn query_excluding_project() {
+        let pool = test_pool().await;
+        insert_pattern_pool(
+            &pool,
             "2026-06-02T10:00:00Z",
             "project-a",
             0.9,
@@ -199,9 +168,10 @@ mod tests {
             "[]",
             "[]",
         )
+        .await
         .unwrap();
-        insert_pattern_conn(
-            &conn,
+        insert_pattern_pool(
+            &pool,
             "2026-06-02T11:00:00Z",
             "project-b",
             0.8,
@@ -210,9 +180,12 @@ mod tests {
             "[]",
             "[]",
         )
+        .await
         .unwrap();
 
-        let patterns = query_patterns_excluding_conn(&conn, "project-a", 10).unwrap();
+        let patterns = query_patterns_excluding_pool(&pool, "project-a", 10)
+            .await
+            .unwrap();
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0]["project"], "project-b");
     }

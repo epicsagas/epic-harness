@@ -91,13 +91,11 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Orchestration API ───────────────────────────
             (Method::Get, "/api/run") => {
-                let body = if let Ok(conn) = crate::store::open_harness_db() {
-                    match crate::store::orchestrator::read_run_conn(&conn) {
-                        Ok(Some(run)) => {
-                            serde_json::to_string(&run).unwrap_or_else(|_| "{}".into())
-                        }
-                        _ => "{}".into(),
-                    }
+                let body = if let Ok(Some(run)) = crate::store::runtime::block_on(async {
+                    let pool = crate::store::pool::harness_pool().await?;
+                    crate::store::orchestrator::read_run_pool(&pool).await
+                }) {
+                    serde_json::to_string(&run).unwrap_or_else(|_| "{}".into())
                 } else {
                     let harness_dir = common::harness_dir();
                     match orch::read_run(&harness_dir) {
@@ -109,13 +107,11 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             (Method::Get, "/api/events") => {
-                let data = if let Ok(conn) = crate::store::open_harness_db() {
-                    match crate::store::orchestrator::read_run_conn(&conn) {
-                        Ok(Some(run)) => {
-                            serde_json::to_string(&run).unwrap_or_else(|_| "null".into())
-                        }
-                        _ => "null".into(),
-                    }
+                let data = if let Ok(Some(run)) = crate::store::runtime::block_on(async {
+                    let pool = crate::store::pool::harness_pool().await?;
+                    crate::store::orchestrator::read_run_pool(&pool).await
+                }) {
+                    serde_json::to_string(&run).unwrap_or_else(|_| "null".into())
                 } else {
                     let harness_dir = common::harness_dir();
                     serde_json::to_string(&orch::read_run(&harness_dir))
@@ -163,8 +159,10 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Memory API (Nodes) ───────────────────────────
             (Method::Get, "/api/nodes") => {
-                let nodes =
-                    store::read_all_nodes_conn(&store::open_db().unwrap()).unwrap_or_default();
+                let nodes = crate::store::runtime::block_on(async {
+                    let pool = crate::store::pool::memory_pool().await?;
+                    store::read_all_nodes_pool(&pool).await
+                }).unwrap_or_default();
                 let results: Vec<serde_json::Value> = nodes
                     .into_iter()
                     .map(|n| {
@@ -242,18 +240,18 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     .trim_end_matches("/status");
                 if !orch::validate_agent_id(agent_id) {
                     json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
-                } else if let Ok(conn) = crate::store::open_harness_db() {
-                    let body = match crate::store::orchestrator::read_agent_conn(&conn, agent_id) {
-                        Ok(Some(a)) => serde_json::json!({
-                            "agent_id": a.id,
-                            "phase": a.phase,
-                            "progress": a.progress,
-                            "last_heartbeat": a.last_heartbeat,
-                            "status": a.status,
-                        })
-                        .to_string(),
-                        _ => "{}".into(),
-                    };
+                } else if let Ok(Some(a)) = crate::store::runtime::block_on(async {
+                    let pool = crate::store::pool::harness_pool().await?;
+                    crate::store::orchestrator::read_agent_pool(&pool, agent_id).await
+                }) {
+                    let body = serde_json::json!({
+                        "agent_id": a.id,
+                        "phase": a.phase,
+                        "progress": a.progress,
+                        "last_heartbeat": a.last_heartbeat,
+                        "status": a.status,
+                    })
+                    .to_string();
                     json_response(&body)
                 } else {
                     let harness_dir = common::harness_dir();
@@ -271,7 +269,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 if !orch::validate_agent_id(agent_id) {
                     json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
                 } else {
-                    let ok = orch::dismiss_agent(&harness_dir, agent_id);
+                    let ok = crate::store::runtime::block_on(async {
+                        let pool = crate::store::pool::harness_pool().await.ok()?;
+                        crate::store::orchestrator::dismiss_agent_pool(&pool, agent_id).await.ok()
+                    }).unwrap_or_else(|| {
+                        // Fallback: delete agent status file directly
+                        let status_path = harness_dir.join("orchestrator").join("agents").join(agent_id).join("status.json");
+                        status_path.exists() && std::fs::remove_file(status_path).is_ok()
+                    });
                     let body = serde_json::json!({"ok": ok, "dismissed": agent_id}).to_string();
                     json_response(&body)
                 }
@@ -396,18 +401,21 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
     match cmd {
         "get_harness_metrics" => {
             // Try SQLite first, fallback to JSON file
-            if let Ok(conn) = crate::store::open_harness_db() {
-                if let Ok(metrics) = crate::store::metrics::load_metrics_conn(&conn) {
-                    return serde_json::to_string(&metrics).unwrap_or_else(|_| "null".into());
-                }
+            if let Ok(metrics) = crate::store::runtime::block_on(async {
+                let pool = crate::store::pool::harness_pool().await?;
+                crate::store::metrics::load_metrics_pool(&pool).await
+            }) {
+                return serde_json::to_string(&metrics).unwrap_or_else(|_| "null".into());
             }
             let p = harness_dir.join("metrics.json");
             fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
         }
         "get_evolved_skills" => {
             // Try SQLite first
-            if let Ok(conn) = crate::store::open_harness_db() {
-                let skills = crate::store::evolved::list_skills_full_conn(&conn)
+            if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
+                let skills = crate::store::runtime::block_on(
+                    crate::store::evolved::list_skills_full_pool(&pool)
+                )
                     .unwrap_or_default()
                     .into_iter()
                     .map(|s| {
@@ -418,12 +426,16 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                         })
                     })
                     .collect::<Vec<_>>();
-                let history = crate::store::evolution::query_recent_records_conn(&conn, 50)
+                let history = crate::store::runtime::block_on(
+                    crate::store::evolution::query_recent_records_pool(&pool, 50)
+                )
                     .unwrap_or_default()
                     .into_iter()
                     .filter_map(|r| serde_json::to_value(r).ok())
                     .collect::<Vec<_>>();
-                let total_sessions = crate::store::metrics::load_metrics_conn(&conn)
+                let total_sessions = crate::store::runtime::block_on(
+                    crate::store::metrics::load_metrics_pool(&pool)
+                )
                     .map(|m| m.total_sessions)
                     .unwrap_or(0);
                 if !skills.is_empty() || !history.is_empty() {
@@ -494,12 +506,14 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
         }
         "get_obs_summary" => {
             // Try SQLite first, fallback to JSONL
-            if let Ok(conn) = crate::store::open_harness_db() {
-                if let Ok(stats) = crate::store::observations::query_obs_stats_conn(
-                    &conn,
+            if let Ok(stats) = crate::store::runtime::block_on(async {
+                let pool = crate::store::pool::harness_pool().await?;
+                crate::store::observations::query_obs_stats_pool(
+                    &pool,
                     "2020-01-01", // all data
                     "2099-12-31",
-                ) {
+                ).await
+            }) {
                     if stats.total > 0 {
                         let tool_stats: Vec<serde_json::Value> = {
                             let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
@@ -550,7 +564,6 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                         .to_string();
                     }
                 }
-            }
 
             // Fallback: JSONL file parsing (for legacy data)
             let obs_dir = harness_dir.join("obs");
@@ -675,17 +688,18 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
         }
         "get_orbit_pipelines" => {
             // Try SQLite first
-            if let Ok(conn) = crate::store::open_harness_db() {
-                if let Ok(pipelines) = crate::store::orbit_store::list_all_pipelines_conn(&conn) {
-                    if !pipelines.is_empty() {
-                        let mut sorted = pipelines;
-                        sorted.sort_by(|a, b| {
-                            let ta = a["started_at"].as_str().unwrap_or("");
-                            let tb = b["started_at"].as_str().unwrap_or("");
-                            tb.cmp(ta)
-                        });
-                        return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
-                    }
+            if let Ok(pipelines) = crate::store::runtime::block_on(async {
+                let pool = crate::store::pool::harness_pool().await?;
+                crate::store::orbit_store::list_all_pipelines_pool(&pool).await
+            }) {
+                if !pipelines.is_empty() {
+                    let mut sorted = pipelines;
+                    sorted.sort_by(|a, b| {
+                        let ta = a["started_at"].as_str().unwrap_or("");
+                        let tb = b["started_at"].as_str().unwrap_or("");
+                        tb.cmp(ta)
+                    });
+                    return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
                 }
             }
             // Fallback: scan PIPELINE-*.json files

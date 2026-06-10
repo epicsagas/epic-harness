@@ -128,26 +128,19 @@ fn get_cross_project_hints() -> Vec<String> {
         .to_string();
 
     // Try SQLite first, fallback to JSONL
-    let records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::global::query_patterns_excluding_conn(&conn, &project_name, 20) {
-            Ok(patterns) => patterns,
-            Err(e) => {
-                eprintln!(
-                    "[resume] SQLite global patterns read failed, falling back to JSONL: {e}"
-                );
-                if !global_patterns_file().is_file() {
-                    return vec![];
-                }
-                read_jsonl(&global_patterns_file())
-            }
-        }
-    } else {
-        eprintln!("[resume] harness.db unavailable for global patterns, falling back to JSONL");
+    let records: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::global::query_patterns_excluding_pool(&pool, &project_name, 20).await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!(
+            "[resume] SQLite global patterns read failed, falling back to JSONL: {e}"
+        );
         if !global_patterns_file().is_file() {
             return vec![];
         }
         read_jsonl(&global_patterns_file())
-    };
+    });
 
     let other: Vec<_> = records
         .iter()
@@ -270,17 +263,18 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 1. Latest session snapshot (SQLite first, fallback to JSON file)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        if let Ok(Some(snap)) = crate::store::sessions::get_latest_snapshot_conn(&conn) {
-            if !snap.summary.is_empty() {
-                hint("resume", &format!("Previous: {}", snap.summary));
-            }
-            if !snap.pending_tasks.is_empty() {
-                hint(
-                    "resume",
-                    &format!("Pending: {}", snap.pending_tasks.join(", ")),
-                );
-            }
+    if let Ok(Some(snap)) = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::sessions::get_latest_snapshot_pool(&pool).await
+    }) {
+        if !snap.summary.is_empty() {
+            hint("resume", &format!("Previous: {}", snap.summary));
+        }
+        if !snap.pending_tasks.is_empty() {
+            hint(
+                "resume",
+                &format!("Pending: {}", snap.pending_tasks.join(", ")),
+            );
         }
     } else {
         let mut snaps = list_files(&sessions_dir(), ".json");
@@ -310,14 +304,13 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 2. Eval metrics — try SQLite first, fall back to JSON file
-    let metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::metrics::load_metrics_conn(&conn) {
-            Ok(m) if m.total_sessions > 0 => m,
-            _ => read_json(&metrics_file(), default_metrics()),
-        }
-    } else {
-        read_json(&metrics_file(), default_metrics())
-    };
+    let metrics: Metrics = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::load_metrics_pool(&pool).await
+    })
+    .ok()
+    .filter(|m| m.total_sessions > 0)
+    .unwrap_or_else(|| read_json(&metrics_file(), default_metrics()));
     if metrics.total_sessions > 0 {
         let score_str = metrics
             .score_history

@@ -4,32 +4,38 @@
 //! orchestrator state, orbit pipelines, evolved skills, global patterns) is
 //! stored in `harness.db` — separate from the knowledge graph `memory.db`.
 //!
-//! Follows the same dual-API pattern as `src/mem/store/`:
-//! standalone functions open their own connection, `_conn()` variants reuse one.
+//! Uses `sqlx` async pool via `pool.rs` + `runtime.rs` sync bridge.
+//! Functions suffixed `_pool` take `&AnyPool`; standalone helpers use the pool
+//! internally via `runtime::block_on`.
 
 // ── Internal submodules ──────────────────────────────
 
 pub mod evolution;
 pub mod evolved;
 pub mod global;
+pub mod merge_project;
 pub mod metrics;
 pub mod migrate;
 pub mod observations;
 pub mod orbit_store;
 pub mod orchestrator;
+pub(crate) mod pool;
+pub(crate) mod runtime;
 pub(crate) mod schema;
 pub mod sessions;
 
 #[cfg(test)]
 mod tests;
 
-// ── DB connection ────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────
 
-use rusqlite::Connection;
-use std::fs;
 use std::io;
 
-use crate::shared::paths;
+/// Convert `sqlx::Error` to `io::Error`.
+#[inline]
+pub(crate) fn sqlx_err(e: sqlx::Error) -> io::Error {
+    io::Error::other(e.to_string())
+}
 
 /// Convert u64 to i64 for SQLite storage.
 /// Saturates at i64::MAX on overflow (extremely unlikely for session/metric counters,
@@ -48,35 +54,13 @@ pub(crate) fn u64_to_i64(v: u64) -> i64 {
     }
 }
 
-/// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
-pub fn harness_db_path() -> std::path::PathBuf {
-    paths::harness_dir().join("harness.db")
+/// Convert i64 back to u64. Clamps negative values to 0.
+#[inline]
+pub(crate) fn i64_to_u64(v: i64) -> u64 {
+    v.try_into().unwrap_or(0)
 }
 
-/// Open the harness operational database.
-///
-/// Creates the file if it doesn't exist. Applies schema (tables, indexes),
-/// runs pending migrations, and imports legacy JSONL/JSON data on first run.
-///
-/// For existing databases, schema init is skipped (checked via _harness_meta).
-/// For new databases, schema is applied and legacy migration runs if needed.
-pub fn open_harness_db() -> io::Result<Connection> {
-    let path = harness_db_path();
-    let _is_new = !path.exists();
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let conn = Connection::open(&path).map_err(io::Error::other)?;
-
-    // Apply schema (WAL + FK pragma are set inside init_schema as the first operation).
-    // Uses IF NOT EXISTS throughout, so safe to call on existing DBs.
-    schema::init_schema(&conn)?;
-
-    // Run legacy migration when needed. migrate::run() is idempotent — it checks
-    // the 'legacy_migrated' flag and exits immediately if already done.
-    // Runs for both new and existing DBs to handle the first open after an upgrade.
-    migrate::run(&conn);
-
-    Ok(conn)
+/// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
+pub fn harness_db_path() -> std::path::PathBuf {
+    crate::shared::paths::harness_dir().join("harness.db")
 }

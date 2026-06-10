@@ -6,7 +6,8 @@
 //! - `score_history` — session score entries (capped at 50)
 //! - `skill_attribution` — per-skill A/B scores
 
-use rusqlite::Connection;
+use sqlx::AnyPool;
+use sqlx::Row;
 use std::collections::HashMap;
 use std::io;
 
@@ -19,83 +20,83 @@ const MAX_SCORE_HISTORY: usize = 50;
 // ── Load ─────────────────────────────────────────────
 
 /// Load the full Metrics struct from SQLite.
-pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
-    // Scalar state — use explicit Option to distinguish missing vs present
-    let get = |key: &str| -> Option<String> {
-        conn.query_row(
-            "SELECT value FROM metrics_state WHERE key = ?1",
-            rusqlite::params![key],
-            |row| row.get::<_, String>(0),
-        )
-        .ok()
-    };
+pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
+    // Scalar state helper
+    async fn get(pool: &AnyPool, key: &str) -> Option<String> {
+        sqlx::query_scalar::<_, String>("SELECT value FROM metrics_state WHERE key = ?")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+    }
 
-    let total_sessions: u64 = get("total_sessions")
+    let total_sessions: u64 = get(pool, "total_sessions").await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let avg_success_rate: f64 = get("avg_success_rate")
+    let avg_success_rate: f64 = get(pool, "avg_success_rate").await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.0);
-    let total_evolved_skills: u64 = get("total_evolved_skills")
+    let total_evolved_skills: u64 = get(pool, "total_evolved_skills").await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let last_session = get("last_session").filter(|v| !v.is_empty());
-    let best_score: Option<f64> = get("best_score").and_then(|v| v.parse().ok());
-    let best_session = get("best_session").unwrap_or_default();
-    let trend = get("trend").unwrap_or_else(|| "stable".into());
-    let stagnation_count: u64 = get("stagnation_count")
+    let last_session = get(pool, "last_session").await.filter(|v| !v.is_empty());
+    let best_score: Option<f64> = get(pool, "best_score").await.and_then(|v| v.parse().ok());
+    let best_session = get(pool, "best_session").await.unwrap_or_default();
+    let trend = get(pool, "trend").await.unwrap_or_else(|| "stable".into());
+    let stagnation_count: u64 = get(pool, "stagnation_count").await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let last_error_context = get("last_error_context").filter(|v| !v.is_empty());
+    let last_error_context = get(pool, "last_error_context").await.filter(|v| !v.is_empty());
 
     // Score history
-    let mut sh_stmt = conn
-        .prepare(
-            "SELECT timestamp, success_rate, avg_score, observations,
-                    dim_success, dim_quality, dim_cost
-             FROM score_history ORDER BY id ASC",
-        )
-        .map_err(io::Error::other)?;
+    let sh_rows = sqlx::query(
+        "SELECT timestamp, success_rate, avg_score, observations,
+                dim_success, dim_quality, dim_cost
+         FROM score_history ORDER BY id ASC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
-    let score_history: Vec<SessionScoreEntry> = sh_stmt
-        .query_map([], |row| {
-            Ok(SessionScoreEntry {
-                timestamp: row.get(0)?,
-                success_rate: row.get(1)?,
-                avg_score: row.get(2)?,
-                observations: row.get::<_, i64>(3)? as u64,
+    let score_history: Vec<SessionScoreEntry> = sh_rows
+        .iter()
+        .filter_map(|r| {
+            Some(SessionScoreEntry {
+                timestamp: r.try_get(0).ok()?,
+                success_rate: r.try_get(1).ok()?,
+                avg_score: r.try_get(2).ok()?,
+                observations: r.try_get::<i64, _>(3).ok()? as u64,
                 dimension_averages: ScoreDimensions {
-                    tool_success: row.get(4)?,
-                    output_quality: row.get(5)?,
-                    execution_cost: row.get(6)?,
+                    tool_success: r.try_get(4).ok()?,
+                    output_quality: r.try_get(5).ok()?,
+                    execution_cost: r.try_get(6).ok()?,
                 },
             })
         })
-        .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
         .collect();
 
     // Skill attribution
-    let mut sa_stmt = conn
-        .prepare(
-            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
-             FROM skill_attribution",
-        )
-        .map_err(io::Error::other)?;
+    let sa_rows = sqlx::query(
+        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+         FROM skill_attribution",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
-    let skill_attribution: HashMap<String, SkillAttribution> = sa_stmt
-        .query_map([], |row| {
-            Ok(SkillAttribution {
-                skill_name: row.get(0)?,
-                sessions_active: row.get::<_, i64>(1)? as u64,
-                avg_score_with: row.get(2)?,
-                avg_score_without: row.get(3)?,
-                first_seen: row.get(4)?,
-            })
+    let skill_attribution: HashMap<String, SkillAttribution> = sa_rows
+        .iter()
+        .filter_map(|r| {
+            let sa = SkillAttribution {
+                skill_name: r.try_get(0).ok()?,
+                sessions_active: r.try_get::<i64, _>(1).ok()? as u64,
+                avg_score_with: r.try_get(2).ok()?,
+                avg_score_without: r.try_get(3).ok()?,
+                first_seen: r.try_get(4).ok()?,
+            };
+            Some((sa.skill_name.clone(), sa))
         })
-        .map_err(io::Error::other)?
-        .filter_map(|r| r.ok())
-        .map(|sa| (sa.skill_name.clone(), sa))
         .collect();
 
     Ok(Metrics {
@@ -109,58 +110,58 @@ pub fn load_metrics_conn(conn: &Connection) -> io::Result<Metrics> {
         trend,
         stagnation_count,
         skill_attribution,
+        epoch_class: None,
         last_error_context,
     })
 }
 
 /// Standalone load.
 pub fn load_metrics() -> io::Result<Metrics> {
-    let conn = super::open_harness_db()?;
-    load_metrics_conn(&conn)
+    super::runtime::block_on(async {
+        let pool = super::pool::harness_pool().await?;
+        load_metrics_pool(&pool).await
+    })
 }
 
 // ── Save ─────────────────────────────────────────────
 
 /// Save the full Metrics struct to SQLite.
-///
-/// Uses UPSERT (INSERT OR REPLACE) for scalar state and skill_attribution
-/// instead of full DELETE + reinsert to avoid data loss on partial failures.
-/// Score history is capped at MAX_SCORE_HISTORY most recent entries.
-pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
-    let tx = conn.unchecked_transaction().map_err(io::Error::other)?;
+pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
 
     // Scalar state — upsert each key
-    let upsert = |key: &str, value: &str| {
-        tx.execute(
-            "INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?1, ?2)",
-            rusqlite::params![key, value],
-        )
-    };
+    async fn upsert(tx: &mut sqlx::Transaction<'_, sqlx::Any>, key: &str, value: &str) -> io::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&mut **tx)
+            .await
+            .map_err(super::sqlx_err)?;
+        Ok(())
+    }
 
-    upsert("total_sessions", &m.total_sessions.to_string()).map_err(io::Error::other)?;
-    upsert("avg_success_rate", &m.avg_success_rate.to_string()).map_err(io::Error::other)?;
-    upsert("total_evolved_skills", &m.total_evolved_skills.to_string())
-        .map_err(io::Error::other)?;
+    upsert(&mut tx, "total_sessions", &m.total_sessions.to_string()).await?;
+    upsert(&mut tx, "avg_success_rate", &m.avg_success_rate.to_string()).await?;
+    upsert(&mut tx, "total_evolved_skills", &m.total_evolved_skills.to_string()).await?;
     if let Some(ref v) = m.last_session {
-        upsert("last_session", v).map_err(io::Error::other)?;
+        upsert(&mut tx, "last_session", v).await?;
     }
     if let Some(v) = m.best_score {
-        upsert("best_score", &v.to_string()).map_err(io::Error::other)?;
+        upsert(&mut tx, "best_score", &v.to_string()).await?;
     }
-    upsert("best_session", &m.best_session).map_err(io::Error::other)?;
-    upsert("trend", &m.trend).map_err(io::Error::other)?;
-    upsert("stagnation_count", &m.stagnation_count.to_string()).map_err(io::Error::other)?;
+    upsert(&mut tx, "best_session", &m.best_session).await?;
+    upsert(&mut tx, "trend", &m.trend).await?;
+    upsert(&mut tx, "stagnation_count", &m.stagnation_count.to_string()).await?;
     if let Some(ref v) = m.last_error_context {
-        upsert("last_error_context", v).map_err(io::Error::other)?;
+        upsert(&mut tx, "last_error_context", v).await?;
     }
 
     // Score history — keep the most recent MAX_SCORE_HISTORY entries.
-    // Use DELETE + batch INSERT in transaction for ordered append-only data.
-    // Double-reverse: first .rev().take(N) selects the N most recent entries
-    // (from the tail), then the second .rev() restores chronological order
-    // so the DB rows are inserted oldest-first (matching the original append order).
-    tx.execute("DELETE FROM score_history", [])
-        .map_err(io::Error::other)?;
+    sqlx::query("DELETE FROM score_history")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
     let entries: Vec<&SessionScoreEntry> = m
         .score_history
         .iter()
@@ -168,57 +169,141 @@ pub fn save_metrics_conn(conn: &Connection, m: &Metrics) -> io::Result<()> {
         .take(MAX_SCORE_HISTORY)
         .collect();
     for entry in entries.into_iter().rev() {
-        tx.execute(
+        sqlx::query(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
-             dim_success, dim_quality, dim_cost) VALUES (?1,?2,?3,?4,?5,?6,?7)",
-            rusqlite::params![
-                entry.timestamp,
-                entry.success_rate,
-                entry.avg_score,
-                super::u64_to_i64(entry.observations),
-                entry.dimension_averages.tool_success,
-                entry.dimension_averages.output_quality,
-                entry.dimension_averages.execution_cost,
-            ],
+             dim_success, dim_quality, dim_cost) VALUES (?,?,?,?,?,?,?)",
         )
-        .map_err(io::Error::other)?;
+        .bind(&entry.timestamp)
+        .bind(entry.success_rate)
+        .bind(entry.avg_score)
+        .bind(super::u64_to_i64(entry.observations))
+        .bind(entry.dimension_averages.tool_success)
+        .bind(entry.dimension_averages.output_quality)
+        .bind(entry.dimension_averages.execution_cost)
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
     }
 
-    // Skill attribution — UPSERT per skill instead of DELETE all + reinsert
+    // Skill attribution — UPSERT per skill
     for sa in m.skill_attribution.values() {
-        tx.execute(
+        sqlx::query(
             "INSERT OR REPLACE INTO skill_attribution
              (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?1,?2,?3,?4,?5)",
-            rusqlite::params![
-                sa.skill_name,
-                super::u64_to_i64(sa.sessions_active),
-                sa.avg_score_with,
-                sa.avg_score_without,
-                sa.first_seen,
-            ],
+             VALUES (?,?,?,?,?)",
         )
-        .map_err(io::Error::other)?;
+        .bind(&sa.skill_name)
+        .bind(super::u64_to_i64(sa.sessions_active))
+        .bind(sa.avg_score_with)
+        .bind(sa.avg_score_without)
+        .bind(&sa.first_seen)
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
     }
 
-    tx.commit().map_err(io::Error::other)?;
+    tx.commit().await.map_err(super::sqlx_err)?;
     Ok(())
 }
 
 /// Standalone save.
 pub fn save_metrics(m: &Metrics) -> io::Result<()> {
-    let conn = super::open_harness_db()?;
-    save_metrics_conn(&conn, m)
+    super::runtime::block_on(async {
+        let pool = super::pool::harness_pool().await?;
+        save_metrics_pool(&pool, m).await
+    })
+}
+
+/// Save metrics directly into an existing transaction (no inner BEGIN/COMMIT).
+/// Used by `migrate.rs` which already holds a transaction.
+pub async fn save_metrics_direct(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    m: &Metrics,
+) -> io::Result<()> {
+    async fn upsert(tx: &mut sqlx::Transaction<'_, sqlx::Any>, key: &str, value: &str) -> io::Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&mut **tx)
+            .await
+            .map_err(super::sqlx_err)?;
+        Ok(())
+    }
+
+    upsert(tx, "total_sessions", &m.total_sessions.to_string()).await?;
+    upsert(tx, "avg_success_rate", &m.avg_success_rate.to_string()).await?;
+    upsert(tx, "total_evolved_skills", &m.total_evolved_skills.to_string()).await?;
+    if let Some(ref v) = m.last_session {
+        upsert(tx, "last_session", v).await?;
+    }
+    if let Some(v) = m.best_score {
+        upsert(tx, "best_score", &v.to_string()).await?;
+    }
+    upsert(tx, "best_session", &m.best_session).await?;
+    upsert(tx, "trend", &m.trend).await?;
+    upsert(tx, "stagnation_count", &m.stagnation_count.to_string()).await?;
+    if let Some(ref v) = m.last_error_context {
+        upsert(tx, "last_error_context", v).await?;
+    }
+
+    // Score history
+    sqlx::query("DELETE FROM score_history")
+        .execute(&mut **tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    let entries: Vec<&SessionScoreEntry> = m
+        .score_history
+        .iter()
+        .rev()
+        .take(MAX_SCORE_HISTORY)
+        .collect();
+    for entry in entries.into_iter().rev() {
+        sqlx::query(
+            "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
+             dim_success, dim_quality, dim_cost) VALUES (?,?,?,?,?,?,?)",
+        )
+        .bind(&entry.timestamp)
+        .bind(entry.success_rate)
+        .bind(entry.avg_score)
+        .bind(super::u64_to_i64(entry.observations))
+        .bind(entry.dimension_averages.tool_success)
+        .bind(entry.dimension_averages.output_quality)
+        .bind(entry.dimension_averages.execution_cost)
+        .execute(&mut **tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    }
+
+    // Skill attribution
+    for sa in m.skill_attribution.values() {
+        sqlx::query(
+            "INSERT OR REPLACE INTO skill_attribution
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
+             VALUES (?,?,?,?,?)",
+        )
+        .bind(&sa.skill_name)
+        .bind(super::u64_to_i64(sa.sessions_active))
+        .bind(sa.avg_score_with)
+        .bind(sa.avg_score_without)
+        .bind(&sa.first_seen)
+        .execute(&mut **tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    }
+
+    // No commit — caller manages the transaction
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn in_memory_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        super::super::schema::init_schema(&conn).unwrap();
-        conn
+    async fn test_pool() -> AnyPool {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+        pool
     }
 
     fn sample_metrics() -> Metrics {
@@ -260,13 +345,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn save_and_load_metrics() {
-        let conn = in_memory_db();
+    #[tokio::test]
+    async fn save_and_load_metrics() {
+        let pool = test_pool().await;
         let m = sample_metrics();
-        save_metrics_conn(&conn, &m).unwrap();
+        save_metrics_pool(&pool, &m).await.unwrap();
 
-        let loaded = load_metrics_conn(&conn).unwrap();
+        let loaded = load_metrics_pool(&pool).await.unwrap();
         assert_eq!(loaded.total_sessions, 10);
         assert_eq!(loaded.avg_success_rate, 0.92);
         assert_eq!(loaded.score_history.len(), 1);
@@ -275,19 +360,18 @@ mod tests {
         assert!(loaded.skill_attribution.contains_key("rust-borrow-checker"));
     }
 
-    #[test]
-    fn load_empty_metrics() {
-        let conn = in_memory_db();
-        let loaded = load_metrics_conn(&conn).unwrap();
+    #[tokio::test]
+    async fn load_empty_metrics() {
+        let pool = test_pool().await;
+        let loaded = load_metrics_pool(&pool).await.unwrap();
         assert_eq!(loaded.total_sessions, 0);
         assert!(loaded.score_history.is_empty());
     }
 
-    #[test]
-    fn score_history_cap_retains_most_recent() {
-        let conn = in_memory_db();
+    #[tokio::test]
+    async fn score_history_cap_retains_most_recent() {
+        let pool = test_pool().await;
         let mut m = sample_metrics();
-        // Add 60 entries with ascending observations values
         for i in 0..60 {
             m.score_history.push(SessionScoreEntry {
                 timestamp: format!("2026-06-{:02}T10:00:00Z", i % 28 + 1),
@@ -297,18 +381,14 @@ mod tests {
                 dimension_averages: ScoreDimensions::default(),
             });
         }
-        save_metrics_conn(&conn, &m).unwrap();
+        save_metrics_pool(&pool, &m).await.unwrap();
 
-        let loaded = load_metrics_conn(&conn).unwrap();
-        // Should be capped at 50
+        let loaded = load_metrics_pool(&pool).await.unwrap();
         assert!(loaded.score_history.len() <= 50);
 
-        // The most recent entries (observations 11..60) should be retained,
-        // not the oldest (0..10). The last entry should have observations=59.
         let last = loaded.score_history.last().unwrap();
         assert_eq!(last.observations, 59);
 
-        // The first retained entry should have observations=10 (skipped 0..9)
         let first = &loaded.score_history[0];
         assert!(
             first.observations >= 10,

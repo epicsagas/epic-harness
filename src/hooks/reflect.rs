@@ -230,21 +230,19 @@ pub fn run_context(
     });
 
     // 2. Evolution stats (SQLite first, fallback to JSONL)
-    let evo_records: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::evolution::query_all_records_conn(&conn) {
-            Ok(recs) => recs
-                .iter()
-                .filter_map(|r| serde_json::to_value(r).ok())
-                .collect(),
-            Err(e) => {
-                eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
-                read_jsonl_typed::<serde_json::Value>(&evolution_file())
-            }
-        }
-    } else {
-        eprintln!("[reflect] harness.db unavailable for evolution records, falling back to JSONL");
+    let evo_records: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::evolution::query_all_records_pool(&pool).await
+    })
+    .map(|recs| {
+        recs.iter()
+            .filter_map(|r| serde_json::to_value(r).ok())
+            .collect()
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
         read_jsonl_typed::<serde_json::Value>(&evolution_file())
-    };
+    });
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
     let mut skills_generated: u64 = 0;
@@ -316,18 +314,14 @@ pub fn run_context(
     });
 
     // 3. Metrics summary (SQLite first, fallback to JSON)
-    let metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::metrics::load_metrics_conn(&conn) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
-                read_json(&metrics_file(), default_metrics())
-            }
-        }
-    } else {
-        eprintln!("[reflect] harness.db unavailable for metrics, falling back to JSON");
+    let metrics: Metrics = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::load_metrics_pool(&pool).await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
         read_json(&metrics_file(), default_metrics())
-    };
+    });
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
@@ -398,23 +392,28 @@ pub fn run_context(
     });
 
     // 4. Session snapshots (SQLite first, fallback to JSON)
-    let snapshots: Vec<serde_json::Value> = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::sessions::list_recent_snapshots_conn(&conn, 5) {
-            Ok(snaps) => snaps
-                .iter()
-                .map(|s| {
-                    serde_json::json!({
-                        "timestamp": s.timestamp,
-                        "type": s.snap_type,
-                        "summary": s.summary.chars().take(400).collect::<String>(),
-                    })
+    let snapshots: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::sessions::list_recent_snapshots_pool(&pool, 5).await
+    })
+    .map(|snaps| {
+        snaps
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "timestamp": s.timestamp,
+                    "type": s.snap_type,
+                    "summary": s.summary.chars().take(400).collect::<String>(),
                 })
-                .collect(),
-            Err(e) => {
-                eprintln!("[reflect] SQLite sessions read failed, falling back to JSON: {e}");
-                vec![]
-            }
-        }
+            })
+            .collect()
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite sessions read failed, falling back to JSON: {e}");
+        vec![]
+    });
+    let snapshots: Vec<serde_json::Value> = if !snapshots.is_empty() {
+        snapshots
     } else {
         let snap_files = list_files(&sessions_dir(), ".json");
         snap_files.iter().rev().take(5).filter_map(|f| {
@@ -518,13 +517,6 @@ pub fn run_context(
 /// Pulls top nodes by importance for each project slug (or all if slugs = [current]).
 /// Session-type nodes are excluded (importance=0.05, noise) unless there's nothing else.
 fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
-    let conn = match store::open_db() {
-        Ok(c) => c,
-        Err(e) => {
-            return serde_json::json!({"error": format!("mem db unavailable: {e}")});
-        }
-    };
-
     // Determine project filter: use first slug if single-project, else no filter (all)
     let project_filter: Option<&str> = if project_slugs.len() == 1 {
         project_slugs.first().map(|s| s.as_str())
@@ -533,8 +525,7 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Smart recall — hint = broad engineering context, limit = 30
-    let recalled = match store::smart_recall_conn(
-        &conn,
+    let recalled = match store::smart_recall(
         project_filter,
         Some("decision pattern error resolution concept"),
         30,
@@ -544,16 +535,13 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Also pull top decisions/resolutions explicitly (high-value types)
-    let decisions = store::query_nodes_conn(
-        &conn,
+    let decisions = store::query_nodes(
         None, // tag filter
         Some("decision"),
         project_filter,
         10,
-    )
-    .unwrap_or_default();
-    let resolutions = store::query_nodes_conn(&conn, None, Some("resolution"), project_filter, 10)
-        .unwrap_or_default();
+    );
+    let resolutions = store::query_nodes(None, Some("resolution"), project_filter, 10);
 
     // Merge and deduplicate by id, prefer higher-importance entry
     let mut seen: std::collections::HashMap<String, serde_json::Value> =
@@ -777,17 +765,21 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
-    let observations = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::observations::query_obs_for_date_range_conn(
-            &conn, &today_str, &today_str,
-        ) {
-            Ok(recs) => recs,
-            Err(e) => {
-                eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-                // Fallthrough to JSONL path below
-                return 0;
-            }
+    let observations = match crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::observations::query_obs_for_date_range_pool(
+            &pool, &today_str, &today_str,
+        ).await
+    }) {
+        Ok(recs) => recs,
+        Err(e) => {
+            eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
+            // Fallthrough to JSONL path below
+            return 0;
         }
+    };
+    let observations = if !observations.is_empty() {
+        observations
     } else {
         // Fallback: read from JSONL files
         if !obs_dir().is_dir() {
@@ -815,18 +807,14 @@ pub fn run(_input: &HookInput) -> i32 {
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
     // 3. Stagnation (load metrics from SQLite, fallback to JSON)
-    let mut metrics: Metrics = if let Ok(conn) = crate::store::open_harness_db() {
-        match crate::store::metrics::load_metrics_conn(&conn) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
-                read_json(&metrics_file(), default_metrics())
-            }
-        }
-    } else {
-        eprintln!("[reflect] harness.db unavailable for metrics load, falling back to JSON");
+    let mut metrics: Metrics = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::load_metrics_pool(&pool).await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
         read_json(&metrics_file(), default_metrics())
-    };
+    });
     let (should_rollback, improved, rolled_back_count) =
         evolve::check_stagnation(&mut metrics, analysis.avg_score);
 
@@ -894,9 +882,10 @@ pub fn run(_input: &HookInput) -> i32 {
         analysis_summary: evolve::build_summary(&analysis),
     };
     // Write evolution record to SQLite (primary) + JSONL (fallback)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        let _ = crate::store::evolution::insert_record_conn(&conn, &record);
-    }
+    let _ = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::evolution::insert_record_pool(&pool, &record).await
+    });
     append_jsonl(&evolution_file(), &record);
 
     // 10. Session handoff context
@@ -963,16 +952,17 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // Save metrics to SQLite (primary) + JSON file (fallback)
-    if let Ok(conn) = crate::store::open_harness_db() {
-        let _ = crate::store::metrics::save_metrics_conn(&conn, &metrics);
-    }
+    let _ = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::save_metrics_pool(&pool, &metrics).await
+    });
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }
 
     // 11.5. Sync orbit pipeline files → SQLite (dual-write: files are source of truth
     //       for /orbit phase recovery; SQLite enables REST API + dashboard queries).
-    if let Ok(conn) = crate::store::open_harness_db() {
+    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
         let odir = orbit_dir();
         if let Ok(entries) = fs::read_dir(&odir) {
             let mut synced = 0usize;
@@ -988,16 +978,17 @@ pub fn run(_input: &HookInput) -> i32 {
                         let status = pl["status"].as_str().unwrap_or("unknown");
                         let phase = pl["phase"].as_str();
                         let mode = pl["mode"].as_str();
-                        if crate::store::orbit_store::upsert_pipeline_conn(
-                            &conn,
-                            id,
-                            &project_slug(),
-                            status,
-                            phase,
-                            mode,
-                            &content,
-                        )
-                        .is_ok()
+                        if crate::store::runtime::block_on(
+                            crate::store::orbit_store::upsert_pipeline_pool(
+                                &pool,
+                                id,
+                                &project_slug(),
+                                status,
+                                phase,
+                                mode,
+                                &content,
+                            )
+                        ).is_ok()
                         {
                             synced += 1;
                         }

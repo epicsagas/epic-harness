@@ -1,36 +1,107 @@
-//! decay.rs — Importance decay, stale tagging, and access tracking via llm-kernel
+//! decay.rs — Importance decay, stale tagging, and access tracking via sqlx
 
 use std::io;
 
-use super::conn::memory_conn;
+use sqlx::Row;
+
+use super::conn::memory_pool_sync;
+use super::util::now_iso;
+use crate::store::runtime;
 
 pub fn decay_importance(days: u64, factor: f64, floor: f64) -> io::Result<u64> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::lifecycle::decay_importance(&guard, days, factor, floor)
-        .map_err(|e| io::Error::other(e.to_string()))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        // Decay importance for nodes not accessed in `days` days.
+        // Excludes 'session' type (already at floor 0.05) and pinned nodes.
+        let cutoff = format!(
+            "-{} days",
+            days
+        );
+        // Calculate cutoff timestamp
+        let now_secs = super::util::parse_iso_to_secs(&now_iso());
+        let cutoff_secs = now_secs.saturating_sub(days * 86400);
+        // Reconstruct ISO timestamp from cutoff_secs
+        let cutoff_ts = {
+            let s = cutoff_secs;
+            let sec = s % 60;
+            let min = (s / 60) % 60;
+            let hour = (s / 3600) % 24;
+            let d = s / 86400;
+            let (y, m, day) = super::util::days_to_ymd(d);
+            format!("{y:04}-{m:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+        };
+
+        let result = sqlx::query(
+            "UPDATE nodes SET importance = MAX(importance * ?, ?) \
+             WHERE accessed_at < ? AND accessed_at != '' \
+             AND type != 'session' AND tags NOT LIKE '%pinned%'"
+        )
+            .bind(factor)
+            .bind(floor)
+            .bind(&cutoff_ts)
+            .execute(&pool)
+            .await
+            .map_err(io::Error::other)?;
+
+        Ok(result.rows_affected())
+    })
 }
 
 pub fn tag_stale_nodes(days: u64) -> io::Result<u64> {
-    let conn = memory_conn()?;
-    let guard = conn.lock().map_err(|e| io::Error::other(e.to_string()))?;
-    llm_kernel::graph::lifecycle::tag_stale_nodes(&guard, days)
-        .map_err(|e| io::Error::other(e.to_string()))
+    let pool = memory_pool_sync()?;
+    runtime::block_on(async {
+        let now_secs = super::util::parse_iso_to_secs(&now_iso());
+        let cutoff_secs = now_secs.saturating_sub(days * 86400);
+        let cutoff_ts = {
+            let s = cutoff_secs;
+            let sec = s % 60;
+            let min = (s / 60) % 60;
+            let hour = (s / 3600) % 24;
+            let d = s / 86400;
+            let (y, m, day) = super::util::days_to_ymd(d);
+            format!("{y:04}-{m:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+        };
+
+        let result = sqlx::query(
+            "UPDATE nodes SET tags = CASE \
+             WHEN tags = '' THEN 'stale' \
+             WHEN tags LIKE '%stale%' THEN tags \
+             ELSE tags || ',stale' END \
+             WHERE updated < ? AND updated != '' \
+             AND type != 'session' AND tags NOT LIKE '%pinned%'"
+        )
+            .bind(&cutoff_ts)
+            .execute(&pool)
+            .await
+            .map_err(io::Error::other)?;
+
+        Ok(result.rows_affected())
+    })
 }
 
 pub fn touch_nodes_pool(_pool: &sqlx::AnyPool, ids: &[String]) {
-    let conn = match memory_conn() {
+    if ids.is_empty() {
+        return;
+    }
+    let pool = match memory_pool_sync() {
         Ok(c) => c,
         Err(_) => return,
     };
-    let guard = match conn.lock() {
-        Ok(g) => g,
-        Err(_) => return,
-    };
-    llm_kernel::graph::lifecycle::touch_nodes(&guard, ids);
+    let _ = runtime::block_on(async {
+        let now = now_iso();
+        for id in ids {
+            let _ = sqlx::query(
+                "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?"
+            )
+                .bind(&now)
+                .bind(id)
+                .execute(&pool)
+                .await;
+        }
+    });
 }
 
-// ── Pool-compatible wrappers ─────────────────────────────
+// ── Pool-compatible wrappers ─────────────────────────────────
 
 #[allow(dead_code)]
 pub async fn decay_importance_pool(

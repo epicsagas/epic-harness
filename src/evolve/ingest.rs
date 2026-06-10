@@ -1,69 +1,65 @@
 use crate::mem::store;
+use crate::mem::store::conn::memory_pool_sync;
 use crate::shared::{evolution::*, helpers::*, paths::*};
 use crate::store::runtime::block_on;
-use sqlx::AnyPool;
+
+use sqlx::{AnyPool, Row};
 
 use super::analysis::build_summary;
 
 /// Query pattern types detected in the previous session (the session that the
 /// current session "follows"). Extracts non-generic tags from CSV tag strings.
 pub async fn query_prev_pattern_types_async(_pool: &AnyPool, session_node_id: &str) -> Vec<String> {
-    let conn = match store::conn::memory_conn() {
-        Ok(c) => c,
+    let pool = match memory_pool_sync() {
+        Ok(p) => p,
         Err(_) => return vec![],
     };
-    let guard = match conn.lock() {
-        Ok(g) => g,
-        Err(_) => return vec![],
-    };
-    let mut stmt = match guard.prepare(
-        "SELECT n.tags FROM nodes n
-         JOIN edges e ON e.source = n.id
-         WHERE n.type = 'pattern'
-         AND e.relation = 'detected_in'
-         AND e.target IN (
-            SELECT e2.source FROM edges e2
-            WHERE e2.target = ? AND e2.relation = 'follows'
-         )",
-    ) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    let tags_rows: Vec<String> =
-        match stmt.query_map((session_node_id,), |row| row.get::<_, String>(0)) {
-            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-            Err(_) => vec![],
-        };
+    block_on(async {
+        let rows = sqlx::query(
+            "SELECT n.tags FROM nodes n
+             JOIN edges e ON e.source = n.id
+             WHERE n.type = 'pattern'
+             AND e.label = 'detected_in'
+             AND e.target IN (
+                SELECT e2.source FROM edges e2
+                WHERE e2.target = ? AND e2.label = 'follows'
+             )",
+        )
+            .bind(session_node_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap_or_default();
 
-    let mut results = Vec::new();
-    for tags_str in tags_rows {
-        for tag in tags_str.split(',') {
-            let tag = tag.trim().trim_matches('"');
-            if !tag.is_empty() && tag != "auto" && tag != "pattern" {
-                results.push(tag.to_string());
+        let mut results = Vec::new();
+        for row in &rows {
+            let tags_str: String = row.try_get(0).unwrap_or_default();
+            for tag in tags_str.split(',') {
+                let tag = tag.trim().trim_matches('"');
+                if !tag.is_empty() && tag != "auto" && tag != "pattern" {
+                    results.push(tag.to_string());
+                }
             }
         }
-    }
-    results
+        results
+    })
 }
 
 /// Find or create a project hub node. Returns the hub node's ID.
 pub async fn ensure_project_hub_async(_pool: &AnyPool, slug: &str) -> std::io::Result<String> {
     let title = format!("project: {}", slug);
 
-    // Check if project hub already exists (via rusqlite)
+    // Check if project hub already exists
     {
-        let conn = store::conn::memory_conn()?;
-        let guard = conn
-            .lock()
-            .map_err(|e| std::io::Error::other(e.to_string()))?;
-        let existing: Option<String> = guard
-            .query_row(
-                "SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1",
-                (&title,),
-                |row| row.get(0),
-            )
-            .ok();
+        let pool = memory_pool_sync()?;
+        let existing: Option<String> = block_on(async {
+            let row = sqlx::query("SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1")
+                .bind(&title)
+                .fetch_optional(&pool)
+                .await
+                .ok()??;
+            Some(row.try_get::<String, _>(0).unwrap_or_default())
+                .filter(|s| !s.is_empty())
+        });
         if let Some(id) = existing {
             return Ok(id);
         }
@@ -94,17 +90,21 @@ pub async fn ensure_project_hub_async(_pool: &AnyPool, slug: &str) -> std::io::R
 
 /// Find the most recent previous session node for a project slug.
 fn find_prev_session(session_node_id: &str, slug: &str) -> Option<String> {
-    let conn = store::conn::memory_conn().ok()?;
-    let guard = conn.lock().ok()?;
-    guard
-        .query_row(
+    let pool = memory_pool_sync().ok()?;
+    block_on(async {
+        let csv_proj = format!("%{slug}%");
+        sqlx::query(
             "SELECT id FROM nodes WHERE type = 'session' AND id != ?
-             AND (',' || projects || ',' LIKE '%,' || ? || ',%')
+             AND projects LIKE ?
              ORDER BY updated DESC LIMIT 1",
-            (session_node_id, slug),
-            |row| row.get(0),
         )
-        .ok()
+            .bind(session_node_id)
+            .bind(&csv_proj)
+            .fetch_optional(&pool)
+            .await
+            .ok()?
+            .and_then(|r| r.try_get::<String, _>(0).ok())
+    })
 }
 
 /// Ingest session analysis results into the knowledge graph.
@@ -515,9 +515,9 @@ mod tests {
     use crate::mem::store;
 
     async fn open_test_mem_pool() -> AnyPool {
-        // Use an isolated in-memory rusqlite connection for each test
-        crate::mem::store::conn::set_test_conn(crate::mem::store::conn::test_conn());
-        crate::store::pool::test_memory_pool().await
+        let pool = crate::store::pool::test_memory_pool().await;
+        crate::mem::store::init_schema_pool(&pool).await.unwrap();
+        pool
     }
 
     #[tokio::test]
