@@ -411,30 +411,6 @@ export async function searchMemory(query: string, type?: string): Promise<Memory
   }
 }
 
-// ── Orchestration API ──────────────────────────────────────────────────────
-
-export async function getOrchestratorRun(): Promise<OrchestrationRun | null> {
-  try {
-    const res = await fetch('/api/run');
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && Object.keys(data).length > 0 ? data as OrchestrationRun : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchAgentStatus | null> {
-  try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/status`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && Object.keys(data).length > 0 ? data as OrchAgentStatus : null;
-  } catch {
-    return null;
-  }
-}
-
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
 /** Build project args from the store. `__all__` means aggregate → omit from request. */

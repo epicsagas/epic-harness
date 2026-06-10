@@ -80,10 +80,54 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         .execute(pool)
         .await;
 
+    // Migrate FTS schema if it lacks the 'id' and 'projects' columns added in v2.
+    migrate_fts_schema(pool).await;
+
     // Legacy file migration
     migrate_legacy_files(pool).await;
 
     Ok(())
+}
+
+/// Check if nodes_fts has the v2 columns (id, projects). If not, drop and recreate with triggers.
+async fn migrate_fts_schema(pool: &AnyPool) {
+    // Try to query 'id' column from FTS; if it fails the old schema is in place.
+    let needs_migration = sqlx::query("SELECT id FROM nodes_fts LIMIT 1")
+        .fetch_optional(pool)
+        .await
+        .is_err();
+
+    if !needs_migration {
+        return;
+    }
+
+    // Drop old triggers, old FTS table, recreate with id+projects columns, restore triggers.
+    let stmts = [
+        "DROP TRIGGER IF EXISTS nodes_ai",
+        "DROP TRIGGER IF EXISTS nodes_ad",
+        "DROP TRIGGER IF EXISTS nodes_au",
+        "DROP TABLE IF EXISTS nodes_fts",
+        "CREATE VIRTUAL TABLE nodes_fts USING fts5(id, title, body, tags, projects, content=nodes, content_rowid=rowid)",
+        "CREATE TRIGGER nodes_ai AFTER INSERT ON nodes BEGIN \
+            INSERT INTO nodes_fts(rowid, id, title, body, tags, projects) \
+            VALUES (new.rowid, new.id, new.title, new.body, new.tags, new.projects); \
+         END",
+        "CREATE TRIGGER nodes_ad AFTER DELETE ON nodes BEGIN \
+            INSERT INTO nodes_fts(nodes_fts, rowid, id, title, body, tags, projects) \
+            VALUES ('delete', old.rowid, old.id, old.title, old.body, old.tags, old.projects); \
+         END",
+        "CREATE TRIGGER nodes_au AFTER UPDATE ON nodes BEGIN \
+            INSERT INTO nodes_fts(nodes_fts, rowid, id, title, body, tags, projects) \
+            VALUES ('delete', old.rowid, old.id, old.title, old.body, old.tags, old.projects); \
+            INSERT INTO nodes_fts(rowid, id, title, body, tags, projects) \
+            VALUES (new.rowid, new.id, new.title, new.body, new.tags, new.projects); \
+         END",
+        "INSERT INTO nodes_fts(nodes_fts) VALUES('rebuild')",
+    ];
+
+    for stmt in &stmts {
+        let _ = sqlx::query(stmt).execute(pool).await;
+    }
 }
 
 /// Import legacy `nodes/*.md` + `edges.jsonl` if not yet migrated.
@@ -143,14 +187,10 @@ async fn migrate_legacy_files(pool: &AnyPool) {
 }
 
 /// Upsert a GraphNode into the nodes table.
+///
+/// FTS sync is handled by triggers (nodes_ai / nodes_ad / nodes_au). INSERT OR REPLACE fires
+/// DELETE+INSERT internally, so the triggers keep nodes_fts consistent automatically.
 pub(crate) async fn upsert_graph_node(pool: &AnyPool, gn: &super::types::GraphNode) -> io::Result<()> {
-    // Delete from FTS first (INSERT OR REPLACE doesn't trigger FTS content sync)
-    sqlx::query("DELETE FROM nodes_fts WHERE id = ?")
-        .bind(&gn.id)
-        .execute(pool)
-        .await
-        .map_err(io::Error::other)?;
-
     sqlx::query(
         "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -167,19 +207,6 @@ pub(crate) async fn upsert_graph_node(pool: &AnyPool, gn: &super::types::GraphNo
         .bind(gn.importance)
         .bind(gn.access_count)
         .bind(&gn.accessed_at)
-        .execute(pool)
-        .await
-        .map_err(io::Error::other)?;
-
-    // Insert into FTS for full-text search
-    sqlx::query(
-        "INSERT INTO nodes_fts (id, title, body, tags, projects) VALUES (?, ?, ?, ?, ?)"
-    )
-        .bind(&gn.id)
-        .bind(&gn.title)
-        .bind(&gn.body)
-        .bind(&gn.tags)
-        .bind(&gn.projects)
         .execute(pool)
         .await
         .map_err(io::Error::other)?;

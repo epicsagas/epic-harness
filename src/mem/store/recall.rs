@@ -7,7 +7,7 @@ use std::io;
 
 use super::conn::memory_pool_sync;
 use super::types::{ScoredNode, graph_to_node};
-use super::util::{NODE_COLUMNS, now_iso, parse_iso_to_secs, row_to_graph_node};
+use super::util::{NODE_COLUMNS, NODE_COLUMNS_PREFIXED, now_iso, parse_iso_to_secs, row_to_graph_node};
 use crate::store::runtime;
 
 /// Half-life in seconds for recency decay (30 days).
@@ -37,20 +37,22 @@ pub(crate) async fn smart_recall_async(
         if let Some(proj) = project {
             let csv_proj = format!("%{proj}%");
             sqlx::query(&format!(
-                "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
-                 (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ?) \
-                 AND projects LIKE ? ORDER BY importance DESC LIMIT ?"
+                "SELECT {NODE_COLUMNS_PREFIXED} FROM nodes n \
+                 INNER JOIN nodes_fts f ON n.rowid = f.rowid \
+                 WHERE f.nodes_fts MATCH ? AND n.projects LIKE ? \
+                 ORDER BY n.importance DESC LIMIT ?"
             ))
                 .bind(&fts_query)
                 .bind(&csv_proj)
-                .bind(limit as i64 * 3) // overfetch for scoring
+                .bind(limit as i64 * 3)
                 .fetch_all(pool)
                 .await
         } else {
             sqlx::query(&format!(
-                "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
-                 (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ?) \
-                 ORDER BY importance DESC LIMIT ?"
+                "SELECT {NODE_COLUMNS_PREFIXED} FROM nodes n \
+                 INNER JOIN nodes_fts f ON n.rowid = f.rowid \
+                 WHERE f.nodes_fts MATCH ? \
+                 ORDER BY n.importance DESC LIMIT ?"
             ))
                 .bind(&fts_query)
                 .bind(limit as i64 * 3)

@@ -4,7 +4,7 @@ use std::io;
 
 use super::conn::memory_pool_sync;
 use super::types::Node;
-use super::util::{NODE_COLUMNS, row_to_node};
+use super::util::{NODE_COLUMNS, NODE_COLUMNS_PREFIXED, row_to_node};
 use crate::store::runtime;
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
@@ -16,11 +16,14 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
 }
 
 async fn search_nodes_async(pool: &sqlx::AnyPool, query: &str, limit: usize) -> Vec<Node> {
-    // Escape FTS5 special characters
     let fts_query = escape_fts(query);
+    // Use rowid-based JOIN: FTS5 content table columns are not reliably accessible via sqlx
+    // AnyPool; joining on rowid is always correct.
     sqlx::query(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN \
-         (SELECT id FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank) \
+        "SELECT {NODE_COLUMNS_PREFIXED} FROM nodes n \
+         INNER JOIN nodes_fts f ON n.rowid = f.rowid \
+         WHERE f.nodes_fts MATCH ? \
+         ORDER BY f.rank \
          LIMIT ?"
     ))
         .bind(&fts_query)

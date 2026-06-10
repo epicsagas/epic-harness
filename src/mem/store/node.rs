@@ -56,11 +56,6 @@ async fn read_node_async(pool: &sqlx::AnyPool, id: &str) -> io::Result<Node> {
 pub fn delete_node_file(id: &str) -> io::Result<()> {
     let pool = memory_pool_sync()?;
     runtime::block_on(async {
-        // Remove from FTS first
-        let _ = sqlx::query("DELETE FROM nodes_fts WHERE id = ?")
-            .bind(id)
-            .execute(&pool)
-            .await;
         sqlx::query("DELETE FROM nodes WHERE id = ?")
             .bind(id)
             .execute(&pool)
@@ -135,11 +130,6 @@ pub async fn read_nodes_pool(pool: &sqlx::AnyPool, ids: &[&str]) -> io::Result<V
 
 #[allow(dead_code)]
 pub async fn delete_node_pool(pool: &sqlx::AnyPool, id: &str) -> io::Result<()> {
-    // Remove from FTS first
-    let _ = sqlx::query("DELETE FROM nodes_fts WHERE id = ?")
-        .bind(id)
-        .execute(pool)
-        .await;
     sqlx::query("DELETE FROM nodes WHERE id = ?")
         .bind(id)
         .execute(pool)
