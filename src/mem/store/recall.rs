@@ -5,9 +5,11 @@
 
 use std::io;
 
+use sqlx::Row as _;
+
 use super::conn::memory_pool_sync;
 use super::types::{ScoredNode, graph_to_node};
-use super::util::{NODE_COLUMNS, NODE_COLUMNS_PREFIXED, now_iso, parse_iso_to_secs, row_to_graph_node};
+use super::util::{NODE_COLUMNS, now_iso, parse_iso_to_secs, row_to_graph_node};
 use crate::store::runtime;
 
 /// Half-life in seconds for recency decay (30 days).
@@ -34,30 +36,40 @@ pub(crate) async fn smart_recall_async(
     // Step 1: Get candidate nodes filtered by project and/or FTS hint
     let candidates = if let Some(query) = hint {
         let fts_query = escape_fts(query);
+        // Get matching rowids from FTS, then fetch full nodes — avoids JOIN column ambiguity
+        // with sqlx AnyPool which doesn't support FTS5 virtual table column access reliably.
+        let rowids: Vec<i64> = sqlx::query(
+            "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?"
+        )
+            .bind(&fts_query)
+            .bind(limit as i64 * 3)
+            .fetch_all(pool)
+            .await
+            .map(|rows| rows.iter().filter_map(|r| r.try_get::<i64, _>(0).ok()).collect())
+            .unwrap_or_default();
+
+        if rowids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let placeholders = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         if let Some(proj) = project {
             let csv_proj = format!("%{proj}%");
-            sqlx::query(&format!(
-                "SELECT {NODE_COLUMNS_PREFIXED} FROM nodes n \
-                 INNER JOIN nodes_fts f ON n.rowid = f.rowid \
-                 WHERE f.nodes_fts MATCH ? AND n.projects LIKE ? \
-                 ORDER BY n.importance DESC LIMIT ?"
-            ))
-                .bind(&fts_query)
-                .bind(&csv_proj)
-                .bind(limit as i64 * 3)
-                .fetch_all(pool)
-                .await
+            let sql = format!(
+                "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) AND projects LIKE ? \
+                 ORDER BY importance DESC"
+            );
+            let mut q = sqlx::query(&sql);
+            for rid in &rowids { q = q.bind(*rid); }
+            q.bind(&csv_proj).fetch_all(pool).await
         } else {
-            sqlx::query(&format!(
-                "SELECT {NODE_COLUMNS_PREFIXED} FROM nodes n \
-                 INNER JOIN nodes_fts f ON n.rowid = f.rowid \
-                 WHERE f.nodes_fts MATCH ? \
-                 ORDER BY n.importance DESC LIMIT ?"
-            ))
-                .bind(&fts_query)
-                .bind(limit as i64 * 3)
-                .fetch_all(pool)
-                .await
+            let sql = format!(
+                "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) \
+                 ORDER BY importance DESC"
+            );
+            let mut q = sqlx::query(&sql);
+            for rid in &rowids { q = q.bind(*rid); }
+            q.fetch_all(pool).await
         }
     } else if let Some(proj) = project {
         let csv_proj = format!("%{proj}%");

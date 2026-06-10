@@ -2,9 +2,11 @@
 
 use std::io;
 
+use sqlx::Row as _;
+
 use super::conn::memory_pool_sync;
 use super::types::Node;
-use super::util::{NODE_COLUMNS, NODE_COLUMNS_PREFIXED, row_to_node};
+use super::util::{NODE_COLUMNS, row_to_node};
 use crate::store::runtime;
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
@@ -17,18 +19,31 @@ pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
 
 async fn search_nodes_async(pool: &sqlx::AnyPool, query: &str, limit: usize) -> Vec<Node> {
     let fts_query = escape_fts(query);
-    // Use rowid-based JOIN: FTS5 content table columns are not reliably accessible via sqlx
-    // AnyPool; joining on rowid is always correct.
-    sqlx::query(&format!(
-        "SELECT {NODE_COLUMNS_PREFIXED} FROM nodes n \
-         INNER JOIN nodes_fts f ON n.rowid = f.rowid \
-         WHERE f.nodes_fts MATCH ? \
-         ORDER BY f.rank \
-         LIMIT ?"
-    ))
+    // Step 1: get matching rowids from FTS index
+    let rowids: Vec<i64> = match sqlx::query(
+        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?"
+    )
         .bind(&fts_query)
         .bind(limit as i64)
         .fetch_all(pool)
+        .await
+    {
+        Ok(rows) => rows.iter().filter_map(|r| r.try_get::<i64, _>(0).ok()).collect(),
+        Err(_) => return vec![],
+    };
+
+    if rowids.is_empty() {
+        return vec![];
+    }
+
+    // Step 2: fetch full nodes by rowid
+    let placeholders = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders})");
+    let mut q = sqlx::query(&sql);
+    for rid in &rowids {
+        q = q.bind(*rid);
+    }
+    q.fetch_all(pool)
         .await
         .map(|rows| rows.iter().map(row_to_node).collect())
         .unwrap_or_default()

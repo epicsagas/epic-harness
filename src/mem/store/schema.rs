@@ -29,6 +29,23 @@ CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
     content=nodes, content_rowid=rowid
 );
 
+CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
+    INSERT INTO nodes_fts(rowid, id, title, body, tags, projects)
+    VALUES (new.rowid, new.id, new.title, new.body, new.tags, new.projects);
+END;
+
+CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, title, body, tags, projects)
+    VALUES ('delete', old.rowid, old.id, old.title, old.body, old.tags, old.projects);
+END;
+
+CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
+    INSERT INTO nodes_fts(nodes_fts, rowid, id, title, body, tags, projects)
+    VALUES ('delete', old.rowid, old.id, old.title, old.body, old.tags, old.projects);
+    INSERT INTO nodes_fts(rowid, id, title, body, tags, projects)
+    VALUES (new.rowid, new.id, new.title, new.body, new.tags, new.projects);
+END;
+
 CREATE TABLE IF NOT EXISTS edges (
     source TEXT NOT NULL,
     target TEXT NOT NULL,
