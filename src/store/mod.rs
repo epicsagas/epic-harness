@@ -19,7 +19,7 @@ pub mod migrate;
 pub mod observations;
 pub mod orbit_store;
 pub mod orchestrator;
-pub(crate) mod pool;
+pub mod pool;
 pub(crate) mod runtime;
 pub(crate) mod schema;
 pub mod sessions;

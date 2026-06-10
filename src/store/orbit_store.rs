@@ -113,6 +113,16 @@ pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_jso
     Ok(pipelines)
 }
 
+/// List pipelines with a row limit (most recent first).
+pub async fn list_all_pipelines_pool_limited(
+    pool: &AnyPool,
+    limit: i64,
+) -> io::Result<Vec<serde_json::Value>> {
+    let mut all = list_all_pipelines_pool(pool).await?;
+    all.truncate(limit as usize);
+    Ok(all)
+}
+
 /// Dismiss (delete) a pipeline by ID.
 pub async fn dismiss_pipeline_pool(pool: &AnyPool, pipeline_id: &str) -> io::Result<bool> {
     let result = sqlx::query("DELETE FROM orbit_pipelines WHERE id = ?")

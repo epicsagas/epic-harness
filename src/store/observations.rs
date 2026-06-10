@@ -260,6 +260,15 @@ pub async fn query_obs_stats_pool(pool: &AnyPool, from_ts: &str, to_ts: &str) ->
     })
 }
 
+/// Alias: query obs stats without project filter (all projects).
+pub async fn query_obs_stats_all_pool(
+    pool: &AnyPool,
+    from_ts: &str,
+    to_ts: &str,
+) -> io::Result<ObsStats> {
+    query_obs_stats_pool(pool, from_ts, to_ts).await
+}
+
 /// Get the last action for a given session.
 pub async fn query_last_action_pool(pool: &AnyPool, session_id: &str) -> io::Result<Option<String>> {
     let row = sqlx::query(

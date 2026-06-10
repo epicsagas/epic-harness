@@ -88,6 +88,14 @@ pub async fn query_all_records_pool(pool: &AnyPool) -> io::Result<Vec<EvolutionR
     query_recent_records_pool(pool, i64::MAX).await
 }
 
+/// Alias: query recent records without project filter (all projects).
+pub async fn query_recent_records_all_pool(
+    pool: &AnyPool,
+    limit: i64,
+) -> io::Result<Vec<EvolutionRecord>> {
+    query_recent_records_pool(pool, limit).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

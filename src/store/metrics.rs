@@ -296,6 +296,11 @@ pub async fn save_metrics_direct(
     Ok(())
 }
 
+/// Alias: load metrics without project filter (cross-project aggregate view).
+pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
+    load_metrics_pool(pool).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

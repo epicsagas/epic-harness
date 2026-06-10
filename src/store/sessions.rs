@@ -108,6 +108,15 @@ pub async fn list_recent_snapshots_pool(
     Ok(snaps)
 }
 
+/// Alias: list recent snapshots without project filter (all projects).
+#[allow(dead_code)]
+pub async fn list_recent_snapshots_all_pool(
+    pool: &AnyPool,
+    limit: i64,
+) -> io::Result<Vec<SessionSnapshot>> {
+    list_recent_snapshots_pool(pool, limit).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

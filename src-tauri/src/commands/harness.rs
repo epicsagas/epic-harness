@@ -34,11 +34,9 @@ pub async fn get_harness_metrics(
 ) -> Result<HarnessMetrics, String> {
     let pool = state.harness_db.clone();
 
-    let m = match project {
-        Some(ref slug) => epic_harness::store::metrics::load_metrics_pool(&pool, slug).await,
-        None => epic_harness::store::metrics::load_metrics_all_pool(&pool).await,
-    }
-    .map_err(|e| format!("load metrics: {e}"))?;
+    let m = epic_harness::store::metrics::load_metrics_pool(&pool)
+        .await
+        .map_err(|e| format!("load metrics: {e}"))?;
 
     // Keep the most recent MAX_SCORE_HISTORY entries (sorted chronologically).
     let history: Vec<_> = m
@@ -179,23 +177,11 @@ pub async fn get_evolved_skills(
         .collect();
 
     // Evolution history
-    let records = match project {
-        Some(ref slug) => {
-            epic_harness::store::evolution::query_recent_records_pool(
-                &pool,
-                slug,
-                MAX_EVOLUTION_ENTRIES,
-            )
-            .await
-        }
-        None => {
-            epic_harness::store::evolution::query_recent_records_all_pool(
-                &pool,
-                MAX_EVOLUTION_ENTRIES,
-            )
-            .await
-        }
-    }
+    let records = epic_harness::store::evolution::query_recent_records_pool(
+        &pool,
+        MAX_EVOLUTION_ENTRIES,
+    )
+    .await
     .map_err(|e| format!("query evolution records: {e}"))?;
 
     let total_sessions = records.len() as u32;
@@ -271,25 +257,12 @@ pub async fn get_obs_summary(
     let pool = state.harness_db.clone();
 
     // Use a wide date range to cover all stored data.
-    let stats = match project {
-        Some(ref slug) => {
-            epic_harness::store::observations::query_obs_stats_pool(
-                &pool,
-                slug,
-                "2000-01-01",
-                "2099-12-31",
-            )
-            .await
-        }
-        None => {
-            epic_harness::store::observations::query_obs_stats_all_pool(
-                &pool,
-                "2000-01-01",
-                "2099-12-31",
-            )
-            .await
-        }
-    }
+    let stats = epic_harness::store::observations::query_obs_stats_pool(
+        &pool,
+        "2000-01-01",
+        "2099-12-31",
+    )
+    .await
     .map_err(|e| format!("query obs stats: {e}"))?;
 
     // Session summaries from aggregate stats
@@ -365,13 +338,9 @@ pub async fn get_session_snapshots(
     state: State<'_, AppState>,
 ) -> Result<Vec<SessionSnapshotResponse>, String> {
     let pool = state.harness_db.clone();
-    let snaps = match project {
-        Some(ref slug) => {
-            epic_harness::store::sessions::list_recent_snapshots_pool(&pool, slug, 50).await
-        }
-        None => epic_harness::store::sessions::list_recent_snapshots_all_pool(&pool, 50).await,
-    }
-    .map_err(|e| format!("query session snapshots: {e}"))?;
+    let snaps = epic_harness::store::sessions::list_recent_snapshots_pool(&pool, 50)
+        .await
+        .map_err(|e| format!("query session snapshots: {e}"))?;
 
     Ok(snaps
         .into_iter()
