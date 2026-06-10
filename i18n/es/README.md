@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un arnés de agente IA multiherramienta que aprende de cada sesión — 26 skills, pipelines autónomos y motor autoevolutivo.</p></blockquote>
+<blockquote><p align="center">Un arnés de agente de codificación IA autoevolutivo — 3 comandos, 19 skills, 1 pipeline autónomo, habilidades de activación automática, aprende de tus fallos.</p></blockquote>
 
-<p align="center"><b>Un arnés, seis herramientas IA. Autónomo del spec al PR. Más inteligente cada sesión.</b></p>
+<p align="center"><b>Menos que memorizar. Más inteligencia por tecla pulsada. Se vuelve más inteligente cada sesión.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.5-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un arnés de agente IA multiherramienta con **26 skills (9 pipeline + 17 quality gates)**, un **motor autoevolutivo**, **memoria unificada** y una **pipeline autónoma de un solo comando** (`/orbit`). Funciona con Claude Code, Codex, Cursor, OpenCode y Cline — todos compartiendo el mismo directorio `~/.harness/`. Después de cada sesión, el bucle de evolución analiza fallos, genera skills dirigidos y los carga en la próxima sesión.
+Un plugin de Claude Code que **consolida más de 30 comandos en 3 comandos + 19 skills de activación automática consolidados**, **activa habilidades automáticamente** según lo que estés haciendo, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo.
 
 <p align="center">
   <img src="../../assets/features.png" alt="características de epic harness" width="100%" />
@@ -46,7 +46,7 @@ Un comando lleva una funcionalidad de extremo a extremo. Las habilidades se acti
 
 ```bash
 $ /orbit "Agregar autenticación JWT a la API de login"
-→ spec approved → go (TDD subagents) → audit (PASS) → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
 O invoca las skills del pipeline directamente:
@@ -54,7 +54,7 @@ O invoca las skills del pipeline directamente:
 ```bash
 /spec "Agregar autenticación JWT a la API de login"   # aclara requisitos → SPEC-*.md
 /go                                                     # planificación automática → subagentes TDD → 4 min
-/audit                                                  # revisión paralela + seguridad + pruebas → PASS
+/check                                                  # revisión paralela + seguridad + pruebas → PASS
 /ship                                                   # prueba aislada → PR → CI en verde
 ```
 
@@ -73,7 +73,7 @@ Al cerrar la sesión, el **bucle evolve** analiza qué falló, genera habilidade
 
 ## Instalación
 
-> **¿Primera vez?** Lee la [Guía de inicio rápido (5 min)](../../docs/quickstart.md). Para detalles de almacenamiento, consulta el [Mapa de Datos](../../docs/data-map.md).
+> **¿Primera vez?** Lee la [Guía de inicio rápido (5 min)](../../docs/quickstart.md).
 
 ### Claude Code (recomendado)
 
@@ -83,15 +83,6 @@ Al cerrar la sesión, el **bucle evolve** analiza qué falló, genera habilidade
 ```
 
 Instala automáticamente el binario y registra todos los hooks en un solo paso.
-
-### Codex CLI
-
-```bash
-codex plugin marketplace add epicsagas/plugins
-```
-
-Instala automáticamente las 26 habilidades y registra los hooks. Disponibles inmediatamente — no se necesitan pasos adicionales.
-Se actualiza con `codex plugin update epic@epicsagas`.
 
 ### macOS / Linux
 
@@ -103,13 +94,13 @@ brew install epicsagas/tap/epic-harness
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
 ```
 
 ### Vía toolchain de Rust
@@ -122,7 +113,9 @@ cargo install epic-harness    # compilar desde el código fuente
 Luego ejecuta el asistente de configuración:
 
 ```bash
-epic install cursor         # Cursor IDE
+epic install          # Claude Code (predeterminado)
+epic install codex    # Codex CLI
+epic install gemini   # Antigravity
 ```
 
 > `epic-harness --version` para verificar. Actualiza con `brew upgrade epic-harness` o vuelve a ejecutar el script de instalación.
@@ -143,7 +136,9 @@ En Claude Code, `hooks/install.js` se ejecuta automáticamente al inicio de la s
 ### Otras herramientas
 
 ```bash
-epic install cursor         # Cursor         → ~/.cursor/ (requiere Cursor 1.7+)
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Antigravity  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (requiere Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -163,23 +158,15 @@ Dentro de una sesión de Claude Code: `/evolve status`
 
 ---
 
-## Pipeline Skills (Ring 1)
+## Comandos
 
-9 habilidades que gestionan el ciclo de vida completo de desarrollo. Invocadas directamente o agrupadas automáticamente por `/orbit`.
+| Comando | Qué hace |
+|---------|----------|
+| `/orbit` | **Pipeline autónomo completo**: spec → go → check → ship → evolve en una sola ejecución |
+| `/team` | Explorar librerías de la organización, contratar equipos existentes o diseñar nuevos (3–6 agentes, sincronizados a `.claude/agents/`) |
+| `/evolve` | Disparador manual de evolución — analizar sesiones, ver panel, inspeccionar efectividad de habilidades, rollback |
 
-| Habilidad | Qué hace |
-|-----------|----------|
-| **discover** | Reframing del problema — 5 Whys, JTBD, diálogo socrático |
-| **spec** | Define requisitos — convierte a documento R + AC numerado |
-| **go** | Fase de build — planificación automática → sub-agentes TDD → ejecución paralela → verificación AC |
-| **audit** | Fase de revisión — revisión de código paralela + auditoría de seguridad + tests con extras por ámbito |
-| **eval** | Fase de evaluación — control de calidad y regresión en 4 dimensiones (corrección, rendimiento, calidad, regresión) |
-| **ship** | Fase de entrega — test aislado → PR con informe completo → monitorización CI + auto-fix |
-| **evolve** | Motor de auto-mejora — analizar sesiones, generar habilidades, métricas de efectividad, rollback |
-| **/orbit** | Envoltorio autónomo — ejecuta discover → spec → go → audit → eval → ship → evolve en una sola invocación |
-| **/team** | Explorar librerías de la organización, contratar equipos existentes o diseñar nuevos (3–6 agentes, sincronizados a `.claude/agents/`) |
-
-Todas las habilidades del pipeline se activan automáticamente según el contexto o se pueden invocar por nombre. Los nombres antiguos de comandos siguen funcionando mediante enrutamiento de alias.
+Las etapas del pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) ahora son **skills** — se activan automáticamente según el contexto o se pueden invocar por nombre. Los nombres antiguos de comandos siguen funcionando mediante enrutamiento de alias.
 
 ---
 
@@ -197,10 +184,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| EVAL{"Eval\n4-dim quality check"}:::auto
-    EVAL -->|PASS| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    AUDIT -->|FAIL| RETRY{"retry < 3?"}
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -212,7 +198,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Morado** — pasos humanos: selección de modo (requerimiento poco claro → interactivo), pausa por 3 fallos de audit.
+**Morado** — pasos humanos: selección de modo (requerimiento poco claro → interactivo), pausa por 3 fallos de check.
 **Verde** — claro + complejo → council auto-spec; claro + simple → construcción directa; ambos completamente autónomos.
 
 Estado persistido en `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobrevive a la compactación del contexto.
@@ -221,28 +207,30 @@ Estado persistido en `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — sobreviv
 
 ---
 
-## Quality Gates (Ring 2)
+## Habilidades Automáticas (Ring 2)
 
 Las habilidades se activan automáticamente según el contexto. No las invocas tú.
 
 | Habilidad | Se activa cuando |
 |-----------|-----------------|
+| **spec** | Necesita definir requisitos — convierte a documento R + AC numerado |
+| **go** | Fase de build — planificación automática → sub-agentes TDD → ejecución paralela → verificación AC |
+| **check** | Fase de revisión — revisión de código paralela + auditoría de seguridad + tests con extras por ámbito |
+| **ship** | Fase de entrega — test aislado → PR con informe completo → monitorización CI + auto-fix |
 | **tdd** | Implementación de nueva funcionalidad o corrección de errores |
 | **debug** | Fallo de prueba o error en tiempo de ejecución |
+| **discover** | Solicitud vaga, solución sin problema, queja desenfocada |
 | **secure** | Código de auth / BD / API / secrets modificado |
-| **threat-model** | Evaluación de seguridad, análisis de superficie de ataque necesario |
-| **vuln-scan** | Escaneo de vulnerabilidades — inyección, autenticación, exposición de datos, dependencias |
-| **triage** | Validación adversarial de hallazgos de seguridad, ajuste de severidad |
 | **perf** | Bucles, consultas, renderizado, operaciones por lotes |
 | **simplify** | Archivo > 200 líneas o alta complejidad ciclomática |
-| **verify** | Antes de completar `/go` o `/ship` |
-| **council** | Decisiones arquitectónicas o de diseño ambiguas |
 | **document** | API pública añadida o firma modificada |
+| **verify** | Antes de completar `/go` o `/ship` |
 | **context** | Ventana de contexto > 70% |
+| **council** | Decisiones arquitectónicas o de diseño ambiguas |
 | **orchestrate** | Estado de orquestación multi-agente y control de agentes en tiempo real |
 | **commit** | Generación de Conventional Commits — creado automáticamente desde git diff |
 | **agent-introspection** | 3+ fallos consecutivos o patrón de reintentos circular |
-| **reflect** | Bajo demanda `/reflect`: autoevaluación humana — "¿Estoy usando la IA como amplificador del pensamiento?" 5 dimensiones con datos del hook |
+| **reflect** | Bajo demanda: ¿estás usando la IA como amplificador del pensamiento? Autoevaluación fría basada en evidencia |
 
 ---
 
@@ -287,27 +275,7 @@ Reload (siguiente sesión — resume carga habilidades evolucionadas)
 
 Siembra de habilidades: herramienta débil (éxito <60%, mín. 5 obs), tipo de archivo débil (éxito <50%, mín. 3 obs), error de alta frecuencia (5+ ocurrencias).
 
-### Optimización inspirada en SkillOpt
-
-Tres técnicas inspiradas en el aprendizaje profundo aplicadas a la evolución de habilidades en lenguaje natural:
-
-| Técnica | Qué hace |
-|---------|----------|
-| **Búfer de retroalimentación negativa** | Persiste las propuestas de habilidades rechazadas con expiración basada en TTL — evita regenerar habilidades conocidas como malas |
-| **Reflexión por minilotes** | Descompone las observaciones en lotes de tamaño fijo para la extracción de patrones estructurales — captura micropatrones ocultos por los promedios de sesión |
-| **Actualización lenta/meta** | Clifica épocas (Improving/Regressing/PersistentFailure/StableSuccess) y registra actualizaciones lentas de parámetros — adapta la estrategia de evolución a las tendencias a largo plazo |
-
-Adaptado de [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904). Configurable mediante `rejected_buffer_ttl` y `minibatch_size` en `[evolution]`.
-
 Estancamiento: 3 sesiones sin una mejora del 5% → rollback automático al mejor punto de control.
-
-### Autoajuste de Prompts
-
-Las habilidades evolucionadas con bajo rendimiento (donde `avg_score_with < avg_score_without`) reciben orientación de ajuste dirigida añadida a su SKILL.md. El contenido original nunca se modifica — las secciones de ajuste viven detrás de un delimitador `<!-- auto-tuned -->`.
-
-- **Reversión automática**: después de 3 sesiones consecutivas con puntajes decrecientes, el ajuste se elimina y el historial se borra
-- **Límite de historial**: 10 entradas de ajuste por habilidad, rastreadas en `meta.json`
-- **Orientación basada en brecha**: la severidad del ajuste coincide con la brecha de puntajes A/B (menor → significativo → mayor)
 
 ### Efectividad de Habilidades
 
@@ -366,7 +334,7 @@ Se ejecutan de forma invisible en cada sesión. Binario único de Rust (`epic-ha
 | **polish** | Después de Edit | Autoformatear (Biome/Prettier/ruff/gofmt) + verificación de tipos |
 | **observe** | Cada uso de herramienta | Registrar en `~/.harness/projects/{slug}/obs/` para evolución |
 | **snapshot** | Antes de compactar | Guardar estado en `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fin de sesión | Motor de evolución automática: análisis de fallos, seeding de skills, métricas, ingest a memoria. Alimenta `/reflect` |
+| **reflect** | Fin de sesión | Analizar fallos, sembrar habilidades evolucionadas, gate, extraer instintos |
 
 Polish retroalimenta en observe: fallo de formato → `lint_fail`, error de TypeScript → `build_fail`. El thrashing Edit→Error se detecta incluso cuando los errores provienen de polish.
 
@@ -429,16 +397,17 @@ Estrategia de fusión: los agentes modificados solicitan confirmación (predeter
 
 Todas las herramientas comparten el mismo directorio de datos `~/.harness/projects/{slug}/`.
 
-| Herramienta | Ring 0 Hooks | Habilidades | Agentes |
-|-------------|-------------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 26 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 26 | — |
-| **Cursor** | ✓ Completo³ | ✓ vía rules | Live |
-| **OpenCode** | ✓ Parcial⁴ | — | — |
-| **Cline** | ✓ Completo⁵ | — | — |
-| **Aider** | —⁶ | — | — |
+| Herramienta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
+|-------------|-------------|----------|-------------|---------|
+| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 19 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ Completo³ | ✓ 3 comandos (incl. /orbit) | ✓ vía rules | Live |
+| **OpenCode** | ✓ Parcial⁴ | ✓ 3 comandos (incl. /orbit) | — | — |
+| **Cline** | ✓ Completo⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Solo convenciones
+¹ `codex_hooks = true` en `~/.codex/config.toml` · ² Guard al nivel `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Solo convenciones
 
 ---
 
@@ -451,19 +420,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (9)"]
+    subgraph R1["Ring 1 — Commands (you call these)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -512,16 +481,16 @@ epic mem mcp-install                                   # Registrar servidor MCP
 epic mem export --out ./docs/memory                    # Exportar a Markdown
 ```
 
-### Comandos CLI (6)
+### Herramientas MCP (6)
 
-| Comando | Propósito |
-|---------|----------|
-| `epic-harness mem recall "HINT"` | Recuperación contextual inteligente con hint + project + vecinos del grafo |
-| `epic-harness mem add --title "T" --type TYPE --body "B"` | Añadir nodo con importancia automática por tipo (o explícita 0.0–1.0) |
-| `epic-harness mem search "QUERY"` | Búsqueda por palabra clave (texto completo), clasificada por importancia |
-| `epic-harness mem list` | Filtrar por etiqueta/tipo/proyecto |
-| `epic-harness mem context` | Recuperación inteligente con ámbito de proyecto (sin hint) |
-| `epic-harness mem related ID` | Traversal del grafo desde un ID de nodo (encuentra conocimiento conectado) |
+| Herramienta | Propósito |
+|-------------|----------|
+| `mem_recall` | Recuperación contextual inteligente con hint + project + vecinos del grafo |
+| `mem_add` | Añadir nodo con importancia automática por tipo (o explícita 0.0–1.0) |
+| `mem_search` | Búsqueda por palabra clave (texto completo), clasificada por importancia |
+| `mem_query` | Filtrar por etiqueta/tipo/proyecto |
+| `mem_context` | Recuperación inteligente con ámbito de proyecto (sin hint) |
+| `mem_related` | Traversal del grafo desde un ID de nodo (encuentra conocimiento conectado) |
 
 ### Tipos de Nodo
 
@@ -571,29 +540,6 @@ Todos los datos viven en `~/.harness/` (directorio home), no en la raíz de tu p
     └── metrics.json           # Estadísticas agregadas + atribución de habilidades
 ```
 
-### Migración (JSONL → SQLite)
-
-Desde la v0.4.9, los datos operativos se almacenan en `harness.db` (SQLite). Los usuarios existentes con archivos JSONL/JSON deben ejecutar esto una vez tras actualizar:
-
-```bash
-epic-harness migrate --dry-run   # previsualizar qué se importaría
-epic-harness migrate             # realizar la importación
-```
-
-Los archivos originales **no se eliminan** tras la importación. Los nuevos usuarios están automáticamente en SQLite — no se requiere ninguna acción.
-
-### Consolidación de Slugs
-
-El mismo proyecto puede acumular múltiples slugs cuando se clona en diferentes rutas (p. ej., `/Volumes/T5/projects/…` vs `~/projects/…` produce sufijos distintos). Fusiónelos con:
-
-```bash
-epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # previsualizar
-epic-harness merge-project --from <source-slug> --to <target-slug>              # aplicar
-epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # aplicar + eliminar origen
-```
-
-Fusiona las tres capas de datos: `harness.db` global (reetiqueta la columna `project`), `harness.db` por proyecto (ATTACH + INSERT OR IGNORE) y datos basados en archivos (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`). Los archivos ya presentes en el destino nunca se sobreescriben — los archivos exclusivos del origen se copian.
-
 Comparte reglas de seguridad con tu equipo: `.harness/guard-rules.yaml` en la raíz del proyecto (comprometido en git).
 
 </details>
@@ -622,8 +568,6 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
-# rejected_buffer_ttl = 10    # sesiones antes de que expiren las propuestas rechazadas
-# minibatch_size = 8          # observaciones por minilote para extracción de patrones
 
 [pattern]
 # repeated_error_min = 3
@@ -738,8 +682,6 @@ Los hooks buscan el binario en dos lugares: `hooks/bin/epic-harness` (plugin loc
 
 ## Agradecimientos
 
-- [SkillOpt](https://arxiv.org/abs/2605.23904) — Optimización de habilidades inspirada en aprendizaje profundo (búfer de retroalimentación negativa, reflexión por minilotes, actualizaciones lentas/meta)
-- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — Patrones de evaluación de seguridad (modelado de amenazas, escaneo de vulnerabilidades, triaje adversarial, límite de confianza de dos contenedores)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — Patrones de evolución automatizada y benchmarks
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Sistema de habilidades de agente de Claude Code
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — Patrones exhaustivos de Claude Code

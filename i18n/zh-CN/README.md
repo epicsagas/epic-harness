@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">从每次会话中学习的多工具 AI 智能体框架 — 26 个技能、自主流水线、自我进化引擎。</p></blockquote>
+<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 3 个命令、19 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
 
-<p align="center"><b>一个框架，五个 AI 工具。从规格到 PR 自主执行。每次会话都更智能。</b></p>
+<p align="center"><b>更少的记忆负担。每次按键更多的智能。每次会话都在变得更聪明。</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | 简体中文 | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.5-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Tools" src="https://img.shields.io/badge/tools-5_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个多工具 AI 智能体框架，拥有 **26 个技能（9 流水线 + 17 质量门）**、**自我进化引擎**、**统一记忆系统**和 **单命令自主流水线**（`/orbit`）。支持 Claude Code、Codex、Cursor、OpenCode 和 Cline — 所有工具共享同一个 `~/.harness/` 数据目录。每次会话结束后，evolve 循环会分析失败、生成针对性技能，并在下次会话时加载。
+一个 Claude Code 插件，**将 30+ 条命令整合为 3 个命令 + 19 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "为登录 API 添加 JWT 认证"
-→ spec 已批准 → go（TDD 子智能体） → audit（通过） → ship（PR + CI） → evolve
+→ spec 已批准 → go（TDD 子智能体） → check（通过） → ship（PR + CI） → evolve
 ```
 
 也可以直接调用管道技能：
@@ -54,7 +54,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 ```bash
 /spec "为登录 API 添加 JWT 认证"   # 明确需求 → SPEC-*.md
 /go                                  # 自动规划 → TDD 子智能体 → 4 分钟
-/audit                               # 并行审查 + 安全审计 + 测试 → 通过
+/check                               # 并行审查 + 安全审计 + 测试 → 通过
 /ship                                # 隔离测试 → PR → CI 通过
 ```
 
@@ -73,7 +73,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 
 ## 安装
 
-> **首次使用？** 阅读[快速入门指南（5 分钟）](../../docs/quickstart.md)。数据存储详情请参阅[数据地图](../../docs/data-map.md)。
+> **首次使用？** 阅读[快速入门指南（5 分钟）](../../docs/quickstart.md)。
 
 ### Claude Code（推荐）
 
@@ -83,14 +83,6 @@ $ /orbit "为登录 API 添加 JWT 认证"
 ```
 
 自动安装二进制文件并一步注册所有 hooks。
-
-### Codex CLI
-
-```bash
-codex plugin marketplace add epicsagas/plugins
-```
-
-自动安装全部 26 个技能并注册 hooks。立即生效 — 无需额外步骤。使用 `codex plugin update epic@epicsagas` 更新。
 
 ### macOS / Linux
 
@@ -102,13 +94,13 @@ brew install epicsagas/tap/epic-harness
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
 ```
 
 ### 通过 Rust 工具链
@@ -121,7 +113,9 @@ cargo install epic-harness    # 从源码构建
 然后运行安装向导：
 
 ```bash
-epic install cursor       # Cursor IDE
+epic install          # Claude Code（默认）
+epic install codex    # Codex CLI
+epic install gemini   # Antigravity
 ```
 
 > 使用 `epic-harness --version` 验证。通过 `brew upgrade epic-harness` 或重新运行安装脚本来更新。
@@ -142,7 +136,9 @@ epic install cursor       # Cursor IDE
 ### 其他工具
 
 ```bash
-epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Antigravity  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -162,21 +158,15 @@ ls ~/.harness/              # 数据目录存在
 
 ---
 
-## 管道技能（Ring 1）
+## 命令
 
-| 技能 | 功能说明 |
+| 命令 | 功能说明 |
 |---------|-------------|
-| **discover** | 问题发现 — 5 Whys、JTBD、Socratic 方法 |
-| **spec** | 需求定义 — 转换为编号的 R + AC 文档 |
-| **go** | 构建阶段 — 自动规划 → TDD 子智能体 → 并行执行 → AC 验证 |
-| **audit** | 审查阶段 — 并行代码审查 + 安全审计 + 测试 |
-| **eval** | 评估阶段 — 4维质量与回归检查（正确性、性能、质量、回归） |
-| **ship** | 发布阶段 — 隔离测试 → PR → CI 监控 + 自动修复 |
-| **evolve** | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
-| **team** | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
-| **orchestrate** | 多智能体编排状态和实时智能体控制 |
+| `/orbit` | **完整自主流水线**：一次性完成 spec → go → check → ship → evolve |
+| `/team` | 浏览组织库、雇佣现有团队或设计新团队（3-6 个智能体，同步到 `.claude/agents/`） |
+| `/evolve` | 手动进化触发 — 分析会话、查看仪表板、检查技能效果、回滚 |
 
-`/orbit` 将 `discover → spec → go → audit → eval → ship → evolve` 封装为一次自主执行。`/team` 和 `/evolve` 可单独调用。所有技能根据上下文自动触发，也可以按名称直接调用。
+管道阶段（`/spec`、`/go`、`/check`、`/ship`、`/discover`）现在是**技能** — 根据上下文自动触发，也可以按名称直接调用。旧命令名通过别名路由继续有效。
 
 ---
 
@@ -194,10 +184,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| EVAL{"Eval\n4-dim quality check"}:::auto
-    EVAL -->|PASS| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    AUDIT -->|FAIL| RETRY{"retry < 3?"}
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -218,19 +207,22 @@ flowchart TD
 
 ---
 
-## 质量门（Ring 2）
+## 自动技能（Ring 2）
 
 技能根据上下文自动触发。你不需要手动调用它们。
 
 | 技能 | 触发时机 |
 |-------|--------------|
+| **spec** | 需要定义需求时 — 转换为编号的 R + AC 文档 |
+| **go** | 构建阶段 — 自动规划 → TDD子代理 → 并行执行 → AC验证 |
+| **check** | 审查阶段 — 并行代码审查 + 安全审计 + 测试，按范围附加检查 |
+| **ship** | 发布阶段 — 隔离测试 → 包含完整检查报告的PR → CI监控 + 自动修复 |
+| **orchestrate** | 多代理编排状态和实时代理控制 |
 | **commit** | 约定式提交生成 — 从 git diff 自动生成 |
 | **tdd** | 新功能实现或 Bug 修复 |
 | **debug** | 测试失败或运行时错误 |
+| **discover** | 需求模糊、没有明确问题的解决方案、缺乏焦点的抱怨 |
 | **secure** | 涉及认证 / 数据库 / API / 密钥代码 |
-| **threat-model** | 安全评估、攻击面分析需要时 |
-| **vuln-scan** | 注入、认证、数据暴露、依赖项漏洞扫描 |
-| **triage** | 安全发现的对立验证，严重性调整 |
 | **perf** | 循环、查询、渲染、批量操作 |
 | **simplify** | 文件超过 200 行或圈复杂度过高 |
 | **document** | 公共 API 新增或签名变更 |
@@ -238,7 +230,7 @@ flowchart TD
 | **context** | 上下文窗口超过 70% |
 | **council** | 存在歧义的架构或设计决策 |
 | **agent-introspection** | 连续 3+ 次失败或循环重试模式 |
-| **reflect** | 按需 `/reflect`：人类自我评估 — "我是否将 AI 作为思维放大器？" 基于 hook 收集数据的 5 维评估 |
+| **reflect** | 按需：你是否在将 AI 作为思维放大器？基于事实的冷静自我评估 |
 
 ---
 
@@ -283,27 +275,7 @@ Reload（下次会话 — resume 加载进化技能）
 
 技能播种：弱工具（成功率 <60%，最少 5 次观测），弱文件类型（成功率 <50%，最少 3 次观测），高频错误（5+ 次出现）。
 
-### SkillOpt 启发的优化
-
-将三种受深度学习启发的技术应用于自然语言技能进化：
-
-| 技术 | 功能 |
-|------|------|
-| **负反馈缓冲区** | 持久化被拒绝的技能提案并设置 TTL 过期机制 — 防止重复生成已知的不良技能 |
-| **小批量反思** | 将观测数据分解为固定大小的批次进行结构化模式提取 — 捕捉被会话平均值掩盖的微模式 |
-| **慢速/元更新** | 对时期进行分类（Improving/Regressing/PersistentFailure/StableSuccess）并记录慢参数更新 — 根据长期趋势调整进化策略 |
-
-改编自 [SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)。可通过 `[evolution]` 中的 `rejected_buffer_ttl` 和 `minibatch_size` 配置。
-
 停滞：连续 3 次会话无 5% 提升 → 自动回滚到最佳检查点。
-
-### 提示词自动调优
-
-表现不佳的进化技能（avg_score_with < avg_score_without）会在其SKILL.md中添加针对性的调优指导。原始内容不会被修改——调优部分位于 `<!-- auto-tuned -->` 分隔符之后。
-
-- **自动回滚**：连续3次会话分数下降后，调优被移除，历史记录清空
-- **历史上限**：每个技能10条调优记录，在 `meta.json` 中跟踪
-- **差距驱动指导**：调优严重程度与A/B分数差距匹配（轻微 → 显著 → 重大）
 
 ### 技能效果
 
@@ -362,7 +334,7 @@ observe（100% 确认）→ extract_instincts() → instinct 节点（置信度 
 | **polish** | Edit 之后 | 自动格式化（Biome/Prettier/ruff/gofmt）+ 类型检查 |
 | **observe** | 每次工具使用 | 记录到 `~/.harness/projects/{slug}/obs/` 用于进化 |
 | **snapshot** | compact 之前 | 保存状态到 `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | 会话结束 | 自动进化引擎：失败分析、技能播种、指标更新、记忆导入。为 `/reflect` 技能提供数据 |
+| **reflect** | 会话结束 | 分析失败、播种进化技能、门控、提取 instincts |
 
 Polish 反馈到 observe：格式化失败 → `lint_fail`，TypeScript 错误 → `build_fail`。编辑→错误交替模式即使在错误来自 polish 时也能被检测到。
 
@@ -425,16 +397,17 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 所有工具共享相同的 `~/.harness/projects/{slug}/` 数据目录。
 
-| 工具 | Ring 0 Hooks | 技能 | 智能体 |
-|------|-------------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 26 个技能（含 /orbit） | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 7 | — |
-| **Cursor** | ✓ 完整² | ✓ 通过 rules | Live |
-| **OpenCode** | ✓ 部分³ | — | — |
-| **Cline** | ✓ 完整⁴ | — | — |
-| **Aider** | —⁵ | — | — |
+| 工具 | Ring 0 Hooks | 命令 | 技能 | 智能体 |
+|------|-------------|----------|--------|--------|
+| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 19 个技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 7 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 7 | — |
+| **Cursor** | ✓ 完整³ | ✓ 3 条命令（含 /orbit） | ✓ 通过 rules | Live |
+| **OpenCode** | ✓ 部分⁴ | ✓ 3 条命令（含 /orbit） | — | — |
+| **Cline** | ✓ 完整⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-¹ Plugin marketplace · ² Cursor 1.7+ · ³ JS 插件 · ⁴ 5 个 hook 脚本 · ⁵ 仅 Conventions
+¹ `codex_hooks = true` 在 `~/.codex/config.toml` 中 · ² Guard 在 `BeforeModel` 级别 · ³ Cursor 1.7+ · ⁴ JS 插件 · ⁵ 5 个 hook 脚本 · ⁶ 仅 Conventions
 
 ---
 
@@ -447,19 +420,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (9)"]
+    subgraph R1["Ring 1 — Commands (you call these)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team (manual)")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -508,16 +481,16 @@ epic mem mcp-install                                   # 注册 MCP 服务器
 epic mem export --out ./docs/memory                    # 导出为 Markdown
 ```
 
-### CLI 命令（6 个）
+### MCP 工具（6 个）
 
-| 命令 | 用途 |
+| 工具 | 用途 |
 |------|---------|
-| `epic-harness mem recall "HINT"` | 带 hint + project + 图邻居的智能上下文召回 |
-| `epic-harness mem add --title "T" --type TYPE --body "B"` | 按类型自动分配重要性添加节点（或显式指定 0.0–1.0） |
-| `epic-harness mem search "QUERY"` | 关键词搜索（全文），按重要性排序 |
-| `epic-harness mem list` | 按标签/类型/项目过滤 |
-| `epic-harness mem context` | 项目范围的智能召回（无需 hint） |
-| `epic-harness mem related ID` | 从节点 ID 进行图遍历（查找关联知识） |
+| `mem_recall` | 带 hint + project + 图邻居的智能上下文召回 |
+| `mem_add` | 按类型自动分配重要性添加节点（或显式指定 0.0–1.0） |
+| `mem_search` | 关键词搜索（全文），按重要性排序 |
+| `mem_query` | 按标签/类型/项目过滤 |
+| `mem_context` | 项目范围的智能召回（无需 hint） |
+| `mem_related` | 从节点 ID 进行图遍历（查找关联知识） |
 
 ### 节点类型
 
@@ -567,29 +540,6 @@ epic mem export --out ./docs/memory                    # 导出为 Markdown
     └── metrics.json           # 聚合统计 + 技能归因
 ```
 
-### 迁移（JSONL → SQLite）
-
-自 v0.4.9 起，运营数据存储在 `harness.db`（SQLite）中。已有 JSONL/JSON 文件的用户在升级后需运行一次：
-
-```bash
-epic-harness migrate --dry-run   # 预览将导入的内容
-epic-harness migrate             # 执行导入
-```
-
-原始文件在导入后**不会被删除**。新用户自动使用 SQLite — 无需任何操作。
-
-### Slug 合并
-
-同一个项目克隆到不同路径时可能积累多个 slug（例如 `/Volumes/T5/projects/…` 与 `~/projects/…` 会产生不同的后缀）。使用以下命令合并：
-
-```bash
-epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # 预览
-epic-harness merge-project --from <source-slug> --to <target-slug>              # 应用
-epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # 应用 + 删除源
-```
-
-合并涵盖三个数据层：全局 `harness.db`（重新标记 `project` 列）、项目级 `harness.db`（ATTACH + INSERT OR IGNORE），以及文件型数据（`obs/`、`sessions/`、`evolved/`、`evolution.jsonl`、`orbit/`）。已存在于目标中的文件不会被覆盖 — 仅将源中独有的文件复制过去。
-
 与团队共享安全规则：在项目根目录放置 `.harness/guard-rules.yaml`（提交到 git）。
 
 </details>
@@ -618,8 +568,6 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
-# rejected_buffer_ttl = 10    # 被拒绝提案过期前的会话数
-# minibatch_size = 8          # 用于模式提取的小批量观测数
 
 [pattern]
 # repeated_error_min = 3
@@ -734,8 +682,6 @@ Hooks 在两个位置查找二进制文件：`hooks/bin/epic-harness`（插件�
 
 ## 致谢
 
-- [SkillOpt](https://arxiv.org/abs/2605.23904) — 受深度学习启发的技能优化（负反馈缓冲区、小批量反思、慢速/元更新）
-- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — 安全评估模式（威胁建模、漏洞扫描、对抗性分诊、双容器信任边界）
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 自动进化和基准测试模式
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 智能体技能系统
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 综合 Claude Code 模式

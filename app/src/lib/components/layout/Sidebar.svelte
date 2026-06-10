@@ -16,11 +16,11 @@
       ],
     },
     {
-      label: 'Ring 1 · Pipeline',
+      label: 'Ring 1 · Commands',
       ringDot: true,
       dotColor: 'var(--accent)',
       items: [
-        { id: 'commands', icon: '▶', label: 'Pipeline', badge: '3' },
+        { id: 'commands', icon: '▶', label: 'Commands', badge: '3' },
       ],
     },
     {
@@ -76,7 +76,7 @@
 <div class="sidebar-brand">
   <div class="logo-icon">EH</div>
   <h1>epic-harness</h1>
-  <span class="version">v{__APP_VERSION__}</span>
+  <span class="version">v0.4.1</span>
 </div>
 
 <nav class="sidebar-nav">

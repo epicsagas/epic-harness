@@ -79,109 +79,156 @@ pub fn run_serve(port: Option<u16>) -> i32 {
     eprintln!("Combined dashboard: http://localhost:{port}");
     eprintln!("Press Ctrl+C to stop.");
 
-    // Open DB once and reuse across all requests (single-threaded server).
-    // Avoids per-request schema init + migration check overhead.
-    // Cross-session / cross-hook concurrency is handled at the SQLite layer:
-    // Open the shared pool once — serves all requests.
-    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
-    let harness_dir = common::harness_dir();
-
     for request in server.incoming_requests() {
         let url = request.url().to_string();
         let method = request.method().clone();
 
         let response = match (method, url.as_str()) {
-            (Method::Get, "/") | (Method::Get, "/index.html") => {
-                Response::from_string(DASHBOARD_HTML)
-                    .with_header(
-                        Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
-                    )
-                    .with_header(
-                        Header::from_bytes(
-                            b"Cache-Control",
-                            b"no-cache, no-store, must-revalidate",
-                        )
-                        .unwrap(),
-                    )
-            }
+            (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(
+                DASHBOARD_HTML,
+            )
+            .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
 
             // ── Orchestration API ───────────────────────────
-            (Method::Get, "/api/run") => handle_get_run(pool.as_ref(), &harness_dir, port),
-            (Method::Get, "/api/events") => handle_get_events(pool.as_ref(), &harness_dir),
+            (Method::Get, "/api/run") => {
+                let harness_dir = common::harness_dir();
+                let body = match orch::read_run(&harness_dir) {
+                    Some(run) => serde_json::to_string(&run).unwrap_or_else(|_| "{}".into()),
+                    None => "{}".into(),
+                };
+                json_response(&body)
+            }
+
+            (Method::Get, "/api/events") => {
+                let harness_dir = common::harness_dir();
+                let run = orch::read_run(&harness_dir);
+                let data = serde_json::to_string(&run).unwrap_or_else(|_| "null".into());
+                let sse_body = format!("data: {data}\n\n");
+                Response::from_string(sse_body)
+                    .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
+                    .with_header(Header::from_bytes(b"Cache-Control", b"no-cache").unwrap())
+            }
 
             // ── Memory API (Graph/Stats) ─────────────────────
-            (Method::Get, "/api/graph") => handle_get_graph(port),
-            (Method::Get, "/api/stats") => handle_get_stats(port),
+            (Method::Get, "/api/graph") => {
+                let body = match graph::rebuild_graph_json() {
+                    Ok(json) => json,
+                    Err(_) => "{}".into(),
+                };
+                json_response(&body)
+            }
 
-            // ── Projects API ────────────────────────────────
-            (Method::Get, "/api/projects") => {
-                let slugs = crate::shared::paths::list_harness_project_slugs();
-                let body = serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into());
-                json_response(&body, port)
+            (Method::Get, "/api/stats") => {
+                let body = match graph::compute_stats() {
+                    Ok(v) => v.to_string(),
+                    Err(_) => "{}".into(),
+                };
+                json_response(&body)
             }
 
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
-                let project = parse_query_param(url, "project");
-                let body = handle_harness_cmd(pool.as_ref(), &cmd, project.as_deref());
-                json_response(&body, port)
-            }
-
-            // ── Orbit Pipeline Dismiss ───────────────────────
-            (Method::Delete, url) if url.starts_with("/api/orbit/") => {
-                let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
-                let body = dismiss_orbit_pipeline(pool.as_ref(), pipeline_id, &harness_dir);
-                json_response(&body, port)
+                let harness_dir = common::harness_dir();
+                let body = handle_harness_cmd(&cmd, &harness_dir);
+                json_response(&body)
             }
 
             // ── Memory API (Nodes) ───────────────────────────
-            (Method::Get, u) if u == "/api/nodes" || u.starts_with("/api/nodes?") => {
-                handle_list_nodes(u, port)
+            (Method::Get, "/api/nodes") => {
+                let nodes =
+                    store::read_all_nodes_conn(&store::open_db().unwrap()).unwrap_or_default();
+                let results: Vec<serde_json::Value> = nodes
+                    .into_iter()
+                    .map(|n| {
+                        serde_json::json!({
+                            "id": n.frontmatter.id,
+                            "type": n.frontmatter.node_type,
+                            "title": n.frontmatter.title,
+                            "tags": n.frontmatter.tags,
+                            "projects": n.frontmatter.projects,
+                            "updated": n.frontmatter.updated
+                        })
+                    })
+                    .collect();
+                json_response(&serde_json::to_string(&results).unwrap_or_else(|_| "[]".into()))
             }
 
-            (Method::Get, url) if url.starts_with("/api/nodes/") => handle_get_node(url, port),
+            (Method::Get, url) if url.starts_with("/api/nodes/") => {
+                let id = url
+                    .trim_start_matches("/api/nodes/")
+                    .split('?')
+                    .next()
+                    .unwrap_or("");
+                let body = match store::read_node(id) {
+                    Ok(node) => {
+                        let v = serde_json::json!({
+                            "id": node.frontmatter.id,
+                            "type": node.frontmatter.node_type,
+                            "title": node.frontmatter.title,
+                            "tags": node.frontmatter.tags,
+                            "projects": node.frontmatter.projects,
+                            "agents": node.frontmatter.agents,
+                            "created": node.frontmatter.created,
+                            "updated": node.frontmatter.updated,
+                            "importance": node.frontmatter.importance,
+                            "access_count": node.frontmatter.access_count,
+                            "body": node.body
+                        });
+                        v.to_string()
+                    }
+                    Err(_) => "{\"error\":\"not found\"}".into(),
+                };
+                json_response(&body)
+            }
 
             // ── Memory API (Search) ──────────────────────────
-            (Method::Get, url) if url.starts_with("/api/search") => handle_search(url, port),
+            (Method::Get, url) if url.starts_with("/api/search") => {
+                let query = url
+                    .split("q=")
+                    .nth(1)
+                    .unwrap_or("")
+                    .split('&')
+                    .next()
+                    .unwrap_or("");
+                let decoded = percent_decode(query);
+                let nodes = store::search_nodes(&decoded, 20);
+                let results: Vec<serde_json::Value> = nodes
+                    .into_iter()
+                    .map(|n| {
+                        serde_json::json!({
+                            "id": n.frontmatter.id,
+                            "title": n.frontmatter.title,
+                            "type": n.frontmatter.node_type,
+                            "snippet": n.body.chars().take(160).collect::<String>()
+                        })
+                    })
+                    .collect();
+                let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
+                json_response(&body)
+            }
 
             // ── Agents API ───────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/status") => {
                 let agent_id = url
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
-                handle_agent_status(pool.as_ref(), agent_id, &harness_dir, port)
-            }
-
-            (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/events") => {
-                let agent_id = url
-                    .trim_start_matches("/api/agents/")
-                    .trim_end_matches("/events");
-                handle_agent_events(pool.as_ref(), agent_id, port)
-            }
-
-            (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/inbox") => {
-                let agent_id = url
-                    .trim_start_matches("/api/agents/")
-                    .trim_end_matches("/inbox");
-                handle_agent_inbox(pool.as_ref(), agent_id, port)
-            }
-
-            (Method::Delete, url) if url.starts_with("/api/agents/") => {
-                let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
-                handle_agent_dismiss(pool.as_ref(), agent_id, &harness_dir, port)
+                let harness_dir = common::harness_dir();
+                if !orch::validate_agent_id(agent_id) {
+                    json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
+                } else {
+                    let body = match orch::read_agent_status(&harness_dir, agent_id) {
+                        Some(s) => serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()),
+                        None => "{}".into(),
+                    };
+                    json_response(&body)
+                }
             }
 
             // ── CORS & Other ────────────────────────────────
             (Method::Options, _) => Response::from_string("{}")
                 .with_status_code(204)
-                .with_header(
-                    Header::from_bytes(
-                        b"Access-Control-Allow-Origin",
-                        format!("http://localhost:{port}").as_bytes(),
-                    )
-                    .unwrap(),
-                )
+                .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
                 .with_header(
                     Header::from_bytes(
                         b"Access-Control-Allow-Methods",
@@ -190,25 +237,13 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     .unwrap(),
                 )
                 .with_header(
-                    Header::from_bytes(
-                        b"Access-Control-Allow-Headers",
-                        b"Content-Type, Accept, Authorization",
-                    )
-                    .unwrap(),
+                    Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
                 ),
 
-            // ── SPA fallback: serve index.html for non-API, non-static-asset GET routes ──
-            (Method::Get, url)
-                if !url.starts_with("/api/")
-                    && !url.contains('.')
-                    && !url.starts_with("/favicon")
-                    && !url.starts_with("/robots")
-                    && !url.starts_with("/sitemap") =>
-            {
-                Response::from_string(DASHBOARD_HTML).with_header(
-                    Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
-                )
-            }
+            // ── SPA fallback: serve index.html for any non-API GET route ──
+            (Method::Get, _) => Response::from_string(DASHBOARD_HTML).with_header(
+                Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
+            ),
 
             _ => Response::from_string("Not Found").with_status_code(404),
         };
@@ -217,298 +252,10 @@ pub fn run_serve(port: Option<u16>) -> i32 {
     0
 }
 
-// ── Route handlers ────────────────────────────────────
-
-/// Try a pool operation with the shared AnyPool. Logs errors and returns None on failure.
-///
-/// The closure `f` receives a `&AnyPool` and typically calls
-/// [`crate::store::runtime::block_on`] inside to bridge async pool queries.
-/// This is safe because `serve.rs` runs on tiny_http's blocking thread pool
-/// (not inside a tokio runtime), so `block_on` will never encounter an
-/// existing runtime and panic.
-fn try_pool<T>(
-    pool: Option<&sqlx::AnyPool>,
-    f: impl FnOnce(&sqlx::AnyPool) -> std::io::Result<T>,
-) -> Option<T> {
-    pool.and_then(|p| match f(p) {
-        Ok(v) => Some(v),
-        Err(e) => {
-            eprintln!("[serve] query failed: {e}");
-            None
-        }
-    })
-}
-
-fn handle_get_run(
-    pool: Option<&sqlx::AnyPool>,
-    harness_dir: &std::path::Path,
-    port: u16,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    let slug = crate::shared::paths::project_slug();
-    let db_ok = try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orchestrator::read_run_pool(p, &slug)).map(
-            |opt| {
-                opt.as_ref()
-                    .map(|r| json_or(r, "{}"))
-                    .unwrap_or_else(|| "{}".into())
-            },
-        )
-    });
-    let body = match db_ok {
-        Some(body) => body,
-        None => {
-            let body: serde_json::Value = orch::read_run(harness_dir)
-                .as_ref()
-                .map(|r| serde_json::to_value(r).unwrap_or_default())
-                .unwrap_or_default();
-            body.to_string()
-        }
-    };
-    json_response(&body, port)
-}
-
-fn handle_get_events(
-    pool: Option<&sqlx::AnyPool>,
-    harness_dir: &std::path::Path,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    let slug = crate::shared::paths::project_slug();
-    let db_ok = try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orchestrator::read_run_pool(p, &slug)).map(
-            |opt| {
-                opt.as_ref()
-                    .map(|r| json_or(r, "null"))
-                    .unwrap_or_else(|| "null".into())
-            },
-        )
-    });
-    let data = match db_ok {
-        Some(data) => data,
-        None => json_or(&orch::read_run(harness_dir), "null"),
-    };
-    let sse_body = format!("data: {data}\n\n");
-    Response::from_string(sse_body)
-        .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
-        .with_header(Header::from_bytes(b"Cache-Control", b"no-cache").unwrap())
-        .with_header(Header::from_bytes(b"Connection", b"keep-alive").unwrap())
-}
-
-fn handle_get_graph(port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
-    let body = match graph::rebuild_graph_json() {
-        Ok(json) => json,
-        Err(_) => "{}".into(),
-    };
-    json_response(&body, port)
-}
-
-fn handle_get_stats(port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
-    let body = match graph::compute_stats() {
-        Ok(v) => v.to_string(),
-        Err(_) => "{}".into(),
-    };
-    json_response(&body, port)
-}
-
-fn handle_list_nodes(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
-    let limit: usize = parse_query_param(url, "limit")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(500)
-        .min(5000);
-    // Note: uses the memory DB pool (memory.db for the knowledge graph),
-    // not the harness operational DB passed as `db` to other handlers.
-    let nodes = crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::memory_pool().await?;
-        store::read_nodes_limited_pool(&pool, limit as i64).await
-    })
-    .unwrap_or_else(|e| {
-        eprintln!("[serve] failed to open memory DB for /api/nodes: {e}");
-        Vec::new()
-    });
-    let results: Vec<serde_json::Value> = nodes
-        .into_iter()
-        .map(|n| {
-            serde_json::json!({
-                "id": n.frontmatter.id,
-                "type": n.frontmatter.node_type,
-                "title": n.frontmatter.title,
-                "tags": n.frontmatter.tags,
-                "projects": n.frontmatter.projects,
-                "updated": n.frontmatter.updated
-            })
-        })
-        .collect();
-    json_response(
-        &serde_json::to_string(&results).unwrap_or_else(|_| "[]".into()),
-        port,
-    )
-}
-
-fn handle_get_node(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
-    let id = url
-        .trim_start_matches("/api/nodes/")
-        .split('?')
-        .next()
-        .unwrap_or("");
-    if !store::validate_uuid(id) {
-        return json_response("{\"error\":\"invalid node id\"}", port).with_status_code(400);
-    }
-    let body = match store::read_node(id) {
-        Ok(node) => {
-            let v = serde_json::json!({
-                "id": node.frontmatter.id,
-                "type": node.frontmatter.node_type,
-                "title": node.frontmatter.title,
-                "tags": node.frontmatter.tags,
-                "projects": node.frontmatter.projects,
-                "agents": node.frontmatter.agents,
-                "created": node.frontmatter.created,
-                "updated": node.frontmatter.updated,
-                "importance": node.frontmatter.importance,
-                "access_count": node.frontmatter.access_count,
-                "body": node.body
-            });
-            v.to_string()
-        }
-        Err(_) => "{\"error\":\"not found\"}".into(),
-    };
-    json_response(&body, port)
-}
-
-fn handle_search(url: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
-    let query = url
-        .split("q=")
-        .nth(1)
-        .unwrap_or("")
-        .split('&')
-        .next()
-        .unwrap_or("");
-    let decoded = percent_decode(query);
-    let nodes = store::search_nodes(&decoded, 20);
-    let results: Vec<serde_json::Value> = nodes
-        .into_iter()
-        .map(|n| {
-            serde_json::json!({
-                "id": n.frontmatter.id,
-                "title": n.frontmatter.title,
-                "type": n.frontmatter.node_type,
-                "snippet": n.body.chars().take(160).collect::<String>()
-            })
-        })
-        .collect();
-    let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
-    json_response(&body, port)
-}
-
-fn handle_agent_status(
-    pool: Option<&sqlx::AnyPool>,
-    agent_id: &str,
-    harness_dir: &std::path::Path,
-    port: u16,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    if !orch::validate_agent_id(agent_id) {
-        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
-    }
-    let slug = crate::shared::paths::project_slug();
-    try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orchestrator::read_agent_pool(
-            p, &slug, agent_id,
-        ))
-        .map(|opt| {
-            opt.map(|a| {
-                serde_json::json!({
-                    "agent_id": a.id,
-                    "phase": a.phase,
-                    "progress": a.progress,
-                    "last_heartbeat": a.last_heartbeat,
-                    "status": a.status,
-                })
-                .to_string()
-            })
-            .unwrap_or_else(|| "{}".into())
-        })
-    })
-    .map(|body| json_response(&body, port))
-    .unwrap_or_else(|| {
-        let body: serde_json::Value = orch::read_agent_status(harness_dir, agent_id)
-            .map(|s| serde_json::to_value(&s).unwrap_or_default())
-            .unwrap_or_default();
-        json_response(&body.to_string(), port)
-    })
-}
-
-fn handle_agent_events(
-    pool: Option<&sqlx::AnyPool>,
-    agent_id: &str,
-    port: u16,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    if !orch::validate_agent_id(agent_id) {
-        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
-    }
-    let body = try_pool(pool, |p| {
-        let events = crate::store::runtime::block_on(
-            crate::store::orchestrator::query_agent_events_pool(p, agent_id, 100),
-        )?;
-        Ok(serde_json::to_string(&events)?)
-    })
-    .unwrap_or_else(|| "[]".into());
-    json_response(&body, port)
-}
-
-fn handle_agent_inbox(
-    pool: Option<&sqlx::AnyPool>,
-    agent_id: &str,
-    port: u16,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    if !orch::validate_agent_id(agent_id) {
-        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
-    }
-    let body = try_pool(pool, |p| {
-        let msgs = crate::store::runtime::block_on(
-            crate::store::orchestrator::query_agent_inbox_pool(p, agent_id, 50),
-        )?;
-        Ok(serde_json::to_string(&msgs)?)
-    })
-    .unwrap_or_else(|| "[]".into());
-    json_response(&body, port)
-}
-
-fn handle_agent_dismiss(
-    pool: Option<&sqlx::AnyPool>,
-    agent_id: &str,
-    harness_dir: &std::path::Path,
-    port: u16,
-) -> Response<std::io::Cursor<Vec<u8>>> {
-    if !orch::validate_agent_id(agent_id) {
-        return json_response("{\"error\":\"invalid agent id\"}", port).with_status_code(400);
-    }
-    // Pool-first: try DB dismiss, fall back to file-based if DB unavailable
-    let slug = crate::shared::paths::project_slug();
-    let db_ok = try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orchestrator::dismiss_agent_pool(
-            p, &slug, agent_id,
-        ))
-    });
-    let ok = db_ok.unwrap_or_else(|| orch::dismiss_agent(harness_dir, agent_id));
-    let body = serde_json::json!({"ok": ok, "dismissed": agent_id});
-    json_response(&body.to_string(), port)
-}
-
-// ── Response helpers ──────────────────────────────────
-
-fn json_response(body: &str, port: u16) -> Response<std::io::Cursor<Vec<u8>>> {
+fn json_response(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
-        .with_header(
-            Header::from_bytes(
-                b"Access-Control-Allow-Origin",
-                format!("http://localhost:{port}").as_bytes(),
-            )
-            .unwrap(),
-        )
-}
-
-/// Serialize a value to JSON, or return the fallback string on failure.
-fn json_or<T: serde::Serialize>(val: &T, fallback: &str) -> String {
-    serde_json::to_string(val).unwrap_or_else(|_| fallback.into())
+        .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
 }
 
 fn percent_decode(s: &str) -> String {
@@ -545,338 +292,260 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
     None
 }
 
-/// Dismiss (delete) an orbit pipeline across SQLite and the filesystem.
-///
-/// SQLite-first: deletes from `orbit_pipelines` table when DB is available.
-/// Falls back to scanning PIPELINE-*.json files in project orbit directories.
-fn dismiss_orbit_pipeline(
-    pool: Option<&sqlx::AnyPool>,
-    pipeline_id: &str,
-    harness_dir: &std::path::Path,
-) -> String {
-    // Validate pipeline_id to prevent unintended file matches.
-    // Expected format: alphanumeric + hyphens (e.g. "20260523105350" or "20260522-170016").
-    if pipeline_id.is_empty()
-        || !pipeline_id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
-    {
-        return serde_json::json!({"ok": false, "error": "invalid pipeline id"}).to_string();
-    }
-
-    // Pool-first: remove the DB record
-    let db_deleted = try_pool(pool, |p| {
-        crate::store::runtime::block_on(crate::store::orbit_store::dismiss_pipeline_pool(
-            p,
-            pipeline_id,
-        ))
-    })
-    .unwrap_or(false);
-
-    // File-based: remove matching PIPELINE-*.json files across all project dirs
-    let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-    let mut file_deleted = false;
-
-    if let Ok(rd) = std::fs::read_dir(projects_root) {
-        for proj_entry in rd.filter_map(|e| e.ok()) {
-            let orbit_dir = proj_entry.path().join("orbit");
-            if !orbit_dir.exists() {
-                continue;
+fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
+    use std::fs;
+    match cmd {
+        "get_harness_metrics" => {
+            let p = harness_dir.join("metrics.json");
+            fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
+        }
+        "get_evolved_skills" => {
+            let evolved_dir = harness_dir.join("evolved");
+            let skills: Vec<serde_json::Value> = if evolved_dir.exists() {
+                fs::read_dir(&evolved_dir)
+                    .map(|rd| {
+                        rd.filter_map(|e| e.ok())
+                            .filter(|e| e.path().is_dir())
+                            .map(|e| {
+                                let name = e.file_name().to_string_lossy().to_string();
+                                let skill_md_path = e.path().join("SKILL.md");
+                                let skill_md =
+                                    fs::read_to_string(&skill_md_path).unwrap_or_default();
+                                serde_json::json!({
+                                    "name": name,
+                                    "skill_md": skill_md,
+                                    "created_at": null
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+            let evo_log = harness_dir.join("evolution.jsonl");
+            let history: Vec<serde_json::Value> = if evo_log.exists() {
+                fs::read_to_string(&evo_log)
+                    .unwrap_or_default()
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .filter_map(|l| serde_json::from_str(l).ok())
+                    .collect::<Vec<serde_json::Value>>()
+                    .into_iter()
+                    .rev()
+                    .take(50)
+                    .rev()
+                    .collect()
+            } else {
+                vec![]
+            };
+            let metrics_path = harness_dir.join("metrics.json");
+            let total_sessions: u64 = fs::read_to_string(&metrics_path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| v["total_sessions"].as_u64())
+                .unwrap_or(0);
+            let result = serde_json::json!({
+                "evolved_skills": skills,
+                "evolution_history": history,
+                "total_sessions_analyzed": total_sessions,
+                "patterns_detected": history.len()
+            });
+            result.to_string()
+        }
+        "get_obs_summary" => {
+            let obs_dir = harness_dir.join("obs");
+            if !obs_dir.exists() {
+                return serde_json::json!({
+                    "recent_sessions": [],
+                    "tool_stats": [],
+                    "total_tool_calls": 0,
+                    "avg_score": 0.0,
+                    "active_agents": []
+                })
+                .to_string();
             }
-            if let Ok(files) = std::fs::read_dir(&orbit_dir) {
-                for f in files.filter_map(|e| e.ok()) {
-                    let fname = f.file_name().to_string_lossy().to_string();
-                    if fname.starts_with("PIPELINE-")
-                        && fname.ends_with(".json")
-                        && fname.contains(pipeline_id)
-                        && std::fs::remove_file(f.path()).is_ok()
-                    {
-                        file_deleted = true;
+            use std::collections::HashMap;
+            let mut tool_map: HashMap<String, (u64, u64, f64)> = HashMap::new();
+            let mut session_map: HashMap<String, (u64, f64, u64, String)> = HashMap::new();
+
+            let mut files: Vec<_> = fs::read_dir(&obs_dir)
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok())
+                        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
+                        .collect()
+                })
+                .unwrap_or_default();
+            files.sort_by_key(|e| e.file_name());
+
+            for entry in &files {
+                let fname = entry.file_name().to_string_lossy().to_string();
+                let session_key = fname.trim_end_matches(".jsonl").to_string();
+                let date = fname.split('_').nth(1).unwrap_or("unknown").to_string();
+                let sess = session_map
+                    .entry(session_key.clone())
+                    .or_insert((0, 0.0, 0, date));
+
+                if let Ok(content) = fs::read_to_string(entry.path()) {
+                    for line in content.lines().filter(|l| !l.is_empty()) {
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                            let tool = v["tool"].as_str().unwrap_or("unknown").to_string();
+                            let is_success = v["result"].as_str() == Some("success")
+                                || v["tool_success"].as_bool() == Some(true);
+                            let score = v["score"]
+                                .as_f64()
+                                .or_else(|| v["composite_score"].as_f64())
+                                .unwrap_or(0.0);
+                            let t = tool_map.entry(tool).or_insert((0, 0, 0.0));
+                            t.0 += 1;
+                            if is_success {
+                                t.1 += 1;
+                            }
+                            t.2 += score;
+                            sess.0 += 1;
+                            sess.1 += score;
+                            if !is_success {
+                                sess.2 += 1;
+                            }
+                        }
                     }
                 }
             }
+
+            let tool_stats: Vec<serde_json::Value> = {
+                let mut v: Vec<_> = tool_map
+                    .iter()
+                    .map(|(tool, (calls, successes, score_sum))| {
+                        serde_json::json!({
+                            "tool": tool,
+                            "calls": calls,
+                            "success_rate": if *calls > 0 {
+                                (*successes as f64 / *calls as f64 * 1000.0).round() / 1000.0
+                            } else { 0.0 },
+                            "avg_score": if *calls > 0 {
+                                (score_sum / *calls as f64 * 1000.0).round() / 1000.0
+                            } else { 0.0 }
+                        })
+                    })
+                    .collect();
+                v.sort_by(|a, b| {
+                    b["calls"]
+                        .as_u64()
+                        .unwrap_or(0)
+                        .cmp(&a["calls"].as_u64().unwrap_or(0))
+                });
+                v
+            };
+
+            let recent_sessions: Vec<serde_json::Value> = {
+                let mut v: Vec<_> = session_map.iter().collect();
+                v.sort_by(|a, b| b.0.cmp(a.0));
+                v.into_iter()
+                    .take(10)
+                    .map(|(sid, (calls, score_sum, failures, date))| {
+                        serde_json::json!({
+                            "session_id": sid,
+                            "date": date,
+                            "tool_calls": calls,
+                            "avg_score": if *calls > 0 {
+                                (*score_sum / *calls as f64 * 1000.0).round() / 1000.0
+                            } else { 0.0 },
+                            "failures": failures
+                        })
+                    })
+                    .collect()
+            };
+
+            let total: u64 = tool_stats
+                .iter()
+                .map(|t| t["calls"].as_u64().unwrap_or(0))
+                .sum();
+            let avg = if total > 0 {
+                tool_stats
+                    .iter()
+                    .map(|t| {
+                        t["avg_score"].as_f64().unwrap_or(0.0) * t["calls"].as_f64().unwrap_or(0.0)
+                    })
+                    .sum::<f64>()
+                    / total as f64
+            } else {
+                0.0
+            };
+
+            serde_json::json!({
+                "recent_sessions": recent_sessions,
+                "tool_stats": tool_stats,
+                "total_tool_calls": total,
+                "avg_score": (avg * 1000.0).round() / 1000.0,
+                "active_agents": []
+            })
+            .to_string()
         }
-    }
-
-    if db_deleted || file_deleted {
-        serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string()
-    } else {
-        serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string()
-    }
-}
-
-// ── Harness command handler ───────────────────────────
-
-fn handle_harness_cmd(pool: Option<&sqlx::AnyPool>, cmd: &str, project: Option<&str>) -> String {
-    // project: Some("slug") = specific project, None = aggregate all projects
-    match cmd {
-        "get_harness_metrics" => cmd_get_metrics(pool, project),
-        "get_evolved_skills" => cmd_get_evolved_skills(pool, project),
-        "get_obs_summary" => cmd_get_obs_summary(pool, project),
-        "get_orbit_pipelines" => cmd_get_orbit_pipelines(pool),
-        "get_session_snapshots" => cmd_get_session_snapshots(pool, project),
-        "get_global_patterns" => cmd_get_global_patterns(pool, project),
-        "get_integration_status" => cmd_get_integration_status(),
+        "get_orbit_pipelines" => {
+            let projects_root = harness_dir.parent().unwrap_or(harness_dir);
+            let mut all: Vec<serde_json::Value> = vec![];
+            if let Ok(rd) = fs::read_dir(projects_root) {
+                for proj_entry in rd.filter_map(|e| e.ok()) {
+                    let orbit_dir = proj_entry.path().join("orbit");
+                    if !orbit_dir.exists() {
+                        continue;
+                    }
+                    if let Ok(files) = fs::read_dir(&orbit_dir) {
+                        for f in files.filter_map(|e| e.ok()) {
+                            let fname = f.file_name().to_string_lossy().to_string();
+                            if fname.starts_with("PIPELINE-")
+                                && fname.ends_with(".json")
+                                && let Ok(content) = fs::read_to_string(f.path())
+                                && let Ok(mut v) =
+                                    serde_json::from_str::<serde_json::Value>(&content)
+                            {
+                                v["_project"] = serde_json::Value::String(
+                                    proj_entry.file_name().to_string_lossy().to_string(),
+                                );
+                                all.push(v);
+                            }
+                        }
+                    }
+                }
+            }
+            all.sort_by(|a, b| {
+                let ta = a["started_at"].as_str().unwrap_or("");
+                let tb = b["started_at"].as_str().unwrap_or("");
+                tb.cmp(ta)
+            });
+            serde_json::to_string(&all).unwrap_or_else(|_| "[]".into())
+        }
+        "get_integration_status" => {
+            let home = std::env::var("HOME").unwrap_or_default();
+            let integrations = serde_json::json!([
+                {
+                    "name": "Claude Code",
+                    "installed": std::path::Path::new(&home)
+                        .join(".claude/settings.json")
+                        .exists(),
+                    "config_path": "~/.claude/settings.json",
+                    "version": null
+                },
+                {
+                    "name": "Antigravity",
+                    "installed": std::path::Path::new(&home)
+                        .join(".gemini/config/mcp_config.json")
+                        .exists(),
+                    "config_path": "~/.gemini/config/mcp_config.json",
+                    "version": null
+                },
+                { "name": "Codex",  "installed": false, "config_path": null, "version": null },
+                { "name": "Cursor", "installed": false, "config_path": null, "version": null },
+                { "name": "Cline",  "installed": false, "config_path": null, "version": null },
+                { "name": "Aider",  "installed": false, "config_path": null, "version": null }
+            ]);
+            integrations.to_string()
+        }
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
         }
         _ => "null".into(),
     }
-}
-
-fn cmd_get_metrics(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
-    try_pool(pool, |p| {
-        let metrics = match project {
-            Some(slug) => {
-                crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, slug))
-            }
-            None => {
-                crate::store::runtime::block_on(crate::store::metrics::load_metrics_all_pool(p))
-            }
-        };
-        metrics.map(|m| serde_json::to_string(&m).unwrap_or_else(|_| "null".into()))
-    })
-    .unwrap_or_else(|| "null".into())
-}
-
-fn cmd_get_evolved_skills(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
-    try_pool(pool, |p| {
-        let all_skills =
-            crate::store::runtime::block_on(crate::store::evolved::list_skills_full_pool(p))
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|s| match project {
-                    Some(slug) => s.project == slug,
-                    None => true,
-                })
-                .map(|s| {
-                    serde_json::json!({
-                        "name": s.name,
-                        "origin": s.origin,
-                        "confidence": s.confidence,
-                        "project": s.project,
-                        "active": s.active,
-                        "skill_md": s.skill_md,
-                        "created_at": s.created,
-                        "updated_at": s.updated,
-                    })
-                })
-                .collect::<Vec<_>>();
-        let history = match project {
-            Some(slug) => crate::store::runtime::block_on(
-                crate::store::evolution::query_recent_records_pool(p, slug, 50),
-            )
-            .unwrap_or_default(),
-            None => crate::store::runtime::block_on(
-                crate::store::evolution::query_recent_records_all_pool(p, 50),
-            )
-            .unwrap_or_default(),
-        };
-        let history_vals: Vec<_> = history
-            .into_iter()
-            .filter_map(|r| serde_json::to_value(r).ok())
-            .collect();
-        let total_sessions = match project {
-            Some(slug) => {
-                crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, slug))
-                    .map(|m| m.total_sessions)
-                    .unwrap_or(0)
-            }
-            None => {
-                crate::store::runtime::block_on(crate::store::metrics::load_metrics_all_pool(p))
-                    .map(|m| m.total_sessions)
-                    .unwrap_or(0)
-            }
-        };
-        Ok(serde_json::json!({
-            "evolved_skills": all_skills,
-            "evolution_history": history_vals,
-            "total_sessions_analyzed": total_sessions,
-            "patterns_detected": history_vals.len()
-        })
-        .to_string())
-    })
-    .unwrap_or_else(|| {
-        serde_json::json!({
-            "evolved_skills": [],
-            "evolution_history": [],
-            "total_sessions_analyzed": 0,
-            "patterns_detected": 0
-        })
-        .to_string()
-    })
-}
-
-fn cmd_get_obs_summary(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
-    try_pool(pool, |p| {
-        let stats = match project {
-            Some(slug) => {
-                crate::store::runtime::block_on(crate::store::observations::query_obs_stats_pool(
-                    p,
-                    slug,
-                    "2000-01-01",
-                    "2099-12-31",
-                ))?
-            }
-            None => crate::store::runtime::block_on(
-                crate::store::observations::query_obs_stats_all_pool(p, "2000-01-01", "2099-12-31"),
-            )?,
-        };
-        let tool_stats: Vec<serde_json::Value> = {
-            let mut v: Vec<_> = stats
-                .tool_stats
-                .iter()
-                .map(|t| {
-                    serde_json::json!({
-                        "tool": t.tool,
-                        "calls": t.calls,
-                        "success_rate": if t.calls > 0 {
-                            (t.successes as f64 / t.calls as f64 * 1000.0).round() / 1000.0
-                        } else { 0.0 },
-                        "avg_score": (t.avg_score * 1000.0).round() / 1000.0
-                    })
-                })
-                .collect();
-            v.sort_by(|a, b| {
-                b["calls"]
-                    .as_i64()
-                    .unwrap_or(0)
-                    .cmp(&a["calls"].as_i64().unwrap_or(0))
-            });
-            v
-        };
-        let recent_sessions: Vec<serde_json::Value> = stats
-            .session_stats
-            .iter()
-            .take(10)
-            .map(|s| {
-                let date = s
-                    .session_id
-                    .split('_')
-                    .next()
-                    .unwrap_or("unknown")
-                    .to_string();
-                serde_json::json!({
-                    "session_id": s.session_id,
-                    "date": date,
-                    "tool_calls": s.calls,
-                    "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
-                    "failures": s.failures
-                })
-            })
-            .collect();
-        let failure_categories: Vec<serde_json::Value> = {
-            let mut v: Vec<_> = stats
-                .error_stats
-                .iter()
-                .map(|(cat, count)| {
-                    serde_json::json!({
-                        "category": cat,
-                        "count": count
-                    })
-                })
-                .collect();
-            v.sort_by(|a, b| {
-                b["count"]
-                    .as_i64()
-                    .unwrap_or(0)
-                    .cmp(&a["count"].as_i64().unwrap_or(0))
-            });
-            v
-        };
-        Ok(serde_json::json!({
-            "recent_sessions": recent_sessions,
-            "tool_stats": tool_stats,
-            "total_tool_calls": stats.total,
-            "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
-            "failure_categories": failure_categories,
-            "active_agents": []
-        })
-        .to_string())
-    })
-    .unwrap_or_else(|| {
-        serde_json::json!({
-            "recent_sessions": [],
-            "tool_stats": [],
-            "total_tool_calls": 0,
-            "avg_score": 0.0,
-            "failure_categories": [],
-            "active_agents": []
-        })
-        .to_string()
-    })
-}
-
-fn cmd_get_session_snapshots(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
-    try_pool(pool, |p| {
-        let snapshots = match project {
-            Some(slug) => crate::store::runtime::block_on(
-                crate::store::sessions::list_recent_snapshots_pool(p, slug, 10),
-            ),
-            None => crate::store::runtime::block_on(
-                crate::store::sessions::list_recent_snapshots_all_pool(p, 10),
-            ),
-        }?;
-        Ok(serde_json::to_string(&snapshots)?)
-    })
-    .unwrap_or_else(|| "[]".into())
-}
-
-fn cmd_get_global_patterns(pool: Option<&sqlx::AnyPool>, project: Option<&str>) -> String {
-    try_pool(pool, |p| {
-        let patterns = match project {
-            Some(slug) => crate::store::runtime::block_on(
-                crate::store::global::query_patterns_excluding_pool(p, slug, 20),
-            ),
-            None => crate::store::runtime::block_on(crate::store::global::query_all_patterns_pool(
-                p, 20,
-            )),
-        }?;
-        Ok(serde_json::to_string(&patterns)?)
-    })
-    .unwrap_or_else(|| "[]".into())
-}
-
-fn cmd_get_orbit_pipelines(pool: Option<&sqlx::AnyPool>) -> String {
-    try_pool(pool, |p| {
-        let pipelines =
-            crate::store::runtime::block_on(crate::store::orbit_store::list_all_pipelines_pool(p))?;
-        let mut sorted = pipelines;
-        sorted.sort_by(|a, b| {
-            let ta = a["started_at"].as_str().unwrap_or("");
-            let tb = b["started_at"].as_str().unwrap_or("");
-            tb.cmp(ta)
-        });
-        Ok(serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into()))
-    })
-    .unwrap_or_else(|| "[]".into())
-}
-
-fn cmd_get_integration_status() -> String {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let integrations = serde_json::json!([
-        {
-            "name": "Claude Code",
-            "installed": std::path::Path::new(&home)
-                .join(".claude/settings.json")
-                .exists(),
-            "config_path": "~/.claude/settings.json",
-            "version": null
-        },
-        {
-            "name": "Antigravity",
-            "installed": std::path::Path::new(&home)
-                .join(".gemini/config/mcp_config.json")
-                .exists(),
-            "config_path": "~/.gemini/config/mcp_config.json",
-            "version": null
-        },
-        { "name": "Codex",  "installed": false, "config_path": null, "version": null },
-        { "name": "Cursor", "installed": false, "config_path": null, "version": null },
-        { "name": "Cline",  "installed": false, "config_path": null, "version": null },
-        { "name": "Aider",  "installed": false, "config_path": null, "version": null }
-    ]);
-    integrations.to_string()
 }
 
 #[cfg(test)]

@@ -2,11 +2,10 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import path from 'path';
-import { execSync, execFileSync } from 'child_process';
+import { execSync } from 'child_process';
 import fs from 'fs';
 import type { Plugin } from 'vite';
 
-const rootPkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'package.json'), 'utf8'));
 const host = process.env.TAURI_DEV_HOST;
 
 function getHarnessDir(): string {
@@ -28,81 +27,12 @@ function getHarnessDir(): string {
   }
 }
 
-/**
- * Read observation summary from a single project directory.
- * Dev-server-only — Tauri runtime uses the async pool API instead.
- * Reads at most MAX_LINES_PER_FILE lines from the tail of each session file
- * to keep dev-server response times reasonable.
- */
-const fsp = fs.promises;
-const MAX_LINES_PER_FILE = 5000;
-async function readObsFromDir(dir: string): Promise<unknown> {
-  const obsDir = path.join(dir, 'obs');
-  const empty = { recent_sessions: [], tool_stats: [], total_tool_calls: 0, avg_score: 0, active_agents: [] };
-  try {
-    const entries = await fsp.readdir(obsDir);
-    const files = entries.filter(f => f.endsWith('.jsonl')).sort().slice(-20);
-    if (!files.length) return empty;
-    const toolMap: Record<string, { calls: number; successes: number; score_sum: number }> = {};
-    const sessionMap: Record<string, { tool_calls: number; score_sum: number; failures: number }> = {};
-    for (const f of files) {
-      const sessionKey = f.replace('.jsonl', '');
-      const dateMatch = f.match(/session_(\d{8})/);
-      const date = dateMatch ? dateMatch[1] : 'unknown';
-      if (!sessionMap[sessionKey]) sessionMap[sessionKey] = { tool_calls: 0, score_sum: 0, failures: 0 };
-      const raw = await fsp.readFile(path.join(obsDir, f), 'utf8');
-      const lines = raw.trim().split('\n').filter(Boolean).slice(-MAX_LINES_PER_FILE);
-      for (const l of lines) {
-        try {
-          const e = JSON.parse(l) as Record<string, unknown>;
-          const t = (e.tool as string) ?? 'unknown';
-          const isSuccess = e.result === 'success' || e.tool_success === true;
-          const score = (e.score as number) ?? (e.composite_score as number) ?? 0;
-          if (!toolMap[t]) toolMap[t] = { calls: 0, successes: 0, score_sum: 0 };
-          toolMap[t].calls++;
-          if (isSuccess) toolMap[t].successes++;
-          toolMap[t].score_sum += score;
-          sessionMap[sessionKey].tool_calls++;
-          sessionMap[sessionKey].score_sum += score;
-          if (!isSuccess) sessionMap[sessionKey].failures++;
-        } catch { /* skip malformed */ }
-      }
-      (sessionMap[sessionKey] as Record<string, unknown>)['date'] = date;
-      (sessionMap[sessionKey] as Record<string, unknown>)['session_id'] = sessionKey;
-    }
-    const tool_stats = Object.entries(toolMap)
-      .map(([tool, s]) => ({ tool, calls: s.calls, success_rate: s.calls ? Math.round((s.successes / s.calls) * 1000) / 1000 : 0, avg_score: s.calls ? Math.round((s.score_sum / s.calls) * 1000) / 1000 : 0 }))
-      .sort((a, b) => b.calls - a.calls);
-    const recent_sessions = Object.values(sessionMap)
-      .sort((a, b) => String((b as Record<string, unknown>)['session_id']).localeCompare(String((a as Record<string, unknown>)['session_id'])))
-      .slice(0, 10)
-      .map(s => { const rec = s as Record<string, unknown>; return { session_id: rec['session_id'] as string, date: rec['date'] as string, tool_calls: rec['tool_calls'] as number, avg_score: (rec['tool_calls'] as number) ? Math.round(((rec['score_sum'] as number) / (rec['tool_calls'] as number)) * 1000) / 1000 : 0, failures: rec['failures'] as number }; });
-    const total = tool_stats.reduce((s, t) => s + t.calls, 0);
-    const avg = total ? tool_stats.reduce((s, t) => s + t.avg_score * t.calls, 0) / total : 0;
-    return { recent_sessions, tool_stats, total_tool_calls: total, avg_score: Math.round(avg * 1000) / 1000, active_agents: [] };
-  } catch { return empty; }
-}
-
 function harnessApiPlugin(): Plugin {
   return {
     name: 'harness-api',
     apply: 'serve',
     configureServer(server) {
       const harnessDir = getHarnessDir();
-
-      // Resolve per-project harnessDir from query param.
-      // Returns null for __all__ (caller aggregates) or invalid slugs.
-      function resolveProjectDir(project?: string | null): string | null {
-        if (!project || project === '__all__') return null;
-        const projectsRoot = path.resolve(harnessDir, '..');
-        const resolved = path.join(projectsRoot, project);
-        // Path traversal defense (resolve symlinks to prevent bypass)
-        if (!fs.existsSync(resolved)) return null;
-        const realRoot = fs.realpathSync(projectsRoot);
-        const realResolved = fs.realpathSync(resolved);
-        if (!realResolved.startsWith(realRoot + path.sep) && realResolved !== realRoot) return null;
-        return resolved;
-      }
 
       // SPA fallback: serve index.html for non-API, non-static GET requests
       server.middlewares.use((req, res, next) => {
@@ -112,40 +42,6 @@ function harnessApiPlugin(): Plugin {
           // Let Vite's built-in middleware handle the rewritten URL
         }
         next();
-      });
-
-      // Project list API
-      server.middlewares.use('/api/projects', (_req, res) => {
-        res.setHeader('Content-Type', 'application/json');
-        const projectsRoot = path.resolve(harnessDir, '..');
-        if (!fs.existsSync(projectsRoot)) { res.end('[]'); return; }
-        try {
-          const slugs = fs.readdirSync(projectsRoot)
-            .filter(n => fs.statSync(path.join(projectsRoot, n)).isDirectory());
-          res.end(JSON.stringify(slugs.sort()));
-        } catch { res.end('[]'); }
-      });
-
-      // Orbit pipeline dismiss — DELETE /api/orbit/:id
-      server.middlewares.use('/api/orbit', (req, res, next) => {
-        if (req.method !== 'DELETE') { next(); return; }
-        const match = (req.url ?? '').match(/^\/([^/]+)$/);
-        if (!match) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing id' })); return; }
-        const id = decodeURIComponent(match[1]);
-        const projectsRoot = path.resolve(harnessDir, '..');
-        let deleted = false;
-        if (fs.existsSync(projectsRoot)) {
-          for (const proj of fs.readdirSync(projectsRoot)) {
-            const orbitDir = path.join(projectsRoot, proj, 'orbit');
-            if (!fs.existsSync(orbitDir)) continue;
-            for (const f of fs.readdirSync(orbitDir)) {
-              if (!f.startsWith('PIPELINE-') || !f.endsWith('.json') || !f.includes(id)) continue;
-              fs.unlinkSync(path.join(orbitDir, f));
-              deleted = true;
-            }
-          }
-        }
-        res.end(JSON.stringify({ ok: deleted, dismissed: id }));
       });
 
       // Agent tracking routes for the live Agents tab
@@ -173,47 +69,8 @@ function harnessApiPlugin(): Plugin {
         catch { res.end(JSON.stringify(null)); }
       });
 
-      // Agent dismiss — DELETE /api/agents/:id
-      server.middlewares.use('/api/agents', (req, res, next) => {
-        if (req.method !== 'DELETE') { next(); return; }
-        const match = (req.url ?? '').match(/^\/([^/]+)$/);
-        if (!match) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'missing id' })); return; }
-        const agentId = decodeURIComponent(match[1]);
-        if (!/^[a-zA-Z0-9_-]+$/.test(agentId)) { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'invalid agent id' })); return; }
-        if (!harnessDir) { res.end(JSON.stringify({ ok: false, error: 'HARNESS_DIR not found' })); return; }
-        // Remove agent from run.json
-        const runPath = path.join(harnessDir, 'orchestrator', 'run.json');
-        let dismissed = false;
-        if (fs.existsSync(runPath)) {
-          try {
-            const run = JSON.parse(fs.readFileSync(runPath, 'utf8'));
-            const before = run.agents?.length ?? 0;
-            if (run.agents) {
-              run.agents = run.agents.filter((a: Record<string, unknown>) => a.id !== agentId);
-            }
-            if (run.dependency_graph) {
-              delete run.dependency_graph[agentId];
-            }
-            if (run.agents?.length < before) {
-              fs.writeFileSync(runPath, JSON.stringify(run, null, 2));
-              dismissed = true;
-            }
-          } catch { /* ignore */ }
-        }
-        // Remove agent status directory
-        const agentDir = path.resolve(harnessDir, 'orchestrator', 'agents', agentId);
-        if (agentDir.startsWith(path.resolve(harnessDir, 'orchestrator', 'agents') + path.sep) && fs.existsSync(agentDir)) {
-          fs.rmSync(agentDir, { recursive: true, force: true });
-          dismissed = true;
-        }
-        res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ ok: dismissed, dismissed: agentId }));
-      });
-
-      server.middlewares.use('/api/harness', async (req, res) => {
-        const urlObj = new URL(req.url ?? '/', 'http://localhost');
-        const cmd = urlObj.searchParams.get('cmd') ?? '';
-        const projectParam = urlObj.searchParams.get('project');
+      server.middlewares.use('/api/harness', (req, res) => {
+        const cmd = new URL(req.url ?? '/', 'http://localhost').searchParams.get('cmd') ?? '';
         res.setHeader('Content-Type', 'application/json');
         if (!harnessDir) {
           res.end(JSON.stringify({ error: 'HARNESS_DIR not found' }));
@@ -221,151 +78,117 @@ function harnessApiPlugin(): Plugin {
         }
         try {
           let data: unknown = null;
-          // Determine harnessDir for this request:
-          // - specific project slug → that project's dir
-          // - __all__ or absent → aggregate across all projects (handled per-cmd below)
-          const projectDir = resolveProjectDir(projectParam);
 
           if (cmd === 'get_harness_metrics') {
-            if (projectDir) {
-              const p = path.join(projectDir, 'metrics.json');
-              data = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null;
-            } else {
-              // Aggregate across all projects
-              const projectsRoot = path.resolve(harnessDir, '..');
-              let totalSessions = 0, weightedSum = 0, totalEvolved = 0, stagnation = 0;
-              let bestScore: number | null = null;
-              let worstTrend = 'stable';
-              interface ScoreEntry { timestamp?: string; avg_score?: number }
-              const allScores: ScoreEntry[] = [];
-              if (fs.existsSync(projectsRoot)) {
-                for (const proj of fs.readdirSync(projectsRoot)) {
-                  const mp = path.join(projectsRoot, proj, 'metrics.json');
-                  if (!fs.existsSync(mp)) continue;
-                  try {
-                    const m: Record<string, unknown> = JSON.parse(fs.readFileSync(mp, 'utf8'));
-                    totalSessions += (m.total_sessions as number) ?? 0;
-                    weightedSum += ((m.avg_success_rate as number) ?? 0) * ((m.total_sessions as number) ?? 0);
-                    totalEvolved += (m.total_evolved_skills as number) ?? 0;
-                    const mbs = m.best_score as number | null | undefined;
-                    if (mbs != null && (bestScore == null || mbs > bestScore)) bestScore = mbs;
-                    if (m.trend === 'declining') worstTrend = 'declining';
-                    else if (m.trend === 'stable' && worstTrend === 'improving') worstTrend = 'stable';
-                    stagnation = Math.max(stagnation, (m.stagnation_count as number) ?? 0);
-                    allScores.push(...(m.score_history as ScoreEntry[] ?? []));
-                  } catch { /* skip */ }
-                }
-              }
-              allScores.sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')));
-              allScores.splice(0, Math.max(0, allScores.length - 150));
-              const avg = allScores.length ? allScores.reduce((s, e) => s + (e.avg_score ?? 0), 0) / allScores.length : 0;
-              data = {
-                total_sessions: totalSessions, avg_success_rate: totalSessions ? weightedSum / totalSessions : 0,
-                total_evolved_skills: totalEvolved, best_score: bestScore, trend: worstTrend,
-                stagnation_count: stagnation, score_history: allScores,
-                session_count: totalSessions, avg_score: Math.round(avg * 1000) / 1000,
-                last_session: null, skill_attribution: {},
-              };
-            }
+            const p = path.join(harnessDir, 'metrics.json');
+            data = fs.existsSync(p) ? JSON.parse(fs.readFileSync(p, 'utf8')) : null;
 
           } else if (cmd === 'get_evolved_skills') {
-            const dir = projectDir;
-            if (dir) {
-              const evolvedDir = path.join(dir, 'evolved');
-              const skills = fs.existsSync(evolvedDir)
-                ? fs.readdirSync(evolvedDir)
-                    .filter(n => fs.statSync(path.join(evolvedDir, n)).isDirectory())
-                    .map(name => {
-                      const skillMd = path.join(evolvedDir, name, 'SKILL.md');
-                      return { name, skill_md: fs.existsSync(skillMd) ? fs.readFileSync(skillMd, 'utf8') : '', created_at: null };
-                    })
-                : [];
-              const evoLog = path.join(dir, 'evolution.jsonl');
-              const history = fs.existsSync(evoLog)
-                ? fs.readFileSync(evoLog, 'utf8').trim().split('\n').filter(Boolean).slice(-50)
-                    .map((l: string) => { try { return JSON.parse(l); } catch { return null; } })
-                    .filter(Boolean).reverse()
-                : [];
-              const metricsPath = path.join(dir, 'metrics.json');
-              const metrics = fs.existsSync(metricsPath) ? JSON.parse(fs.readFileSync(metricsPath, 'utf8')) : {};
-              data = { evolved_skills: skills, evolution_history: history, total_sessions_analyzed: metrics.total_sessions ?? 0, patterns_detected: history.length };
-            } else {
-              // Aggregate across all projects
-              const projectsRoot = path.resolve(harnessDir, '..');
-              const allSkills: unknown[] = [];
-              const allHistory: unknown[] = [];
-              let totalSessions = 0;
-              if (fs.existsSync(projectsRoot)) {
-                for (const proj of fs.readdirSync(projectsRoot)) {
-                  const evolvedDir = path.join(projectsRoot, proj, 'evolved');
-                  if (fs.existsSync(evolvedDir)) {
-                    for (const name of fs.readdirSync(evolvedDir)) {
-                      if (!fs.statSync(path.join(evolvedDir, name)).isDirectory()) continue;
-                      const skillMd = path.join(evolvedDir, name, 'SKILL.md');
-                      allSkills.push({ name, project: proj, skill_md: fs.existsSync(skillMd) ? fs.readFileSync(skillMd, 'utf8') : '', created_at: null });
-                    }
-                  }
-                  const evoLog = path.join(projectsRoot, proj, 'evolution.jsonl');
-                  if (fs.existsSync(evoLog)) {
-                    allHistory.push(...fs.readFileSync(evoLog, 'utf8').trim().split('\n').filter(Boolean).slice(-50)
-                      .map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
-                  }
-                  const mp = path.join(projectsRoot, proj, 'metrics.json');
-                  if (fs.existsSync(mp)) { try { totalSessions += (JSON.parse(fs.readFileSync(mp, 'utf8')).total_sessions ?? 0); } catch { /* skip */ } }
-                }
-              }
-              allHistory.sort((a: Record<string, unknown>, b: Record<string, unknown>) => String(b.timestamp ?? '').localeCompare(String(a.timestamp ?? '')));
-              data = { evolved_skills: allSkills, evolution_history: allHistory.slice(0, 50), total_sessions_analyzed: totalSessions, patterns_detected: allHistory.length };
-            }
+            const evolvedDir = path.join(harnessDir, 'evolved');
+            const skills = fs.existsSync(evolvedDir)
+              ? fs.readdirSync(evolvedDir)
+                  .filter(n => fs.statSync(path.join(evolvedDir, n)).isDirectory())
+                  .map(name => {
+                    const skillMd = path.join(evolvedDir, name, 'SKILL.md');
+                    return {
+                      name,
+                      skill_md: fs.existsSync(skillMd) ? fs.readFileSync(skillMd, 'utf8') : '',
+                      created_at: null,
+                    };
+                  })
+              : [];
+            const evoLog = path.join(harnessDir, 'evolution.jsonl');
+            const history = fs.existsSync(evoLog)
+              ? fs.readFileSync(evoLog, 'utf8').trim().split('\n').filter(Boolean).slice(-50)
+                  .map(l => { try { return JSON.parse(l); } catch { return null; } })
+                  .filter(Boolean)
+              : [];
+            const metricsPath = path.join(harnessDir, 'metrics.json');
+            const metrics = fs.existsSync(metricsPath)
+              ? JSON.parse(fs.readFileSync(metricsPath, 'utf8'))
+              : {};
+            data = {
+              evolved_skills: skills,
+              evolution_history: history,
+              total_sessions_analyzed: metrics.total_sessions ?? 0,
+              patterns_detected: history.length,
+            };
 
           } else if (cmd === 'get_obs_summary') {
-            const dir = projectDir;
-            if (dir) {
-              data = await readObsFromDir(dir);
-            } else {
-              // Aggregate across all projects
-              const projectsRoot = path.resolve(harnessDir, '..');
-              const merged = { recent_sessions: [] as unknown[], tool_stats: [] as unknown[], total_tool_calls: 0, avg_score: 0, active_agents: [] as unknown[], failure_categories: [] as unknown[] };
-              if (fs.existsSync(projectsRoot)) {
-                for (const proj of fs.readdirSync(projectsRoot)) {
-                  const projDir = path.join(projectsRoot, proj);
-                  if (!fs.statSync(projDir).isDirectory()) continue;
-                  const d = (await readObsFromDir(projDir)) as Record<string, unknown>;
-                  if (!d) continue;
-                  (merged.recent_sessions as unknown[]).push(...((d.recent_sessions as unknown[]) ?? []));
-                  (merged.tool_stats as unknown[]).push(...((d.tool_stats as unknown[]) ?? []));
-                  merged.total_tool_calls += (d.total_tool_calls as number) ?? 0;
-                  ((d as any).failure_categories ?? []).forEach((fc: any) => {
-                    (merged.failure_categories as any[]).push(fc);
-                  });
-                }
-              }
-              // Re-aggregate tool stats (merge duplicates across projects)
+            const obsDir = path.join(harnessDir, 'obs');
+            data = { recent_sessions: [], tool_stats: [], total_tool_calls: 0, avg_score: 0, active_agents: [] };
+            if (fs.existsSync(obsDir)) {
+              // all files, sorted — session_{date}_{pid}.jsonl
+              const files = fs.readdirSync(obsDir).filter(f => f.endsWith('.jsonl')).sort();
               const toolMap: Record<string, { calls: number; successes: number; score_sum: number }> = {};
-              for (const ts of merged.tool_stats as any[]) {
-                const t = ts.tool as string;
-                if (!toolMap[t]) toolMap[t] = { calls: 0, successes: 0, score_sum: 0 };
-                toolMap[t].calls += ts.calls ?? 0;
-                toolMap[t].successes += Math.round((ts.calls ?? 0) * (ts.success_rate ?? 0));
-                toolMap[t].score_sum += (ts.avg_score ?? 0) * (ts.calls ?? 0);
+              // session-level aggregation: filename → stats
+              const sessionMap: Record<string, { tool_calls: number; score_sum: number; failures: number }> = {};
+
+              for (const f of files) {
+                const sessionKey = f.replace('.jsonl', '');
+                // extract date from filename: session_YYYYMMDD_pid.jsonl
+                const dateMatch = f.match(/session_(\d{8})/);
+                const date = dateMatch ? dateMatch[1] : 'unknown';
+                if (!sessionMap[sessionKey]) sessionMap[sessionKey] = { tool_calls: 0, score_sum: 0, failures: 0 };
+
+                const lines = fs.readFileSync(path.join(obsDir, f), 'utf8')
+                  .trim().split('\n').filter(Boolean).slice(-10000);
+                for (const l of lines) {
+                  try {
+                    const e = JSON.parse(l) as Record<string, unknown>;
+                    const t = (e.tool as string) ?? 'unknown';
+                    // real schema: result="success"|"failure", score (float)
+                    const isSuccess = e.result === 'success' || e.tool_success === true;
+                    const score = (e.score as number) ?? (e.composite_score as number) ?? 0;
+
+                    if (!toolMap[t]) toolMap[t] = { calls: 0, successes: 0, score_sum: 0 };
+                    toolMap[t].calls++;
+                    if (isSuccess) toolMap[t].successes++;
+                    toolMap[t].score_sum += score;
+
+                    sessionMap[sessionKey].tool_calls++;
+                    sessionMap[sessionKey].score_sum += score;
+                    if (!isSuccess) sessionMap[sessionKey].failures++;
+                  } catch { /* skip malformed lines */ }
+                }
+                (sessionMap[sessionKey] as Record<string, unknown>)['date'] = date;
+                (sessionMap[sessionKey] as Record<string, unknown>)['session_id'] = sessionKey;
               }
-              merged.tool_stats = Object.entries(toolMap)
-                .map(([tool, s]) => ({ tool, calls: s.calls, success_rate: s.calls ? Math.round((s.successes / s.calls) * 1000) / 1000 : 0, avg_score: s.calls ? Math.round((s.score_sum / s.calls) * 1000) / 1000 : 0 }))
+
+              const tool_stats = Object.entries(toolMap)
+                .map(([tool, s]) => ({
+                  tool,
+                  calls: s.calls,
+                  success_rate: s.calls ? Math.round((s.successes / s.calls) * 1000) / 1000 : 0,
+                  avg_score: s.calls ? Math.round((s.score_sum / s.calls) * 1000) / 1000 : 0,
+                }))
                 .sort((a, b) => b.calls - a.calls);
-              const total = (merged.tool_stats as any[]).reduce((s, t) => s + t.calls, 0);
-              merged.avg_score = total ? Math.round(((merged.tool_stats as any[]).reduce((s, t) => s + t.avg_score * t.calls, 0) / total) * 1000) / 1000 : 0;
-              // Re-aggregate failure categories (merge duplicates across projects)
-              const fcMap: Record<string, number> = {};
-              for (const fc of (merged as any).failure_categories ?? []) {
-                fcMap[fc.category] = (fcMap[fc.category] ?? 0) + (fc.count ?? 0);
-              }
-              (merged as any).failure_categories = Object.entries(fcMap)
-                .map(([category, count]) => ({ category, count }))
-                .sort((a: any, b: any) => b.count - a.count);
-              // Keep top 10 sessions by date
-              (merged.recent_sessions as any[]).sort((a, b) => String(b.session_id ?? '').localeCompare(String(a.session_id ?? '')));
-              merged.recent_sessions = (merged.recent_sessions as any[]).slice(0, 10);
-              data = merged;
+
+              const recent_sessions = Object.values(sessionMap)
+                .sort((a, b) => String((b as Record<string,unknown>)['session_id']).localeCompare(String((a as Record<string,unknown>)['session_id'])))
+                .slice(0, 10)
+                .map(s => {
+                  const rec = s as Record<string, unknown>;
+                  return {
+                    session_id: rec['session_id'] as string,
+                    date: rec['date'] as string,
+                    tool_calls: rec['tool_calls'] as number,
+                    avg_score: rec['tool_calls'] ? Math.round(((rec['score_sum'] as number) / (rec['tool_calls'] as number)) * 1000) / 1000 : 0,
+                    failures: rec['failures'] as number,
+                  };
+                });
+
+              const total = tool_stats.reduce((s, t) => s + t.calls, 0);
+              const avg = total
+                ? tool_stats.reduce((s, t) => s + t.avg_score * t.calls, 0) / total
+                : 0;
+              data = {
+                recent_sessions,
+                tool_stats,
+                total_tool_calls: total,
+                avg_score: Math.round(avg * 1000) / 1000,
+                active_agents: [],
+              };
             }
 
           } else if (cmd === 'get_orbit_pipelines') {
@@ -411,8 +234,14 @@ function harnessApiPlugin(): Plugin {
             data = { nodes: [], edges: [] };
             if (fs.existsSync(dbPath)) {
               try {
-                const nodesJson = execFileSync('sqlite3', ['-json', dbPath, 'SELECT id, type, title, tags, importance FROM nodes WHERE type != \'session\' ORDER BY importance DESC LIMIT 200'], { encoding: 'utf8' }).trim();
-                const edgesJson = execFileSync('sqlite3', ['-json', dbPath, 'SELECT source, target, relation, weight FROM edges LIMIT 500'], { encoding: 'utf8' }).trim();
+                const nodesJson = execSync(
+                  `sqlite3 -json "${dbPath}" "SELECT id, type, title, tags, importance FROM nodes WHERE type != 'session' ORDER BY importance DESC LIMIT 200"`,
+                  { encoding: 'utf8' }
+                ).trim();
+                const edgesJson = execSync(
+                  `sqlite3 -json "${dbPath}" "SELECT source, target, relation, weight FROM edges LIMIT 500"`,
+                  { encoding: 'utf8' }
+                ).trim();
                 const rawNodes = nodesJson ? (JSON.parse(nodesJson) as Array<Record<string, unknown>>) : [];
                 const rawEdges = edgesJson ? (JSON.parse(edgesJson) as Array<Record<string, unknown>>) : [];
                 data = {
@@ -449,20 +278,9 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
   },
-  define: {
-    __APP_VERSION__: JSON.stringify(rootPkg.version),
-  },
   plugins: [svelte(), viteSingleFile(), harnessApiPlugin()],
   appType: 'spa',
   base: '/',
-  build: {
-    rollupOptions: {
-      // @tauri-apps/api accesses window.__TAURI_INTERNALS__ at module level,
-      // crashing in plain browsers. Externalize so the dynamic import in
-      // harness.ts falls through to browserFallback at runtime.
-      external: ['@tauri-apps/api/core'],
-    },
-  },
   resolve: {
     alias: {
       '$lib': path.resolve('./src/lib'),

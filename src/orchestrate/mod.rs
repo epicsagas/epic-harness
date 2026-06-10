@@ -299,7 +299,6 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .chars()
         .take(120)
         .collect();
-    let desc = mask_secrets(&desc);
     let sub_type = input
         .tool_input
         .as_ref()
@@ -309,9 +308,6 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .to_string();
     (desc, sub_type)
 }
-
-// mask_secrets is unified in shared/sanitize.rs — same coverage across all modules
-use crate::shared::sanitize::mask_secrets;
 
 /// Resolve the output text from hook input.
 fn resolve_output(input: &HookInput) -> String {
@@ -351,61 +347,58 @@ fn resolve_output(input: &HookInput) -> String {
 mod tests {
     use super::*;
 
-    /// Helper: save and restore EPIC_ORCHESTRATION around a test closure.
-    fn with_env<F>(value: Option<&str>, f: F)
-    where
-        F: FnOnce(),
-    {
-        let prev = std::env::var("EPIC_ORCHESTRATION").ok();
-        match value {
-            Some(v) => unsafe { std::env::set_var("EPIC_ORCHESTRATION", v) },
-            None => unsafe { std::env::remove_var("EPIC_ORCHESTRATION") },
-        }
-        f();
-        match prev {
-            Some(v) => unsafe { std::env::set_var("EPIC_ORCHESTRATION", v) },
-            None => unsafe { std::env::remove_var("EPIC_ORCHESTRATION") },
-        }
-    }
-
     #[test]
-    #[serial_test::serial]
     fn is_enabled_defaults_to_false() {
-        with_env(None, || assert!(!is_enabled()));
+        // SAFETY: isolated test, we ensure the var is removed
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+        assert!(!is_enabled());
     }
 
     #[test]
-    #[serial_test::serial]
     fn is_enabled_true_when_set() {
-        with_env(Some("enabled"), || assert!(is_enabled()));
+        // SAFETY: isolated test
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        assert!(is_enabled());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
     }
 
     #[test]
-    #[serial_test::serial]
     fn is_enabled_false_for_other_values() {
-        with_env(Some("true"), || assert!(!is_enabled()));
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "true");
+        }
+        assert!(!is_enabled());
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
     }
 
     #[test]
-    #[serial_test::serial]
     fn run_pre_returns_0_when_disabled() {
-        with_env(None, || {
-            let input = HookInput {
-                tool_name: Some("Agent".to_string()),
-                tool_input: Some(serde_json::json!({"prompt": "test"})),
-                ..Default::default()
-            };
-            assert_eq!(run_pre(&input), 0);
-        });
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({"prompt": "test"})),
+            ..Default::default()
+        };
+        assert_eq!(run_pre(&input), 0);
     }
 
     #[test]
-    #[serial_test::serial]
     fn run_post_returns_0_when_disabled() {
-        with_env(None, || {
-            let input = HookInput::default();
-            assert_eq!(run_post(&input), 0);
-        });
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+        let input = HookInput::default();
+        assert_eq!(run_post(&input), 0);
     }
 
     #[test]

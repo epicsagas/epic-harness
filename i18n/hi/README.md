@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">हर सेशन से सीखने वाला मल्टी-टूल AI एजेंट हार्नेस — 26 स्किल्स, स्वायत्त पाइपलाइन, और स्व-विकास इंजन।</p></blockquote>
+<blockquote><p align="center">एक स्व-विकसित AI कोडिंग एजेंट हार्नेस — 3 कमांड्स, 19 स्किल्स, 1 स्वायत्त पाइपलाइन, आपकी विफलताओं से सीखता है।</p></blockquote>
 
-<p align="center"><b>एक हार्नेस, छह AI टूल। स्पेक से PR तक स्वायत्त। हर सेशन के साथ और स्मार्ट।</b></p>
+<p align="center"><b>याद रखने के लिए कम। प्रत्येक कीस्ट्रोक में अधिक बुद्धिमत्ता। हर सेशन के साथ और स्मार्ट।</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.5-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-एक मल्टी-टूल AI एजेंट हार्नेस जिसमें **26 स्किल्स (9 पाइपलाइन + 17 क्वालिटी गेट्स)**, **स्व-विकास इंजन**, **एकीकृत मेमोरी**, और **एकल-कमांड स्वायत्त पाइपलाइन** (`/orbit`) है। Claude Code, Codex, Cursor, OpenCode और Cline के साथ काम करता है — सभी एक ही `~/.harness/` डेटा डायरेक्टरी साझा करते हैं। हर सेशन के बाद, evolve लूप विफलताओं का विश्लेषण करता है, लक्षित स्किल्स उत्पन्न करता है, और अगली बार लोड करता है।
+एक Claude Code प्लगइन जो **30+ कमांड्स + 19 ऑटो-ट्रिगर स्किल्स में समेकित** करता है, **आप जो कर रहे हैं उसके आधार पर स्वचालित रूप से स्किल्स ट्रिगर करता है**, और **आपके अपने विफलता पैटर्न से नई स्किल्स विकसित करता है**।
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -46,7 +46,7 @@
 
 ```bash
 $ /orbit "लॉगिन API में JWT auth जोड़ो"
-→ spec approved → go (TDD subagents) → audit (PASS) → eval → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
 या पाइपलाइन स्किल्स को सीधे इनवोक करें:
@@ -54,7 +54,7 @@ $ /orbit "लॉगिन API में JWT auth जोड़ो"
 ```bash
 /spec "Add JWT auth to the login API"   # आवश्यकताएँ स्पष्ट करता है → SPEC-*.md
 /go                                      # ऑटो-प्लान → TDD subagents → 4 मिनट
-/audit                                   # समानांतर review + security + tests → PASS
+/check                                   # समानांतर review + security + tests → PASS
 /ship                                    # isolated test → PR → CI green
 ```
 
@@ -73,7 +73,7 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 
 ## इंस्टॉलेशन
 
-> **पहली बार?** [त्वरित प्रारंभ गाइड (5 मिनट)](../../docs/quickstart.md) पढ़ें। डेटा स्टोरेज विवरण के लिए [डेटा मैप](../../docs/data-map.md) देखें।
+> **पहली बार?** [त्वरित प्रारंभ गाइड (5 मिनट)](../../docs/quickstart.md) पढ़ें।
 
 ### Claude Code (अनुशंसित)
 
@@ -83,14 +83,6 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 ```
 
 बाइनरी ऑटो-इंस्टॉल करता है और सभी hooks को एक ही चरण में रजिस्टर करता है।
-
-### Codex CLI
-
-```bash
-codex plugin marketplace add epicsagas/plugins
-```
-
-सभी 26 स्किल्स ऑटो-इंस्टॉल होती हैं और hooks रजिस्टर हो जाते हैं। तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं। `codex plugin update epic@epicsagas` से अपडेट करें।
 
 ### macOS / Linux
 
@@ -102,13 +94,13 @@ Homebrew नहीं है? इंस्टॉलर स्क्रिप्�
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
 ```
 
 ### Rust टूलचेन के माध्यम से
@@ -121,7 +113,9 @@ cargo install epic-harness    # सोर्स से बिल्ड
 फिर सेटअप विज़ार्ड चलाएं:
 
 ```bash
-epic install cursor         # Cursor IDE
+epic install          # Claude Code (डिफ़ॉल्ट)
+epic install codex    # Codex CLI
+epic install gemini   # Antigravity
 ```
 
 > `epic-harness --version` सत्यापित करने के लिए। `brew upgrade epic-harness` या इंस्टॉलर स्क्रिप्ट दोबारा चलाकर अपडेट करें।
@@ -142,7 +136,9 @@ Claude Code में, `hooks/install.js` सेशन स्टार्ट प
 ### अन्य टूल्स
 
 ```bash
-epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ आवश्यक)
+epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
+epic install gemini       # Antigravity  → ~/.gemini/
+epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ आवश्यक)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
@@ -162,19 +158,15 @@ Claude Code सेशन के अंदर: `/evolve status`
 
 ---
 
-## पाइपलाइन स्किल्स (Ring 1)
+## कमांड
 
-| स्किल | यह क्या करता है |
+| कमांड | यह क्या करता है |
 |---------|-------------|
-| `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: discover → spec → go → audit → ship → evolve एक ही शॉट में |
-| `/discover` | अस्पष्ट अनुरोधों को स्पष्ट करता है — 5 Whys, JTBD, Socratic |
-| `/spec` | आवश्यकताओं को परिभाषित करता है — क्रमांकित R + AC दस्तावेज़ |
-| `/go` | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन |
-| `/audit` | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट |
-| /eval | मूल्यांकन चरण — 4-आयामी गुणवत्ता और प्रतिगमन जाँच (शुद्धता, प्रदर्शन, गुणवत्ता, प्रतिगमन) |
-| `/ship` | शिपिंग चरण — आइसोलेटेड टेस्ट → PR → CI मॉनिटरिंग + ऑटो-फिक्स |
-| `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर — सेशन विश्लेषण, डैशबोर्ड देखें, स्किल प्रभावशीलता निरीक्षण, rollback |
+| `/orbit` | **पूर्ण स्वायत्त पाइपलाइन**: spec → go → check → ship → evolve एक ही शॉट में |
 | `/team` | ऑर्ग लाइब्रेरी ब्राउज़ करें, मौजूदा टीमों को हायर करें, या नई डिज़ाइन करें (3–6 एजेंट, `.claude/agents/` में सिंक) |
+| `/evolve` | मैन्युअल एवोल्यूशन ट्रिगर — सेशन विश्लेषण, डैशबोर्ड देखें, स्किल प्रभावशीलता निरीक्षण, rollback |
+
+पाइपलाइन चरण (`/spec`, `/go`, `/check`, `/ship`, `/discover`) अब **स्किल्स** हैं — संदर्भ के आधार पर ऑटो-ट्रिगर होते हैं या नाम से इनवोक किए जा सकते हैं। पुराने कमांड नाम अलियास राउटिंग के माध्यम से काम करते हैं।
 
 ---
 
@@ -192,11 +184,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| EVAL{"Eval\nquality gates?"}:::auto
-    EVAL -->|"PASS"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    EVAL -->|"FAIL"| GO
-    AUDIT -->|FAIL| RETRY{"retry < 3?"}
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -208,7 +198,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**बैंगनी** — मानव चरण: मोड चयन (अस्पष्ट → इंटरेक्टिव), 3× audit विफलता पर रुकना।
+**बैंगनी** — मानव चरण: मोड चयन (अस्पष्ट → इंटरेक्टिव), 3× check विफलता पर रुकना।
 **हरा** — clear + complex → council auto-spec; clear + simple → direct build; दोनों पूर्ण रूप से स्वायत्त।
 
 स्थिति `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` में बनी रहती है — context compaction के बाद भी जीवित।
@@ -217,26 +207,28 @@ flowchart TD
 
 ---
 
-## क्वालिटी गेट्स (Ring 2)
+## ऑटो स्किल्स (Ring 2)
 
 स्किल्स संदर्भ के आधार पर स्वचालित रूप से ट्रिगर होती हैं। आप उन्हें बुलाते नहीं हैं।
 
 | स्किल | कब ट्रिगर होती है |
 |-------|--------------|
+| **spec** | आवश्यकताओं को परिभाषित करने की आवश्यकता — क्रमांकित R + AC दस्तावेज़ में रूपांतरित करता है |
+| **go** | बिल्ड चरण — ऑटो-प्लानिंग → TDD सब-एजेंट → समानांतर निष्पादन → AC सत्यापन |
+| **check** | समीक्षा चरण — समानांतर कोड समीक्षा + सुरक्षा ऑडिट + टेस्ट, स्कोप-आधारित अतिरिक्त |
+| **ship** | शिपिंग चरण — आइसोलेटेड टेस्ट → पूर्ण चेक रिपोर्ट के साथ PR → CI मॉनिटरिंग + ऑटो-फिक्स |
 | **tdd** | नई फीचर इम्प्लीमेंटेशन या बग फिक्स |
 | **debug** | टेस्ट विफलता या runtime error |
+| **discover** | अस्पष्ट अनुरोध, समस्या के बिना समाधान, अनफोकस्ड शिकायत |
 | **secure** | Auth / DB / API / secrets कोड छूा गया |
-| **threat-model** | सुरक्षा मूल्यांकन, हमले की सतह विश्लेषण आवश्यक |
-| **vuln-scan** | कमजोरी स्कैनिंग — इंजेक्शन, प्रमाणीकरण, डेटा एक्सपोजर, निर्भरताएँ |
-| **triage** | सुरक्षा निष्कर्षों का प्रतिकूल सत्यापन, गंभीरता समायोजन |
 | **perf** | लूप, क्वेरी, रेंडरिंग, batch operations |
 | **simplify** | फ़ाइल > 200 लाइनें या उच्च cyclomatic complexity |
-| **verify** | `/go` या `/ship` पूरा करने से पहले |
-| **council** | अस्पष्ट architectural या design निर्णय |
 | **document** | सार्वजनिक API जोड़ा गया या signature बदली |
+| **verify** | `/go` या `/ship` पूरा करने से पहले |
 | **context** | Context window > 70% |
+| **council** | अस्पष्ट architectural या design निर्णय |
 | **agent-introspection** | 3+ लगातार विफलताएं या circular retry पैटर्न |
-| **reflect** | ऑन-डिमांड `/reflect`: मानव स्व-मूल्यांकन — "क्या मैं AI को विचार एम्पलीफायर के रूप में उपयोग कर रहा हूँ?" हुक-संग्रहित डेटा से 5-आयामी मूल्यांकन |
+| **reflect** | ऑन-डिमांड: क्या आप AI को विचार एम्पलीफायर के रूप में उपयोग कर रहे हैं? ठंडे साक्ष्य-आधारित स्व-मूल्यांकन |
 | **orchestrate** | मल्टी-एजेंट ऑर्केस्ट्रेशन स्टेटस और लाइव एजेंट नियंत्रण |
 | **commit** | Conventional Commits जनरेशन — git diff से ऑटो-जनरेट किया गया |
 
@@ -283,27 +275,7 @@ Reload (अगला सेशन — resume विकसित स्किल�
 
 स्किल सीडिंग: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences)।
 
-### SkillOpt-प्रेरित अनुकूलन
-
-प्राकृतिक भाषा कौशल विकास पर लागू डीप लर्निंग से प्रेरित तीन तकनीकें:
-
-| तकनीक | क्या करती है |
-|--------|-------------|
-| **नेगेटिव फीडबैक बफर** | अस्वीकृत कौशल प्रस्तावों को TTL-आधारित समाप्ति के साथ संग्रहित करता है — ज्ञात खराब कौशल को पुनः उत्पन्न होने से रोकता है |
-| **मिनीबैच प्रतिबिंब** | संरचनात्मक पैटर्न निष्कर्षण के लिए अवलोकनों को निश्चित-आकार बैचों में विघटित करता है — सत्र औसत से छिपे माइक्रो-पैटर्न को पकड़ता है |
-| **स्लो/मेटा अपडेट** | युगों को वर्गीकृत करता है (Improving/Regressing/PersistentFailure/StableSuccess) और धीमे पैरामीटर अपडेट रिकॉर्ड करता है — दीर्घकालिक रुझानों के अनुसार विकास रणनीति को अनुकूलित करता है |
-
-[SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904) से अनुकूलित। `[evolution]` में `rejected_buffer_ttl` और `minibatch_size` के माध्यम से कॉन्फ़िगर करने योग्य।
-
 स्थिरता: 5% सुधार के बिना 3 सेशन → best checkpoint पर ऑटो-rollback।
-
-### प्रॉम्प्ट ऑटो-ट्यूनिंग
-
-कम प्रदर्शन वाले विकसित स्किल्स (जहाँ `avg_score_with < avg_score_without`) को उनके SKILL.md में लक्षित ट्यूनिंग मार्गदर्शन प्राप्त होता है। मूल सामग्री कभी संशोधित नहीं होती — ट्यूनिंग अनुभाग `<!-- auto-tuned -->` सीमांकक के पीछे होते हैं।
-
-- **स्वतः रोलबैक**: लगातार 3 सत्रों में घटते स्कोर के बाद, ट्यूनिंग हटा दी जाती है और इतिहास साफ़ होता है
-- **इतिहास सीमा**: प्रति स्किल 10 ट्यूनिंग प्रविष्टियाँ, `meta.json` में ट्रैक की गई
-- **अंतर-आधारित मार्गदर्शन**: ट्यूनिंग की गंभीरता A/B स्कोर अंतर से मेल खाती है (मामूली → महत्वपूर्ण → प्रमुख)
 
 ### स्किल प्रभावशीलता
 
@@ -362,7 +334,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | Edit के बाद | ऑटो-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | हर टूल उपयोग | `~/.harness/projects/{slug}/obs/` में log करें एवोल्यूशन के लिए |
 | **snapshot** | compact से पहले | `~/.harness/projects/{slug}/sessions/` में state save करें |
-| **reflect** | सेशन एंड | स्वचालित विकास इंजन: विफलता विश्लेषण, स्किल सीडिंग, मेट्रिक्स अपडेट, मेमोरी इंजेस्ट। `/reflect` स्किल को डेटा प्रदान करता है |
+| **reflect** | सेशन एंड | विफलताओं का विश्लेषण, evolved skills seed, gate, instincts निकालें |
 
 Polish observe में फीडबैक देता है: format विफलता → `lint_fail`, TypeScript error → `build_fail`। Edit→Error thrashing तब भी detect होता है जब errors polish से आते हैं।
 
@@ -425,16 +397,17 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 
 सभी टूल एक ही `~/.harness/projects/{slug}/` डेटा डायरेक्टरी साझा करते हैं।
 
-| टूल | Ring 0 Hooks | स्किल्स | एजेंट |
-|------|-------------|--------|--------|
-| **Claude Code** | ✓ पूर्ण | ✓ 26 स्किल्स | Live |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 26 | — |
-| **Cursor** | ✓ पूर्ण³ | ✓ rules के माध्यम से | Live |
-| **OpenCode** | ✓ आंशिक⁴ | — | — |
-| **Cline** | ✓ पूर्ण⁵ | — | — |
-| **Aider** | —⁶ | — | — |
+| टूल | Ring 0 Hooks | कमांड | स्किल्स | एजेंट |
+|------|-------------|----------|--------|--------|
+| **Claude Code** | ✓ पूर्ण | ✓ 3 कमांड (incl. /orbit) | ✓ 19 स्किल्स | Live |
+| **Codex CLI** | ✓ पूर्ण¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ आंशिक² | ✓ 3 कमांड (incl. /orbit) | ✓ 19 | — |
+| **Cursor** | ✓ पूर्ण³ | ✓ 3 कमांड (incl. /orbit) | ✓ rules के माध्यम से | Live |
+| **OpenCode** | ✓ आंशिक⁴ | ✓ 3 कमांड (incl. /orbit) | — | — |
+| **Cline** | ✓ पूर्ण⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
+¹ `~/.codex/config.toml` में `codex_hooks = true` · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
 
 ---
 
@@ -447,19 +420,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — Pipeline Skills (9)"]
+    subgraph R1["Ring 1 — Commands (you call these)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — Quality Gates (17, context-triggered)"]
+    subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -469,7 +442,7 @@ flowchart TB
 
     R0 -->|"observe every tool call"| R3
     R3 -.->|"evolved skills"| R2
-    R1 -->|"auto-trigger quality gates"| R2
+    R1 -->|"auto-trigger skills"| R2
     R0 -->|"resume: restore context"| R1
 ```
 
@@ -508,16 +481,16 @@ epic mem mcp-install                                   # MCP सर्वर reg
 epic mem export --out ./docs/memory                    # Markdown में export
 ```
 
-### CLI कमांड (6)
+### MCP टूल (6)
 
-| कमांड | उद्देश्य |
-|--------|---------|
-| `epic-harness mem recall "HINT"` | hint + project + graph neighbors के साथ स्मार्ट contextual recall |
-| `epic-harness mem add --title "T" --type TYPE --body "B"` | type के अनुसार auto-importance (या explicit 0.0–1.0) के साथ नोड जोड़ें |
-| `epic-harness mem search "QUERY"` | keyword खोज (full-text), importance के अनुसार ranked |
-| `epic-harness mem list` | tag/type/project द्वारा फ़िल्टर |
-| `epic-harness mem context` | प्रोजेक्ट-scoped स्मार्ट recall (कोई hint नहीं) |
-| `epic-harness mem related ID` | नोड ID से graph traversal (connected knowledge ढूंढता है) |
+| टूल | उद्देश्य |
+|------|---------|
+| `mem_recall` | hint + project + graph neighbors के साथ स्मार्ट contextual recall |
+| `mem_add` | type के अनुसार auto-importance (या explicit 0.0–1.0) के साथ नोड जोड़ें |
+| `mem_search` | keyword खोज (full-text), importance के अनुसार ranked |
+| `mem_query` | tag/type/project द्वारा फ़िल्टर |
+| `mem_context` | प्रोजेक्ट-scoped स्मार्ट recall (कोई hint नहीं) |
+| `mem_related` | नोड ID से graph traversal (connected knowledge ढूंढता है) |
 
 ### नोड प्रकार
 
@@ -567,29 +540,6 @@ Lifecycle: 30+ दिन बिना access → 10% importance decay (floor 0.0
     └── metrics.json           # Aggregate stats + skill attribution
 ```
 
-### माइग्रेशन (JSONL → SQLite)
-
-v0.4.9 से, operational data `harness.db` (SQLite) में संग्रहीत होता है। JSONL/JSON फ़ाइलों वाले मौजूदा उपयोगकर्ताओं को upgrade के बाद एक बार चलाना चाहिए:
-
-```bash
-epic-harness migrate --dry-run   # preview what would be imported
-epic-harness migrate             # perform the import
-```
-
-import के बाद मूल फ़ाइलें **हटाई नहीं जाती**। नए उपयोगकर्ता स्वचालित रूप से SQLite पर होते हैं — कोई कार्रवाई आवश्यक नहीं।
-
-### Slug एकीकरण
-
-जब किसी प्रोजेक्ट को अलग-अलग पथों पर clone किया जाता है (जैसे `/Volumes/T5/projects/…` बनाम `~/projects/…` अलग-अलग suffix बनाता है) तो एक ही प्रोजेक्ट कई slugs जमा कर सकता है। उन्हें इस प्रकार merge करें:
-
-```bash
-epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # preview
-epic-harness merge-project --from <source-slug> --to <target-slug>              # apply
-epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # apply + remove source
-```
-
-तीनों data layers merge करता है: global `harness.db` (`project` column को re-label करता है), per-project `harness.db` (ATTACH + INSERT OR IGNORE), और file-based data (`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`)। target में पहले से मौजूद फ़ाइलें कभी overwrite नहीं होतीं — केवल source-only फ़ाइलें copy की जाती हैं।
-
 अपनी टीम के साथ safety rules साझा करें: प्रोजेक्ट रूट में `.harness/guard-rules.yaml` (git में committed)।
 
 </details>
@@ -618,8 +568,6 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
-# rejected_buffer_ttl = 10    # अस्वीकृत प्रस्तावों की समाप्ति से पहले सत्र
-# minibatch_size = 8          # पैटर्न निष्कर्षण के लिए प्रति मिनीबैच अवलोकन
 
 [pattern]
 # repeated_error_min = 3
@@ -734,8 +682,6 @@ Hooks binary दो जगहों पर ढूंढते हैं: `hooks/
 
 ## आभार
 
-- [SkillOpt](https://arxiv.org/abs/2605.23904) — डीप लर्निंग-प्रेरित कौशल अनुकूलन (नेगेटिव फीडबैक बफर, मिनीबैच प्रतिबिंब, स्लो/मेटा अपडेट)
-- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — सुरक्षा मूल्यांकन पैटर्न (खतरे का मॉडलिंग, कमजोरी स्कैनिंग, प्रतिकूल ट्रायेज, दो-कंटेनर विश्वास सीमा)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — स्वचालित एवोल्यूशन और benchmark patterns
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code एजेंट skill system
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — व्यापक Claude Code patterns

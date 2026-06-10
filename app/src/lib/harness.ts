@@ -174,6 +174,33 @@ export interface AgentEvent {
   data: Record<string, unknown>;
 }
 
+export interface OrchAgentDef {
+  id: string;
+  role: string;
+  task: string;
+  satisfies: string[];
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface OrchestrationRun {
+  id: string;
+  status: string;
+  agents: OrchAgentDef[];
+  dependency_graph: Record<string, string[]>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrchAgentStatus {
+  agent_id: string;
+  phase: string;
+  progress: number;
+  last_heartbeat: string;
+  status: string;
+}
+
 export interface GraphNode {
   id: string;
   title: string;
@@ -381,6 +408,30 @@ export async function searchMemory(query: string, type?: string): Promise<Memory
     return await res.json();
   } catch {
     return [];
+  }
+}
+
+// ── Orchestration API ──────────────────────────────────────────────────────
+
+export async function getOrchestratorRun(): Promise<OrchestrationRun | null> {
+  try {
+    const res = await fetch('/api/run');
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && Object.keys(data).length > 0 ? data as OrchestrationRun : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchAgentStatus | null> {
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/status`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && Object.keys(data).length > 0 ? data as OrchAgentStatus : null;
+  } catch {
+    return null;
   }
 }
 

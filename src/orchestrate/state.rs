@@ -312,13 +312,6 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 
 /// Acquire an exclusive advisory file lock on `path`.
 /// Returns the locked file handle (holds the lock until dropped).
-/// Uses non-blocking flock with retries to avoid blocking hooks.
-///
-/// **Tradeoff**: Binds flock(2) directly via `extern "C"` instead of depending on
-/// the `libc` crate. This avoids a transitive dependency but requires that the
-/// platform's C library exports `flock` with the standard signature — true for
-/// macOS, Linux, and all BSDs. If this ever causes link issues, switch to
-/// `fs4` or `file-lock` crate (one line change in Cargo.toml + here).
 #[cfg(unix)]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
@@ -329,56 +322,32 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
         .read(true)
         .write(true)
         .open(lock_path)?;
-    // Advisory exclusive lock via flock(2) — non-blocking with retries.
-    // Uses raw syscall binding to avoid the `libc` crate dependency.
-    // SAFETY: fd is a valid open file descriptor.
+    // Non-blocking exclusive lock — if contended, fall back to blocking
+    // (hooks are sequential within a session, contention is cross-session)
     use std::os::unix::io::AsRawFd;
     let fd = file.as_raw_fd();
-    const MAX_RETRIES: u32 = 10;
-    const RETRY_DELAY_MS: u64 = 50;
-    for _ in 0..MAX_RETRIES {
-        let result = unsafe { flock(fd, LOCK_EX | LOCK_NB) };
-        if result == 0 {
-            return Ok(file);
-        }
-        let err = io::Error::last_os_error();
-        if err.kind() != io::ErrorKind::WouldBlock {
-            return Err(err);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(RETRY_DELAY_MS));
+    let result = unsafe { libc::flock(fd, libc::LOCK_EX) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
     }
-    Err(io::Error::new(
-        io::ErrorKind::TimedOut,
-        "failed to acquire lock after retries",
-    ))
+    Ok(file)
 }
 
-#[cfg(unix)]
-const LOCK_EX: i32 = 2; // LOCK_EX from sys/file.h
-#[cfg(unix)]
-const LOCK_NB: i32 = 4; // LOCK_NB from sys/file.h
-
-/// Raw flock(2) binding — avoids pulling in the `libc` crate.
-/// Only used on Unix for advisory file locking.
-#[cfg(unix)]
-unsafe fn flock(fd: i32, operation: i32) -> i32 {
-    unsafe extern "C" {
-        fn flock(fd: i32, operation: i32) -> i32;
-    }
-    unsafe { flock(fd, operation) }
-}
-
-/// No-op lock for non-Unix platforms. Advisory file locking (flock) is Unix-only.
-/// On Windows, concurrent agent spawns may produce rare write races on run.json.
-/// Impact is limited: auto-tracked runs are ephemeral and self-heal on next session.
 #[cfg(not(unix))]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+    use std::sync::OnceLock;
+    static WARNED: OnceLock<()> = OnceLock::new();
+    WARNED.get_or_init(|| {
+        eprintln!(
+            "[harness] warning: file locking unavailable on this platform — \
+             concurrent agent spawns may race"
+        );
+    });
     fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
+        .create_new(true)
         .write(true)
         .open(lock_path)
+        .or_else(|_| fs::File::open(lock_path))
 }
 
 /// Upsert an agent into an auto-created run.json.
@@ -423,17 +392,13 @@ pub fn upsert_agent_to_run(
     let a_dir = agent_dir(base, agent_id);
     fs::create_dir_all(&a_dir)?;
 
-    let mut changed = false;
     if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
-        if existing.status != status {
-            existing.status = status.clone();
-            if status == AgentStatus::Done {
-                existing.completed_at = Some(now.clone());
-            }
-            if status == AgentStatus::Running && existing.started_at.is_none() {
-                existing.started_at = Some(now.clone());
-            }
-            changed = true;
+        existing.status = status.clone();
+        if status == AgentStatus::Done {
+            existing.completed_at = Some(now.clone());
+        }
+        if status == AgentStatus::Running && existing.started_at.is_none() {
+            existing.started_at = Some(now.clone());
         }
     } else {
         run.agents.push(AgentDef {
@@ -453,11 +418,6 @@ pub fn upsert_agent_to_run(
                 None
             },
         });
-        changed = true;
-    }
-
-    if !changed {
-        return Ok(agent_id.to_string());
     }
 
     // Check if all agents are done
@@ -497,45 +457,6 @@ pub fn upsert_agent_to_run(
     Ok(agent_id.to_string())
 }
 
-/// Dismiss an agent: remove from run.json and delete its status directory.
-pub fn dismiss_agent(base: &Path, agent_id: &str) -> bool {
-    if !validate_agent_id(agent_id) {
-        return false;
-    }
-    let orch_dir = orchestrator_dir(base);
-    let lock_path = orch_dir.join("run.json.lock");
-    let _lock = match acquire_lock(&lock_path) {
-        Ok(l) => l,
-        Err(_) => return false,
-    };
-
-    let Some(mut run) = read_run(base) else {
-        return false;
-    };
-
-    let before = run.agents.len();
-    run.agents.retain(|a| a.id != agent_id);
-    run.dependency_graph.remove(agent_id);
-    if run.agents.len() == before {
-        return false; // agent not found
-    }
-
-    let now = crate::shared::helpers::now_iso();
-    run.updated_at = now;
-
-    if write_run(base, &run).is_err() {
-        return false;
-    }
-
-    // Remove agent status directory
-    let dir = agent_dir(base, agent_id);
-    if dir.exists() {
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    true
-}
-
 /// Clean up stale auto-generated runs.
 ///
 /// - Complete runs older than 1 hour: remove agent status directories
@@ -544,13 +465,7 @@ pub fn dismiss_agent(base: &Path, agent_id: &str) -> bool {
 pub fn auto_cleanup_stale_runs(base: &Path) {
     let orch_dir = orchestrator_dir(base);
     let lock_path = orch_dir.join("run.json.lock");
-    let _lock = match acquire_lock(&lock_path) {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("[harness] cleanup: failed to acquire lock: {e}");
-            return;
-        }
-    };
+    let _lock = acquire_lock(&lock_path);
 
     let Some(mut run) = read_run(base) else {
         return;
@@ -615,10 +530,6 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
         && let Ok(entries) = fs::read_dir(&agents_dir)
     {
         for entry in entries.flatten() {
-            let name = entry.file_name();
-            if name == "_invalid" {
-                continue;
-            }
             let status_path = entry.path().join("status.json");
             if let Ok(content) = fs::read_to_string(&status_path) {
                 let status: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
