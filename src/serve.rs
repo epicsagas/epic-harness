@@ -91,22 +91,41 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Orchestration API ───────────────────────────
             (Method::Get, "/api/run") => {
-                let harness_dir = common::harness_dir();
-                let body = match orch::read_run(&harness_dir) {
-                    Some(run) => serde_json::to_string(&run).unwrap_or_else(|_| "{}".into()),
-                    None => "{}".into(),
+                let body = if let Ok(conn) = crate::store::open_harness_db() {
+                    match crate::store::orchestrator::read_run_conn(&conn) {
+                        Ok(Some(run)) => {
+                            serde_json::to_string(&run).unwrap_or_else(|_| "{}".into())
+                        }
+                        _ => "{}".into(),
+                    }
+                } else {
+                    let harness_dir = common::harness_dir();
+                    match orch::read_run(&harness_dir) {
+                        Some(run) => serde_json::to_string(&run).unwrap_or_else(|_| "{}".into()),
+                        None => "{}".into(),
+                    }
                 };
                 json_response(&body)
             }
 
             (Method::Get, "/api/events") => {
-                let harness_dir = common::harness_dir();
-                let run = orch::read_run(&harness_dir);
-                let data = serde_json::to_string(&run).unwrap_or_else(|_| "null".into());
+                let data = if let Ok(conn) = crate::store::open_harness_db() {
+                    match crate::store::orchestrator::read_run_conn(&conn) {
+                        Ok(Some(run)) => {
+                            serde_json::to_string(&run).unwrap_or_else(|_| "null".into())
+                        }
+                        _ => "null".into(),
+                    }
+                } else {
+                    let harness_dir = common::harness_dir();
+                    serde_json::to_string(&orch::read_run(&harness_dir))
+                        .unwrap_or_else(|_| "null".into())
+                };
                 let sse_body = format!("data: {data}\n\n");
                 Response::from_string(sse_body)
                     .with_header(Header::from_bytes(b"Content-Type", b"text/event-stream").unwrap())
                     .with_header(Header::from_bytes(b"Cache-Control", b"no-cache").unwrap())
+                    .with_header(Header::from_bytes(b"Connection", b"keep-alive").unwrap())
             }
 
             // ── Memory API (Graph/Stats) ─────────────────────
@@ -131,6 +150,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
                 let harness_dir = common::harness_dir();
                 let body = handle_harness_cmd(&cmd, &harness_dir);
+                json_response(&body)
+            }
+
+            // ── Orbit Pipeline Dismiss ───────────────────────
+            (Method::Delete, url) if url.starts_with("/api/orbit/") => {
+                let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
+                let harness_dir = common::harness_dir();
+                let body = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
                 json_response(&body)
             }
 
@@ -213,10 +240,23 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let agent_id = url
                     .trim_start_matches("/api/agents/")
                     .trim_end_matches("/status");
-                let harness_dir = common::harness_dir();
                 if !orch::validate_agent_id(agent_id) {
                     json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
+                } else if let Ok(conn) = crate::store::open_harness_db() {
+                    let body = match crate::store::orchestrator::read_agent_conn(&conn, agent_id) {
+                        Ok(Some(a)) => serde_json::json!({
+                            "agent_id": a.id,
+                            "phase": a.phase,
+                            "progress": a.progress,
+                            "last_heartbeat": a.last_heartbeat,
+                            "status": a.status,
+                        })
+                        .to_string(),
+                        _ => "{}".into(),
+                    };
+                    json_response(&body)
                 } else {
+                    let harness_dir = common::harness_dir();
                     let body = match orch::read_agent_status(&harness_dir, agent_id) {
                         Some(s) => serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()),
                         None => "{}".into(),
@@ -225,10 +265,25 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 }
             }
 
+            (Method::Delete, url) if url.starts_with("/api/agents/") => {
+                let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
+                let harness_dir = common::harness_dir();
+                if !orch::validate_agent_id(agent_id) {
+                    json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
+                } else {
+                    let ok = orch::dismiss_agent(&harness_dir, agent_id);
+                    let body = serde_json::json!({"ok": ok, "dismissed": agent_id}).to_string();
+                    json_response(&body)
+                }
+            }
+
             // ── CORS & Other ────────────────────────────────
             (Method::Options, _) => Response::from_string("{}")
                 .with_status_code(204)
-                .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
+                .with_header(
+                    Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173")
+                        .unwrap(),
+                )
                 .with_header(
                     Header::from_bytes(
                         b"Access-Control-Allow-Methods",
@@ -240,10 +295,18 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap(),
                 ),
 
-            // ── SPA fallback: serve index.html for any non-API GET route ──
-            (Method::Get, _) => Response::from_string(DASHBOARD_HTML).with_header(
-                Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
-            ),
+            // ── SPA fallback: serve index.html for non-API, non-static-asset GET routes ──
+            (Method::Get, url)
+                if !url.starts_with("/api/")
+                    && !url.contains('.')
+                    && !url.starts_with("/favicon")
+                    && !url.starts_with("/robots")
+                    && !url.starts_with("/sitemap") =>
+            {
+                Response::from_string(DASHBOARD_HTML).with_header(
+                    Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap(),
+                )
+            }
 
             _ => Response::from_string("Not Found").with_status_code(404),
         };
@@ -255,7 +318,9 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 fn json_response(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
-        .with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
+        .with_header(
+            Header::from_bytes(b"Access-Control-Allow-Origin", b"http://localhost:5173").unwrap(),
+        )
 }
 
 fn percent_decode(s: &str) -> String {
@@ -281,6 +346,40 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
+/// Dismiss (delete) an orbit pipeline file across all projects.
+fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
+    let projects_root = harness_dir.parent().unwrap_or(harness_dir);
+    let mut deleted = false;
+
+    if let Ok(rd) = std::fs::read_dir(projects_root) {
+        for proj_entry in rd.filter_map(|e| e.ok()) {
+            let orbit_dir = proj_entry.path().join("orbit");
+            if !orbit_dir.exists() {
+                continue;
+            }
+            // Match by ID — pipeline_id is the timestamp part (e.g. "20260523105350")
+            if let Ok(files) = std::fs::read_dir(&orbit_dir) {
+                for f in files.filter_map(|e| e.ok()) {
+                    let fname = f.file_name().to_string_lossy().to_string();
+                    if fname.starts_with("PIPELINE-")
+                        && fname.ends_with(".json")
+                        && fname.contains(pipeline_id)
+                        && std::fs::remove_file(f.path()).is_ok()
+                    {
+                        deleted = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if deleted {
+        serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string()
+    } else {
+        serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string()
+    }
+}
+
 fn parse_query_param(url: &str, key: &str) -> Option<String> {
     let query = url.split('?').nth(1)?;
     for pair in query.split('&') {
@@ -296,10 +395,49 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
     use std::fs;
     match cmd {
         "get_harness_metrics" => {
+            // Try SQLite first, fallback to JSON file
+            if let Ok(conn) = crate::store::open_harness_db() {
+                if let Ok(metrics) = crate::store::metrics::load_metrics_conn(&conn) {
+                    return serde_json::to_string(&metrics).unwrap_or_else(|_| "null".into());
+                }
+            }
             let p = harness_dir.join("metrics.json");
             fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
         }
         "get_evolved_skills" => {
+            // Try SQLite first
+            if let Ok(conn) = crate::store::open_harness_db() {
+                let skills = crate::store::evolved::list_skills_full_conn(&conn)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|s| {
+                        serde_json::json!({
+                            "name": s.name,
+                            "skill_md": s.skill_md,
+                            "created_at": s.created
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let history = crate::store::evolution::query_recent_records_conn(&conn, 50)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|r| serde_json::to_value(r).ok())
+                    .collect::<Vec<_>>();
+                let total_sessions = crate::store::metrics::load_metrics_conn(&conn)
+                    .map(|m| m.total_sessions)
+                    .unwrap_or(0);
+                if !skills.is_empty() || !history.is_empty() {
+                    return serde_json::json!({
+                        "evolved_skills": skills,
+                        "evolution_history": history,
+                        "total_sessions_analyzed": total_sessions,
+                        "patterns_detected": history.len()
+                    })
+                    .to_string();
+                }
+            }
+
+            // Fallback: file-based reading
             let evolved_dir = harness_dir.join("evolved");
             let skills: Vec<serde_json::Value> = if evolved_dir.exists() {
                 fs::read_dir(&evolved_dir)
@@ -309,13 +447,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                             .map(|e| {
                                 let name = e.file_name().to_string_lossy().to_string();
                                 let skill_md_path = e.path().join("SKILL.md");
-                                let skill_md =
-                                    fs::read_to_string(&skill_md_path).unwrap_or_default();
-                                serde_json::json!({
-                                    "name": name,
-                                    "skill_md": skill_md,
-                                    "created_at": null
-                                })
+                                let skill_md = fs::read_to_string(&skill_md_path).unwrap_or_default();
+                                serde_json::json!({ "name": name, "skill_md": skill_md, "created_at": null })
                             })
                             .collect()
                     })
@@ -325,17 +458,23 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             };
             let evo_log = harness_dir.join("evolution.jsonl");
             let history: Vec<serde_json::Value> = if evo_log.exists() {
-                fs::read_to_string(&evo_log)
-                    .unwrap_or_default()
-                    .lines()
-                    .filter(|l| !l.is_empty())
-                    .filter_map(|l| serde_json::from_str(l).ok())
-                    .collect::<Vec<serde_json::Value>>()
-                    .into_iter()
-                    .rev()
-                    .take(50)
-                    .rev()
-                    .collect()
+                let mut buf: std::collections::VecDeque<serde_json::Value> =
+                    std::collections::VecDeque::with_capacity(51);
+                if let Ok(file) = fs::File::open(&evo_log) {
+                    use std::io::BufRead;
+                    for line in std::io::BufReader::new(file).lines().map_while(Result::ok) {
+                        if line.trim().is_empty() {
+                            continue;
+                        }
+                        if let Ok(v) = serde_json::from_str(&line) {
+                            buf.push_back(v);
+                            if buf.len() > 50 {
+                                buf.pop_front();
+                            }
+                        }
+                    }
+                }
+                buf.into_iter().rev().collect()
             } else {
                 vec![]
             };
@@ -345,15 +484,75 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
                 .and_then(|v| v["total_sessions"].as_u64())
                 .unwrap_or(0);
-            let result = serde_json::json!({
+            serde_json::json!({
                 "evolved_skills": skills,
                 "evolution_history": history,
                 "total_sessions_analyzed": total_sessions,
                 "patterns_detected": history.len()
-            });
-            result.to_string()
+            })
+            .to_string()
         }
         "get_obs_summary" => {
+            // Try SQLite first, fallback to JSONL
+            if let Ok(conn) = crate::store::open_harness_db() {
+                if let Ok(stats) = crate::store::observations::query_obs_stats_conn(
+                    &conn,
+                    "2020-01-01", // all data
+                    "2099-12-31",
+                ) {
+                    if stats.total > 0 {
+                        let tool_stats: Vec<serde_json::Value> = {
+                            let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
+                                serde_json::json!({
+                                    "tool": t.tool,
+                                    "calls": t.calls,
+                                    "success_rate": if t.calls > 0 {
+                                        (t.successes as f64 / t.calls as f64 * 1000.0).round() / 1000.0
+                                    } else { 0.0 },
+                                    "avg_score": (t.avg_score * 1000.0).round() / 1000.0
+                                })
+                            }).collect();
+                            v.sort_by(|a, b| {
+                                b["calls"]
+                                    .as_i64()
+                                    .unwrap_or(0)
+                                    .cmp(&a["calls"].as_i64().unwrap_or(0))
+                            });
+                            v
+                        };
+                        let recent_sessions: Vec<serde_json::Value> = stats
+                            .session_stats
+                            .iter()
+                            .take(10)
+                            .map(|s| {
+                                let date = s
+                                    .session_id
+                                    .split('_')
+                                    .next()
+                                    .unwrap_or("unknown")
+                                    .to_string();
+                                serde_json::json!({
+                                    "session_id": s.session_id,
+                                    "date": date,
+                                    "tool_calls": s.calls,
+                                    "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
+                                    "failures": s.failures
+                                })
+                            })
+                            .collect();
+                        return serde_json::json!({
+                            "recent_sessions": recent_sessions,
+                            "tool_stats": tool_stats,
+                            "total_tool_calls": stats.total,
+                            "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
+                            "active_agents": []
+                        })
+                        .to_string();
+                    }
+                }
+            }
+
+            // Fallback: JSONL file parsing (for legacy data)
             let obs_dir = harness_dir.join("obs");
             if !obs_dir.exists() {
                 return serde_json::json!({
@@ -436,26 +635,19 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 });
                 v
             };
-
             let recent_sessions: Vec<serde_json::Value> = {
                 let mut v: Vec<_> = session_map.iter().collect();
                 v.sort_by(|a, b| b.0.cmp(a.0));
-                v.into_iter()
-                    .take(10)
-                    .map(|(sid, (calls, score_sum, failures, date))| {
-                        serde_json::json!({
-                            "session_id": sid,
-                            "date": date,
-                            "tool_calls": calls,
-                            "avg_score": if *calls > 0 {
-                                (*score_sum / *calls as f64 * 1000.0).round() / 1000.0
-                            } else { 0.0 },
-                            "failures": failures
-                        })
+                v.into_iter().take(10).map(|(sid, (calls, score_sum, failures, date))| {
+                    serde_json::json!({
+                        "session_id": sid,
+                        "date": date,
+                        "tool_calls": calls,
+                        "avg_score": if *calls > 0 { (*score_sum / *calls as f64 * 1000.0).round() / 1000.0 } else { 0.0 },
+                        "failures": failures
                     })
-                    .collect()
+                }).collect()
             };
-
             let total: u64 = tool_stats
                 .iter()
                 .map(|t| t["calls"].as_u64().unwrap_or(0))
@@ -482,6 +674,21 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             .to_string()
         }
         "get_orbit_pipelines" => {
+            // Try SQLite first
+            if let Ok(conn) = crate::store::open_harness_db() {
+                if let Ok(pipelines) = crate::store::orbit_store::list_all_pipelines_conn(&conn) {
+                    if !pipelines.is_empty() {
+                        let mut sorted = pipelines;
+                        sorted.sort_by(|a, b| {
+                            let ta = a["started_at"].as_str().unwrap_or("");
+                            let tb = b["started_at"].as_str().unwrap_or("");
+                            tb.cmp(ta)
+                        });
+                        return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
+                    }
+                }
+            }
+            // Fallback: scan PIPELINE-*.json files
             let projects_root = harness_dir.parent().unwrap_or(harness_dir);
             let mut all: Vec<serde_json::Value> = vec![];
             if let Ok(rd) = fs::read_dir(projects_root) {

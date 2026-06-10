@@ -1,55 +1,13 @@
-//! orchestrator.rs — Orchestrator state SQLite I/O (async pool)
+//! orchestrator.rs — Orchestrator state SQLite I/O
+#![allow(dead_code)]
 //!
 //! Replaces file-based orchestrator/ directory with SQLite tables.
 //! flock(2) advisory locking is replaced by SQLite WAL transactions.
 
+use rusqlite::Connection;
 use std::io;
 
 // ── Types ────────────────────────────────────────────
-
-/// Type-safe status for an orchestration run.
-/// `OrchRun.status` remains `String` for JSON/DB round-trip; use `RunStatus` for function params.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
-pub enum RunStatus {
-    Running,
-    Complete,
-    Aborted,
-}
-
-impl RunStatus {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            RunStatus::Running => "running",
-            RunStatus::Complete => "complete",
-            RunStatus::Aborted => "aborted",
-        }
-    }
-}
-
-/// Type-safe control action for the single-row `orch_control` table.
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlAction {
-    Start,
-    Stop,
-    Pause,
-    Resume,
-}
-
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-impl ControlAction {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ControlAction::Start => "start",
-            ControlAction::Stop => "stop",
-            ControlAction::Pause => "pause",
-            ControlAction::Resume => "resume",
-        }
-    }
-}
 
 /// Subset of orchestrate::state::OrchestrationRun fields stored in DB.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -77,360 +35,333 @@ pub struct OrchAgent {
     pub completed_at: Option<String>,
 }
 
-// ── Async pool functions ─────────────────────────────
+// ── Run operations ───────────────────────────────────
 
-use sqlx::{AnyPool, Row};
-
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn init_run_pool(pool: &AnyPool, project: &str, run: &OrchRun) -> io::Result<()> {
-    sqlx::query(
-        "INSERT INTO orch_runs (id, project, status, agents_json, dep_graph_json, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO UPDATE SET project=excluded.project, status=excluded.status, agents_json=excluded.agents_json, dep_graph_json=excluded.dep_graph_json, updated_at=excluded.updated_at"
+/// Initialize a new orchestration run.
+pub fn init_run_conn(conn: &Connection, run: &OrchRun) -> io::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO orch_runs
+         (id, status, agents_json, dep_graph_json, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6)",
+        rusqlite::params![
+            run.id,
+            run.status,
+            run.agents_json,
+            run.dep_graph_json,
+            run.created_at,
+            run.updated_at,
+        ],
     )
-    .bind(&run.id)
-    .bind(project)
-    .bind(&run.status)
-    .bind(&run.agents_json)
-    .bind(&run.dep_graph_json)
-    .bind(&run.created_at)
-    .bind(&run.updated_at)
-    .execute(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
-pub async fn read_run_pool(pool: &AnyPool, project: &str) -> io::Result<Option<OrchRun>> {
-    let row = sqlx::query(
-        "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at FROM orch_runs WHERE project = $1 AND status = $2 ORDER BY created_at DESC LIMIT 1"
-    )
-    .bind(project)
-    .bind(RunStatus::Running.as_str())
-    .fetch_optional(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+/// Read the current orchestration run.
+pub fn read_run_conn(conn: &Connection) -> io::Result<Option<OrchRun>> {
+    let result = conn.query_row(
+        "SELECT id, status, agents_json, dep_graph_json, created_at, updated_at
+         FROM orch_runs WHERE status = 'running' ORDER BY created_at DESC LIMIT 1",
+        [],
+        |row| {
+            Ok(OrchRun {
+                id: row.get(0)?,
+                status: row.get(1)?,
+                agents_json: row.get(2)?,
+                dep_graph_json: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        },
+    );
 
-    match row {
-        Some(r) => Ok(Some(OrchRun {
-            id: r.try_get::<String, _>(0).map_err(crate::store::sqlx_err)?,
-            status: r.try_get::<String, _>(1).map_err(crate::store::sqlx_err)?,
-            agents_json: r.try_get::<String, _>(2).map_err(crate::store::sqlx_err)?,
-            dep_graph_json: r.try_get::<String, _>(3).map_err(crate::store::sqlx_err)?,
-            created_at: r.try_get::<String, _>(4).map_err(crate::store::sqlx_err)?,
-            updated_at: r.try_get::<String, _>(5).map_err(crate::store::sqlx_err)?,
-        })),
-        None => Ok(None),
+    match result {
+        Ok(run) => Ok(Some(run)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(io::Error::other(e)),
     }
 }
 
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn update_run_status_pool(
-    pool: &AnyPool,
-    run_id: &str,
-    status: RunStatus,
-) -> io::Result<()> {
-    sqlx::query("UPDATE orch_runs SET status = $1, updated_at = $2 WHERE id = $3")
-        .bind(status.as_str())
-        .bind(crate::shared::helpers::now_iso())
-        .bind(run_id)
-        .execute(pool)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+/// Update run status.
+pub fn update_run_status_conn(conn: &Connection, run_id: &str, status: &str) -> io::Result<()> {
+    conn.execute(
+        "UPDATE orch_runs SET status = ?1, updated_at = ?2 WHERE id = ?3",
+        rusqlite::params![status, crate::shared::helpers::now_iso(), run_id],
+    )
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn upsert_agent_pool(pool: &AnyPool, agent: &OrchAgent) -> io::Result<()> {
-    sqlx::query(
-        "INSERT INTO orch_agents (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat, started_at, completed_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT (id) DO UPDATE SET run_id=excluded.run_id, role=excluded.role, task=excluded.task, satisfies_json=excluded.satisfies_json, status=excluded.status, phase=excluded.phase, progress=excluded.progress, last_heartbeat=excluded.last_heartbeat, started_at=excluded.started_at, completed_at=excluded.completed_at"
+// ── Agent operations ─────────────────────────────────
+
+/// Insert or update an agent.
+pub fn upsert_agent_conn(conn: &Connection, agent: &OrchAgent) -> io::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO orch_agents
+         (id, run_id, role, task, satisfies_json, status, phase, progress,
+          last_heartbeat, started_at, completed_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+        rusqlite::params![
+            agent.id,
+            agent.run_id,
+            agent.role,
+            agent.task,
+            agent.satisfies_json,
+            agent.status,
+            agent.phase,
+            agent.progress,
+            agent.last_heartbeat,
+            agent.started_at,
+            agent.completed_at,
+        ],
     )
-    .bind(&agent.id)
-    .bind(&agent.run_id)
-    .bind(&agent.role)
-    .bind(&agent.task)
-    .bind(&agent.satisfies_json)
-    .bind(&agent.status)
-    .bind(&agent.phase)
-    .bind(agent.progress)
-    .bind(&agent.last_heartbeat)
-    .bind(&agent.started_at)
-    .bind(&agent.completed_at)
-    .execute(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
-pub async fn read_agent_pool(
-    pool: &AnyPool,
-    project: &str,
-    agent_id: &str,
-) -> io::Result<Option<OrchAgent>> {
-    let row = sqlx::query(
-        "SELECT a.id, a.run_id, a.role, a.task, a.satisfies_json, a.status, a.phase, a.progress, a.last_heartbeat, a.started_at, a.completed_at FROM orch_agents a JOIN orch_runs r ON a.run_id = r.id WHERE a.id = $1 AND r.project = $2"
-    )
-    .bind(agent_id)
-    .bind(project)
-    .fetch_optional(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+/// Read agent status by ID.
+pub fn read_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<Option<OrchAgent>> {
+    let result = conn.query_row(
+        "SELECT id, run_id, role, task, satisfies_json, status, phase, progress,
+                last_heartbeat, started_at, completed_at
+         FROM orch_agents WHERE id = ?1",
+        rusqlite::params![agent_id],
+        |row| {
+            Ok(OrchAgent {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                role: row.get(2)?,
+                task: row.get(3)?,
+                satisfies_json: row.get(4)?,
+                status: row.get(5)?,
+                phase: row.get(6)?,
+                progress: row.get(7)?,
+                last_heartbeat: row.get(8)?,
+                started_at: row.get(9)?,
+                completed_at: row.get(10)?,
+            })
+        },
+    );
 
-    match row {
-        Some(r) => Ok(Some(OrchAgent {
-            id: r.try_get::<String, _>(0).map_err(crate::store::sqlx_err)?,
-            run_id: r.try_get::<String, _>(1).map_err(crate::store::sqlx_err)?,
-            role: r.try_get::<String, _>(2).map_err(crate::store::sqlx_err)?,
-            task: r.try_get::<String, _>(3).map_err(crate::store::sqlx_err)?,
-            satisfies_json: r.try_get::<String, _>(4).map_err(crate::store::sqlx_err)?,
-            status: r.try_get::<String, _>(5).map_err(crate::store::sqlx_err)?,
-            phase: r.try_get::<String, _>(6).map_err(crate::store::sqlx_err)?,
-            progress: r.try_get::<f64, _>(7).map_err(crate::store::sqlx_err)?,
-            last_heartbeat: r.try_get::<String, _>(8).map_err(crate::store::sqlx_err)?,
-            started_at: r
-                .try_get::<Option<String>, _>(9)
-                .map_err(crate::store::sqlx_err)?,
-            completed_at: r
-                .try_get::<Option<String>, _>(10)
-                .map_err(crate::store::sqlx_err)?,
-        })),
-        None => Ok(None),
+    match result {
+        Ok(agent) => Ok(Some(agent)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(io::Error::other(e)),
     }
 }
 
-pub async fn dismiss_agent_pool(pool: &AnyPool, project: &str, agent_id: &str) -> io::Result<bool> {
-    let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
+/// Dismiss an agent: remove from agents table and update run JSON.
+///
+/// Uses BEGIN IMMEDIATE to prevent the check-then-delete race condition:
+/// two concurrent callers cannot both read `exists=true` and then both attempt to delete.
+pub fn dismiss_agent_conn(conn: &Connection, agent_id: &str) -> io::Result<bool> {
+    // BEGIN IMMEDIATE acquires a write lock without requiring &mut Connection.
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(io::Error::other)?;
 
-    let result = sqlx::query(
-        "DELETE FROM orch_agents WHERE id = $1 AND run_id IN (SELECT id FROM orch_runs WHERE project = $2)"
-    )
-        .bind(agent_id)
-        .bind(project)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    if result.rows_affected() == 0 {
+    // Check agent exists inside the write lock
+    let exists: bool =
+        conn.query_row(
+            "SELECT COUNT(*) FROM orch_agents WHERE id = ?1",
+            rusqlite::params![agent_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| {
+            let _ = conn.execute_batch("ROLLBACK");
+            io::Error::other(e)
+        })? > 0;
+
+    if !exists {
+        conn.execute_batch("ROLLBACK").map_err(io::Error::other)?;
         return Ok(false);
     }
 
-    sqlx::query("DELETE FROM orch_agent_events WHERE agent_id = $1")
-        .bind(agent_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    sqlx::query("DELETE FROM orch_agent_inbox WHERE agent_id = $1")
-        .bind(agent_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+    // Delete agent and related records within the held write lock
+    let del = || -> io::Result<()> {
+        conn.execute(
+            "DELETE FROM orch_agents WHERE id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(io::Error::other)?;
+        conn.execute(
+            "DELETE FROM orch_agent_events WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(io::Error::other)?;
+        conn.execute(
+            "DELETE FROM orch_agent_inbox WHERE agent_id = ?1",
+            rusqlite::params![agent_id],
+        )
+        .map_err(io::Error::other)?;
+        Ok(())
+    };
 
-    tx.commit().await.map_err(crate::store::sqlx_err)?;
+    if let Err(e) = del() {
+        let _ = conn.execute_batch("ROLLBACK");
+        return Err(e);
+    }
+
+    conn.execute_batch("COMMIT").map_err(io::Error::other)?;
     Ok(true)
 }
 
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn append_event_pool(
-    pool: &AnyPool,
+// ── Agent events ─────────────────────────────────────
+
+/// Append an agent event.
+pub fn append_event_conn(
+    conn: &Connection,
     agent_id: &str,
     timestamp: &str,
     event_type: &str,
     data_json: &str,
 ) -> io::Result<()> {
-    sqlx::query(
-        "INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json) VALUES ($1,$2,$3,$4)"
+    conn.execute(
+        "INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json)
+         VALUES (?1,?2,?3,?4)",
+        rusqlite::params![agent_id, timestamp, event_type, data_json],
     )
-    .bind(agent_id)
-    .bind(timestamp)
-    .bind(event_type)
-    .bind(data_json)
-    .execute(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
-pub async fn query_agent_events_pool(
-    pool: &AnyPool,
-    agent_id: &str,
-    limit: i64,
-) -> io::Result<Vec<crate::orchestrate::state::AgentEvent>> {
-    let rows = sqlx::query_as::<_, (String, String, String)>(
-        "SELECT timestamp, event_type, data_json FROM orch_agent_events WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT $2",
-    )
-    .bind(agent_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-    Ok(rows
-        .into_iter()
-        .map(|(ts, etype, data)| crate::orchestrate::state::AgentEvent {
-            timestamp: ts,
-            event_type: etype,
-            data: serde_json::from_str(&data).unwrap_or(serde_json::Value::Null),
-        })
-        .collect())
-}
+// ── Agent inbox ──────────────────────────────────────
 
-pub async fn query_agent_inbox_pool(
-    pool: &AnyPool,
-    agent_id: &str,
-    limit: i64,
-) -> io::Result<Vec<serde_json::Value>> {
-    let rows = sqlx::query_as::<_, (String, String, String, String)>(
-        "SELECT agent_id, from_agent, timestamp, message FROM orch_agent_inbox WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT $2",
-    )
-    .bind(agent_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-    Ok(rows
-        .into_iter()
-        .map(|(to, from, ts, msg)| {
-            serde_json::json!({
-                "to": to,
-                "from": from,
-                "timestamp": ts,
-                "message": msg,
-            })
-        })
-        .collect())
-}
-
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn post_inbox_pool(
-    pool: &AnyPool,
+/// Post a message to an agent's inbox.
+pub fn post_inbox_conn(
+    conn: &Connection,
     agent_id: &str,
     from_agent: &str,
     timestamp: &str,
     message: &str,
 ) -> io::Result<()> {
-    sqlx::query(
-        "INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message) VALUES ($1,$2,$3,$4)"
+    conn.execute(
+        "INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message)
+         VALUES (?1,?2,?3,?4)",
+        rusqlite::params![agent_id, from_agent, timestamp, message],
     )
-    .bind(agent_id)
-    .bind(from_agent)
-    .bind(timestamp)
-    .bind(message)
-    .execute(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn write_control_pool(
-    pool: &AnyPool,
-    action: ControlAction,
+// ── Control ──────────────────────────────────────────
+
+/// Write a control directive (single-row table).
+pub fn write_control_conn(
+    conn: &Connection,
+    action: &str,
     target: Option<&str>,
     message: Option<&str>,
     generation: i64,
 ) -> io::Result<()> {
-    sqlx::query(
-        "INSERT INTO orch_control (id, action, target, message, generation) VALUES (1, $1, $2, $3, $4) ON CONFLICT (id) DO UPDATE SET action=excluded.action, target=excluded.target, message=excluded.message, generation=excluded.generation"
+    conn.execute(
+        "INSERT OR REPLACE INTO orch_control (id, action, target, message, generation)
+         VALUES (1, ?1, ?2, ?3, ?4)",
+        rusqlite::params![action, target, message, generation],
     )
-    .bind(action.as_str())
-    .bind(target)
-    .bind(message)
-    .bind(generation)
-    .execute(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(io::Error::other)?;
     Ok(())
 }
 
+// ── Cleanup ──────────────────────────────────────────
+
 /// Clean up completed/aborted runs and orphaned agents.
-// TODO: Wire up when remaining sync callers migrate to pool (R4).
-#[allow(dead_code)]
-pub async fn cleanup_stale_pool(pool: &AnyPool, project: &str, cutoff_ts: &str) -> io::Result<u64> {
-    let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
+///
+/// `cutoff_ts` is an ISO-8601 timestamp; only runs updated before this time
+/// are removed. Pass an empty string to remove all completed/aborted runs.
+///
+/// All deletions are wrapped in a single IMMEDIATE transaction so a partial failure
+/// does not leave orphaned agent events or inbox messages without their agents.
+pub fn cleanup_stale_conn(conn: &Connection, cutoff_ts: &str) -> io::Result<u64> {
+    conn.execute_batch("BEGIN IMMEDIATE")
+        .map_err(io::Error::other)?;
 
-    sqlx::query("CREATE TEMP TABLE IF NOT EXISTS _stale_run_ids (id TEXT PRIMARY KEY); DELETE FROM _stale_run_ids")
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+    let do_cleanup = || -> io::Result<u64> {
+        let mut count = 0u64;
 
-    if cutoff_ts.is_empty() {
-        sqlx::query(
-            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE project = $1 AND (status = $2 OR status = $3)",
+        // Deletion order respects FK constraints (foreign_keys=ON):
+        //   child rows (events, inbox, agents) must be removed before parent (runs).
+        //
+        // Step 1: identify stale run IDs
+        let stale_run_subquery = if cutoff_ts.is_empty() {
+            "SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted')".to_string()
+        } else {
+            format!(
+                "SELECT id FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < '{}'",
+                cutoff_ts.replace('\'', "''") // basic escaping; cutoff_ts is ISO-8601
+            )
+        };
+
+        // Step 2: delete child rows for agents belonging to stale runs
+        conn.execute(
+            &format!(
+                "DELETE FROM orch_agent_events WHERE agent_id IN (
+                     SELECT id FROM orch_agents WHERE run_id IN ({stale_run_subquery})
+                 )"
+            ),
+            [],
         )
-        .bind(project)
-        .bind(RunStatus::Complete.as_str())
-        .bind(RunStatus::Aborted.as_str())
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    } else {
-        sqlx::query(
-            "INSERT INTO _stale_run_ids SELECT id FROM orch_runs WHERE project = $1 AND (status = $2 OR status = $3) AND updated_at < $4",
+        .map_err(io::Error::other)?;
+        conn.execute(
+            &format!(
+                "DELETE FROM orch_agent_inbox WHERE agent_id IN (
+                     SELECT id FROM orch_agents WHERE run_id IN ({stale_run_subquery})
+                 )"
+            ),
+            [],
         )
-        .bind(project)
-        .bind(RunStatus::Complete.as_str())
-        .bind(RunStatus::Aborted.as_str())
-        .bind(cutoff_ts)
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+        .map_err(io::Error::other)?;
+
+        // Step 3: delete agents for stale runs
+        let deleted_agents = conn
+            .execute(
+                &format!("DELETE FROM orch_agents WHERE run_id IN ({stale_run_subquery})"),
+                [],
+            )
+            .map_err(io::Error::other)?;
+        count += deleted_agents as u64;
+
+        // Step 4: now safe to delete the runs themselves
+        let deleted_runs = if cutoff_ts.is_empty() {
+            conn.execute(
+                "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted')",
+                [],
+            )
+        } else {
+            conn.execute(
+                "DELETE FROM orch_runs WHERE status IN ('complete', 'aborted') AND updated_at < ?1",
+                rusqlite::params![cutoff_ts],
+            )
+        }
+        .map_err(io::Error::other)?;
+        count += deleted_runs as u64;
+
+        Ok(count)
+    };
+
+    match do_cleanup() {
+        Ok(count) => {
+            conn.execute_batch("COMMIT").map_err(io::Error::other)?;
+            Ok(count)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
     }
-
-    sqlx::query(
-        "DELETE FROM orch_agent_events WHERE agent_id IN (
-             SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
-         )",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-
-    sqlx::query(
-        "DELETE FROM orch_agent_inbox WHERE agent_id IN (
-             SELECT id FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)
-         )",
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-
-    let result =
-        sqlx::query("DELETE FROM orch_agents WHERE run_id IN (SELECT id FROM _stale_run_ids)")
-            .execute(&mut *tx)
-            .await
-            .map_err(crate::store::sqlx_err)?;
-    let mut count = result.rows_affected();
-
-    let result = sqlx::query("DELETE FROM orch_runs WHERE id IN (SELECT id FROM _stale_run_ids)")
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-    count += result.rows_affected();
-
-    sqlx::query("DELETE FROM _stale_run_ids")
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
-
-    tx.commit().await.map_err(crate::store::sqlx_err)?;
-    Ok(count)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> AnyPool {
-        let p = crate::store::pool::test_memory_pool().await;
-        crate::store::schema::init_schema_pool(&p).await.unwrap();
-        p
+    fn in_memory_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        super::super::schema::init_schema(&conn).unwrap();
+        conn
     }
 
-    #[tokio::test]
-    async fn init_and_read_run() {
-        let pool = in_memory_pool().await;
+    #[test]
+    fn init_and_read_run() {
+        let conn = in_memory_db();
         let run = OrchRun {
             id: "auto-123".into(),
             status: "running".into(),
@@ -439,16 +370,16 @@ mod tests {
             created_at: "2026-06-02T10:00:00Z".into(),
             updated_at: "2026-06-02T10:00:00Z".into(),
         };
-        init_run_pool(&pool, "test-project", &run).await.unwrap();
+        init_run_conn(&conn, &run).unwrap();
 
-        let loaded = read_run_pool(&pool, "test-project").await.unwrap();
+        let loaded = read_run_conn(&conn).unwrap();
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().id, "auto-123");
     }
 
-    #[tokio::test]
-    async fn upsert_and_read_agent() {
-        let pool = in_memory_pool().await;
+    #[test]
+    fn upsert_and_read_agent() {
+        let conn = in_memory_db();
         let run = OrchRun {
             id: "auto-123".into(),
             status: "running".into(),
@@ -457,7 +388,7 @@ mod tests {
             created_at: "2026-06-02T10:00:00Z".into(),
             updated_at: "2026-06-02T10:00:00Z".into(),
         };
-        init_run_pool(&pool, "test-project", &run).await.unwrap();
+        init_run_conn(&conn, &run).unwrap();
 
         let agent = OrchAgent {
             id: "agent-1".into(),
@@ -472,18 +403,16 @@ mod tests {
             started_at: Some("2026-06-02T10:00:00Z".into()),
             completed_at: None,
         };
-        upsert_agent_pool(&pool, &agent).await.unwrap();
+        upsert_agent_conn(&conn, &agent).unwrap();
 
-        let loaded = read_agent_pool(&pool, "test-project", "agent-1")
-            .await
-            .unwrap();
+        let loaded = read_agent_conn(&conn, "agent-1").unwrap();
         assert!(loaded.is_some());
         assert_eq!(loaded.unwrap().role, "coder");
     }
 
-    #[tokio::test]
-    async fn dismiss_agent() {
-        let pool = in_memory_pool().await;
+    #[test]
+    fn dismiss_agent() {
+        let conn = in_memory_db();
         let run = OrchRun {
             id: "auto-123".into(),
             status: "running".into(),
@@ -492,7 +421,7 @@ mod tests {
             created_at: "2026-06-02T10:00:00Z".into(),
             updated_at: "2026-06-02T10:00:00Z".into(),
         };
-        init_run_pool(&pool, "test-project", &run).await.unwrap();
+        init_run_conn(&conn, &run).unwrap();
 
         let agent = OrchAgent {
             id: "agent-1".into(),
@@ -507,16 +436,12 @@ mod tests {
             started_at: None,
             completed_at: None,
         };
-        upsert_agent_pool(&pool, &agent).await.unwrap();
+        upsert_agent_conn(&conn, &agent).unwrap();
 
-        let dismissed = dismiss_agent_pool(&pool, "test-project", "agent-1")
-            .await
-            .unwrap();
+        let dismissed = dismiss_agent_conn(&conn, "agent-1").unwrap();
         assert!(dismissed);
 
-        let loaded = read_agent_pool(&pool, "test-project", "agent-1")
-            .await
-            .unwrap();
+        let loaded = read_agent_conn(&conn, "agent-1").unwrap();
         assert!(loaded.is_none());
     }
 }
