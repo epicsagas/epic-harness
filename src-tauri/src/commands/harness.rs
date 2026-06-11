@@ -29,7 +29,7 @@ pub struct HarnessMetrics {
 
 #[tauri::command]
 pub async fn get_harness_metrics(
-    project: Option<String>,
+    _project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<HarnessMetrics, String> {
     let pool = state.harness_db.clone();
@@ -249,7 +249,7 @@ pub struct FailureCategory {
 
 #[tauri::command]
 pub async fn get_obs_summary(
-    project: Option<String>,
+    _project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ObsSummary, String> {
     let pool = state.harness_db.clone();
@@ -329,7 +329,7 @@ pub struct SessionSnapshotResponse {
 
 #[tauri::command]
 pub async fn get_session_snapshots(
-    project: Option<String>,
+    _project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SessionSnapshotResponse>, String> {
     let pool = state.harness_db.clone();
