@@ -5,6 +5,20 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] — 2026-06-10
+
+### Fixed
+- **FTS5 search broken after rusqlite→sqlx migration**: `search` and `recall` commands returned empty results because FTS virtual table columns were inaccessible via `sqlx::AnyPool`
+  - Two-step rowid query pattern: `SELECT rowid FROM nodes_fts WHERE MATCH ?` → `SELECT ... FROM nodes WHERE rowid IN (...)`
+  - Schema DDL now includes `CREATE TRIGGER IF NOT EXISTS` for `nodes_ai/au/ad` to keep FTS index in sync automatically
+  - `migrate_fts_schema()`: auto-detects old 3-column FTS tables and migrates to 6-column (id, title, body, tags, projects) with content=nodes
+  - Removed manual `DELETE/INSERT INTO nodes_fts` from upsert/delete — triggers handle sync
+- **src-tauri dashboard build broken after sqlx migration**: function signatures changed during migration but `src-tauri` (separate crate) wasn't updated
+  - Added pool-only alias functions: `load_metrics_all_pool`, `list_recent_snapshots_all_pool`, `query_recent_records_all_pool`, `query_obs_stats_all_pool`, `list_all_pipelines_pool_limited`
+  - Fixed call sites in `src-tauri/src/commands/harness.rs` to use new signatures
+- **Duplicate exports in dashboard harness.ts**: removed duplicate `getOrchestratorRun` and `getOrchestratorAgentStatus` function blocks
+- **`store::pool` visibility**: changed `pub(crate)` → `pub` for cross-crate access from `src-tauri`
+
 ## [0.6.1] — 2026-06-10
 
 ### Fixed
