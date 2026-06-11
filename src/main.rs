@@ -214,6 +214,10 @@ fn main() {
             println!("{}", hooks::common::harness_dir().display());
             0
         }
+        "slug" => {
+            println!("{}", shared::paths::project_slug());
+            0
+        }
         "version" => {
             eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
             0
@@ -276,6 +280,7 @@ fn main() {
             eprintln!("  update       Self-update to the latest release");
             eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
             eprintln!("  path         Print the harness data directory");
+            eprintln!("  slug         Print the current project slug (worktree-safe)");
             eprintln!("  version      Print version");
             eprintln!("  --version, -v  Print version\n");
             eprintln!("INSTALL TARGETS:  codex  antigravity  cursor  opencode  cline  aider");
