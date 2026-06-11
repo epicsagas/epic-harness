@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 3 个命令、19 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
+<blockquote><p align="center">一个自我进化的 AI 编程智能体框架 — 3 个命令、26 个技能、1 条自主流水线，从你的失败中学习。</p></blockquote>
 
 <p align="center"><b>更少的记忆负担。每次按键更多的智能。每次会话都在变得更聪明。</b></p>
 
@@ -16,27 +16,40 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一个 Claude Code 插件，**将 30+ 条命令整合为 3 个命令 + 19 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
+一个 Claude Code 插件，**将 30+ 条命令整合为 3 个命令 + 26 个自动触发技能**，根据你正在做的事情**自动触发技能**，并从你的失败模式中**进化出新的技能**。
 
 <p align="center">
-  <img src="./assets/features.png" alt="epic harness 功能特性" width="100%" />
+  <img src="./assets/features.png" alt="epic harness features" width="100%" />
 </p>
 
 ---
 
 ![Demo](../../docs/demo/demo.gif)
 
-### Web 控制面板 — 10 屏实时指标
+### Web 控制面板 — 会话启动时自动打开
+
+10 屏实时指标，覆盖 eval 评分、工具统计、orbit 流水线、进化技能和 hook 健康。首次 Claude Code 会话时自动打开 — 无需手动配置。
+
 <p align="center">
   <img src="../../assets/dashboard.png" alt="Dashboard" width="49%" />
   <img src="../../assets/dashboard-orbit.png" alt="Orbit Pipeline" width="49%" />
 </p>
+
+```bash
+# 首次会话时自动启动（默认：http://localhost:7700）
+# 在 ~/.harness/config.toml 中配置端口或禁用：
+[dashboard]
+port = 7700       # 设为 0 以禁用自动启动
+auto_open = true  # 首次会话时打开浏览器
+```
+
+页面：**Dashboard** · /orbit 流水线 · 命令 (3) · 技能 (26) · 实时智能体 · Eval & Evolve · Hooks (6) · 集成 (6) · harness-mem · 设置
 
 ---
 
@@ -84,6 +97,14 @@ $ /orbit "为登录 API 添加 JWT 认证"
 
 自动安装二进制文件并一步注册所有 hooks。
 
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+技能和智能体立即可用 — 无需进一步操作。
+
 ### macOS / Linux
 
 ```bash
@@ -94,13 +115,13 @@ brew install epicsagas/tap/epic-harness
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
 ### 通过 Rust 工具链
@@ -113,9 +134,9 @@ cargo install epic-harness    # 从源码构建
 然后运行安装向导：
 
 ```bash
-epic install          # Claude Code（默认）
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install               # Claude Code（默认）
+epic install codex         # Codex CLI
+epic install antigravity   # Antigravity
 ```
 
 > 使用 `epic-harness --version` 验证。通过 `brew upgrade epic-harness` 或重新运行安装脚本来更新。
@@ -136,16 +157,16 @@ epic install gemini   # Antigravity
 ### 其他工具
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
+epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # 交互式菜单
 ```
 
-集成文件从二进制文件**同步**：缺失或过期的文件会被写入。`GEMINI.md` 和 `AGENTS.md` 仅在不存在时创建。
+集成文件从二进制文件**同步**：缺失或过期的文件会被写入。`AGENTS.md` 仅在不存在时创建。
 
 ### 验证
 
@@ -214,23 +235,36 @@ flowchart TD
 | 技能 | 触发时机 |
 |-------|--------------|
 | **spec** | 需要定义需求时 — 转换为编号的 R + AC 文档 |
-| **go** | 构建阶段 — 自动规划 → TDD子代理 → 并行执行 → AC验证 |
+| **go** | 构建阶段 — 自动规划 → TDD 子智能体 → 并行执行 → AC 验证 |
 | **check** | 审查阶段 — 并行代码审查 + 安全审计 + 测试，按范围附加检查 |
-| **ship** | 发布阶段 — 隔离测试 → 包含完整检查报告的PR → CI监控 + 自动修复 |
-| **orchestrate** | 多代理编排状态和实时代理控制 |
-| **commit** | 约定式提交生成 — 从 git diff 自动生成 |
+| **ship** | 发布阶段 — 隔离测试 → 包含完整检查报告的 PR → CI 监控 + 自动修复 |
+| **audit** | 全面审计 — 并行代码质量 + 安全 + 测试审查，语义去重 |
+| **eval** | 基于基线对比的质量回归评估 — 正确性、性能、质量 |
 | **tdd** | 新功能实现或 Bug 修复 |
 | **debug** | 测试失败或运行时错误 |
 | **discover** | 需求模糊、没有明确问题的解决方案、缺乏焦点的抱怨 |
 | **secure** | 涉及认证 / 数据库 / API / 密钥代码 |
+| **threat-model** | 安全范围界定 — 信任边界枚举、威胁参与者、场景 → THREAT_MODEL.md |
+| **vuln-scan** | 系统性漏洞扫描 — 注入、认证、数据暴露、依赖 → VULN-FINDINGS.json |
+| **triage** | 对抗性验证 — 严重性调整、链式分析、根因分组 → TRIAGE.json |
 | **perf** | 循环、查询、渲染、批量操作 |
 | **simplify** | 文件超过 200 行或圈复杂度过高 |
 | **document** | 公共 API 新增或签名变更 |
 | **verify** | 在完成 `/go` 或 `/ship` 之前 |
 | **context** | 上下文窗口超过 70% |
 | **council** | 存在歧义的架构或设计决策 |
+| **orchestrate** | 多智能体编排状态和实时智能体干预 |
 | **agent-introspection** | 连续 3+ 次失败或循环重试模式 |
 | **reflect** | 按需：你是否在将 AI 作为思维放大器？基于事实的冷静自我评估 |
+| **commit** | 约定式提交生成 — 从 git diff 自动生成 |
+
+> **Token 预算说明：** Claude Code 将技能描述加载到每个会话上下文中。epic 的 26 个技能在默认的 `skillListingBudgetFraction: 0.01`（1%）内可以容纳。如果你安装了额外技能（例如 episteme、alcove、obscura），合计总量可能超出预算并触发 "descriptions dropped" 警告。在 `~/.claude/settings.json` 中添加以下配置来修复：
+>
+> ```json
+> "skillListingBudgetFraction": 0.02
+> ```
+>
+> 如果你安装了 20+ 个技能，请使用 `0.03`。
 
 ---
 
@@ -277,6 +311,20 @@ Reload（下次会话 — resume 加载进化技能）
 
 停滞：连续 3 次会话无 5% 提升 → 自动回滚到最佳检查点。
 
+### SkillOpt 启发的优化
+
+三种受深度学习启发、改编自 [SkillOpt](https://arxiv.org/abs/2605.23904) 的技术：
+
+| 技术 | 工作原理 |
+|-----------|-------------|
+| **负反馈缓冲** | 被拒绝的提案带 TTL 过期时间存储；生成新提案前先检查缓冲区 |
+| **小批量反思** | 观测数据分解为固定大小的批次进行结构化模式提取；当主要错误 ≥60% + ≥2 个不同文件时可复用 |
+| **慢速/元更新** | 对最近 5 次会话进行线性回归，将 epoch 分类为 Improving / Regressing / PersistentFailure / StableSuccess；自动淘汰表现不佳的技能 |
+
+### Prompt 自动调优
+
+表现不佳的进化技能会在 `<!-- auto-tuned -->` 分隔符之后追加针对性调优指导。原始内容永远不会被修改。连续 3 次下降会话 → 自动回滚调优，历史记录清除。
+
 ### 技能效果
 
 每个进化技能都有 A/B 归因追踪：
@@ -320,6 +368,27 @@ observe（100% 确认）→ extract_instincts() → instinct 节点（置信度 
 /evolve rollback     # 恢复之前的最佳状态
 /evolve reset        # 清除所有进化数据
 ```
+
+---
+
+## 安全流水线
+
+三阶段漏洞评估流水线，移植自 [defending-code](https://github.com/anthropics/defending-code-reference-harness)：
+
+```bash
+/threat-model    # 1. 信任边界、威胁参与者、场景 → THREAT_MODEL.md
+/vuln-scan       # 2. 4 维扫描器（注入、认证、数据暴露、依赖）→ VULN-FINDINGS.json
+/triage          # 3. 对抗性验证、严重性调整、链式分析 → TRIAGE.json
+```
+
+### Audit `--strict` 模式
+
+对于安全评估，`--strict` 模式强制各审计模式之间保持独立性：
+- 代码、安全和测试审查者仅接收 diff + spec — 不包含构建者上下文
+- 交叉检查独立性：各模式在综合之前独立运行
+- 盲评分防止锚定偏差
+
+可选的评估上下文通过项目根目录的 `.harness/engagement.md` 提供（授权、范围、约束、排除项）。参见 `docs/references/engagement.md` 获取模板。
 
 ---
 
@@ -399,15 +468,15 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 | 工具 | Ring 0 Hooks | 命令 | 技能 | 智能体 |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 19 个技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 7 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 7 | — |
+| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 26 个技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 26 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 26 | — |
 | **Cursor** | ✓ 完整³ | ✓ 3 条命令（含 /orbit） | ✓ 通过 rules | Live |
 | **OpenCode** | ✓ 部分⁴ | ✓ 3 条命令（含 /orbit） | — | — |
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` 在 `~/.codex/config.toml` 中 · ² Guard 在 `BeforeModel` 级别 · ³ Cursor 1.7+ · ⁴ JS 插件 · ⁵ 5 个 hook 脚本 · ⁶ 仅 Conventions
+¹ `codex_hooks = true` 在 `~/.codex/config.toml` 中 · ² 插件安装；子智能体支持尚不可用 · ³ Cursor 1.7+ · ⁴ JS 插件 · ⁵ 5 个 hook 脚本 · ⁶ 仅 Conventions
 
 ---
 
@@ -432,7 +501,7 @@ flowchart TB
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify) --- s11(audit) --- s12(eval) --- s13(threat-model) --- s14(vuln-scan) --- s15(triage)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -506,8 +575,6 @@ epic mem export --out ./docs/memory                    # 导出为 Markdown
 | `session` | 自动（reflect） | 0.2 |
 
 生命周期：30+ 天未访问 → 10% 重要性衰减（下限 0.05）。180+ 天 → 标记为 `stale`，从召回中排除。`pinned` 标签防止衰减。
-
-> **Web UI**：图可视化正在积极改进 — 聚类、邻居高亮和离线回退近期已上线。更多增强功能正在开发中。
 
 ---
 

@@ -1,11 +1,11 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 3 commandes, 19 skills, 1 pipeline autonome, competences a declenchement automatique, apprend de vos echecs.</p></blockquote>
+<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 3 commandes, 26 skills, 1 pipeline autonome, apprend de vos echecs.</p></blockquote>
 
 <p align="center"><b>Moins a memoriser. Plus d'intelligence par frappe. Devient plus intelligent a chaque session.</b></p>
 
 <p align="center">
-<a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="./README.md">Francais</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Portugues</a> | <a href="../es/README.md">Espanol</a> | <a href="../hi/README.md">हिन्दी</a>
+<a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="./README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
 </p>
 
 <p align="center">
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 19 skills a declenchement automatique**, **declenche automatiquement des competences** en fonction de ce que vous faites, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
+Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 26 skills a declenchement automatique**, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
 
 <p align="center">
   <img src="./assets/features.png" alt="fonctionnalites epic harness" width="100%" />
@@ -32,11 +32,24 @@ Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 19 s
 
 ![Demo](../../docs/demo/demo.gif)
 
-### Tableau de bord web — 10 écrans de métriques en temps réel
+### Tableau de bord web — se lance automatiquement au demarrage de la session
+
+10 ecrans de metriques en temps reel pour les scores eval, les statistiques d'outils, les pipelines orbit, les competences evoluees et l'etat des hooks. S'ouvre automatiquement lors de la premiere session Claude Code — aucune configuration manuelle necessaire.
+
 <p align="center">
   <img src="../../assets/dashboard.png" alt="Dashboard" width="49%" />
-  <img src="../../assets/dashboard-orbit.png" alt="Orbit Pipeline" width="49%" />
+  <img src="../../assets/dashboard-orbit.png" alt="Pipeline Orbit" width="49%" />
 </p>
+
+```bash
+# Se lance automatiquement lors de la premiere session (par defaut : http://localhost:7700)
+# Configurez le port ou desactivez dans ~/.harness/config.toml :
+[dashboard]
+port = 7700       # mettre a 0 pour desactiver le lancement automatique
+auto_open = true  # ouvrir le navigateur lors de la premiere session
+```
+
+Ecrans : **Dashboard** · Pipeline /orbit · Commandes (3) · Competences (26) · Agents en direct · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Parametres
 
 ---
 
@@ -84,6 +97,14 @@ Apres la fin de la session, la **boucle evolve** analyse ce qui a echoue, genere
 
 Installe automatiquement le binaire et enregistre tous les hooks en une seule etape.
 
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+Les skills et agents sont disponibles immediatement — aucune etape supplementaire necessaire.
+
 ### macOS / Linux
 
 ```bash
@@ -94,13 +115,13 @@ Pas de Homebrew ? Utilisez le script d'installation :
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
 ### Via la chaine d'outils Rust
@@ -113,9 +134,9 @@ cargo install epic-harness    # compilation depuis les sources
 Puis executez l'assistant de configuration :
 
 ```bash
-epic install          # Claude Code (par defaut)
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install               # Claude Code (par defaut)
+epic install codex         # Codex CLI
+epic install antigravity   # Antigravity
 ```
 
 > `epic-harness --version` pour verifier. Mettez a jour avec `brew upgrade epic-harness` ou re-executez le script d'installation.
@@ -136,16 +157,16 @@ Sur Claude Code, `hooks/install.js` s'execute automatiquement au demarrage de la
 ### Autres outils
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (necessite Cursor 1.7+)
+epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (necessite Cursor 1.7+)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # Menu interactif
 ```
 
-Les fichiers d'integration sont **synchronises** depuis le binaire : les fichiers manquants ou obsoletes sont ecrits. `GEMINI.md` et `AGENTS.md` ne sont crees que lorsqu'ils sont absents.
+Les fichiers d'integration sont **synchronises** depuis le binaire : les fichiers manquants ou obsoletes sont ecrits. `AGENTS.md` n'est cree que lorsqu'il est absent.
 
 ### Verifier
 
@@ -166,7 +187,7 @@ Dans une session Claude Code : `/evolve status`
 | `/team` | Parcourir les bibliotheques d'organisation, recruter des equipes existantes ou en concevoir de nouvelles (3–6 agents, synchronises vers `.claude/agents/`) |
 | `/evolve` | Declencheur d'evolution manuelle — analyser les sessions, voir le tableau de bord, inspecter l'efficacite des competences, restaurer |
 
-Les étapes du pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) sont maintenant des **skills** — déclenchées automatiquement selon le contexte ou appelables par nom. Les anciens noms de commandes fonctionnent toujours via le routage par alias.
+Les etapes du pipeline (`/spec`, `/go`, `/check`, `/ship`, `/discover`) sont maintenant des **skills** — declenchees automatiquement selon le contexte ou appelables par nom. Les anciens noms de commandes fonctionnent toujours via le routage par alias.
 
 ---
 
@@ -203,7 +224,7 @@ flowchart TD
 
 Etat persiste dans `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survit a la compaction du contexte.
 
-> **Reserves** : L'agent peut contourner le pipeline lorsqu'il modifie orbit lui-meme ou lorsqu'il modifie uniquement de la documentation. Voir [Problemes connus ( Jugement de l'agent)](#known-issues-agent-judgment).
+> **Reserves** : L'agent peut contourner le pipeline lorsqu'il modifie orbit lui-meme ou lorsqu'il modifie uniquement de la documentation. Voir [Problemes connus (Jugement de l'agent)](#known-issues-agent-judgment).
 
 ---
 
@@ -217,26 +238,39 @@ Les competences se declenchent automatiquement en fonction du contexte. Vous ne 
 | **go** | Phase de build — planification auto → sous-agents TDD → execution parallele → verification AC |
 | **check** | Phase de review — revue de code parallele + audit de securite + tests avec extras par scope |
 | **ship** | Phase de livraison — test isole → PR avec rapport complet → surveillance CI + auto-fix |
+| **audit** | Audit complet — revue parallele de la qualite du code + securite + tests avec dedoublonnage semantique |
+| **eval** | Evaluation de regression qualitative avec comparaison de base — correction, perf, qualite |
 | **tdd** | Implementation d'une nouvelle fonctionnalite ou correction de bug |
 | **debug** | Echec de test ou erreur d'execution |
 | **discover** | Demande vague, solution sans probleme, plainte imprecise |
 | **secure** | Code d'auth / BDD / API / secrets modifie |
+| **threat-model** | Cadrage de securite — enumeration des frontieres de confiance, acteurs de menace, scenarios → THREAT_MODEL.md |
+| **vuln-scan** | Scan systematique des vulnerabilites — injection, auth, exposition de donnees, dependances → VULN-FINDINGS.json |
+| **triage** | Validation adversariale — ajustement de severite, analyse de chainage, regroupement par cause racine → TRIAGE.json |
 | **perf** | Boucles, requetes, rendu, operations par lot |
 | **simplify** | Fichier > 200 lignes ou complexite cyclomatique elevee |
 | **document** | API publique ajoutee ou signature modifiee |
 | **verify** | Avant de completer `/go` ou `/ship` |
 | **context** | Fenetre de contexte > 70 % |
 | **council** | Decisions architecturales ou de conception ambigues |
+| **orchestrate** | Statut d'orchestration multi-agent et controle des agents en direct |
 | **agent-introspection** | 3+ echecs consecutifs ou schema de reessai circulaire |
 | **reflect** | A la demande : utilisez-vous l'IA comme amplificateur de pensee ? Auto-evaluation basee sur des preuves froides |
-| **orchestrate** | Statut d'orchestration multi-agent et controle des agents en direct |
 | **commit** | Generation Conventional Commits — cree automatiquement depuis git diff |
+
+> **Note sur le budget de tokens :** Claude Code charge les descriptions de competences dans chaque contexte de session. Les 26 skills d'epic s'inscrivent dans le `skillListingBudgetFraction: 0.01` par defaut (1 %). Si vous installez des competences supplementaires (par ex. episteme, alcove, obscura), le total combine peut depasser le budget et declencher un avertissement « descriptions dropped ». Ajoutez ceci a `~/.claude/settings.json` pour corriger :
+>
+> ```json
+> "skillListingBudgetFraction": 0.02
+> ```
+>
+> Utilisez `0.03` si vous avez 20+ competences installees.
 
 ---
 
 ## Evolve (Ring 3)
 
-Le harnais observe chaque appel d'outil, le evalue sur 3 axes, detecte les schemas d'echec et genere des competences ciblees — automatiquement, en fin de session.
+Le harnais observe chaque appel d'outil, l'evaluate sur 3 axes, detecte les schemas d'echec et genere des competences ciblees — automatiquement, en fin de session.
 
 ### Notation
 
@@ -276,6 +310,20 @@ Reload (prochaine session — resume charge les competences evoluees)
 Seeding de competences : outil faible (succes <60 %, min 5 obs), type de fichier faible (succes <50 %, min 3 obs), erreur frequente (5+ occurrences).
 
 Stagnation : 3 sessions sans 5 % d'amelioration → retour automatique au meilleur point de controle.
+
+### Optimisation inspiree de SkillOpt
+
+Trois techniques inspirees de l'apprentissage profond adaptees de [SkillOpt](https://arxiv.org/abs/2605.23904) :
+
+| Technique | Comment ca fonctionne |
+|-----------|----------------------|
+| **Tampon de retour negatif** | Les propositions rejetees sont stockees avec une expiration basee sur un TTL ; les propositions futures sont verifiees par rapport au tampon avant generation |
+| **Reflexion par mini-lots** | Les observations sont decomposees en lots de taille fixe pour l'extraction de schemas structurels ; reutilisable quand l'erreur dominante ≥60 % + ≥2 fichiers distincts |
+| **Mise a jour lente/meta** | Une regression lineaire sur les 5 dernieres sessions classifie les epoques comme Improving / Regressing / PersistentFailure / StableSuccess ; supprime automatiquement les competences sous-performantes |
+
+### Auto-reglage des prompts
+
+Les competences evoluees sous-performantes recoivent des conseils de reglage cibles ajoutes apres le delimiteur `<!-- auto-tuned -->`. Le contenu original n'est jamais modifie. 3 sessions consecutives en baisse → retour automatique du reglage, historique efface.
 
 ### Efficacite des competences
 
@@ -320,6 +368,27 @@ observe (100 % confirme) → extract_instincts() → noeud instinct (confiance �
 /evolve rollback     # Restaurer le meilleur precedent
 /evolve reset        # Effacer toutes les donnees d'evolution
 ```
+
+---
+
+## Pipeline de securite
+
+Pipeline d'evaluation des vulnerabilites en trois etapes porte depuis [defending-code](https://github.com/anthropics/defending-code-reference-harness) :
+
+```bash
+/threat-model    # 1. Frontieres de confiance, acteurs de menace, scenarios → THREAT_MODEL.md
+/vuln-scan       # 2. Scanner en 4 dimensions (injection, auth, exposition de donnees, deps) → VULN-FINDINGS.json
+/triage          # 3. Validation adversariale, ajustement de severite, chainage → TRIAGE.json
+```
+
+### Mode audit `--strict`
+
+Pour les audits de securite, le mode `--strict` impose l'independance entre les modes d'audit :
+- Les revues de code, securite et tests recoivent uniquement le diff + spec — aucun contexte du builder
+- Independance croisee : les modes s'executent a l'aveugle jusqu'a la synthese
+- Notation a l'aveugle pour eviter le biais d'ancrage
+
+Contexte d'audit optionnel via `.harness/engagement.md` a la racine du projet (autorisation, portee, contraintes, exclusions). Voir `docs/references/engagement.md` pour le modele.
 
 ---
 
@@ -382,7 +451,7 @@ Apres synchronisation, les agents sont disponibles dans la prochaine session : `
 
 | Type | Mot-cle | Agents par defaut |
 |------|----------|-------------------|
-| Aligné sur le flux | `stream` | domain-expert, reviewer, tester |
+| Aligne sur le flux | `stream` | domain-expert, reviewer, tester |
 | Plateforme | `platform` | api-designer, infra-specialist, dx-agent |
 | Facilitateur | `enabling` | specialist |
 | Sous-systeme complexe | `subsystem` | domain-specialist, integration-tester |
@@ -399,15 +468,15 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 
 | Outil | Hooks Ring 0 | Commandes | Competences | Agents |
 |-------|-------------|-----------|-------------|--------|
-| **Claude Code** | ✓ Complet | ✓ 3 commandes (incl. /orbit) | ✓ 19 competences | Live |
-| **Codex CLI** | ✓ Complet¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ Partiel² | ✓ 3 commandes (incl. /orbit) | ✓ 19 | — |
-| **Cursor** | ✓ Complet³ | ✓ 3 commandes (incl. /orbit) | ✓ 19 | Live |
+| **Claude Code** | ✓ Complet | ✓ 3 commandes (incl. /orbit) | ✓ 26 competences | Live |
+| **Codex CLI** | ✓ Complet¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
+| **Antigravity** | ✓ Partiel² | ✓ 3 commandes (incl. /orbit) | ✓ 26 | — |
+| **Cursor** | ✓ Complet³ | ✓ 3 commandes (incl. /orbit) | ✓ via rules | Live |
 | **OpenCode** | ✓ Partiel⁴ | ✓ 3 commandes (incl. /orbit) | — | — |
 | **Cline** | ✓ Complet⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` dans `~/.codex/config.toml` · ² Guard au niveau `BeforeModel` · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
+¹ `codex_hooks = true` dans `~/.codex/config.toml` · ² Installation du plugin ; support de sous-agent pas encore disponible · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
 
 ---
 
@@ -432,7 +501,7 @@ flowchart TB
 
     subgraph R2["Ring 2 — Competences automatiques (declenchement contextuel)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify) --- s11(audit) --- s12(eval) --- s13(threat-model) --- s14(vuln-scan) --- s15(triage)
     end
 
     subgraph R3["Ring 3 — Evolve (auto-amelioration)"]
@@ -506,8 +575,6 @@ epic mem export --out ./docs/memory                    # Exporter en Markdown
 | `session` | Auto (reflect) | 0.2 |
 
 Cycle de vie : 30+ jours sans acces → 10 % de decroissance d'importance (plancher 0.05). 180+ jours → etiquete `stale`, exclu du rappel. Le tag `pinned` empeche la decroissance.
-
-> **Interface Web** : La visualisation du graphe est en cours d'amelioration active — le regroupement, la mise en evidence des voisins et le mode hors ligne de secours ont ete recemment integres. D'autres ameliorations sont en cours.
 
 ---
 
@@ -587,7 +654,7 @@ gated_promotion_min = 3
 
 ---
 
-## Problemes connus ( Jugement de l'agent)
+## Problemes connus (Jugement de l'agent)
 
 Ces problemes decoulent de l'interpretation du contexte par l'agent plutot que de bogues dans le code. Liste ici pour que les utilisateurs sachent a quoi faire attention.
 
@@ -606,7 +673,7 @@ Ceux-ci ont ete envisages pour amelioration mais maintenus tels quels apres eval
 | Choix | Pourquoi non ameliore | Justification |
 |-------|----------------------|---------------|
 | **Worktree entre en phase Go, pas au debut d'orbit** | Pourrait isoler des la pre-vol | La pre-vol/mode/spec sont en lecture seule. Isoler plus tot ajoute de la complexite sans benefice — la branche n'est pas creee avant la phase Go de toute facon |
-| **Worktree preserve apres Ship** | pourrait supprimer automatiquement a la fusion de la PR | La branche est la tete de la PR. La supprimer avant la fusion casse la PR. Le nettoyage est laisse a l'utilisateur apres la fusion |
+| **Worktree preserve apres Ship** | Pourrait supprimer automatiquement a la fusion de la PR | La branche est la tete de la PR. La supprimer avant la fusion casse la PR. Le nettoyage est laisse a l'utilisateur apres la fusion |
 | **Branche nommee `orbit-{slug}` et non `feature/{slug}`** | Pourrait correspondre a la nomenclature conventionnelle des branches | `EnterWorktree` n'autorise pas `/` dans les noms. Renommer apres creation ajoute une etape pour un benefice uniquement cosmetique |
 | **Pas de chemin de pipeline leger pour les modifications de doc** | Pourrait detecter doc-only et sauter TDD/tests | La detection est fragile (qu'est-ce qui compte comme « doc » ?). Ajouter un chemin separe augmente la complexite du protocole pour un gain marginal |
 

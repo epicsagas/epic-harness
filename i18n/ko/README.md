@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 19개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
+<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 26개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
 
 <p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**30개 이상의 명령어를 3개 명령어 + 19개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
+**30개 이상의 명령어를 3개 명령어 + 26개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -32,11 +32,24 @@
 
 ![Demo](../../docs/demo/demo.gif)
 
-### 웹 대시보드 — 10개 화면 실시간 메트릭
+### 웹 대시보드 — 세션 시작 시 자동 실행
+
+eval 점수, 도구 통계, orbit 파이프라인, 진화 스킬, 훅 상태를 보여주는 10개 화면 실시간 메트릭. 첫 Claude Code 세션에서 자동으로 열립니다 — 수동 설정이 필요 없습니다.
+
 <p align="center">
   <img src="../../assets/dashboard.png" alt="Dashboard" width="49%" />
   <img src="../../assets/dashboard-orbit.png" alt="Orbit Pipeline" width="49%" />
 </p>
+
+```bash
+# 첫 세션에서 자동 실행 (기본값: http://localhost:7700)
+# ~/.harness/config.toml에서 포트 설정 또는 비활성화:
+[dashboard]
+port = 7700       # 0으로 설정하면 자동 실행 비활성화
+auto_open = true  # 첫 세션에서 브라우저 열기
+```
+
+화면: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -84,6 +97,14 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 
 바이너리를 자동 설치하고 모든 훅을 한 번에 등록합니다.
 
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+스킬과 에이전트를 즉시 사용할 수 있습니다 — 추가 단계가 필요 없습니다.
+
 ### macOS / Linux
 
 ```bash
@@ -94,13 +115,13 @@ Homebrew가 없다면 인스톨러 스크립트를 사용하세요:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
 ### Rust 툴체인으로 설치
@@ -113,9 +134,9 @@ cargo install epic-harness    # 소스에서 빌드
 그 다음 설정 마법사를 실행하세요:
 
 ```bash
-epic install          # Claude Code (기본값)
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install               # Claude Code (기본값)
+epic install codex         # Codex CLI
+epic install antigravity   # Antigravity
 ```
 
 > `epic-harness --version`으로 확인. 업데이트는 `brew upgrade epic-harness` 또는 인스톨러 스크립트 재실행.
@@ -136,16 +157,16 @@ Claude Code에서는 세션 시작 시 `hooks/install.js`가 자동 실행되어
 ### 다른 도구
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ 필요)
+epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ 필요)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # 인터랙티브 메뉴
 ```
 
-통합 파일은 바이너리에서 **동기화**됩니다: 누락되거나 오래된 파일이 기록됩니다. `GEMINI.md`와 `AGENTS.md`는 없을 때만 생성됩니다.
+통합 파일은 바이너리에서 **동기화**됩니다: 누락되거나 오래된 파일이 기록됩니다. `AGENTS.md`는 없을 때만 생성됩니다.
 
 ### 확인
 
@@ -216,11 +237,16 @@ flowchart TD
 | **spec** | 요구사항 정의 필요 — 번호가 매겨진 R + AC 문서로 변환 |
 | **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
 | **check** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
-| **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
+| **ship** | 배포 단계 — 격리 테스트 → 전체 check 리포트가 포함된 PR → CI 감시 + 자동 수정 |
+| **audit** | 전체 감사 — 병렬 코드 품질 + 보안 + 테스트 리뷰 (의미적 중복 제거) |
+| **eval** | 베이스라인 비교 품질 회귀 평가 — 정확성, 성능, 품질 |
 | **tdd** | 새로운 기능 구현 또는 버그 수정 |
 | **debug** | 테스트 실패 또는 런타임 에러 |
 | **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 |
 | **secure** | 인증/DB/API/시크릿 코드 수정 시 |
+| **threat-model** | 보안 범위 지정 — 신뢰 경계 열거, 위협 행위자, 시나리오 → THREAT_MODEL.md |
+| **vuln-scan** | 체계적 취약점 스캔 — 인젝션, 인증, 데이터 노출, 의존성 → VULN-FINDINGS.json |
+| **triage** | 적대적 검증 — 심각도 조정, 체이닝 분석, 근원 그룹화 → TRIAGE.json |
 | **perf** | 루프, 쿼리, 렌더링, 배치 작업 |
 | **simplify** | 파일이 200줄 초과이거나 순환 복잡도가 높을 때 |
 | **document** | 퍼블릭 API 추가 또는 서명 변경 |
@@ -231,6 +257,14 @@ flowchart TD
 | **agent-introspection** | 3회 이상 연속 실패 또는 순환 재시도 패턴 |
 | **reflect** | 온디맨드: AI를 사고 증폭기로 활용하고 있는가? 냉정한 증거 기반 자기 평가 |
 | **commit** | Conventional Commits 생성 — git diff에서 자동 생성 |
+
+> **토큰 예산 참고:** Claude Code는 스킬 설명을 매 세션 컨텍스트에 로드합니다. epic의 26개 스킬은 기본 `skillListingBudgetFraction: 0.01`(1%) 내에 들어갑니다. 추가 스킬(예: episteme, alcove, obscura)을 설치하면 합산이 예산을 초과하여 "descriptions dropped" 경고가 발생할 수 있습니다. 이 경우 `~/.claude/settings.json`에 다음을 추가하세요:
+>
+> ```json
+> "skillListingBudgetFraction": 0.02
+> ```
+>
+> 20개 이상의 스킬이 설치되어 있다면 `0.03`을 사용하세요.
 
 ---
 
@@ -276,6 +310,20 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 스킬 시드: 약한 도구 (성공률 <60%, 최소 5회 관측), 약한 파일 유형 (성공률 <50%, 최소 3회 관측), 고빈도 에러 (5회 이상).
 
 정체: 3세션 동안 5% 개선 없음 → 최적 체크포인트로 자동 롤백.
+
+### SkillOpt 영감 최적화
+
+[SkillOpt](https://arxiv.org/abs/2605.23904)에서 적용한 딥러닝 영감의 세 가지 기법:
+
+| 기법 | 작동 방식 |
+|------|----------|
+| **Negative Feedback Buffer** | 거부된 제안을 TTL 기반 만료와 함께 저장; 향후 제안 생성 전 버퍼를 확인 |
+| **Minibatch Reflection** | 관측값을 고정 크기 배치로 분해하여 구조적 패턴 추출; 지배적 에러 ≥60% + ≥2개 이상의 서로 다른 파일일 때 재사용 가능 |
+| **Slow/Meta Update** | 최근 5개 세션에 대한 선형 회귀로 에포크를 Improving / Regressing / PersistentFailure / StableSuccess로 분류; 성과가 낮은 스킬 자동 퇴출 |
+
+### 프롬프트 자동 튜닝
+
+성과가 낮은 진화 스킬은 `<!-- auto-tuned -->` 구분자 뒤에 타겟팅된 튜닝 가이드가 추가됩니다. 원본 콘텐츠는 수정되지 않습니다. 3세션 연속 하락 시 → 튜닝 자동 롤백, 이력 초기화.
 
 ### 스킬 효과
 
@@ -323,6 +371,27 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 
 ---
 
+## 보안 파이프라인
+
+[defending-code](https://github.com/anthropics/defending-code-reference-harness)에서 이식한 3단계 취약점 평가 파이프라인:
+
+```bash
+/threat-model    # 1. 신뢰 경계, 위협 행위자, 시나리오 → THREAT_MODEL.md
+/vuln-scan       # 2. 4차원 스캐너 (인젝션, 인증, 데이터 노출, 의존성) → VULN-FINDINGS.json
+/triage          # 3. 적대적 검증, 심각도 조정, 체이닝 → TRIAGE.json
+```
+
+### Audit `--strict` 모드
+
+보안 종합 평가를 위해 `--strict` 모드는 audit 모드 간 독립성을 강제합니다:
+- 코드, 보안, 테스트 리뷰어는 diff + spec만 수신 — 빌더 컨텍스트 없음
+- 교차 검증 독립성: 종합 전까지 각 모드가 블라인드로 실행
+- 블라인드 스코어링으로 앵커링 편향 방지
+
+선택적으로 프로젝트 루트에 `.harness/engagement.md`를 통해 종합 평가 컨텍스트를 제공할 수 있습니다 (권한, 범위, 제약, 제외 항목). 템플릿은 `docs/references/engagement.md`를 참조하세요.
+
+---
+
 ## 훅 (Ring 0)
 
 모든 세션에서 투명하게 실행됩니다. 단일 Rust 바이너리(`epic-harness`)의 서브커맨드로 구현됩니다.
@@ -332,7 +401,7 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 | **resume** | 세션 시작 | 컨텍스트 복원, 메모리 로드, 스택 감지 |
 | **guard** | Bash 실행 전 | force-push-to-main, `rm -rf /`, DROP prod 차단 |
 | **polish** | Edit 후 | 자동 포맷 (Biome/Prettier/ruff/gofmt) + 타입체크 |
-| **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 로깅 |
+| **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 진화용 로깅 |
 | **snapshot** | compact 전 | `~/.harness/projects/{slug}/sessions/`에 상태 저장 |
 | **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트, instinct 추출 |
 
@@ -399,15 +468,15 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 | 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
 |------|-----------|--------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 19개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 19개 | — |
-| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 19개 | — |
+| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
+| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
 | **Cursor** | ✓ 전체³ | ✓ 3개 명령어 (/orbit 포함) | ✓ 규칙 경유 | Live |
 | **OpenCode** | ✓ 부분⁴ | ✓ 3개 명령어 (/orbit 포함) | — | — |
 | **Cline** | ✓ 전체⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요 · ² `BeforeModel` 레벨에서 guard 실행 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
+¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요 · ² 플러그인 설치; 서브에이전트 지원은 아직 미지원 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
 ---
 
@@ -432,7 +501,7 @@ flowchart TB
 
     subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify) --- s11(audit) --- s12(eval) --- s13(threat-model) --- s14(vuln-scan) --- s15(triage)
     end
 
     subgraph R3["Ring 3 — 진화 (자기 개선)"]
@@ -506,8 +575,6 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 | `session` | 자동 (reflect) | 0.2 |
 
 수명 주기: 30일 이상 미접근 → 중요도 10% 감쇠 (최소 0.05). 180일 이상 → `stale` 태그, 리콜 제외. `pinned` 태그는 감쇠를 방지합니다.
-
-> **Web UI**: 그래프 시각화는 적극 개선 중입니다 — 클러스터링, 이웃 하이라이트, 오프라인 폴백이 최근 추가되었습니다. 더 많은 개선이 진행 중입니다.
 
 ---
 
@@ -645,14 +712,14 @@ macOS가 인터넷에서 다운로드한 서명되지 않은 바이너리를 차
 
 ```bash
 xattr -d com.apple.quarantine ~/.cargo/bin/epic-harness
-xattr -d com.apple.quarantine ~/.cargo/bin/ep
+xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
 <details>
 <summary>epic: plugin hooks 내에서 바이너리를 찾을 수 없음</summary>
 
-플러그인은 먼저 `hooks/bin/epic-harness`에서 바이너리를 찾습니다. `cargo install`으로 업데이트한 후 복사하세요:
+플러그인은 먼저 `hooks/bin/epic-harness`에서 바이너리를 찾습니다. `cargo install`로 업데이트한 후 복사하세요:
 
 ```bash
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness

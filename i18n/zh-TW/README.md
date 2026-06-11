@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">一個自我進化的 AI 程式設計智能體框架 — 3 條命令、19 個技能、1 條自主流水線，從你的失敗中學習。</p></blockquote>
+<blockquote><p align="center">一個自我進化的 AI 程式設計智能體框架 — 3 條命令、26 個技能、1 條自主流水線，從你的失敗中學習。</p></blockquote>
 
 <p align="center"><b>需要記憶的更少。每次按鍵的智慧含量更高。每次會話都變得更聰明。</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-一個 Claude Code 外掛，將 30+ 條命令整合為 **3 條命令 + 19 個自動觸發技能**，**根據你正在做的事情自動觸發技能**，並**從你自己的失敗模式中進化出新技能**。
+一個 Claude Code 外掛，將 30+ 條命令整合為 **3 條命令 + 26 個自動觸發技能**，並**從你自己的失敗模式中進化出新技能**。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 功能" width="100%" />
@@ -32,11 +32,24 @@
 
 ![Demo](../../docs/demo/demo.gif)
 
-### Web 控制面板 — 10 螢幕即時指標
+### Web 控制面板 — 會話啟動時自動開啟
+
+10 螢幕即時指標，涵蓋 eval 評分、工具統計、orbit 流水線、進化技能和掛鉤健康狀態。首次 Claude Code 會話時自動開啟 — 無需手動設定。
+
 <p align="center">
   <img src="../../assets/dashboard.png" alt="Dashboard" width="49%" />
   <img src="../../assets/dashboard-orbit.png" alt="Orbit Pipeline" width="49%" />
 </p>
+
+```bash
+# 首次會話時自動啟動（預設：http://localhost:7700）
+# 在 ~/.harness/config.toml 中設定連接埠或停用：
+[dashboard]
+port = 7700       # 設為 0 以停用自動啟動
+auto_open = true  # 首次會話時開啟瀏覽器
+```
+
+螢幕：**Dashboard** · /orbit 流水線 · 命令（3） · 技能（26） · 即時智能體 · Eval 與 Evolve · 掛鉤（6） · 整合（6） · harness-mem · 設定
 
 ---
 
@@ -61,10 +74,10 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 技能會在背景自動觸發 — 不需要額外命令：
 
 ```
-正在開發新功能？         → 觸發 tdd（強制 Red→Green→Refactor）
-測試失敗？               → 觸發 debug（先找根因，不做盲修）
-修改了 auth 或 DB？      → 觸發 secure（OWASP 檢查清單，不走捷徑）
-檔案超過 200 行？        → 觸發 simplify（抽取、重新命名、簡化）
+正在開發新功能？         → tdd 觸發（強制 Red→Green→Refactor）
+測試失敗？               → debug 觸發（先找根因，不做盲修）
+修改了 auth 或 DB？      → secure 觸發（OWASP 檢查清單，不走捷徑）
+檔案超過 200 行？        → simplify 觸發（抽取、重新命名、簡化）
 ```
 
 會話結束後，**evolve 迴圈**會分析什麼壞了、生成針對性技能，並在下一次會話載入。今天卡在 TypeScript 建置失敗，下一次就有 `evo-ts-care` 技能幫你起跑。
@@ -84,6 +97,14 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 
 一步完成二進位安裝和所有掛鉤註冊。
 
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+技能和智能體立即可用 — 無需額外步驟。
+
 ### macOS / Linux
 
 ```bash
@@ -94,13 +115,13 @@ brew install epicsagas/tap/epic-harness
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
 ### Windows
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
 ### 透過 Rust 工具鏈
@@ -113,9 +134,9 @@ cargo install epic-harness    # 從原始碼建置
 然後執行安裝精靈：
 
 ```bash
-epic install          # Claude Code（預設）
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
+epic install               # Claude Code（預設）
+epic install codex         # Codex CLI
+epic install antigravity   # Antigravity
 ```
 
 > 執行 `epic-harness --version` 驗證安裝。使用 `brew upgrade epic-harness` 或重新執行安裝腳本進行更新。
@@ -136,16 +157,16 @@ epic install gemini   # Antigravity
 ### 其他工具
 
 ```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/（需要 Cursor 1.7+）
+epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
+epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
 epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # 互動式選單
 ```
 
-整合檔案從二進位**同步**而來：缺失或過時的檔案會被寫入。`GEMINI.md` 和 `AGENTS.md` 僅在不存在時才會建立。
+整合檔案從二進位**同步**而來：缺失或過時的檔案會被寫入。`AGENTS.md` 僅在不存在時才會建立。
 
 ### 驗證
 
@@ -163,7 +184,7 @@ ls ~/.harness/              # 資料目錄存在
 | 命令 | 功能 |
 |---------|-------------|
 | `/orbit` | **完整自主流水線**：spec → go → check → ship → evolve 一次執行 |
-| `/team` | 瀏覽組織庫、聘請現有團隊，或設計新團隊（3-6 個智能體，同步到 `.claude/agents/`） |
+| `/team` | 瀏覽組織庫、聘請現有團隊，或設計新團隊（3–6 個智能體，同步到 `.claude/agents/`） |
 | `/evolve` | 手動進化觸發 — 分析工作階段、查看儀表板、檢查技能效果、回滾 |
 
 管道階段（`/spec`、`/go`、`/check`、`/ship`、`/discover`）現在是**技能** — 根據上下文自動觸發，也可以按名稱直接呼叫。舊命令名透過別名路由繼續有效。
@@ -214,23 +235,36 @@ flowchart TD
 | 技能 | 觸發時機 |
 |-------|--------------|
 | **spec** | 需要定義需求時 — 轉換為編號的 R + AC 文件 |
-| **go** | 建構階段 — 自動規劃 → TDD子代理 → 平行執行 → AC驗證 |
+| **go** | 建構階段 — 自動規劃 → TDD 子代理 → 平行執行 → AC 驗證 |
 | **check** | 審查階段 — 平行程式碼審查 + 安全稽核 + 測試，按範圍附加檢查 |
-| **ship** | 發佈階段 — 隔離測試 → 包含完整檢查報告的PR → CI監控 + 自動修復 |
+| **ship** | 發佈階段 — 隔離測試 → 包含完整檢查報告的 PR → CI 監控 + 自動修復 |
+| **audit** | 完整稽核 — 平行程式碼品質 + 安全 + 測試審查，含語意去重 |
+| **eval** | 品質回歸評估，含基線比較 — 正確性、效能、品質 |
 | **tdd** | 新功能實作或錯誤修復 |
 | **debug** | 測試失敗或執行時期錯誤 |
 | **discover** | 模糊的請求、先給出解決方案而無問題描述、無焦點的抱怨 |
 | **secure** | 涉及 Auth / DB / API / secrets 的程式碼 |
+| **threat-model** | 安全範圍界定 — 信任邊界列舉、威脅行為者、情境 → THREAT_MODEL.md |
+| **vuln-scan** | 系統化漏洞掃描 — 注入、驗證、資料暴露、依賴項 → VULN-FINDINGS.json |
+| **triage** | 對抗性驗證 — 嚴重性調整、鏈式分析、根因分組 → TRIAGE.json |
 | **perf** | 迴圈、查詢、渲染、批次操作 |
 | **simplify** | 檔案超過 200 行或圈複雜度過高 |
 | **document** | 新增或修改了公開 API 簽名 |
 | **verify** | 在完成 `/go` 或 `/ship` 之前 |
 | **context** | 上下文視窗使用超過 70% |
 | **council** | 模糊的架構或設計決策 |
+| **orchestrate** | 多代理編排狀態和即時代理干預 |
 | **agent-introspection** | 連續 3 次以上失敗或循環重試模式 |
-| **reflect** | 按需觸發：你是否將 AI 作為思考放大器？基於冷证据的自我評估 |
-| **orchestrate** | 多代理編排狀態和即時代理控制 |
+| **reflect** | 按需觸發：你是否將 AI 作為思考放大器？基於冷證據的自我評估 |
 | **commit** | 約定式提交生成 — 從 git diff 自動生成 |
+
+> **Token 預算注意事項：** Claude Code 會將技能描述載入每個會話的上下文中。epic 的 26 個技能在預設的 `skillListingBudgetFraction: 0.01`（1%）內可容納。如果你安裝了額外技能（例如 episteme、alcove、obscura），合計總數可能超過預算並觸發「descriptions dropped」警告。在 `~/.claude/settings.json` 中加入以下設定以修正：
+>
+> ```json
+> "skillListingBudgetFraction": 0.02
+> ```
+>
+> 如果安裝了 20+ 個技能，請使用 `0.03`。
 
 ---
 
@@ -277,6 +311,20 @@ Reload (next session — resume loads evolved skills)
 
 停滯處理：連續 3 個工作階段無 5% 改善 → 自動回滾到最佳檢查點。
 
+### SkillOpt 啟發的最佳化
+
+三種受深度學習啟發的技術，改編自 [SkillOpt](https://arxiv.org/abs/2605.23904)：
+
+| 技術 | 運作方式 |
+|-----------|-------------|
+| **負反饋緩衝區** | 被拒絕的提案以 TTL 為基礎的過期機制儲存；未來的提案在生成前會先對照緩衝區檢查 |
+| **小批次反思** | 觀測資料分解為固定大小的批次以進行結構化模式提取；當主要錯誤 ≥60% + ≥2 個不同檔案時可重複使用 |
+| **慢速/元更新** | 對最近 5 個工作階段進行線性迴歸，將 epoch 分類為 Improving / Regressing / PersistentFailure / StableSuccess；自動淘汰表現不佳的技能 |
+
+### 提示詞自動調校
+
+表現不佳的進化技能會收到針對性的調校指引，附加在 `<!-- auto-tuned -->` 分隔符之後。原始內容永不修改。連續 3 個下降的工作階段 → 自動回滾調校，歷史記錄清除。
+
 ### 技能有效性
 
 每個進化技能都透過 A/B 歸因追蹤：
@@ -320,6 +368,27 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 /evolve rollback     # 恢復上一個最佳版本
 /evolve reset        # 清除所有進化資料
 ```
+
+---
+
+## 安全流水線
+
+三階段漏洞評估流水線，移植自 [defending-code](https://github.com/anthropics/defending-code-reference-harness)：
+
+```bash
+/threat-model    # 1. 信任邊界、威脅行為者、情境 → THREAT_MODEL.md
+/vuln-scan       # 2. 4 維度掃描器（注入、驗證、資料暴露、依賴項） → VULN-FINDINGS.json
+/triage          # 3. 對抗性驗證、嚴重性調整、鏈式分析 → TRIAGE.json
+```
+
+### 稽核 `--strict` 模式
+
+用於安全評估專案，`--strict` 模式強制各稽核模式之間的獨立性：
+- 程式碼、安全和測試審查者僅收到 diff + spec — 不含建構者上下文
+- 交叉檢查獨立性：各模式在綜合之前各自獨立執行
+- 盲評分防止錨定偏差
+
+可選的評估專案上下文，透過專案根目錄的 `.harness/engagement.md` 提供（授權、範圍、限制、排除）。參見 `docs/references/engagement.md` 取得範本。
 
 ---
 
@@ -399,15 +468,15 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 
 | 工具 | Ring 0 掛鉤 | 命令 | 技能 | 智能體 |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 3 條命令（含 /orbit） | ✓ 19 個技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 條提示詞（含 /orbit） | ✓ 19 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 條命令（含 /orbit） | ✓ 19 | — |
-| **Cursor** | ✓ 完整³ | ✓ 3 條命令（含 /orbit） | ✓ 19 | Live |
+| **Claude Code** | ✓ 完整 | ✓ 3 條命令（含 /orbit） | ✓ 26 個技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 條提示詞（含 /orbit） | ✓ 26 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 條命令（含 /orbit） | ✓ 26 | — |
+| **Cursor** | ✓ 完整³ | ✓ 3 條命令（含 /orbit） | ✓ 透過 rules | Live |
 | **OpenCode** | ✓ 部分⁴ | ✓ 3 條命令（含 /orbit） | — | — |
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` 在 `~/.codex/config.toml` · ² 守衛在 `BeforeModel` 級別 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
+¹ `codex_hooks = true` 在 `~/.codex/config.toml` · ² 外掛安裝；子代理支援尚不可用 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
 
 ---
 
@@ -432,7 +501,7 @@ flowchart TB
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify) --- s11(audit) --- s12(eval) --- s13(threat-model) --- s14(vuln-scan) --- s15(triage)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -506,8 +575,6 @@ epic mem export --out ./docs/memory                    # 匯出為 Markdown
 | `session` | 自動（reflect） | 0.2 |
 
 生命週期：超過 30 天未存取 → 重要性衰減 10%（下限 0.05）。超過 180 天 → 標記為 `stale`，從檢索中排除。`pinned` 標籤可防止衰減。
-
-> **Web UI**：圖形視覺化正在積極改進中 — 聚類、鄰居高亮和離線回退最近已上線。更多改進進行中。
 
 ---
 

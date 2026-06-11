@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">A self-evolving AI coding agent harness — 3 commands, 19 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
+<blockquote><p align="center">A self-evolving AI coding agent harness — 3 commands, 26 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
 
 <p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
 
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.1-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A Claude Code plugin that **consolidates 30+ commands into 3 commands + 19 auto-trigger skills**, and **evolves new skills** from your own failure patterns.
+A Claude Code plugin that **consolidates 30+ commands into 3 commands + 26 auto-trigger skills**, and **evolves new skills** from your own failure patterns.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # set to 0 to disable auto-launch
 auto_open = true  # open browser on first session
 ```
 
-Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (19) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -238,10 +238,15 @@ Skills trigger automatically based on context. You don't invoke them.
 | **go** | Build phase — auto-plan → TDD sub-agents → parallel execution → AC verification |
 | **check** | Review phase — parallel code review + security audit + tests with scope extras |
 | **ship** | Shipping phase — isolated test → PR with full check report → CI watch + auto-fix |
+| **audit** | Full audit — parallel code quality + security + test review with semantic dedup |
+| **eval** | Quality regression evaluation with baseline comparison — correctness, perf, quality |
 | **tdd** | New feature implementation or bug fix |
 | **debug** | Test failure or runtime error |
 | **discover** | Vague request, solution without a problem, unfocused complaint |
 | **secure** | Auth / DB / API / secrets code touched |
+| **threat-model** | Security scoping — trust boundary enumeration, threat actors, scenarios → THREAT_MODEL.md |
+| **vuln-scan** | Systematic vulnerability scan — injection, auth, data exposure, dependencies → VULN-FINDINGS.json |
+| **triage** | Adversarial validation — severity adjustment, chaining analysis, root-cause grouping → TRIAGE.json |
 | **perf** | Loops, queries, rendering, batch operations |
 | **simplify** | File > 200 lines or high cyclomatic complexity |
 | **document** | Public API added or signature changed |
@@ -253,7 +258,7 @@ Skills trigger automatically based on context. You don't invoke them.
 | **reflect** | On-demand: are you using AI as a thought amplifier? Cold evidence-based self-assessment |
 | **commit** | Conventional Commits generation — auto-generates from git diff |
 
-> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 19 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 26 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -306,6 +311,20 @@ Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%
 
 Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
 
+### SkillOpt-Inspired Optimization
+
+Three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.org/abs/2605.23904):
+
+| Technique | How it works |
+|-----------|-------------|
+| **Negative Feedback Buffer** | Rejected proposals stored with TTL-based expiry; future proposals checked against buffer before generation |
+| **Minibatch Reflection** | Observations decomposed into fixed-size batches for structural pattern extraction; reusable when dominant error ≥60% + ≥2 distinct files |
+| **Slow/Meta Update** | Linear regression over last 5 sessions classifies epochs as Improving / Regressing / PersistentFailure / StableSuccess; auto-evicts underperforming skills |
+
+### Prompt Auto-Tuning
+
+Underperforming evolved skills receive targeted tuning guidance appended after `<!-- auto-tuned -->` delimiter. Original content is never modified. 3 consecutive declining sessions → auto-rollback tuning, history cleared.
+
 ### Skill Effectiveness
 
 Every evolved skill tracked with A/B attribution:
@@ -349,6 +368,27 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 /evolve rollback     # Restore previous best
 /evolve reset        # Clear all evolution data
 ```
+
+---
+
+## Security Pipeline
+
+Three-stage vulnerability assessment pipeline ported from [defending-code](https://github.com/anthropics/defending-code-reference-harness):
+
+```bash
+/threat-model    # 1. Trust boundaries, threat actors, scenarios → THREAT_MODEL.md
+/vuln-scan       # 2. 4-dimension scanner (injection, auth, data exposure, deps) → VULN-FINDINGS.json
+/triage          # 3. Adversarial validation, severity adjustment, chaining → TRIAGE.json
+```
+
+### Audit `--strict` Mode
+
+For security engagements, `--strict` mode enforces independence between audit modes:
+- Code, security, and test reviewers receive only the diff + spec — no builder context
+- Cross-check independence: modes run blind until synthesis
+- Blind scoring prevents anchoring bias
+
+Optional engagement context via `.harness/engagement.md` in project root (authorization, scope, constraints, exclusions). See `docs/references/engagement.md` for the template.
 
 ---
 
@@ -428,9 +468,9 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 19 skills | Live |
-| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 19 | — |
+| **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 26 skills | Live |
+| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
+| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 26 | — |
 | **Cursor** | ✓ Full³ | ✓ 3 commands (incl. /orbit) | ✓ via rules | Live |
 | **OpenCode** | ✓ Partial⁴ | ✓ 3 commands (incl. /orbit) | — | — |
 | **Cline** | ✓ Full⁵ | — | — | — |
@@ -461,7 +501,7 @@ flowchart TB
 
     subgraph R2["Ring 2 — Auto Skills (context-triggered)"]
         direction LR
-        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify) --- s11(audit) --- s12(eval) --- s13(threat-model) --- s14(vuln-scan) --- s15(triage)
     end
 
     subgraph R3["Ring 3 — Evolve (self-improving)"]
@@ -535,8 +575,6 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 | `session` | Auto (reflect) | 0.2 |
 
 Lifecycle: 30+ days without access → 10% importance decay (floor 0.05). 180+ days → tagged `stale`, excluded from recall. `pinned` tag prevents decay.
-
-> **WIP**: harness-mem is under active development. CLI, MCP server, Web UI, and auto-recording pipeline are not yet fully functional. Do not rely on this feature in production.
 
 ---
 
