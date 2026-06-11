@@ -286,3 +286,7 @@ $RECYCLE.BIN/
 .harness/
 .cursor/
 .gemini/
+
+# Eval results (runtime artifacts — not tracked in git)
+benchmarks/results/
+benchmarks/baselines/
