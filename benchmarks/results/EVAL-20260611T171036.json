@@ -1,0 +1,30 @@
+{
+  "timestamp": "20260611T171036",
+  "dimensions": {
+    "benchmark:make_eval": {
+      "details": {
+        "command": "make eval",
+        "exit_code": 2,
+        "result_type": "exit_code",
+        "score": 0.0,
+        "stderr_tail": "make[685]: *** [eval] Error 1\n",
+        "stdout_tail": "...\"passed\\\":false,\\\"score\\\":0.0,\\\"verdict\\\":\\\"FAIL\\\"},\\\"regression\\\":{\\\"details\\\":{\\\"note\\\":\\\"no previous baseline — first run\\\"},\\\"duration_ms\\\":0,\\\"passed\\\":true,\\\"score\\\":1.0,\\\"verdict\\\":\\\"PASS\\\"}},\\\"overall_score\\\":0.5,\\\"overall_verdict\\\":\\\"FAIL\\\"}\\n\"},\"duration_ms\":421310,\"passed\":false,\"score\":0.0,\"verdict\":\"FAIL\"},\"regression\":{\"details\":{\"note\":\"no previous baseline — first run\"},\"duration_ms\":0,\"passed\":true,\"score\":1.0,\"verdict\":\"PASS\"}},\"overall_score\":0.5,\"overall_verdict\":\"FAIL\"}\n"
+      },
+      "duration_ms": 421903,
+      "passed": false,
+      "score": 0.0,
+      "verdict": "FAIL"
+    },
+    "regression": {
+      "details": {
+        "note": "no previous baseline — first run"
+      },
+      "duration_ms": 0,
+      "passed": true,
+      "score": 1.0,
+      "verdict": "PASS"
+    }
+  },
+  "overall_score": 0.5,
+  "overall_verdict": "FAIL"
+}

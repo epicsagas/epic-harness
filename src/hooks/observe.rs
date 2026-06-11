@@ -442,8 +442,10 @@ pub fn run(input: &HookInput) -> i32 {
                     .as_ref()
                     .and_then(|pool| {
                         crate::store::runtime::block_on(
-                            crate::store::observations::query_last_action_pool(pool, &sid)
-                        ).ok().flatten()
+                            crate::store::observations::query_last_action_pool(pool, &sid),
+                        )
+                        .ok()
+                        .flatten()
                     })
                     .or_else(|| get_last_action(&session_file));
                 score_edit(&combined, prev.as_deref(), action.as_deref())
@@ -494,7 +496,7 @@ pub fn run(input: &HookInput) -> i32 {
     // acceptable tradeoff; persistent DB failures are treated as a setup problem.
     if let Some(ref pool) = db {
         if let Err(e) = crate::store::runtime::block_on(
-            crate::store::observations::insert_observation_pool(pool, &record, &sid)
+            crate::store::observations::insert_observation_pool(pool, &record, &sid),
         ) {
             eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
             append_jsonl(&session_file, &record);

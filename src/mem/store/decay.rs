@@ -11,7 +11,12 @@ pub fn decay_importance(days: u64, factor: f64, floor: f64) -> io::Result<u64> {
     runtime::block_on(decay_importance_async(&pool, days, factor, floor))
 }
 
-async fn decay_importance_async(pool: &sqlx::AnyPool, days: u64, factor: f64, floor: f64) -> io::Result<u64> {
+async fn decay_importance_async(
+    pool: &sqlx::AnyPool,
+    days: u64,
+    factor: f64,
+    floor: f64,
+) -> io::Result<u64> {
     // Decay importance for nodes not accessed in `days` days.
     // Excludes 'session' type (already at floor 0.05) and pinned nodes.
     // Calculate cutoff timestamp
@@ -31,14 +36,14 @@ async fn decay_importance_async(pool: &sqlx::AnyPool, days: u64, factor: f64, fl
     let result = sqlx::query(
         "UPDATE nodes SET importance = MAX(importance * ?, ?) \
          WHERE accessed_at < ? AND accessed_at != '' \
-         AND type != 'session' AND tags NOT LIKE '%pinned%'"
+         AND type != 'session' AND tags NOT LIKE '%pinned%'",
     )
-        .bind(factor)
-        .bind(floor)
-        .bind(&cutoff_ts)
-        .execute(pool)
-        .await
-        .map_err(io::Error::other)?;
+    .bind(factor)
+    .bind(floor)
+    .bind(&cutoff_ts)
+    .execute(pool)
+    .await
+    .map_err(io::Error::other)?;
 
     Ok(result.rows_affected())
 }
@@ -67,12 +72,12 @@ async fn tag_stale_nodes_async(pool: &sqlx::AnyPool, days: u64) -> io::Result<u6
          ELSE tags || ',stale' END \
          WHERE updated < ? AND updated != '' \
          AND type != 'session' AND tags NOT LIKE '%pinned%' \
-         AND tags NOT LIKE '%stale%'"
+         AND tags NOT LIKE '%stale%'",
     )
-        .bind(&cutoff_ts)
-        .execute(pool)
-        .await
-        .map_err(io::Error::other)?;
+    .bind(&cutoff_ts)
+    .execute(pool)
+    .await
+    .map_err(io::Error::other)?;
 
     Ok(result.rows_affected())
 }
@@ -91,12 +96,12 @@ pub fn touch_nodes_pool(_pool: &sqlx::AnyPool, ids: &[String]) {
         let now = now_iso();
         for id in ids {
             let _ = sqlx::query(
-                "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?"
+                "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?",
             )
-                .bind(&now)
-                .bind(id)
-                .execute(&owned_pool)
-                .await;
+            .bind(&now)
+            .bind(id)
+            .execute(&owned_pool)
+            .await;
         }
     });
 }

@@ -766,9 +766,8 @@ pub fn run(_input: &HookInput) -> i32 {
     let today_str = today();
     let observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::observations::query_obs_for_date_range_pool(
-            &pool, &today_str, &today_str,
-        ).await
+        crate::store::observations::query_obs_for_date_range_pool(&pool, &today_str, &today_str)
+            .await
     }) {
         Ok(recs) => recs,
         Err(e) => {
@@ -975,8 +974,9 @@ pub fn run(_input: &HookInput) -> i32 {
                                 phase,
                                 mode,
                                 &content,
-                            )
-                        ).is_ok()
+                            ),
+                        )
+                        .is_ok()
                         {
                             synced += 1;
                         }
@@ -1128,7 +1128,6 @@ pub fn run(_input: &HookInput) -> i32 {
 
     0
 }
-
 
 // ── Orbit evolve gap detection ──────────────────────────────────────────────
 

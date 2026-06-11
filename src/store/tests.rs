@@ -60,12 +60,11 @@ async fn schema_is_idempotent() {
 #[tokio::test]
 async fn meta_table_tracks_version() {
     let pool = test_pool().await;
-    let version: String = sqlx::query_scalar(
-        "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
-    )
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let version: String =
+        sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'schema_version'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(version, "1");
 }
 
@@ -237,14 +236,24 @@ async fn dismiss_agent_is_atomic() {
     assert!(first, "first dismiss must return true");
 
     let second = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
-    assert!(!second, "second dismiss of non-existent agent must return false");
+    assert!(
+        !second,
+        "second dismiss of non-existent agent must return false"
+    );
 
-    assert!(read_agent_pool(&pool, "agent-atomic").await.unwrap().is_none());
+    assert!(
+        read_agent_pool(&pool, "agent-atomic")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[tokio::test]
 async fn cleanup_stale_is_atomic() {
-    use super::orchestrator::{OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool};
+    use super::orchestrator::{
+        OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool,
+    };
 
     let pool = test_pool().await;
     let run = OrchRun {

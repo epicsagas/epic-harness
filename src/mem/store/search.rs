@@ -21,14 +21,17 @@ async fn search_nodes_async(pool: &sqlx::AnyPool, query: &str, limit: usize) -> 
     let fts_query = escape_fts(query);
     // Step 1: get matching rowids from FTS index
     let rowids: Vec<i64> = match sqlx::query(
-        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?"
+        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
     )
-        .bind(&fts_query)
-        .bind(limit as i64)
-        .fetch_all(pool)
-        .await
+    .bind(&fts_query)
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await
     {
-        Ok(rows) => rows.iter().filter_map(|r| r.try_get::<i64, _>(0).ok()).collect(),
+        Ok(rows) => rows
+            .iter()
+            .filter_map(|r| r.try_get::<i64, _>(0).ok())
+            .collect(),
         Err(_) => return vec![],
     };
 
@@ -120,7 +123,11 @@ fn escape_fts(s: &str) -> String {
     if words.is_empty() {
         return "*".to_string();
     }
-    words.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(" OR ")
+    words
+        .iter()
+        .map(|w| format!("\"{}\"", w))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 // ── Pool-compatible wrappers ─────────────────────────────────

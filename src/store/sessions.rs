@@ -90,8 +90,7 @@ pub async fn list_recent_snapshots_pool(
     let mut snaps = Vec::with_capacity(rows.len());
     for r in rows {
         let pending_json: String = r.try_get(3).map_err(super::sqlx_err)?;
-        let pending_tasks: Vec<String> =
-            serde_json::from_str(&pending_json).unwrap_or_default();
+        let pending_tasks: Vec<String> = serde_json::from_str(&pending_json).unwrap_or_default();
         let pipeline_json: Option<String> = r.try_get(5).map_err(super::sqlx_err)?;
         let pipeline_state: Option<serde_json::Value> = pipeline_json
             .as_deref()
@@ -168,7 +167,9 @@ mod tests {
                 context_usage: None,
                 pipeline_state: None,
             };
-            insert_snapshot_pool(&pool, &snap, 1000 + i as i64).await.unwrap();
+            insert_snapshot_pool(&pool, &snap, 1000 + i as i64)
+                .await
+                .unwrap();
         }
 
         let recent = list_recent_snapshots_pool(&pool, 3).await.unwrap();

@@ -177,12 +177,10 @@ pub async fn get_evolved_skills(
         .collect();
 
     // Evolution history
-    let records = epic_harness::store::evolution::query_recent_records_pool(
-        &pool,
-        MAX_EVOLUTION_ENTRIES,
-    )
-    .await
-    .map_err(|e| format!("query evolution records: {e}"))?;
+    let records =
+        epic_harness::store::evolution::query_recent_records_pool(&pool, MAX_EVOLUTION_ENTRIES)
+            .await
+            .map_err(|e| format!("query evolution records: {e}"))?;
 
     let total_sessions = records.len() as u32;
     let patterns_detected: u32 = records
@@ -257,13 +255,10 @@ pub async fn get_obs_summary(
     let pool = state.harness_db.clone();
 
     // Use a wide date range to cover all stored data.
-    let stats = epic_harness::store::observations::query_obs_stats_pool(
-        &pool,
-        "2000-01-01",
-        "2099-12-31",
-    )
-    .await
-    .map_err(|e| format!("query obs stats: {e}"))?;
+    let stats =
+        epic_harness::store::observations::query_obs_stats_pool(&pool, "2000-01-01", "2099-12-31")
+            .await
+            .map_err(|e| format!("query obs stats: {e}"))?;
 
     // Session summaries from aggregate stats
     let session_summaries: Vec<SessionSummary> = stats

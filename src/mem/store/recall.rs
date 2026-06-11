@@ -39,14 +39,18 @@ pub(crate) async fn smart_recall_async(
         // Get matching rowids from FTS, then fetch full nodes — avoids JOIN column ambiguity
         // with sqlx AnyPool which doesn't support FTS5 virtual table column access reliably.
         let rowids: Vec<i64> = sqlx::query(
-            "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?"
+            "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
         )
-            .bind(&fts_query)
-            .bind(limit as i64 * 3)
-            .fetch_all(pool)
-            .await
-            .map(|rows| rows.iter().filter_map(|r| r.try_get::<i64, _>(0).ok()).collect())
-            .unwrap_or_default();
+        .bind(&fts_query)
+        .bind(limit as i64 * 3)
+        .fetch_all(pool)
+        .await
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.try_get::<i64, _>(0).ok())
+                .collect()
+        })
+        .unwrap_or_default();
 
         if rowids.is_empty() {
             return Ok(vec![]);
@@ -60,7 +64,9 @@ pub(crate) async fn smart_recall_async(
                  ORDER BY importance DESC"
             );
             let mut q = sqlx::query(&sql);
-            for rid in &rowids { q = q.bind(*rid); }
+            for rid in &rowids {
+                q = q.bind(*rid);
+            }
             q.bind(&csv_proj).fetch_all(pool).await
         } else {
             let sql = format!(
@@ -68,7 +74,9 @@ pub(crate) async fn smart_recall_async(
                  ORDER BY importance DESC"
             );
             let mut q = sqlx::query(&sql);
-            for rid in &rowids { q = q.bind(*rid); }
+            for rid in &rowids {
+                q = q.bind(*rid);
+            }
             q.fetch_all(pool).await
         }
     } else if let Some(proj) = project {
@@ -77,17 +85,17 @@ pub(crate) async fn smart_recall_async(
             "SELECT {NODE_COLUMNS} FROM nodes WHERE projects LIKE ? \
              ORDER BY importance DESC LIMIT ?"
         ))
-            .bind(&csv_proj)
-            .bind(limit as i64 * 3)
-            .fetch_all(pool)
-            .await
+        .bind(&csv_proj)
+        .bind(limit as i64 * 3)
+        .fetch_all(pool)
+        .await
     } else {
         sqlx::query(&format!(
             "SELECT {NODE_COLUMNS} FROM nodes ORDER BY importance DESC LIMIT ?"
         ))
-            .bind(limit as i64 * 3)
-            .fetch_all(pool)
-            .await
+        .bind(limit as i64 * 3)
+        .fetch_all(pool)
+        .await
     };
 
     let rows = candidates.map_err(io::Error::other)?;
@@ -120,11 +128,18 @@ pub(crate) async fn smart_recall_async(
         .collect();
 
     // Step 3: Sort by score descending, truncate to limit
-    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     scored.truncate(limit);
 
     // Step 4: Touch accessed nodes (increment access_count)
-    let ids: Vec<String> = scored.iter().map(|s| s.node.frontmatter.id.clone()).collect();
+    let ids: Vec<String> = scored
+        .iter()
+        .map(|s| s.node.frontmatter.id.clone())
+        .collect();
     if !ids.is_empty() {
         let _ = touch_nodes_async(pool, &ids).await;
     }
@@ -136,12 +151,14 @@ pub(crate) async fn smart_recall_async(
 async fn touch_nodes_async(pool: &sqlx::AnyPool, ids: &[String]) -> io::Result<()> {
     let now = now_iso();
     for id in ids {
-        sqlx::query("UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?")
-            .bind(&now)
-            .bind(id)
-            .execute(pool)
-            .await
-            .map_err(io::Error::other)?;
+        sqlx::query(
+            "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?",
+        )
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(io::Error::other)?;
     }
     Ok(())
 }
@@ -168,7 +185,11 @@ fn escape_fts(s: &str) -> String {
     if words.is_empty() {
         return "*".to_string();
     }
-    words.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(" OR ")
+    words
+        .iter()
+        .map(|w| format!("\"{}\"", w))
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 
 // ── Pool-compatible wrappers ─────────────────────────────────

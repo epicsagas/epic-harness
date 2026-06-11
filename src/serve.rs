@@ -162,7 +162,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let nodes = crate::store::runtime::block_on(async {
                     let pool = crate::store::pool::memory_pool().await?;
                     store::read_all_nodes_pool(&pool).await
-                }).unwrap_or_default();
+                })
+                .unwrap_or_default();
                 let results: Vec<serde_json::Value> = nodes
                     .into_iter()
                     .map(|n| {
@@ -271,10 +272,17 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 } else {
                     let ok = crate::store::runtime::block_on(async {
                         let pool = crate::store::pool::harness_pool().await.ok()?;
-                        crate::store::orchestrator::dismiss_agent_pool(&pool, agent_id).await.ok()
-                    }).unwrap_or_else(|| {
+                        crate::store::orchestrator::dismiss_agent_pool(&pool, agent_id)
+                            .await
+                            .ok()
+                    })
+                    .unwrap_or_else(|| {
                         // Fallback: delete agent status file directly
-                        let status_path = harness_dir.join("orchestrator").join("agents").join(agent_id).join("status.json");
+                        let status_path = harness_dir
+                            .join("orchestrator")
+                            .join("agents")
+                            .join(agent_id)
+                            .join("status.json");
                         status_path.exists() && std::fs::remove_file(status_path).is_ok()
                     });
                     let body = serde_json::json!({"ok": ok, "dismissed": agent_id}).to_string();
@@ -414,30 +422,30 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             // Try SQLite first
             if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
                 let skills = crate::store::runtime::block_on(
-                    crate::store::evolved::list_skills_full_pool(&pool)
+                    crate::store::evolved::list_skills_full_pool(&pool),
                 )
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|s| {
-                        serde_json::json!({
-                            "name": s.name,
-                            "skill_md": s.skill_md,
-                            "created_at": s.created
-                        })
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| {
+                    serde_json::json!({
+                        "name": s.name,
+                        "skill_md": s.skill_md,
+                        "created_at": s.created
                     })
-                    .collect::<Vec<_>>();
+                })
+                .collect::<Vec<_>>();
                 let history = crate::store::runtime::block_on(
-                    crate::store::evolution::query_recent_records_pool(&pool, 50)
+                    crate::store::evolution::query_recent_records_pool(&pool, 50),
                 )
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|r| serde_json::to_value(r).ok())
-                    .collect::<Vec<_>>();
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|r| serde_json::to_value(r).ok())
+                .collect::<Vec<_>>();
                 let total_sessions = crate::store::runtime::block_on(
-                    crate::store::metrics::load_metrics_pool(&pool)
+                    crate::store::metrics::load_metrics_pool(&pool),
                 )
-                    .map(|m| m.total_sessions)
-                    .unwrap_or(0);
+                .map(|m| m.total_sessions)
+                .unwrap_or(0);
                 if !skills.is_empty() || !history.is_empty() {
                     return serde_json::json!({
                         "evolved_skills": skills,
@@ -512,11 +520,12 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                     &pool,
                     "2020-01-01", // all data
                     "2099-12-31",
-                ).await
+                )
+                .await
             }) {
-                    if stats.total > 0 {
-                        let tool_stats: Vec<serde_json::Value> = {
-                            let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
+                if stats.total > 0 {
+                    let tool_stats: Vec<serde_json::Value> = {
+                        let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
                                 serde_json::json!({
                                     "tool": t.tool,
                                     "calls": t.calls,
@@ -526,44 +535,44 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                                     "avg_score": (t.avg_score * 1000.0).round() / 1000.0
                                 })
                             }).collect();
-                            v.sort_by(|a, b| {
-                                b["calls"]
-                                    .as_i64()
-                                    .unwrap_or(0)
-                                    .cmp(&a["calls"].as_i64().unwrap_or(0))
-                            });
-                            v
-                        };
-                        let recent_sessions: Vec<serde_json::Value> = stats
-                            .session_stats
-                            .iter()
-                            .take(10)
-                            .map(|s| {
-                                let date = s
-                                    .session_id
-                                    .split('_')
-                                    .next()
-                                    .unwrap_or("unknown")
-                                    .to_string();
-                                serde_json::json!({
-                                    "session_id": s.session_id,
-                                    "date": date,
-                                    "tool_calls": s.calls,
-                                    "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
-                                    "failures": s.failures
-                                })
+                        v.sort_by(|a, b| {
+                            b["calls"]
+                                .as_i64()
+                                .unwrap_or(0)
+                                .cmp(&a["calls"].as_i64().unwrap_or(0))
+                        });
+                        v
+                    };
+                    let recent_sessions: Vec<serde_json::Value> = stats
+                        .session_stats
+                        .iter()
+                        .take(10)
+                        .map(|s| {
+                            let date = s
+                                .session_id
+                                .split('_')
+                                .next()
+                                .unwrap_or("unknown")
+                                .to_string();
+                            serde_json::json!({
+                                "session_id": s.session_id,
+                                "date": date,
+                                "tool_calls": s.calls,
+                                "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
+                                "failures": s.failures
                             })
-                            .collect();
-                        return serde_json::json!({
-                            "recent_sessions": recent_sessions,
-                            "tool_stats": tool_stats,
-                            "total_tool_calls": stats.total,
-                            "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
-                            "active_agents": []
                         })
-                        .to_string();
-                    }
+                        .collect();
+                    return serde_json::json!({
+                        "recent_sessions": recent_sessions,
+                        "tool_stats": tool_stats,
+                        "total_tool_calls": stats.total,
+                        "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
+                        "active_agents": []
+                    })
+                    .to_string();
                 }
+            }
 
             // Fallback: JSONL file parsing (for legacy data)
             let obs_dir = harness_dir.join("obs");

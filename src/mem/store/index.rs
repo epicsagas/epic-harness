@@ -16,10 +16,14 @@ pub fn read_index() -> Index {
         sqlx::query(&format!(
             "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"
         ))
-            .fetch_all(&pool)
-            .await
-            .map(|rows| rows.iter().map(|r| graph_to_node(row_to_graph_node(r))).collect())
-            .unwrap_or_default()
+        .fetch_all(&pool)
+        .await
+        .map(|rows| {
+            rows.iter()
+                .map(|r| graph_to_node(row_to_graph_node(r)))
+                .collect()
+        })
+        .unwrap_or_default()
     });
 
     let mut by_tag: std::collections::HashMap<String, Vec<String>> = Default::default();

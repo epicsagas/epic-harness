@@ -16,7 +16,10 @@ pub fn append_edge(edge: &Edge) -> io::Result<()> {
     runtime::block_on(append_edge_pool_async(&pool, &ge))
 }
 
-async fn append_edge_pool_async(pool: &sqlx::AnyPool, ge: &super::types::GraphEdge) -> io::Result<()> {
+async fn append_edge_pool_async(
+    pool: &sqlx::AnyPool,
+    ge: &super::types::GraphEdge,
+) -> io::Result<()> {
     append_graph_edge(pool, ge).await
 }
 

@@ -19,14 +19,13 @@ pub fn write_node(node: &Node) -> io::Result<()> {
 async fn write_node_async(pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
     // Preserve monotonically-increasing fields from existing node
     let mut gn = node_to_graph(node.clone());
-    let existing: Option<super::types::GraphNode> = sqlx::query(&format!(
-        "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
-    ))
-        .bind(&gn.id)
-        .fetch_optional(pool)
-        .await
-        .map_err(io::Error::other)?
-        .map(|r| row_to_graph_node(&r));
+    let existing: Option<super::types::GraphNode> =
+        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"))
+            .bind(&gn.id)
+            .fetch_optional(pool)
+            .await
+            .map_err(io::Error::other)?
+            .map(|r| row_to_graph_node(&r));
 
     if let Some(ex) = existing {
         gn.access_count = gn.access_count.max(ex.access_count);
@@ -145,24 +144,28 @@ pub async fn node_exists_pool(pool: &sqlx::AnyPool, id: &str) -> bool {
 
 #[allow(dead_code)]
 pub async fn read_all_nodes_pool(pool: &sqlx::AnyPool) -> io::Result<Vec<Node>> {
-    sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"))
-        .fetch_all(pool)
-        .await
-        .map_err(io::Error::other)?
-        .iter()
-        .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
-        .collect()
+    sqlx::query(&format!(
+        "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"
+    ))
+    .fetch_all(pool)
+    .await
+    .map_err(io::Error::other)?
+    .iter()
+    .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+    .collect()
 }
 
 pub async fn read_nodes_limited_pool(pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec<Node>> {
-    sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?"))
-        .bind(limit)
-        .fetch_all(pool)
-        .await
-        .map_err(io::Error::other)?
-        .iter()
-        .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
-        .collect()
+    sqlx::query(&format!(
+        "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?"
+    ))
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(io::Error::other)?
+    .iter()
+    .map(|r| Ok(graph_to_node(row_to_graph_node(r))))
+    .collect()
 }
 
 #[allow(dead_code)]

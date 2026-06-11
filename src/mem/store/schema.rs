@@ -93,9 +93,7 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         .map_err(io::Error::other)?;
 
     // Importance backfill (ignore errors — best-effort)
-    let _ = sqlx::query(IMPORTANCE_BACKFILL_SQL)
-        .execute(pool)
-        .await;
+    let _ = sqlx::query(IMPORTANCE_BACKFILL_SQL).execute(pool).await;
 
     // Migrate FTS schema if it lacks the 'id' and 'projects' columns added in v2.
     migrate_fts_schema(pool).await;
@@ -207,7 +205,10 @@ async fn migrate_legacy_files(pool: &AnyPool) {
 ///
 /// FTS sync is handled by triggers (nodes_ai / nodes_ad / nodes_au). INSERT OR REPLACE fires
 /// DELETE+INSERT internally, so the triggers keep nodes_fts consistent automatically.
-pub(crate) async fn upsert_graph_node(pool: &AnyPool, gn: &super::types::GraphNode) -> io::Result<()> {
+pub(crate) async fn upsert_graph_node(
+    pool: &AnyPool,
+    gn: &super::types::GraphNode,
+) -> io::Result<()> {
     sqlx::query(
         "INSERT OR REPLACE INTO nodes (id, type, title, tags, projects, agents, created, updated, body, importance, access_count, accessed_at) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -232,16 +233,19 @@ pub(crate) async fn upsert_graph_node(pool: &AnyPool, gn: &super::types::GraphNo
 }
 
 /// Append a GraphEdge into the edges table.
-pub(crate) async fn append_graph_edge(pool: &AnyPool, ge: &super::types::GraphEdge) -> io::Result<()> {
+pub(crate) async fn append_graph_edge(
+    pool: &AnyPool,
+    ge: &super::types::GraphEdge,
+) -> io::Result<()> {
     sqlx::query(
-        "INSERT OR REPLACE INTO edges (source, target, label, created) VALUES (?, ?, ?, ?)"
+        "INSERT OR REPLACE INTO edges (source, target, label, created) VALUES (?, ?, ?, ?)",
     )
-        .bind(&ge.source)
-        .bind(&ge.target)
-        .bind(&ge.label)
-        .bind(&ge.created)
-        .execute(pool)
-        .await
-        .map_err(io::Error::other)?;
+    .bind(&ge.source)
+    .bind(&ge.target)
+    .bind(&ge.label)
+    .bind(&ge.created)
+    .execute(pool)
+    .await
+    .map_err(io::Error::other)?;
     Ok(())
 }

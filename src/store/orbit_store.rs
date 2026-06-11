@@ -204,9 +204,7 @@ mod tests {
             .await
             .unwrap();
 
-        let dismissed = dismiss_pipeline_pool(&pool, "PIPELINE-1")
-            .await
-            .unwrap();
+        let dismissed = dismiss_pipeline_pool(&pool, "PIPELINE-1").await.unwrap();
         assert!(dismissed);
 
         let result = read_running_pipeline_pool(&pool, None).await.unwrap();

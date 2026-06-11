@@ -20,10 +20,10 @@ pub async fn query_prev_pattern_types_async(pool: &AnyPool, session_node_id: &st
             WHERE e2.target = ? AND e2.label = 'follows'
          )",
     )
-        .bind(session_node_id)
-        .fetch_all(pool)
-        .await
-        .unwrap_or_default();
+    .bind(session_node_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
 
     let mut results = Vec::new();
     for row in &rows {
@@ -43,14 +43,15 @@ pub async fn ensure_project_hub_async(pool: &AnyPool, slug: &str) -> std::io::Re
     let title = format!("project: {}", slug);
 
     // Check if project hub already exists
-    let existing: Option<String> = sqlx::query("SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1")
-        .bind(&title)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|r| r.try_get::<String, _>(0).ok())
-        .filter(|s| !s.is_empty());
+    let existing: Option<String> =
+        sqlx::query("SELECT id FROM nodes WHERE type = 'project' AND title = ? LIMIT 1")
+            .bind(&title)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|r| r.try_get::<String, _>(0).ok())
+            .filter(|s| !s.is_empty());
 
     if let Some(id) = existing {
         return Ok(id);
@@ -80,20 +81,24 @@ pub async fn ensure_project_hub_async(pool: &AnyPool, slug: &str) -> std::io::Re
 }
 
 /// Find the most recent previous session node for a project slug.
-async fn find_prev_session_async(pool: &AnyPool, session_node_id: &str, slug: &str) -> Option<String> {
+async fn find_prev_session_async(
+    pool: &AnyPool,
+    session_node_id: &str,
+    slug: &str,
+) -> Option<String> {
     let csv_proj = format!("%{slug}%");
     sqlx::query(
         "SELECT id FROM nodes WHERE type = 'session' AND id != ?
          AND projects LIKE ?
          ORDER BY updated DESC LIMIT 1",
     )
-        .bind(session_node_id)
-        .bind(&csv_proj)
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|r| r.try_get::<String, _>(0).ok())
+    .bind(session_node_id)
+    .bind(&csv_proj)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|r| r.try_get::<String, _>(0).ok())
 }
 
 /// Find the most recent previous session node for a project slug (sync wrapper).

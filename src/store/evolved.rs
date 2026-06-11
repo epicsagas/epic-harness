@@ -200,8 +200,12 @@ mod tests {
     #[tokio::test]
     async fn upsert_list_and_read() {
         let pool = test_pool().await;
-        upsert_skill_pool(&pool, &sample_skill("rust-ownership")).await.unwrap();
-        upsert_skill_pool(&pool, &sample_skill("ts-async")).await.unwrap();
+        upsert_skill_pool(&pool, &sample_skill("rust-ownership"))
+            .await
+            .unwrap();
+        upsert_skill_pool(&pool, &sample_skill("ts-async"))
+            .await
+            .unwrap();
 
         let skills = list_skills_pool(&pool).await.unwrap();
         assert_eq!(skills.len(), 2);
@@ -214,7 +218,9 @@ mod tests {
     #[tokio::test]
     async fn delete_skill() {
         let pool = test_pool().await;
-        upsert_skill_pool(&pool, &sample_skill("to-delete")).await.unwrap();
+        upsert_skill_pool(&pool, &sample_skill("to-delete"))
+            .await
+            .unwrap();
 
         let deleted = delete_skill_pool(&pool, "to-delete").await.unwrap();
         assert!(deleted);
@@ -230,7 +236,9 @@ mod tests {
         counters.insert("pattern_a".into(), 5);
         counters.insert("pattern_b".into(), 3);
 
-        save_promotion_counters_pool(&pool, &counters).await.unwrap();
+        save_promotion_counters_pool(&pool, &counters)
+            .await
+            .unwrap();
         let loaded = load_promotion_counters_pool(&pool).await.unwrap();
         assert_eq!(loaded.get("pattern_a"), Some(&5));
         assert_eq!(loaded.len(), 2);

@@ -39,12 +39,12 @@ pub(crate) async fn write_node_dedup_async(
     let existing = sqlx::query(&format!(
         "SELECT {NODE_COLUMNS} FROM nodes WHERE title = ? AND type = ? AND updated >= ? LIMIT 1"
     ))
-        .bind(&gn.title)
-        .bind(&gn.node_type)
-        .bind(&cutoff_ts)
-        .fetch_optional(pool)
-        .await
-        .map_err(io::Error::other)?;
+    .bind(&gn.title)
+    .bind(&gn.node_type)
+    .bind(&cutoff_ts)
+    .fetch_optional(pool)
+    .await
+    .map_err(io::Error::other)?;
 
     if let Some(row) = existing {
         let existing_gn = row_to_graph_node(&row);

@@ -133,9 +133,7 @@ fn get_cross_project_hints() -> Vec<String> {
         crate::store::global::query_patterns_excluding_pool(&pool, &project_name, 20).await
     })
     .unwrap_or_else(|e| {
-        eprintln!(
-            "[resume] SQLite global patterns read failed, falling back to JSONL: {e}"
-        );
+        eprintln!("[resume] SQLite global patterns read failed, falling back to JSONL: {e}");
         if !global_patterns_file().is_file() {
             return vec![];
         }

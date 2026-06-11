@@ -77,9 +77,9 @@ async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::R
     let rows = sqlx::query(&format!(
         "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC"
     ))
-        .fetch_all(pool)
-        .await
-        .map_err(io::Error::other)?;
+    .fetch_all(pool)
+    .await
+    .map_err(io::Error::other)?;
 
     let nodes: Vec<GraphNode> = rows
         .iter()
@@ -98,21 +98,21 @@ async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::R
         .collect();
 
     let mut edges: Vec<GraphEdge> = sqlx::query(
-        "SELECT source, target, label, created FROM edges ORDER BY created DESC LIMIT ?"
+        "SELECT source, target, label, created FROM edges ORDER BY created DESC LIMIT ?",
     )
-        .bind(MAX_GRAPH_EDGES as i64)
-        .fetch_all(pool)
-        .await
-        .map_err(io::Error::other)?
-        .iter()
-        .map(|r| GraphEdge {
-            source: r.get::<String, _>(0),
-            target: r.get::<String, _>(1),
-            relation: r.get::<String, _>(2),
-            weight: 1.0,
-            virtual_: false,
-        })
-        .collect();
+    .bind(MAX_GRAPH_EDGES as i64)
+    .fetch_all(pool)
+    .await
+    .map_err(io::Error::other)?
+    .iter()
+    .map(|r| GraphEdge {
+        source: r.get::<String, _>(0),
+        target: r.get::<String, _>(1),
+        relation: r.get::<String, _>(2),
+        weight: 1.0,
+        virtual_: false,
+    })
+    .collect();
 
     if include_virtual {
         let persisted = edges.len();
@@ -245,10 +245,7 @@ pub fn rebuild_graph() -> io::Result<()> {
 const MAX_SEED_IDS: usize = 100;
 
 /// Async 1-hop neighbors.
-pub async fn graph_neighbors_pool(
-    pool: &sqlx::AnyPool,
-    seed_ids: &[String],
-) -> Vec<(String, f64)> {
+pub async fn graph_neighbors_pool(pool: &sqlx::AnyPool, seed_ids: &[String]) -> Vec<(String, f64)> {
     graph_neighbors_async(pool, seed_ids).await
 }
 
@@ -281,13 +278,13 @@ async fn graph_neighbors_async(pool: &sqlx::AnyPool, seed_ids: &[String]) -> Vec
         let rows = sqlx::query(
             "SELECT target FROM edges WHERE source = ? \
              UNION \
-             SELECT source FROM edges WHERE target = ?"
+             SELECT source FROM edges WHERE target = ?",
         )
-            .bind(seed_id)
-            .bind(seed_id)
-            .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+        .bind(seed_id)
+        .bind(seed_id)
+        .fetch_all(pool)
+        .await
+        .unwrap_or_default();
 
         for row in rows {
             let neighbor_id: String = row.get(0);
@@ -310,11 +307,7 @@ pub fn graph_neighbors(seed_ids: &[String]) -> Vec<(String, f64)> {
 }
 
 /// Async BFS traversal.
-pub async fn related_nodes_pool(
-    pool: &sqlx::AnyPool,
-    start_id: &str,
-    depth: usize,
-) -> Vec<String> {
+pub async fn related_nodes_pool(pool: &sqlx::AnyPool, start_id: &str, depth: usize) -> Vec<String> {
     related_nodes_async(pool, start_id, depth).await
 }
 
@@ -337,13 +330,13 @@ async fn related_nodes_async(pool: &sqlx::AnyPool, start_id: &str, depth: usize)
             let rows = sqlx::query(
                 "SELECT target FROM edges WHERE source = ? \
                  UNION \
-                 SELECT source FROM edges WHERE target = ?"
+                 SELECT source FROM edges WHERE target = ?",
             )
-                .bind(node_id)
-                .bind(node_id)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default();
+            .bind(node_id)
+            .bind(node_id)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
 
             for row in rows {
                 let neighbor: String = row.get(0);
@@ -398,15 +391,14 @@ async fn compute_stats_async(pool: &sqlx::AnyPool) -> io::Result<serde_json::Val
         .try_get(0)
         .unwrap_or(0.0);
 
-    let type_counts: std::collections::HashMap<String, i64> = sqlx::query(
-        "SELECT type, COUNT(*) FROM nodes GROUP BY type"
-    )
-        .fetch_all(pool)
-        .await
-        .map_err(io::Error::other)?
-        .iter()
-        .map(|r| (r.get::<String, _>(0), r.get::<i64, _>(1)))
-        .collect();
+    let type_counts: std::collections::HashMap<String, i64> =
+        sqlx::query("SELECT type, COUNT(*) FROM nodes GROUP BY type")
+            .fetch_all(pool)
+            .await
+            .map_err(io::Error::other)?
+            .iter()
+            .map(|r| (r.get::<String, _>(0), r.get::<i64, _>(1)))
+            .collect();
 
     Ok(serde_json::json!({
         "nodes": node_count,

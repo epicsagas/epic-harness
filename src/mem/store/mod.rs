@@ -43,17 +43,17 @@ pub use schema::init_schema_pool;
 
 #[allow(unused_imports)]
 pub use node::{
-    delete_node_file, list_node_ids, parse_node, read_node, read_nodes_limited_pool,
-    serialize_node, write_node, write_node_pool, read_node_pool, read_nodes_pool,
-    read_all_nodes_pool, delete_node_pool, node_exists_pool, list_node_ids_pool,
+    delete_node_file, delete_node_pool, list_node_ids, list_node_ids_pool, node_exists_pool,
+    parse_node, read_all_nodes_pool, read_node, read_node_pool, read_nodes_limited_pool,
+    read_nodes_pool, serialize_node, write_node, write_node_pool,
 };
 
 // ── Re-exports: edge ──────────────────────────────────
 
 #[allow(unused_imports)]
 pub use edge::{
-    append_edge, append_edge_pool, delete_edge_by_id, read_edges, read_edges_pool,
-    remove_edges_for_node, remove_edges_for_node_pool, delete_edge_by_id_pool, read_edges_limit,
+    append_edge, append_edge_pool, delete_edge_by_id, delete_edge_by_id_pool, read_edges,
+    read_edges_limit, read_edges_pool, remove_edges_for_node, remove_edges_for_node_pool,
 };
 
 // ── Re-exports: index ─────────────────────────────────
@@ -75,4 +75,4 @@ pub use recall::{smart_recall, smart_recall_pool};
 
 // ── Re-exports: search ────────────────────────────────
 
-pub use search::{query_nodes, search_nodes, query_nodes_pool, search_nodes_pool};
+pub use search::{query_nodes, query_nodes_pool, search_nodes, search_nodes_pool};

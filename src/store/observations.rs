@@ -119,8 +119,12 @@ pub async fn query_obs_for_date_range_pool(
             timestamp: row.try_get::<String, _>(0).map_err(super::sqlx_err)?,
             tool: row.try_get::<String, _>(1).map_err(super::sqlx_err)?,
             tool_category: row.try_get::<String, _>(2).map_err(super::sqlx_err)?,
-            action: row.try_get::<Option<String>, _>(3).map_err(super::sqlx_err)?,
-            result: row.try_get::<Option<String>, _>(4).map_err(super::sqlx_err)?,
+            action: row
+                .try_get::<Option<String>, _>(3)
+                .map_err(super::sqlx_err)?,
+            result: row
+                .try_get::<Option<String>, _>(4)
+                .map_err(super::sqlx_err)?,
             score: row.try_get::<Option<f64>, _>(5).map_err(super::sqlx_err)?,
             dimensions: if any_some {
                 Some(ScoreDimensions {
@@ -131,18 +135,30 @@ pub async fn query_obs_for_date_range_pool(
             } else {
                 None
             },
-            failure_category: row.try_get::<Option<String>, _>(9).map_err(super::sqlx_err)?,
-            error_snippet: row.try_get::<Option<String>, _>(10).map_err(super::sqlx_err)?,
-            file_ext: row.try_get::<Option<String>, _>(11).map_err(super::sqlx_err)?,
+            failure_category: row
+                .try_get::<Option<String>, _>(9)
+                .map_err(super::sqlx_err)?,
+            error_snippet: row
+                .try_get::<Option<String>, _>(10)
+                .map_err(super::sqlx_err)?,
+            file_ext: row
+                .try_get::<Option<String>, _>(11)
+                .map_err(super::sqlx_err)?,
             sequence_id: seq_id.map(|v| v as u64),
-            pipeline_id: row.try_get::<Option<String>, _>(13).map_err(super::sqlx_err)?,
+            pipeline_id: row
+                .try_get::<Option<String>, _>(13)
+                .map_err(super::sqlx_err)?,
         });
     }
     Ok(records)
 }
 
 /// Aggregate observation stats via SQL.
-pub async fn query_obs_stats_pool(pool: &AnyPool, from_ts: &str, to_ts: &str) -> io::Result<ObsStats> {
+pub async fn query_obs_stats_pool(
+    pool: &AnyPool,
+    from_ts: &str,
+    to_ts: &str,
+) -> io::Result<ObsStats> {
     let from = if from_ts.len() == 10 {
         format!("{}T00:00:00", from_ts)
     } else {
@@ -270,7 +286,10 @@ pub async fn query_obs_stats_all_pool(
 }
 
 /// Get the last action for a given session.
-pub async fn query_last_action_pool(pool: &AnyPool, session_id: &str) -> io::Result<Option<String>> {
+pub async fn query_last_action_pool(
+    pool: &AnyPool,
+    session_id: &str,
+) -> io::Result<Option<String>> {
     let row = sqlx::query(
         "SELECT action FROM observations
          WHERE session_id = ?
@@ -358,10 +377,14 @@ mod tests {
             pipeline_id: None,
         };
 
-        let id = insert_observation_pool(&pool, &rec, "20260602_12345").await.unwrap();
+        let id = insert_observation_pool(&pool, &rec, "20260602_12345")
+            .await
+            .unwrap();
         assert!(id > 0);
 
-        let results = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02").await.unwrap();
+        let results = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02")
+            .await
+            .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool, "Bash");
         assert_eq!(results[0].score, Some(0.95));
@@ -370,7 +393,9 @@ mod tests {
     #[tokio::test]
     async fn query_stats_empty() {
         let pool = test_pool().await;
-        let stats = query_obs_stats_pool(&pool, "2026-06-01", "2026-06-30").await.unwrap();
+        let stats = query_obs_stats_pool(&pool, "2026-06-01", "2026-06-30")
+            .await
+            .unwrap();
         assert_eq!(stats.total, 0);
         assert_eq!(stats.successes, 0);
     }
@@ -402,10 +427,14 @@ mod tests {
                 sequence_id: None,
                 pipeline_id: None,
             };
-            insert_observation_pool(&pool, &rec, "20260602_12345").await.unwrap();
+            insert_observation_pool(&pool, &rec, "20260602_12345")
+                .await
+                .unwrap();
         }
 
-        let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02").await.unwrap();
+        let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02")
+            .await
+            .unwrap();
         assert_eq!(stats.total, 5);
         assert_eq!(stats.tool_stats.len(), 1);
         assert_eq!(stats.tool_stats[0].tool, "Edit");
@@ -431,12 +460,18 @@ mod tests {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_pool(&pool, &rec, "20260501_12345").await.unwrap();
+        insert_observation_pool(&pool, &rec, "20260501_12345")
+            .await
+            .unwrap();
 
-        let deleted = delete_obs_older_than_pool(&pool, "2026-05-15").await.unwrap();
+        let deleted = delete_obs_older_than_pool(&pool, "2026-05-15")
+            .await
+            .unwrap();
         assert_eq!(deleted, 1);
 
-        let results = query_obs_for_date_range_pool(&pool, "2026-05-01", "2026-05-31").await.unwrap();
+        let results = query_obs_for_date_range_pool(&pool, "2026-05-01", "2026-05-31")
+            .await
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -473,8 +508,12 @@ mod tests {
             pipeline_id: None,
         };
 
-        insert_observation_pool(&pool, &rec1, "sess1").await.unwrap();
-        insert_observation_pool(&pool, &rec2, "sess1").await.unwrap();
+        insert_observation_pool(&pool, &rec1, "sess1")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec2, "sess1")
+            .await
+            .unwrap();
 
         let last = query_last_action_pool(&pool, "sess1").await.unwrap();
         assert_eq!(last, Some("second edit".to_string()));

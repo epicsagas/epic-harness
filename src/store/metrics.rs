@@ -31,23 +31,29 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
             .flatten()
     }
 
-    let total_sessions: u64 = get(pool, "total_sessions").await
+    let total_sessions: u64 = get(pool, "total_sessions")
+        .await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let avg_success_rate: f64 = get(pool, "avg_success_rate").await
+    let avg_success_rate: f64 = get(pool, "avg_success_rate")
+        .await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0.0);
-    let total_evolved_skills: u64 = get(pool, "total_evolved_skills").await
+    let total_evolved_skills: u64 = get(pool, "total_evolved_skills")
+        .await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
     let last_session = get(pool, "last_session").await.filter(|v| !v.is_empty());
     let best_score: Option<f64> = get(pool, "best_score").await.and_then(|v| v.parse().ok());
     let best_session = get(pool, "best_session").await.unwrap_or_default();
     let trend = get(pool, "trend").await.unwrap_or_else(|| "stable".into());
-    let stagnation_count: u64 = get(pool, "stagnation_count").await
+    let stagnation_count: u64 = get(pool, "stagnation_count")
+        .await
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
-    let last_error_context = get(pool, "last_error_context").await.filter(|v| !v.is_empty());
+    let last_error_context = get(pool, "last_error_context")
+        .await
+        .filter(|v| !v.is_empty());
 
     // Score history
     let sh_rows = sqlx::query(
@@ -130,7 +136,11 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
     let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
 
     // Scalar state — upsert each key
-    async fn upsert(tx: &mut sqlx::Transaction<'_, sqlx::Any>, key: &str, value: &str) -> io::Result<()> {
+    async fn upsert(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        key: &str,
+        value: &str,
+    ) -> io::Result<()> {
         sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?, ?)")
             .bind(key)
             .bind(value)
@@ -142,7 +152,12 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
 
     upsert(&mut tx, "total_sessions", &m.total_sessions.to_string()).await?;
     upsert(&mut tx, "avg_success_rate", &m.avg_success_rate.to_string()).await?;
-    upsert(&mut tx, "total_evolved_skills", &m.total_evolved_skills.to_string()).await?;
+    upsert(
+        &mut tx,
+        "total_evolved_skills",
+        &m.total_evolved_skills.to_string(),
+    )
+    .await?;
     if let Some(ref v) = m.last_session {
         upsert(&mut tx, "last_session", v).await?;
     }
@@ -220,7 +235,11 @@ pub async fn save_metrics_direct(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     m: &Metrics,
 ) -> io::Result<()> {
-    async fn upsert(tx: &mut sqlx::Transaction<'_, sqlx::Any>, key: &str, value: &str) -> io::Result<()> {
+    async fn upsert(
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        key: &str,
+        value: &str,
+    ) -> io::Result<()> {
         sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?, ?)")
             .bind(key)
             .bind(value)
@@ -232,7 +251,12 @@ pub async fn save_metrics_direct(
 
     upsert(tx, "total_sessions", &m.total_sessions.to_string()).await?;
     upsert(tx, "avg_success_rate", &m.avg_success_rate.to_string()).await?;
-    upsert(tx, "total_evolved_skills", &m.total_evolved_skills.to_string()).await?;
+    upsert(
+        tx,
+        "total_evolved_skills",
+        &m.total_evolved_skills.to_string(),
+    )
+    .await?;
     if let Some(ref v) = m.last_session {
         upsert(tx, "last_session", v).await?;
     }
