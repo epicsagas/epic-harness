@@ -844,9 +844,9 @@ pub fn run(_input: &HookInput) -> i32 {
     let (mem_nodes, mem_edges) = evolve::ingest_to_memory(&analysis, &analysis.failure_patterns);
 
     // 8.5a. Episteme ingest — send key insights to the knowledge graph
-    // Runs in parallel with instinct extraction via early-return on any failure.
-    // Graceful degradation: Episteme errors are non-fatal.
-    let episteme_ok = ingest_to_episteme(&analysis);
+    // Disabled: session metrics are not semantic knowledge graph entities.
+    // See https://github.com/epicsagas/Episteme/issues/49
+    let episteme_ok = true;
     if !episteme_ok {
         hint(
             "reflect",
