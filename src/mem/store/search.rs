@@ -1,22 +1,52 @@
-//! search.rs — FTS search and dynamic filter queries via llm-kernel
+//! search.rs — FTS search and dynamic filter queries via sqlx
 
 use std::io;
 
-use super::conn::memory_conn;
-use super::types::{Node, graph_to_node};
+use sqlx::Row as _;
+
+use super::conn::memory_pool_sync;
+use super::types::Node;
+use super::util::{NODE_COLUMNS, row_to_node};
+use crate::store::runtime;
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
-    let conn = match memory_conn() {
+    let pool = match memory_pool_sync() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    let guard = match conn.lock() {
-        Ok(g) => g,
+    runtime::block_on(search_nodes_async(&pool, query, limit))
+}
+
+async fn search_nodes_async(pool: &sqlx::AnyPool, query: &str, limit: usize) -> Vec<Node> {
+    let fts_query = escape_fts(query);
+    // Step 1: get matching rowids from FTS index
+    let rowids: Vec<i64> = match sqlx::query(
+        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?"
+    )
+        .bind(&fts_query)
+        .bind(limit as i64)
+        .fetch_all(pool)
+        .await
+    {
+        Ok(rows) => rows.iter().filter_map(|r| r.try_get::<i64, _>(0).ok()).collect(),
         Err(_) => return vec![],
     };
-    llm_kernel::graph::search::search_nodes(&guard, query, limit)
-        .map(|nodes| nodes.into_iter().map(graph_to_node).collect())
-        .unwrap_or_else(|_| vec![])
+
+    if rowids.is_empty() {
+        return vec![];
+    }
+
+    // Step 2: fetch full nodes by rowid
+    let placeholders = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders})");
+    let mut q = sqlx::query(&sql);
+    for rid in &rowids {
+        q = q.bind(*rid);
+    }
+    q.fetch_all(pool)
+        .await
+        .map(|rows| rows.iter().map(row_to_node).collect())
+        .unwrap_or_default()
 }
 
 pub fn query_nodes(
@@ -25,35 +55,90 @@ pub fn query_nodes(
     project: Option<&str>,
     limit: usize,
 ) -> Vec<Node> {
-    let conn = match memory_conn() {
+    let pool = match memory_pool_sync() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    let guard = match conn.lock() {
-        Ok(g) => g,
-        Err(_) => return vec![],
-    };
-    llm_kernel::graph::search::query_nodes(&guard, tag, node_type, project, limit)
-        .map(|nodes| nodes.into_iter().map(graph_to_node).collect())
-        .unwrap_or_else(|_| vec![])
+    runtime::block_on(query_nodes_async(&pool, tag, node_type, project, limit))
 }
 
-// ── Pool-compatible wrappers ─────────────────────────────
+async fn query_nodes_async(
+    pool: &sqlx::AnyPool,
+    tag: Option<&str>,
+    node_type: Option<&str>,
+    project: Option<&str>,
+    limit: usize,
+) -> Vec<Node> {
+    let mut sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE 1=1");
+
+    if tag.is_some() {
+        sql.push_str(" AND tags LIKE ?");
+    }
+    if node_type.is_some() {
+        sql.push_str(" AND type = ?");
+    }
+    if project.is_some() {
+        sql.push_str(" AND projects LIKE ?");
+    }
+    // Cap limit at 200
+    let safe_limit = (limit.min(200)) as i64;
+    sql.push_str(" ORDER BY updated DESC LIMIT ?");
+
+    let mut query = sqlx::query(&sql);
+    if let Some(t) = tag {
+        query = query.bind(format!("%{t}%"));
+    }
+    if let Some(t) = node_type {
+        query = query.bind(t);
+    }
+    if let Some(p) = project {
+        query = query.bind(format!("%{p}%"));
+    }
+    query = query.bind(safe_limit);
+
+    query
+        .fetch_all(pool)
+        .await
+        .map(|rows| rows.iter().map(row_to_node).collect())
+        .unwrap_or_default()
+}
+
+/// Escape special FTS5 characters in a search query.
+fn escape_fts(s: &str) -> String {
+    let sanitized: String = s
+        .replace(['"', '*'], "")
+        .replace(':', " ")
+        .replace(['^', '{', '}', '(', ')'], "")
+        .trim()
+        .to_string();
+
+    if sanitized.is_empty() {
+        return "*".to_string();
+    }
+
+    let words: Vec<&str> = sanitized.split_whitespace().take(5).collect();
+    if words.is_empty() {
+        return "*".to_string();
+    }
+    words.iter().map(|w| format!("\"{}\"", w)).collect::<Vec<_>>().join(" OR ")
+}
+
+// ── Pool-compatible wrappers ─────────────────────────────────
 
 pub async fn search_nodes_pool(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     query: &str,
     limit: i64,
 ) -> io::Result<Vec<Node>> {
-    Ok(search_nodes(query, limit as usize))
+    Ok(search_nodes_async(pool, query, limit as usize).await)
 }
 
 pub async fn query_nodes_pool(
-    _pool: &sqlx::AnyPool,
+    pool: &sqlx::AnyPool,
     tag: Option<&str>,
     node_type: Option<&str>,
     project: Option<&str>,
     limit: usize,
 ) -> io::Result<Vec<Node>> {
-    Ok(query_nodes(tag, node_type, project, limit))
+    Ok(query_nodes_async(pool, tag, node_type, project, limit).await)
 }

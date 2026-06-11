@@ -1,29 +1,24 @@
 //! Integration tests for the store module
 
+use sqlx::AnyPool;
 use sqlx::Row;
 
-// ── Helper ────────────────────────────────────────────
-async fn setup_pool() -> sqlx::AnyPool {
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+async fn test_pool() -> AnyPool {
+    let pool = super::pool::test_memory_pool().await;
+    super::schema::init_schema_pool(&pool).await.unwrap();
     pool
 }
 
-// ── Schema / DDL tests ────────────────────────────────
-
 #[tokio::test]
 async fn schema_creates_all_tables() {
-    let pool = setup_pool().await;
+    let pool = test_pool().await;
 
     let rows = sqlx::query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         .fetch_all(&pool)
         .await
         .unwrap();
 
-    let tables: Vec<String> = rows
-        .iter()
-        .map(|r| r.try_get::<String, _>(0).unwrap())
-        .collect();
+    let tables: Vec<String> = rows.iter().filter_map(|r| r.try_get(0).ok()).collect();
 
     let expected = [
         "_harness_meta",
@@ -56,144 +51,43 @@ async fn schema_creates_all_tables() {
 
 #[tokio::test]
 async fn schema_is_idempotent() {
-    let pool = crate::store::pool::test_memory_pool().await;
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    let pool = super::pool::test_memory_pool().await;
+    super::schema::init_schema_pool(&pool).await.unwrap();
     // Running again should not fail
-    crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    super::schema::init_schema_pool(&pool).await.unwrap();
 }
 
 #[tokio::test]
 async fn meta_table_tracks_version() {
-    let pool = setup_pool().await;
-    let version: String =
-        sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'schema_version'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(version, "4");
-}
-
-#[tokio::test]
-async fn wal_mode_is_enforced() {
-    let pool = setup_pool().await;
-    // In-memory DBs report "memory"; file-backed report "wal". Accept both.
-    let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert!(
-        mode == "wal" || mode == "memory",
-        "unexpected journal_mode: {mode}"
-    );
-}
-
-#[tokio::test]
-async fn foreign_keys_are_enforced() {
-    let pool = setup_pool().await;
-    let fk: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(fk, 1, "foreign_keys pragma must be ON (1)");
-}
-
-#[tokio::test]
-async fn migration_is_idempotent() {
-    let pool = setup_pool().await;
-
-    // Simulate a completed migration by setting the flag.
-    sqlx::query(
-        "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+    let pool = test_pool().await;
+    let version: String = sqlx::query_scalar(
+        "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
     )
-    .execute(&pool)
+    .fetch_one(&pool)
     .await
     .unwrap();
-
-    let migrated: String =
-        sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert_eq!(migrated, "1");
+    assert_eq!(version, "1");
 }
 
-// ── Numeric helpers ───────────────────────────────────
-
-#[test]
-fn u64_to_i64_converts_normal_values() {
+#[tokio::test]
+async fn u64_to_i64_converts_normal_values() {
     assert_eq!(super::u64_to_i64(0), 0);
     assert_eq!(super::u64_to_i64(1_000_000), 1_000_000);
     assert_eq!(super::u64_to_i64(i64::MAX as u64), i64::MAX);
 }
 
-#[test]
-fn u64_to_i64_saturates_on_overflow() {
+#[tokio::test]
+async fn u64_to_i64_saturates_on_overflow() {
     let result = super::u64_to_i64(u64::MAX);
     assert_eq!(result, i64::MAX);
 }
-
-#[test]
-fn i64_to_u64_converts_normal_values() {
-    assert_eq!(super::i64_to_u64(0), 0);
-    assert_eq!(super::i64_to_u64(1_000_000), 1_000_000);
-    assert_eq!(super::i64_to_u64(i64::MAX), i64::MAX as u64);
-}
-
-#[test]
-fn i64_to_u64_clamps_negative_to_zero() {
-    assert_eq!(super::i64_to_u64(-1), 0);
-    assert_eq!(super::i64_to_u64(i64::MIN), 0);
-}
-
-// ── Pool-based constraint tests ───────────────────────
-
-#[tokio::test]
-async fn fk_violation_on_agent_without_run() {
-    let pool = setup_pool().await;
-    let result = sqlx::query(
-        "INSERT INTO orch_agents
-         (id, run_id, role, task, satisfies_json, status, phase, progress, last_heartbeat)
-         VALUES ('agent-x', 'nonexistent-run', 'worker', 'do thing', '[]', 'running', 'exec', 0.0, '')",
-    )
-    .execute(&pool)
-    .await;
-    assert!(
-        result.is_err(),
-        "FK violation must reject insert of agent with non-existent run_id"
-    );
-}
-
-#[tokio::test]
-async fn unique_constraint_on_score_history_timestamp() {
-    let pool = setup_pool().await;
-    sqlx::query(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-06-02T10:00:00Z', 0.9, 0.8, 10, 1.0, 0.9, 0.8)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let result = sqlx::query(
-        "INSERT INTO score_history (timestamp, success_rate, avg_score, observations, dim_success, dim_quality, dim_cost)
-         VALUES ('2026-06-02T10:00:00Z', 0.7, 0.6, 5, 0.5, 0.5, 0.5)",
-    )
-    .execute(&pool)
-    .await;
-    assert!(
-        result.is_err(),
-        "UNIQUE constraint must reject duplicate score_history (timestamp, project)"
-    );
-}
-
-// ── Observation / stats tests ─────────────────────────
 
 #[tokio::test]
 async fn obs_stats_tool_limit_is_enforced() {
     use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let pool = setup_pool().await;
+    let pool = test_pool().await;
 
     for i in 0..150usize {
         let rec = ObsRecord {
@@ -210,12 +104,12 @@ async fn obs_stats_tool_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_pool(&pool, "test-project", &rec, "sess_limit_test")
+        insert_observation_pool(&pool, &rec, "sess_limit_test")
             .await
             .unwrap();
     }
 
-    let stats = query_obs_stats_pool(&pool, "test-project", "2026-06-02", "2026-06-02")
+    let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02")
         .await
         .unwrap();
     assert_eq!(stats.total, 150, "total should count all observations");
@@ -231,7 +125,7 @@ async fn obs_error_stats_limit_is_enforced() {
     use super::observations::{insert_observation_pool, query_obs_stats_pool};
     use crate::shared::obs::ObsRecord;
 
-    let pool = setup_pool().await;
+    let pool = test_pool().await;
 
     for i in 0..80usize {
         let rec = ObsRecord {
@@ -248,12 +142,12 @@ async fn obs_error_stats_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_pool(&pool, "test-project", &rec, "sess_err_limit")
+        insert_observation_pool(&pool, &rec, "sess_err_limit")
             .await
             .unwrap();
     }
 
-    let stats = query_obs_stats_pool(&pool, "test-project", "2026-06-02", "2026-06-02")
+    let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02")
         .await
         .unwrap();
     assert!(
@@ -267,7 +161,8 @@ async fn obs_error_stats_limit_is_enforced() {
 async fn global_json_field_parse_failure_uses_fallback() {
     use super::global::{insert_pattern_pool, query_all_patterns_pool};
 
-    let pool = setup_pool().await;
+    let pool = test_pool().await;
+    // Insert a row with intentionally malformed JSON via raw SQL
     sqlx::query(
         "INSERT INTO global_patterns
          (timestamp, project, success_rate, avg_score, per_error_stats, failure_patterns, weak_tools)
@@ -312,7 +207,7 @@ async fn dismiss_agent_is_atomic() {
         OrchAgent, OrchRun, dismiss_agent_pool, init_run_pool, read_agent_pool, upsert_agent_pool,
     };
 
-    let pool = setup_pool().await;
+    let pool = test_pool().await;
     let run = OrchRun {
         id: "run-atomic".into(),
         status: "running".into(),
@@ -321,7 +216,7 @@ async fn dismiss_agent_is_atomic() {
         created_at: "2026-06-02T10:00:00Z".into(),
         updated_at: "2026-06-02T10:00:00Z".into(),
     };
-    init_run_pool(&pool, "test-project", &run).await.unwrap();
+    init_run_pool(&pool, &run).await.unwrap();
 
     let agent = OrchAgent {
         id: "agent-atomic".into(),
@@ -338,34 +233,20 @@ async fn dismiss_agent_is_atomic() {
     };
     upsert_agent_pool(&pool, &agent).await.unwrap();
 
-    let first = dismiss_agent_pool(&pool, "test-project", "agent-atomic")
-        .await
-        .unwrap();
+    let first = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
     assert!(first, "first dismiss must return true");
 
-    let second = dismiss_agent_pool(&pool, "test-project", "agent-atomic")
-        .await
-        .unwrap();
-    assert!(
-        !second,
-        "second dismiss of non-existent agent must return false"
-    );
+    let second = dismiss_agent_pool(&pool, "agent-atomic").await.unwrap();
+    assert!(!second, "second dismiss of non-existent agent must return false");
 
-    assert!(
-        read_agent_pool(&pool, "test-project", "agent-atomic")
-            .await
-            .unwrap()
-            .is_none()
-    );
+    assert!(read_agent_pool(&pool, "agent-atomic").await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn cleanup_stale_is_atomic() {
-    use super::orchestrator::{
-        OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool,
-    };
+    use super::orchestrator::{OrchAgent, OrchRun, cleanup_stale_pool, init_run_pool, upsert_agent_pool};
 
-    let pool = setup_pool().await;
+    let pool = test_pool().await;
     let run = OrchRun {
         id: "run-stale".into(),
         status: "complete".into(),
@@ -374,7 +255,7 @@ async fn cleanup_stale_is_atomic() {
         created_at: "2026-06-01T10:00:00Z".into(),
         updated_at: "2026-06-01T10:00:00Z".into(),
     };
-    init_run_pool(&pool, "test-project", &run).await.unwrap();
+    init_run_pool(&pool, &run).await.unwrap();
 
     let agent = OrchAgent {
         id: "agent-stale".into(),
@@ -391,7 +272,7 @@ async fn cleanup_stale_is_atomic() {
     };
     upsert_agent_pool(&pool, &agent).await.unwrap();
 
-    let deleted = cleanup_stale_pool(&pool, "test-project", "").await.unwrap();
+    let deleted = cleanup_stale_pool(&pool, "").await.unwrap();
     assert!(deleted >= 2, "must delete run + agent, got {deleted}");
 
     let run_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orch_runs")

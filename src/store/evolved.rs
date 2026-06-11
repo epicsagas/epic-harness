@@ -1,6 +1,8 @@
-//! evolved.rs — Evolved skills SQLite I/O (async pool)
+//! evolved.rs — Evolved skills SQLite I/O
+#![allow(dead_code)]
 
-#[cfg(test)]
+use sqlx::AnyPool;
+use sqlx::Row;
 use std::collections::HashMap;
 use std::io;
 
@@ -17,15 +19,15 @@ pub struct EvolvedSkillRow {
     pub updated: String,
 }
 
-// ── Async pool functions ─────────────────────────────
-
-use sqlx::{AnyPool, Row};
-
-#[cfg(test)]
+/// Insert or update an evolved skill.
 pub async fn upsert_skill_pool(pool: &AnyPool, skill: &EvolvedSkillRow) -> io::Result<()> {
     let active_int = if skill.active { 1 } else { 0 };
     sqlx::query(
-        "INSERT INTO evolved_skills (name, origin, confidence, project, skill_md, active, created, updated) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (name) DO UPDATE SET origin=excluded.origin, confidence=excluded.confidence, project=excluded.project, skill_md=excluded.skill_md, active=excluded.active, created=evolved_skills.created, updated=excluded.updated"
+        "INSERT OR REPLACE INTO evolved_skills
+         (name, origin, confidence, project, skill_md, active, created, updated)
+         VALUES (?, ?, ?, ?, ?, ?,
+                 COALESCE((SELECT created FROM evolved_skills WHERE name = ?), ?),
+                 ?)",
     )
     .bind(&skill.name)
     .bind(&skill.origin)
@@ -33,138 +35,142 @@ pub async fn upsert_skill_pool(pool: &AnyPool, skill: &EvolvedSkillRow) -> io::R
     .bind(&skill.project)
     .bind(&skill.skill_md)
     .bind(active_int)
+    .bind(&skill.name)
     .bind(&skill.created)
     .bind(&skill.updated)
     .execute(pool)
     .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(super::sqlx_err)?;
     Ok(())
 }
 
-#[cfg(test)]
+/// List all evolved skills (metadata only, no skill_md body).
 pub async fn list_skills_pool(pool: &AnyPool) -> io::Result<Vec<EvolvedSkillRow>> {
-    list_skills_pool_inner(pool, false).await
-}
+    let rows = sqlx::query(
+        "SELECT name, origin, confidence, project, active, created, updated
+         FROM evolved_skills ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
-pub async fn list_skills_full_pool(pool: &AnyPool) -> io::Result<Vec<EvolvedSkillRow>> {
-    list_skills_pool_inner(pool, true).await
-}
-
-async fn list_skills_pool_inner(
-    pool: &AnyPool,
-    include_body: bool,
-) -> io::Result<Vec<EvolvedSkillRow>> {
-    let rows = if include_body {
-        sqlx::query(
-            "SELECT name, origin, confidence, project, skill_md, active, created, updated FROM evolved_skills ORDER BY name"
-        )
-        .fetch_all(pool)
-        .await
-    } else {
-        sqlx::query(
-            "SELECT name, origin, confidence, project, active, created, updated FROM evolved_skills ORDER BY name"
-        )
-        .fetch_all(pool)
-        .await
+    let mut skills = Vec::with_capacity(rows.len());
+    for r in rows {
+        let active_i32: i32 = r.try_get(4).map_err(super::sqlx_err)?;
+        skills.push(EvolvedSkillRow {
+            name: r.try_get(0).map_err(super::sqlx_err)?,
+            origin: r.try_get(1).map_err(super::sqlx_err)?,
+            confidence: r.try_get(2).map_err(super::sqlx_err)?,
+            project: r.try_get(3).map_err(super::sqlx_err)?,
+            skill_md: String::new(),
+            active: active_i32 != 0,
+            created: r.try_get(5).map_err(super::sqlx_err)?,
+            updated: r.try_get(6).map_err(super::sqlx_err)?,
+        });
     }
-    .map_err(crate::store::sqlx_err)?;
-
-    let skills: Vec<EvolvedSkillRow> = rows
-        .iter()
-        .map(|r| {
-            let (skill_md, active_col, created_col, updated_col) = if include_body {
-                (
-                    r.try_get::<String, _>(4).unwrap_or_default(),
-                    5usize,
-                    6usize,
-                    7usize,
-                )
-            } else {
-                (String::new(), 4usize, 5usize, 6usize)
-            };
-            EvolvedSkillRow {
-                name: r.try_get(0).unwrap_or_default(),
-                origin: r.try_get(1).unwrap_or_default(),
-                confidence: r.try_get(2).unwrap_or(0.0),
-                project: r.try_get(3).unwrap_or_default(),
-                skill_md,
-                active: r.try_get::<i32, _>(active_col).unwrap_or(0) != 0,
-                created: r.try_get(created_col).unwrap_or_default(),
-                updated: r.try_get(updated_col).unwrap_or_default(),
-            }
-        })
-        .collect();
     Ok(skills)
 }
 
-#[cfg(test)]
+/// List all evolved skills including the full skill_md body.
+pub async fn list_skills_full_pool(pool: &AnyPool) -> io::Result<Vec<EvolvedSkillRow>> {
+    let rows = sqlx::query(
+        "SELECT name, origin, confidence, project, skill_md, active, created, updated
+         FROM evolved_skills ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let mut skills = Vec::with_capacity(rows.len());
+    for r in rows {
+        let active_i32: i32 = r.try_get(5).map_err(super::sqlx_err)?;
+        skills.push(EvolvedSkillRow {
+            name: r.try_get(0).map_err(super::sqlx_err)?,
+            origin: r.try_get(1).map_err(super::sqlx_err)?,
+            confidence: r.try_get(2).map_err(super::sqlx_err)?,
+            project: r.try_get(3).map_err(super::sqlx_err)?,
+            skill_md: r.try_get(4).map_err(super::sqlx_err)?,
+            active: active_i32 != 0,
+            created: r.try_get(6).map_err(super::sqlx_err)?,
+            updated: r.try_get(7).map_err(super::sqlx_err)?,
+        });
+    }
+    Ok(skills)
+}
+
+/// Read a single skill's markdown content.
 pub async fn read_skill_md_pool(pool: &AnyPool, name: &str) -> io::Result<Option<String>> {
-    let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = $1")
+    let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = ?")
         .bind(name)
         .fetch_optional(pool)
         .await
-        .map_err(crate::store::sqlx_err)?;
+        .map_err(super::sqlx_err)?;
 
     match row {
-        Some(r) => Ok(Some(r.try_get(0).map_err(crate::store::sqlx_err)?)),
+        Some(r) => Ok(Some(r.try_get::<String, _>(0).map_err(super::sqlx_err)?)),
         None => Ok(None),
     }
 }
 
-#[cfg(test)]
+/// Delete an evolved skill by name.
 pub async fn delete_skill_pool(pool: &AnyPool, name: &str) -> io::Result<bool> {
-    let result = sqlx::query("DELETE FROM evolved_skills WHERE name = $1")
+    let result = sqlx::query("DELETE FROM evolved_skills WHERE name = ?")
         .bind(name)
         .execute(pool)
         .await
-        .map_err(crate::store::sqlx_err)?;
+        .map_err(super::sqlx_err)?;
     Ok(result.rows_affected() > 0)
 }
 
-#[cfg(test)]
-pub async fn load_promotion_counters_pool(
-    pool: &AnyPool,
-    project: &str,
-) -> io::Result<HashMap<String, u64>> {
-    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters WHERE project = $1")
-        .bind(project)
+/// Count active evolved skills.
+pub async fn count_active_skills_pool(pool: &AnyPool) -> io::Result<usize> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM evolved_skills WHERE active = 1")
+        .fetch_one(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+    Ok(count as usize)
+}
+
+// ── Promotion counters ───────────────────────────────
+
+/// Load all promotion counters.
+pub async fn load_promotion_counters_pool(pool: &AnyPool) -> io::Result<HashMap<String, u64>> {
+    let rows = sqlx::query("SELECT pattern_key, count FROM promotion_counters")
         .fetch_all(pool)
         .await
-        .map_err(crate::store::sqlx_err)?;
+        .map_err(super::sqlx_err)?;
 
-    let mut counters = HashMap::new();
-    for r in &rows {
-        let key: String = r.try_get(0).map_err(crate::store::sqlx_err)?;
-        let count: i64 = r.try_get(1).map_err(crate::store::sqlx_err)?;
-        counters.insert(key, crate::store::i64_to_u64(count));
+    let mut counters = HashMap::with_capacity(rows.len());
+    for r in rows {
+        let key: String = r.try_get(0).map_err(super::sqlx_err)?;
+        let count: i64 = r.try_get(1).map_err(super::sqlx_err)?;
+        counters.insert(key, count as u64);
     }
     Ok(counters)
 }
 
-#[cfg(test)]
+/// Save all promotion counters (replaces entire table).
 pub async fn save_promotion_counters_pool(
     pool: &AnyPool,
-    project: &str,
     counters: &HashMap<String, u64>,
 ) -> io::Result<()> {
-    let mut tx = pool.begin().await.map_err(crate::store::sqlx_err)?;
-    sqlx::query("DELETE FROM promotion_counters WHERE project = $1")
-        .bind(project)
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+
+    sqlx::query("DELETE FROM promotion_counters")
         .execute(&mut *tx)
         .await
-        .map_err(crate::store::sqlx_err)?;
+        .map_err(super::sqlx_err)?;
+
     for (key, count) in counters {
-        sqlx::query(
-            "INSERT INTO promotion_counters (pattern_key, project, count) VALUES ($1, $2, $3) ON CONFLICT (pattern_key, project) DO UPDATE SET count=excluded.count",
-        )
-        .bind(key)
-        .bind(project)
-        .bind(crate::store::u64_to_i64(*count))
-        .execute(&mut *tx)
-        .await
-        .map_err(crate::store::sqlx_err)?;
+        sqlx::query("INSERT INTO promotion_counters (pattern_key, count) VALUES (?, ?)")
+            .bind(key)
+            .bind(super::u64_to_i64(*count))
+            .execute(&mut *tx)
+            .await
+            .map_err(super::sqlx_err)?;
     }
-    tx.commit().await.map_err(crate::store::sqlx_err)?;
+
+    tx.commit().await.map_err(super::sqlx_err)?;
     Ok(())
 }
 
@@ -172,9 +178,9 @@ pub async fn save_promotion_counters_pool(
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::AnyPool {
-        let pool = crate::store::pool::test_memory_pool().await;
-        crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    async fn test_pool() -> AnyPool {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
         pool
     }
 
@@ -193,13 +199,9 @@ mod tests {
 
     #[tokio::test]
     async fn upsert_list_and_read() {
-        let pool = in_memory_pool().await;
-        upsert_skill_pool(&pool, &sample_skill("rust-ownership"))
-            .await
-            .unwrap();
-        upsert_skill_pool(&pool, &sample_skill("ts-async"))
-            .await
-            .unwrap();
+        let pool = test_pool().await;
+        upsert_skill_pool(&pool, &sample_skill("rust-ownership")).await.unwrap();
+        upsert_skill_pool(&pool, &sample_skill("ts-async")).await.unwrap();
 
         let skills = list_skills_pool(&pool).await.unwrap();
         assert_eq!(skills.len(), 2);
@@ -211,10 +213,8 @@ mod tests {
 
     #[tokio::test]
     async fn delete_skill() {
-        let pool = in_memory_pool().await;
-        upsert_skill_pool(&pool, &sample_skill("to-delete"))
-            .await
-            .unwrap();
+        let pool = test_pool().await;
+        upsert_skill_pool(&pool, &sample_skill("to-delete")).await.unwrap();
 
         let deleted = delete_skill_pool(&pool, "to-delete").await.unwrap();
         assert!(deleted);
@@ -225,17 +225,13 @@ mod tests {
 
     #[tokio::test]
     async fn promotion_counters() {
-        let pool = in_memory_pool().await;
+        let pool = test_pool().await;
         let mut counters = HashMap::new();
         counters.insert("pattern_a".into(), 5);
         counters.insert("pattern_b".into(), 3);
 
-        save_promotion_counters_pool(&pool, "test-project", &counters)
-            .await
-            .unwrap();
-        let loaded = load_promotion_counters_pool(&pool, "test-project")
-            .await
-            .unwrap();
+        save_promotion_counters_pool(&pool, &counters).await.unwrap();
+        let loaded = load_promotion_counters_pool(&pool).await.unwrap();
         assert_eq!(loaded.get("pattern_a"), Some(&5));
         assert_eq!(loaded.len(), 2);
     }

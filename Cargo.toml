@@ -3,10 +3,10 @@ members = [".", "src-tauri"]
 
 [package]
 name = "epic-harness"
-version = "0.6.1"
+version = "0.6.2"
 edition = "2024"
 rust-version = "1.87.0"
-description = "Multi-tool AI agent harness with 22 skills, self-evolving engine, and autonomous pipeline"
+description = "3 commands + 19 auto-trigger skills + self-evolving agent harness with autonomous pipeline"
 license = "Apache-2.0"
 repository = "https://github.com/epicsagas/epic-harness"
 homepage = "https://github.com/epicsagas/epic-harness"
@@ -36,10 +36,10 @@ serde_yaml = "0.9"
 toml = "1.1"
 uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
-sqlx = { version = "0.8.1", features = ["runtime-tokio", "sqlite", "migrate", "any"] }
-llm-kernel = { version = "0.3.1", features = ["graph"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+libc = "0.2"
 url = "2"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
+
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal", "net"] }
@@ -49,19 +49,6 @@ tower-http = { version = "0.6", features = ["cors"] }
 tempfile = "3"
 serial_test = "3"
 axum-test = "20"
-
-# ---------------------------------------------------------------------------
-# Feature flags — multi-database driver support
-# ---------------------------------------------------------------------------
-
-[features]
-default = ["sqlite"]
-# `sqlite` is intentionally empty: sqlx's sqlite driver is always compiled in
-# via the base dependency. The flag exists for symmetry with `postgres`/`mysql`
-# and for use in `cfg!(feature = "sqlite")` guards.
-sqlite = []
-postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring"]
-mysql = ["sqlx/mysql", "sqlx/tls-rustls-ring"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.tar.xz"

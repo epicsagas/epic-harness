@@ -2,35 +2,33 @@ use super::common::*;
 
 fn get_obs_summary() -> Option<String> {
     let today_str = today();
-    let slug = crate::shared::paths::project_slug();
 
-    // Try SQLite pool first
-    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
-        if let Ok(stats) = crate::store::runtime::block_on(
-            crate::store::observations::query_obs_stats_pool(&pool, &slug, &today_str, &today_str),
-        ) {
-            if stats.total > 0 {
-                let success_rate = if stats.total > 0 {
-                    ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
-                } else {
-                    100
-                };
-                let error_str = if !stats.error_stats.is_empty() {
-                    let parts: Vec<String> = stats
-                        .error_stats
-                        .iter()
-                        .take(3)
-                        .map(|(c, n)| format!("{}:{}", c, n))
-                        .collect();
-                    format!(", errors=[{}]", parts.join(","))
-                } else {
-                    String::new()
-                };
-                return Some(format!(
-                    "{} obs, {success_rate}% success, avg={:.2}{error_str}",
-                    stats.total, stats.avg_score
-                ));
-            }
+    // Try SQLite first
+    if let Ok(stats) = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::observations::query_obs_stats_pool(&pool, &today_str, &today_str).await
+    }) {
+        if stats.total > 0 {
+            let success_rate = if stats.total > 0 {
+                ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
+            } else {
+                100
+            };
+            let error_str = if !stats.error_stats.is_empty() {
+                let parts: Vec<String> = stats
+                    .error_stats
+                    .iter()
+                    .take(3)
+                    .map(|(c, n)| format!("{}:{}", c, n))
+                    .collect();
+                format!(", errors=[{}]", parts.join(","))
+            } else {
+                String::new()
+            };
+            return Some(format!(
+                "{} obs, {success_rate}% success, avg={:.2}{error_str}",
+                stats.total, stats.avg_score
+            ));
         }
     }
 
@@ -140,35 +138,17 @@ pub fn run(input: &HookInput) -> i32 {
         .unwrap_or_default()
         .as_millis() as i64;
 
-    // Write to SQLite (primary). Only fall back to a JSON file when the DB is
-    // unavailable — writing to both stores unconditionally causes sessions/ to
-    // accumulate stale files and resume.rs to surface stale data when the DB is
-    // healthy but the file timestamp is newer.
+    // Write to SQLite (primary)
+    let _ = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::sessions::insert_snapshot_pool(&pool, &snapshot, millis).await
+    });
+
+    // Also write JSONL file for backward compatibility
     let filename = format!("snapshot_{}.json", millis);
-    let slug = crate::shared::paths::project_slug();
-    let sqlite_ok = crate::store::runtime::block_on(crate::store::pool::harness_pool())
-        .ok()
-        .and_then(|pool| {
-            crate::store::runtime::block_on(crate::store::sessions::insert_snapshot_pool(
-                &pool, &slug, &snapshot, millis,
-            ))
-            .ok()
-        })
-        .is_some();
-
-    if !sqlite_ok {
-        let path = sessions_dir().join(&filename);
-        if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
-            let _ = std::fs::write(&path, json);
-        }
-    }
-
-    // Sync orbit pipeline files → SQLite so the REST API stays current during long sessions.
-    // Best-effort: a failure here must not block the pre-compact snapshot.
-    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
-        let _ = crate::store::runtime::block_on(
-            crate::store::orbit_store::sync_orbit_files_to_db_pool(&pool, &orbit_dir()),
-        );
+    let path = sessions_dir().join(&filename);
+    if let Ok(json) = serde_json::to_string_pretty(&snapshot) {
+        let _ = std::fs::write(&path, json);
     }
 
     hint(

@@ -1,6 +1,6 @@
-# epic harness
+# epic-harness
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. Never use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. Never use `.harness/` in the project directory.
 
 ## Commands
 
@@ -18,7 +18,7 @@ These skills activate automatically based on context signals:
 |-------|---------|
 | `spec` | Define requirements before coding |
 | `go` | Build with auto-plan + TDD |
-| `audit` | Review + security audit + tests |
+| `check` | Review + security audit + tests |
 | `ship` | Create PR, verify CI, merge |
 | `tdd` | New feature or bug fix — Red → Green → Refactor |
 | `debug` | Test failure, runtime error, unexpected behavior |
@@ -33,7 +33,7 @@ These skills activate automatically based on context signals:
 | `discover` | Problem discovery — 5 Whys, JTBD, Socratic |
 | `orchestrate` | Multi-agent orchestration status and control |
 | `agent-introspection` | Failure recovery on 3+ consecutive errors |
-| `reflect` | Human-triggered: "Am I using AI as a thought amplifier?" 5-dimension evidence-based self-assessment consuming hook-produced data |
+| `reflect` | AI usage review and scoring |
 
 ## Session Start
 
@@ -41,7 +41,7 @@ At the beginning of every session:
 - Read `$HARNESS_DIR/memory/` for project-specific rules and patterns
 - If `$HARNESS_DIR/sessions/*.json` exists, read the latest file for previous session context
 - Report any evolved skills found in `$HARNESS_DIR/evolved/`
-- Run `epic resume` if binary is available
+- Run `epic-harness resume` if binary is available
 
 ## Auto-Behaviors
 
@@ -59,12 +59,12 @@ At the beginning of every session:
 
 | Hook | Command | Effect |
 |------|---------|--------|
-| Session start | `epic resume` | Restore session + load evolved skills |
-| Pre tool use | `epic guard` | Block dangerous shell patterns |
-| Post tool use | `epic observe` | Record tool scores (async) |
-| Post edit | `epic polish` | Auto-format + typecheck |
-| Pre compact | `epic snapshot` | Save session state |
-| Session end | `epic reflect` | Analyze failures, seed evolved skills, update metrics, ingest to memory |
+| Session start | `epic-harness resume` | Restore session + load evolved skills |
+| Pre tool use | `epic-harness guard` | Block dangerous shell patterns |
+| Post tool use | `epic-harness observe` | Record tool scores (async) |
+| Post edit | `epic-harness polish` | Auto-format + typecheck |
+| Pre compact | `epic-harness snapshot` | Save session state |
+| Session end | `epic-harness reflect` | Evolve skills + save metrics |
 
 ## Harness Memory
 
@@ -88,11 +88,11 @@ Anti-patterns: vague messages, wrong type, staging unrelated files, using `--no-
 
 ## Orbit — Autonomous Pipeline
 
-Chains `spec → go → audit → ship` skills in one session.
+Chains `spec → go → check → ship` skills in one session.
 
 **Two modes:**
-- **Interactive**: user describes the problem, then spec/go/audit/ship skills fire automatically
+- **Interactive**: user describes the problem, then spec/go/check/ship skills fire automatically
 - **Council auto-spec**: 4-voice council generates spec; user approves or rejects
 
-After spec approved, runs autonomously. On FAIL: auto-fix and re-audit, max 3 cycles. Pauses for human input if all 3 fail.
+After spec approved, runs autonomously. On FAIL: auto-fix and re-check, max 3 cycles. Pauses for human input if all 3 fail.
 State tracked in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`.

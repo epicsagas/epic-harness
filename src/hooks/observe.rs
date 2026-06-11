@@ -14,6 +14,26 @@ static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
 });
 
+fn get_next_sequence_id(session_file: &std::path::Path) -> u64 {
+    std::fs::metadata(session_file)
+        .map(|m| m.len())
+        .unwrap_or(0)
+}
+
+fn get_last_action(session_file: &std::path::Path) -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(session_file).ok()?;
+    let file_len = f.seek(SeekFrom::End(0)).ok()?;
+    let start = file_len.saturating_sub(1024);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((file_len - start) as usize + 1);
+    f.read_to_end(&mut buf).ok()?;
+    let tail = String::from_utf8_lossy(&buf);
+    let last_line = tail.lines().rfind(|l| !l.is_empty())?;
+    let rec: ObsRecord = serde_json::from_str(last_line).ok()?;
+    rec.action
+}
+
 fn failure_quality(failure_category: Option<&str>) -> f64 {
     match failure_category {
         None => 1.0, // no failure means success — callers gate on .is_some()
@@ -329,10 +349,9 @@ pub fn run(input: &HookInput) -> i32 {
     ensure_dir(&obs_dir());
 
     let sid = session_id();
-    let slug = crate::shared::paths::project_slug();
 
-    // Open harness pool for SQLite writes (fallback to JSONL if DB unavailable)
-    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
+    // Open harness DB pool for SQLite writes (fallback to JSONL if DB unavailable)
+    let db = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
     let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
@@ -352,6 +371,11 @@ pub fn run(input: &HookInput) -> i32 {
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
+    let seq_id = if db.is_none() {
+        get_next_sequence_id(&session_file)
+    } else {
+        0
+    };
 
     let mut record = ObsRecord {
         timestamp: now_iso(),
@@ -364,7 +388,7 @@ pub fn run(input: &HookInput) -> i32 {
         failure_category: None,
         error_snippet: None,
         file_ext,
-        sequence_id: None,
+        sequence_id: Some(seq_id),
         pipeline_id: super::common::detect_active_orbit_id(),
     };
 
@@ -414,13 +438,14 @@ pub fn run(input: &HookInput) -> i32 {
                 score_bash(&combined, cmd)
             }
             "edit" => {
-                let prev = pool.as_ref().and_then(|p| {
-                    crate::store::runtime::block_on(
-                        crate::store::observations::query_last_action_pool(p, &sid),
-                    )
-                    .ok()
-                    .flatten()
-                });
+                let prev = db
+                    .as_ref()
+                    .and_then(|pool| {
+                        crate::store::runtime::block_on(
+                            crate::store::observations::query_last_action_pool(pool, &sid)
+                        ).ok().flatten()
+                    })
+                    .or_else(|| get_last_action(&session_file));
                 score_edit(&combined, prev.as_deref(), action.as_deref())
             }
             "write" => score_write(&combined),
@@ -467,9 +492,9 @@ pub fn run(input: &HookInput) -> i32 {
     // Note: reflect.rs reads from SQLite only — if a write falls back to JSONL,
     // that observation is excluded from end-of-session analysis. This is an
     // acceptable tradeoff; persistent DB failures are treated as a setup problem.
-    if let Some(ref p) = pool {
+    if let Some(ref pool) = db {
         if let Err(e) = crate::store::runtime::block_on(
-            crate::store::observations::insert_observation_pool(p, &slug, &record, &sid),
+            crate::store::observations::insert_observation_pool(pool, &record, &sid)
         ) {
             eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
             append_jsonl(&session_file, &record);
@@ -633,6 +658,27 @@ mod tests {
     fn read_empty_output() {
         let dims = score_read_search("");
         assert_eq!(dims.tool_success, 0.0);
+    }
+
+    // ── get_next_sequence_id ────────────────────────
+    #[test]
+    fn sequence_id_zero_for_missing_file() {
+        let path = std::path::Path::new("/tmp/epic_harness_nonexistent_file_xyzzy.jsonl");
+        assert_eq!(get_next_sequence_id(path), 0);
+    }
+
+    #[test]
+    fn sequence_id_increases_with_content() {
+        use std::io::Write;
+        let dir = std::env::temp_dir();
+        let path = dir.join("epic_harness_seq_test.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        let id_empty = get_next_sequence_id(&path);
+        f.write_all(b"{\"a\":1}\n").unwrap();
+        f.flush().unwrap();
+        let id_after = get_next_sequence_id(&path);
+        assert!(id_after > id_empty);
+        let _ = std::fs::remove_file(&path);
     }
 
     // ── compute_score integration ───────────────────

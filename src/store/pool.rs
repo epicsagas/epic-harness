@@ -456,6 +456,7 @@ pub async fn memory_pool() -> io::Result<AnyPool> {
 }
 
 /// Gracefully close all pools. Call on process shutdown to flush WAL.
+#[allow(dead_code)]
 pub async fn shutdown() {
     // Take pools under write lock, drop lock, then close.
     let harness = {
@@ -475,6 +476,7 @@ pub async fn shutdown() {
 }
 
 /// Detect the database type for the harness.db pool.
+#[allow(dead_code)]
 pub fn harness_db_type() -> DbType {
     DbType::from_url(&harness_url()).unwrap_or(DbType::Sqlite)
 }

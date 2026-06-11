@@ -29,7 +29,7 @@
       },
       {
         "matcher": "*",
-        "command": "EH=$(command -v epic 2>/dev/null); SLUG=$(basename \"$(pwd)\" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g'); test -n \"$EH\" && \"$EH\" mem-observe --project \"$SLUG\" --agent cursor || true",
+        "command": "EH=$(command -v epic 2>/dev/null); SLUG=$(\"$EH\" slug 2>/dev/null); test -n \"$EH\" && test -n \"$SLUG\" && \"$EH\" mem-observe --project \"$SLUG\" --agent cursor || true",
         "async": true
       }
     ],

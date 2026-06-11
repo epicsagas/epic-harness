@@ -14,7 +14,7 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 epic-harness = { path = ".." }
-sqlx = { version = "0.8.1", features = ["any", "runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
 tokio = { version = "1", features = ["rt"] }
 thiserror = "2"
 

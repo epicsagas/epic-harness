@@ -1,4 +1,4 @@
-//! store/ — Node/Edge SQLite I/O via llm-kernel graph
+//! store/ — Node/Edge SQLite I/O (sqlx async pool)
 //!
 //! Re-exports all public items from focused submodules.
 
@@ -11,10 +11,10 @@ mod edge;
 mod index;
 mod node;
 mod recall;
-mod schema;
+pub(crate) mod schema;
 mod search;
 pub mod types;
-mod util;
+pub(crate) mod util;
 
 #[cfg(test)]
 mod tests;
@@ -31,56 +31,48 @@ pub use util::{
     validate_uuid,
 };
 
+#[cfg(test)]
+#[allow(unused_imports)]
+pub(crate) use util::parse_iso_to_secs as _parse_iso_to_secs;
+
 // ── Re-exports: schema ───────────────────────────────
 
-pub(crate) use schema::init_schema_pool;
+pub use schema::init_schema_pool;
 
 // ── Re-exports: node ─────────────────────────────────
 
+#[allow(unused_imports)]
 pub use node::{
-    delete_node_file, list_node_ids, parse_node, read_node, serialize_node, write_node,
+    delete_node_file, list_node_ids, parse_node, read_node, read_nodes_limited_pool,
+    serialize_node, write_node, write_node_pool, read_node_pool, read_nodes_pool,
+    read_all_nodes_pool, delete_node_pool, node_exists_pool, list_node_ids_pool,
 };
 
-pub use node::write_node_pool;
-
-// ── Re-exports: edge ─────────────────────────────────
+// ── Re-exports: edge ──────────────────────────────────
 
 #[allow(unused_imports)]
-pub use edge::{append_edge, delete_edge_by_id, read_edges, remove_edges_for_node};
+pub use edge::{
+    append_edge, append_edge_pool, delete_edge_by_id, read_edges, read_edges_pool,
+    remove_edges_for_node, remove_edges_for_node_pool, delete_edge_by_id_pool, read_edges_limit,
+};
 
-// ── Re-exports: index ────────────────────────────────
+// ── Re-exports: index ─────────────────────────────────
 
 #[allow(unused_imports)]
 pub use index::{read_index, remove_from_index, upsert_index};
 
-// ── Re-exports: dedup ────────────────────────────────
+// ── Re-exports: dedup ─────────────────────────────────
 
 pub use dedup::{write_node_dedup, write_node_dedup_pool};
 
-// ── Re-exports: decay ────────────────────────────────
+// ── Re-exports: decay ─────────────────────────────────
 
 pub use decay::{decay_importance, tag_stale_nodes, touch_nodes_pool};
 
-// ── Re-exports: recall ───────────────────────────────
+// ── Re-exports: recall ────────────────────────────────
 
 pub use recall::{smart_recall, smart_recall_pool};
 
-// ── Re-exports: search ───────────────────────────────
+// ── Re-exports: search ────────────────────────────────
 
-pub use search::{query_nodes, search_nodes, search_nodes_pool};
-
-// ── Re-exports: async pool functions (backward compat) ──
-
-#[allow(unused_imports)]
-pub use decay::{decay_importance_pool, tag_stale_nodes_pool};
-#[allow(unused_imports)]
-pub use edge::{
-    append_edge_pool, delete_edge_by_id_pool, read_edges_pool, remove_edges_for_node_pool,
-};
-#[allow(unused_imports)]
-pub use node::{
-    delete_node_pool, list_node_ids_pool, node_exists_pool, read_all_nodes_pool, read_node_pool,
-    read_nodes_limited_pool, read_nodes_pool,
-};
-#[allow(unused_imports)]
-pub use search::query_nodes_pool;
+pub use search::{query_nodes, search_nodes, query_nodes_pool, search_nodes_pool};

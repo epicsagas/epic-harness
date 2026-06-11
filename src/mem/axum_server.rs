@@ -579,9 +579,10 @@ mod tests {
     use axum_test::TestServer;
 
     async fn make_state() -> AppState {
-        // Use an isolated in-memory rusqlite connection for each test
-        crate::mem::store::conn::set_test_conn(crate::mem::store::conn::test_conn());
+        // Use an isolated in-memory sqlx pool for each test
         let pool = crate::store::pool::test_memory_pool().await;
+        // Initialize schema for the test pool
+        crate::mem::store::init_schema_pool(&pool).await.unwrap();
         AppState { pool }
     }
 

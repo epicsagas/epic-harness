@@ -1,7 +1,7 @@
 {
   "name": "epic",
-  "version": "0.6.1",
-  "description": "22 auto-trigger skills + self-evolving agent harness. Less to remember, more automation.",
+  "version": "0.6.2",
+  "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness. Less to remember, more automation.",
   "author": {
     "name": "epicsagas",
     "url": "https://github.com/epicsagas"
@@ -19,5 +19,5 @@
     "automation"
   ],
   "skills": "./registry/skills/",
-  "hooks": "./.claude-plugin/hooks.json"
+  "commands": "./registry/commands/"
 }

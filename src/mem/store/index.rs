@@ -1,24 +1,26 @@
 //! index.rs — Index (built from DB) operations
 
-use super::conn::memory_conn;
+use super::conn::memory_pool_sync;
 use super::node::{delete_node_file, write_node};
 use super::types::{Index, IndexNode, graph_to_node};
-use super::util::split_csv;
+use super::util::{NODE_COLUMNS, row_to_graph_node, split_csv};
+use crate::store::runtime;
 
 #[allow(dead_code)]
 pub fn read_index() -> Index {
-    let conn = match memory_conn() {
+    let pool = match memory_pool_sync() {
         Ok(c) => c,
         Err(_) => return Index::default(),
     };
-    let guard = match conn.lock() {
-        Ok(g) => g,
-        Err(_) => return Index::default(),
-    };
-    let nodes: Vec<super::types::Node> =
-        llm_kernel::graph::store::read_nodes_limited(&guard, 1_000_000)
-            .map(|nodes| nodes.into_iter().map(graph_to_node).collect())
-            .unwrap_or_default();
+    let nodes: Vec<super::types::Node> = runtime::block_on(async {
+        sqlx::query(&format!(
+            "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"
+        ))
+            .fetch_all(&pool)
+            .await
+            .map(|rows| rows.iter().map(|r| graph_to_node(row_to_graph_node(r))).collect())
+            .unwrap_or_default()
+    });
 
     let mut by_tag: std::collections::HashMap<String, Vec<String>> = Default::default();
     let mut by_type: std::collections::HashMap<String, Vec<String>> = Default::default();

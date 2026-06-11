@@ -1,8 +1,8 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">모든 세션에서 학습하는 멀티툴 AI 에이전트 하네스 — 26개 스킬, 자율 파이프라인, 자기 진화 엔진.</p></blockquote>
+<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 26개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
 
-<p align="center"><b>하나의 하네스, 6개 AI 툴. 스펙에서 PR까지 자율 실행. 세션이 반복될수록 더 똑똑해집니다.</b></p>
+<p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
 <p align="center">
 <a href="../../README.md">English</a> | <a href="../ja/README.md">日本語</a> | <a href="../ko/README.md">한국어</a> | <a href="../de/README.md">Deutsch</a> | <a href="../fr/README.md">Français</a> | <a href="../zh-CN/README.md">简体中文</a> | <a href="../zh-TW/README.md">繁體中文</a> | <a href="../pt-BR/README.md">Português</a> | <a href="../es/README.md">Español</a> | <a href="../hi/README.md">हिन्दी</a>
@@ -16,13 +16,13 @@
 </p>
 <p align="center">
   <a href="../../LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.5-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.87+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
-  <img alt="Tools" src="https://img.shields.io/badge/tools-6_supported-bc8cff?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.6.2-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**26개 스킬(9 파이프라인 + 17 품질 게이트)**, **자기 진화 엔진**, **통합 메모리**, **단일 명령 자율 파이프라인**(`/orbit`)을 갖춘 멀티툴 AI 에이전트 하네스입니다. Claude Code, Codex, Cursor, OpenCode, Cline을 지원하며, 모든 툴이 동일한 `~/.harness/` 데이터 디렉토리를 공유합니다. 세션이 끝날 때마다 evolve 루프가 실패를 분석하고, 타겟팅된 스킬을 생성해 다음 세션에 로드합니다.
+**30개 이상의 명령어를 3개 명령어 + 26개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -32,11 +32,24 @@
 
 ![Demo](../../docs/demo/demo.gif)
 
-### 웹 대시보드 — 10개 화면 실시간 메트릭
+### 웹 대시보드 — 세션 시작 시 자동 실행
+
+eval 점수, 도구 통계, orbit 파이프라인, 진화 스킬, 훅 상태를 보여주는 10개 화면 실시간 메트릭. 첫 Claude Code 세션에서 자동으로 열립니다 — 수동 설정이 필요 없습니다.
+
 <p align="center">
   <img src="../../assets/dashboard.png" alt="Dashboard" width="49%" />
   <img src="../../assets/dashboard-orbit.png" alt="Orbit Pipeline" width="49%" />
 </p>
+
+```bash
+# 첫 세션에서 자동 실행 (기본값: http://localhost:7700)
+# ~/.harness/config.toml에서 포트 설정 또는 비활성화:
+[dashboard]
+port = 7700       # 0으로 설정하면 자동 실행 비활성화
+auto_open = true  # 첫 세션에서 브라우저 열기
+```
+
+화면: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -46,7 +59,7 @@
 
 ```bash
 $ /orbit "로그인 API에 JWT 인증 추가"
-→ spec approved → go (TDD subagents) → audit (PASS) → eval → ship (PR + CI) → evolve
+→ spec approved → go (TDD subagents) → check (PASS) → ship (PR + CI) → evolve
 ```
 
 원하면 파이프라인 스킬을 직접 호출할 수도 있습니다:
@@ -54,7 +67,7 @@ $ /orbit "로그인 API에 JWT 인증 추가"
 ```bash
 /spec "로그인 API에 JWT 인증 추가"   # 요구사항 명확화 → SPEC-*.md
 /go                                    # 자동 계획 → TDD 서브에이전트 → 4분
-/audit                                 # 병렬 리뷰 + 보안 + 테스트 → PASS
+/check                                 # 병렬 리뷰 + 보안 + 테스트 → PASS
 /ship                                  # 격리 테스트 → PR → CI green
 ```
 
@@ -73,7 +86,7 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 
 ## 설치
 
-> **처음이라면?** [빠른 시작 가이드 (5분)](../../docs/quickstart.md)를 읽어보세요. 데이터 저장소 구조는 [데이터 맵](../../docs/data-map.md)을 참조하세요.
+> **처음이라면?** [빠른 시작 가이드 (5분)](../../docs/quickstart.md)를 읽어보세요.
 
 ### Claude Code (권장)
 
@@ -90,9 +103,7 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 codex plugin marketplace add epicsagas/plugins
 ```
 
-26개 스킬 전체를 자동 설치하고 훅을 등록합니다. 추가 설정 없이 바로 사용할 수 있습니다.
-
-`codex plugin update epic@epicsagas`로 업데이트합니다.
+스킬과 에이전트를 즉시 사용할 수 있습니다 — 추가 단계가 필요 없습니다.
 
 ### macOS / Linux
 
@@ -123,7 +134,9 @@ cargo install epic-harness    # 소스에서 빌드
 그 다음 설정 마법사를 실행하세요:
 
 ```bash
-epic install cursor         # Cursor IDE
+epic install               # Claude Code (기본값)
+epic install codex         # Codex CLI
+epic install antigravity   # Antigravity
 ```
 
 > `epic-harness --version`으로 확인. 업데이트는 `brew upgrade epic-harness` 또는 인스톨러 스크립트 재실행.
@@ -144,6 +157,8 @@ Claude Code에서는 세션 시작 시 `hooks/install.js`가 자동 실행되어
 ### 다른 도구
 
 ```bash
+epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
+epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
 epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+ 필요)
 epic install opencode     # OpenCode    → ~/.config/opencode/
 epic install cline        # Cline       → ~/Documents/Cline/Rules/
@@ -151,7 +166,7 @@ epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
 epic install              # 인터랙티브 메뉴
 ```
 
-통합 파일은 바이너리에서 **동기화**됩니다: 누락되거나 오래된 파일이 기록됩니다. `GEMINI.md`와 `AGENTS.md`는 없을 때만 생성됩니다.
+통합 파일은 바이너리에서 **동기화**됩니다: 누락되거나 오래된 파일이 기록됩니다. `AGENTS.md`는 없을 때만 생성됩니다.
 
 ### 확인
 
@@ -164,21 +179,15 @@ Claude Code 세션 안에서: `/evolve status`
 
 ---
 
-## 파이프라인 스킬 (Ring 1)
+## 명령어
 
-| 스킬 | 기능 |
-|------|------|
-| **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 — 5 Whys, JTBD, Socratic |
-| **spec** | 요구사항 정의 — 번호가 매겨진 R + AC 문서로 변환 |
-| **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
-| **audit** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
-| **eval** | 평가 단계 — 4차원 품질/회귀 검사 (정확성, 성능, 품질, 회귀) |
-| **ship** | 배포 단계 — 격리 테스트 → 전체 체크 리포트가 포함된 PR → CI 감시 + 자동 수정 |
-| **evolve** | 진화 — 자동 세션 분석, 패턴 감지, 스킬 시딩, 메트릭 업데이트 |
-| **/team** | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
-| **/evolve** | 수동 진화 트리거 — 대시보드 보기, 스킬 효과 검사, 롤백 |
+| 명령어 | 기능 |
+|--------|------|
+| `/orbit` | **전체 자율 파이프라인**: spec → go → check → ship → evolve을 한 번에 실행 |
+| `/team` | 조직 라이브러리 탐색, 기존 팀 고용, 또는 새로 설계 (3–6 에이전트, `.claude/agents/`에 동기화) |
+| `/evolve` | 수동 진화 트리거 — 세션 분석, 대시보드 보기, 스킬 효과 검사, 롤백 |
 
-파이프라인 스킬은 `/orbit`으로 한 번에 실행되거나 개별적으로 직접 호출할 수 있습니다. `/team`과 `/evolve`는 수동 전용입니다.
+파이프라인 단계(`/spec`, `/go`, `/check`, `/ship`, `/discover`)는 이제 **스킬**입니다 — 컨텍스트에 따라 자동 트리거되거나 이름으로 직접 호출할 수 있습니다. 기존 명령어 이름은 별칭 라우팅으로 계속 작동합니다.
 
 ---
 
@@ -196,12 +205,9 @@ flowchart TD
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
     SPEC_LOAD --> GO["Go\nplan → TDD → integrate"]:::auto
-    GO --> AUDIT["Audit\nreview + security + test"]:::auto
-    AUDIT -->|"PASS / WARN"| EVAL{"eval.yaml"}
-    EVAL -->|"yes"| EVAL_RUN["Eval\n4-dimension quality check"]:::auto
-    EVAL_RUN -->|"PASS"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    EVAL -->|"no"| SHIP["Ship\nisolated test → PR → CI"]:::auto
-    AUDIT -->|FAIL| RETRY{"retry < 3?"}
+    GO --> CHECK["Check\nreview + audit + test"]:::auto
+    CHECK -->|"PASS / WARN"| SHIP["Ship\nisolated test → PR → CI"]:::auto
+    CHECK -->|FAIL| RETRY{"retry < 3?"}
     RETRY -->|yes| GO
     RETRY -->|no| PAUSE["Pause\nuser decides"]:::human
     PAUSE -->|continue| GO
@@ -213,7 +219,7 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**보라색** — 사람 개입: 모드 선택 (불분명한 경우만 인터랙티브), 3회 audit 실패 시 일시정지.
+**보라색** — 사람 개입: 모드 선택 (불분명한 경우만 인터랙티브), 3회 check 실패 시 일시정지.
 **초록색** — 명확 + 복잡 → council 자동 스펙; 명확 + 단순 → direct 빌드; 둘 다 완전 자율 실행.
 
 상태는 `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`에 저장 — 컨텍스트 압축에도 유지됩니다.
@@ -222,28 +228,43 @@ flowchart TD
 
 ---
 
-## 품질 게이트 (Ring 2)
+## 자동 스킬 (Ring 2)
 
-품질 게이트 스킬은 컨텍스트에 따라 자동으로 트리거됩니다. 직접 호출할 필요가 없습니다.
+스킬은 컨텍스트에 따라 자동으로 트리거됩니다. 직접 호출할 필요가 없습니다.
 
 | 스킬 | 트리거 조건 |
 |------|------------|
+| **spec** | 요구사항 정의 필요 — 번호가 매겨진 R + AC 문서로 변환 |
+| **go** | 빌드 단계 — 자동 계획 → TDD 서브에이전트 → 병렬 실행 → AC 검증 |
+| **check** | 리뷰 단계 — 병렬 코드 리뷰 + 보안 감사 + 테스트, 범위별 추가 항목 |
+| **ship** | 배포 단계 — 격리 테스트 → 전체 check 리포트가 포함된 PR → CI 감시 + 자동 수정 |
+| **audit** | 전체 감사 — 병렬 코드 품질 + 보안 + 테스트 리뷰 (의미적 중복 제거) |
+| **eval** | 베이스라인 비교 품질 회귀 평가 — 정확성, 성능, 품질 |
 | **tdd** | 새로운 기능 구현 또는 버그 수정 |
 | **debug** | 테스트 실패 또는 런타임 에러 |
+| **discover** | 불분명한 요청, 문제 없는 솔루션, 초점 없는 불만 |
 | **secure** | 인증/DB/API/시크릿 코드 수정 시 |
-| **threat-model** | 보안 평가, 공격 표면 분석 필요 시 |
-| **vuln-scan** | 인젝션, 인증, 데이터 노출, 의존성 전체 취약점 스캔 |
-| **triage** | 보안 발견 사항의 적대적 검증, 심각도 조정 |
+| **threat-model** | 보안 범위 지정 — 신뢰 경계 열거, 위협 행위자, 시나리오 → THREAT_MODEL.md |
+| **vuln-scan** | 체계적 취약점 스캔 — 인젝션, 인증, 데이터 노출, 의존성 → VULN-FINDINGS.json |
+| **triage** | 적대적 검증 — 심각도 조정, 체이닝 분석, 근원 그룹화 → TRIAGE.json |
 | **perf** | 루프, 쿼리, 렌더링, 배치 작업 |
 | **simplify** | 파일이 200줄 초과이거나 순환 복잡도가 높을 때 |
-| **verify** | `/go` 또는 `/ship` 완료 전 |
 | **document** | 퍼블릭 API 추가 또는 서명 변경 |
+| **verify** | `/go` 또는 `/ship` 완료 전 |
 | **context** | 컨텍스트 윈도우 사용률 > 70% |
 | **council** | 모호한 아키텍처 또는 설계 결정 |
 | **orchestrate** | 멀티 에이전트 오케스트레이션 상태 및 라이브 에이전트 제어 |
 | **agent-introspection** | 3회 이상 연속 실패 또는 순환 재시도 패턴 |
-| **reflect** | 온디맨드 `/reflect`: 휴먼 자기 평가 — "AI를 사고 증폭기로 잘 쓰고 있는가?" 훅이 수집한 데이터로 5차원 증거 기반 평가 |
+| **reflect** | 온디맨드: AI를 사고 증폭기로 활용하고 있는가? 냉정한 증거 기반 자기 평가 |
 | **commit** | Conventional Commits 생성 — git diff에서 자동 생성 |
+
+> **토큰 예산 참고:** Claude Code는 스킬 설명을 매 세션 컨텍스트에 로드합니다. epic의 26개 스킬은 기본 `skillListingBudgetFraction: 0.01`(1%) 내에 들어갑니다. 추가 스킬(예: episteme, alcove, obscura)을 설치하면 합산이 예산을 초과하여 "descriptions dropped" 경고가 발생할 수 있습니다. 이 경우 `~/.claude/settings.json`에 다음을 추가하세요:
+>
+> ```json
+> "skillListingBudgetFraction": 0.02
+> ```
+>
+> 20개 이상의 스킬이 설치되어 있다면 `0.03`을 사용하세요.
 
 ---
 
@@ -288,27 +309,21 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 
 스킬 시드: 약한 도구 (성공률 <60%, 최소 5회 관측), 약한 파일 유형 (성공률 <50%, 최소 3회 관측), 고빈도 에러 (5회 이상).
 
-### SkillOpt 기반 최적화
-
-자연어 스킬 진화에 딥러닝에서 영감받은 세 가지 기법을 적용합니다:
-
-| 기법 | 설명 |
-|------|------|
-| **네거티브 피드백 버퍼** | 거부된 스킬 제안을 TTL 기반으로 보관 — 동일한 나쁜 스킬 재생성 방지 |
-| **미니배치 리플렉션** | 관측 데이터를 고정 크기 배치로 분해하여 구조적 패턴 추출 — 세션 평균에 묻히는 미세 패턴 포착 |
-| **슬로우/메타 업데이트** | 에포크 분류(Improving/Regressing/PersistentFailure/StableSuccess) 및 느린 파라미터 업데이트 기록 — 장기 트렌드에 맞춘 진화 전략 조정 |
-
-[SkillOpt (arXiv 2605.23904)](https://arxiv.org/abs/2605.23904)에서 차용. `[evolution]`의 `rejected_buffer_ttl`과 `minibatch_size`로 설정 가능.
-
 정체: 3세션 동안 5% 개선 없음 → 최적 체크포인트로 자동 롤백.
+
+### SkillOpt 영감 최적화
+
+[SkillOpt](https://arxiv.org/abs/2605.23904)에서 적용한 딥러닝 영감의 세 가지 기법:
+
+| 기법 | 작동 방식 |
+|------|----------|
+| **Negative Feedback Buffer** | 거부된 제안을 TTL 기반 만료와 함께 저장; 향후 제안 생성 전 버퍼를 확인 |
+| **Minibatch Reflection** | 관측값을 고정 크기 배치로 분해하여 구조적 패턴 추출; 지배적 에러 ≥60% + ≥2개 이상의 서로 다른 파일일 때 재사용 가능 |
+| **Slow/Meta Update** | 최근 5개 세션에 대한 선형 회귀로 에포크를 Improving / Regressing / PersistentFailure / StableSuccess로 분류; 성과가 낮은 스킬 자동 퇴출 |
 
 ### 프롬프트 자동 튜닝
 
-성과가 낮은 진화 스킬(avg_score_with < avg_score_without)은 SKILL.md에 타겟팅된 튜닝 가이드가 추가됩니다. 원본 콘텐츠는 수정되지 않으며, 튜닝 섹션은 `<!-- auto-tuned -->` 구분자 뒤에 위치합니다.
-
-- **자동 롤백**: 3회 연속 점수 하락 시 튜닝 제거 및 이력 초기화
-- **이력 상한**: 스킬당 10개 튜닝 엔트리, `meta.json`에 추적
-- **격차 기반 가이드**: 튜닝 심각도가 A/B 점수 격차에 일치 (minor → significant → major)
+성과가 낮은 진화 스킬은 `<!-- auto-tuned -->` 구분자 뒤에 타겟팅된 튜닝 가이드가 추가됩니다. 원본 콘텐츠는 수정되지 않습니다. 3세션 연속 하락 시 → 튜닝 자동 롤백, 이력 초기화.
 
 ### 스킬 효과
 
@@ -356,6 +371,27 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 
 ---
 
+## 보안 파이프라인
+
+[defending-code](https://github.com/anthropics/defending-code-reference-harness)에서 이식한 3단계 취약점 평가 파이프라인:
+
+```bash
+/threat-model    # 1. 신뢰 경계, 위협 행위자, 시나리오 → THREAT_MODEL.md
+/vuln-scan       # 2. 4차원 스캐너 (인젝션, 인증, 데이터 노출, 의존성) → VULN-FINDINGS.json
+/triage          # 3. 적대적 검증, 심각도 조정, 체이닝 → TRIAGE.json
+```
+
+### Audit `--strict` 모드
+
+보안 종합 평가를 위해 `--strict` 모드는 audit 모드 간 독립성을 강제합니다:
+- 코드, 보안, 테스트 리뷰어는 diff + spec만 수신 — 빌더 컨텍스트 없음
+- 교차 검증 독립성: 종합 전까지 각 모드가 블라인드로 실행
+- 블라인드 스코어링으로 앵커링 편향 방지
+
+선택적으로 프로젝트 루트에 `.harness/engagement.md`를 통해 종합 평가 컨텍스트를 제공할 수 있습니다 (권한, 범위, 제약, 제외 항목). 템플릿은 `docs/references/engagement.md`를 참조하세요.
+
+---
+
 ## 훅 (Ring 0)
 
 모든 세션에서 투명하게 실행됩니다. 단일 Rust 바이너리(`epic-harness`)의 서브커맨드로 구현됩니다.
@@ -365,9 +401,9 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 | **resume** | 세션 시작 | 컨텍스트 복원, 메모리 로드, 스택 감지 |
 | **guard** | Bash 실행 전 | force-push-to-main, `rm -rf /`, DROP prod 차단 |
 | **polish** | Edit 후 | 자동 포맷 (Biome/Prettier/ruff/gofmt) + 타입체크 |
-| **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 로깅 |
+| **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 진화용 로깅 |
 | **snapshot** | compact 전 | `~/.harness/projects/{slug}/sessions/`에 상태 저장 |
-| **reflect** | 세션 종료 | 자동 진화 엔진: 실패 분석, 진화 스킬 시딩, 메트릭 업데이트, 메모리 인제스트. `/reflect` 스킬에 데이터 제공 |
+| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트, instinct 추출 |
 
 polish는 observe로 피드백됩니다: 포맷 실패 → `lint_fail`, TypeScript 에러 → `build_fail`. Edit→Error 쓰래싱은 에러가 polish에서 발생해도 감지됩니다.
 
@@ -430,16 +466,17 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 모든 도구가 동일한 `~/.harness/projects/{slug}/` 데이터 디렉토리를 공유합니다.
 
-| 도구 | Ring 0 훅 | 스킬 | 에이전트 |
-|------|-----------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 26개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 26개 | — |
-| **Cursor** | ✓ 전체³ | ✓ 규칙 경유 | Live |
-| **OpenCode** | ✓ 부분⁴ | — | — |
-| **Cline** | ✓ 전체⁵ | — | — |
-| **Aider** | —⁶ | — | — |
+| 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
+|------|-----------|--------|------|---------|
+| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
+| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
+| **Cursor** | ✓ 전체³ | ✓ 3개 명령어 (/orbit 포함) | ✓ 규칙 경유 | Live |
+| **OpenCode** | ✓ 부분⁴ | ✓ 3개 명령어 (/orbit 포함) | — | — |
+| **Cline** | ✓ 전체⁵ | — | — | — |
+| **Aider** | —⁶ | — | — | — |
 
-¹ Plugin marketplace · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
+¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요 · ² 플러그인 설치; 서브에이전트 지원은 아직 미지원 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
 ---
 
@@ -452,19 +489,19 @@ flowchart TB
         h1(resume) --- h2(guard) --- h3(polish) --- h4(observe) --- h5(snapshot) --- h6(reflect)
     end
 
-    subgraph R1["Ring 1 — 파이프라인 스킬 (9)"]
+    subgraph R1["Ring 1 — 명령어 (직접 호출)"]
         direction TB
         subgraph orbit_wrap["  /orbit  "]
             direction LR
-            c1("discover") --> c2("spec") --> c3("go") --> c4("audit") --> c4b("eval") --> c5("ship") --> c6("evolve")
+            c1("spec") --> c2("go") --> c3("check") --> c4("ship") --> c5("evolve")
         end
-        c7("/team")
-        c8("/evolve (manual)")
+        c6("/team")
+        c7("/evolve (manual)")
     end
 
-    subgraph R2["Ring 2 — 품질 게이트 (17, context-triggered)"]
+    subgraph R2["Ring 2 — 자동 스킬 (컨텍스트 트리거)"]
         direction LR
-        s1(tdd) --- s2(debug) --- s3(secure) --- s3b(threat-model) --- s3c(vuln-scan) --- s3d(triage) --- s4(perf) --- s5(simplify) --- s6(verify) --- s7(council)
+        s1(spec) --- s2(go) --- s3(check) --- s4(ship) --- s5(tdd) --- s6(debug) --- s7(secure) --- s8(perf) --- s9(simplify) --- s10(verify) --- s11(audit) --- s12(eval) --- s13(threat-model) --- s14(vuln-scan) --- s15(triage)
     end
 
     subgraph R3["Ring 3 — 진화 (자기 개선)"]
@@ -513,16 +550,16 @@ epic mem mcp-install                                   # MCP 서버 등록
 epic mem export --out ./docs/memory                    # Markdown 내보내기
 ```
 
-### CLI 명령어 (6개)
+### MCP 도구 (6개)
 
-| 명령어 | 목적 |
-|--------|------|
-| `epic-harness mem recall "HINT"` | 힌트 + 프로젝트 + 그래프 이웃을 활용한 스마트 컨텍스트 리콜 |
-| `epic-harness mem add --title "T" --type TYPE --body "B"` | 유형별 자동 중요도로 노드 추가 (또는 명시적 0.0–1.0) |
-| `epic-harness mem search "QUERY"` | 키워드 검색 (전체 텍스트), 중요도 순 정렬 |
-| `epic-harness mem list` | 태그/유형/프로젝트별 필터 |
-| `epic-harness mem context` | 프로젝트 범위 스마트 리콜 (힌트 없음) |
-| `epic-harness mem related ID` | 노드 ID에서 그래프 탐색 (연결된 지식 발견) |
+| 도구 | 목적 |
+|------|------|
+| `mem_recall` | 힌트 + 프로젝트 + 그래프 이웃을 활용한 스마트 컨텍스트 리콜 |
+| `mem_add` | 유형별 자동 중요도로 노드 추가 (또는 명시적 0.0–1.0) |
+| `mem_search` | 키워드 검색 (전체 텍스트), 중요도 순 정렬 |
+| `mem_query` | 태그/유형/프로젝트별 필터 |
+| `mem_context` | 프로젝트 범위 스마트 리콜 (힌트 없음) |
+| `mem_related` | 노드 ID에서 그래프 탐색 (연결된 지식 발견) |
 
 ### 노드 유형
 
@@ -538,8 +575,6 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 | `session` | 자동 (reflect) | 0.2 |
 
 수명 주기: 30일 이상 미접근 → 중요도 10% 감쇠 (최소 0.05). 180일 이상 → `stale` 태그, 리콜 제외. `pinned` 태그는 감쇠를 방지합니다.
-
-> **Web UI**: 그래프 시각화는 적극 개선 중입니다 — 클러스터링, 이웃 하이라이트, 오프라인 폴백이 최근 추가되었습니다. 더 많은 개선이 진행 중입니다.
 
 ---
 
@@ -572,29 +607,6 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
     └── metrics.json           # 집계 통계 + 스킬 기여도
 ```
 
-### 마이그레이션 (JSONL → SQLite)
-
-v0.4.9부터 운영 데이터는 `harness.db`(SQLite)에 저장됩니다. JSONL/JSON 파일을 보유한 기존 사용자는 업그레이드 후 한 번 실행해야 합니다:
-
-```bash
-epic-harness migrate --dry-run   # 가져올 데이터 미리 보기
-epic-harness migrate             # 실제 가져오기 실행
-```
-
-원본 파일은 가져오기 후 **삭제되지 않습니다**. 신규 사용자는 자동으로 SQLite를 사용하므로 별도 작업이 필요 없습니다.
-
-### 슬러그 통합
-
-같은 프로젝트를 다른 경로에 클론하면 여러 슬러그가 생길 수 있습니다 (예: `/Volumes/T5/projects/…`와 `~/projects/…`는 서로 다른 접미사를 생성). 다음 명령어로 병합할 수 있습니다:
-
-```bash
-epic-harness merge-project --from <source-slug> --to <target-slug> --dry-run   # 미리 보기
-epic-harness merge-project --from <source-slug> --to <target-slug>              # 적용
-epic-harness merge-project --from <source-slug> --to <target-slug> --delete-source  # 적용 + 소스 제거
-```
-
-세 가지 데이터 계층을 모두 병합합니다: 글로벌 `harness.db`(`project` 컬럼 재레이블링), 프로젝트별 `harness.db`(ATTACH + INSERT OR IGNORE), 파일 기반 데이터(`obs/`, `sessions/`, `evolved/`, `evolution.jsonl`, `orbit/`). 대상에 이미 존재하는 파일은 절대 덮어쓰지 않으며 — 소스 전용 파일만 복사됩니다.
-
 프로젝트 루트의 `.harness/guard-rules.yaml`을 통해 팀과 안전 규칙을 공유할 수 있습니다 (git에 커밋됨).
 
 </details>
@@ -623,8 +635,6 @@ max_skills = 10
 stagnation_limit = 3
 improvement_threshold = 0.05
 gated_promotion_min = 3
-# rejected_buffer_ttl = 10    # 거부된 제안 만료 전 세션 수
-# minibatch_size = 8          # 패턴 추출용 미니배치 크기
 
 [pattern]
 # repeated_error_min = 3
@@ -702,14 +712,14 @@ macOS가 인터넷에서 다운로드한 서명되지 않은 바이너리를 차
 
 ```bash
 xattr -d com.apple.quarantine ~/.cargo/bin/epic-harness
-xattr -d com.apple.quarantine ~/.cargo/bin/ep
+xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
 <details>
 <summary>epic: plugin hooks 내에서 바이너리를 찾을 수 없음</summary>
 
-플러그인은 먼저 `hooks/bin/epic-harness`에서 바이너리를 찾습니다. `cargo install`으로 업데이트한 후 복사하세요:
+플러그인은 먼저 `hooks/bin/epic-harness`에서 바이너리를 찾습니다. `cargo install`로 업데이트한 후 복사하세요:
 
 ```bash
 cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
@@ -739,8 +749,6 @@ cargo test                                                    # 테스트
 
 ## 감사의 말
 
-- [SkillOpt](https://arxiv.org/abs/2605.23904) — 딥러닝 기반 스킬 최적화 (네거티브 피드백 버퍼, 미니배치 리플렉션, 슬로우/메타 업데이트)
-- [defending-code](https://github.com/anthropics/defending-code-reference-harness) — 보안 평가 패턴 (위협 모델링, 취약점 스캔, 적대적 트리아지, 투 컨테이너 신뢰 경계)
 - [a-evolve](https://github.com/A-EVO-Lab/a-evolve) — 자동화된 진화 및 벤치마크 패턴
 - [agent-skills](https://github.com/addyosmani/agent-skills) — Claude Code 에이전트 스킬 시스템
 - [everything-claude-code](https://github.com/affaan-m/everything-claude-code) — 종합 Claude Code 패턴

@@ -1,86 +1,11 @@
 //! orbit_store.rs — Orbit pipeline SQLite I/O
-//!
-//! Dual-write model: the /orbit skill writes PIPELINE-*.json files (required for
-//! phase recovery via Claude Code's file tools); hooks sync those files to SQLite
-//! at session-end (reflect) and pre-compact (snapshot) so the REST API and dashboard
-//! have a queryable, up-to-date view without changing the skill.
+#![allow(dead_code)]
 
+use sqlx::AnyPool;
+use sqlx::Row;
 use std::io;
 
-const MAX_PIPELINE_LIST: usize = 200;
-
-// ── Async pool functions ─────────────────────────────
-
-use sqlx::{AnyPool, Row};
-
-/// Pool version of sync_orbit_files_to_db.
-pub async fn sync_orbit_files_to_db_pool(
-    pool: &AnyPool,
-    orbit_dir: &std::path::Path,
-) -> io::Result<usize> {
-    if !orbit_dir.is_dir() {
-        return Ok(0);
-    }
-
-    let project = crate::shared::paths::project_slug();
-    let mut synced = 0;
-
-    let entries = std::fs::read_dir(orbit_dir)
-        .map_err(io::Error::other)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let name = e.file_name();
-            let s = name.to_string_lossy();
-            s.starts_with("PIPELINE-") && s.ends_with(".json")
-        });
-
-    for entry in entries {
-        let path = entry.path();
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("[store/orbit] failed to read {}: {e}", path.display());
-                continue;
-            }
-        };
-
-        let val: serde_json::Value = match serde_json::from_str(&content) {
-            Ok(v) => v,
-            Err(e) => {
-                eprintln!("[store/orbit] malformed JSON in {}: {e}", path.display());
-                continue;
-            }
-        };
-
-        let id = val
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_else(|| {
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-            })
-            .to_string();
-
-        let status = val
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown");
-        let phase = val.get("phase").and_then(|v| v.as_str());
-        let mode = val.get("mode").and_then(|v| v.as_str());
-
-        if let Err(e) =
-            upsert_pipeline_pool(pool, &id, &project, status, phase, mode, &content).await
-        {
-            eprintln!("[store/orbit] upsert failed for {id}: {e}");
-            continue;
-        }
-        synced += 1;
-    }
-
-    Ok(synced)
-}
-
+/// Upsert a pipeline state. If a pipeline with the same id exists, it's replaced.
 pub async fn upsert_pipeline_pool(
     pool: &AnyPool,
     id: &str,
@@ -92,7 +17,11 @@ pub async fn upsert_pipeline_pool(
 ) -> io::Result<()> {
     let now = crate::shared::helpers::now_iso();
     sqlx::query(
-        "INSERT INTO orbit_pipelines (id, project, status, phase, mode, state_json, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (id) DO UPDATE SET project=excluded.project, status=excluded.status, phase=excluded.phase, mode=excluded.mode, state_json=excluded.state_json, created_at=orbit_pipelines.created_at, updated_at=excluded.updated_at"
+        "INSERT OR REPLACE INTO orbit_pipelines
+         (id, project, status, phase, mode, state_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?,
+                 COALESCE((SELECT created_at FROM orbit_pipelines WHERE id = ?), ?),
+                 ?)",
     )
     .bind(id)
     .bind(project)
@@ -100,111 +29,124 @@ pub async fn upsert_pipeline_pool(
     .bind(phase)
     .bind(mode)
     .bind(state_json)
+    .bind(id)
     .bind(&now)
     .bind(&now)
     .execute(pool)
     .await
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(super::sqlx_err)?;
     Ok(())
 }
 
-#[cfg(test)]
+/// Find a running pipeline, optionally filtered by project.
 pub async fn read_running_pipeline_pool(
     pool: &AnyPool,
     project: Option<&str>,
 ) -> io::Result<Option<serde_json::Value>> {
-    let row = if let Some(proj) = project {
-        sqlx::query(
-            "SELECT state_json FROM orbit_pipelines WHERE status = 'running' AND project = $1 LIMIT 1"
-        )
-        .bind(proj)
-        .fetch_optional(pool)
-        .await
-    } else {
-        sqlx::query(
-            "SELECT state_json FROM orbit_pipelines WHERE status = 'running' LIMIT 1"
-        )
-        .fetch_optional(pool)
-        .await
+    let row = match project {
+        Some(p) => {
+            sqlx::query(
+                "SELECT state_json FROM orbit_pipelines WHERE status = 'running' AND project = ? LIMIT 1",
+            )
+            .bind(p)
+            .fetch_optional(pool)
+            .await
+        }
+        None => {
+            sqlx::query(
+                "SELECT state_json FROM orbit_pipelines WHERE status = 'running' LIMIT 1",
+            )
+            .fetch_optional(pool)
+            .await
+        }
     }
-    .map_err(crate::store::sqlx_err)?;
+    .map_err(super::sqlx_err)?;
 
     match row {
         Some(r) => {
-            let json_str: String = r.try_get(0).map_err(crate::store::sqlx_err)?;
-            let val: serde_json::Value = serde_json::from_str(&json_str).unwrap_or_else(|e| {
-                eprintln!("[store/orbit] malformed state_json, using empty object: {e}");
-                serde_json::Value::Object(Default::default())
-            });
+            let json_str: String = r.try_get(0).map_err(super::sqlx_err)?;
+            let val: serde_json::Value = serde_json::from_str(&json_str)
+                .unwrap_or(serde_json::Value::Object(Default::default()));
             Ok(Some(val))
         }
         None => Ok(None),
     }
 }
 
+/// List all pipelines across all projects (for dashboard).
 pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_json::Value>> {
-    list_all_pipelines_pool_limited(pool, MAX_PIPELINE_LIST as i64).await
+    let rows = sqlx::query(
+        "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
+         FROM orbit_pipelines ORDER BY created_at DESC",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let mut pipelines = Vec::with_capacity(rows.len());
+    for r in rows {
+        let id: String = r.try_get(0).map_err(super::sqlx_err)?;
+        let project: String = r.try_get(1).map_err(super::sqlx_err)?;
+        let status: String = r.try_get(2).map_err(super::sqlx_err)?;
+        let phase: Option<String> = r.try_get(3).map_err(super::sqlx_err)?;
+        let mode: Option<String> = r.try_get(4).map_err(super::sqlx_err)?;
+        let state_json: String = r.try_get(5).map_err(super::sqlx_err)?;
+        let created_at: String = r.try_get(6).map_err(super::sqlx_err)?;
+        let updated_at: String = r.try_get(7).map_err(super::sqlx_err)?;
+
+        let mut val: serde_json::Value = serde_json::from_str(&state_json)
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        let map = val.as_object_mut().unwrap();
+        map.insert("id".into(), serde_json::Value::String(id));
+        map.insert("project".into(), serde_json::Value::String(project));
+        map.insert("status".into(), serde_json::Value::String(status));
+        if let Some(p) = phase {
+            map.insert("phase".into(), serde_json::Value::String(p));
+        }
+        if let Some(m) = mode {
+            map.insert("mode".into(), serde_json::Value::String(m));
+        }
+        map.insert("started_at".into(), serde_json::Value::String(created_at));
+        map.insert("updated_at".into(), serde_json::Value::String(updated_at));
+        pipelines.push(val);
+    }
+    Ok(pipelines)
 }
 
+/// List pipelines with a row limit (most recent first).
 pub async fn list_all_pipelines_pool_limited(
     pool: &AnyPool,
     limit: i64,
 ) -> io::Result<Vec<serde_json::Value>> {
-    let rows = sqlx::query(
-        "SELECT id, project, status, phase, mode, state_json, created_at, updated_at FROM orbit_pipelines ORDER BY created_at DESC LIMIT $1"
-    )
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(crate::store::sqlx_err)?;
-
-    let pipelines: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|r| {
-            let id: String = r.try_get(0).unwrap_or_default();
-            let project: String = r.try_get(1).unwrap_or_default();
-            let status: String = r.try_get(2).unwrap_or_default();
-            let phase: Option<String> = r.try_get(3).unwrap_or(None);
-            let mode: Option<String> = r.try_get(4).unwrap_or(None);
-            let state_json: String = r.try_get(5).unwrap_or_default();
-            let created_at: String = r.try_get(6).unwrap_or_default();
-            let updated_at: String = r.try_get(7).unwrap_or_default();
-
-            let mut val: serde_json::Value =
-                serde_json::from_str(&state_json).unwrap_or_else(|e| {
-                    eprintln!(
-                        "[store/orbit] malformed state_json in listing, using empty object: {e}"
-                    );
-                    serde_json::Value::Object(Default::default())
-                });
-            if !val.is_object() {
-                val = serde_json::Value::Object(Default::default());
-            }
-            if let Some(map) = val.as_object_mut() {
-                map.insert("id".into(), serde_json::Value::String(id));
-                map.insert("project".into(), serde_json::Value::String(project));
-                map.insert("status".into(), serde_json::Value::String(status));
-                if let Some(p) = phase {
-                    map.insert("phase".into(), serde_json::Value::String(p));
-                }
-                if let Some(m) = mode {
-                    map.insert("mode".into(), serde_json::Value::String(m));
-                }
-                map.insert("started_at".into(), serde_json::Value::String(created_at));
-                map.insert("updated_at".into(), serde_json::Value::String(updated_at));
-            }
-            val
-        })
-        .collect();
-    Ok(pipelines)
+    let mut all = list_all_pipelines_pool(pool).await?;
+    all.truncate(limit as usize);
+    Ok(all)
 }
 
+/// Dismiss (delete) a pipeline by ID.
 pub async fn dismiss_pipeline_pool(pool: &AnyPool, pipeline_id: &str) -> io::Result<bool> {
-    let result = sqlx::query("DELETE FROM orbit_pipelines WHERE id = $1")
+    let result = sqlx::query("DELETE FROM orbit_pipelines WHERE id = ?")
         .bind(pipeline_id)
         .execute(pool)
         .await
-        .map_err(crate::store::sqlx_err)?;
+        .map_err(super::sqlx_err)?;
+    Ok(result.rows_affected() > 0)
+}
+
+/// Update pipeline status only.
+pub async fn update_pipeline_status_pool(
+    pool: &AnyPool,
+    pipeline_id: &str,
+    status: &str,
+) -> io::Result<bool> {
+    let now = crate::shared::helpers::now_iso();
+    let result = sqlx::query("UPDATE orbit_pipelines SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(status)
+        .bind(&now)
+        .bind(pipeline_id)
+        .execute(pool)
+        .await
+        .map_err(super::sqlx_err)?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -212,15 +154,15 @@ pub async fn dismiss_pipeline_pool(pool: &AnyPool, pipeline_id: &str) -> io::Res
 mod tests {
     use super::*;
 
-    async fn in_memory_pool() -> sqlx::AnyPool {
-        let pool = crate::store::pool::test_memory_pool().await;
-        crate::store::schema::init_schema_pool(&pool).await.unwrap();
+    async fn test_pool() -> AnyPool {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
         pool
     }
 
     #[tokio::test]
     async fn upsert_and_read_running() {
-        let pool = in_memory_pool().await;
+        let pool = test_pool().await;
         upsert_pipeline_pool(
             &pool,
             "PIPELINE-20260602-abc",
@@ -243,7 +185,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_all_pipelines() {
-        let pool = in_memory_pool().await;
+        let pool = test_pool().await;
         upsert_pipeline_pool(&pool, "PIPELINE-1", "proj-a", "running", None, None, "{}")
             .await
             .unwrap();
@@ -257,12 +199,14 @@ mod tests {
 
     #[tokio::test]
     async fn dismiss_pipeline() {
-        let pool = in_memory_pool().await;
+        let pool = test_pool().await;
         upsert_pipeline_pool(&pool, "PIPELINE-1", "proj", "running", None, None, "{}")
             .await
             .unwrap();
 
-        let dismissed = dismiss_pipeline_pool(&pool, "PIPELINE-1").await.unwrap();
+        let dismissed = dismiss_pipeline_pool(&pool, "PIPELINE-1")
+            .await
+            .unwrap();
         assert!(dismissed);
 
         let result = read_running_pipeline_pool(&pool, None).await.unwrap();

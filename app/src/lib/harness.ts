@@ -174,6 +174,33 @@ export interface AgentEvent {
   data: Record<string, unknown>;
 }
 
+export interface OrchAgentDef {
+  id: string;
+  role: string;
+  task: string;
+  satisfies: string[];
+  status: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface OrchestrationRun {
+  id: string;
+  status: string;
+  agents: OrchAgentDef[];
+  dependency_graph: Record<string, string[]>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrchAgentStatus {
+  agent_id: string;
+  phase: string;
+  progress: number;
+  last_heartbeat: string;
+  status: string;
+}
+
 export interface GraphNode {
   id: string;
   title: string;

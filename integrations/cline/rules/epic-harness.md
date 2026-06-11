@@ -1,9 +1,9 @@
-<!-- Canonical source: ~/.harness/HARNESS.md (managed by epic). Keep in sync when updating harness instructions. -->
-# epic harness
+<!-- Canonical source: ~/.harness/HARNESS.md (managed by epic-harness). Keep in sync when updating harness instructions. -->
+# epic-harness
 
-**CRITICAL**: Run `HARNESS_DIR=$(epic path)` first. NEVER use `.harness/` in the project directory.
+**CRITICAL**: Run `HARNESS_DIR=$(epic-harness path)` first. NEVER use `.harness/` in the project directory.
 
-This project uses the **epic** automation layer. The hooks in
+This project uses the **epic-harness** automation layer. The hooks in
 `~/Documents/Cline/Hooks/` run automatically around every tool call.
 Here is what they do:
 
@@ -34,7 +34,7 @@ These skills activate automatically based on context signals:
 |-------|---------|
 | `spec` | Define requirements before coding |
 | `go` | Build with auto-plan + TDD sub-agents |
-| `audit` | Parallel review + security + tests |
+| `check` | Parallel review + security + tests |
 | `ship` | Create PR, verify CI, merge |
 | `tdd` | New feature or bug fix — Red → Green → Refactor |
 | `debug` | Test failure, runtime error, unexpected behavior |
@@ -49,7 +49,7 @@ These skills activate automatically based on context signals:
 | `discover` | Problem discovery — 5 Whys, JTBD, Socratic |
 | `orchestrate` | Multi-agent orchestration status and control |
 | `agent-introspection` | Failure recovery on 3+ consecutive errors |
-| `reflect` | Human-triggered: "Am I using AI as a thought amplifier?" 5-dimension evidence-based self-assessment consuming hook-produced data |
+| `reflect` | AI usage review and scoring |
 
 ## ~/.harness/projects/{slug}/ Directory
 
@@ -83,20 +83,20 @@ Anti-patterns to reject:
 
 ## Orbit — Autonomous Pipeline
 
-Chains spec → go → audit → ship in a single session.
+Chains spec → go → check → ship in a single session.
 
 **Two modes:**
-- **Interactive**: User describes the problem, then spec/go/audit/ship skills fire automatically
+- **Interactive**: User describes the problem, then spec/go/check/ship skills fire automatically
 - **Council auto-spec**: 4-voice council (Architect, Skeptic, Pragmatist, Critic) analyzes the request and generates a spec. User approves or rejects.
 
 **After spec approved**, runs autonomously:
 1. Go: plan tasks, execute with TDD, integrate
-2. Audit: code review + security audit + test suite + spec coverage
-3. On FAIL: auto-fix and re-audit, max 3 cycles. Pauses for human input if all 3 fail.
+2. Check: code review + security audit + test suite + spec coverage
+3. On FAIL: auto-fix and re-check, max 3 cycles. Pauses for human input if all 3 fail.
 4. Ship: isolated integration test, git hygiene, create PR, watch CI
 
 **State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`
 
 **Human checkpoints:**
 - Spec must be explicitly approved before autonomous execution begins
-- 3 failed audit cycles → pause for user decision (continue or abort)
+- 3 failed check cycles → pause for user decision (continue or abort)

@@ -21,11 +21,15 @@ static SKILL_DISCOVER: &str = include_str!("../registry/skills/discover/SKILL.md
 static SKILL_ORCHESTRATE: &str = include_str!("../registry/skills/orchestrate/SKILL.md");
 static SKILL_SPEC: &str = include_str!("../registry/skills/spec/SKILL.md");
 static SKILL_GO: &str = include_str!("../registry/skills/go/SKILL.md");
-static SKILL_AUDIT: &str = include_str!("../registry/skills/audit/SKILL.md");
+static SKILL_CHECK: &str = include_str!("../registry/skills/check/SKILL.md");
 static SKILL_SHIP: &str = include_str!("../registry/skills/ship/SKILL.md");
-static SKILL_ORBIT: &str = include_str!("../registry/skills/orbit/SKILL.md");
-static SKILL_EVOLVE: &str = include_str!("../registry/skills/evolve/SKILL.md");
-static SKILL_TEAM: &str = include_str!("../registry/skills/team/SKILL.md");
+// _dispatch is Claude Code only, not installed to other tools
+static CMD_EVOLVE: &str = include_str!("../registry/commands/evolve.md");
+static CMD_TEAM: &str = include_str!("../registry/commands/team.md");
+static CMD_ORBIT: &str = include_str!("../registry/commands/orbit.md");
+
+static SKILL_DISPATCH: &str = include_str!("../registry/skills/_dispatch/SKILL.md");
+
 static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("commit", SKILL_COMMIT),
     ("context", SKILL_CONTEXT),
@@ -43,11 +47,8 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("orchestrate", SKILL_ORCHESTRATE),
     ("spec", SKILL_SPEC),
     ("go", SKILL_GO),
-    ("audit", SKILL_AUDIT),
+    ("check", SKILL_CHECK),
     ("ship", SKILL_SHIP),
-    ("orbit", SKILL_ORBIT),
-    ("evolve", SKILL_EVOLVE),
-    ("team", SKILL_TEAM),
 ];
 
 // ── Per-skill Memory Integration sections (appended for codex) ──────────────
@@ -224,6 +225,23 @@ fn transform_skill(tool: &str, name: &str, canonical: &str) -> String {
 
             result
         }
+        "antigravity" => {
+            let mut result = canonical.to_string();
+
+            // Text normalizations
+            if name == "tdd" || name == "verify" {
+                result = result.replace("subagents", "sub-agents");
+                result = result.replace("subagent", "sub-agent");
+            }
+
+            // Append Memory Integration section (same as codex)
+            let mem_section = mem_section_for_skill(name);
+            if !mem_section.is_empty() {
+                result = format!("{}{}", result.trim_end(), mem_section);
+            }
+
+            result
+        }
         _ => canonical.to_string(),
     }
 }
@@ -254,6 +272,38 @@ macro_rules! integration_files {
 
 static HARNESS_MD: &str = include_str!("../integrations/common/HARNESS.md");
 
+static CODEX_FILES: &[(&str, &str)] = integration_files!(
+    "codex",
+    [
+        (
+            "hooks.json",
+            include_str!("../integrations/codex/hooks.json")
+        ),
+        // config.toml: enables codex_hooks (off by default without this).
+        (
+            "config.toml",
+            include_str!("../integrations/codex/config.toml")
+        ),
+    ]
+);
+
+/// Codex command-skills: converted from deprecated prompts/ to skills/ format at install time.
+/// Each entry is (skill_name, source_markdown_with_frontmatter).
+static CODEX_COMMAND_SKILLS: &[(&str, &str)] = &[
+    (
+        "evolve",
+        include_str!("../integrations/codex/prompts/evolve.md"),
+    ),
+    (
+        "team",
+        include_str!("../integrations/codex/prompts/team.md"),
+    ),
+    (
+        "orbit",
+        include_str!("../integrations/codex/prompts/orbit.md"),
+    ),
+];
+
 static CURSOR_FILES: &[(&str, &str)] = integration_files!(
     "cursor",
     [
@@ -265,15 +315,41 @@ static CURSOR_FILES: &[(&str, &str)] = integration_files!(
             "rules/harness-context.mdc",
             include_str!("../integrations/cursor/rules/harness-context.mdc")
         ),
+        (
+            "commands/evolve.md",
+            include_str!("../integrations/cursor/commands/evolve.md")
+        ),
+        (
+            "commands/team.md",
+            include_str!("../integrations/cursor/commands/team.md")
+        ),
+        (
+            "commands/orbit.md",
+            include_str!("../integrations/cursor/commands/orbit.md")
+        ),
     ]
 );
 
 static OPENCODE_FILES: &[(&str, &str)] = integration_files!(
     "opencode",
-    [(
-        "plugins/epic-harness.js",
-        include_str!("../integrations/opencode/plugins/epic-harness.js")
-    ),]
+    [
+        (
+            "commands/evolve.md",
+            include_str!("../integrations/opencode/commands/evolve.md")
+        ),
+        (
+            "commands/team.md",
+            include_str!("../integrations/opencode/commands/team.md")
+        ),
+        (
+            "commands/orbit.md",
+            include_str!("../integrations/opencode/commands/orbit.md")
+        ),
+        (
+            "plugins/epic-harness.js",
+            include_str!("../integrations/opencode/plugins/epic-harness.js")
+        ),
+    ]
 );
 
 static CLINE_FILES: &[(&str, &str)] = integration_files!(
@@ -320,6 +396,31 @@ static AIDER_FILES: &[(&str, &str)] = integration_files!(
     ]
 );
 
+static CLAUDE_FILES: &[(&str, &str)] = integration_files!(
+    "claude",
+    [(".claude/settings.json", include_str!("../hooks/hooks.json")),]
+);
+
+// Antigravity: gemini-extension.json manifest + context + hooks.
+// Installed to ~/.gemini/config/plugins/epic/ (global) or .agents/plugins/epic/ (local).
+static ANTIGRAVITY_FILES: &[(&str, &str)] = integration_files!(
+    "antigravity",
+    [
+        (
+            "gemini-extension.json",
+            include_str!("../integrations/antigravity/gemini-extension.json")
+        ),
+        (
+            "GEMINI.md",
+            include_str!("../integrations/antigravity/GEMINI.md")
+        ),
+        (
+            "hooks/hooks.json",
+            include_str!("../integrations/antigravity/hooks/hooks.json")
+        ),
+    ]
+);
+
 // ── Tool config ───────────────────────────────────────────────────────────────
 
 struct ToolConfig {
@@ -345,6 +446,16 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
     match tool {
+        "codex" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home).join(".codex"),
+            local_dir: cwd.join(".codex"),
+            root_files: &[],
+            files: CODEX_FILES,
+            note: None,
+            // config.toml may contain user-customised settings — never overwrite.
+            preserve_files: &["config.toml"],
+            executable_files: &[],
+        }),
         "cursor" => Some(ToolConfig {
             global_dir: PathBuf::from(&home).join(".cursor"),
             local_dir: cwd.join(".cursor"),
@@ -395,6 +506,35 @@ fn tool_config(tool: &str) -> Option<ToolConfig> {
             files: AIDER_FILES,
             note: Some("No hook system available. Conventions are loaded via .aider.conf.yml."),
             preserve_files: &[".aider.conf.yml"],
+            executable_files: &[],
+        }),
+        // Antigravity: gemini-extension bundle at ~/.gemini/config/plugins/epic/ (global)
+        // or .agents/plugins/epic/ (local). Skills, commands, agents, hooks, MCP included.
+        "antigravity" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home)
+                .join(".gemini")
+                .join("config")
+                .join("plugins")
+                .join("epic"),
+            local_dir: cwd.join(".agents").join("plugins").join("epic"),
+            root_files: &[],
+            files: ANTIGRAVITY_FILES,
+            note: Some(
+                "Antigravity extension installed with skills, commands, hooks, and harness-mem MCP.",
+            ),
+            preserve_files: &[],
+            executable_files: &[],
+        }),
+        // Claude Code: install hooks into ~/.claude/settings.json + MCP injection via inject_mcp_claude().
+        "claude" => Some(ToolConfig {
+            global_dir: PathBuf::from(&home),
+            local_dir: cwd.clone(),
+            root_files: &[],
+            files: CLAUDE_FILES,
+            note: Some(
+                "Installs hooks in ~/.claude/settings.json and registers harness-mem MCP server in ~/.claude.json.",
+            ),
+            preserve_files: &[],
             executable_files: &[],
         }),
         _ => None,
@@ -622,15 +762,338 @@ fn make_executable(path: &Path) {
     }
 }
 
-/// Prints MCP setup guidance instead of auto-injecting config (skill-driven mode).
-fn inject_mcp(_tool: &str, _target_dir: &Path) {
-    eprintln!("[harness] MCP server not auto-configured (skill-driven mode).");
-    eprintln!("   To use MCP, see registry/mcp.json for manual setup.");
+/// Claude global settings hooks do not run in a plugin context, so
+/// `${CLAUDE_PLUGIN_ROOT}` is unavailable there.
+fn sanitize_claude_global_hooks(content: &str) -> String {
+    let mut json: serde_json::Value = match serde_json::from_str(content) {
+        Ok(v) => v,
+        Err(_) => return content.to_string(),
+    };
+
+    let Some(hooks) = json.get_mut("hooks").and_then(|v| v.as_object_mut()) else {
+        return content.to_string();
+    };
+
+    for entries in hooks.values_mut() {
+        let Some(entries_arr) = entries.as_array_mut() else {
+            continue;
+        };
+        for entry in entries_arr {
+            let Some(cmd_hooks) = entry.get_mut("hooks").and_then(|v| v.as_array_mut()) else {
+                continue;
+            };
+            for cmd_hook in cmd_hooks {
+                let Some(cmd) = cmd_hook.get_mut("command").and_then(|v| v.as_str()) else {
+                    continue;
+                };
+                // Plugin bootstrap cmd: when installed globally (not via plugin),
+                // binary is already on PATH — drop the install/seed step, just resume.
+                let next = if cmd.contains("setup.sh")
+                    || cmd.contains("install.js")
+                    || cmd.contains("epic-harness install claude")
+                {
+                    "epic-harness resume"
+                } else {
+                    cmd
+                };
+                if next != cmd {
+                    cmd_hook["command"] = serde_json::Value::String(next.to_string());
+                }
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&json).unwrap_or_else(|_| content.to_string())
+}
+
+// ── MCP injection ─────────────────────────────────────────────────────────────
+
+/// Syncs canonical commands/skills into every discovered Claude Code
+/// plugin cache directory (`~/.claude/plugins/cache/epicsagas/epic/*/`).
+///
+/// Called on `epic install claude` so the locally-installed binary always
+/// keeps the cache in sync without waiting for an npm publish.
+fn sync_plugin_cache(home: &str, dry_run: bool) {
+    let cache_base = std::path::Path::new(home).join(".claude/plugins/cache/epicsagas/epic");
+
+    let entries = match fs::read_dir(&cache_base) {
+        Ok(e) => e,
+        Err(_) => {
+            return; // Claude Code not installed — skip silently
+        }
+    };
+
+    // symlink 탈출 방어: cache_base를 한 번 canonicalize (루프 밖)
+    let cache_base_canon = match cache_base.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return; // Claude Code not installed — skip silently
+        }
+    };
+
+    let files: &[(&str, &str)] = &[
+        ("commands/evolve.md", CMD_EVOLVE),
+        ("commands/team.md", CMD_TEAM),
+        ("commands/orbit.md", CMD_ORBIT),
+        ("skills/_dispatch/SKILL.md", SKILL_DISPATCH),
+        ("skills/commit/SKILL.md", SKILL_COMMIT),
+        ("skills/context/SKILL.md", SKILL_CONTEXT),
+        ("skills/debug/SKILL.md", SKILL_DEBUG),
+        ("skills/document/SKILL.md", SKILL_DOCUMENT),
+        ("skills/perf/SKILL.md", SKILL_PERF),
+        ("skills/secure/SKILL.md", SKILL_SECURE),
+        ("skills/simplify/SKILL.md", SKILL_SIMPLIFY),
+        ("skills/tdd/SKILL.md", SKILL_TDD),
+        ("skills/verify/SKILL.md", SKILL_VERIFY),
+        ("skills/council/SKILL.md", SKILL_COUNCIL),
+        (
+            "skills/agent-introspection/SKILL.md",
+            SKILL_AGENT_INTROSPECTION,
+        ),
+        ("skills/reflect/SKILL.md", SKILL_REFLECT),
+        ("skills/discover/SKILL.md", SKILL_DISCOVER),
+        ("skills/orchestrate/SKILL.md", SKILL_ORCHESTRATE),
+        ("skills/spec/SKILL.md", SKILL_SPEC),
+        ("skills/go/SKILL.md", SKILL_GO),
+        ("skills/check/SKILL.md", SKILL_CHECK),
+        ("skills/ship/SKILL.md", SKILL_SHIP),
+    ];
+
+    let mut synced = 0u32;
+    for entry in entries.flatten() {
+        let version_dir = entry.path();
+        if !version_dir.is_dir() {
+            continue;
+        }
+        // symlink 탈출 방어: version_dir를 canonicalize 후 cache_base 내부인지 검증
+        let version_dir = match version_dir.canonicalize() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if !version_dir.starts_with(&cache_base_canon) {
+            eprintln!(
+                "[harness] skipping suspicious cache entry: {}",
+                version_dir.display()
+            );
+            continue;
+        }
+        for (rel, content) in files {
+            let dest = version_dir.join(rel);
+            let status = write_or_sync(&dest, content, dry_run);
+            if matches!(status, FileStatus::Updated | FileStatus::Added) {
+                synced += 1;
+            }
+        }
+    }
+
+    if dry_run {
+        eprintln!("[harness] dry-run: would sync plugin cache files");
+    } else {
+        eprintln!("[harness] plugin cache synced ({synced} files updated)");
+    }
+}
+
+/// Injects `mcpServers.harness-mem` into `~/.claude.json`.
+/// Claude Code uses this file (not ~/.claude/settings.json) for global app state including MCP.
+fn inject_mcp_claude() {
+    let Some(home) = std::env::var_os("HOME") else {
+        eprintln!("[harness] Could not determine home directory — skipping Claude MCP injection.");
+        return;
+    };
+    let claude_json = std::path::Path::new(&home).join(".claude.json");
+
+    let raw = if claude_json.exists() {
+        fs::read_to_string(&claude_json).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    };
+
+    let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+
+    if json["mcpServers"]["harness-mem"].is_object() {
+        eprintln!(
+            "[harness] mcpServers.harness-mem already registered in ~/.claude.json — skipping."
+        );
+        return;
+    }
+
+    let binary = "epic-harness";
+
+    json["mcpServers"]["harness-mem"] = serde_json::json!({
+        "command": binary,
+        "args": ["mem", "mcp"]
+    });
+
+    let out = match serde_json::to_string_pretty(&json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
+            return;
+        }
+    };
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp =
+        claude_json.with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
+    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
+        eprintln!("[harness] Registered mcpServers.harness-mem in ~/.claude.json");
+    } else {
+        let _ = fs::remove_file(&tmp); // clean up tmp on failure
+        eprintln!("[harness] Failed to write ~/.claude.json");
+    }
+}
+
+/// Removes `mcpServers.harness-mem` from `~/.claude.json`.
+/// Mirror of `inject_mcp_claude()` — called by `uninstall_tool` for the "claude" tool.
+fn remove_mcp_claude(dry_run: bool) {
+    let Some(home) = std::env::var_os("HOME") else {
+        eprintln!("[harness] Could not determine home directory — skipping Claude MCP removal.");
+        return;
+    };
+    let claude_json = std::path::Path::new(&home).join(".claude.json");
+
+    if !claude_json.exists() {
+        eprintln!("[harness] ~/.claude.json not found — nothing to remove.");
+        return;
+    }
+
+    let raw = match fs::read_to_string(&claude_json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[harness] Failed to read ~/.claude.json: {e}");
+            return;
+        }
+    };
+
+    let mut json: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[harness] Failed to parse ~/.claude.json: {e}");
+            return;
+        }
+    };
+
+    if json["mcpServers"].get("harness-mem").is_none() {
+        eprintln!(
+            "[harness] mcpServers.harness-mem not found in ~/.claude.json — nothing to remove."
+        );
+        return;
+    }
+
+    if dry_run {
+        eprintln!("[harness] (dry-run) would remove mcpServers.harness-mem from ~/.claude.json");
+        return;
+    }
+
+    if let Some(servers) = json["mcpServers"].as_object_mut() {
+        servers.remove("harness-mem");
+    }
+
+    let out = match serde_json::to_string_pretty(&json) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[harness] Failed to serialize ~/.claude.json: {e}");
+            return;
+        }
+    };
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let tmp =
+        claude_json.with_file_name(format!(".claude.{}.{}.json.tmp", std::process::id(), nonce));
+    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &claude_json).is_ok() {
+        eprintln!("[harness] Removed mcpServers.harness-mem from ~/.claude.json");
+    } else {
+        let _ = fs::remove_file(&tmp); // clean up tmp on failure
+        eprintln!("[harness] Failed to write ~/.claude.json");
+    }
+}
+
+/// Injects `mcpServers.harness-mem` into the tool's settings JSON file.
+/// Registers `epic-harness mem mcp` as the MCP server command (no Node.js required).
+/// Silently skips if the settings file doesn't exist or already has the entry.
+fn inject_mcp(tool: &str, target_dir: &Path) {
+    // Claude Code stores MCP config in ~/.claude.json (global app state), not settings.json
+    if tool == "claude" {
+        inject_mcp_claude();
+        return;
+    }
+
+    let settings_path = match tool {
+        "codex" => None, // Codex uses hooks.json, no mcpServers concept
+        "cursor" => Some(target_dir.join("mcp.json")),
+        "opencode" => Some(target_dir.join("opencode.json")),
+        "cline" => None, // Cline MCP is configured per-workspace, not via global install
+        "aider" => None, // No MCP support
+        _ => None,
+    };
+
+    let settings_path = match settings_path {
+        Some(p) => p,
+        None => return, // tool doesn't support MCP via a settings file
+    };
+
+    let raw = if settings_path.exists() {
+        fs::read_to_string(&settings_path).unwrap_or_else(|_| "{}".to_string())
+    } else {
+        "{}".to_string()
+    };
+
+    let mut json: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+
+    let binary = "epic-harness";
+
+    // opencode uses { "mcp": { "name": { type, command[] } } }
+    // Others use { "mcpServers": { "name": { command, args[] } } }
+    if tool == "opencode" {
+        if json["mcp"]["harness-mem"].is_object() {
+            eprintln!(
+                "[harness] mcp.harness-mem already registered in {tool} settings — skipping."
+            );
+            return;
+        }
+        json["mcp"]["harness-mem"] = serde_json::json!({
+            "type": "local",
+            "command": [binary, "mem", "mcp"]
+        });
+    } else {
+        if json["mcpServers"]["harness-mem"].is_object() {
+            eprintln!(
+                "[harness] mcpServers.harness-mem already registered in {tool} settings — skipping."
+            );
+            return;
+        }
+        json["mcpServers"]["harness-mem"] = serde_json::json!({
+            "command": binary,
+            "args": ["mem", "mcp"]
+        });
+    }
+
+    let out = serde_json::to_string_pretty(&json).unwrap_or_else(|_| raw.clone());
+
+    if let Some(parent) = settings_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let tmp = settings_path.with_extension("tmp");
+    if fs::write(&tmp, &out).is_ok() && fs::rename(&tmp, &settings_path).is_ok() {
+        eprintln!(
+            "[harness] Registered mcpServers.harness-mem in {}",
+            settings_path.display()
+        );
+    } else {
+        let _ = fs::remove_file(&tmp); // clean up tmp on failure
+    }
 }
 
 // ── Interactive menu ──────────────────────────────────────────────────────────
 
 const TOOLS: &[(&str, &str)] = &[
+    ("claude", "Claude Code"),
+    ("codex", "OpenAI Codex CLI"),
+    ("antigravity", "Google Antigravity"),
     ("cursor", "Cursor IDE"),
     ("opencode", "OpenCode"),
     ("cline", "Cline (VS Code)"),
@@ -709,43 +1172,84 @@ fn interactive_menu_fallback() -> Vec<String> {
 
 /// Remove legacy command/agent files from a previous installation.
 /// Called during install to clean up files that were absorbed into skills.
-/// Returns the number of removed files for migration reporting.
-fn cleanup_legacy_files(target_dir: &Path) -> u32 {
+fn cleanup_legacy_files(target_dir: &Path) {
     let legacy_commands = [
         "discover",
         "spec",
         "go",
-        "audit",
+        "check",
         "ship",
         "intervene",
         "status",
-        "orbit",
-        "evolve",
-        "team",
     ];
     let legacy_agents = ["builder", "reviewer", "auditor", "planner"];
-    let mut removed = 0u32;
     for name in &legacy_commands {
         let path = target_dir.join(format!("commands/{}.md", name));
         if path.exists() {
             let _ = std::fs::remove_file(&path);
-            removed += 1;
         }
     }
     for name in &legacy_agents {
         let path = target_dir.join(format!("agents/{}.md", name));
         if path.exists() {
             let _ = std::fs::remove_file(&path);
-            removed += 1;
         }
     }
-    removed
 }
 
 // ── Canonical file generation helpers ─────────────────────────────────────────
 
 /// Convert a Codex prompt .md into a Codex skill SKILL.md format.
 /// Extracts the description from YAML frontmatter and wraps the body.
+fn prompt_to_skill(name: &str, prompt_md: &str) -> String {
+    let (description, body) = if let Some(rest) = prompt_md.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let frontmatter = &rest[..end];
+        let desc = frontmatter
+            .lines()
+            .find_map(|line| line.strip_prefix("description:"))
+            .map(|d| d.trim().trim_matches('"'))
+            .unwrap_or(name);
+        let after = end + 4; // skip \n---
+        let b = if after < rest.len() && rest.as_bytes()[after] == b'\n' {
+            &rest[after + 1..]
+        } else if after < rest.len() {
+            &rest[after..]
+        } else {
+            ""
+        };
+        (desc.to_string(), b.to_string())
+    } else {
+        (name.to_string(), prompt_md.to_string())
+    };
+
+    format!("---\nname: {name}\ndescription: \"{description}\"\n---\n{body}")
+}
+
+/// Convert a Codex prompt markdown file to an Antigravity custom command (TOML).
+/// Antigravity commands use `commands/{group}/{name}.toml` with a `prompt` field.
+fn prompt_to_antigravity_command(_name: &str, prompt_md: &str) -> String {
+    // Strip frontmatter — the body is the prompt content.
+    let body = if let Some(rest) = prompt_md.strip_prefix("---")
+        && let Some(end) = rest.find("\n---")
+    {
+        let after = end + 4;
+        if after < rest.len() && rest.as_bytes()[after] == b'\n' {
+            &rest[after + 1..]
+        } else if after < rest.len() {
+            &rest[after..]
+        } else {
+            ""
+        }
+    } else {
+        prompt_md
+    };
+
+    // TOML: escape triple quotes inside the prompt by using single-quoted raw string.
+    format!("prompt = '''\n{}\n'''\n", body.trim())
+}
+
 /// Generate transformed canonical skill files for a tool.
 /// Returns a Vec of (relative_path, content) pairs.
 fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
@@ -758,14 +1262,18 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
                 let transformed = transform_skill(tool, name, content);
                 files.push((format!("skills/{}/SKILL.md", name), transformed));
             }
+            // Command-skills: converted from deprecated prompts/ to skills/ format.
+            // Prompts are no longer seeded to ~/.codex/prompts/ — skills/ is the
+            // only mechanism. These appear as /evolve, /team, /orbit in the Codex UI.
+            for (name, content) in CODEX_COMMAND_SKILLS {
+                files.push((
+                    format!("skills/{}/SKILL.md", name),
+                    prompt_to_skill(name, content),
+                ));
+            }
         }
         "cursor" => {
-            // Skills: individual SKILL.md in .cursor/skills/ + consolidated rules
-            for (name, content) in CANONICAL_SKILLS {
-                let transformed = transform_skill(tool, name, content);
-                files.push((format!("skills/{}/SKILL.md", name), transformed));
-            }
-            // Also keep the consolidated rules file for auto-trigger quality skills
+            // Skills: concatenated into harness-skills.mdc
             files.push((
                 "rules/harness-skills.mdc".to_string(),
                 build_cursor_skills_mdc(),
@@ -773,6 +1281,20 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
         }
         "opencode" => {
             // No canonical files for opencode (only static command files)
+        }
+        "antigravity" => {
+            // Skills: skills/{name}/SKILL.md
+            for (name, content) in CANONICAL_SKILLS {
+                let transformed = transform_skill(tool, name, content);
+                files.push((format!("skills/{}/SKILL.md", name), transformed));
+            }
+            // Commands: commands/harness/{name}.toml (Antigravity custom commands)
+            for (name, content) in CODEX_COMMAND_SKILLS {
+                files.push((
+                    format!("commands/harness/{}.toml", name),
+                    prompt_to_antigravity_command(name, content),
+                ));
+            }
         }
         // cline, aider: no canonical files to generate
         _ => {}
@@ -788,7 +1310,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, antigravity, cursor, opencode, cline, aider"
             );
             return 1;
         }
@@ -811,6 +1333,14 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     let mut progress = Progress::new(tool, total_files, dry_run);
 
     for (rel, content) in cfg.files {
+        let effective_content;
+        let content = if tool == "claude" && *rel == ".claude/settings.json" {
+            effective_content = sanitize_claude_global_hooks(content);
+            effective_content.as_str()
+        } else {
+            content
+        };
+
         let dest = if cfg.root_files.contains(rel) {
             cwd.join(rel)
         } else {
@@ -840,19 +1370,52 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
 
     progress.finish();
 
-    // MCP setup guidance (skill-driven mode — no auto-injection).
+    // Inject harness-mem MCP server entry into the tool's settings file.
     if !dry_run {
         inject_mcp(tool, target_dir);
+    } else {
+        eprintln!("[harness] dry-run: would inject mcpServers.harness-mem into {tool} settings");
+    }
+
+    // Codex-specific: warn if config.toml exists but codex_hooks is not enabled.
+    if tool == "codex" {
+        let config_path = target_dir.join("config.toml");
+        if config_path.exists() {
+            let ok = fs::read_to_string(&config_path)
+                .map(|s| s.contains("codex_hooks"))
+                .unwrap_or(false);
+            if !ok {
+                eprintln!();
+                eprintln!(
+                    "[harness] WARNING: ~/.codex/config.toml exists but does not enable hooks."
+                );
+                eprintln!("[harness] Hooks are OFF by default. Add these lines to enable them:");
+                eprintln!();
+                eprintln!("    [features]");
+                eprintln!("    codex_hooks = true");
+                eprintln!();
+                eprintln!("[harness] Then restart Codex for the change to take effect.");
+            }
+        }
+    }
+
+    // Sync plugin cache for Claude Code (keeps commands/skills/agents up-to-date
+    // without requiring an npm publish for every change).
+    if tool == "claude" {
+        let home = std::env::var("HOME").unwrap_or_default();
+        sync_plugin_cache(&home, dry_run);
+    }
+
+    // Seed the default epic org/team on first install (idempotent).
+    // Restricted to `epic install claude` — other tools should not implicitly
+    // create org state in ~/.harness/orgs/.
+    if !dry_run && tool == "claude" {
+        crate::team::store::install_default_team_if_needed("epic");
     }
 
     // Clean up legacy command/agent files from previous installations.
     if !dry_run {
-        let removed = cleanup_legacy_files(target_dir);
-        if removed > 0 {
-            eprintln!(
-                "[harness] Removed {removed} legacy file(s) (commands/agents absorbed into skills in v0.4)"
-            );
-        }
+        cleanup_legacy_files(target_dir);
     }
 
     0
@@ -892,7 +1455,9 @@ pub fn run(args: &[String]) -> i32 {
         }
 
         Some("--list" | "list") => {
-            println!("Available integrations: claude, codex, cursor, opencode, cline, aider");
+            println!(
+                "Available integrations: claude, codex, antigravity, cursor, opencode, cline, aider"
+            );
             0
         }
 
@@ -955,11 +1520,17 @@ fn uninstall_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         Some(c) => c,
         None => {
             eprintln!(
-                "[harness] Unknown tool '{tool}'. Use one of: cursor, opencode, cline, aider"
+                "[harness] Unknown tool '{tool}'. Use one of: claude, codex, antigravity, cursor, opencode, cline, aider"
             );
             return 1;
         }
     };
+
+    // Claude Code: no files to remove — only MCP entry in ~/.claude.json.
+    if tool == "claude" {
+        remove_mcp_claude(dry_run);
+        return 0;
+    }
 
     let target_dir = if local {
         &cfg.local_dir
@@ -1075,7 +1646,9 @@ pub fn run_uninstall(args: &[String]) -> i32 {
             exit
         }
         Some("--list" | "list") => {
-            println!("Available integrations: claude, codex, cursor, opencode, cline, aider");
+            println!(
+                "Available integrations: claude, codex, antigravity, cursor, opencode, cline, aider"
+            );
             0
         }
         Some(tool) => uninstall_tool(tool, local, dry_run),
@@ -1274,7 +1847,7 @@ mod tests {
         // Consolidated skills (absorbed from commands)
         assert!(paths.contains(&"skills/spec/SKILL.md"));
         assert!(paths.contains(&"skills/go/SKILL.md"));
-        assert!(paths.contains(&"skills/audit/SKILL.md"));
+        assert!(paths.contains(&"skills/check/SKILL.md"));
         assert!(paths.contains(&"skills/ship/SKILL.md"));
         // Remaining command-skills
         assert!(paths.contains(&"skills/orbit/SKILL.md"));
@@ -1291,13 +1864,8 @@ mod tests {
         let files = generate_canonical_files("cursor");
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
         assert!(paths.contains(&"rules/harness-skills.mdc"));
-        // Cursor: individual skills + consolidated mdc
-        assert!(files.len() >= 22);
-        assert!(
-            paths
-                .iter()
-                .any(|p| p.contains("skills/") && p.contains("SKILL.md"))
-        );
+        // Cursor: 1 mdc only (no agents)
+        assert_eq!(files.len(), 1);
     }
 
     #[test]
@@ -1322,6 +1890,76 @@ mod tests {
     fn test_generate_canonical_files_aider_empty() {
         let files = generate_canonical_files("aider");
         assert!(files.is_empty());
+    }
+
+    #[test]
+    fn test_generate_canonical_files_antigravity() {
+        let files = generate_canonical_files("antigravity");
+        // 18 canonical skills + 3 command-skills = 21
+        assert!(
+            !files.is_empty(),
+            "antigravity should generate canonical files"
+        );
+
+        // Verify skills
+        let skill_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("skills/"))
+            .collect();
+        assert!(
+            skill_files.len() >= 16,
+            "expected at least 16 skill files, got {}",
+            skill_files.len()
+        );
+
+        // Verify no agents
+        let agent_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("agents/") && p.ends_with(".md"))
+            .collect();
+        assert!(agent_files.is_empty(), "expected no agent files");
+
+        // Verify commands
+        let cmd_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("commands/harness/") && p.ends_with(".toml"))
+            .collect();
+        assert_eq!(cmd_files.len(), 3, "expected 3 command files");
+
+        // Verify all command files are valid TOML (start with prompt = ''')
+        for (path, content) in &cmd_files {
+            assert!(
+                content.starts_with("prompt = '''"),
+                "command {} should start with TOML prompt field",
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn test_prompt_to_antigravity_command() {
+        let input = "\
+---
+description: \"Run tests and verify\"
+---
+
+# /check — Verify
+
+Run all tests.
+";
+        let result = prompt_to_antigravity_command("check", input);
+        assert!(
+            result.starts_with("prompt = '''"),
+            "should start with TOML prompt field"
+        );
+        assert!(
+            result.contains("# /check — Verify"),
+            "should contain body content"
+        );
+        assert!(
+            !result.contains("description:"),
+            "should not contain frontmatter"
+        );
     }
 
     #[test]
@@ -1362,5 +2000,60 @@ mod tests {
         assert!(v["hooks"]["PreToolUse"].is_array());
         assert!(v["hooks"]["SessionStart"].is_null());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn test_sanitize_claude_global_hooks_removes_plugin_root_refs() {
+        let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
+        let json: serde_json::Value = serde_json::from_str(&out).unwrap();
+        // All hook "command" fields must not reference setup.sh
+        let hooks = json["hooks"].as_object().unwrap();
+        for entries in hooks.values() {
+            if let Some(arr) = entries.as_array() {
+                for entry in arr {
+                    if let Some(cmd_hooks) = entry["hooks"].as_array() {
+                        for cmd_hook in cmd_hooks {
+                            let cmd = cmd_hook["command"].as_str().unwrap_or("");
+                            assert!(
+                                !cmd.contains("setup.sh"),
+                                "setup.sh must be removed from command: {cmd}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_sanitize_claude_global_hooks_replaces_bootstrap_with_resume() {
+        let out = sanitize_claude_global_hooks(CLAUDE_FILES[0].1);
+        // plugin bootstrap cmd → epic-harness resume (binary already on PATH when globally installed)
+        assert!(out.contains("epic-harness resume"));
+    }
+
+    // ── sync_plugin_cache ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_sync_plugin_cache_no_panic_on_missing_dir() {
+        // HOME을 존재하지 않는 임시 경로로 설정 → cache_base 없음 → silent return
+        let fake_home = std::env::temp_dir().join(format!("epic_test_no_cache_{}", rand_suffix()));
+        // 디렉토리를 만들지 않아야 함 — cache_base read_dir 실패해야 함
+        let home_str = fake_home.to_string_lossy().to_string();
+        // dry_run=true 로 호출 — 패닉 없이 즉시 반환되어야 함
+        sync_plugin_cache(&home_str, true);
+        // 여기까지 도달하면 성공
+    }
+
+    #[test]
+    fn test_sync_plugin_cache_no_panic_on_empty_cache_dir() {
+        // cache_base 디렉토리는 존재하지만 version 서브디렉토리가 없는 경우
+        let base_dir = tmp_dir();
+        let cache_base = base_dir.join(".claude/plugins/cache/epicsagas/epic");
+        fs::create_dir_all(&cache_base).unwrap();
+        let home_str = base_dir.to_string_lossy().to_string();
+        // 패닉 없이 종료되어야 함
+        sync_plugin_cache(&home_str, true);
+        let _ = fs::remove_dir_all(base_dir);
     }
 }

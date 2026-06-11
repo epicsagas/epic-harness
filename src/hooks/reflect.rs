@@ -4,7 +4,6 @@ use std::sync::LazyLock;
 
 use super::common::*;
 use crate::config::CONFIG;
-use crate::episteme_client::{self, InsightPayload};
 use crate::evolve;
 use crate::mem::store;
 use crate::shared::{evolution::*, helpers::*, obs::ObsRecord, paths::*};
@@ -54,8 +53,8 @@ pub fn run_context(
     }
 
     // 1. Obs stats — compute date range
-    let date_from = if let Some(ref s) = since {
-        s.clone()
+    let (cutoff_tag, date_from) = if let Some(ref s) = since {
+        (s.clone(), s.clone())
     } else {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -64,7 +63,8 @@ pub fn run_context(
         let cutoff_ts = now.saturating_sub((days as u64) * 86400);
         let days_since_epoch = cutoff_ts / 86400;
         let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
-        format!("{y:04}{m:02}{d:02}")
+        let tag = format!("{y:04}{m:02}{d:02}");
+        (tag.clone(), tag)
     };
     let date_to = today();
 
@@ -77,11 +77,9 @@ pub fn run_context(
     let mut dim_counts: HashMap<String, u64> = HashMap::new();
     let mut tool_success_map: HashMap<String, (u64, u64)> = HashMap::new(); // (success, total)
 
-    let shared_pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
-
-    // Validate all slug paths before reading data (security: prevent path traversal).
-    // harness.db stores all projects together so the DB query runs once, not per-slug.
+    // Collect obs from all target project slugs
     for slug in &project_slugs {
+        // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
         let safe = if slug_harness.exists() {
             slug_harness
@@ -96,65 +94,53 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
-    }
-
-    // Query observations once — the DB is shared across all projects and slug-filtering
-    // is not yet supported in the schema. Querying inside the slug loop caused N copies
-    // of the same result set to be accumulated (one per slug).
-    // See policy comment in run() — SQLite is required here, no JSONL fallback.
-    let recs: Vec<ObsRecord> = match shared_pool.as_ref() {
-        Some(pool) => match crate::store::runtime::block_on(
-            crate::store::observations::query_obs_for_date_range_multi_pool(
-                pool,
-                &project_slugs,
-                &date_from,
-                &date_to,
-                Some(50_000),
-            ),
-        ) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("[reflect] SQLite observations read failed: {e}");
-                return 1;
-            }
-        },
-        None => {
-            eprintln!(
-                "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
-            );
-            return 1;
+        let slug_obs_dir = slug_harness.join("obs");
+        if !slug_obs_dir.is_dir() {
+            continue;
         }
-    };
-
-    for r in &recs {
-        total_obs += 1;
-        *tool_counts.entry(r.tool.clone()).or_default() += 1;
-        if let Some(ref fc) = r.failure_category {
-            *failure_cats.entry(fc.clone()).or_default() += 1;
-        }
-        if let Some(ref ext) = r.file_ext {
-            *file_ext_counts.entry(ext.clone()).or_default() += 1;
-        }
-        if let Some(s) = r.score {
-            scores.push(s);
-        }
-        if let Some(ref dims) = r.dimensions {
-            let ds = serde_json::to_value(dims).ok();
-            if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
-                for (k, v) in obj {
-                    if let Some(n) = v.as_f64() {
-                        *dim_sums.entry(k.clone()).or_default() += n;
-                        *dim_counts.entry(k.clone()).or_default() += 1;
+        let all_obs = list_files(&slug_obs_dir, ".jsonl");
+        let filtered: Vec<String> = all_obs
+            .into_iter()
+            .filter(|f| {
+                let tag = f.replace("session_", "");
+                tag.get(..8)
+                    .map(|s| s >= cutoff_tag.as_str())
+                    .unwrap_or(true)
+            })
+            .collect();
+        for f in &filtered {
+            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
+            for r in &recs {
+                total_obs += 1;
+                *tool_counts.entry(r.tool.clone()).or_default() += 1;
+                if let Some(ref fc) = r.failure_category {
+                    *failure_cats.entry(fc.clone()).or_default() += 1;
+                }
+                if let Some(ref ext) = r.file_ext {
+                    *file_ext_counts.entry(ext.clone()).or_default() += 1;
+                }
+                if let Some(s) = r.score {
+                    scores.push(s);
+                }
+                if let Some(ref dims) = r.dimensions {
+                    let ds = serde_json::to_value(dims).ok();
+                    if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                        for (k, v) in obj {
+                            if let Some(n) = v.as_f64() {
+                                *dim_sums.entry(k.clone()).or_default() += n;
+                                *dim_counts.entry(k.clone()).or_default() += 1;
+                            }
+                        }
                     }
                 }
+                let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+                entry.1 += 1;
+                if r.result.as_deref() == Some("success")
+                    || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+                {
+                    entry.0 += 1;
+                }
             }
-        }
-        let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-        entry.1 += 1;
-        if r.result.as_deref() == Some("success")
-            || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-        {
-            entry.0 += 1;
         }
     }
 
@@ -242,24 +228,20 @@ pub fn run_context(
         "tool_success_rate": tool_success_rate,
     });
 
-    // 2. Evolution stats
-    let context_slug = project_slugs.first().map(|s| s.as_str()).unwrap_or("");
-    let evo_records: Vec<serde_json::Value> = shared_pool
-        .as_ref()
-        .and_then(|pool| {
-            crate::store::runtime::block_on(crate::store::evolution::query_all_records_pool(
-                pool,
-                context_slug,
-            ))
-            .map_err(|e| eprintln!("[reflect] SQLite evolution read failed: {e}"))
-            .ok()
-        })
-        .map(|recs| {
-            recs.iter()
-                .filter_map(|r| serde_json::to_value(r).ok())
-                .collect()
-        })
-        .unwrap_or_default();
+    // 2. Evolution stats (SQLite first, fallback to JSONL)
+    let evo_records: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::evolution::query_all_records_pool(&pool).await
+    })
+    .map(|recs| {
+        recs.iter()
+            .filter_map(|r| serde_json::to_value(r).ok())
+            .collect()
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
+        read_jsonl_typed::<serde_json::Value>(&evolution_file())
+    });
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
     let mut skills_generated: u64 = 0;
@@ -330,19 +312,15 @@ pub fn run_context(
         "stagnation_count": stagnation_count,
     });
 
-    // 3. Metrics summary — use the first (current) project slug for context
-    // context_slug already bound at section 2 above; reused here.
-    let metrics: Metrics = shared_pool
-        .as_ref()
-        .and_then(|pool| {
-            crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(
-                pool,
-                context_slug,
-            ))
-            .map_err(|e| eprintln!("[reflect] SQLite metrics read failed: {e}"))
-            .ok()
-        })
-        .unwrap_or_else(default_metrics);
+    // 3. Metrics summary (SQLite first, fallback to JSON)
+    let metrics: Metrics = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::load_metrics_pool(&pool).await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
+        read_json(&metrics_file(), default_metrics())
+    });
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
@@ -412,31 +390,41 @@ pub fn run_context(
         "skill_attribution": skill_attr,
     });
 
-    // 4. Session snapshots
-    let snapshots: Vec<serde_json::Value> = shared_pool
-        .as_ref()
-        .and_then(|pool| {
-            crate::store::runtime::block_on(crate::store::sessions::list_recent_snapshots_pool(
-                pool,
-                context_slug,
-                5,
-            ))
-            .map_err(|e| eprintln!("[reflect] SQLite sessions read failed: {e}"))
-            .ok()
-        })
-        .map(|snaps| {
-            snaps
-                .iter()
-                .map(|s| {
-                    serde_json::json!({
-                        "timestamp": s.timestamp,
-                        "type": s.snap_type,
-                        "summary": s.summary.chars().take(400).collect::<String>(),
-                    })
+    // 4. Session snapshots (SQLite first, fallback to JSON)
+    let snapshots: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::sessions::list_recent_snapshots_pool(&pool, 5).await
+    })
+    .map(|snaps| {
+        snaps
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "timestamp": s.timestamp,
+                    "type": s.snap_type,
+                    "summary": s.summary.chars().take(400).collect::<String>(),
                 })
-                .collect()
-        })
-        .unwrap_or_default();
+            })
+            .collect()
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite sessions read failed, falling back to JSON: {e}");
+        vec![]
+    });
+    let snapshots: Vec<serde_json::Value> = if !snapshots.is_empty() {
+        snapshots
+    } else {
+        let snap_files = list_files(&sessions_dir(), ".json");
+        snap_files.iter().rev().take(5).filter_map(|f| {
+            let sp: serde_json::Value = read_json(&sessions_dir().join(f), serde_json::Value::Null);
+            if sp.is_null() { return None; }
+            Some(serde_json::json!({
+                "timestamp": sp.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
+                "type": sp.get("type").and_then(|v| v.as_str()).unwrap_or(""),
+                "summary": sp.get("summary").and_then(|v| v.as_str()).unwrap_or("").chars().take(400).collect::<String>(),
+            }))
+        }).collect()
+    };
 
     // 5. Evolved skills
     let evolved_list_dirs = list_dirs(&evolved_dir());
@@ -528,13 +516,6 @@ pub fn run_context(
 /// Pulls top nodes by importance for each project slug (or all if slugs = [current]).
 /// Session-type nodes are excluded (importance=0.05, noise) unless there's nothing else.
 fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
-    let pool = match crate::store::runtime::block_on(crate::store::pool::memory_pool()) {
-        Ok(p) => p,
-        Err(e) => {
-            return serde_json::json!({"error": format!("mem db unavailable: {e}")});
-        }
-    };
-
     // Determine project filter: use first slug if single-project, else no filter (all)
     let project_filter: Option<&str> = if project_slugs.len() == 1 {
         project_slugs.first().map(|s| s.as_str())
@@ -543,33 +524,23 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Smart recall — hint = broad engineering context, limit = 30
-    let recalled = match crate::store::runtime::block_on(store::smart_recall_pool(
-        &pool,
+    let recalled = match store::smart_recall(
         project_filter,
         Some("decision pattern error resolution concept"),
         30,
-    )) {
+    ) {
         Ok(s) => s,
         Err(e) => return serde_json::json!({"error": format!("recall failed: {e}")}),
     };
 
     // Also pull top decisions/resolutions explicitly (high-value types)
-    let decisions = crate::store::runtime::block_on(store::query_nodes_pool(
-        &pool,
+    let decisions = store::query_nodes(
         None, // tag filter
         Some("decision"),
         project_filter,
         10,
-    ))
-    .unwrap_or_default();
-    let resolutions = crate::store::runtime::block_on(store::query_nodes_pool(
-        &pool,
-        None,
-        Some("resolution"),
-        project_filter,
-        10,
-    ))
-    .unwrap_or_default();
+    );
+    let resolutions = store::query_nodes(None, Some("resolution"), project_filter, 10);
 
     // Merge and deduplicate by id, prefer higher-importance entry
     let mut seen: std::collections::HashMap<String, serde_json::Value> =
@@ -791,39 +762,40 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
 
-    // 1. Collect today's observations from SQLite pool (no JSONL fallback — see policy at pool==None branch)
+    // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
-    let slug = project_slug();
-    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
-    let observations = match pool.as_ref() {
-        Some(p) => match crate::store::runtime::block_on(
-            crate::store::observations::query_obs_for_date_range_pool(
-                p,
-                &slug,
-                &today_str,
-                &today_str,
-                Some(50_000),
-            ),
-        ) {
-            Ok(recs) => recs,
-            Err(e) => {
-                eprintln!("[reflect] SQLite observations read failed: {e}");
-                return 1;
-            }
-        },
-        None => {
-            // Storage policy: reflect.rs requires SQLite. Unlike observe.rs (which falls
-            // back to JSONL on transient write errors), reflect cannot fall back because:
-            // (1) JSONL records are per-session files with no aggregated index, and
-            // (2) if observe.rs wrote to JSONL, it was a transient failure — the next
-            //     successful write went to SQLite, so the session data is split.
-            // If harness.db is absent, the harness has never been initialized; there is
-            // nothing meaningful to analyze.
-            eprintln!(
-                "[reflect] harness.db unavailable — run `epic-harness migrate` to import legacy data"
-            );
-            return 1;
+    let observations = match crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::observations::query_obs_for_date_range_pool(
+            &pool, &today_str, &today_str,
+        ).await
+    }) {
+        Ok(recs) => recs,
+        Err(e) => {
+            eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
+            // Fallthrough to JSONL path below
+            return 0;
         }
+    };
+    let observations = if !observations.is_empty() {
+        observations
+    } else {
+        // Fallback: read from JSONL files
+        if !obs_dir().is_dir() {
+            return 0;
+        }
+        let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
+            .into_iter()
+            .filter(|f| f.contains(&today_str))
+            .collect();
+        if obs_files.is_empty() {
+            return 0;
+        }
+        let mut recs: Vec<ObsRecord> = vec![];
+        for f in &obs_files {
+            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
+        }
+        recs
     };
     if observations.len() < 3 {
         return 0;
@@ -833,22 +805,20 @@ pub fn run(_input: &HookInput) -> i32 {
     let mut analysis = evolve::analyze_session(&observations);
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
-    // 3. Stagnation
-    let mut metrics: Metrics = pool
-        .as_ref()
-        .and_then(|p| {
-            crate::store::runtime::block_on(crate::store::metrics::load_metrics_pool(p, &slug))
-                .map_err(|e| eprintln!("[reflect] SQLite metrics load failed: {e}"))
-                .ok()
-        })
-        .unwrap_or_else(default_metrics);
+    // 3. Stagnation (load metrics from SQLite, fallback to JSON)
+    let mut metrics: Metrics = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::load_metrics_pool(&pool).await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
+        read_json(&metrics_file(), default_metrics())
+    });
     let (should_rollback, improved, rolled_back_count) =
         evolve::check_stagnation(&mut metrics, analysis.avg_score);
 
     // 4. Seed evolved skills
     ensure_dir(&evolved_dir());
-    // Prune expired entries from the negative feedback buffer (SkillOpt §4)
-    evolve::prune_rejected_buffer();
     let existing = list_dirs(&evolved_dir());
     let seeded = if !should_rollback {
         evolve::seed_smart_skills(&analysis, &existing)
@@ -866,19 +836,11 @@ pub fn run(_input: &HookInput) -> i32 {
     // 7. Cross-project export
     evolve::export_to_global(&analysis, &analysis.failure_patterns);
 
+    // 7.5. Prune expired entries from the negative feedback buffer (SkillOpt §4)
+    evolve::prune_rejected_buffer();
+
     // 8. Memory auto-ingest (knowledge graph)
     let (mem_nodes, mem_edges) = evolve::ingest_to_memory(&analysis, &analysis.failure_patterns);
-
-    // 8.5a. Episteme ingest — send key insights to the knowledge graph
-    // Runs in parallel with instinct extraction via early-return on any failure.
-    // Graceful degradation: Episteme errors are non-fatal.
-    let episteme_ok = ingest_to_episteme(&analysis);
-    if !episteme_ok {
-        hint(
-            "reflect",
-            "Episteme: ingest skipped (binary unavailable or error)",
-        );
-    }
 
     // 8.5. Instinct extraction and promotion
     let instincts = evolve::extract_instincts(&observations, &analysis);
@@ -907,19 +869,12 @@ pub fn run(_input: &HookInput) -> i32 {
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
     };
-    // SQLite-first: fall back to JSONL only when DB write fails or DB is unavailable.
-    // Writing to both stores after migration is complete risks divergence: if the process
-    // crashes between the two writes, the stores contain different data.
-    if let Some(ref p) = pool {
-        if let Err(e) = crate::store::runtime::block_on(
-            crate::store::evolution::insert_record_pool(p, &slug, &record),
-        ) {
-            eprintln!("[reflect] SQLite evo write failed: {e}; falling back to JSONL");
-            append_jsonl(&evolution_file(), &record);
-        }
-    } else {
-        append_jsonl(&evolution_file(), &record);
-    }
+    // Write evolution record to SQLite (primary) + JSONL (fallback)
+    let _ = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::evolution::insert_record_pool(&pool, &record).await
+    });
+    append_jsonl(&evolution_file(), &record);
 
     // 10. Session handoff context
     let last_errors: Vec<String> = observations
@@ -984,31 +939,53 @@ pub fn run(_input: &HookInput) -> i32 {
         evolve::update_meta_field(&evolved_dirs, epoch, analysis.avg_score);
     }
 
-    // SQLite-first: fall back to file only when DB write fails or DB is unavailable.
-    if let Some(ref p) = pool {
-        if let Err(e) = crate::store::runtime::block_on(crate::store::metrics::save_metrics_pool(
-            p, &slug, &metrics,
-        )) {
-            eprintln!("[reflect] SQLite metrics write failed: {e}; falling back to file");
-            if let Ok(json) = serde_json::to_string_pretty(&metrics) {
-                let _ = fs::write(metrics_file(), json);
-            }
-        }
-    } else if let Ok(json) = serde_json::to_string_pretty(&metrics) {
+    // Save metrics to SQLite (primary) + JSON file (fallback)
+    let _ = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::save_metrics_pool(&pool, &metrics).await
+    });
+    if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }
 
     // 11.5. Sync orbit pipeline files → SQLite (dual-write: files are source of truth
     //       for /orbit phase recovery; SQLite enables REST API + dashboard queries).
-    if let Some(ref p) = pool {
-        match crate::store::runtime::block_on(
-            crate::store::orbit_store::sync_orbit_files_to_db_pool(p, &orbit_dir()),
-        ) {
-            Ok(n) if n > 0 => {
-                eprintln!("[reflect] synced {n} orbit pipeline(s) to SQLite");
+    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
+        let odir = orbit_dir();
+        if let Ok(entries) = fs::read_dir(&odir) {
+            let mut synced = 0usize;
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if !name.starts_with("PIPELINE-") || !name.ends_with(".json") {
+                    continue;
+                }
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let id = pl["id"].as_str().unwrap_or(name.trim_end_matches(".json"));
+                        let status = pl["status"].as_str().unwrap_or("unknown");
+                        let phase = pl["phase"].as_str();
+                        let mode = pl["mode"].as_str();
+                        if crate::store::runtime::block_on(
+                            crate::store::orbit_store::upsert_pipeline_pool(
+                                &pool,
+                                id,
+                                &project_slug(),
+                                status,
+                                phase,
+                                mode,
+                                &content,
+                            )
+                        ).is_ok()
+                        {
+                            synced += 1;
+                        }
+                    }
+                }
             }
-            Err(e) => eprintln!("[reflect] orbit sync failed (non-fatal): {e}"),
-            _ => {}
+            if synced > 0 {
+                eprintln!("[reflect] synced {synced} orbit pipeline(s) to SQLite");
+            }
         }
     }
 
@@ -1152,102 +1129,6 @@ pub fn run(_input: &HookInput) -> i32 {
     0
 }
 
-// ── Episteme Integration ────────────────────────────────
-
-/// Ingest session insights into the Episteme knowledge graph via `add_insight`.
-///
-/// Builds a concise natural-language summary and forwards it with metadata.
-/// Returns `true` if the call succeeded (or if there was nothing to ingest),
-/// `false` on any Episteme-side error. Errors are non-fatal by design.
-fn ingest_to_episteme(analysis: &SessionAnalysis) -> bool {
-    // Skip if session had very few observations (not worth persisting)
-    if analysis.total_observations < 3 {
-        return true;
-    }
-
-    let slug = project_slug();
-
-    // Build insight text: concise summary of the session
-    let weak_tools: Vec<String> = analysis
-        .per_tool_stats
-        .iter()
-        .filter(|(_, s)| {
-            s.total >= CONFIG.pattern.weak_tool_min_obs
-                && (s.successes as f64 / s.total as f64) < CONFIG.pattern.weak_tool_rate
-        })
-        .map(|(t, s)| {
-            format!(
-                "{} ({:.0}%)",
-                t,
-                s.successes as f64 / s.total as f64 * 100.0
-            )
-        })
-        .collect();
-
-    let pattern_names: Vec<String> = analysis
-        .failure_patterns
-        .iter()
-        .map(|p| format!("{}({}x)", p.pattern_type, p.count))
-        .collect();
-
-    let mut parts: Vec<String> = vec![format!(
-        "Session in `{}`: {:.1}% success rate, avg_score={:.3} ({} observations).",
-        slug,
-        analysis.success_rate * 100.0,
-        analysis.avg_score,
-        analysis.total_observations
-    )];
-
-    if !weak_tools.is_empty() {
-        parts.push(format!("Weak tools: {}.", weak_tools.join(", ")));
-    }
-    if !pattern_names.is_empty() {
-        parts.push(format!("Failure patterns: {}.", pattern_names.join(", ")));
-    }
-    // Top error categories
-    let mut top_errors: Vec<(&String, &u64)> = analysis.per_error_stats.iter().collect();
-    top_errors.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
-    let top_errors: Vec<String> = top_errors
-        .iter()
-        .take(3)
-        .map(|(cat, count)| format!("{cat}({}x)", count))
-        .collect();
-    if !top_errors.is_empty() {
-        parts.push(format!("Top errors: {}.", top_errors.join(", ")));
-    }
-
-    let insight_text = parts.join(" ");
-
-    // Tags: project slug + detected pattern types
-    let mut tags: Vec<String> = vec!["auto".to_string(), "session-reflect".to_string()];
-    for p in &analysis.failure_patterns {
-        tags.push(p.pattern_type.clone());
-    }
-
-    // Confidence: composite_score × pattern density factor
-    let confidence =
-        episteme_client::compute_confidence(analysis.avg_score, analysis.failure_patterns.len());
-
-    let payload = InsightPayload {
-        text: insight_text,
-        tags,
-        linked_entities: vec![], // Episteme auto-detects links from text
-        project: slug,
-        confidence,
-    };
-
-    match episteme_client::add_insight(&payload) {
-        Ok(id) => {
-            hint("reflect", &format!("Episteme: insight recorded (id={id})"));
-            true
-        }
-        Err(e) => {
-            // Non-fatal: log but do not abort the hook
-            hint("reflect", &format!("Episteme: {e}"));
-            false
-        }
-    }
-}
 
 // ── Orbit evolve gap detection ──────────────────────────────────────────────
 
@@ -1355,63 +1236,39 @@ mod tests {
     fn effective_sources_all_expands() {
         let sources: Vec<String> = vec!["all".into()];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "mem", "claude-session", "alcove"]
+            vec!["harness", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness", "mem"]
+            vec!["harness"]
         } else {
-            let mut v: Vec<&str> = vec!["harness", "mem"];
-            for s in sources.iter() {
-                let s = s.as_str();
-                if s != "harness" && s != "mem" {
-                    v.push(s);
-                }
-            }
-            v
+            sources.iter().map(|s| s.as_str()).collect()
         };
-        assert_eq!(
-            effective,
-            vec!["harness", "mem", "claude-session", "alcove"]
-        );
+        assert_eq!(effective, vec!["harness", "claude-session", "alcove"]);
     }
 
     #[test]
     fn effective_sources_empty_defaults_to_harness() {
         let sources: Vec<String> = vec![];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "mem", "claude-session", "alcove"]
+            vec!["harness", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness", "mem"]
+            vec!["harness"]
         } else {
-            let mut v: Vec<&str> = vec!["harness", "mem"];
-            for s in sources.iter() {
-                let s = s.as_str();
-                if s != "harness" && s != "mem" {
-                    v.push(s);
-                }
-            }
-            v
+            sources.iter().map(|s| s.as_str()).collect()
         };
-        assert_eq!(effective, vec!["harness", "mem"]);
+        assert_eq!(effective, vec!["harness"]);
     }
 
     #[test]
     fn effective_sources_explicit_list_passthrough() {
         let sources: Vec<String> = vec!["harness".into(), "alcove".into()];
         let effective: Vec<&str> = if sources.contains(&"all".to_string()) {
-            vec!["harness", "mem", "claude-session", "alcove"]
+            vec!["harness", "claude-session", "alcove"]
         } else if sources.is_empty() {
-            vec!["harness", "mem"]
+            vec!["harness"]
         } else {
-            let mut v: Vec<&str> = vec!["harness", "mem"];
-            for s in sources.iter() {
-                let s = s.as_str();
-                if s != "harness" && s != "mem" {
-                    v.push(s);
-                }
-            }
-            v
+            sources.iter().map(|s| s.as_str()).collect()
         };
-        assert_eq!(effective, vec!["harness", "mem", "alcove"]);
+        assert_eq!(effective, vec!["harness", "alcove"]);
     }
 
     #[test]
@@ -1437,6 +1294,8 @@ mod tests {
         assert_eq!(cutoff_tag, "20260101");
         assert_eq!(date_from, "20260101");
     }
+
+    // ── patch_orbit_evolve_gap ───────────────────────────
 
     #[test]
     fn patch_orbit_evolve_gap_patches_ship_complete_no_evolve() {

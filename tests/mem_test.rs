@@ -288,10 +288,12 @@ fn test_delete_edge_by_id_is_consistent() {
     append_edge(&edge_b).unwrap();
     assert_eq!(read_edges().len(), 2, "should have 2 edges before delete");
 
-    delete_edge_by_id("edge-aaa").unwrap();
+    // delete_edge_by_id matches against source, target, or label (relation).
+    // edges table has no id column, so we delete by source.
+    delete_edge_by_id("src-1").unwrap();
     let remaining = read_edges();
     assert_eq!(remaining.len(), 1, "should have 1 edge after delete");
-    assert_eq!(remaining[0].id, "edge-bbb");
+    assert_eq!(remaining[0].source, "src-2");
 }
 
 #[test]
@@ -326,7 +328,8 @@ fn test_remove_edges_for_node_is_consistent() {
     remove_edges_for_node("node-x").unwrap();
     let remaining = read_edges();
     assert_eq!(remaining.len(), 1, "only unrelated edge should remain");
-    assert_eq!(remaining[0].id, "edge-unrelated");
+    assert_eq!(remaining[0].source, "node-other");
+    assert_eq!(remaining[0].target, "node-another");
 }
 
 // ── validate_uuid tests ───────────
@@ -831,16 +834,16 @@ fn test_stats_endpoint_returns_correct_counts() {
         append_edge(&edge).unwrap();
     }
 
-    // Verify /api/stats returns total_nodes=6, total_edges=4
+    // Verify /api/stats returns nodes=6, edges=4
     let stats = compute_stats().unwrap();
-    assert_eq!(stats["total_nodes"], 6, "should have 6 total nodes");
-    assert_eq!(stats["total_edges"], 4, "should have 4 total edges");
+    assert_eq!(stats["nodes"], 6, "should have 6 total nodes");
+    assert_eq!(stats["edges"], 4, "should have 4 total edges");
 
-    // Verify by_type has correct counts
-    let by_type = stats["by_type"].as_object().unwrap();
-    assert_eq!(by_type["session"], 3, "should have 3 session nodes");
-    assert_eq!(by_type["pattern"], 2, "should have 2 pattern nodes");
-    assert_eq!(by_type["decision"], 1, "should have 1 decision node");
+    // Verify types has correct counts
+    let types = stats["types"].as_object().unwrap();
+    assert_eq!(types["session"], 3, "should have 3 session nodes");
+    assert_eq!(types["pattern"], 2, "should have 2 pattern nodes");
+    assert_eq!(types["decision"], 1, "should have 1 decision node");
 }
 
 // ── smart_recall importance ranking test ────────────
