@@ -16,7 +16,33 @@ pub fn project_slug() -> String {
     static SLUG: LazyLock<String> = LazyLock::new(|| {
         let cwd_path = cwd();
 
-        // Try git first: rev-parse --show-toplevel gives the worktree root.
+        // Prefer --git-common-dir: returns an absolute path in linked worktrees,
+        // pointing to the main repo's .git directory, so the slug stays stable
+        // even when the hook fires from inside an orbit-{goal_slug} worktree.
+        // In a normal (non-worktree) checkout it returns the relative string ".git",
+        // in which case we fall back to --show-toplevel as before.
+        if let Ok(out) = std::process::Command::new("git")
+            .args(["rev-parse", "--git-common-dir"])
+            .output()
+        {
+            if out.status.success() {
+                let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                // Absolute path → linked worktree; derive project root from common .git dir.
+                if raw.starts_with('/') {
+                    let common_git = PathBuf::from(&raw);
+                    // common_git = /main/repo/.git  →  parent = /main/repo
+                    if let Some(repo_root) = common_git.parent() {
+                        let name = repo_root
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "project".into());
+                        return sanitize_slug_name(&name);
+                    }
+                }
+            }
+        }
+
+        // Normal repo (--git-common-dir returned ".git"): use --show-toplevel.
         if let Ok(git_root) = std::process::Command::new("git")
             .args(["rev-parse", "--show-toplevel"])
             .output()
