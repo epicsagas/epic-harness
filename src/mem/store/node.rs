@@ -19,13 +19,14 @@ pub fn write_node(node: &Node) -> io::Result<()> {
 async fn write_node_async(pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
     // Preserve monotonically-increasing fields from existing node
     let mut gn = node_to_graph(node.clone());
-    let existing: Option<super::types::GraphNode> =
-        sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"))
-            .bind(&gn.id)
-            .fetch_optional(pool)
-            .await
-            .map_err(io::Error::other)?
-            .map(|r| row_to_graph_node(&r));
+    let existing: Option<super::types::GraphNode> = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
+    )))
+    .bind(&gn.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(io::Error::other)?
+    .map(|r| row_to_graph_node(&r));
 
     if let Some(ex) = existing {
         gn.access_count = gn.access_count.max(ex.access_count);
@@ -43,13 +44,15 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 }
 
 async fn read_node_async(pool: &sqlx::AnyPool, id: &str) -> io::Result<Node> {
-    sqlx::query(&format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"))
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map_err(io::Error::other)?
-        .map(|r| graph_to_node(row_to_graph_node(&r)))
-        .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
+    )))
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(io::Error::other)?
+    .map(|r| graph_to_node(row_to_graph_node(&r)))
+    .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
 }
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {
@@ -114,7 +117,7 @@ pub async fn read_nodes_pool(pool: &sqlx::AnyPool, ids: &[&str]) -> io::Result<V
         "SELECT {NODE_COLUMNS} FROM nodes WHERE id IN ({})",
         placeholders.join(",")
     );
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     for id in ids {
         query = query.bind(*id);
     }
@@ -144,9 +147,9 @@ pub async fn node_exists_pool(pool: &sqlx::AnyPool, id: &str) -> bool {
 
 #[allow(dead_code)]
 pub async fn read_all_nodes_pool(pool: &sqlx::AnyPool) -> io::Result<Vec<Node>> {
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"
-    ))
+    )))
     .fetch_all(pool)
     .await
     .map_err(io::Error::other)?
@@ -156,9 +159,9 @@ pub async fn read_all_nodes_pool(pool: &sqlx::AnyPool) -> io::Result<Vec<Node>> 
 }
 
 pub async fn read_nodes_limited_pool(pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec<Node>> {
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT ?"
-    ))
+    )))
     .bind(limit)
     .fetch_all(pool)
     .await

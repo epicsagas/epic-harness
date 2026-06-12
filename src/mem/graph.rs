@@ -74,9 +74,9 @@ fn build_graph_sync(include_virtual: bool) -> io::Result<Graph> {
 }
 
 async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::Result<Graph> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC"
-    ))
+    )))
     .fetch_all(pool)
     .await
     .map_err(io::Error::other)?;

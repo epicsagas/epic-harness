@@ -36,9 +36,9 @@ pub(crate) async fn write_node_dedup_async(
         format!("{y:04}-{m:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
     };
 
-    let existing = sqlx::query(&format!(
+    let existing = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {NODE_COLUMNS} FROM nodes WHERE title = ? AND type = ? AND updated >= ? LIMIT 1"
-    ))
+    )))
     .bind(&gn.title)
     .bind(&gn.node_type)
     .bind(&cutoff_ts)

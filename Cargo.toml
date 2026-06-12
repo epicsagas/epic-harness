@@ -38,7 +38,7 @@ uuid = { version = "1", features = ["v4"] }
 tiny_http = "0.12"
 libc = "0.2"
 url = "2"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
 
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
