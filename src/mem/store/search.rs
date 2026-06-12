@@ -42,7 +42,7 @@ async fn search_nodes_async(pool: &sqlx::AnyPool, query: &str, limit: usize) -> 
     // Step 2: fetch full nodes by rowid
     let placeholders = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders})");
-    let mut q = sqlx::query(&sql);
+    let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
     for rid in &rowids {
         q = q.bind(*rid);
     }
@@ -87,7 +87,7 @@ async fn query_nodes_async(
     let safe_limit = (limit.min(200)) as i64;
     sql.push_str(" ORDER BY updated DESC LIMIT ?");
 
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(t) = tag {
         query = query.bind(format!("%{t}%"));
     }

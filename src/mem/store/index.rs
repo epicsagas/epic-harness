@@ -13,9 +13,9 @@ pub fn read_index() -> Index {
         Err(_) => return Index::default(),
     };
     let nodes: Vec<super::types::Node> = runtime::block_on(async {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes ORDER BY updated DESC LIMIT 1000000"
-        ))
+        )))
         .fetch_all(&pool)
         .await
         .map(|rows| {

@@ -726,7 +726,7 @@ pub async fn merge_attached_db_async(
             "INSERT OR IGNORE INTO main.{table} ({dest_cols}) \
              SELECT {src_cols}, ? FROM {attach_name}.{table}"
         );
-        match sqlx::query(&sql).bind(slug).execute(&mut *conn).await {
+        match sqlx::query(sqlx::AssertSqlSafe(sql)).bind(slug).execute(&mut *conn).await {
             Ok(r) => match *table {
                 "observations" => stats.obs += r.rows_affected() as usize,
                 "sessions" => stats.sessions += r.rows_affected() as usize,
@@ -743,10 +743,10 @@ pub async fn merge_attached_db_async(
     }
 
     // metrics_state: key-value with project
-    if let Ok(r) = sqlx::query(&format!(
+    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT OR IGNORE INTO main.metrics_state (key, value, project) \
          SELECT key, value, ? FROM {attach_name}.metrics_state"
-    ))
+    )))
     .bind(slug)
     .execute(&mut *conn)
     .await
@@ -755,14 +755,14 @@ pub async fn merge_attached_db_async(
     }
 
     // score_history: has UNIQUE(timestamp) so INSERT OR IGNORE deduplicates
-    if let Ok(r) = sqlx::query(&format!(
+    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT OR IGNORE INTO main.score_history \
          (timestamp, success_rate, avg_score, observations, \
           dim_success, dim_quality, dim_cost, project) \
          SELECT timestamp, success_rate, avg_score, observations, \
                 dim_success, dim_quality, dim_cost, ? \
          FROM {attach_name}.score_history"
-    ))
+    )))
     .bind(slug)
     .execute(&mut *conn)
     .await
@@ -771,12 +771,12 @@ pub async fn merge_attached_db_async(
     }
 
     // skill_attribution: composite PK (skill_name, project) — safe to INSERT OR IGNORE
-    if let Ok(r) = sqlx::query(&format!(
+    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT OR IGNORE INTO main.skill_attribution \
          (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) \
          SELECT skill_name, ?, sessions_active, avg_score_with, avg_score_without, first_seen \
          FROM {attach_name}.skill_attribution"
-    ))
+    )))
     .bind(slug)
     .execute(&mut *conn)
     .await
@@ -785,10 +785,10 @@ pub async fn merge_attached_db_async(
     }
 
     // promotion_counters: composite PK (pattern_key, project)
-    if let Ok(r) = sqlx::query(&format!(
+    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT OR IGNORE INTO main.promotion_counters (pattern_key, project, count) \
          SELECT pattern_key, ?, count FROM {attach_name}.promotion_counters"
-    ))
+    )))
     .bind(slug)
     .execute(&mut *conn)
     .await
@@ -813,9 +813,9 @@ pub async fn merge_attached_db_async(
         ),
     ];
     for (table, cols) in orch_tables {
-        let _ = sqlx::query(&format!(
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT OR IGNORE INTO main.{table} ({cols}) SELECT {cols} FROM {attach_name}.{table}"
-        ))
+        )))
         .execute(&mut *conn)
         .await;
     }
@@ -892,7 +892,7 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
         let attach_name = "src";
         let escaped = db_path.display().to_string().replace('\'', "''");
         if let Err(e) = conn
-            .execute(format!("ATTACH '{}' AS {attach_name}", escaped).as_str())
+            .execute(sqlx::AssertSqlSafe(format!("ATTACH '{}' AS {attach_name}", escaped)))
             .await
             .map_err(sqlx_err)
         {
@@ -1064,7 +1064,7 @@ async fn collect_distinct_projects(conn: &mut sqlx::SqliteConnection) -> io::Res
     ];
     let mut seen = std::collections::HashSet::new();
     for table in &tables {
-        let rows: Vec<String> = sqlx::query(&format!("SELECT DISTINCT project FROM {table}"))
+        let rows: Vec<String> = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT DISTINCT project FROM {table}")))
             .fetch_all(&mut *conn)
             .await
             .unwrap_or_default()
@@ -1116,7 +1116,7 @@ async fn apply_slug_mapping(
     for (old, new) in mapping {
         // Simple tables: direct UPDATE.
         for table in SIMPLE_TABLES {
-            sqlx::query(&format!("UPDATE {table} SET project = ? WHERE project = ?"))
+            sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET project = ? WHERE project = ?")))
                 .bind(new)
                 .bind(old)
                 .execute(&mut *conn)
@@ -1128,15 +1128,15 @@ async fn apply_slug_mapping(
         // when two hashed slugs map to the same name-only slug.
         for table in COMPOSITE_PK_TABLES {
             // Step 1: Copy matching rows to temp table.
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "CREATE TEMP TABLE _norm_tmp AS SELECT * FROM {table} WHERE project = ?"
-            ))
+            )))
             .bind(old)
             .execute(&mut *conn)
             .await
             .map_err(sqlx_err)?;
             // Step 2: Delete originals.
-            sqlx::query(&format!("DELETE FROM {table} WHERE project = ?"))
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE project = ?")))
                 .bind(old)
                 .execute(&mut *conn)
                 .await
@@ -1149,10 +1149,9 @@ async fn apply_slug_mapping(
                 .map_err(sqlx_err)?;
             // Step 4: Insert back (IGNORE handles conflicts with existing rows).
             conn.execute(
-                format!(
+                sqlx::AssertSqlSafe(format!(
                     "INSERT OR IGNORE INTO {table} SELECT * FROM _norm_tmp; DROP TABLE _norm_tmp;"
-                )
-                .as_str(),
+                )),
             )
             .await
             .map_err(sqlx_err)?;
@@ -1436,7 +1435,7 @@ mod tests {
         let slug = "test-project";
         let escaped_path = db_path.display().to_string().replace('\'', "''");
         global_conn
-            .execute(format!("ATTACH '{escaped_path}' AS src").as_str())
+            .execute(sqlx::AssertSqlSafe(format!("ATTACH '{escaped_path}' AS src")))
             .await
             .unwrap();
 

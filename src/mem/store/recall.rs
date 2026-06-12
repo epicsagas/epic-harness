@@ -63,7 +63,7 @@ pub(crate) async fn smart_recall_async(
                 "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) AND projects LIKE ? \
                  ORDER BY importance DESC"
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
             for rid in &rowids {
                 q = q.bind(*rid);
             }
@@ -73,7 +73,7 @@ pub(crate) async fn smart_recall_async(
                 "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) \
                  ORDER BY importance DESC"
             );
-            let mut q = sqlx::query(&sql);
+            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
             for rid in &rowids {
                 q = q.bind(*rid);
             }
@@ -81,18 +81,18 @@ pub(crate) async fn smart_recall_async(
         }
     } else if let Some(proj) = project {
         let csv_proj = format!("%{proj}%");
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes WHERE projects LIKE ? \
              ORDER BY importance DESC LIMIT ?"
-        ))
+        )))
         .bind(&csv_proj)
         .bind(limit as i64 * 3)
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {NODE_COLUMNS} FROM nodes ORDER BY importance DESC LIMIT ?"
-        ))
+        )))
         .bind(limit as i64 * 3)
         .fetch_all(pool)
         .await

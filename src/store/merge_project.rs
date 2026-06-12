@@ -163,7 +163,7 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
     if dry_run {
         for table in SIMPLE {
             let n: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE project = ?"))
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table} WHERE project = ?")))
                     .bind(from)
                     .fetch_one(&mut conn)
                     .await
@@ -175,7 +175,7 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
         }
         for table in &["metrics_state", "skill_attribution", "promotion_counters"] {
             let n: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table} WHERE project = ?"))
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table} WHERE project = ?")))
                     .bind(from)
                     .fetch_one(&mut conn)
                     .await
@@ -191,7 +191,7 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
     conn.execute("BEGIN IMMEDIATE").await.map_err(sqlx_err)?;
 
     for table in SIMPLE {
-        match sqlx::query(&format!("UPDATE {table} SET project = ? WHERE project = ?"))
+        match sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET project = ? WHERE project = ?")))
             .bind(to)
             .bind(from)
             .execute(&mut conn)
@@ -330,7 +330,7 @@ async fn merge_per_project_dbs(
     }
 
     let escaped = from_db.to_string_lossy().replace('\'', "''");
-    conn.execute(format!("ATTACH DATABASE '{escaped}' AS src").as_str())
+    conn.execute(sqlx::AssertSqlSafe(format!("ATTACH DATABASE '{escaped}' AS src")))
         .await
         .map_err(sqlx_err)?;
 

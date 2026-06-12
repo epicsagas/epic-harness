@@ -141,7 +141,7 @@ async fn migrate_fts_schema(pool: &AnyPool) {
     ];
 
     for stmt in &stmts {
-        let _ = sqlx::query(stmt).execute(pool).await;
+        let _ = sqlx::query(*stmt).execute(pool).await;
     }
 }
 
