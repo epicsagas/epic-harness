@@ -357,6 +357,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn is_enabled_true_when_set() {
         // SAFETY: isolated test
         unsafe {
@@ -369,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn is_enabled_false_for_other_values() {
         unsafe {
             std::env::set_var("EPIC_ORCHESTRATION", "true");
