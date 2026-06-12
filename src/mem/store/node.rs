@@ -19,13 +19,14 @@ pub fn write_node(node: &Node) -> io::Result<()> {
 async fn write_node_async(pool: &sqlx::AnyPool, node: &Node) -> io::Result<()> {
     // Preserve monotonically-increasing fields from existing node
     let mut gn = node_to_graph(node.clone());
-    let existing: Option<super::types::GraphNode> =
-        sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?")))
-            .bind(&gn.id)
-            .fetch_optional(pool)
-            .await
-            .map_err(io::Error::other)?
-            .map(|r| row_to_graph_node(&r));
+    let existing: Option<super::types::GraphNode> = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
+    )))
+    .bind(&gn.id)
+    .fetch_optional(pool)
+    .await
+    .map_err(io::Error::other)?
+    .map(|r| row_to_graph_node(&r));
 
     if let Some(ex) = existing {
         gn.access_count = gn.access_count.max(ex.access_count);
@@ -43,13 +44,15 @@ pub fn read_node(id: &str) -> io::Result<Node> {
 }
 
 async fn read_node_async(pool: &sqlx::AnyPool, id: &str) -> io::Result<Node> {
-    sqlx::query(sqlx::AssertSqlSafe(format!("SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?")))
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map_err(io::Error::other)?
-        .map(|r| graph_to_node(row_to_graph_node(&r)))
-        .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE id = ?"
+    )))
+    .bind(id)
+    .fetch_optional(pool)
+    .await
+    .map_err(io::Error::other)?
+    .map(|r| graph_to_node(row_to_graph_node(&r)))
+    .ok_or_else(|| io::Error::other(format!("node not found: {id}")))
 }
 
 pub fn delete_node_file(id: &str) -> io::Result<()> {

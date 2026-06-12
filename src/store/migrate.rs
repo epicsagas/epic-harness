@@ -726,7 +726,11 @@ pub async fn merge_attached_db_async(
             "INSERT OR IGNORE INTO main.{table} ({dest_cols}) \
              SELECT {src_cols}, ? FROM {attach_name}.{table}"
         );
-        match sqlx::query(sqlx::AssertSqlSafe(sql)).bind(slug).execute(&mut *conn).await {
+        match sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(slug)
+            .execute(&mut *conn)
+            .await
+        {
             Ok(r) => match *table {
                 "observations" => stats.obs += r.rows_affected() as usize,
                 "sessions" => stats.sessions += r.rows_affected() as usize,
@@ -892,7 +896,10 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
         let attach_name = "src";
         let escaped = db_path.display().to_string().replace('\'', "''");
         if let Err(e) = conn
-            .execute(sqlx::AssertSqlSafe(format!("ATTACH '{}' AS {attach_name}", escaped)))
+            .execute(sqlx::AssertSqlSafe(format!(
+                "ATTACH '{}' AS {attach_name}",
+                escaped
+            )))
             .await
             .map_err(sqlx_err)
         {
@@ -1064,13 +1071,15 @@ async fn collect_distinct_projects(conn: &mut sqlx::SqliteConnection) -> io::Res
     ];
     let mut seen = std::collections::HashSet::new();
     for table in &tables {
-        let rows: Vec<String> = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT DISTINCT project FROM {table}")))
-            .fetch_all(&mut *conn)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|row| row.try_get::<String, _>(0).ok())
-            .collect();
+        let rows: Vec<String> = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT DISTINCT project FROM {table}"
+        )))
+        .fetch_all(&mut *conn)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|row| row.try_get::<String, _>(0).ok())
+        .collect();
         for slug in rows {
             seen.insert(slug);
         }
@@ -1116,12 +1125,14 @@ async fn apply_slug_mapping(
     for (old, new) in mapping {
         // Simple tables: direct UPDATE.
         for table in SIMPLE_TABLES {
-            sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET project = ? WHERE project = ?")))
-                .bind(new)
-                .bind(old)
-                .execute(&mut *conn)
-                .await
-                .map_err(sqlx_err)?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE {table} SET project = ? WHERE project = ?"
+            )))
+            .bind(new)
+            .bind(old)
+            .execute(&mut *conn)
+            .await
+            .map_err(sqlx_err)?;
         }
 
         // Composite PK tables: temp-table approach to handle PK conflicts
@@ -1136,11 +1147,13 @@ async fn apply_slug_mapping(
             .await
             .map_err(sqlx_err)?;
             // Step 2: Delete originals.
-            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table} WHERE project = ?")))
-                .bind(old)
-                .execute(&mut *conn)
-                .await
-                .map_err(sqlx_err)?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE project = ?"
+            )))
+            .bind(old)
+            .execute(&mut *conn)
+            .await
+            .map_err(sqlx_err)?;
             // Step 3: Update project in temp.
             sqlx::query("UPDATE _norm_tmp SET project = ?")
                 .bind(new)
@@ -1148,11 +1161,9 @@ async fn apply_slug_mapping(
                 .await
                 .map_err(sqlx_err)?;
             // Step 4: Insert back (IGNORE handles conflicts with existing rows).
-            conn.execute(
-                sqlx::AssertSqlSafe(format!(
-                    "INSERT OR IGNORE INTO {table} SELECT * FROM _norm_tmp; DROP TABLE _norm_tmp;"
-                )),
-            )
+            conn.execute(sqlx::AssertSqlSafe(format!(
+                "INSERT OR IGNORE INTO {table} SELECT * FROM _norm_tmp; DROP TABLE _norm_tmp;"
+            )))
             .await
             .map_err(sqlx_err)?;
         }
@@ -1435,7 +1446,9 @@ mod tests {
         let slug = "test-project";
         let escaped_path = db_path.display().to_string().replace('\'', "''");
         global_conn
-            .execute(sqlx::AssertSqlSafe(format!("ATTACH '{escaped_path}' AS src")))
+            .execute(sqlx::AssertSqlSafe(format!(
+                "ATTACH '{escaped_path}' AS src"
+            )))
             .await
             .unwrap();
 

@@ -162,24 +162,26 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
 
     if dry_run {
         for table in SIMPLE {
-            let n: i64 =
-                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table} WHERE project = ?")))
-                    .bind(from)
-                    .fetch_one(&mut conn)
-                    .await
-                    .unwrap_or(0);
+            let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table} WHERE project = ?"
+            )))
+            .bind(from)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap_or(0);
             if n > 0 {
                 println!("  [dry-run] {table}: {n} rows would be re-labelled");
                 total += n as usize;
             }
         }
         for table in &["metrics_state", "skill_attribution", "promotion_counters"] {
-            let n: i64 =
-                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table} WHERE project = ?")))
-                    .bind(from)
-                    .fetch_one(&mut conn)
-                    .await
-                    .unwrap_or(0);
+            let n: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM {table} WHERE project = ?"
+            )))
+            .bind(from)
+            .fetch_one(&mut conn)
+            .await
+            .unwrap_or(0);
             if n > 0 {
                 println!("  [dry-run] {table}: {n} rows would be merged/re-labelled");
                 total += n as usize;
@@ -191,11 +193,13 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
     conn.execute("BEGIN IMMEDIATE").await.map_err(sqlx_err)?;
 
     for table in SIMPLE {
-        match sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET project = ? WHERE project = ?")))
-            .bind(to)
-            .bind(from)
-            .execute(&mut conn)
-            .await
+        match sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE {table} SET project = ? WHERE project = ?"
+        )))
+        .bind(to)
+        .bind(from)
+        .execute(&mut conn)
+        .await
         {
             Ok(r) => total += r.rows_affected() as usize,
             Err(e) if e.to_string().contains("no such") => {}
@@ -330,9 +334,11 @@ async fn merge_per_project_dbs(
     }
 
     let escaped = from_db.to_string_lossy().replace('\'', "''");
-    conn.execute(sqlx::AssertSqlSafe(format!("ATTACH DATABASE '{escaped}' AS src")))
-        .await
-        .map_err(sqlx_err)?;
+    conn.execute(sqlx::AssertSqlSafe(format!(
+        "ATTACH DATABASE '{escaped}' AS src"
+    )))
+    .await
+    .map_err(sqlx_err)?;
 
     let stats = super::migrate::merge_attached_db_async(&mut conn, to_slug, "src").await?;
 
