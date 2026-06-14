@@ -5,6 +5,11 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] — 2026-06-15
+
+### Fixed
+- **Release build reproducibility**: `Cargo.lock` is now tracked (it was gitignored). The v0.6.4 release failed in CI because, without a lockfile, CI resolved `brotli-decompressor` 5.0.2 (published 2026-06-13), which broke `brotli` 8.0.3's `implement_allocator` macro. The committed lock pins `brotli-decompressor` to 5.0.1, matching the successful v0.6.3 build. Otherwise identical to 0.6.4.
+
 ## [0.6.4] — 2026-06-15
 
 ### Fixed
