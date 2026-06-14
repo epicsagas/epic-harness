@@ -348,6 +348,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn is_enabled_defaults_to_false() {
         // SAFETY: isolated test, we ensure the var is removed
         unsafe {
