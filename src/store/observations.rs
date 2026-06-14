@@ -10,10 +10,15 @@ use crate::shared::obs::ObsRecord;
 use crate::shared::scoring::ScoreDimensions;
 
 /// Insert a single observation record.
+///
+/// `project` is the project slug to attribute this observation to. The caller
+/// (observe hook) resolves it via `paths::project_slug()`; passing it explicitly
+/// keeps the store layer free of CWD/git dependencies.
 pub async fn insert_observation_pool(
     pool: &AnyPool,
     rec: &ObsRecord,
     session_id: &str,
+    project: &str,
 ) -> io::Result<i64> {
     let (dim_s, dim_q, dim_c) = match &rec.dimensions {
         Some(d) => (
@@ -27,8 +32,8 @@ pub async fn insert_observation_pool(
         "INSERT INTO observations
          (timestamp, session_id, tool, tool_category, action, result, score,
           dim_success, dim_quality, dim_cost, failure_category, error_snippet,
-          file_ext, sequence_id, pipeline_id)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          file_ext, sequence_id, pipeline_id, project)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
     .bind(&rec.timestamp)
     .bind(session_id)
@@ -45,6 +50,7 @@ pub async fn insert_observation_pool(
     .bind(&rec.file_ext)
     .bind(rec.sequence_id.map(super::u64_to_i64))
     .bind(&rec.pipeline_id)
+    .bind(project)
     .execute(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -61,7 +67,8 @@ pub async fn insert_observation_pool(
 pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> {
     super::runtime::block_on(async {
         let pool = super::pool::harness_pool().await?;
-        insert_observation_pool(&pool, rec, session_id).await
+        let project = crate::shared::paths::project_slug();
+        insert_observation_pool(&pool, rec, session_id, &project).await
     })
 }
 
@@ -377,7 +384,7 @@ mod tests {
             pipeline_id: None,
         };
 
-        let id = insert_observation_pool(&pool, &rec, "20260602_12345")
+        let id = insert_observation_pool(&pool, &rec, "20260602_12345", "test-project")
             .await
             .unwrap();
         assert!(id > 0);
@@ -427,7 +434,7 @@ mod tests {
                 sequence_id: None,
                 pipeline_id: None,
             };
-            insert_observation_pool(&pool, &rec, "20260602_12345")
+            insert_observation_pool(&pool, &rec, "20260602_12345", "test-project")
                 .await
                 .unwrap();
         }
@@ -460,7 +467,7 @@ mod tests {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_pool(&pool, &rec, "20260501_12345")
+        insert_observation_pool(&pool, &rec, "20260501_12345", "test-project")
             .await
             .unwrap();
 
@@ -508,10 +515,10 @@ mod tests {
             pipeline_id: None,
         };
 
-        insert_observation_pool(&pool, &rec1, "sess1")
+        insert_observation_pool(&pool, &rec1, "sess1", "test-project")
             .await
             .unwrap();
-        insert_observation_pool(&pool, &rec2, "sess1")
+        insert_observation_pool(&pool, &rec2, "sess1", "test-project")
             .await
             .unwrap();
 

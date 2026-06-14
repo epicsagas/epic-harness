@@ -71,10 +71,12 @@ pub(crate) const DDL_SQLITE: &str = r#"
         pending_tasks     TEXT NOT NULL DEFAULT '[]',
         context_usage     REAL,
         pipeline_state    TEXT,
-        created_at_millis INTEGER NOT NULL
+        created_at_millis INTEGER NOT NULL,
+        project           TEXT NOT NULL DEFAULT ''
     );
 
     CREATE INDEX IF NOT EXISTS idx_sessions_ts ON sessions(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project);
 
     CREATE TABLE IF NOT EXISTS evolution_records (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,14 +89,16 @@ pub(crate) const DDL_SQLITE: &str = r#"
         skills_seeded     INTEGER NOT NULL DEFAULT 0,
         skills_rolled_back INTEGER NOT NULL DEFAULT 0,
         total_evolved     INTEGER NOT NULL DEFAULT 0,
-        analysis_summary  TEXT NOT NULL DEFAULT ''
+        analysis_summary  TEXT NOT NULL DEFAULT '',
+        project           TEXT NOT NULL DEFAULT ''
     );
 
     CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);
 
     CREATE TABLE IF NOT EXISTS metrics_state (
-        key   TEXT PRIMARY KEY,
-        value TEXT NOT NULL
+        key     TEXT PRIMARY KEY,
+        value   TEXT NOT NULL,
+        project TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS score_history (
@@ -105,7 +109,8 @@ pub(crate) const DDL_SQLITE: &str = r#"
         observations INTEGER NOT NULL DEFAULT 0,
         dim_success  REAL NOT NULL DEFAULT 0.0,
         dim_quality  REAL NOT NULL DEFAULT 0.0,
-        dim_cost     REAL NOT NULL DEFAULT 0.0
+        dim_cost     REAL NOT NULL DEFAULT 0.0,
+        project      TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS skill_attribution (
@@ -118,6 +123,7 @@ pub(crate) const DDL_SQLITE: &str = r#"
 
     CREATE TABLE IF NOT EXISTS orch_runs (
         id             TEXT PRIMARY KEY,
+        project        TEXT NOT NULL DEFAULT '',
         status         TEXT NOT NULL DEFAULT 'running',
         agents_json    TEXT NOT NULL DEFAULT '[]',
         dep_graph_json TEXT NOT NULL DEFAULT '{}',
@@ -157,6 +163,7 @@ pub(crate) const DDL_SQLITE: &str = r#"
 
     CREATE TABLE IF NOT EXISTS orch_control (
         id         INTEGER PRIMARY KEY CHECK (id = 1),
+        project    TEXT NOT NULL DEFAULT '',
         action     TEXT NOT NULL,
         target     TEXT,
         message    TEXT,
@@ -193,8 +200,10 @@ pub(crate) const DDL_SQLITE: &str = r#"
     );
 
     CREATE TABLE IF NOT EXISTS promotion_counters (
-        pattern_key TEXT PRIMARY KEY,
-        count       INTEGER NOT NULL DEFAULT 0
+        pattern_key TEXT NOT NULL,
+        project     TEXT NOT NULL DEFAULT '',
+        count       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (pattern_key, project)
     );
 
     CREATE TABLE IF NOT EXISTS workspace_manifest (

@@ -60,8 +60,3 @@ pub(crate) fn u64_to_i64(v: u64) -> i64 {
 pub(crate) fn i64_to_u64(v: i64) -> u64 {
     v.try_into().unwrap_or(0)
 }
-
-/// Path to the operational database: `~/.harness/projects/{slug}/harness.db`
-pub fn harness_db_path() -> std::path::PathBuf {
-    crate::shared::paths::harness_dir().join("harness.db")
-}

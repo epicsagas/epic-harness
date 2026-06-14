@@ -495,9 +495,14 @@ pub fn run(input: &HookInput) -> i32 {
     // that observation is excluded from end-of-session analysis. This is an
     // acceptable tradeoff; persistent DB failures are treated as a setup problem.
     if let Some(ref pool) = db {
-        if let Err(e) = crate::store::runtime::block_on(
-            crate::store::observations::insert_observation_pool(pool, &record, &sid),
-        ) {
+        if let Err(e) =
+            crate::store::runtime::block_on(crate::store::observations::insert_observation_pool(
+                pool,
+                &record,
+                &sid,
+                &crate::shared::paths::project_slug(),
+            ))
+        {
             eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
             append_jsonl(&session_file, &record);
         }

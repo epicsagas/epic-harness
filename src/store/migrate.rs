@@ -23,7 +23,7 @@ use super::sqlx_err;
 // ── Connection factory ──────────────────────────────────────────────────────
 
 async fn open_migrate_conn() -> io::Result<sqlx::SqliteConnection> {
-    let path = super::harness_db_path();
+    let path = crate::shared::paths::global_harness_db_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -697,8 +697,10 @@ pub async fn merge_attached_db_async(
         ),
         (
             "sessions",
-            "timestamp, snap_type, summary, snapshot_json, millis, project",
-            "timestamp, snap_type, summary, snapshot_json, millis",
+            "timestamp, snap_type, summary, pending_tasks, context_usage, \
+          pipeline_state, created_at_millis, project",
+            "timestamp, snap_type, summary, pending_tasks, context_usage, \
+          pipeline_state, created_at_millis",
         ),
         (
             "evolution_records",
@@ -1417,10 +1419,20 @@ mod tests {
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         timestamp TEXT NOT NULL,
                         snap_type TEXT NOT NULL,
-                        summary TEXT,
-                        snapshot_json TEXT NOT NULL,
-                        millis INTEGER NOT NULL
+                        summary TEXT NOT NULL DEFAULT '',
+                        pending_tasks TEXT NOT NULL DEFAULT '[]',
+                        context_usage REAL,
+                        pipeline_state TEXT,
+                        created_at_millis INTEGER NOT NULL
                     )",
+                )
+                .await
+                .unwrap();
+            src_conn
+                .execute(
+                    "INSERT INTO sessions (timestamp, snap_type, summary, pending_tasks, \
+                     context_usage, pipeline_state, created_at_millis) \
+                     VALUES ('2026-01-01T00:00:00Z', 'pre-compact', 'test', '[]', 0.5, NULL, 1700000000000)",
                 )
                 .await
                 .unwrap();
@@ -1458,9 +1470,9 @@ mod tests {
         global_conn.execute("DETACH src").await.unwrap();
 
         assert_eq!(merged.obs, 1, "should merge 1 observation");
-        assert_eq!(merged.sessions, 0, "sessions table was empty");
+        assert_eq!(merged.sessions, 1, "should merge 1 session");
 
-        // Verify the project column is set
+        // Verify the project column is set on observations
         let count: i64 = sqlx::query("SELECT COUNT(*) FROM observations WHERE project = ?")
             .bind(slug)
             .fetch_one(&mut global_conn)
@@ -1469,5 +1481,15 @@ mod tests {
             .try_get(0)
             .unwrap();
         assert_eq!(count, 1);
+
+        // Verify the project column is set on sessions too
+        let sess_count: i64 = sqlx::query("SELECT COUNT(*) FROM sessions WHERE project = ?")
+            .bind(slug)
+            .fetch_one(&mut global_conn)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(sess_count, 1);
     }
 }

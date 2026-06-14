@@ -103,7 +103,7 @@ async fn obs_stats_tool_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_pool(&pool, &rec, "sess_limit_test")
+        insert_observation_pool(&pool, &rec, "sess_limit_test", "test-project")
             .await
             .unwrap();
     }
@@ -141,7 +141,7 @@ async fn obs_error_stats_limit_is_enforced() {
             sequence_id: None,
             pipeline_id: None,
         };
-        insert_observation_pool(&pool, &rec, "sess_err_limit")
+        insert_observation_pool(&pool, &rec, "sess_err_limit", "test-project")
             .await
             .unwrap();
     }
