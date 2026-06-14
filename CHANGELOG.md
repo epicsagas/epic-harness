@@ -5,6 +5,28 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] — 2026-06-15
+
+### Fixed
+- **Observations lost project attribution**: `insert_observation_pool` dropped the `project` column, so ~30% of observations written since the per-project → global db consolidation had blank project. The project slug is now bound at the observe hook call site and threaded through the store layer.
+- **`migrate` targeted the wrong database**: `open_migrate_conn` opened the per-project db instead of the global one, so `migrate` and `migrate --to-global` wrote to the wrong database. Now targets global `~/.harness/harness.db`. Removed the dead per-project `harness_db_path()`.
+- **Sessions merge schema drift**: `merge_attached_db_async` referenced stale session columns (`snapshot_json`/`millis`); aligned with the current `pending_tasks`/`context_usage`/`created_at_millis` columns.
+- **DDL divergence from production**: `DDL_SQLITE` was missing the `project` column on 7 tables (`sessions`, `evolution_records`, `metrics_state`, `score_history`, `orch_runs`, `orch_control`, `promotion_counters`); aligned so fresh dbs match the production global db schema.
+
+## [0.6.3] — 2026-06-12
+
+### Added
+- **`epic slug` CLI subcommand**: prints the worktree-safe project slug; used in Cursor hooks.
+
+### Fixed
+- **Project slug in linked worktrees**: `project_slug()` now uses `git-common-dir` to resolve a stable slug in linked worktrees instead of CWD dirname.
+- **Orchestration test flakiness**: added the `serial` attribute to env-mutating tests to prevent race conditions.
+- **Episteme ingest**: disabled Episteme integration in reflect session metrics and removed the broken dependency.
+- **src-tauri build**: prefixed unused project params to satisfy the compiler after signature changes.
+
+### Changed
+- sqlx requirement updated from 0.8 to 0.9.
+
 ## [0.6.2] — 2026-06-10
 
 ### Fixed
