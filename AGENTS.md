@@ -275,9 +275,26 @@ When creating a new release tag, update ALL of the following to the same version
 |------|-------|---------|
 | `Cargo.toml` | `version = "x.y.z"` | `0.4.3` |
 | `package.json` | `"version": "x.y.z"` | `0.4.3` |
+| `app/package.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.codex-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `integrations/antigravity/gemini-extension.json` | `"version": "x.y.z"` | `0.4.3` |
 | Git tag | `vx.y.z` | `v0.4.3` |
 
-All six must match before tagging.
+All seven must match before tagging.
+
+### Dashboard rebuild (before tagging)
+
+The web dashboard is a Svelte app under `app/` that builds to `assets/dashboard.html`,
+which is embedded into the binary at compile time. After bumping versions, rebuild
+and commit it so the bundled dashboard matches:
+
+```bash
+make dashboard-build   # cd app && pnpm install --frozen-lockfile && pnpm run build && cp app/dist/index.html assets/dashboard.html
+git add assets/dashboard.html
+```
+
+The running binary always stamps its own `CARGO_PKG_VERSION` into the served
+dashboard via `<meta name="harness-version">` (see `serve.rs`), so the version
+shown is correct even if this step is missed — but rebuilding keeps the
+fallback (dev mode) and Settings page in sync.

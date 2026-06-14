@@ -12,6 +12,27 @@ const DEFAULT_PORT: u16 = 7700;
 // HTML is embedded at compile time from assets/dashboard.html
 static DASHBOARD_HTML: &str = include_str!("../assets/dashboard.html");
 
+// The binary's own version, stamped into the served dashboard HTML so the UI
+// always shows the version users actually installed — regardless of whether
+// the bundled assets/dashboard.html was rebuilt or app/package.json was bumped
+// before release. Source of truth = the running binary, not the frontend build.
+const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Inject the binary version into the embedded dashboard HTML as a meta tag.
+/// Called on every dashboard page serve so the version is always correct.
+fn dashboard_html_with_version() -> String {
+    let meta = format!("<meta name=\"harness-version\" content=\"{HARNESS_VERSION}\">");
+    // Inject immediately after the opening <head> (first occurrence only).
+    match DASHBOARD_HTML.split_once("<head>") {
+        Some((before, after)) => format!("{before}<head>{meta}{after}"),
+        None => {
+            // Fallback: no <head> tag found — prepend the meta so the version
+            // is still discoverable.
+            format!("{meta}{DASHBOARD_HTML}")
+        }
+    }
+}
+
 /// `epic-harness dashboard [--port=N]` — serve + open browser
 pub fn run_dashboard(port: Option<u16>) -> i32 {
     let port = port.unwrap_or(DEFAULT_PORT);
@@ -85,7 +106,7 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
         let response = match (method, url.as_str()) {
             (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(
-                DASHBOARD_HTML,
+                dashboard_html_with_version(),
             )
             .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
 

@@ -8,6 +8,13 @@ import type { Plugin } from 'vite';
 
 const host = process.env.TAURI_DEV_HOST;
 
+// Frontend build-time version (app/package.json). Used as a fallback for the
+// dashboard version display in `vite dev`; in production the binary stamps its
+// own CARGO_PKG_VERSION via a <meta name="harness-version"> tag (see serve.rs).
+const pkg = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'),
+) as { version: string };
+
 function getHarnessDir(): string {
   // epic-harness path resolves the slug from the git worktree's commondir (the
   // original repo), not from a linked worktree. Walk up from app/ to find the
@@ -281,6 +288,9 @@ export default defineConfig({
   plugins: [svelte(), viteSingleFile(), harnessApiPlugin()],
   appType: 'spa',
   base: '/',
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   resolve: {
     alias: {
       '$lib': path.resolve('./src/lib'),

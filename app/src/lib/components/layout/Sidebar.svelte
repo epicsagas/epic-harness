@@ -6,6 +6,15 @@
 
   let { currentScreen, onNavigate }: Props = $props();
 
+  // Dashboard version: prefer the server-injected <meta name="harness-version">
+  // (always matches the installed binary, since the binary stamps its own
+  // CARGO_PKG_VERSION on serve). Fall back to the build-time __APP_VERSION__
+  // when running under `vite dev` (no binary serving).
+  const version =
+    (typeof document !== 'undefined'
+      ? document.querySelector('meta[name="harness-version"]')?.getAttribute('content')
+      : undefined) ?? __APP_VERSION__;
+
   const navSections = [
     {
       label: 'Overview',
@@ -76,7 +85,7 @@
 <div class="sidebar-brand">
   <div class="logo-icon">EH</div>
   <h1>epic-harness</h1>
-  <span class="version">v0.4.1</span>
+  <span class="version">v{version}</span>
 </div>
 
 <nav class="sidebar-nav">
