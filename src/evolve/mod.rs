@@ -1,10 +1,12 @@
 pub mod analysis;
+pub mod digester;
 pub mod ingest;
 pub mod instincts;
 pub mod metrics;
 pub mod skills;
 
 pub use analysis::{analyze_session, build_summary, detect_patterns};
+pub use digester::digest_session;
 pub use ingest::ingest_to_memory;
 pub use instincts::{extract_instincts, promote_instincts_to_global};
 pub use metrics::{
