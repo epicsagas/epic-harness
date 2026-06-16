@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! variants.rs — HarnessX variant isolation via ensemble routing (§4.5)
 //!
 //! Maintains up to K skill variants and routes each task to the variant with

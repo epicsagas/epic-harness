@@ -69,6 +69,10 @@ impl EditType {
 
 /// The nine orthogonal dimensions of the harness behavioral space.
 /// Inspired by HarnessX's taxonomy — used for dimension-scoped analysis.
+///
+/// Reserved for P3 (dimension tags in skill frontmatter); not yet read by any
+/// gate, hence `allow(dead_code)`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessDimension {
@@ -83,6 +87,7 @@ pub enum HarnessDimension {
     TrainingBridge,
 }
 
+#[allow(dead_code)]
 impl HarnessDimension {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -420,10 +425,13 @@ impl SolvedTaskRegistry {
 }
 
 // ── HarnessX-inspired: Harness Snapshot (first-class) ─
+// The snapshot types below are reserved for P2 (harness as first-class object:
+// `epic harness snapshot/diff/restore`). Not yet constructed, hence allow(dead_code).
 
 /// A serializable snapshot of the entire harness state.
 /// Inspired by HarnessX's "first-class object" — the harness can be
 /// serialized, compared, and restored as a unit.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessSnapshot {
     pub version: String,
@@ -439,6 +447,7 @@ pub struct HarnessSnapshot {
 }
 
 /// Subset of config relevant for comparison.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigSummary {
     pub hook_profile: String,
@@ -448,6 +457,7 @@ pub struct ConfigSummary {
 }
 
 /// Compact metrics summary for snapshot.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetricsSummary {
     pub total_sessions: u64,
@@ -462,6 +472,11 @@ pub struct MetricsSummary {
 /// A domain-scoped variant of evolved skills.
 /// Inspired by HarnessX's variant isolation — prevents catastrophic
 /// forgetting on heterogeneous task sets by scoping skills per domain.
+///
+/// Constructed by `evolve::variants::VariantPool`; the struct itself is read
+/// there but `allow(dead_code)` is needed because the bin targets don't form
+/// a pool yet (wiring lands when variant isolation gates the evolve loop).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillVariant {
     /// Variant identifier (e.g., "rust-backend", "python-ml").

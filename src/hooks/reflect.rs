@@ -861,7 +861,8 @@ pub fn run(_input: &HookInput) -> i32 {
     // tolerance, surface it as a warning and skip seeding to avoid committing
     // a regressing edit. The registry is then updated with this round's scores.
     let seesaw = evolve::load_registry();
-    let regressed = evolve::seesaw_check(&seesaw, &digests, 0.1);
+    let regressed =
+        evolve::seesaw_check(&seesaw, &digests, crate::evolve::seesaw::DEFAULT_TOLERANCE);
     if !regressed.is_empty() && seeded > 0 {
         hint(
             "reflect",

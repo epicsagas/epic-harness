@@ -1,4 +1,12 @@
+#![allow(dead_code)]
+
 //! edits.rs — HarnessX-inspired typed edit operations
+//!
+//! The `HarnessEdit` API and its manifest are not yet invoked from the reflect
+//! loop (that wiring lands when typed edits replace the direct SKILL.md
+//! writes in `seed_smart_skills`). They are exposed now so the Planner's
+//! edit-type coverage analysis has the full taxonomy to compare against and
+//! so R6 variant isolation can branch on edit kind.
 //!
 //! Each candidate harness adaptation is a typed [`HarnessEdit`] value rather
 //! than an opaque "write SKILL.md" action (HarnessX paper §4.3 Evolver: "each
