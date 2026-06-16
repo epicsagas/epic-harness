@@ -753,6 +753,12 @@ const TUNING_DECLINE_LIMIT: usize = 3;
 /// Append a tuning section to an evolved skill's SKILL.md.
 /// **Never modifies or deletes existing content** — only appends after a delimiter.
 #[allow(dead_code)]
+/// Public entry point for typed edits (R4 HarnessEdit::ModifySkill).
+/// Delegates to the private implementation.
+pub fn append_tuning_section_pub(name: &str, section: &str) {
+    append_tuning_section(name, section)
+}
+
 fn append_tuning_section(name: &str, section: &str) {
     let dir = evolved_dir().join(name);
     let skill_file = dir.join("SKILL.md");
