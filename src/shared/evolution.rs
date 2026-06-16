@@ -367,28 +367,34 @@ pub struct AttemptedEdit {
 
 // ── HarnessX-inspired: Seesaw Constraint ──────────────
 
-/// Key for tracking per-task, per-dimension scores.
-/// Used by the seesaw constraint to prevent regression.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct TaskDimensionKey {
-    pub task_id: String,
-    pub dimension: String,
-}
-
-/// Registry of solved tasks and their best scores.
-/// The seesaw constraint rejects any edit that regresses a solved task
-/// below its best score minus the tolerance.
+/// Registry of solved tasks and their best outcome score.
+///
+/// Implements the HarnessX **seesaw constraint** (paper §4.1): the candidate
+/// harness must not regress any previously solved task.
+///
+/// ## Critic-driven design note
+/// The earlier draft tracked scores `per (task_id, dimension)`. The paper's
+/// own analysis (§6.6, §7.6) shows that aggregate/per-dimension gating *fails*
+/// to catch sub-threshold coupling — the exact regression mode seesaw is meant
+/// to prevent. The paper's seesaw is **per-task** (pass@2 binary flips). We
+/// therefore track a single best outcome score per task and reject any edit
+/// that drops a previously-solved task below its best minus tolerance.
+///
+/// This is a deliberately coarse gate (the paper acknowledges even per-task
+/// seesaw is insufficient for sub-threshold drift; variant isolation in R6 is
+/// the real fix). Its scope here is to catch *gross* regressions cheaply, not
+/// to guarantee no forgetting.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SolvedTaskRegistry {
-    /// task_id+dimension → best score achieved.
+    /// task_id → best outcome score achieved (0.0–1.0).
     pub solved: HashMap<String, f64>,
     /// Count of tasks currently marked as solved.
     pub total_solved: u32,
 }
 
 impl SolvedTaskRegistry {
-    /// Check whether applying new scores would cause any regression
-    /// on previously solved tasks. Returns the list of regressed keys.
+    /// Check whether the new per-task scores would regress any previously
+    /// solved task. Returns the list of regressed task_ids.
     /// Empty = no regression (edit passes the seesaw constraint).
     pub fn check_seesaw(
         &self,
@@ -397,10 +403,10 @@ impl SolvedTaskRegistry {
     ) -> Vec<String> {
         self.solved
             .iter()
-            .filter_map(|(key, best)| {
-                new_scores.get(key).map_or(None, |new| {
+            .filter_map(|(task_id, best)| {
+                new_scores.get(task_id).map_or(None, |new| {
                     if *new < *best - tolerance {
-                        Some(key.clone())
+                        Some(task_id.clone())
                     } else {
                         None
                     }
@@ -409,10 +415,10 @@ impl SolvedTaskRegistry {
             .collect()
     }
 
-    /// Update the registry with new scores. Only improves best scores.
+    /// Update the registry with new per-task scores. Only improves best scores.
     pub fn update(&mut self, scores: &HashMap<String, f64>) {
-        for (key, score) in scores {
-            let entry = self.solved.entry(key.clone()).or_insert(*score);
+        for (task_id, score) in scores {
+            let entry = self.solved.entry(task_id.clone()).or_insert(*score);
             if *score > *entry {
                 *entry = *score;
             }
