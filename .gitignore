@@ -291,3 +291,4 @@ $RECYCLE.BIN/
 # Eval results (runtime artifacts — not tracked in git)
 benchmarks/results/
 benchmarks/baselines/
+!benchmarks/baselines/latest.json
