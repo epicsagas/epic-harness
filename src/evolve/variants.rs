@@ -82,7 +82,9 @@ impl VariantPool {
         }
 
         // Fallback: highest avg_score overall.
-        self.variants.iter().max_by(|a, b| a.avg_score.total_cmp(&b.avg_score))
+        self.variants
+            .iter()
+            .max_by(|a, b| a.avg_score.total_cmp(&b.avg_score))
     }
 
     /// Fork-on-regression: given an edit improves variant `target` but would
@@ -129,7 +131,10 @@ impl VariantPool {
 
     /// Record a routing outcome for warm-routing stats.
     pub fn record_outcome(&mut self, variant_id: &str, success: bool) {
-        let entry = self.routing_stats.entry(variant_id.to_string()).or_insert((0, 0));
+        let entry = self
+            .routing_stats
+            .entry(variant_id.to_string())
+            .or_insert((0, 0));
         entry.1 += 1;
         if success {
             entry.0 += 1;
@@ -294,7 +299,10 @@ mod tests {
 
     #[test]
     fn detect_stack_basic() {
-        assert_eq!(detect_stack("fix src/auth/login.rs"), vec!["rust".to_string()]);
+        assert_eq!(
+            detect_stack("fix src/auth/login.rs"),
+            vec!["rust".to_string()]
+        );
         assert_eq!(detect_stack("run train.py"), vec!["python".to_string()]);
         let mixed = detect_stack("port utils.ts to main.rs");
         assert!(mixed.contains(&"rust".to_string()));

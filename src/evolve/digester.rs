@@ -316,7 +316,10 @@ mod tests {
 
     #[test]
     fn all_success_segment_classified_success() {
-        let obs = vec![rec("Read", "read", Some(1.0), None), rec("Edit", "edit", Some(1.0), None)];
+        let obs = vec![
+            rec("Read", "read", Some(1.0), None),
+            rec("Edit", "edit", Some(1.0), None),
+        ];
         let digests = digest_session(&obs, &[]);
         assert_eq!(digests.len(), 1);
         assert!(matches!(digests[0].outcome, TaskOutcome::Success));
@@ -333,10 +336,16 @@ mod tests {
         let digests = digest_session(&obs, &[]);
         assert!(matches!(
             digests[0].outcome,
-            TaskOutcome::PartialFailure { failed_steps: 2, total_steps: 3 }
+            TaskOutcome::PartialFailure {
+                failed_steps: 2,
+                total_steps: 3
+            }
         ));
         // type_error ranked first (count 2).
-        assert_eq!(digests[0].failure_categories[0], ("type_error".to_string(), 2));
+        assert_eq!(
+            digests[0].failure_categories[0],
+            ("type_error".to_string(), 2)
+        );
     }
 
     #[test]
@@ -385,7 +394,8 @@ mod tests {
         let mut o2 = rec("Bash", "bash", Some(0.0), Some("type_error"));
         o2.error_snippet = Some("type mismatch".into()); // dup
         let mut o3 = rec("Bash", "bash", Some(0.0), Some("type_error"));
-        o3.error_snippet = Some("a much longer and more verbose error message than the first".into());
+        o3.error_snippet =
+            Some("a much longer and more verbose error message than the first".into());
         let digests = digest_session(&[o, o2, o3], &[]);
         // 2 distinct excerpts (dup removed), shortest first.
         assert_eq!(digests[0].evidence_excerpts.len(), 2);

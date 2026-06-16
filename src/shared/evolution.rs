@@ -393,11 +393,7 @@ impl SolvedTaskRegistry {
     /// Check whether the new per-task scores would regress any previously
     /// solved task. Returns the list of regressed task_ids.
     /// Empty = no regression (edit passes the seesaw constraint).
-    pub fn check_seesaw(
-        &self,
-        new_scores: &HashMap<String, f64>,
-        tolerance: f64,
-    ) -> Vec<String> {
+    pub fn check_seesaw(&self, new_scores: &HashMap<String, f64>, tolerance: f64) -> Vec<String> {
         self.solved
             .iter()
             .filter_map(|(task_id, best)| {

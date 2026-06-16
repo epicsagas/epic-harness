@@ -106,13 +106,24 @@ impl HarnessEdit {
     /// Build a falsifiable manifest for this edit.
     pub fn manifest(&self) -> EditManifest {
         match self {
-            HarnessEdit::AddSkill { name, origin, confidence, .. } => EditManifest {
+            HarnessEdit::AddSkill {
+                name,
+                origin,
+                confidence,
+                ..
+            } => EditManifest {
                 edit_type: EditType::AddSkill,
                 target: name.clone(),
                 intended_effect: format!("New evolved skill from {origin} pattern"),
-                predicted_impact: format!("Reduce failures of {origin} (confidence {confidence:.2})"),
+                predicted_impact: format!(
+                    "Reduce failures of {origin} (confidence {confidence:.2})"
+                ),
             },
-            HarnessEdit::ModifySkill { skill_name, section, .. } => EditManifest {
+            HarnessEdit::ModifySkill {
+                skill_name,
+                section,
+                ..
+            } => EditManifest {
                 edit_type: EditType::ModifySkill,
                 target: skill_name.clone(),
                 intended_effect: format!("Auto-tune {section} of {skill_name}"),
@@ -124,7 +135,11 @@ impl HarnessEdit {
                 intended_effect: "Promote pattern to global memory".into(),
                 predicted_impact: format!("Recall {trigger} cross-project"),
             },
-            HarnessEdit::ModifyConfig { key, old_value, new_value } => EditManifest {
+            HarnessEdit::ModifyConfig {
+                key,
+                old_value,
+                new_value,
+            } => EditManifest {
                 edit_type: EditType::ModifyConfig,
                 target: key.clone(),
                 intended_effect: format!("Adjust {key}: {old_value} -> {new_value}"),
@@ -143,11 +158,20 @@ impl HarnessEdit {
     /// config/guard edits are reserved and report `NotImplemented`.
     pub fn apply(&self) -> EditOutcome {
         match self {
-            HarnessEdit::AddSkill { name, content, origin, confidence } => {
+            HarnessEdit::AddSkill {
+                name,
+                content,
+                origin,
+                confidence,
+            } => {
                 super::skills::write_skill_with_meta(name, content, origin, *confidence);
                 EditOutcome::Applied
             }
-            HarnessEdit::ModifySkill { skill_name, section, new_content } => {
+            HarnessEdit::ModifySkill {
+                skill_name,
+                section,
+                new_content,
+            } => {
                 // Combine the section heading and body into the single tuning
                 // section string the underlying editor expects.
                 let combined = if section.is_empty() {
@@ -176,7 +200,11 @@ impl HarnessEdit {
                 }
                 Ok(())
             }
-            HarnessEdit::ModifySkill { skill_name, new_content, .. } => {
+            HarnessEdit::ModifySkill {
+                skill_name,
+                new_content,
+                ..
+            } => {
                 if !super::skills::sanitize_skill_name(skill_name) {
                     return Err(format!("invalid skill name: {skill_name}"));
                 }
@@ -200,23 +228,49 @@ mod tests {
     #[test]
     fn edit_type_maps_each_variant() {
         assert_eq!(
-            HarnessEdit::AddSkill { name: "x".into(), content: "c".into(), origin: "o".into(), confidence: 0.5 }.edit_type(),
+            HarnessEdit::AddSkill {
+                name: "x".into(),
+                content: "c".into(),
+                origin: "o".into(),
+                confidence: 0.5
+            }
+            .edit_type(),
             EditType::AddSkill
         );
         assert_eq!(
-            HarnessEdit::ModifySkill { skill_name: "x".into(), section: "s".into(), new_content: "c".into() }.edit_type(),
+            HarnessEdit::ModifySkill {
+                skill_name: "x".into(),
+                section: "s".into(),
+                new_content: "c".into()
+            }
+            .edit_type(),
             EditType::ModifySkill
         );
         assert_eq!(
-            HarnessEdit::AddInstinct { trigger: "t".into(), body: "b".into(), confidence: 0.5 }.edit_type(),
+            HarnessEdit::AddInstinct {
+                trigger: "t".into(),
+                body: "b".into(),
+                confidence: 0.5
+            }
+            .edit_type(),
             EditType::AddInstinct
         );
         assert_eq!(
-            HarnessEdit::ModifyConfig { key: "k".into(), old_value: "a".into(), new_value: "b".into() }.edit_type(),
+            HarnessEdit::ModifyConfig {
+                key: "k".into(),
+                old_value: "a".into(),
+                new_value: "b".into()
+            }
+            .edit_type(),
             EditType::ModifyConfig
         );
         assert_eq!(
-            HarnessEdit::AddGuardRule { pattern: "p".into(), level: "warn".into(), msg: "m".into() }.edit_type(),
+            HarnessEdit::AddGuardRule {
+                pattern: "p".into(),
+                level: "warn".into(),
+                msg: "m".into()
+            }
+            .edit_type(),
             EditType::AddGuardRule
         );
     }
@@ -281,7 +335,12 @@ mod tests {
     #[test]
     fn target_exposes_relevant_field() {
         assert_eq!(
-            HarnessEdit::ModifyConfig { key: "stagnation_limit".into(), old_value: "3".into(), new_value: "5".into() }.target(),
+            HarnessEdit::ModifyConfig {
+                key: "stagnation_limit".into(),
+                old_value: "3".into(),
+                new_value: "5".into()
+            }
+            .target(),
             "stagnation_limit"
         );
     }

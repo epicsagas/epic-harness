@@ -55,10 +55,7 @@ pub fn build_landscape(
 /// edit type — the exact condition where the engine is "plateauing on local
 /// edits while structural options remain unexplored."
 pub fn recommends_exploration(landscape: &AdaptationLandscape) -> bool {
-    let has_unresolved = landscape
-        .persistent_failures
-        .iter()
-        .any(|f| !f.resolved);
+    let has_unresolved = landscape.persistent_failures.iter().any(|f| !f.resolved);
     has_unresolved && !landscape.untried_edit_types.is_empty()
 }
 
@@ -182,7 +179,12 @@ mod tests {
     use crate::shared::evolution::{DetectedPattern, TaskOutcome};
     use std::collections::HashMap;
 
-    fn record(ts: &str, error_cats: &[&str], pattern_types: &[&str], edit: EditType) -> EvolutionRecord {
+    fn record(
+        ts: &str,
+        error_cats: &[&str],
+        pattern_types: &[&str],
+        edit: EditType,
+    ) -> EvolutionRecord {
         let mut error_patterns = HashMap::new();
         for c in error_cats {
             error_patterns.insert((*c).to_string(), 1u64);
@@ -225,21 +227,49 @@ mod tests {
     fn persistent_failure_detected_across_sessions() {
         // type_error in 3 distinct sessions → persistent.
         let history = vec![
-            record("2026-06-01T00:00:00Z", &["type_error"], &[], EditType::AddSkill),
-            record("2026-06-02T00:00:00Z", &["type_error"], &[], EditType::AddSkill),
-            record("2026-06-03T00:00:00Z", &["type_error"], &[], EditType::AddSkill),
+            record(
+                "2026-06-01T00:00:00Z",
+                &["type_error"],
+                &[],
+                EditType::AddSkill,
+            ),
+            record(
+                "2026-06-02T00:00:00Z",
+                &["type_error"],
+                &[],
+                EditType::AddSkill,
+            ),
+            record(
+                "2026-06-03T00:00:00Z",
+                &["type_error"],
+                &[],
+                EditType::AddSkill,
+            ),
         ];
         let landscape = build_landscape(&history, &[], 2);
-        let cats: Vec<&str> = landscape.persistent_failures.iter().map(|f| f.failure_category.as_str()).collect();
+        let cats: Vec<&str> = landscape
+            .persistent_failures
+            .iter()
+            .map(|f| f.failure_category.as_str())
+            .collect();
         assert!(cats.contains(&"type_error"));
-        let pf = landscape.persistent_failures.iter().find(|f| f.failure_category == "type_error").unwrap();
+        let pf = landscape
+            .persistent_failures
+            .iter()
+            .find(|f| f.failure_category == "type_error")
+            .unwrap();
         assert_eq!(pf.sessions_seen, 3);
         assert!(!pf.resolved);
     }
 
     #[test]
     fn single_session_failure_is_not_persistent() {
-        let history = vec![record("2026-06-01T00:00:00Z", &["type_error"], &[], EditType::AddSkill)];
+        let history = vec![record(
+            "2026-06-01T00:00:00Z",
+            &["type_error"],
+            &[],
+            EditType::AddSkill,
+        )];
         let landscape = build_landscape(&history, &[], 2);
         assert!(landscape.persistent_failures.is_empty());
     }
@@ -255,15 +285,33 @@ mod tests {
         assert_eq!(landscape.edit_type_coverage.get("add_skill"), Some(&2));
         assert_eq!(landscape.edit_type_coverage.get("modify_skill"), Some(&1));
         // add_skill and modify_skill are tried; the rest untried.
-        assert!(landscape.untried_edit_types.contains(&"modify_config".to_string()));
-        assert!(!landscape.untried_edit_types.contains(&"add_skill".to_string()));
+        assert!(
+            landscape
+                .untried_edit_types
+                .contains(&"modify_config".to_string())
+        );
+        assert!(
+            !landscape
+                .untried_edit_types
+                .contains(&"add_skill".to_string())
+        );
     }
 
     #[test]
     fn recommends_exploration_when_unresolved_and_untried() {
         let history = vec![
-            record("2026-06-01T00:00:00Z", &["type_error"], &[], EditType::AddSkill),
-            record("2026-06-02T00:00:00Z", &["type_error"], &[], EditType::AddSkill),
+            record(
+                "2026-06-01T00:00:00Z",
+                &["type_error"],
+                &[],
+                EditType::AddSkill,
+            ),
+            record(
+                "2026-06-02T00:00:00Z",
+                &["type_error"],
+                &[],
+                EditType::AddSkill,
+            ),
         ];
         let landscape = build_landscape(&history, &[], 2);
         // Persistent failure + untried structural types → explore.

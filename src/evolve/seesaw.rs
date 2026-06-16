@@ -50,7 +50,12 @@ pub fn save_registry(reg: &SolvedTaskRegistry) -> io::Result<()> {
 pub fn scores_from_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
     digests
         .iter()
-        .map(|d| (d.task_id.clone(), outcome_score(&d.outcome, d.observation_count)))
+        .map(|d| {
+            (
+                d.task_id.clone(),
+                outcome_score(&d.outcome, d.observation_count),
+            )
+        })
         .collect()
 }
 
@@ -71,7 +76,10 @@ pub fn outcome_score(outcome: &TaskOutcome, _observation_count: u64) -> f64 {
     match outcome {
         TaskOutcome::Success => 1.0,
         TaskOutcome::CompleteFailure => 0.0,
-        TaskOutcome::PartialFailure { failed_steps, total_steps } => {
+        TaskOutcome::PartialFailure {
+            failed_steps,
+            total_steps,
+        } => {
             if *total_steps == 0 {
                 return 0.0;
             }
@@ -110,10 +118,16 @@ mod tests {
     fn outcome_score_partial_in_between() {
         // 2 failed of 4 → 0.5 success fraction.
         let s = outcome_score(
-            &TaskOutcome::PartialFailure { failed_steps: 2, total_steps: 4 },
+            &TaskOutcome::PartialFailure {
+                failed_steps: 2,
+                total_steps: 4,
+            },
             4,
         );
-        assert!((s - 0.5).abs() < 1e-9, "partial score should be 0.5, got {s}");
+        assert!(
+            (s - 0.5).abs() < 1e-9,
+            "partial score should be 0.5, got {s}"
+        );
     }
 
     #[test]
@@ -123,7 +137,14 @@ mod tests {
         reg.update(&HashMap::from([("A".to_string(), 1.0)]));
 
         // New round: A dropped to 0.5 — regression (1.0 - 0.5 = 0.5 > tolerance 0.1).
-        let digests = vec![digest("A", TaskOutcome::PartialFailure { failed_steps: 2, total_steps: 4 }, 4)];
+        let digests = vec![digest(
+            "A",
+            TaskOutcome::PartialFailure {
+                failed_steps: 2,
+                total_steps: 4,
+            },
+            4,
+        )];
         let regressed = check(&reg, &digests, DEFAULT_TOLERANCE);
         assert!(regressed.contains(&"A".to_string()));
     }

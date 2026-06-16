@@ -28,7 +28,13 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
 
     // Idempotent column migrations for pre-existing databases.
     // SQLite has no ADD COLUMN IF NOT EXISTS, so guard with pragma_table_info.
-    ensure_column(pool, "evolution_records", "edit_type", "TEXT NOT NULL DEFAULT 'add_skill'").await?;
+    ensure_column(
+        pool,
+        "evolution_records",
+        "edit_type",
+        "TEXT NOT NULL DEFAULT 'add_skill'",
+    )
+    .await?;
 
     Ok(())
 }
@@ -48,14 +54,13 @@ async fn ensure_column(
     column: &str,
     type_clause: &str,
 ) -> io::Result<()> {
-    let exists: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?",
-    )
-    .bind(table)
-    .bind(column)
-    .fetch_one(pool)
-    .await
-    .map_err(super::sqlx_err)?;
+    let exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?")
+            .bind(table)
+            .bind(column)
+            .fetch_one(pool)
+            .await
+            .map_err(super::sqlx_err)?;
 
     if exists == 0 {
         let ddl = format!("ALTER TABLE {table} ADD COLUMN {column} {type_clause}");

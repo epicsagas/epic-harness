@@ -163,11 +163,19 @@ mod tests {
         }
 
         let results = query_recent_records_pool(&pool, 100).await.unwrap();
-        assert_eq!(results.len(), crate::shared::evolution::EditType::all().len());
+        assert_eq!(
+            results.len(),
+            crate::shared::evolution::EditType::all().len()
+        );
         // Every persisted edit type must survive the round trip.
         for r in &results {
             let expected = crate::shared::evolution::EditType::from_db_str(r.edit_type.as_str());
-            assert_eq!(expected, r.edit_type, "edit_type round-trip failed for {}", r.edit_type.as_str());
+            assert_eq!(
+                expected,
+                r.edit_type,
+                "edit_type round-trip failed for {}",
+                r.edit_type.as_str()
+            );
         }
     }
 }
