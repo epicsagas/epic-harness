@@ -8,10 +8,11 @@ use super::scoring::ScoreDimensions;
 /// The category of edit that the evolution engine applied.
 /// Inspired by HarnessX's "typed builder operations" — each harness adaptation
 /// is a typed operation rather than an opaque "write SKILL.md" action.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum EditType {
     /// Create a new evolved skill (SKILL.md).
+    #[default]
     AddSkill,
     /// Modify an existing skill's content (prompt tuning).
     ModifySkill,
@@ -23,12 +24,6 @@ pub enum EditType {
     AddGuardRule,
     /// Modify an existing skill's prompt (auto-tuning).
     ModifyPrompt,
-}
-
-impl Default for EditType {
-    fn default() -> Self {
-        EditType::AddSkill
-    }
 }
 
 impl EditType {
@@ -103,7 +98,9 @@ impl HarnessDimension {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse a dimension from its snake_case string. (Named `parse_dimension`
+    /// rather than `from_str` to avoid shadowing the std `FromStr` trait.)
+    pub fn parse_dimension(s: &str) -> Option<Self> {
         match s {
             "model_selection" => Some(Self::ModelSelection),
             "context_assembly" => Some(Self::ContextAssembly),
@@ -404,13 +401,12 @@ impl SolvedTaskRegistry {
         self.solved
             .iter()
             .filter_map(|(task_id, best)| {
-                new_scores.get(task_id).map_or(None, |new| {
-                    if *new < *best - tolerance {
-                        Some(task_id.clone())
-                    } else {
-                        None
-                    }
-                })
+                let new = new_scores.get(task_id)?;
+                if *new < *best - tolerance {
+                    Some(task_id.clone())
+                } else {
+                    None
+                }
             })
             .collect()
     }

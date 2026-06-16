@@ -276,7 +276,7 @@ fn parse_epoch(ts: &str) -> Option<i64> {
     // Days since Unix epoch (proleptic Gregorian, UTC). Formula from Howard Hinnant.
     let y = if mo <= 2 { y - 1 } else { y };
     let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as i64; // [0, 399]
+    let yoe = y - era * 400; // [0, 399]
     let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
     let days = era * 146097 + doe - 719468;
