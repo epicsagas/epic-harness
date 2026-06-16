@@ -54,6 +54,14 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
     let last_error_context = get(pool, "last_error_context")
         .await
         .filter(|v| !v.is_empty());
+    let reward_hacking_suspected: bool = get(pool, "reward_hacking_suspected")
+        .await
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(false);
+    let epoch_class: Option<crate::shared::evolution::EpochClass> = get(pool, "epoch_class")
+        .await
+        .filter(|v| !v.is_empty())
+        .and_then(|v| serde_json::from_str::<crate::shared::evolution::EpochClass>(&v).ok());
 
     // Score history
     let sh_rows = sqlx::query(
@@ -116,9 +124,9 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
         trend,
         stagnation_count,
         skill_attribution,
-        epoch_class: None,
+        epoch_class,
         last_error_context,
-        reward_hacking_suspected: false,
+        reward_hacking_suspected,
     })
 }
 
@@ -170,6 +178,17 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
     upsert(&mut tx, "stagnation_count", &m.stagnation_count.to_string()).await?;
     if let Some(ref v) = m.last_error_context {
         upsert(&mut tx, "last_error_context", v).await?;
+    }
+    upsert(
+        &mut tx,
+        "reward_hacking_suspected",
+        &m.reward_hacking_suspected.to_string(),
+    )
+    .await?;
+    if let Some(ref epoch) = m.epoch_class {
+        if let Ok(s) = serde_json::to_string(epoch) {
+            upsert(&mut tx, "epoch_class", &s).await?;
+        }
     }
 
     // Score history — keep the most recent MAX_SCORE_HISTORY entries.
@@ -270,6 +289,17 @@ pub async fn save_metrics_direct(
     if let Some(ref v) = m.last_error_context {
         upsert(tx, "last_error_context", v).await?;
     }
+    upsert(
+        tx,
+        "reward_hacking_suspected",
+        &m.reward_hacking_suspected.to_string(),
+    )
+    .await?;
+    if let Some(ref epoch) = m.epoch_class {
+        if let Ok(s) = serde_json::to_string(epoch) {
+            upsert(tx, "epoch_class", &s).await?;
+        }
+    }
 
     // Score history
     sqlx::query("DELETE FROM score_history")
@@ -356,7 +386,7 @@ mod tests {
             best_score: Some(0.95),
             best_session: "2026-06-01".into(),
             trend: "improving".into(),
-            epoch_class: None,
+            epoch_class: Some(crate::shared::evolution::EpochClass::Improving),
             stagnation_count: 0,
             skill_attribution: {
                 let mut m = HashMap::new();
@@ -377,6 +407,13 @@ mod tests {
         }
     }
 
+    fn sample_metrics_reward_hacking() -> Metrics {
+        let mut m = sample_metrics();
+        m.reward_hacking_suspected = true;
+        m.epoch_class = Some(crate::shared::evolution::EpochClass::Regressing);
+        m
+    }
+
     #[tokio::test]
     async fn save_and_load_metrics() {
         let pool = test_pool().await;
@@ -390,6 +427,29 @@ mod tests {
         assert_eq!(loaded.score_history[0].observations, 42);
         assert_eq!(loaded.trend, "improving");
         assert!(loaded.skill_attribution.contains_key("rust-borrow-checker"));
+        assert_eq!(
+            loaded.epoch_class,
+            Some(crate::shared::evolution::EpochClass::Improving)
+        );
+        assert!(!loaded.reward_hacking_suspected);
+    }
+
+    #[tokio::test]
+    async fn save_and_load_metrics_round_trips_reward_hacking_flag() {
+        let pool = test_pool().await;
+        let m = sample_metrics_reward_hacking();
+        save_metrics_pool(&pool, &m).await.unwrap();
+
+        let loaded = load_metrics_pool(&pool).await.unwrap();
+        assert!(
+            loaded.reward_hacking_suspected,
+            "reward_hacking_suspected must round-trip through SQLite"
+        );
+        assert_eq!(
+            loaded.epoch_class,
+            Some(crate::shared::evolution::EpochClass::Regressing),
+            "epoch_class must round-trip through SQLite"
+        );
     }
 
     #[tokio::test]

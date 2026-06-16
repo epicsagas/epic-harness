@@ -990,6 +990,11 @@ pub fn run(_input: &HookInput) -> i32 {
     // SkillOpt §4 Slow/Meta Update: classify epoch for adaptive strategy
     metrics.epoch_class = Some(evolve::classify_epoch(&metrics.score_history));
 
+    // HarnessX Tier 2.2: detect reward hacking (efficiency proxy rising
+    // while quality proxy falling). Computed only — seeding suppression is
+    // the Critic's job (Tier 2.1), not this hook.
+    metrics.reward_hacking_suspected = evolve::detect_reward_hacking(&metrics);
+
     // Update evolved skill meta files with epoch classification
     if let Some(ref epoch) = metrics.epoch_class {
         evolve::update_meta_field(&evolved_dirs, epoch, analysis.avg_score);
