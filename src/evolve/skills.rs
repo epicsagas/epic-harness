@@ -959,6 +959,7 @@ mod tests {
             count: 5,
             involved_files: vec!["/src/main.ts".into()],
             suggested_remediation: "stop".into(),
+            implicated_components: vec![],
         };
         let skill = build_pattern_skill(&p);
         assert!(skill.starts_with("---\n"));
@@ -1191,6 +1192,7 @@ mod tests {
                 count: 5,
                 involved_files: vec![],
                 suggested_remediation: "stop".into(),
+                implicated_components: vec![],
             }],
             ..Default::default()
         };

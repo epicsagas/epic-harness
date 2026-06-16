@@ -54,6 +54,20 @@ impl EditType {
             EditType::ModifyPrompt => "modify_prompt",
         }
     }
+
+    /// Parse an edit type from its database string representation.
+    /// Falls back to `AddSkill` for unknown/legacy values, which is the
+    /// historically dominant edit type and the safe default.
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "modify_skill" => EditType::ModifySkill,
+            "add_instinct" => EditType::AddInstinct,
+            "modify_config" => EditType::ModifyConfig,
+            "add_guard_rule" => EditType::AddGuardRule,
+            "modify_prompt" => EditType::ModifyPrompt,
+            _ => EditType::AddSkill,
+        }
+    }
 }
 
 // ── HarnessX-inspired: nine-dimensional taxonomy ──────
