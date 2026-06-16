@@ -867,6 +867,7 @@ pub fn run(_input: &HookInput) -> i32 {
         skills_rolled_back: rolled_back_count,
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
+        edit_type: EditType::AddSkill,
     };
     // Write evolution record to SQLite (primary) + JSONL (fallback)
     let _ = crate::store::runtime::block_on(async {

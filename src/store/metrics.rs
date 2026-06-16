@@ -118,6 +118,7 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
         skill_attribution,
         epoch_class: None,
         last_error_context,
+        reward_hacking_suspected: false,
     })
 }
 
