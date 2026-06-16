@@ -77,6 +77,7 @@ pub async fn query_recent_records_pool(
             skills_rolled_back: r.try_get::<i64, _>(7).map_err(super::sqlx_err)? as u64,
             total_evolved: r.try_get::<i64, _>(8).map_err(super::sqlx_err)? as u64,
             analysis_summary: r.try_get(9).map_err(super::sqlx_err)?,
+            edit_type: crate::shared::evolution::EditType::AddSkill,
         });
     }
     records.reverse();

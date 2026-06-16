@@ -3,6 +3,108 @@ use std::collections::HashMap;
 
 use super::scoring::ScoreDimensions;
 
+// ── HarnessX-inspired: typed edit operations ─────────
+
+/// The category of edit that the evolution engine applied.
+/// Inspired by HarnessX's "typed builder operations" — each harness adaptation
+/// is a typed operation rather than an opaque "write SKILL.md" action.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum EditType {
+    /// Create a new evolved skill (SKILL.md).
+    AddSkill,
+    /// Modify an existing skill's content (prompt tuning).
+    ModifySkill,
+    /// Promote a high-confidence pattern to global memory (instinct).
+    AddInstinct,
+    /// Change a config.toml threshold (future).
+    ModifyConfig,
+    /// Add a guard rule from observed failure patterns (future).
+    AddGuardRule,
+    /// Modify an existing skill's prompt (auto-tuning).
+    ModifyPrompt,
+}
+
+impl Default for EditType {
+    fn default() -> Self {
+        EditType::AddSkill
+    }
+}
+
+impl EditType {
+    /// All edit types — used for coverage analysis.
+    pub fn all() -> &'static [EditType] {
+        &[
+            EditType::AddSkill,
+            EditType::ModifySkill,
+            EditType::AddInstinct,
+            EditType::ModifyConfig,
+            EditType::AddGuardRule,
+            EditType::ModifyPrompt,
+        ]
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EditType::AddSkill => "add_skill",
+            EditType::ModifySkill => "modify_skill",
+            EditType::AddInstinct => "add_instinct",
+            EditType::ModifyConfig => "modify_config",
+            EditType::AddGuardRule => "add_guard_rule",
+            EditType::ModifyPrompt => "modify_prompt",
+        }
+    }
+}
+
+// ── HarnessX-inspired: nine-dimensional taxonomy ──────
+
+/// The nine orthogonal dimensions of the harness behavioral space.
+/// Inspired by HarnessX's taxonomy — used for dimension-scoped analysis.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum HarnessDimension {
+    ModelSelection,
+    ContextAssembly,
+    MemoryManagement,
+    ToolEcosystem,
+    ExecutionEnvironment,
+    EvaluationAndReward,
+    ControlAndSafety,
+    Observability,
+    TrainingBridge,
+}
+
+impl HarnessDimension {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            HarnessDimension::ModelSelection => "model_selection",
+            HarnessDimension::ContextAssembly => "context_assembly",
+            HarnessDimension::MemoryManagement => "memory_management",
+            HarnessDimension::ToolEcosystem => "tool_ecosystem",
+            HarnessDimension::ExecutionEnvironment => "execution_environment",
+            HarnessDimension::EvaluationAndReward => "evaluation_and_reward",
+            HarnessDimension::ControlAndSafety => "control_and_safety",
+            HarnessDimension::Observability => "observability",
+            HarnessDimension::TrainingBridge => "training_bridge",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "model_selection" => Some(Self::ModelSelection),
+            "context_assembly" => Some(Self::ContextAssembly),
+            "memory_management" => Some(Self::MemoryManagement),
+            "tool_ecosystem" => Some(Self::ToolEcosystem),
+            "execution_environment" => Some(Self::ExecutionEnvironment),
+            "evaluation_and_reward" => Some(Self::EvaluationAndReward),
+            "control_and_safety" => Some(Self::ControlAndSafety),
+            "observability" => Some(Self::Observability),
+            "training_bridge" => Some(Self::TrainingBridge),
+            _ => None,
+        }
+    }
+}
+
 // ── SkillOpt-inspired types ───────────────────────────
 
 /// A single entry in the negative feedback buffer — records why a skill proposal was rejected
@@ -59,6 +161,11 @@ pub struct DetectedPattern {
     pub count: u64,
     pub involved_files: Vec<String>,
     pub suggested_remediation: String,
+    /// HarnessX-inspired: logical components implicated in this pattern.
+    /// Derived from file paths (e.g., "src/auth/login.ts" → "auth").
+    /// Empty when no component mapping is available.
+    #[serde(default)]
+    pub implicated_components: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -80,6 +187,14 @@ pub struct SessionAnalysis {
     pub failure_patterns: Vec<DetectedPattern>,
     pub minibatch_insights: Vec<MinibatchInsight>,
     pub dimension_averages: ScoreDimensions,
+    /// HarnessX-inspired: true when a failure_category from this session
+    /// was also present in the previous N sessions. Indicates a systemic issue.
+    #[serde(default)]
+    pub persistent_failure: bool,
+    /// HarnessX-inspired: list of failure categories that are persistent
+    /// (seen across multiple sessions). Used by the adaptation planner.
+    #[serde(default)]
+    pub persistent_failure_categories: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -119,6 +234,11 @@ pub struct Metrics {
     pub epoch_class: Option<EpochClass>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_error_context: Option<String>,
+    /// HarnessX-inspired: reward hacking detection.
+    /// True when execution_cost is improving while output_quality is declining,
+    /// suggesting the evolution is gaming the metric rather than improving outcomes.
+    #[serde(default)]
+    pub reward_hacking_suspected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +253,9 @@ pub struct EvolutionRecord {
     pub skills_rolled_back: u64,
     pub total_evolved: u64,
     pub analysis_summary: String,
+    /// HarnessX-inspired: the type of edit applied during this evolution cycle.
+    #[serde(default)]
+    pub edit_type: EditType,
 }
 
 pub fn default_metrics() -> Metrics {
@@ -149,5 +272,194 @@ pub fn default_metrics() -> Metrics {
         skill_attribution: HashMap::new(),
         epoch_class: None,
         last_error_context: None,
+        reward_hacking_suspected: false,
     }
+}
+
+// ── HarnessX-inspired: Task Digest (Digester) ─────────
+
+/// Compressed summary of a task segment from execution traces.
+/// Inspired by HarnessX's Digester stage — compresses voluminous raw
+/// execution traces into structured per-task summaries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskDigest {
+    /// Task identifier — orbit pipeline ID or session segment hash.
+    pub task_id: String,
+    /// Binary outcome of this task segment.
+    pub outcome: TaskOutcome,
+    /// Failure categories ranked by frequency.
+    pub failure_categories: Vec<(String, u32)>,
+    /// Logical components implicated in failures.
+    pub implicated_components: Vec<String>,
+    /// Curated error excerpts (max 3).
+    pub evidence_excerpts: Vec<String>,
+    /// Ordered sequence of tool categories used.
+    pub tool_trajectory: Vec<String>,
+    /// Number of previous iterations this task was seen (cross-iteration persistence).
+    pub iterations_seen: u32,
+    /// Estimated token count of the original trace segment.
+    pub token_estimate: usize,
+    /// Number of observations in this segment.
+    pub observation_count: u64,
+}
+
+/// Outcome classification for a task segment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "type", content = "data")]
+pub enum TaskOutcome {
+    Success,
+    PartialFailure { failed_steps: u32, total_steps: u32 },
+    CompleteFailure,
+}
+
+// ── HarnessX-inspired: Adaptation Landscape (Planner) ─
+
+/// Strategic overview of the adaptation space.
+/// Inspired by HarnessX's Planner stage — tracks what has been tried,
+/// what persists, and what remains unexplored.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AdaptationLandscape {
+    /// Failures that have persisted across multiple sessions.
+    pub persistent_failures: Vec<PersistentFailure>,
+    /// History of attempted edits (what was tried).
+    pub attempted_edits: Vec<AttemptedEdit>,
+    /// Count of each edit type used so far.
+    pub edit_type_coverage: HashMap<String, u32>,
+    /// Edit types that have never been attempted.
+    pub untried_edit_types: Vec<String>,
+    /// Component name → failure rate (0.0–1.0).
+    pub component_failure_heatmap: HashMap<String, f64>,
+}
+
+/// A failure that has persisted across multiple evolution cycles.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistentFailure {
+    pub failure_category: String,
+    pub first_seen: String,
+    pub sessions_seen: u32,
+    /// Skill names that attempted to address this failure.
+    pub attempted_fixes: Vec<String>,
+    pub resolved: bool,
+}
+
+/// Record of an edit that was attempted by the evolution engine.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AttemptedEdit {
+    pub edit_type: String,
+    pub target: String,
+    pub timestamp: String,
+    pub success: bool,
+}
+
+// ── HarnessX-inspired: Seesaw Constraint ──────────────
+
+/// Key for tracking per-task, per-dimension scores.
+/// Used by the seesaw constraint to prevent regression.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct TaskDimensionKey {
+    pub task_id: String,
+    pub dimension: String,
+}
+
+/// Registry of solved tasks and their best scores.
+/// The seesaw constraint rejects any edit that regresses a solved task
+/// below its best score minus the tolerance.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SolvedTaskRegistry {
+    /// task_id+dimension → best score achieved.
+    pub solved: HashMap<String, f64>,
+    /// Count of tasks currently marked as solved.
+    pub total_solved: u32,
+}
+
+impl SolvedTaskRegistry {
+    /// Check whether applying new scores would cause any regression
+    /// on previously solved tasks. Returns the list of regressed keys.
+    /// Empty = no regression (edit passes the seesaw constraint).
+    pub fn check_seesaw(
+        &self,
+        new_scores: &HashMap<String, f64>,
+        tolerance: f64,
+    ) -> Vec<String> {
+        self.solved
+            .iter()
+            .filter_map(|(key, best)| {
+                new_scores.get(key).map_or(None, |new| {
+                    if *new < *best - tolerance {
+                        Some(key.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Update the registry with new scores. Only improves best scores.
+    pub fn update(&mut self, scores: &HashMap<String, f64>) {
+        for (key, score) in scores {
+            let entry = self.solved.entry(key.clone()).or_insert(*score);
+            if *score > *entry {
+                *entry = *score;
+            }
+        }
+        self.total_solved = self.solved.len() as u32;
+    }
+}
+
+// ── HarnessX-inspired: Harness Snapshot (first-class) ─
+
+/// A serializable snapshot of the entire harness state.
+/// Inspired by HarnessX's "first-class object" — the harness can be
+/// serialized, compared, and restored as a unit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HarnessSnapshot {
+    pub version: String,
+    pub project_slug: String,
+    pub timestamp: String,
+    pub config_summary: ConfigSummary,
+    pub active_skills: Vec<String>,
+    pub evolved_skills: Vec<String>,
+    pub guard_rules: Vec<String>,
+    pub metrics_summary: MetricsSummary,
+    /// Content hash for comparison.
+    pub hash: String,
+}
+
+/// Subset of config relevant for comparison.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ConfigSummary {
+    pub hook_profile: String,
+    pub scoring_weights: [f64; 3],
+    pub max_skills: usize,
+    pub stagnation_limit: u64,
+}
+
+/// Compact metrics summary for snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MetricsSummary {
+    pub total_sessions: u64,
+    pub best_score: Option<f64>,
+    pub trend: String,
+    pub total_evolved: u64,
+    pub stagnation_count: u64,
+}
+
+// ── HarnessX-inspired: Skill Variants ─────────────────
+
+/// A domain-scoped variant of evolved skills.
+/// Inspired by HarnessX's variant isolation — prevents catastrophic
+/// forgetting on heterogeneous task sets by scoping skills per domain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillVariant {
+    /// Variant identifier (e.g., "rust-backend", "python-ml").
+    pub id: String,
+    /// Detected stack/domain tags.
+    pub domain_tags: Vec<String>,
+    /// Skill names belonging to this variant.
+    pub skills: Vec<String>,
+    /// Average score for tasks routed to this variant.
+    pub avg_score: f64,
+    /// Patterns that route tasks to this variant.
+    pub task_routing: Vec<String>,
 }

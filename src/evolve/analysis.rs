@@ -127,6 +127,8 @@ pub fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         failure_patterns: vec![],
         dimension_averages: dim_avg,
         minibatch_insights,
+        persistent_failure: false,
+        persistent_failure_categories: vec![],
     }
 }
 
@@ -278,6 +280,7 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                         count: streak,
                         involved_files: if streak_file.is_empty() { vec![] } else { vec![streak_file.clone()] },
                         suggested_remediation: format!("Stop retrying the same approach for {streak_category}. Re-read the full error, check root cause."),
+                        implicated_components: vec![],
                     });
                 }
                 streak = 1;
@@ -304,6 +307,7 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 suggested_remediation: format!(
                     "Stop retrying the same approach for {streak_category}. Re-read the full error."
                 ),
+                implicated_components: vec![],
             });
         }
     }
@@ -351,6 +355,7 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 count: total,
                 involved_files: files,
                 suggested_remediation: "Before editing, run the build/test to establish a baseline. After editing, immediately verify.".into(),
+                implicated_components: vec![],
             });
         }
     }
@@ -401,6 +406,7 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 suggested_remediation:
                     "Stuck in debug loop. Stop, re-read the surrounding code context (100+ lines)."
                         .into(),
+                implicated_components: vec![],
             });
         }
     }
@@ -437,6 +443,7 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                     count: edits + errors,
                     involved_files: vec![file.clone()],
                     suggested_remediation: "Alternating edit-error cycle detected. Stop and read the surrounding context.".into(),
+                    implicated_components: vec![],
                 });
             }
         }
