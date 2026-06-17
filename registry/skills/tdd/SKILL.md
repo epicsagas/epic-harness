@@ -1,5 +1,6 @@
 ---
 name: tdd
+dimension: control_and_safety
 description: "Test-Driven Development enforcer. Red→Green→Refactor cycle with no production code without a failing test first. Use for new features and bug fixes."
 ---
 

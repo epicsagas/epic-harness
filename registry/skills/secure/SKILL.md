@@ -1,5 +1,6 @@
 ---
 name: secure
+dimension: control_and_safety
 description: "Security review checklist with optional engagement scoping. Use when auth, DB, API, infra, or secrets code is touched."
 ---
 

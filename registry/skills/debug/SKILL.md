@@ -1,5 +1,6 @@
 ---
 name: debug
+dimension: observability
 description: "Systematic root-cause isolation for test failures, runtime errors, or unexpected behavior. Narrow hypothesis → verify → fix."
 ---
 
