@@ -8,6 +8,7 @@ pub mod metrics;
 pub mod planner;
 pub mod seesaw;
 pub mod skills;
+pub mod snapshot;
 pub mod variants;
 
 pub use analysis::{analyze_session, build_summary, detect_patterns};

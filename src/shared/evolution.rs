@@ -437,7 +437,8 @@ impl SolvedTaskRegistry {
 /// A serializable snapshot of the entire harness state.
 /// Inspired by HarnessX's "first-class object" — the harness can be
 /// serialized, compared, and restored as a unit.
-#[allow(dead_code)]
+///
+/// Constructed by [`crate::evolve::snapshot::build_snapshot`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessSnapshot {
     pub version: String,
@@ -453,7 +454,6 @@ pub struct HarnessSnapshot {
 }
 
 /// Subset of config relevant for comparison.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigSummary {
     pub hook_profile: String,
@@ -463,7 +463,6 @@ pub struct ConfigSummary {
 }
 
 /// Compact metrics summary for snapshot.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetricsSummary {
     pub total_sessions: u64,
