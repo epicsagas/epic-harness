@@ -34,7 +34,7 @@ A Claude Code plugin that **consolidates 30+ commands into 3 commands + 26 auto-
 
 ### Web Dashboard — auto-launches on session start
 
-10-screen real-time metrics for eval scores, tool stats, orbit pipelines, evolved skills, and hook health. Opens automatically with the first Claude Code session — no manual setup needed.
+10-screen real-time metrics for eval scores, tool stats, orbit pipelines, evolved skills, and hook health. Opens automatically with the first Claude Code session — no manual setup needed. The **Eval & Evolve** screen surfaces the HarnessX evolution-engine state: reward-hacking warnings, seesaw solved-task registry, variant pool, and the adaptation landscape (persistent failures + untried edit types).
 
 <p align="center">
   <img src="./assets/dashboard.png" alt="Dashboard" width="49%" />
@@ -367,6 +367,33 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 /evolve cross-project # Cross-project pattern analysis
 /evolve rollback     # Restore previous best
 /evolve reset        # Clear all evolution data
+```
+
+### HarnessX-Inspired Defenses (v0.7.0)
+
+The evolution loop now carries the safety mechanisms from the [HarnessX](https://arxiv.org/abs/2606.14249v1) paper's AEGIS pipeline, adapted to epic-harness's single-agent, per-project model. See `docs/references/operational-mirror.md` for the RL-analogy mapping.
+
+| Defense | Module | Protects against | Paper |
+|---------|--------|------------------|-------|
+| **Seesaw gate** | `evolve/seesaw.rs` | Catastrophic forgetting — blocks seeding when a previously-solved task regresses | §4.1 |
+| **Variant isolation** | `evolve/variants.rs` | Catastrophic forgetting — forks a sibling variant on regression instead of overwriting | §4.5 |
+| **Reward-hacking detection** | `evolve/metrics.rs` | Metric gaming — flags when execution_cost rises while output_quality falls | §4.3 |
+| **Critic layer** | `evolve/critic.rs` | Reward hacking — suppresses seeding + rejects manifests contradicting evidence | §4.3 |
+| **Digester** | `evolve/digester.rs` | (Trace compression) — per-task digests feeding the Planner | §4.3 |
+| **Planner** | `evolve/planner.rs` | Under-exploration — tracks untried edit types + persistent failures | §4.3 |
+| **Typed edits + manifests** | `evolve/edits.rs` | Opaque edits — each edit carries a falsifiable manifest (Table 9) | §4.3 |
+| **Processor abstraction** | `hooks/processor.rs` | (Foundation) — typed `HookPoint`/`Processor` over the CLI hooks | §3.2 |
+
+A **regression harness** (`tests/evolve_regression_test.rs`) locks these contracts with 6 hermetic scenarios — no live benchmark required.
+
+### Harness Snapshot (v0.7.0)
+
+The harness is now a serializable, comparable first-class object:
+
+```bash
+epic harness snapshot              # JSON: config + skills + guard rules + metrics + content hash
+epic harness diff before.json after.json   # field-by-field structural diff
+# (restore is deferred — destructive)
 ```
 
 ---

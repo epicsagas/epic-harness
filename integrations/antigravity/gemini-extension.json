@@ -1,12 +1,15 @@
 {
   "name": "epic-harness",
-  "version": "0.6.5",
+  "version": "0.7.0",
   "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness for Antigravity",
   "contextFileName": "GEMINI.md",
   "mcpServers": {
     "harness-mem": {
       "command": "epic-harness",
-      "args": ["mem", "mcp"]
+      "args": [
+        "mem",
+        "mcp"
+      ]
     }
   }
 }

@@ -5,6 +5,54 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-06-17
+
+The HarnessX evolution-engine release. Adapts the AEGIS pipeline (arXiv:2606.14249v1) to epic-harness's single-agent, per-project evolution loop. The evolution engine went from "reactive single-agent + SKILL.md-only" to **strategic, typed, regression-protected, and self-verifying**. ~5,000 LOC across 5 PRs (#75–#80), +69 tests, all CI green. Driven by the gap-analysis at `docs/analysis/harnessx-vs-epic-harness-gap-analysis.md` (vault mirror `ref-010`).
+
+### Added — Evolution engine
+- **Digester** (`src/evolve/digester.rs`): compresses a session's observations into per-task `TaskDigest`s — binary outcome, ranked failure categories, implicated components, evidence excerpts, tool trajectory, cross-iteration persistence. Paper §4.3.
+- **Planner** (`src/evolve/planner.rs`): builds an `AdaptationLandscape` (persistent failures, attempted edits, edit-type coverage, untried edit types, component heatmap) and flags under-exploration. Paper §4.3 — the primary defense against local-minimum bias.
+- **Typed edits** (`src/evolve/edits.rs`): `HarnessEdit` enum (AddSkill/ModifySkill/AddGuardRule concrete; ModifyConfig/AddInstinct reserved) with a falsifiable `EditManifest` per edit (edit_type/target/intended_effect/predicted_impact). Paper §4.3 / Table 9. `edit_type` now persists in SQLite and round-trips (was hardcoded `AddSkill`).
+- **Seesaw** (`src/evolve/seesaw.rs`): per-task regression gate that blocks seeding when a previously-solved task regresses beyond tolerance. Paper §4.1. (Deliberately per-task, not per-dimension — the paper §6.6 proves per-dimension gating misses sub-threshold coupling.)
+- **Variant isolation** (`src/evolve/variants.rs`): `VariantPool` with fork-on-regression (spawns a sibling variant rather than overwriting) and warm/cold stack-based routing. `MAX_VARIANTS` separate from `MAX_EVOLVED_SKILLS`. Atomic persistence. Paper §4.5 — the real catastrophic-forgetting defense.
+- **Reward-hacking detection** (`src/evolve/metrics.rs::detect_reward_hacking`): least-squares slope of output_quality vs execution_cost (efficiency proxy, higher=better) over a configurable window. Configurable thresholds in `EvolutionConfig`. Now computed + persisted (was a dead flag).
+- **Critic layer** (`src/evolve/critic.rs` + `registry/skills/_critic/SKILL.md`): deterministic in-loop Critic (no external LLM, per project rule) that suppresses seeding under reward hacking and rejects manifests claiming score lifts that contradict evidence. The `_critic` skill is the out-of-band LLM counterpart for non-local effects.
+- **Falsifiability ledger**: each shipped edit's `EditManifest` is persisted to `EvolutionRecord.manifests` + a `manifests.jsonl` sidecar. (The cross-round Critic read that verifies predictions held is honestly documented as a deferred follow-up — the write loop is wired.)
+- **AddGuardRule concrete editor** (`src/hooks/guard.rs::append_guard_rule`): appends a blocked/warned rule to the project's `guard-rules.yaml` via atomic read-modify-write, round-trip safe through the incumbent parser. Makes the Planner's `add_guard_rule` untried-edit-type attemptable.
+- **Regression harness** (`tests/evolve_regression_test.rs`): 6 hermetic scenarios (no live benchmark, no SQLite, no network, no HOME redirect) locking the seesaw/variant/planner/outcome-score contracts — the validation substrate the gap-analysis demanded before the engine's claims could be trusted.
+- **Processor abstraction** (`src/hooks/processor.rs`): `HookPoint` enum (6 lifecycle points ↔ subcommands) + `Processor` trait + static dispatch table wrapping the existing `run()` hooks unchanged. Representational seam (paper §3.2) — a full in-process pipeline redesign was explicitly rejected as the most invasive change.
+
+### Added — Harness as a first-class object
+- **`HarnessSnapshot` + CLI** (`src/evolve/snapshot.rs`, `src/harness_cli.rs`): `epic harness snapshot` (JSON + deterministic content hash), `epic harness diff <a> <b>`. `restore` deferred (destructive). Was dead code; now constructed.
+
+### Added — Dashboard surfacing (PR #80)
+- **5 new dashboard handlers** (`src/serve.rs`): `get_seesaw_registry`, `get_variant_pool`, `get_harness_snapshot`, `get_adaptation_landscape`, `get_manifests` (tail-reads the falsifiability ledger, capped 50).
+- **3 previously-broken dashboard panels fixed**: `get_session_snapshots`, `get_global_patterns`, `get_effect_pending` were returning `"null"` via the dispatch fallthrough; now implemented.
+- **Evolution.svelte**: reward-hacking warning banner (when `reward_hacking_suspected`), Seesaw/Variants/Adaptation-landscape panels, `edit_type` column in evolution history. `Promise.allSettled` so a cold project degrades gracefully.
+- `harness.ts`: client wrappers + types (`SolvedTaskRegistry`, `VariantPool`, `HarnessSnapshotData`, `AdaptationLandscape`, `EditManifestEntry`); `HarnessMetrics` gains `reward_hacking_suspected` + `epoch_class`.
+
+### Added — Documentation
+- `docs/references/operational-mirror.md`: maps the evolution engine onto RL vocabulary (state/action/reward + the three pathologies → concrete defenses) with a tuning guide. Paper §4.1–4.2, §7.3.
+- `dimension:` frontmatter on 6 core static skills (tdd/secure=control_and_safety, verify/perf=evaluation_and_reward, debug=observability, simplify=context_assembly).
+
+### Fixed
+- **Seesaw `reg.update()` latent bug**: the solved-task registry update now only runs when the gate passed. Previously it ran unconditionally, which could raise a task's best-of on a regressing round's coincidental high scores and mask future genuine regressions.
+- **Flaky `rebuild_produces_stable_hash` test**: switched from live `build_snapshot()` (which diverged when a parallel test wrote to `evolved_dir()`) to a hermetic fixture.
+- **SQLite DDL migration**: `evolution_records.edit_type` added via idempotent `ensure_column` (pragma_table_info guard + `AssertSqlSafe`), so existing databases upgrade without manual surgery.
+- **Reward-hacking + epoch_class SQLite round-trip**: were hardcoded `false`/`None` on load; now read from the `metrics_state` key/value table.
+
+### Changed
+- `seed_smart_skills()` split into `plan_skill_edits()` (pure planner, emits `Vec<HarnessEdit>`) + `apply_skill_edits()` (Critic-verifies then applies) — signature preserved, behavior unchanged for the common path.
+- `EditManifest`, `Metrics` now derive `Serialize/Deserialize/Default`.
+- `cargo clippy --all-targets -- -D warnings` remains clean across the stack; 643 lib + 6 regression + 7 CLI tests.
+
+### Known limitations (documented in code)
+- Falsifiability loop is write-only: manifests persist, but the cross-round Critic read is a deferred follow-up.
+- Seesaw is deliberately coarse (per-task); sub-threshold coupling out of scope — variant isolation is the practical mitigation.
+- `AddGuardRule` editor is concrete but Planner auto-emission is not wired (conservative).
+- `HarnessSnapshot restore` deferred (destructive).
+- Processor trait is a representational wrapper (main.rs dispatch unchanged).
+
 ## [0.6.5] — 2026-06-15
 
 ### Fixed
