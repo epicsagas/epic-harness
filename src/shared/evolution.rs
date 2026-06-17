@@ -273,9 +273,13 @@ pub struct EvolutionRecord {
     #[serde(default)]
     pub edit_type: EditType,
     /// HarnessX falsifiability contract (Table 9): the manifest of each edit
-    /// shipped this round, so the next round's Critic can verify the predicted
-    /// impacts held. Persisted to the JSONL fallback; the SQLite store writes
-    /// only the scalar columns (manifests ride along via the JSONL path).
+    /// shipped this round. Persisted to the JSONL fallback; the SQLite store
+    /// writes only the scalar columns (manifests ride along via the JSONL
+    /// path).
+    ///
+    /// STATUS: these are WRITTEN (reflect persists them + the sidecar
+    /// manifests.jsonl). A Critic that READS them to verify prior predictions
+    /// held is a deferred follow-up — not yet wired.
     #[serde(default)]
     pub manifests: Vec<crate::evolve::edits::EditManifest>,
 }

@@ -450,8 +450,11 @@ pub(crate) fn plan_skill_edits(
 /// path. Each edit is validated before apply. Returns the count applied.
 /// Outcome of applying a skill-edit plan: how many edits landed, plus the
 /// falsifiable manifest for each APPLIED edit (HarnessX Table 9). Manifests of
-/// edits the Critic rejected or that failed validation are excluded — only
-/// shipped edits carry a manifest the next round can falsify.
+/// edits the Critic rejected or that failed validation are excluded. The
+/// caller persists these (reflect → manifests.jsonl); a Critic that READS
+/// them to falsify prior predictions is a deferred follow-up (today the
+/// per-edit Critic gate only consults the in-round reward-hacking flag — see
+/// `Critic::verify_against_evidence`).
 #[derive(Debug, Clone, Default)]
 pub struct ApplyOutcome {
     pub applied: u64,

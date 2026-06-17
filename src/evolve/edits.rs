@@ -83,8 +83,12 @@ pub enum EditOutcome {
 
 /// A falsifiable change manifest (HarnessX paper Table 9 / §10.3).
 ///
-/// Every shipped edit should carry one so the Critic (R-P2) can later verify
-/// the next round's trace matches the predicted effect.
+/// Every shipped edit carries one. They are PERSISTED (reflect writes them to
+/// the EvolutionRecord + the sidecar manifests.jsonl). The consumer that
+/// verifies a prior round's prediction against the current trace is a
+/// DEFERRED follow-up — today the Critic only consults the in-round
+/// reward-hacking flag, so manifests accumulate as a ledger without yet
+/// closing the falsifiability loop.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EditManifest {
     pub edit_type: EditType,
