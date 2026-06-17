@@ -66,6 +66,8 @@ export interface HarnessMetrics {
   stagnation_count?: number;
   trend?: string;
   skill_attribution?: Record<string, SkillAttribution>;
+  epoch_class?: string | null;
+  reward_hacking_suspected?: boolean;
   // derived by getHarnessMetrics()
   session_count: number;
   avg_score: number;
@@ -256,6 +258,71 @@ export interface GlobalPattern {
   weak_tools: string[];
 }
 
+// ── HarnessX evolution-engine types ──
+export interface SolvedTaskRegistry {
+  solved: Record<string, number>;
+  total_solved: number;
+}
+
+export interface SkillVariant {
+  id: string;
+  domain_tags: string[];
+  skills: string[];
+  avg_score: number;
+  task_routing: string[];
+}
+
+export interface VariantPool {
+  variants: SkillVariant[];
+  routing_stats: Record<string, [number, number]>;
+}
+
+export interface HarnessSnapshotData {
+  version: string;
+  project_slug: string;
+  timestamp: string;
+  config_summary: {
+    hook_profile: string;
+    scoring_weights: number[];
+    max_skills: number;
+    stagnation_limit: number;
+  };
+  active_skills: string[];
+  evolved_skills: string[];
+  guard_rules: string[];
+  metrics_summary: {
+    total_sessions: number;
+    best_score: number | null;
+    trend: string;
+    total_evolved: number;
+    stagnation_count: number;
+  };
+  hash: string;
+}
+
+export interface PersistentFailure {
+  failure_category: string;
+  first_seen: string;
+  sessions_seen: number;
+  attempted_fixes: string[];
+  resolved: boolean;
+}
+
+export interface AdaptationLandscape {
+  persistent_failures: PersistentFailure[];
+  attempted_edits: { edit_type: string; target: string; timestamp: string; success: boolean }[];
+  edit_type_coverage: Record<string, number>;
+  untried_edit_types: string[];
+  component_failure_heatmap: Record<string, number>;
+}
+
+export interface EditManifestEntry {
+  edit_type: string;
+  target: string;
+  intended_effect: string;
+  predicted_impact: string;
+}
+
 export interface GraphStats {
   total_nodes: number;
   total_edges: number;
@@ -318,6 +385,12 @@ export const getGraph = () => invoke<GraphData>('get_graph');
 export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integration_status');
 export const getSessionSnapshots = () => invoke<SessionSnapshotData[]>('get_session_snapshots', projectArgs());
 export const getGlobalPatterns = () => invoke<GlobalPattern[]>('get_global_patterns', projectArgs());
+// ── HarnessX evolution-engine surfaces ──
+export const getSeesawRegistry = () => invoke<SolvedTaskRegistry>('get_seesaw_registry', projectArgs());
+export const getVariantPool = () => invoke<VariantPool>('get_variant_pool', projectArgs());
+export const getHarnessSnapshot = () => invoke<HarnessSnapshotData>('get_harness_snapshot', projectArgs());
+export const getAdaptationLandscape = () => invoke<AdaptationLandscape>('get_adaptation_landscape', projectArgs());
+export const getManifests = () => invoke<EditManifestEntry[]>('get_manifests', projectArgs());
 
 // ── Orchestration API ──────────────────────────────────────────────────────
 

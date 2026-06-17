@@ -795,6 +795,79 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
         }
+        // ── HarnessX evolution-engine surfaces ────────────────────────────
+        // These read the state the 4-PR evolution stack writes, so the
+        // dashboard can surface reward-hacking, regression, variant, and
+        // adaptation-landscape state. Each is a thin reader; computation
+        // stays in the evolve modules.
+        "get_seesaw_registry" => {
+            let reg = crate::evolve::seesaw::load_registry();
+            serde_json::to_string(&reg).unwrap_or_else(|_| "null".into())
+        }
+        "get_variant_pool" => {
+            let pool = crate::evolve::variants::VariantPool::load();
+            serde_json::to_string(&pool).unwrap_or_else(|_| "null".into())
+        }
+        "get_harness_snapshot" => {
+            let snap = crate::evolve::snapshot::build_snapshot();
+            serde_json::to_string(&snap).unwrap_or_else(|_| "null".into())
+        }
+        "get_adaptation_landscape" => {
+            // Landscape is computed from evolution history + current digests.
+            // For the dashboard we compute it from history + an empty digest
+            // set (the per-session digests are reflect-only here); the
+            // persistent_failures / edit_type_coverage / untried_edit_types
+            // come from history alone.
+            let history = crate::store::runtime::block_on(async {
+                let pool = crate::store::pool::harness_pool().await?;
+                crate::store::evolution::query_all_records_pool(&pool).await
+            })
+            .unwrap_or_default();
+            let landscape = crate::evolve::planner::build_landscape(&history, &[], 2);
+            serde_json::to_string(&landscape).unwrap_or_else(|_| "null".into())
+        }
+        "get_manifests" => {
+            // Tail-read the falsifiability ledger sidecar (manifests.jsonl).
+            // Cap at the most recent 50 to bound payload size.
+            let path = crate::shared::paths::manifests_file();
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for line in text.lines().rev().take(50) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        items.push(v);
+                    }
+                }
+            }
+            serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+        }
+        // ── Previously-broken panels (returned "null" via the fallthrough) ─
+        "get_session_snapshots" => {
+            // List session snapshot files in the project's sessions/ dir.
+            let sessions_dir = harness_dir.join("sessions");
+            let mut snaps: Vec<String> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
+                for e in rd.flatten() {
+                    if let Some(n) = e.file_name().to_str() {
+                        if n.ends_with(".json") {
+                            snaps.push(n.to_string());
+                        }
+                    }
+                }
+            }
+            snaps.sort();
+            serde_json::to_string(&snaps).unwrap_or_else(|_| "[]".into())
+        }
+        "get_global_patterns" => {
+            // Cross-project global patterns (opt-in feature).
+            let path = crate::shared::paths::global_patterns_file();
+            std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into())
+        }
+        "get_effect_pending" => {
+            // Whether a cross-project effect export is pending this session.
+            // We approximate: present if the marker file exists.
+            let marker = harness_dir.join(".cross-project-enabled");
+            serde_json::json!({ "enabled": marker.exists() }).to_string()
+        }
         _ => "null".into(),
     }
 }
