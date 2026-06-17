@@ -867,14 +867,41 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    // 4. Seed evolved skills (skipped on rollback OR seesaw regression)
+    // 4. Critic gate (Tier 2.1): the EARLIER, coarser gate that pairs with
+    // seesaw. Suppresses ALL new seeding when reward hacking is suspected
+    // (paper §4.3). Computed pre-seed by appending this session's dimension
+    // averages to a throwaway copy of score_history, so the detector sees the
+    // current round without mutating metrics before its later official push.
+    let critic_blocked = {
+        let mut probe = metrics.clone();
+        probe.score_history.push(SessionScoreEntry {
+            timestamp: now_iso(),
+            success_rate: analysis.success_rate,
+            avg_score: analysis.avg_score,
+            observations: analysis.total_observations,
+            dimension_averages: analysis.dimension_averages,
+        });
+        probe.reward_hacking_suspected = evolve::detect_reward_hacking(&probe);
+        if probe.reward_hacking_suspected {
+            hint(
+                "reflect",
+                "Critic: reward hacking suspected (execution_cost rising while output_quality falls) — blocking skill seeding this round",
+            );
+        }
+        crate::evolve::critic::Critic::should_block_seeding(&probe)
+    };
+
+    // 5. Seed evolved skills (skipped on rollback, seesaw regression, OR critic block)
     ensure_dir(&evolved_dir());
     let existing = list_dirs(&evolved_dir());
-    let mut seeded = if !should_rollback && !seesaw_blocked {
+    let mut seeded = if !should_rollback && !seesaw_blocked && !critic_blocked {
         evolve::seed_smart_skills(&analysis, &existing)
     } else {
         0
     };
+    if seesaw_blocked || critic_blocked {
+        seeded = 0;
+    }
     if seesaw_blocked {
         seeded = 0;
     }
