@@ -169,6 +169,11 @@ pub fn project_seesaw_path() -> PathBuf {
     harness_dir().join("seesaw.json")
 }
 
+/// Per-project variant pool for ensemble routing / variant isolation (R6).
+pub fn variant_pool_path() -> PathBuf {
+    harness_dir().join("variants.json")
+}
+
 /// guard-rules.yaml stays in the project tree only if the user/team explicitly
 /// created it there. Otherwise, we default to the per-project global directory
 /// to keep the project tree clean.

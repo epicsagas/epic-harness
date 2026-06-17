@@ -4,6 +4,7 @@ use std::fs;
 use serde::{Deserialize, Serialize};
 
 use crate::config::CONFIG;
+use crate::evolve::edits::HarnessEdit;
 use crate::shared::{evolution::*, helpers::*, paths::*, sanitize::sanitize_skill_content};
 
 // ── Negative Feedback Buffer (SkillOpt §4) ────────────
@@ -380,6 +381,86 @@ When encountering {err_cat} errors with {} operations on {files}:\n\
     proposals
 }
 
+/// A typed plan of edits produced by the planner role, applied by the executor.
+///
+/// `counters` is returned so the caller persists promotion-counter state at
+/// exactly the same point it did before the plan/apply split.
+#[derive(Debug, Default)]
+pub(crate) struct SkillEditPlan {
+    pub edits: Vec<HarnessEdit>,
+    pub counters: PromotionCounter,
+    pub promoted_count: u64,
+}
+
+/// Planner role (pure): decide which proposals become typed `HarnessEdit`s,
+/// applying graduated-scope + curation + gated-promotion exactly as the legacy
+/// loop did. Writes nothing, prints nothing. Returns the plan + counters so the
+/// thin wrapper can save counters and emit hints at the original points.
+pub(crate) fn plan_skill_edits(
+    analysis: &SessionAnalysis,
+    existing: &[String],
+    counters: &mut PromotionCounter,
+) -> SkillEditPlan {
+    let avg_score = analysis.avg_score;
+    let full_seeding = avg_score < CONFIG.pattern.graduated_scope_moderate;
+    let cap = CONFIG.evolution.max_skills.saturating_sub(existing.len());
+    let rejected_buf = load_rejected_buffer();
+
+    let proposals = build_proposals(analysis);
+    let mut edits: Vec<HarnessEdit> = Vec::new();
+    let mut promoted_count = 0u64;
+
+    for proposal in &proposals {
+        if edits.len() >= cap {
+            break;
+        }
+        if existing.contains(&proposal.name) {
+            continue;
+        }
+        if !full_seeding && (proposal.origin == "weak_ext" || proposal.origin == "high_freq_error")
+        {
+            continue;
+        }
+        let action = curate_proposal(proposal, existing, &rejected_buf);
+        match action {
+            ProposalAction::Skip => continue,
+            ProposalAction::Merge | ProposalAction::Accept => {
+                if !check_promotion(&proposal.name, counters) {
+                    continue;
+                }
+                edits.push(HarnessEdit::AddSkill {
+                    name: proposal.name.clone(),
+                    content: proposal.content.clone(),
+                    origin: proposal.origin.clone(),
+                    confidence: proposal.confidence,
+                });
+                promoted_count += 1;
+            }
+        }
+    }
+
+    SkillEditPlan {
+        edits,
+        counters: std::mem::take(counters),
+        promoted_count,
+    }
+}
+
+/// Executor role: apply a plan's edits via the typed `HarnessEdit::apply()`
+/// path. Each edit is validated before apply. Returns the count applied.
+pub(crate) fn apply_skill_edits(plan: &SkillEditPlan) -> u64 {
+    let mut applied = 0u64;
+    for edit in &plan.edits {
+        if edit.validate().is_err() {
+            continue;
+        }
+        if matches!(edit.apply(), crate::evolve::edits::EditOutcome::Applied) {
+            applied += 1;
+        }
+    }
+    applied
+}
+
 pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
     let avg_score = analysis.avg_score;
 
@@ -404,57 +485,17 @@ pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64
     }
 
     let mut counters = load_promotion_counters();
-    let rejected_buf = load_rejected_buffer();
-    let mut seeded = 0u64;
-    let mut promoted_count = 0u64;
-    let cap = CONFIG.evolution.max_skills.saturating_sub(existing.len());
+    let plan = plan_skill_edits(analysis, existing, &mut counters);
+    let seeded = apply_skill_edits(&plan);
 
-    // Build proposals (solver role)
-    let proposals = build_proposals(analysis);
-
-    // Curate and write (curator role)
-    for proposal in &proposals {
-        if seeded as usize >= cap {
-            break;
-        }
-        if existing.contains(&proposal.name) {
-            continue;
-        }
-
-        // Apply graduated scope: skip weak_ext and high_freq_error in moderate mode
-        if !full_seeding && (proposal.origin == "weak_ext" || proposal.origin == "high_freq_error")
-        {
-            continue;
-        }
-
-        // Curate: decide whether to accept
-        let action = curate_proposal(proposal, existing, &rejected_buf);
-        match action {
-            ProposalAction::Skip => continue,
-            ProposalAction::Merge | ProposalAction::Accept => {
-                // Check gated promotion
-                if !check_promotion(&proposal.name, &mut counters) {
-                    continue;
-                }
-                write_skill_with_meta(
-                    &proposal.name,
-                    &proposal.content,
-                    &proposal.origin,
-                    proposal.confidence,
-                );
-                seeded += 1;
-                promoted_count += 1;
-            }
-        }
-    }
-
-    save_promotion_counters(&counters);
-    if promoted_count > 0 {
+    save_promotion_counters(&plan.counters);
+    if plan.promoted_count > 0 {
         let min_obs = CONFIG.evolution.gated_promotion_min;
         hint(
             "reflect",
             &format!(
-                "Gated Promotion: {promoted_count} skill(s) promoted after {min_obs}+ observations"
+                "Gated Promotion: {} skill(s) promoted after {min_obs}+ observations",
+                plan.promoted_count
             ),
         );
     }

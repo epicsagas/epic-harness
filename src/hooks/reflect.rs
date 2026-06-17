@@ -847,38 +847,75 @@ pub fn run(_input: &HookInput) -> i32 {
     let (should_rollback, improved, rolled_back_count) =
         evolve::check_stagnation(&mut metrics, analysis.avg_score);
 
-    // 4. Seed evolved skills
-    ensure_dir(&evolved_dir());
-    let existing = list_dirs(&evolved_dir());
-    let mut seeded = if !should_rollback {
-        evolve::seed_smart_skills(&analysis, &existing)
-    } else {
-        0
-    };
-
     // 4b. HarnessX seesaw constraint (R5): a coarse per-task regression gate.
-    // If the current digests regress any previously solved task beyond
-    // tolerance, surface it as a warning and skip seeding to avoid committing
-    // a regressing edit. The registry is then updated with this round's scores.
+    // Runs BEFORE seeding (digests are already available from step 2b) so a
+    // regressing round blocks NEW skill commits at the source rather than
+    // warning after the fact. The previous order (seed-then-check) was
+    // toothless: skills were already on disk when the warning fired.
     let seesaw = evolve::load_registry();
     let regressed =
         evolve::seesaw_check(&seesaw, &digests, crate::evolve::seesaw::DEFAULT_TOLERANCE);
-    if !regressed.is_empty() && seeded > 0 {
+    let seesaw_blocked = !regressed.is_empty();
+    if seesaw_blocked {
         hint(
             "reflect",
             &format!(
-                "Seesaw constraint: {} previously solved task(s) regressed {:?} — skipping further seeding this round",
+                "Seesaw constraint: {} previously solved task(s) regressed {:?} — blocking skill seeding this round",
                 regressed.len(),
                 regressed,
             ),
         );
+    }
+
+    // 4. Seed evolved skills (skipped on rollback OR seesaw regression)
+    ensure_dir(&evolved_dir());
+    let existing = list_dirs(&evolved_dir());
+    let mut seeded = if !should_rollback && !seesaw_blocked {
+        evolve::seed_smart_skills(&analysis, &existing)
+    } else {
+        0
+    };
+    if seesaw_blocked {
         seeded = 0;
     }
-    {
+
+    // Update the solved-task registry. Guard: only update when the gate
+    // PASSED. update() is monotonic (only improves bests), but recording a
+    // regressing round's coincidental high scores would raise the best-of
+    // for tasks that scored well by luck, masking future genuine regressions.
+    if !seesaw_blocked {
         let mut reg = seesaw;
         let scores = evolve::scores_from_digests(&digests);
         reg.update(&scores);
         let _ = evolve::save_registry(&reg);
+    }
+
+    // 4c. HarnessX variant isolation (R6): record this session's stack outcome
+    // into the variant pool so warm routing can converge on per-stack success
+    // rates, and fork-on-regression when the seesaw detected a regression on a
+    // stack that already has a variant (the core catastrophic-forgetting
+    // defense, paper §4.5). With a cold/empty pool this is a no-op that just
+    // seeds routing stats; forking meaningfully engages once variants exist.
+    let mut pool = crate::evolve::variants::VariantPool::load();
+    let session_stack: Vec<String> = detect_session_stack(&observations);
+    if !session_stack.is_empty() {
+        let stack_str = session_stack.first().cloned().unwrap_or_default();
+        if seesaw_blocked {
+            // A regressing round on a known stack → fork rather than let the
+            // existing variant absorb the bad edit. record_outcome then runs
+            // on the (possibly forked) variant the session is routed to.
+            let target_id = pool
+                .route(&[stack_str.as_str()])
+                .map(|v| v.id.clone())
+                .unwrap_or_else(|| stack_str.clone());
+            pool.fork_if_needed(&target_id, true);
+        }
+        let route_id = pool
+            .route(&[stack_str.as_str()])
+            .map(|v| v.id.clone())
+            .unwrap_or_else(|| stack_str.clone());
+        pool.record_outcome(&route_id, !seesaw_blocked);
+        let _ = pool.save();
     }
 
     // 5. Gate
@@ -1268,6 +1305,43 @@ fn patch_orbit_evolve_gap(orbit_dir: &std::path::Path, now: &str) -> usize {
         }
     }
     patched
+}
+
+/// Detect the dominant stack tags from a session's observations, used by R6
+/// variant routing. Inspects file extensions in `action` and the `file_ext`
+/// field. Returns at most one tag (the dominant stack) to keep routing simple.
+fn detect_session_stack(observations: &[ObsRecord]) -> Vec<String> {
+    use std::collections::HashMap;
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    for o in observations {
+        let ext = o
+            .file_ext
+            .clone()
+            .or_else(|| {
+                o.action.as_ref().and_then(|a| {
+                    a.rsplit('.')
+                        .next()
+                        .filter(|e| e.len() <= 6 && !e.contains(' '))
+                        .map(String::from)
+                })
+            })
+            .unwrap_or_default()
+            .to_lowercase();
+        let tag = match ext.as_str() {
+            "rs" => "rust",
+            "py" => "python",
+            "ts" | "tsx" => "typescript",
+            "go" => "go",
+            "java" | "kt" => "jvm",
+            _ => continue,
+        };
+        *counts.entry(tag.to_string()).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, c)| *c)
+        .map(|(t, _)| vec![t])
+        .unwrap_or_default()
 }
 
 // ── Inline tests (kept here: run_context epoch helpers) ──
