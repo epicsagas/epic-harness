@@ -448,20 +448,56 @@ pub(crate) fn plan_skill_edits(
 
 /// Executor role: apply a plan's edits via the typed `HarnessEdit::apply()`
 /// path. Each edit is validated before apply. Returns the count applied.
-pub(crate) fn apply_skill_edits(plan: &SkillEditPlan) -> u64 {
-    let mut applied = 0u64;
+/// Outcome of applying a skill-edit plan: how many edits landed, plus the
+/// falsifiable manifest for each APPLIED edit (HarnessX Table 9). Manifests of
+/// edits the Critic rejected or that failed validation are excluded — only
+/// shipped edits carry a manifest the next round can falsify.
+#[derive(Debug, Clone, Default)]
+pub struct ApplyOutcome {
+    pub applied: u64,
+    pub manifests: Vec<crate::evolve::edits::EditManifest>,
+}
+
+/// Executor role: validate → Critic-verify → apply each typed edit.
+///
+/// Edits whose manifest the Critic Rejects are skipped (not applied, no
+/// manifest emitted). The Critic receives the same `metrics` the round-level
+/// block decision used, so the verdict is consistent with the seeding gate.
+pub(crate) fn apply_skill_edits(
+    plan: &SkillEditPlan,
+    metrics: &crate::shared::evolution::Metrics,
+) -> ApplyOutcome {
+    let mut outcome = ApplyOutcome::default();
     for edit in &plan.edits {
         if edit.validate().is_err() {
             continue;
         }
+        let manifest = edit.manifest();
+        // Critic falsifiability gate (HarnessX §4.3): reject edits whose
+        // claimed impact contradicts observed evidence. The most common
+        // contradiction today: claiming a score lift while reward hacking is
+        // suspected (quality falling). This is defense-in-depth — the
+        // round-level block already suppressed seeding under reward hacking,
+        // so this per-edit gate is the hook for FUTURE non-reward-hacking
+        // contradictions.
+        if let crate::evolve::critic::CriticVerdict::Reject(_) =
+            crate::evolve::critic::Critic::verify_against_evidence(&manifest, &[], metrics)
+        {
+            continue;
+        }
         if matches!(edit.apply(), crate::evolve::edits::EditOutcome::Applied) {
-            applied += 1;
+            outcome.applied += 1;
+            outcome.manifests.push(manifest);
         }
     }
-    applied
+    outcome
 }
 
-pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64 {
+pub fn seed_smart_skills(
+    analysis: &SessionAnalysis,
+    existing: &[String],
+    metrics: &crate::shared::evolution::Metrics,
+) -> ApplyOutcome {
     let avg_score = analysis.avg_score;
 
     // Graduated Scope: skip seeding for excellent sessions
@@ -473,7 +509,7 @@ pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64
                 "Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {skip})"
             ),
         );
-        return 0;
+        return ApplyOutcome::default();
     }
 
     let full_seeding = avg_score < CONFIG.pattern.graduated_scope_moderate;
@@ -486,7 +522,7 @@ pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64
 
     let mut counters = load_promotion_counters();
     let plan = plan_skill_edits(analysis, existing, &mut counters);
-    let seeded = apply_skill_edits(&plan);
+    let outcome = apply_skill_edits(&plan, metrics);
 
     save_promotion_counters(&plan.counters);
     if plan.promoted_count > 0 {
@@ -499,7 +535,7 @@ pub fn seed_smart_skills(analysis: &SessionAnalysis, existing: &[String]) -> u64
             ),
         );
     }
-    seeded
+    outcome
 }
 
 pub fn sanitize_skill_name(name: &str) -> bool {
@@ -1627,5 +1663,69 @@ mod tests {
         let (with, without) = get_skill_scores(&metrics, "nonexistent");
         assert_eq!(with, 0.0);
         assert_eq!(without, 0.0);
+    }
+
+    #[test]
+    fn apply_outcome_carries_manifest_for_applied_edit() {
+        // A: an AddSkill edit that validates + applies (clean metrics) emits
+        // exactly one manifest, and applied == 1.
+        let _ = std::fs::remove_dir_all(
+            crate::shared::paths::evolved_dir().join("evo-unit-test-skill"),
+        );
+        let edit = HarnessEdit::AddSkill {
+            name: "evo-unit-test-skill".into(),
+            content:
+                "---\nname: evo-unit-test-skill\n---\nbody that is long enough to pass gating\n"
+                    .into(),
+            origin: "type_error".into(),
+            confidence: 0.8,
+        };
+        let plan = SkillEditPlan {
+            edits: vec![edit],
+            counters: crate::evolve::skills::PromotionCounter::default(),
+            promoted_count: 1,
+        };
+        let metrics = crate::shared::evolution::Metrics::default();
+        let outcome = apply_skill_edits(&plan, &metrics);
+        assert_eq!(outcome.applied, 1);
+        assert_eq!(outcome.manifests.len(), 1);
+        assert_eq!(outcome.manifests[0].target, "evo-unit-test-skill");
+        // cleanup the skill dir we wrote
+        let _ = std::fs::remove_dir_all(
+            crate::shared::paths::evolved_dir().join("evo-unit-test-skill"),
+        );
+    }
+
+    #[test]
+    fn critic_reject_skips_edit_and_emits_no_manifest() {
+        // A: when reward hacking is suspected, a manifest claiming a score lift
+        // is rejected by the Critic → the edit is skipped, no manifest emitted.
+        let _ = std::fs::remove_dir_all(
+            crate::shared::paths::evolved_dir().join("evo-unit-test-rejected"),
+        );
+        let edit = HarnessEdit::AddSkill {
+            name: "evo-unit-test-rejected".into(),
+            content: "---\nname: evo-unit-test-rejected\n---\nbody\n".into(),
+            origin: "type_error".into(),
+            confidence: 0.8,
+        };
+        let plan = SkillEditPlan {
+            edits: vec![edit],
+            counters: crate::evolve::skills::PromotionCounter::default(),
+            promoted_count: 1,
+        };
+        let metrics = crate::shared::evolution::Metrics {
+            reward_hacking_suspected: true,
+            ..crate::shared::evolution::Metrics::default()
+        };
+        let outcome = apply_skill_edits(&plan, &metrics);
+        assert_eq!(outcome.applied, 0);
+        assert!(outcome.manifests.is_empty());
+        // nothing was written
+        assert!(
+            !crate::shared::paths::evolved_dir()
+                .join("evo-unit-test-rejected")
+                .exists()
+        );
     }
 }

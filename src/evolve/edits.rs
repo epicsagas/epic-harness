@@ -80,7 +80,7 @@ pub enum EditOutcome {
 ///
 /// Every shipped edit should carry one so the Critic (R-P2) can later verify
 /// the next round's trace matches the predicted effect.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EditManifest {
     pub edit_type: EditType,
     pub target: String,
@@ -124,7 +124,7 @@ impl HarnessEdit {
                 target: name.clone(),
                 intended_effect: format!("New evolved skill from {origin} pattern"),
                 predicted_impact: format!(
-                    "Reduce failures of {origin} (confidence {confidence:.2})"
+                    "Lift avg_score_with by reducing {origin} failures (confidence {confidence:.2})"
                 ),
             },
             HarnessEdit::ModifySkill {

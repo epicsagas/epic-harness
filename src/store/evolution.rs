@@ -82,6 +82,9 @@ pub async fn query_recent_records_pool(
             total_evolved: r.try_get::<i64, _>(8).map_err(super::sqlx_err)? as u64,
             analysis_summary: r.try_get(9).map_err(super::sqlx_err)?,
             edit_type: crate::shared::evolution::EditType::from_db_str(&edit_type_str),
+            // Manifests are persisted to the JSONL sidecar, not the SQLite
+            // scalar columns; reads from SQLite leave them empty.
+            manifests: vec![],
         });
     }
     records.reverse();
@@ -131,6 +134,7 @@ mod tests {
             total_evolved: 3,
             analysis_summary: "Good session".into(),
             edit_type: crate::shared::evolution::EditType::AddSkill,
+            manifests: vec![],
         };
 
         insert_record_pool(&pool, &rec).await.unwrap();
@@ -158,6 +162,7 @@ mod tests {
                 total_evolved: 0,
                 analysis_summary: String::new(),
                 edit_type: ty.clone(),
+                manifests: vec![],
             };
             insert_record_pool(&pool, &rec).await.unwrap();
         }

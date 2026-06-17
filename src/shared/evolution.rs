@@ -231,7 +231,7 @@ pub struct SkillAttribution {
     pub first_seen: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Metrics {
     pub total_sessions: u64,
     pub avg_success_rate: f64,
@@ -272,6 +272,12 @@ pub struct EvolutionRecord {
     /// HarnessX-inspired: the type of edit applied during this evolution cycle.
     #[serde(default)]
     pub edit_type: EditType,
+    /// HarnessX falsifiability contract (Table 9): the manifest of each edit
+    /// shipped this round, so the next round's Critic can verify the predicted
+    /// impacts held. Persisted to the JSONL fallback; the SQLite store writes
+    /// only the scalar columns (manifests ride along via the JSONL path).
+    #[serde(default)]
+    pub manifests: Vec<crate::evolve::edits::EditManifest>,
 }
 
 pub fn default_metrics() -> Metrics {

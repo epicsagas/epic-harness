@@ -174,6 +174,13 @@ pub fn variant_pool_path() -> PathBuf {
     harness_dir().join("variants.json")
 }
 
+/// Per-project edit-manifest log for the HarnessX falsifiability contract
+/// (Table 9). Each shipped edit appends its manifest here; the next round's
+/// Critic reads recent manifests to check predictions held.
+pub fn manifests_file() -> PathBuf {
+    harness_dir().join("manifests.jsonl")
+}
+
 /// guard-rules.yaml stays in the project tree only if the user/team explicitly
 /// created it there. Otherwise, we default to the per-project global directory
 /// to keep the project tree clean.

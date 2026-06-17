@@ -872,7 +872,9 @@ pub fn run(_input: &HookInput) -> i32 {
     // (paper §4.3). Computed pre-seed by appending this session's dimension
     // averages to a throwaway copy of score_history, so the detector sees the
     // current round without mutating metrics before its later official push.
-    let critic_blocked = {
+    // The probe is reused as the metrics passed to seed_smart_skills so the
+    // per-edit Critic verdict is consistent with the round-level block.
+    let probe_metrics = {
         let mut probe = metrics.clone();
         probe.score_history.push(SessionScoreEntry {
             timestamp: now_iso(),
@@ -888,20 +890,24 @@ pub fn run(_input: &HookInput) -> i32 {
                 "Critic: reward hacking suspected (execution_cost rising while output_quality falls) — blocking skill seeding this round",
             );
         }
-        crate::evolve::critic::Critic::should_block_seeding(&probe)
+        probe
     };
+    let critic_blocked = crate::evolve::critic::Critic::should_block_seeding(&probe_metrics);
 
     // 5. Seed evolved skills (skipped on rollback, seesaw regression, OR critic block)
     ensure_dir(&evolved_dir());
     let existing = list_dirs(&evolved_dir());
-    let mut seeded = if !should_rollback && !seesaw_blocked && !critic_blocked {
-        evolve::seed_smart_skills(&analysis, &existing)
+    let outcome = if !should_rollback && !seesaw_blocked && !critic_blocked {
+        evolve::seed_smart_skills(&analysis, &existing, &probe_metrics)
     } else {
-        0
+        crate::evolve::skills::ApplyOutcome::default()
     };
-    if seesaw_blocked || critic_blocked {
-        seeded = 0;
-    }
+    let mut seeded = if seesaw_blocked || critic_blocked {
+        0
+    } else {
+        outcome.applied
+    };
+    let manifests = outcome.manifests;
     if seesaw_blocked {
         seeded = 0;
     }
@@ -988,6 +994,7 @@ pub fn run(_input: &HookInput) -> i32 {
         total_evolved: evolved_dirs.len() as u64,
         analysis_summary: evolve::build_summary(&analysis),
         edit_type: EditType::AddSkill,
+        manifests: manifests.clone(),
     };
     // Write evolution record to SQLite (primary) + JSONL (fallback)
     let _ = crate::store::runtime::block_on(async {
@@ -995,6 +1002,14 @@ pub fn run(_input: &HookInput) -> i32 {
         crate::store::evolution::insert_record_pool(&pool, &record).await
     });
     append_jsonl(&evolution_file(), &record);
+
+    // 9b. HarnessX falsifiability ledger (Table 9): append each shipped edit's
+    // manifest to a sidecar JSONL the next round's Critic reads to check
+    // predictions held. Append-only (rotation is a future concern; evolution
+    // .jsonl is already append-only and unbounded by the same convention).
+    for m in &manifests {
+        append_jsonl(&manifests_file(), m);
+    }
 
     // 10. Session handoff context
     let last_errors: Vec<String> = observations
