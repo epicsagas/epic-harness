@@ -1377,12 +1377,32 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
         eprintln!("[harness] dry-run: would inject mcpServers.harness-mem into {tool} settings");
     }
 
-    // Codex-specific: warn if config.toml exists but codex_hooks is not enabled.
+    // Codex-specific: warn if config.toml exists but hooks are not enabled.
+    // Accepts either the legacy `codex_hooks = true` flag or the modern
+    // `hooks = true` in a `[features]` block (Codex renamed the key).
     if tool == "codex" {
         let config_path = target_dir.join("config.toml");
         if config_path.exists() {
             let ok = fs::read_to_string(&config_path)
-                .map(|s| s.contains("codex_hooks"))
+                .map(|s| {
+                    // Legacy: `codex_hooks` anywhere in the file.
+                    if s.contains("codex_hooks") {
+                        return true;
+                    }
+                    // Modern: `hooks = true` inside a [features] block.
+                    let mut in_features = false;
+                    for line in s.lines() {
+                        let t = line.trim();
+                        if t.starts_with('[') {
+                            in_features = t == "[features]";
+                            continue;
+                        }
+                        if in_features && t == "hooks = true" {
+                            return true;
+                        }
+                    }
+                    false
+                })
                 .unwrap_or(false);
             if !ok {
                 eprintln!();
@@ -1392,7 +1412,7 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
                 eprintln!("[harness] Hooks are OFF by default. Add these lines to enable them:");
                 eprintln!();
                 eprintln!("    [features]");
-                eprintln!("    codex_hooks = true");
+                eprintln!("    hooks = true");
                 eprintln!();
                 eprintln!("[harness] Then restart Codex for the change to take effect.");
             }
