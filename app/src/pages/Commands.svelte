@@ -1,51 +1,24 @@
 <script lang="ts">
   import { tStore } from '$lib/i18n.js';
 
-  type CommandKey =
-    | 'cmdDiscoverDesc' | 'cmdSpecDesc' | 'cmdGoDesc' | 'cmdAuditDesc'
-    | 'cmdEvalDesc' | 'cmdShipDesc' | 'cmdOrbitDesc' | 'cmdEvolveDesc' | 'cmdTeamDesc';
-
-  // The spec→ship flow orbit chains — 6 phases orbiting the orchestrator,
-  // rendered as an SVG diagram (mirrors the epiccounty.com/ecosystem style:
-  // central node + satellite nodes connected by labelled flow lines).
-  const FLOW = [
-    { cmd: 'discover', descKey: 'cmdDiscoverDesc', label: 'DISCOVER' },
-    { cmd: 'spec',     descKey: 'cmdSpecDesc',     label: 'SPEC' },
-    { cmd: 'go',       descKey: 'cmdGoDesc',       label: 'GO' },
-    { cmd: 'audit',    descKey: 'cmdAuditDesc',    label: 'AUDIT' },
-    { cmd: 'eval',     descKey: 'cmdEvalDesc',     label: 'EVAL' },
-    { cmd: 'ship',     descKey: 'cmdShipDesc',     label: 'SHIP' },
-  ] as const;
-
+  // /orbit decision tree — mirrors the README mermaid diagram exactly:
+  //   /orbit → requirement? → {interactive | council | direct} → Load spec →
+  //   Go → Check → (PASS/WARN → Ship | FAIL → retry<3? → Go | Pause) →
+  //   Ship → Evolve → Orbit Complete
+  // Purple = human checkpoint, green = autonomous, teal = decision diamond.
   const UTILITIES = [
     { cmd: 'evolve', descKey: 'cmdEvolveDesc' },
     { cmd: 'team',   descKey: 'cmdTeamDesc' },
   ] as const;
 
   let copiedCmd = $state<string | null>(null);
-
   async function copyCmd(cmd: string) {
     try {
       await navigator.clipboard.writeText('/' + cmd);
       copiedCmd = cmd;
       setTimeout(() => { copiedCmd = null; }, 1500);
-    } catch {
-      copiedCmd = null;
-    }
+    } catch { copiedCmd = null; }
   }
-
-  // Diagram geometry — 6 satellites evenly spaced around the centre.
-  const CX = 360;
-  const CY = 245;
-  const R = 175; // orbit radius
-  // Each satellite box dimensions
-  const BW = 110;
-  const BH = 52;
-  const positions = FLOW.map((_, i) => {
-    // start at top (-90deg), go clockwise
-    const angle = (-90 + i * (360 / FLOW.length)) * (Math.PI / 180);
-    return { x: CX + R * Math.cos(angle), y: CY + R * Math.sin(angle) };
-  });
 </script>
 
 <div class="screen-header">
@@ -53,66 +26,170 @@
   <p>{$tStore('pageCommandsDesc3')}</p>
 </div>
 
-<!-- SVG flow diagram: /orbit orchestrator at the centre, 6 phases around it -->
+<!-- /orbit decision tree (SVG, README-style flowchart) -->
 <div class="diagram-wrap">
-  <svg viewBox="0 0 720 490" class="diagram" role="img" aria-label="orbit pipeline flow">
+  <svg viewBox="0 0 620 760" class="diagram" role="img" aria-label="orbit decision flow">
     <defs>
-      <marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-        <path d="M0,0 L6,4 L0,8 Z" fill="var(--accent)" />
+      <marker id="ah" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L7,4.5 L0,9 Z" fill="var(--muted)" />
       </marker>
     </defs>
 
-    <!-- Flow connectors centre → each phase -->
-    {#each positions as p, i}
-      <line
-        x1={CX} y1={CY}
-        x2={p.x} y2={p.y}
-        class="flow-line"
-        marker-end="url(#arrowhead)"
-      />
-      <!-- phase order badge on the line -->
-      <text
-        x={CX + (p.x - CX) * 0.42}
-        y={CY + (p.y - CY) * 0.42 - 4}
-        class="flow-num"
-        text-anchor="middle"
-      >{i + 1}</text>
-    {/each}
+    <!-- Connectors (drawn first, under nodes) -->
+    <!-- /orbit → requirement? -->
+    <line x1="310" y1="56" x2="310" y2="92" class="edge" marker-end="url(#ah)" />
+    <!-- requirement? → 3 modes -->
+    <path d="M310 168 L310 196 L120 196 L120 222" class="edge" fill="none" marker-end="url(#ah)" />
+    <line x1="310" y1="168" x2="310" y2="222" class="edge" marker-end="url(#ah)" />
+    <path d="M310 168 L310 196 L500 196 L500 222" class="edge" fill="none" marker-end="url(#ah)" />
+    <!-- edge labels -->
+    <text x="210" y="190" class="elabel" text-anchor="middle">unclear</text>
+    <text x="324" y="190" class="elabel">clear + complex</text>
+    <text x="410" y="190" class="elabel" text-anchor="middle">simple</text>
 
-    <!-- Central /orbit orchestrator node -->
-    <g class="orbit-node" role="button" tabindex="0"
+    <!-- 3 modes → Load spec (merge) -->
+    <path d="M120 300 L120 326 L310 326" class="edge" fill="none" marker-end="url(#ah)" />
+    <line x1="310" y1="300" x2="310" y2="326" class="edge" marker-end="url(#ah)" />
+    <path d="M500 300 L500 326 L310 326" class="edge" fill="none" marker-end="url(#ah)" />
+
+    <!-- Load spec → Go -->
+    <line x1="310" y1="372" x2="310" y2="408" class="edge" marker-end="url(#ah)" />
+    <!-- Go → Check -->
+    <line x1="310" y1="468" x2="310" y2="504" class="edge" marker-end="url(#ah)" />
+    <!-- Check → Ship (PASS/WARN) -->
+    <path d="M390 540 L430 540 L430 600" class="edge" fill="none" marker-end="url(#ah)" />
+    <text x="438" y="572" class="elabel">PASS / WARN</text>
+    <!-- Check → retry (FAIL) -->
+    <path d="M230 540 L190 540 L190 600" class="edge" fill="none" marker-end="url(#ah)" />
+    <text x="150" y="572" class="elabel">FAIL</text>
+
+    <!-- retry → Go (yes, loop back) -->
+    <path d="M120 600 L60 600 L60 438 L218 438" class="edge" fill="none" marker-end="url(#ah)" />
+    <text x="68" y="520" class="elabel">yes</text>
+    <!-- retry → Pause (no) -->
+    <line x1="190" y1="648" x2="190" y2="684" class="edge" marker-end="url(#ah)" />
+    <text x="200" y="672" class="elabel">no</text>
+
+    <!-- Pause → Abort (abort) -->
+    <path d="M120 710 L70 710" class="edge" fill="none" marker-end="url(#ah)" />
+    <text x="78" y="702" class="elabel">abort</text>
+
+    <!-- Ship → Evolve -->
+    <line x1="430" y1="660" x2="430" y2="696" class="edge" marker-end="url(#ah)" />
+
+    <!-- ── Nodes ─────────────────────────────────────────── -->
+
+    <!-- /orbit (start, oval) -->
+    <g class="node-start" role="button" tabindex="0"
        onclick={() => copyCmd('orbit')}
        onkeydown={(e) => e.key === 'Enter' && copyCmd('orbit')}>
-      <rect x={CX - 95} y={CY - 48} width="190" height="96" rx="12" class="orbit-box" />
-      <rect x={CX - 87} y={CY - 40} width="174" height="80" rx="9" class="orbit-box-inner" />
-      <text x={CX} y={CY - 14} text-anchor="middle" class="orbit-title">/orbit</text>
-      <text x={CX} y={CY + 10} text-anchor="middle" class="orbit-sub">ORCHESTRATOR</text>
-      <text x={CX} y={CY + 28} text-anchor="middle" class="orbit-hint">spec → ship · auto</text>
+      <rect x="250" y="18" width="120" height="38" rx="19" class="n-start" />
+      <text x="310" y="42" text-anchor="middle" class="n-text">/orbit</text>
     </g>
 
-    <!-- Satellite phase nodes -->
-    {#each FLOW as phase, i}
-      {@const p = positions[i]}
-      <g
-        class="phase-node"
-        role="button" tabindex="0"
-        onclick={() => copyCmd(phase.cmd)}
-        onkeydown={(e) => e.key === 'Enter' && copyCmd(phase.cmd)}
-      >
-        <rect x={p.x - BW / 2} y={p.y - BH / 2} width={BW} height={BH} rx="8" class="phase-box" />
-        <text x={p.x} y={p.y - 6} text-anchor="middle" class="phase-cmd">/{phase.cmd}</text>
-        <text x={p.x} y={p.y + 12} text-anchor="middle" class="phase-label">{phase.label}</text>
-      </g>
-    {/each}
+    <!-- requirement? (decision diamond) -->
+    <g>
+      <polygon points="310,92 380,130 310,168 240,130" class="n-decide" />
+      <text x="310" y="134" text-anchor="middle" class="n-text">requirement?</text>
+    </g>
+
+    <!-- Interactive (human, left) -->
+    <g>
+      <rect x="40" y="222" width="160" height="78" rx="6" class="n-human" />
+      <text x="120" y="246" text-anchor="middle" class="n-title">Interactive</text>
+      <text x="120" y="266" text-anchor="middle" class="n-sub">/discover → /spec</text>
+      <text x="120" y="284" text-anchor="middle" class="n-sub">then 'orbit go'</text>
+    </g>
+
+    <!-- Council (auto, center) -->
+    <g>
+      <rect x="220" y="222" width="180" height="78" rx="6" class="n-auto" />
+      <text x="310" y="246" text-anchor="middle" class="n-title">Council</text>
+      <text x="310" y="266" text-anchor="middle" class="n-sub">4-voice auto-spec</text>
+      <text x="310" y="284" text-anchor="middle" class="n-tag">clear + complex</text>
+    </g>
+
+    <!-- Direct (auto, right) -->
+    <g>
+      <rect x="420" y="222" width="160" height="78" rx="6" class="n-auto" />
+      <text x="500" y="246" text-anchor="middle" class="n-title">Direct</text>
+      <text x="500" y="266" text-anchor="middle" class="n-sub">auto-spec</text>
+      <text x="500" y="284" text-anchor="middle" class="n-tag">clear + simple</text>
+    </g>
+
+    <!-- Load spec (merge) -->
+    <g>
+      <rect x="230" y="326" width="160" height="46" rx="6" class="n-merge" />
+      <text x="310" y="354" text-anchor="middle" class="n-text">Load spec</text>
+    </g>
+
+    <!-- Go -->
+    <g class="node-cmd" role="button" tabindex="0"
+       onclick={() => copyCmd('go')}
+       onkeydown={(e) => e.key === 'Enter' && copyCmd('go')}>
+      <rect x="218" y="408" width="184" height="60" rx="6" class="n-auto" />
+      <text x="310" y="432" text-anchor="middle" class="n-title">Go</text>
+      <text x="310" y="452" text-anchor="middle" class="n-sub">plan → TDD → integrate</text>
+    </g>
+
+    <!-- Check -->
+    <g class="node-cmd" role="button" tabindex="0"
+       onclick={() => copyCmd('audit')}
+       onkeydown={(e) => e.key === 'Enter' && copyCmd('audit')}>
+      <rect x="230" y="504" width="160" height="72" rx="6" class="n-auto" />
+      <text x="310" y="528" text-anchor="middle" class="n-title">Check</text>
+      <text x="310" y="548" text-anchor="middle" class="n-sub">review + audit + test</text>
+    </g>
+
+    <!-- retry<3? (decision diamond) -->
+    <g>
+      <polygon points="190,600 250,624 190,648 130,624" class="n-decide-sm" />
+      <text x="190" y="628" text-anchor="middle" class="n-text-sm">retry &lt; 3?</text>
+    </g>
+
+    <!-- Pause (human) -->
+    <g>
+      <rect x="120" y="684" width="140" height="52" rx="6" class="n-human" />
+      <text x="190" y="706" text-anchor="middle" class="n-title">Pause</text>
+      <text x="190" y="724" text-anchor="middle" class="n-sub">user decides</text>
+    </g>
+
+    <!-- Abort (terminal, oval) -->
+    <g>
+      <rect x="14" y="692" width="56" height="36" rx="18" class="n-terminal" />
+      <text x="42" y="715" text-anchor="middle" class="n-text-sm">Abort</text>
+    </g>
+
+    <!-- Ship -->
+    <g class="node-cmd" role="button" tabindex="0"
+       onclick={() => copyCmd('ship')}
+       onkeydown={(e) => e.key === 'Enter' && copyCmd('ship')}>
+      <rect x="350" y="600" width="160" height="60" rx="6" class="n-auto" />
+      <text x="430" y="624" text-anchor="middle" class="n-title">Ship</text>
+      <text x="430" y="644" text-anchor="middle" class="n-sub">isolated test → PR → CI</text>
+    </g>
+
+    <!-- Evolve -->
+    <g class="node-cmd" role="button" tabindex="0"
+       onclick={() => copyCmd('evolve')}
+       onkeydown={(e) => e.key === 'Enter' && copyCmd('evolve')}>
+      <rect x="350" y="696" width="160" height="48" rx="6" class="n-auto" />
+      <text x="430" y="718" text-anchor="middle" class="n-title">Evolve</text>
+      <text x="430" y="735" text-anchor="middle" class="n-sub">auto-analyze session</text>
+    </g>
+
+    <!-- (Orbit Complete would be below Evolve; omitted for space — Evolve is the last clickable node) -->
   </svg>
-  {#if copiedCmd === 'orbit'}
-    <div class="copied-float">{$tStore('copied')}</div>
+  {#if copiedCmd}
+    <div class="copied-float">copied /{copiedCmd}</div>
   {/if}
 </div>
 
-<div class="diagram-legend">
-  <span><span class="dot accent"></span> orbit chains phases 1→6 automatically</span>
-  <span>click any node to copy <code>/command</code></span>
+<div class="legend">
+  <span><span class="sw human"></span> human checkpoint</span>
+  <span><span class="sw auto"></span> autonomous</span>
+  <span><span class="sw decide"></span> decision</span>
+  <span class="hint">click a node to copy the command</span>
 </div>
 
 <!-- Cross-cutting orchestrators -->
@@ -138,160 +215,75 @@
     position: relative;
     display: flex;
     justify-content: center;
-    margin-bottom: 12px;
+    overflow-x: auto;
+    margin-bottom: 10px;
   }
-  .diagram {
-    width: 100%;
-    max-width: 720px;
-    height: auto;
-  }
+  .diagram { width: 100%; max-width: 620px; height: auto; min-width: 560px; }
 
-  .flow-line {
-    stroke: var(--border);
-    stroke-width: 1.5;
-    stroke-dasharray: 4 3;
-  }
-
-  .flow-num {
-    fill: var(--accent);
-    font-size: 12px;
-    font-weight: 700;
-    font-family: var(--font-mono);
-  }
-
-  /* Central orbit node */
-  .orbit-box {
-    fill: var(--accent-soft);
-    stroke: var(--accent);
-    stroke-width: 1.5;
-  }
-  .orbit-box-inner {
-    fill: var(--surface-raised);
-    stroke: var(--accent);
-    stroke-width: 0.8;
-    stroke-opacity: 0.4;
-  }
-  .orbit-node { cursor: pointer; }
-  .orbit-node:hover .orbit-box { filter: drop-shadow(0 0 10px var(--accent)); }
-  .orbit-title {
-    fill: var(--accent);
-    font-size: 22px;
-    font-weight: 700;
-    font-family: var(--font-mono);
-  }
-  .orbit-sub {
+  .edge { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+  .elabel {
     fill: var(--fg-secondary);
     font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    font-family: var(--font-mono);
-  }
-  .orbit-hint {
-    fill: var(--muted);
-    font-size: 10px;
     font-family: var(--font-mono);
   }
 
-  /* Satellite phase nodes */
-  .phase-node { cursor: pointer; }
-  .phase-box {
-    fill: var(--surface-raised);
-    stroke: var(--teal);
-    stroke-width: 1.2;
-    transition: fill var(--transition), stroke-width var(--transition);
-  }
-  .phase-node:hover .phase-box {
-    fill: var(--teal-soft);
-    stroke-width: 2;
-  }
-  .phase-cmd {
-    fill: var(--fg);
-    font-size: 14px;
-    font-weight: 600;
-    font-family: var(--font-mono);
-  }
-  .phase-label {
-    fill: var(--teal);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    font-family: var(--font-mono);
-  }
+  /* Node fills — README classDef: human=#4a4a6a, auto=#1a5c3a */
+  .n-human { fill: #4a4a6a; stroke: #9b9bcc; stroke-width: 1; }
+  .n-auto  { fill: #1a5c3a; stroke: #4caf7d; stroke-width: 1; }
+  .n-merge { fill: #6b4a2a; stroke: #c9954a; stroke-width: 1; }
+  .n-decide { fill: #2a3a5c; stroke: #5a7acc; stroke-width: 1; }
+  .n-decide-sm { fill: #3a2a1a; stroke: #c9954a; stroke-width: 1; }
+  .n-start, .n-terminal { fill: #1a5c3a; stroke: #4caf7d; stroke-width: 1.2; }
+
+  .node-cmd, .node-start { cursor: pointer; }
+  .node-cmd:hover .n-auto,
+  .node-start:hover .n-start { filter: brightness(1.25); }
+
+  .n-text { fill: #fff; font-size: 13px; font-weight: 600; font-family: var(--font-mono); }
+  .n-text-sm { fill: #fff; font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
+  .n-title { fill: #fff; font-size: 14px; font-weight: 700; font-family: var(--font-mono); }
+  .n-sub { fill: rgba(255,255,255,0.82); font-size: 10.5px; font-family: var(--font-mono); }
+  .n-tag { fill: #4caf7d; font-size: 9.5px; font-weight: 700; font-family: var(--font-mono); letter-spacing: 0.04em; }
 
   .copied-float {
-    position: absolute;
-    top: 12px;
-    right: 16px;
-    font-size: 11px;
-    color: var(--success);
-    font-family: var(--font-mono);
-    font-weight: 600;
+    position: absolute; top: 10px; right: 14px;
+    font-size: 11px; color: var(--success);
+    font-family: var(--font-mono); font-weight: 600;
   }
 
-  .diagram-legend {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 18px;
-    justify-content: center;
-    font-size: 12px;
-    color: var(--muted);
-    margin-bottom: 28px;
-    font-family: var(--font-mono);
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 16px; justify-content: center;
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 28px; font-family: var(--font-mono);
   }
-  .diagram-legend .dot {
-    display: inline-block;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    margin-right: 4px;
-    vertical-align: middle;
+  .legend .sw {
+    display: inline-block; width: 11px; height: 11px;
+    border-radius: 3px; margin-right: 5px; vertical-align: -1px;
+    border: 1px solid;
   }
-  .diagram-legend .dot.accent { background: var(--accent); }
-  .diagram-legend code {
-    font-family: var(--font-mono);
-    color: var(--teal);
-    background: var(--teal-soft);
-    padding: 1px 5px;
-    border-radius: 3px;
-  }
+  .legend .sw.human { background: #4a4a6a; border-color: #9b9bcc; }
+  .legend .sw.auto { background: #1a5c3a; border-color: #4caf7d; }
+  .legend .sw.decide { background: #2a3a5c; border-color: #5a7acc; }
+  .legend .hint { color: var(--teal); }
 
-  /* Cross-cutting */
   .util-section { margin-top: 4px; }
   .util-label {
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--muted);
-    margin-bottom: 10px;
-    font-family: var(--font-mono);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted); margin-bottom: 10px; font-family: var(--font-mono);
   }
   .util-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 12px;
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;
   }
   .util-card {
-    display: block;
-    text-align: left;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--purple);
-    border-radius: var(--radius);
-    background: var(--surface);
-    cursor: pointer;
-    font-family: inherit;
-    color: var(--fg);
+    display: block; text-align: left; padding: 14px;
+    border: 1px solid var(--border); border-left: 3px solid var(--purple);
+    border-radius: var(--radius); background: var(--surface);
+    cursor: pointer; font-family: inherit; color: var(--fg);
     transition: border-color var(--transition), background var(--transition);
   }
   .util-card:hover { border-color: var(--purple); background: var(--surface-raised); }
   .util-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .util-name { font-family: var(--font-mono); font-weight: 600; font-size: 14px; }
   .util-desc { font-size: 12px; color: var(--fg-secondary); }
-  .copied-inline {
-    font-size: 11px; color: var(--success);
-    font-family: var(--font-mono); font-weight: 600;
-  }
-
-  @media (max-width: 640px) {
-    .diagram-legend { flex-direction: column; gap: 6px; text-align: center; }
-  }
+  .copied-inline { font-size: 11px; color: var(--success); font-family: var(--font-mono); font-weight: 600; }
 </style>
