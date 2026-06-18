@@ -162,11 +162,37 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 json_response(&body)
             }
 
+            // ── Project list ─────────────────────────────────
+            // Returns the sorted list of project slugs discovered under
+            // ~/.harness/projects/. The frontend project dropdown populates
+            // from this; without it the dropdown is empty and the previously-
+            // selected project stays pinned (cannot switch, cannot see all).
+            (Method::Get, "/api/projects") => {
+                let root = crate::shared::paths::harness_projects_root();
+                let mut slugs: Vec<String> = Vec::new();
+                if let Ok(rd) = std::fs::read_dir(&root) {
+                    for entry in rd.filter_map(|e| e.ok()) {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                            if let Some(name) = entry.file_name().to_str() {
+                                slugs.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+                slugs.sort();
+                json_response(&serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into()))
+            }
+
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
+                // `project` selects a specific project slug; absent or
+                // `__all__` means cross-project aggregate. The frontend's
+                // projectArgs() omits the param entirely for "all".
+                let project = parse_query_param(url, "project")
+                    .filter(|p| !p.is_empty() && p != "__all__");
                 let harness_dir = common::harness_dir();
-                let body = handle_harness_cmd(&cmd, &harness_dir);
+                let body = handle_harness_cmd(&cmd, &harness_dir, project.as_deref());
                 json_response(&body)
             }
 
@@ -425,17 +451,21 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
     None
 }
 
-fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
+fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<&str>) -> String {
     use std::fs;
     match cmd {
         "get_harness_metrics" => {
-            // Try SQLite first, fallback to JSON file
+            // Project-scoped load: a specific slug, or cross-project aggregate
+            // when `project` is None. Uses the (key, project)-keyed
+            // metrics_state table correctly (the unfiltered loader returned
+            // indeterminate results with multiple projects).
             if let Ok(metrics) = crate::store::runtime::block_on(async {
                 let pool = crate::store::pool::harness_pool().await?;
-                crate::store::metrics::load_metrics_pool(&pool).await
+                crate::store::metrics::load_metrics_scoped_pool(&pool, project).await
             }) {
                 return serde_json::to_string(&metrics).unwrap_or_else(|_| "null".into());
             }
+            // File fallback — only meaningful for the active project dir.
             let p = harness_dir.join("metrics.json");
             fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
         }
@@ -537,10 +567,11 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             // Try SQLite first, fallback to JSONL
             if let Ok(stats) = crate::store::runtime::block_on(async {
                 let pool = crate::store::pool::harness_pool().await?;
-                crate::store::observations::query_obs_stats_pool(
+                crate::store::observations::query_obs_stats_scoped_pool(
                     &pool,
                     "2020-01-01", // all data
                     "2099-12-31",
+                    project,
                 )
                 .await
             }) {

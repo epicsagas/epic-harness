@@ -356,6 +356,244 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
     load_metrics_pool(pool).await
 }
 
+/// Load metrics for a specific project slug, or aggregated across all
+/// projects when `project` is `None`.
+///
+/// The `metrics_state` table is keyed by `(key, project)`, so the unfiltered
+/// `load_metrics_pool` returns indeterminate results when multiple projects
+/// have written rows (it used `fetch_optional` on a multi-row result). This
+/// variant scopes every query to the requested project, or aggregates (SUM /
+/// weighted avg) across all projects when `None`.
+pub async fn load_metrics_scoped_pool(pool: &AnyPool, project: Option<&str>) -> io::Result<Metrics> {
+    // Scalar state — aggregate across projects.
+    async fn get_sum(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<f64> {
+        let q = if project.is_some() {
+            "SELECT value FROM metrics_state WHERE key = ? AND project = ? LIMIT 1"
+        } else {
+            "SELECT value FROM metrics_state WHERE key = ? LIMIT 1"
+        };
+        let row = if let Some(p) = project {
+            sqlx::query_scalar::<_, String>(q).bind(key).bind(p)
+        } else {
+            sqlx::query_scalar::<_, String>(q).bind(key)
+        }
+        .fetch_optional(pool)
+        .await
+        .ok()??;
+        row.parse().ok()
+    }
+    async fn get_str(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<String> {
+        let v = get_sum(pool, key, project).await?;
+        Some(v.to_string())
+    }
+
+    // Aggregate scalar metrics across projects for the "all" view, or take
+    // the single project row otherwise.
+    let (total_sessions, avg_success_rate, total_evolved_skills, stagnation_count): (
+        u64,
+        f64,
+        u64,
+        u64,
+    ) = if let Some(p) = project {
+        (
+            get_sum(pool, "total_sessions", Some(p)).await.unwrap_or(0.0) as u64,
+            get_sum(pool, "avg_success_rate", Some(p)).await.unwrap_or(0.0),
+            get_sum(pool, "total_evolved_skills", Some(p)).await.unwrap_or(0.0) as u64,
+            get_sum(pool, "stagnation_count", Some(p)).await.unwrap_or(0.0) as u64,
+        )
+    } else {
+        // Sum counts across every project row. SQLite SUM over REAL columns
+        // returns a REAL, so decode as f64 (i64 decode silently yields None).
+        let ts: f64 = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT SUM(CAST(value AS REAL)) FROM metrics_state WHERE key = 'total_sessions'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .unwrap_or(0.0);
+        let tes: f64 = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT SUM(CAST(value AS REAL)) FROM metrics_state WHERE key = 'total_evolved_skills'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .unwrap_or(0.0);
+        let st: u64 = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT SUM(CAST(value AS REAL)) FROM metrics_state WHERE key = 'stagnation_count'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .unwrap_or(0.0) as u64;
+        // Weighted-average success rate by per-project session count.
+        let avg = sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT CASE WHEN SUM(ts) > 0 THEN SUM(asr * ts) / SUM(ts) ELSE 0 END
+             FROM (SELECT CAST(value AS REAL) AS asr,
+                          (SELECT CAST(value AS REAL) FROM metrics_state m2
+                           WHERE m2.key='total_sessions' AND m2.project = m1.project) AS ts
+                   FROM metrics_state m1 WHERE m1.key = 'avg_success_rate')",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .unwrap_or(0.0);
+        (ts as u64, avg, tes as u64, st)
+    };
+
+    let last_session = if let Some(p) = project {
+        get_str(pool, "last_session", Some(p)).await.filter(|v| !v.is_empty())
+    } else {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT MAX(value) FROM metrics_state WHERE key = 'last_session'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .filter(|v| !v.is_empty())
+    };
+    let best_score: Option<f64> = if let Some(p) = project {
+        get_sum(pool, "best_score", Some(p)).await
+    } else {
+        sqlx::query_scalar::<_, Option<f64>>(
+            "SELECT MAX(CAST(value AS REAL)) FROM metrics_state WHERE key = 'best_score'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+    };
+    let best_session = if let Some(p) = project {
+        get_str(pool, "best_session", Some(p)).await.unwrap_or_default()
+    } else {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT value FROM metrics_state WHERE key = 'best_session'
+             ORDER BY CAST((SELECT value FROM metrics_state m2 WHERE m2.key='best_score' AND m2.project=metrics_state.project) AS REAL) DESC LIMIT 1",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .unwrap_or_default()
+    };
+    let trend = if let Some(p) = project {
+        get_str(pool, "trend", Some(p)).await.unwrap_or_else(|| "stable".into())
+    } else {
+        "stable".to_string()
+    };
+    let last_error_context = if let Some(p) = project {
+        get_str(pool, "last_error_context", Some(p)).await.filter(|v| !v.is_empty())
+    } else {
+        None
+    };
+    let reward_hacking_suspected: bool = if let Some(p) = project {
+        get_sum(pool, "reward_hacking_suspected", Some(p))
+            .await
+            .map(|v| v != 0.0)
+            .unwrap_or(false)
+    } else {
+        sqlx::query_scalar::<_, Option<i64>>(
+            "SELECT CASE WHEN MAX(CAST(value AS REAL)) > 0 THEN 1 ELSE 0 END
+             FROM metrics_state WHERE key = 'reward_hacking_suspected'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(None)
+        .map(|v| v != 0)
+        .unwrap_or(false)
+    };
+    let epoch_class: Option<crate::shared::evolution::EpochClass> = if let Some(p) = project {
+        get_str(pool, "epoch_class", Some(p))
+            .await
+            .filter(|v| !v.is_empty())
+            .and_then(|v| serde_json::from_str::<crate::shared::evolution::EpochClass>(&v).ok())
+    } else {
+        None
+    };
+
+    // Score history — filter by project, or union all.
+    let sh_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT timestamp, success_rate, avg_score, observations,
+                    dim_success, dim_quality, dim_cost
+             FROM score_history WHERE project = ? ORDER BY id ASC",
+        )
+        .bind(p)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT timestamp, success_rate, avg_score, observations,
+                    dim_success, dim_quality, dim_cost
+             FROM score_history ORDER BY id ASC",
+        )
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(super::sqlx_err)?;
+
+    let score_history: Vec<SessionScoreEntry> = sh_rows
+        .iter()
+        .filter_map(|r| {
+            Some(SessionScoreEntry {
+                timestamp: r.try_get(0).ok()?,
+                success_rate: r.try_get(1).ok()?,
+                avg_score: r.try_get(2).ok()?,
+                observations: r.try_get::<i64, _>(3).ok()? as u64,
+                dimension_averages: ScoreDimensions {
+                    tool_success: r.try_get(4).ok()?,
+                    output_quality: r.try_get(5).ok()?,
+                    execution_cost: r.try_get(6).ok()?,
+                },
+            })
+        })
+        .collect();
+
+    // Skill attribution — filter by project, or all.
+    let sa_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+             FROM skill_attribution WHERE project = ?",
+        )
+        .bind(p)
+    } else {
+        sqlx::query(
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+             FROM skill_attribution",
+        )
+    }
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let skill_attribution: HashMap<String, SkillAttribution> = sa_rows
+        .iter()
+        .filter_map(|r| {
+            let sa = SkillAttribution {
+                skill_name: r.try_get(0).ok()?,
+                sessions_active: r.try_get::<i64, _>(1).ok()? as u64,
+                avg_score_with: r.try_get(2).ok()?,
+                avg_score_without: r.try_get(3).ok()?,
+                first_seen: r.try_get(4).ok()?,
+            };
+            Some((sa.skill_name.clone(), sa))
+        })
+        .collect();
+
+    Ok(Metrics {
+        total_sessions,
+        avg_success_rate,
+        total_evolved_skills,
+        last_session,
+        score_history,
+        best_score,
+        best_session,
+        trend,
+        stagnation_count,
+        skill_attribution,
+        epoch_class,
+        last_error_context,
+        reward_hacking_suspected,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
