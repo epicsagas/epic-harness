@@ -119,6 +119,23 @@
     run ? run.agents.filter(a => a.status === 'failed').length : 0
   );
 
+  // Cards only show agents active or completed within the last 24h — older
+  // ones are still available in the completed table below, so the card grid
+  // stays focused on recent activity.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  function within24h(agent: OrchAgentDef): boolean {
+    if (agent.status === 'running') return true;
+    const ts = agent.completed_at ?? agent.started_at;
+    if (!ts) return false;
+    return Date.now() - new Date(ts).getTime() < DAY_MS;
+  }
+  const recentAgents = $derived(
+    run ? run.agents.filter(within24h) : []
+  );
+  const olderCount = $derived(
+    run ? run.agents.length - recentAgents.length : 0
+  );
+
   // Low success tools from obs
   const lowSuccessTools = $derived(
     obs ? obs.tool_stats.filter(t => t.success_rate < 0.85) : []
@@ -196,9 +213,9 @@
         </div>
       </div>
 
-      <!-- Agent Cards -->
+      <!-- Agent Cards — last 24h only (older agents in the completed table) -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
-        {#each run.agents as agent}
+        {#each recentAgents as agent}
           {@const status = agentStatuses.get(agent.id)}
           <div class="agent-card" class:hx-flash={flash.agents}>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
@@ -232,6 +249,17 @@
           </div>
         {/each}
       </div>
+
+      {#if recentAgents.length === 0}
+        <div style="text-align:center;padding:32px 16px;color:var(--muted);font-size:13px;">
+          {$tStore('noActiveOrchestration')} — last 24h
+        </div>
+      {/if}
+      {#if olderCount > 0}
+        <div style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--font-mono);text-align:right;">
+          +{olderCount} older agents — see completed table below
+        </div>
+      {/if}
 
       <!-- Dependency Graph -->
       {#if Object.keys(run.dependency_graph).length > 0}
