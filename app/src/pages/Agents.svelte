@@ -1,10 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
   import { getOrchestratorRun, getOrchestratorAgentStatus } from '../lib/harness.js';
   import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let run = $state<OrchestrationRun | null>(null);
   let agentStatuses = $state<Map<string, OrchAgentStatus>>(new Map());
@@ -67,9 +67,11 @@
     }
   }
 
-  onMount(() => {
+  // Reload on project switch (getObsSummary is project-scoped) + poll for live view.
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
     load();
-    const id = setInterval(load, 5000); // Refresh every 5s for live view
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
   });
 

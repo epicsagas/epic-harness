@@ -470,10 +470,10 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
         }
         "get_evolved_skills" => {
-            // Try SQLite first
+            // Try SQLite first — scoped to the selected project.
             if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
                 let skills = crate::store::runtime::block_on(
-                    crate::store::evolved::list_skills_full_pool(&pool),
+                    crate::store::evolved::list_skills_full_scoped_pool(&pool, project),
                 )
                 .unwrap_or_default()
                 .into_iter()
@@ -486,14 +486,14 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                 })
                 .collect::<Vec<_>>();
                 let history = crate::store::runtime::block_on(
-                    crate::store::evolution::query_recent_records_pool(&pool, 50),
+                    crate::store::evolution::query_recent_records_scoped_pool(&pool, 50, project),
                 )
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|r| serde_json::to_value(r).ok())
                 .collect::<Vec<_>>();
                 let total_sessions = crate::store::runtime::block_on(
-                    crate::store::metrics::load_metrics_pool(&pool),
+                    crate::store::metrics::load_metrics_scoped_pool(&pool, project),
                 )
                 .map(|m| m.total_sessions)
                 .unwrap_or(0);

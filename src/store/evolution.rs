@@ -104,6 +104,61 @@ pub async fn query_recent_records_all_pool(
     query_recent_records_pool(pool, limit).await
 }
 
+/// Project-scoped recent records. `Some(p)` adds `WHERE project = ?`;
+/// `None` behaves like the unfiltered variant. Same row decoding as
+/// query_recent_records_pool (static-SQL two-branch form because sqlx 0.9's
+/// SqlSafeStr rejects dynamically-built strings).
+pub async fn query_recent_records_scoped_pool(
+    pool: &AnyPool,
+    limit: i64,
+    project: Option<&str>,
+) -> io::Result<Vec<EvolutionRecord>> {
+    let rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT timestamp, observations, success_rate, avg_score, error_patterns,
+                    failure_patterns, skills_seeded, skills_rolled_back, total_evolved,
+                    analysis_summary, edit_type
+             FROM evolution_records WHERE project = ? ORDER BY id DESC LIMIT ?",
+        )
+        .bind(p)
+        .bind(limit)
+    } else {
+        sqlx::query(
+            "SELECT timestamp, observations, success_rate, avg_score, error_patterns,
+                    failure_patterns, skills_seeded, skills_rolled_back, total_evolved,
+                    analysis_summary, edit_type
+             FROM evolution_records ORDER BY id DESC LIMIT ?",
+        )
+        .bind(limit)
+    }
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let mut records = Vec::with_capacity(rows.len());
+    for r in rows {
+        let error_json: String = r.try_get(4).map_err(super::sqlx_err)?;
+        let failure_json: String = r.try_get(5).map_err(super::sqlx_err)?;
+        let edit_type_str: String = r.try_get(10).map_err(super::sqlx_err)?;
+        records.push(EvolutionRecord {
+            timestamp: r.try_get(0).map_err(super::sqlx_err)?,
+            observations: r.try_get::<i64, _>(1).map_err(super::sqlx_err)? as u64,
+            success_rate: r.try_get(2).map_err(super::sqlx_err)?,
+            avg_score: r.try_get(3).map_err(super::sqlx_err)?,
+            error_patterns: serde_json::from_str(&error_json).unwrap_or_default(),
+            failure_patterns: serde_json::from_str(&failure_json).unwrap_or_default(),
+            skills_seeded: r.try_get::<i64, _>(6).map_err(super::sqlx_err)? as u64,
+            skills_rolled_back: r.try_get::<i64, _>(7).map_err(super::sqlx_err)? as u64,
+            total_evolved: r.try_get::<i64, _>(8).map_err(super::sqlx_err)? as u64,
+            analysis_summary: r.try_get(9).map_err(super::sqlx_err)?,
+            edit_type: crate::shared::evolution::EditType::from_db_str(&edit_type_str),
+            manifests: vec![],
+        });
+    }
+    records.reverse();
+    Ok(records)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

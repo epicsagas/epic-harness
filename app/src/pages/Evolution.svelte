@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { getEvolvedSkills, getHarnessMetrics, getSeesawRegistry, getVariantPool, getAdaptationLandscape } from '../lib/harness.js';
   import type { EvolutionData, HarnessMetrics, SolvedTaskRegistry, VariantPool, AdaptationLandscape } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   const SEEDING_THRESHOLDS = [
     { typeKey: 'seedTypeWeakTool',       threshKey: 'seedThreshWeakTool' },
@@ -169,11 +169,13 @@
     return '—';
   }
 
-  let pollInterval: ReturnType<typeof setInterval>;
-  onMount(() => {
+  // Reload whenever the selected project changes (projectArgs() reads it at
+  // call time), then poll on an interval. $effect re-runs on project switch.
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
     load();
-    pollInterval = setInterval(load, 30_000);
-    return () => clearInterval(pollInterval);
+    const id = setInterval(() => { if (!document.hidden) load(); }, 30_000);
+    return () => clearInterval(id);
   });
 </script>
 
