@@ -429,8 +429,12 @@ mod tests {
     /// Rebuilding the same instant produces a stable hash (modulo timestamp).
     #[test]
     fn rebuild_produces_stable_hash() {
-        let a = build_snapshot();
-        let b = build_snapshot();
+        // Use hermetic fixtures (not live build_snapshot) so the test is
+        // independent of host harness state. A parallel test writing to
+        // evolved_dir() during two live build_snapshot() calls previously
+        // made the hashes diverge (flaky under --test-threads > 1).
+        let a = make_fixture_snapshot("proj", &["evo-a", "evo-b"], [0.5, 0.3, 0.2], 10, 3);
+        let b = make_fixture_snapshot("proj", &["evo-a", "evo-b"], [0.5, 0.3, 0.2], 10, 3);
         // Hash must be identical; only the timestamp may differ.
         assert_eq!(a.hash, b.hash);
         assert_eq!(a.version, b.version);
