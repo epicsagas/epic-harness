@@ -1,5 +1,6 @@
 ---
 name: verify
+dimension: evaluation_and_reward
 description: "Pre-merge verification gate. Build, test, and lint must all pass before marking done or shipping."
 ---
 

@@ -231,7 +231,7 @@ pub struct SkillAttribution {
     pub first_seen: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Metrics {
     pub total_sessions: u64,
     pub avg_success_rate: f64,
@@ -272,6 +272,16 @@ pub struct EvolutionRecord {
     /// HarnessX-inspired: the type of edit applied during this evolution cycle.
     #[serde(default)]
     pub edit_type: EditType,
+    /// HarnessX falsifiability contract (Table 9): the manifest of each edit
+    /// shipped this round. Persisted to the JSONL fallback; the SQLite store
+    /// writes only the scalar columns (manifests ride along via the JSONL
+    /// path).
+    ///
+    /// STATUS: these are WRITTEN (reflect persists them + the sidecar
+    /// manifests.jsonl). A Critic that READS them to verify prior predictions
+    /// held is a deferred follow-up — not yet wired.
+    #[serde(default)]
+    pub manifests: Vec<crate::evolve::edits::EditManifest>,
 }
 
 pub fn default_metrics() -> Metrics {
@@ -431,7 +441,8 @@ impl SolvedTaskRegistry {
 /// A serializable snapshot of the entire harness state.
 /// Inspired by HarnessX's "first-class object" — the harness can be
 /// serialized, compared, and restored as a unit.
-#[allow(dead_code)]
+///
+/// Constructed by [`crate::evolve::snapshot::build_snapshot`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessSnapshot {
     pub version: String,
@@ -447,7 +458,6 @@ pub struct HarnessSnapshot {
 }
 
 /// Subset of config relevant for comparison.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigSummary {
     pub hook_profile: String,
@@ -457,7 +467,6 @@ pub struct ConfigSummary {
 }
 
 /// Compact metrics summary for snapshot.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetricsSummary {
     pub total_sessions: u64,

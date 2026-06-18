@@ -1,5 +1,6 @@
 ---
 name: perf
+dimension: evaluation_and_reward
 description: "Performance optimizer for loops, DB queries, rendering, and batch operations. Catches N+1 queries, missing indexes, and unnecessary re-renders."
 ---
 

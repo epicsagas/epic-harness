@@ -1,5 +1,6 @@
 ---
 name: simplify
+dimension: context_assembly
 description: "Code simplification for high-complexity files. Targets deep nesting, copy-paste patterns, god functions, and files over 200 lines."
 ---
 

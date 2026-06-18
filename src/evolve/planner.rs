@@ -211,6 +211,7 @@ mod tests {
             total_evolved: 1,
             analysis_summary: "seeded evo-skill".into(),
             edit_type: edit,
+            manifests: vec![],
         }
     }
 

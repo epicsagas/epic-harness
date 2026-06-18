@@ -16,10 +16,13 @@
 //! variants fork, and lets the variant-isolation gate branch on edit kind.
 //!
 //! Today only `AddSkill` and `ModifySkill` (auto-tune) are produced by the
-//! evolution loop. `ModifyConfig`, `AddGuardRule`, and `AddInstinct` are
-//! declared so the Planner's edit-type coverage analysis has the full taxonomy
-//! to compare against (exposing under-exploration), with `apply()` returning
-//! `NotImplemented` until a concrete editor lands.
+//! evolution loop. `AddGuardRule` has a concrete editor (appends to
+//! `guard-rules.yaml`) but is not yet emitted by the Planner — the Planner
+//! still lists `add_guard_rule` as an untried edit type; once a follow-up
+//! wires auto-emission, the editor is ready. `ModifyConfig` and `AddInstinct`
+//! remain reserved so the Planner's edit-type coverage analysis has the full
+//! taxonomy to compare against (exposing under-exploration), with `apply()`
+//! returning `NotImplemented` until a concrete editor lands.
 //!
 //! ## Why enum over trait
 //! The paper uses a trait-like abstraction, but epic-harness edits are
@@ -57,7 +60,9 @@ pub enum HarnessEdit {
         old_value: String,
         new_value: String,
     },
-    /// Add a guard-rules.yaml pattern (not yet implemented; reserved for coverage).
+    /// Add a `guard-rules.yaml` pattern. Concrete editor (appends a blocked or
+    /// warned rule via [`crate::hooks::guard::append_guard_rule`]); not yet
+    /// auto-emitted by the Planner.
     AddGuardRule {
         pattern: String,
         level: String,
@@ -78,9 +83,13 @@ pub enum EditOutcome {
 
 /// A falsifiable change manifest (HarnessX paper Table 9 / §10.3).
 ///
-/// Every shipped edit should carry one so the Critic (R-P2) can later verify
-/// the next round's trace matches the predicted effect.
-#[derive(Debug, Clone)]
+/// Every shipped edit carries one. They are PERSISTED (reflect writes them to
+/// the EvolutionRecord + the sidecar manifests.jsonl). The consumer that
+/// verifies a prior round's prediction against the current trace is a
+/// DEFERRED follow-up — today the Critic only consults the in-round
+/// reward-hacking flag, so manifests accumulate as a ledger without yet
+/// closing the falsifiability loop.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EditManifest {
     pub edit_type: EditType,
     pub target: String,
@@ -124,7 +133,7 @@ impl HarnessEdit {
                 target: name.clone(),
                 intended_effect: format!("New evolved skill from {origin} pattern"),
                 predicted_impact: format!(
-                    "Reduce failures of {origin} (confidence {confidence:.2})"
+                    "Lift avg_score_with by reducing {origin} failures (confidence {confidence:.2})"
                 ),
             },
             HarnessEdit::ModifySkill {
@@ -162,8 +171,16 @@ impl HarnessEdit {
         }
     }
 
-    /// Apply the edit. Only SKILL.md-touching variants are concrete today;
-    /// config/guard edits are reserved and report `NotImplemented`.
+    /// Apply the edit. Only SKILL.md-touching variants and `AddGuardRule` are
+    /// concrete today; config/instinct edits are reserved and report
+    /// `NotImplemented`.
+    ///
+    /// `AddGuardRule` appends a pattern to the project's `guard-rules.yaml`
+    /// (resolved via [`crate::shared::paths::guard_rules_file`], with the same
+    /// project-local-then-harness-dir fallback the guard hook itself uses).
+    /// It does NOT auto-wire from the Planner yet — the Planner still lists
+    /// `add_guard_rule` as an untried edit type; making the editor concrete
+    /// first lets a follow-up emit it safely.
     pub fn apply(&self) -> EditOutcome {
         match self {
             HarnessEdit::AddSkill {
@@ -190,13 +207,25 @@ impl HarnessEdit {
                 super::skills::append_tuning_section_pub(skill_name, &combined);
                 EditOutcome::Applied
             }
-            HarnessEdit::AddInstinct { .. }
-            | HarnessEdit::ModifyConfig { .. }
-            | HarnessEdit::AddGuardRule { .. } => EditOutcome::NotImplemented,
+            HarnessEdit::AddGuardRule {
+                pattern,
+                level,
+                msg,
+            } => {
+                let path = crate::shared::paths::guard_rules_file();
+                match crate::hooks::guard::append_guard_rule(&path, level, pattern, msg) {
+                    Ok(()) => EditOutcome::Applied,
+                    Err(e) => EditOutcome::Skipped(format!("guard-rules.yaml append failed: {e}")),
+                }
+            }
+            HarnessEdit::AddInstinct { .. } | HarnessEdit::ModifyConfig { .. } => {
+                EditOutcome::NotImplemented
+            }
         }
     }
 
-    /// Validate the edit without applying (name safety, non-empty content).
+    /// Validate the edit without applying (name safety, non-empty content,
+    /// guard pattern sanity).
     pub fn validate(&self) -> Result<(), String> {
         match self {
             HarnessEdit::AddSkill { name, content, .. } => {
@@ -221,10 +250,22 @@ impl HarnessEdit {
                 }
                 Ok(())
             }
+            HarnessEdit::AddGuardRule { pattern, .. } => {
+                if pattern.trim().is_empty() {
+                    return Err("guard rule pattern is empty".into());
+                }
+                if pattern.len() > crate::hooks::guard::GUARD_PATTERN_MAX_LEN {
+                    return Err(format!(
+                        "guard rule pattern too long ({} > {} chars) — \
+                         pathological regex would slow every guard run",
+                        pattern.len(),
+                        crate::hooks::guard::GUARD_PATTERN_MAX_LEN
+                    ));
+                }
+                Ok(())
+            }
             // Reserved edits pass validation (they no-op on apply).
-            HarnessEdit::AddInstinct { .. }
-            | HarnessEdit::ModifyConfig { .. }
-            | HarnessEdit::AddGuardRule { .. } => Ok(()),
+            HarnessEdit::AddInstinct { .. } | HarnessEdit::ModifyConfig { .. } => Ok(()),
         }
     }
 }
@@ -331,13 +372,81 @@ mod tests {
     }
 
     #[test]
-    fn reserved_edits_report_not_implemented() {
+    fn validate_rejects_empty_guard_pattern() {
         let edit = HarnessEdit::AddGuardRule {
-            pattern: "rm -rf".into(),
+            pattern: "   ".into(),
             level: "block".into(),
             msg: "no".into(),
         };
-        assert_eq!(edit.apply(), EditOutcome::NotImplemented);
+        assert!(edit.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_pathologically_long_guard_pattern() {
+        let edit = HarnessEdit::AddGuardRule {
+            pattern: "a".repeat(crate::hooks::guard::GUARD_PATTERN_MAX_LEN + 1),
+            level: "block".into(),
+            msg: "no".into(),
+        };
+        assert!(edit.validate().is_err());
+    }
+
+    #[test]
+    fn validate_accepts_well_formed_guard_rule() {
+        let edit = HarnessEdit::AddGuardRule {
+            pattern: r"rm\s+-rf".into(),
+            level: "warn".into(),
+            msg: "careful".into(),
+        };
+        assert!(edit.validate().is_ok());
+    }
+
+    /// `AddGuardRule::apply()` is concrete: it appends to `guard-rules.yaml`.
+    /// We isolate the filesystem by pointing HOME at a tempdir and seeding a
+    /// local `.harness/guard-rules.yaml` so `guard_rules_file()` resolves to a
+    /// path inside the tempdir regardless of the cached `harness_dir()` slug.
+    #[test]
+    #[serial_test::serial]
+    fn add_guard_rule_apply_writes_rule_to_file() {
+        use std::io::Write;
+
+        let dir = tempfile::tempdir().unwrap();
+        // Seed a project-local guard-rules.yaml so guard_rules_file() returns
+        // this path (local-file-wins branch), keeping the write inside tempdir.
+        let local_harness = dir.path().join(".harness");
+        std::fs::create_dir_all(&local_harness).unwrap();
+        let rules_path = local_harness.join("guard-rules.yaml");
+        let mut f = std::fs::File::create(&rules_path).unwrap();
+        writeln!(f, "warned:\n  - pattern: existing | msg: pre-existing rule").unwrap();
+        drop(f);
+
+        // Point cwd at the tempdir so local_harness_dir() resolves inside it.
+        let saved_cwd = std::env::current_dir().ok();
+        let _ = std::env::set_current_dir(dir.path());
+
+        let edit = HarnessEdit::AddGuardRule {
+            pattern: r"kubectl\s+delete".into(),
+            level: "block".into(),
+            msg: "kubectl delete blocked".into(),
+        };
+        let outcome = edit.apply();
+        assert_eq!(outcome, EditOutcome::Applied);
+
+        // The new rule landed in the file alongside the pre-existing one.
+        let content = std::fs::read_to_string(&rules_path).unwrap();
+        assert!(
+            content.contains(r"kubectl\s+delete"),
+            "new rule missing: {content}"
+        );
+        assert!(content.contains("kubectl delete blocked"));
+        assert!(
+            content.contains("pre-existing rule"),
+            "existing rule clobbered: {content}"
+        );
+
+        if let Some(cwd) = saved_cwd {
+            let _ = std::env::set_current_dir(cwd);
+        }
     }
 
     #[test]

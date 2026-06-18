@@ -1,6 +1,7 @@
 mod config;
 mod eval;
 mod evolve;
+mod harness_cli;
 mod hooks;
 mod install;
 mod install_wizard;
@@ -111,6 +112,10 @@ fn main() {
         let code = eval::run(&args[2..]);
         std::process::exit(code);
     }
+    if subcmd == "harness" {
+        let code = harness_cli::run(&args[1..]);
+        std::process::exit(code);
+    }
     if subcmd == "serve" {
         let port = parse_flag_u32(&args, "--port").map(|p| p as u16);
         std::process::exit(serve::run_serve(port));
@@ -205,8 +210,8 @@ fn main() {
                 }
             }
         }
-        "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "telemetry" | "serve"
-        | "dashboard" | "update" => {
+        "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "harness" | "telemetry"
+        | "serve" | "dashboard" | "update" => {
             unreachable!()
         }
         "path" => {
@@ -272,6 +277,9 @@ fn main() {
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
+            eprintln!(
+                "  harness      Harness state as a first-class object  (epic harness snapshot|diff|restore)"
+            );
             eprintln!("  dashboard    Open web dashboard in browser (default port: 7700)");
             eprintln!("  serve        Start dashboard web server without opening browser");
             eprintln!("  install      Install harness into a supported AI tool");
