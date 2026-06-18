@@ -182,7 +182,7 @@
         <div class="stat-card">
           <div class="stat-label"><span class="dot" style="background:var(--info)"></span> {$tStore('activeLabel')}</div>
           <div class="stat-value">{activeCount}</div>
-          <div class="stat-sub">{$tStore('ofAgents')(run.agents.length)}</div>
+          <div class="stat-sub">{$tStore('ofAgents', run.agents.length)}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('completedLabel')}</div>
