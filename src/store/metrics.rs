@@ -364,7 +364,10 @@ pub async fn load_metrics_all_pool(pool: &AnyPool) -> io::Result<Metrics> {
 /// have written rows (it used `fetch_optional` on a multi-row result). This
 /// variant scopes every query to the requested project, or aggregates (SUM /
 /// weighted avg) across all projects when `None`.
-pub async fn load_metrics_scoped_pool(pool: &AnyPool, project: Option<&str>) -> io::Result<Metrics> {
+pub async fn load_metrics_scoped_pool(
+    pool: &AnyPool,
+    project: Option<&str>,
+) -> io::Result<Metrics> {
     // Scalar state — aggregate across projects.
     async fn get_sum(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<f64> {
         let q = if project.is_some() {
@@ -396,10 +399,18 @@ pub async fn load_metrics_scoped_pool(pool: &AnyPool, project: Option<&str>) -> 
         u64,
     ) = if let Some(p) = project {
         (
-            get_sum(pool, "total_sessions", Some(p)).await.unwrap_or(0.0) as u64,
-            get_sum(pool, "avg_success_rate", Some(p)).await.unwrap_or(0.0),
-            get_sum(pool, "total_evolved_skills", Some(p)).await.unwrap_or(0.0) as u64,
-            get_sum(pool, "stagnation_count", Some(p)).await.unwrap_or(0.0) as u64,
+            get_sum(pool, "total_sessions", Some(p))
+                .await
+                .unwrap_or(0.0) as u64,
+            get_sum(pool, "avg_success_rate", Some(p))
+                .await
+                .unwrap_or(0.0),
+            get_sum(pool, "total_evolved_skills", Some(p))
+                .await
+                .unwrap_or(0.0) as u64,
+            get_sum(pool, "stagnation_count", Some(p))
+                .await
+                .unwrap_or(0.0) as u64,
         )
     } else {
         // Sum counts across every project row. SQLite SUM over REAL columns
@@ -441,7 +452,9 @@ pub async fn load_metrics_scoped_pool(pool: &AnyPool, project: Option<&str>) -> 
     };
 
     let last_session = if let Some(p) = project {
-        get_str(pool, "last_session", Some(p)).await.filter(|v| !v.is_empty())
+        get_str(pool, "last_session", Some(p))
+            .await
+            .filter(|v| !v.is_empty())
     } else {
         sqlx::query_scalar::<_, Option<String>>(
             "SELECT MAX(value) FROM metrics_state WHERE key = 'last_session'",
@@ -462,7 +475,9 @@ pub async fn load_metrics_scoped_pool(pool: &AnyPool, project: Option<&str>) -> 
         .unwrap_or(None)
     };
     let best_session = if let Some(p) = project {
-        get_str(pool, "best_session", Some(p)).await.unwrap_or_default()
+        get_str(pool, "best_session", Some(p))
+            .await
+            .unwrap_or_default()
     } else {
         sqlx::query_scalar::<_, Option<String>>(
             "SELECT value FROM metrics_state WHERE key = 'best_session'
@@ -474,12 +489,16 @@ pub async fn load_metrics_scoped_pool(pool: &AnyPool, project: Option<&str>) -> 
         .unwrap_or_default()
     };
     let trend = if let Some(p) = project {
-        get_str(pool, "trend", Some(p)).await.unwrap_or_else(|| "stable".into())
+        get_str(pool, "trend", Some(p))
+            .await
+            .unwrap_or_else(|| "stable".into())
     } else {
         "stable".to_string()
     };
     let last_error_context = if let Some(p) = project {
-        get_str(pool, "last_error_context", Some(p)).await.filter(|v| !v.is_empty())
+        get_str(pool, "last_error_context", Some(p))
+            .await
+            .filter(|v| !v.is_empty())
     } else {
         None
     };

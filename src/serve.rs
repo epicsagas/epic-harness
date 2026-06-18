@@ -189,8 +189,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 // `project` selects a specific project slug; absent or
                 // `__all__` means cross-project aggregate. The frontend's
                 // projectArgs() omits the param entirely for "all".
-                let project = parse_query_param(url, "project")
-                    .filter(|p| !p.is_empty() && p != "__all__");
+                let project =
+                    parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
                 let harness_dir = common::harness_dir();
                 let body = handle_harness_cmd(&cmd, &harness_dir, project.as_deref());
                 json_response(&body)
