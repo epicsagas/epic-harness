@@ -804,6 +804,37 @@ pub fn run(_input: &HookInput) -> i32 {
     let mut analysis = evolve::analyze_session(&observations);
     analysis.failure_patterns = evolve::detect_patterns(&observations);
 
+    // 2b. HarnessX Digester + Planner (R2, R3): compress the session into
+    // per-task digests and build the adaptation landscape from history. The
+    // landscape surfaces persistent failures + untried edit types, and
+    // recommends exploration when the engine is plateauing on local edits.
+    let digests = evolve::digest_session(&observations, &[]);
+    let persistent_cats: Vec<String> = digests
+        .iter()
+        .flat_map(|d| d.failure_categories.iter().map(|(c, _)| c.clone()))
+        .collect();
+    if !persistent_cats.is_empty() {
+        analysis.persistent_failure = true;
+        analysis.persistent_failure_categories = persistent_cats;
+    }
+    let history: Vec<EvolutionRecord> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::evolution::query_all_records_pool(&pool).await
+    })
+    .unwrap_or_default();
+    let landscape = evolve::build_landscape(&history, &digests, 2);
+    if evolve::recommends_exploration(&landscape) {
+        hint(
+            "reflect",
+            &format!(
+                "Adaptation landscape: {} persistent failure(s), {} untried edit type(s) {:?} — consider a structural edit",
+                landscape.persistent_failures.len(),
+                landscape.untried_edit_types.len(),
+                landscape.untried_edit_types,
+            ),
+        );
+    }
+
     // 3. Stagnation (load metrics from SQLite, fallback to JSON)
     let mut metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
@@ -819,11 +850,36 @@ pub fn run(_input: &HookInput) -> i32 {
     // 4. Seed evolved skills
     ensure_dir(&evolved_dir());
     let existing = list_dirs(&evolved_dir());
-    let seeded = if !should_rollback {
+    let mut seeded = if !should_rollback {
         evolve::seed_smart_skills(&analysis, &existing)
     } else {
         0
     };
+
+    // 4b. HarnessX seesaw constraint (R5): a coarse per-task regression gate.
+    // If the current digests regress any previously solved task beyond
+    // tolerance, surface it as a warning and skip seeding to avoid committing
+    // a regressing edit. The registry is then updated with this round's scores.
+    let seesaw = evolve::load_registry();
+    let regressed =
+        evolve::seesaw_check(&seesaw, &digests, crate::evolve::seesaw::DEFAULT_TOLERANCE);
+    if !regressed.is_empty() && seeded > 0 {
+        hint(
+            "reflect",
+            &format!(
+                "Seesaw constraint: {} previously solved task(s) regressed {:?} — skipping further seeding this round",
+                regressed.len(),
+                regressed,
+            ),
+        );
+        seeded = 0;
+    }
+    {
+        let mut reg = seesaw;
+        let scores = evolve::scores_from_digests(&digests);
+        reg.update(&scores);
+        let _ = evolve::save_registry(&reg);
+    }
 
     // 5. Gate
     evolve::gate_skills();

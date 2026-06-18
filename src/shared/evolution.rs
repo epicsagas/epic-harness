@@ -8,10 +8,11 @@ use super::scoring::ScoreDimensions;
 /// The category of edit that the evolution engine applied.
 /// Inspired by HarnessX's "typed builder operations" — each harness adaptation
 /// is a typed operation rather than an opaque "write SKILL.md" action.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum EditType {
     /// Create a new evolved skill (SKILL.md).
+    #[default]
     AddSkill,
     /// Modify an existing skill's content (prompt tuning).
     ModifySkill,
@@ -23,12 +24,6 @@ pub enum EditType {
     AddGuardRule,
     /// Modify an existing skill's prompt (auto-tuning).
     ModifyPrompt,
-}
-
-impl Default for EditType {
-    fn default() -> Self {
-        EditType::AddSkill
-    }
 }
 
 impl EditType {
@@ -54,12 +49,30 @@ impl EditType {
             EditType::ModifyPrompt => "modify_prompt",
         }
     }
+
+    /// Parse an edit type from its database string representation.
+    /// Falls back to `AddSkill` for unknown/legacy values, which is the
+    /// historically dominant edit type and the safe default.
+    pub fn from_db_str(s: &str) -> Self {
+        match s {
+            "modify_skill" => EditType::ModifySkill,
+            "add_instinct" => EditType::AddInstinct,
+            "modify_config" => EditType::ModifyConfig,
+            "add_guard_rule" => EditType::AddGuardRule,
+            "modify_prompt" => EditType::ModifyPrompt,
+            _ => EditType::AddSkill,
+        }
+    }
 }
 
 // ── HarnessX-inspired: nine-dimensional taxonomy ──────
 
 /// The nine orthogonal dimensions of the harness behavioral space.
 /// Inspired by HarnessX's taxonomy — used for dimension-scoped analysis.
+///
+/// Reserved for P3 (dimension tags in skill frontmatter); not yet read by any
+/// gate, hence `allow(dead_code)`.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum HarnessDimension {
@@ -74,6 +87,7 @@ pub enum HarnessDimension {
     TrainingBridge,
 }
 
+#[allow(dead_code)]
 impl HarnessDimension {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -89,7 +103,9 @@ impl HarnessDimension {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    /// Parse a dimension from its snake_case string. (Named `parse_dimension`
+    /// rather than `from_str` to avoid shadowing the std `FromStr` trait.)
+    pub fn parse_dimension(s: &str) -> Option<Self> {
         match s {
             "model_selection" => Some(Self::ModelSelection),
             "context_assembly" => Some(Self::ContextAssembly),
@@ -353,52 +369,53 @@ pub struct AttemptedEdit {
 
 // ── HarnessX-inspired: Seesaw Constraint ──────────────
 
-/// Key for tracking per-task, per-dimension scores.
-/// Used by the seesaw constraint to prevent regression.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct TaskDimensionKey {
-    pub task_id: String,
-    pub dimension: String,
-}
-
-/// Registry of solved tasks and their best scores.
-/// The seesaw constraint rejects any edit that regresses a solved task
-/// below its best score minus the tolerance.
+/// Registry of solved tasks and their best outcome score.
+///
+/// Implements the HarnessX **seesaw constraint** (paper §4.1): the candidate
+/// harness must not regress any previously solved task.
+///
+/// ## Critic-driven design note
+/// The earlier draft tracked scores `per (task_id, dimension)`. The paper's
+/// own analysis (§6.6, §7.6) shows that aggregate/per-dimension gating *fails*
+/// to catch sub-threshold coupling — the exact regression mode seesaw is meant
+/// to prevent. The paper's seesaw is **per-task** (pass@2 binary flips). We
+/// therefore track a single best outcome score per task and reject any edit
+/// that drops a previously-solved task below its best minus tolerance.
+///
+/// This is a deliberately coarse gate (the paper acknowledges even per-task
+/// seesaw is insufficient for sub-threshold drift; variant isolation in R6 is
+/// the real fix). Its scope here is to catch *gross* regressions cheaply, not
+/// to guarantee no forgetting.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SolvedTaskRegistry {
-    /// task_id+dimension → best score achieved.
+    /// task_id → best outcome score achieved (0.0–1.0).
     pub solved: HashMap<String, f64>,
     /// Count of tasks currently marked as solved.
     pub total_solved: u32,
 }
 
 impl SolvedTaskRegistry {
-    /// Check whether applying new scores would cause any regression
-    /// on previously solved tasks. Returns the list of regressed keys.
+    /// Check whether the new per-task scores would regress any previously
+    /// solved task. Returns the list of regressed task_ids.
     /// Empty = no regression (edit passes the seesaw constraint).
-    pub fn check_seesaw(
-        &self,
-        new_scores: &HashMap<String, f64>,
-        tolerance: f64,
-    ) -> Vec<String> {
+    pub fn check_seesaw(&self, new_scores: &HashMap<String, f64>, tolerance: f64) -> Vec<String> {
         self.solved
             .iter()
-            .filter_map(|(key, best)| {
-                new_scores.get(key).map_or(None, |new| {
-                    if *new < *best - tolerance {
-                        Some(key.clone())
-                    } else {
-                        None
-                    }
-                })
+            .filter_map(|(task_id, best)| {
+                let new = new_scores.get(task_id)?;
+                if *new < *best - tolerance {
+                    Some(task_id.clone())
+                } else {
+                    None
+                }
             })
             .collect()
     }
 
-    /// Update the registry with new scores. Only improves best scores.
+    /// Update the registry with new per-task scores. Only improves best scores.
     pub fn update(&mut self, scores: &HashMap<String, f64>) {
-        for (key, score) in scores {
-            let entry = self.solved.entry(key.clone()).or_insert(*score);
+        for (task_id, score) in scores {
+            let entry = self.solved.entry(task_id.clone()).or_insert(*score);
             if *score > *entry {
                 *entry = *score;
             }
@@ -408,10 +425,13 @@ impl SolvedTaskRegistry {
 }
 
 // ── HarnessX-inspired: Harness Snapshot (first-class) ─
+// The snapshot types below are reserved for P2 (harness as first-class object:
+// `epic harness snapshot/diff/restore`). Not yet constructed, hence allow(dead_code).
 
 /// A serializable snapshot of the entire harness state.
 /// Inspired by HarnessX's "first-class object" — the harness can be
 /// serialized, compared, and restored as a unit.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HarnessSnapshot {
     pub version: String,
@@ -427,6 +447,7 @@ pub struct HarnessSnapshot {
 }
 
 /// Subset of config relevant for comparison.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConfigSummary {
     pub hook_profile: String,
@@ -436,6 +457,7 @@ pub struct ConfigSummary {
 }
 
 /// Compact metrics summary for snapshot.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MetricsSummary {
     pub total_sessions: u64,
@@ -450,6 +472,11 @@ pub struct MetricsSummary {
 /// A domain-scoped variant of evolved skills.
 /// Inspired by HarnessX's variant isolation — prevents catastrophic
 /// forgetting on heterogeneous task sets by scoping skills per domain.
+///
+/// Constructed by `evolve::variants::VariantPool`; the struct itself is read
+/// there but `allow(dead_code)` is needed because the bin targets don't form
+/// a pool yet (wiring lands when variant isolation gates the evolve loop).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillVariant {
     /// Variant identifier (e.g., "rust-backend", "python-ml").

@@ -164,6 +164,11 @@ pub fn evolution_file() -> PathBuf {
     harness_dir().join("evolution.jsonl")
 }
 
+/// Per-project solved-task registry for the seesaw constraint (R5).
+pub fn project_seesaw_path() -> PathBuf {
+    harness_dir().join("seesaw.json")
+}
+
 /// guard-rules.yaml stays in the project tree only if the user/team explicitly
 /// created it there. Otherwise, we default to the per-project global directory
 /// to keep the project tree clean.

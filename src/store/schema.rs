@@ -26,6 +26,49 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
             .map_err(super::sqlx_err)?;
     }
 
+    // Idempotent column migrations for pre-existing databases.
+    // SQLite has no ADD COLUMN IF NOT EXISTS, so guard with pragma_table_info.
+    ensure_column(
+        pool,
+        "evolution_records",
+        "edit_type",
+        "TEXT NOT NULL DEFAULT 'add_skill'",
+    )
+    .await?;
+
+    Ok(())
+}
+
+/// Add a column to a table if it does not already exist.
+///
+/// SQLite lacks `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so this inspects
+/// `pragma_table_info` and only issues the `ALTER TABLE` when the column is
+/// absent. Safe to call on every schema init.
+///
+/// `table`, `column`, and `type_clause` are always compile-time string
+/// literals passed by the caller (never user input), so the interpolated DDL
+/// is wrapped in `AssertSqlSafe` per the codebase convention for identifier DDL.
+async fn ensure_column(
+    pool: &AnyPool,
+    table: &str,
+    column: &str,
+    type_clause: &str,
+) -> io::Result<()> {
+    let exists: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?")
+            .bind(table)
+            .bind(column)
+            .fetch_one(pool)
+            .await
+            .map_err(super::sqlx_err)?;
+
+    if exists == 0 {
+        let ddl = format!("ALTER TABLE {table} ADD COLUMN {column} {type_clause}");
+        sqlx::query(sqlx::AssertSqlSafe(ddl))
+            .execute(pool)
+            .await
+            .map_err(super::sqlx_err)?;
+    }
     Ok(())
 }
 
@@ -90,6 +133,7 @@ pub(crate) const DDL_SQLITE: &str = r#"
         skills_rolled_back INTEGER NOT NULL DEFAULT 0,
         total_evolved     INTEGER NOT NULL DEFAULT 0,
         analysis_summary  TEXT NOT NULL DEFAULT '',
+        edit_type         TEXT NOT NULL DEFAULT 'add_skill',
         project           TEXT NOT NULL DEFAULT ''
     );
 

@@ -15,8 +15,9 @@ pub async fn insert_record_pool(pool: &AnyPool, rec: &EvolutionRecord) -> io::Re
     sqlx::query(
         "INSERT INTO evolution_records
          (timestamp, observations, success_rate, avg_score, error_patterns,
-          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary)
-         VALUES (?,?,?,?,?,?,?,?,?,?)",
+          failure_patterns, skills_seeded, skills_rolled_back, total_evolved,
+          analysis_summary, edit_type)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?)",
     )
     .bind(&rec.timestamp)
     .bind(super::u64_to_i64(rec.observations))
@@ -28,6 +29,7 @@ pub async fn insert_record_pool(pool: &AnyPool, rec: &EvolutionRecord) -> io::Re
     .bind(super::u64_to_i64(rec.skills_rolled_back))
     .bind(super::u64_to_i64(rec.total_evolved))
     .bind(&rec.analysis_summary)
+    .bind(rec.edit_type.as_str())
     .execute(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -54,7 +56,8 @@ pub async fn query_recent_records_pool(
 ) -> io::Result<Vec<EvolutionRecord>> {
     let rows = sqlx::query(
         "SELECT timestamp, observations, success_rate, avg_score, error_patterns,
-                failure_patterns, skills_seeded, skills_rolled_back, total_evolved, analysis_summary
+                failure_patterns, skills_seeded, skills_rolled_back, total_evolved,
+                analysis_summary, edit_type
          FROM evolution_records ORDER BY id DESC LIMIT ?",
     )
     .bind(limit)
@@ -66,6 +69,7 @@ pub async fn query_recent_records_pool(
     for r in rows {
         let error_json: String = r.try_get(4).map_err(super::sqlx_err)?;
         let failure_json: String = r.try_get(5).map_err(super::sqlx_err)?;
+        let edit_type_str: String = r.try_get(10).map_err(super::sqlx_err)?;
         records.push(EvolutionRecord {
             timestamp: r.try_get(0).map_err(super::sqlx_err)?,
             observations: r.try_get::<i64, _>(1).map_err(super::sqlx_err)? as u64,
@@ -77,7 +81,7 @@ pub async fn query_recent_records_pool(
             skills_rolled_back: r.try_get::<i64, _>(7).map_err(super::sqlx_err)? as u64,
             total_evolved: r.try_get::<i64, _>(8).map_err(super::sqlx_err)? as u64,
             analysis_summary: r.try_get(9).map_err(super::sqlx_err)?,
-            edit_type: crate::shared::evolution::EditType::AddSkill,
+            edit_type: crate::shared::evolution::EditType::from_db_str(&edit_type_str),
         });
     }
     records.reverse();
@@ -126,6 +130,7 @@ mod tests {
             skills_rolled_back: 0,
             total_evolved: 3,
             analysis_summary: "Good session".into(),
+            edit_type: crate::shared::evolution::EditType::AddSkill,
         };
 
         insert_record_pool(&pool, &rec).await.unwrap();
@@ -134,5 +139,43 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].observations, 42);
         assert_eq!(results[0].error_patterns.get("syntax_error"), Some(&3));
+    }
+
+    #[tokio::test]
+    async fn edit_type_roundtrips() {
+        // R1: edit_type must persist and read back for every variant.
+        let pool = test_pool().await;
+        for ty in crate::shared::evolution::EditType::all() {
+            let rec = EvolutionRecord {
+                timestamp: format!("2026-06-16T10:00:0{}Z", ty.as_str().len()),
+                observations: 1,
+                success_rate: 0.5,
+                avg_score: 0.5,
+                error_patterns: HashMap::new(),
+                failure_patterns: vec![],
+                skills_seeded: 0,
+                skills_rolled_back: 0,
+                total_evolved: 0,
+                analysis_summary: String::new(),
+                edit_type: ty.clone(),
+            };
+            insert_record_pool(&pool, &rec).await.unwrap();
+        }
+
+        let results = query_recent_records_pool(&pool, 100).await.unwrap();
+        assert_eq!(
+            results.len(),
+            crate::shared::evolution::EditType::all().len()
+        );
+        // Every persisted edit type must survive the round trip.
+        for r in &results {
+            let expected = crate::shared::evolution::EditType::from_db_str(r.edit_type.as_str());
+            assert_eq!(
+                expected,
+                r.edit_type,
+                "edit_type round-trip failed for {}",
+                r.edit_type.as_str()
+            );
+        }
     }
 }

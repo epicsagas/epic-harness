@@ -373,6 +373,7 @@ mod tests {
                 m
             },
             last_error_context: Some("type_error in main.rs".into()),
+            reward_hacking_suspected: false,
         }
     }
 

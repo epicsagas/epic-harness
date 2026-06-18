@@ -753,6 +753,12 @@ const TUNING_DECLINE_LIMIT: usize = 3;
 /// Append a tuning section to an evolved skill's SKILL.md.
 /// **Never modifies or deletes existing content** — only appends after a delimiter.
 #[allow(dead_code)]
+/// Public entry point for typed edits (R4 HarnessEdit::ModifySkill).
+/// Delegates to the private implementation.
+pub fn append_tuning_section_pub(name: &str, section: &str) {
+    append_tuning_section(name, section)
+}
+
 fn append_tuning_section(name: &str, section: &str) {
     let dir = evolved_dir().join(name);
     let skill_file = dir.join("SKILL.md");
@@ -959,6 +965,7 @@ mod tests {
             count: 5,
             involved_files: vec!["/src/main.ts".into()],
             suggested_remediation: "stop".into(),
+            implicated_components: vec![],
         };
         let skill = build_pattern_skill(&p);
         assert!(skill.starts_with("---\n"));
@@ -1191,6 +1198,7 @@ mod tests {
                 count: 5,
                 involved_files: vec![],
                 suggested_remediation: "stop".into(),
+                implicated_components: vec![],
             }],
             ..Default::default()
         };
