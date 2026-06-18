@@ -767,7 +767,29 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             serde_json::to_string(&all).unwrap_or_else(|_| "[]".into())
         }
         "get_integration_status" => {
-            let home = std::env::var("HOME").unwrap_or_default();
+            let home = std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default();
+            // Codex: detect either the legacy `~/.codex/hooks.json` install path
+            // (written by `epic install codex`) OR the modern plugin marketplace
+            // install (Codex's own `codex plugin install epic@epicsagas`), which
+            // unpacks the plugin under `~/.codex/plugins/cache/epicsagas/`.
+            let codex_legacy = std::path::Path::new(&home)
+                .join(".codex/hooks.json")
+                .exists();
+            let codex_plugin = std::path::Path::new(&home)
+                .join(".codex/plugins/cache/epicsagas")
+                .exists();
+            let codex_installed = codex_legacy || codex_plugin;
+            // null when not installed — matches Cursor/Cline/Aider so the
+            // dashboard never shows a phantom path for an absent Codex.
+            let codex_config_path: Option<&str> = if !codex_installed {
+                None
+            } else if codex_plugin {
+                Some("~/.codex/plugins/cache/epicsagas/")
+            } else {
+                Some("~/.codex/hooks.json")
+            };
             let integrations = serde_json::json!([
                 {
                     "name": "Claude Code",
@@ -785,7 +807,12 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                     "config_path": "~/.gemini/config/mcp_config.json",
                     "version": null
                 },
-                { "name": "Codex",  "installed": false, "config_path": null, "version": null },
+                {
+                    "name": "Codex",
+                    "installed": codex_installed,
+                    "config_path": codex_config_path,
+                    "version": null
+                },
                 { "name": "Cursor", "installed": false, "config_path": null, "version": null },
                 { "name": "Cline",  "installed": false, "config_path": null, "version": null },
                 { "name": "Aider",  "installed": false, "config_path": null, "version": null }
