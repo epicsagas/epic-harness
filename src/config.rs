@@ -97,6 +97,21 @@ pub struct EvolutionConfig {
     /// Number of observations per minibatch for structural pattern analysis.
     /// (SkillOpt reflection minibatch size)
     pub minibatch_size: usize,
+
+    /// HarnessX Tier 2.2: number of recent sessions inspected for reward-hacking.
+    /// Detection requires at least this many score_history entries.
+    #[serde(default = "default_reward_hacking_window")]
+    pub reward_hacking_window: usize,
+
+    /// HarnessX Tier 2.2: minimum negative slope of output_quality required
+    /// (per session, over the window) to consider quality "declining".
+    #[serde(default = "default_reward_hacking_quality_drop")]
+    pub reward_hacking_quality_drop: f64,
+
+    /// HarnessX Tier 2.2: minimum positive slope of execution_cost required
+    /// (per session, over the window) to consider the efficiency proxy "rising".
+    #[serde(default = "default_reward_hacking_cost_rise")]
+    pub reward_hacking_cost_rise: f64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,8 +208,25 @@ impl Default for EvolutionConfig {
             stagnation_rolling_window: 3,
             rejected_buffer_ttl: 10,
             minibatch_size: 8,
+            reward_hacking_window: default_reward_hacking_window(),
+            reward_hacking_quality_drop: default_reward_hacking_quality_drop(),
+            reward_hacking_cost_rise: default_reward_hacking_cost_rise(),
         }
     }
+}
+
+// ── Reward-hacking defaults (HarnessX Tier 2.2) ─────
+
+fn default_reward_hacking_window() -> usize {
+    5
+}
+
+fn default_reward_hacking_quality_drop() -> f64 {
+    0.05
+}
+
+fn default_reward_hacking_cost_rise() -> f64 {
+    0.05
 }
 
 impl Default for PatternConfig {
@@ -547,6 +579,15 @@ gated_promotion_min = 2
 # Larger batches find more structural patterns but need more observations.
 # minibatch_size = 8
 
+# Reward-hacking detection (HarnessX Tier 2.2). Flags the evolution when
+# the efficiency proxy (execution_cost) is rising while the quality proxy
+# (output_quality) is declining over the window — a sign the metric is
+# being gamed rather than outcomes improved. In this codebase
+# execution_cost is an efficiency proxy where HIGHER = BETTER.
+# reward_hacking_window = 5
+# reward_hacking_quality_drop = 0.05
+# reward_hacking_cost_rise = 0.05
+
 # ── Pattern detection (power-user) ──────────────────
 # These thresholds control when failure patterns are detected.
 # Defaults work well for most projects — only adjust if you have
@@ -676,6 +717,9 @@ mod tests {
         assert_eq!(c.evolution.stagnation_rolling_window, 3);
         assert_eq!(c.evolution.rejected_buffer_ttl, 10);
         assert_eq!(c.evolution.minibatch_size, 8);
+        assert_eq!(c.evolution.reward_hacking_window, 5);
+        assert!((c.evolution.reward_hacking_quality_drop - 0.05).abs() < f64::EPSILON);
+        assert!((c.evolution.reward_hacking_cost_rise - 0.05).abs() < f64::EPSILON);
         assert_eq!(c.pattern.repeated_error_min, 3);
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);

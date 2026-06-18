@@ -199,6 +199,75 @@ pub fn classify_epoch(history: &[SessionScoreEntry]) -> EpochClass {
     }
 }
 
+/// Least-squares slope of a scalar series over x = [0, 1, .. n-1].
+/// Returns 0.0 when the denominator is degenerate (all-equal x) or when the
+/// series contains any non-finite value, so callers never see NaN.
+fn series_slope(values: &[f64]) -> f64 {
+    if values.iter().any(|v| !v.is_finite()) {
+        return 0.0;
+    }
+    let n = values.len() as f64;
+    if n < 2.0 {
+        return 0.0;
+    }
+    let (mut sx, mut sy, mut sxy, mut sxx) = (0.0, 0.0, 0.0, 0.0);
+    for (i, y) in values.iter().enumerate() {
+        let x = i as f64;
+        sx += x;
+        sy += *y;
+        sxy += x * *y;
+        sxx += x * x;
+    }
+    let denom = n * sxx - sx * sx;
+    if !denom.is_finite() || denom.abs() < f64::EPSILON {
+        return 0.0;
+    }
+    (n * sxy - sx * sy) / denom
+}
+
+/// HarnessX Tier 2.2: reward-hacking detection.
+///
+/// Examines the last `evolution.reward_hacking_window` `SessionScoreEntry`s in
+/// `score_history` and computes the least-squares slope of `output_quality` and
+/// of `execution_cost` (each taken from `dimension_averages`).
+///
+/// **Semantics (critical):** in this codebase `execution_cost` is an
+/// *efficiency proxy* where **HIGHER = BETTER**. Reward hacking is therefore
+/// flagged when the *efficiency proxy is rising* (`execution_cost` slope >
+/// `reward_hacking_cost_rise`) **while the quality proxy is falling**
+/// (`output_quality` slope < `-(reward_hacking_quality_drop)`). The agent is
+/// gaming the cheap efficiency dimension while real output quality regresses.
+///
+/// Returns `false` when there are fewer than `reward_hacking_window` entries
+/// (insufficient data), and guards against NaN in all derived slopes.
+pub fn detect_reward_hacking(metrics: &Metrics) -> bool {
+    let window = CONFIG.evolution.reward_hacking_window;
+    if window == 0 || metrics.score_history.len() < window {
+        return false;
+    }
+    let start = metrics.score_history.len().saturating_sub(window);
+    let recent = &metrics.score_history[start..];
+
+    let quality: Vec<f64> = recent
+        .iter()
+        .map(|e| e.dimension_averages.output_quality)
+        .collect();
+    let cost: Vec<f64> = recent
+        .iter()
+        .map(|e| e.dimension_averages.execution_cost)
+        .collect();
+
+    let quality_slope = series_slope(&quality);
+    let cost_slope = series_slope(&cost);
+
+    if !quality_slope.is_finite() || !cost_slope.is_finite() {
+        return false;
+    }
+
+    quality_slope < -CONFIG.evolution.reward_hacking_quality_drop
+        && cost_slope > CONFIG.evolution.reward_hacking_cost_rise
+}
+
 pub fn update_skill_attribution(
     metrics: &mut Metrics,
     analysis: &crate::shared::evolution::SessionAnalysis,
@@ -581,5 +650,150 @@ mod tests {
     fn classify_epoch_empty_history_is_insufficient_data() {
         let history: Vec<SessionScoreEntry> = vec![];
         assert_eq!(classify_epoch(&history), EpochClass::InsufficientData);
+    }
+
+    // ── reward-hacking detection (HarnessX Tier 2.2) ──
+
+    /// Build a SessionScoreEntry with the given quality (output_quality) and
+    /// efficiency proxy (execution_cost) values. tool_success is held flat.
+    fn entry(quality: f64, cost: f64) -> SessionScoreEntry {
+        SessionScoreEntry {
+            timestamp: "2026-06-01T00:00:00Z".into(),
+            success_rate: 0.9,
+            avg_score: 0.5,
+            observations: 10,
+            dimension_averages: ScoreDimensions {
+                tool_success: 0.9,
+                output_quality: quality,
+                execution_cost: cost,
+            },
+        }
+    }
+
+    /// Linearly interpolate `n` values from `lo` to `hi` inclusive.
+    fn ramp(n: usize, lo: f64, hi: f64) -> Vec<f64> {
+        if n <= 1 {
+            return vec![lo];
+        }
+        (0..n)
+            .map(|i| lo + (hi - lo) * (i as f64) / ((n - 1) as f64))
+            .collect()
+    }
+
+    #[test]
+    fn reward_hacking_empty_history_is_false() {
+        let metrics = default_metrics();
+        assert!(!detect_reward_hacking(&metrics));
+    }
+
+    #[test]
+    fn reward_hacking_single_entry_is_false() {
+        let mut metrics = default_metrics();
+        metrics.score_history.push(entry(0.9, 0.5));
+        assert!(!detect_reward_hacking(&metrics));
+    }
+
+    #[test]
+    fn reward_hacking_insufficient_below_window_is_false() {
+        // window defaults to 5; provide only 4 entries that *would* hack.
+        let mut metrics = default_metrics();
+        let quality = ramp(4, 0.9, 0.5);
+        let cost = ramp(4, 0.5, 0.9);
+        for (q, c) in quality.into_iter().zip(cost) {
+            metrics.score_history.push(entry(q, c));
+        }
+        assert!(
+            !detect_reward_hacking(&metrics),
+            "fewer than window entries must never flag"
+        );
+    }
+
+    #[test]
+    fn reward_hacking_clear_case_is_true() {
+        // quality 0.9 → 0.5 (declining), cost 0.5 → 0.9 (rising) over 5 sessions.
+        let mut metrics = default_metrics();
+        let quality = ramp(5, 0.9, 0.5);
+        let cost = ramp(5, 0.5, 0.9);
+        for (q, c) in quality.into_iter().zip(cost) {
+            metrics.score_history.push(entry(q, c));
+        }
+        assert!(
+            detect_reward_hacking(&metrics),
+            "quality falling while efficiency proxy rises must flag reward hacking"
+        );
+    }
+
+    #[test]
+    fn reward_hacking_honest_improvement_both_rise_is_false() {
+        let mut metrics = default_metrics();
+        let quality = ramp(5, 0.5, 0.9);
+        let cost = ramp(5, 0.5, 0.9);
+        for (q, c) in quality.into_iter().zip(cost) {
+            metrics.score_history.push(entry(q, c));
+        }
+        assert!(!detect_reward_hacking(&metrics));
+    }
+
+    #[test]
+    fn reward_hacking_honest_degradation_both_fall_is_false() {
+        let mut metrics = default_metrics();
+        let quality = ramp(5, 0.9, 0.5);
+        let cost = ramp(5, 0.9, 0.5);
+        for (q, c) in quality.into_iter().zip(cost) {
+            metrics.score_history.push(entry(q, c));
+        }
+        assert!(!detect_reward_hacking(&metrics));
+    }
+
+    #[test]
+    fn reward_hacking_flat_is_false() {
+        let mut metrics = default_metrics();
+        for _ in 0..5 {
+            metrics.score_history.push(entry(0.7, 0.7));
+        }
+        assert!(!detect_reward_hacking(&metrics));
+    }
+
+    #[test]
+    fn reward_hacking_flat_produces_no_nan_result() {
+        // Guard: flat series must yield a boolean (never panic on NaN).
+        let mut metrics = default_metrics();
+        for _ in 0..5 {
+            metrics.score_history.push(entry(0.7, 0.7));
+        }
+        let result = detect_reward_hacking(&metrics);
+        // Simply asserting it is a bool; if NaN leaked the call would be fine
+        // but the value must be a plain false.
+        assert!(!result);
+    }
+
+    #[test]
+    fn reward_hacking_nan_quality_does_not_flag_or_panic() {
+        let mut metrics = default_metrics();
+        let quality = ramp(5, 0.9, 0.5);
+        let cost = ramp(5, 0.5, 0.9);
+        for (i, (q, c)) in quality.into_iter().zip(cost).enumerate() {
+            let q = if i == 2 { f64::NAN } else { q };
+            metrics.score_history.push(entry(q, c));
+        }
+        assert!(!detect_reward_hacking(&metrics));
+    }
+
+    #[test]
+    fn reward_hacking_uses_only_last_window_entries() {
+        // First 5 entries are honest (both rising); last 5 are a hacking pattern.
+        // Detection must consider only the trailing window and flag.
+        let mut metrics = default_metrics();
+        let early_quality = ramp(5, 0.5, 0.9);
+        let early_cost = ramp(5, 0.5, 0.9);
+        for (q, c) in early_quality.into_iter().zip(early_cost) {
+            metrics.score_history.push(entry(q, c));
+        }
+        let late_quality = ramp(5, 0.9, 0.5);
+        let late_cost = ramp(5, 0.5, 0.9);
+        for (q, c) in late_quality.into_iter().zip(late_cost) {
+            metrics.score_history.push(entry(q, c));
+        }
+        assert!(detect_reward_hacking(&metrics));
     }
 }

@@ -1,0 +1,46 @@
+[
+  {
+    "timestamp": "2026-06-15T23:59:00Z",
+    "observations": 4,
+    "success_rate": 0.25,
+    "avg_score": 0.25,
+    "error_patterns": { "type_error": 3 },
+    "failure_patterns": [
+      {
+        "pattern_type": "type_error",
+        "description": "mismatched types in auth module",
+        "count": 3,
+        "involved_files": ["src/auth/login.rs"],
+        "suggested_remediation": "fix type annotation",
+        "implicated_components": ["auth"]
+      }
+    ],
+    "skills_seeded": 1,
+    "skills_rolled_back": 0,
+    "total_evolved": 1,
+    "analysis_summary": "seeded type-error guard skill",
+    "edit_type": "add_skill"
+  },
+  {
+    "timestamp": "2026-06-16T23:59:00Z",
+    "observations": 4,
+    "success_rate": 0.25,
+    "avg_score": 0.25,
+    "error_patterns": { "type_error": 3 },
+    "failure_patterns": [
+      {
+        "pattern_type": "type_error",
+        "description": "mismatched types persisting in auth module",
+        "count": 3,
+        "involved_files": ["src/auth/login.rs"],
+        "suggested_remediation": "still unresolved after add_skill",
+        "implicated_components": ["auth"]
+      }
+    ],
+    "skills_seeded": 0,
+    "skills_rolled_back": 0,
+    "total_evolved": 1,
+    "analysis_summary": "type_error persists despite prior skill",
+    "edit_type": "modify_skill"
+  }
+]

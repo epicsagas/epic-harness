@@ -24,6 +24,9 @@
 //! tested only against tasks routed to k.
 
 use std::collections::HashMap;
+use std::io;
+
+use serde::{Deserialize, Serialize};
 
 use crate::shared::evolution::SkillVariant;
 
@@ -36,11 +39,40 @@ pub const MAX_VARIANTS: usize = 3;
 const WARM_ROUTING_MIN_SAMPLES: u32 = 4;
 
 /// A pool of skill variants plus per-variant routing stats.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VariantPool {
     pub variants: Vec<SkillVariant>,
     /// variant_id → (successes, total) for routed tasks.
     pub routing_stats: HashMap<String, (u32, u32)>,
+}
+
+impl VariantPool {
+    /// Load the variant pool from disk, or an empty pool on missing/corrupt
+    /// file. Variant routing is a hot path (called from dispatch); a corrupt
+    /// `variants.json` must NOT panic — it resets to an empty pool so the
+    /// session degrades gracefully rather than crashing every dispatch.
+    pub fn load() -> VariantPool {
+        let path = crate::shared::paths::variant_pool_path();
+        match std::fs::read_to_string(&path) {
+            Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+            Err(_) => VariantPool::default(),
+        }
+    }
+
+    /// Persist the pool atomically (tmp + rename). A reflect hook killed
+    /// mid-save must not leave a truncated file that breaks every future
+    /// `load()`/`route()` call.
+    pub fn save(&self) -> io::Result<()> {
+        let path = crate::shared::paths::variant_pool_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json)?;
+        std::fs::rename(&tmp, &path)?;
+        Ok(())
+    }
 }
 
 impl VariantPool {
