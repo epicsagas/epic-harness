@@ -54,7 +54,7 @@ export default {
   patternExpertPoolDesc: 'Routing zum Spezialisten je Aufgabentyp',
   patternProducerReviewerDesc: 'Einer baut, einer überprüft, iterieren',
   patternSupervisorDesc: 'Zentraler Koordinator verteilt Aufgaben an Worker',
-  pageCommands: 'Befehle',
+  pageCommands: 'Pipeline',
   pageCommandsDesc3: '3 Top-Level-Befehle — orbit, evolve, team — Karte anklicken zum Kopieren',
   cmdEvolveDesc: 'Skill-Evolution prüfen oder auslösen',
   cmdTeamDesc: 'Projektspezifisches Agententeam generieren',

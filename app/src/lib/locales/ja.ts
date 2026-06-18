@@ -54,7 +54,7 @@ export default {
   patternExpertPoolDesc: 'タスクタイプ別に専門家へルーティング',
   patternProducerReviewerDesc: '1人がビルド、1人がレビュー、繰り返し',
   patternSupervisorDesc: '中央コーディネーターがワーカーにタスクを割り当て',
-  pageCommands: 'コマンド',
+  pageCommands: 'パイプライン',
   pageCommandsDesc3: '3つのトップレベルコマンド — orbit, evolve, team — カードをクリックしてコピー',
   cmdEvolveDesc: 'スキル進化の確認とトリガー',
   cmdTeamDesc: 'プロジェクト固有のエージェントチームを生成',

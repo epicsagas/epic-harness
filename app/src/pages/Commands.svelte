@@ -2,7 +2,8 @@
   import { tStore } from '$lib/i18n.js';
 
   type CommandKey =
-    | 'cmdOrbitDesc' | 'cmdEvolveDesc' | 'cmdTeamDesc';
+    | 'cmdDiscoverDesc' | 'cmdSpecDesc' | 'cmdGoDesc' | 'cmdAuditDesc'
+    | 'cmdEvalDesc' | 'cmdShipDesc' | 'cmdOrbitDesc' | 'cmdEvolveDesc' | 'cmdTeamDesc';
 
   interface Command {
     cmd: string;
@@ -10,7 +11,16 @@
     ring: number;
   }
 
+  // Ring 1 pipeline skills in spec→ship order. orbit/evolve/team are the
+  // top-level orchestrators; discover/spec/go/audit/eval/ship are the
+  // phased stages orbit chains under the hood.
   const commands: Command[] = [
+    { cmd: 'discover', descKey: 'cmdDiscoverDesc', ring: 1 },
+    { cmd: 'spec',     descKey: 'cmdSpecDesc',     ring: 1 },
+    { cmd: 'go',       descKey: 'cmdGoDesc',       ring: 1 },
+    { cmd: 'audit',    descKey: 'cmdAuditDesc',    ring: 1 },
+    { cmd: 'eval',     descKey: 'cmdEvalDesc',     ring: 1 },
+    { cmd: 'ship',     descKey: 'cmdShipDesc',     ring: 1 },
     { cmd: 'orbit',    descKey: 'cmdOrbitDesc',    ring: 1 },
     { cmd: 'evolve',   descKey: 'cmdEvolveDesc',   ring: 3 },
     { cmd: 'team',     descKey: 'cmdTeamDesc',     ring: 1 },
@@ -36,7 +46,7 @@
 </script>
 
 <div class="screen-header">
-  <h2>{$tStore('pageCommands')} <span class="subtitle-tag">Ring 1</span></h2>
+  <h2>{$tStore('pageCommands')} <span class="subtitle-tag">Ring 1 · Skills</span></h2>
   <p>{$tStore('pageCommandsDesc3')}</p>
 </div>
 

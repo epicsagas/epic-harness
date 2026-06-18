@@ -54,7 +54,7 @@ export default {
   patternExpertPoolDesc: '按任务类型路由到专家',
   patternProducerReviewerDesc: '一人构建，一人审查，迭代',
   patternSupervisorDesc: '中央协调器向工作节点分发任务',
-  pageCommands: '命令',
+  pageCommands: '流水线',
   pageCommandsDesc3: '3个顶级命令 — orbit、evolve、team — 点击卡片复制',
   cmdEvolveDesc: '检查或触发技能进化',
   cmdTeamDesc: '生成项目专属代理团队',
