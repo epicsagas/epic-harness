@@ -781,10 +781,14 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 .join(".codex/plugins/cache/epicsagas")
                 .exists();
             let codex_installed = codex_legacy || codex_plugin;
-            let codex_config_path = if codex_plugin {
-                "~/.codex/plugins/cache/epicsagas/"
+            // null when not installed — matches Cursor/Cline/Aider so the
+            // dashboard never shows a phantom path for an absent Codex.
+            let codex_config_path: Option<&str> = if !codex_installed {
+                None
+            } else if codex_plugin {
+                Some("~/.codex/plugins/cache/epicsagas/")
             } else {
-                "~/.codex/hooks.json"
+                Some("~/.codex/hooks.json")
             };
             let integrations = serde_json::json!([
                 {

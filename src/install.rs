@@ -1303,6 +1303,39 @@ fn generate_canonical_files(tool: &str) -> Vec<(String, String)> {
     files
 }
 
+// ── Codex hooks detection ────────────────────────────────────────────────────
+
+/// Subset of Codex's `~/.codex/config.toml` needed to detect hook enablement.
+/// `#[serde(default)]` keeps deserialization resilient to unknown keys.
+#[derive(serde::Deserialize)]
+struct CodexConfig {
+    #[serde(default)]
+    features: CodexFeatures,
+}
+
+#[derive(Default, serde::Deserialize)]
+struct CodexFeatures {
+    #[serde(default)]
+    hooks: Option<bool>,
+}
+
+/// Whether Codex hooks are enabled in `config.toml` content.
+///
+/// Accepts the legacy `codex_hooks` key (anywhere in the file) or the modern
+/// `hooks = true` inside a `[features]` block (Codex renamed the key). Parsed
+/// as real TOML so trailing comments, missing spaces, and quoted-string
+/// variants are handled correctly. Invalid TOML falls back to `false` — the
+/// only consequence is a (harmless) install warning.
+fn codex_hooks_enabled(config: &str) -> bool {
+    if config.contains("codex_hooks") {
+        return true;
+    }
+    match toml::from_str::<CodexConfig>(config) {
+        Ok(c) => c.features.hooks == Some(true),
+        Err(_) => false,
+    }
+}
+
 // ── Install a single tool ─────────────────────────────────────────────────────
 
 fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
@@ -1378,31 +1411,13 @@ fn install_tool(tool: &str, local: bool, dry_run: bool) -> i32 {
     }
 
     // Codex-specific: warn if config.toml exists but hooks are not enabled.
-    // Accepts either the legacy `codex_hooks = true` flag or the modern
-    // `hooks = true` in a `[features]` block (Codex renamed the key).
+    // Detection logic (legacy `codex_hooks` or modern `[features] hooks = true`)
+    // lives in `codex_hooks_enabled` below so it can be unit-tested.
     if tool == "codex" {
         let config_path = target_dir.join("config.toml");
         if config_path.exists() {
             let ok = fs::read_to_string(&config_path)
-                .map(|s| {
-                    // Legacy: `codex_hooks` anywhere in the file.
-                    if s.contains("codex_hooks") {
-                        return true;
-                    }
-                    // Modern: `hooks = true` inside a [features] block.
-                    let mut in_features = false;
-                    for line in s.lines() {
-                        let t = line.trim();
-                        if t.starts_with('[') {
-                            in_features = t == "[features]";
-                            continue;
-                        }
-                        if in_features && t == "hooks = true" {
-                            return true;
-                        }
-                    }
-                    false
-                })
+                .map(|s| codex_hooks_enabled(&s))
                 .unwrap_or(false);
             if !ok {
                 eprintln!();
@@ -2075,5 +2090,29 @@ Run all tests.
         // 패닉 없이 종료되어야 함
         sync_plugin_cache(&home_str, true);
         let _ = fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn test_codex_hooks_enabled_detects_all_forms() {
+        // Legacy `codex_hooks` key, anywhere in the file.
+        assert!(codex_hooks_enabled("codex_hooks = true\n"));
+        assert!(codex_hooks_enabled("other = 1\ncodex_hooks = true\n"));
+
+        // Modern `[features] hooks = true`.
+        assert!(codex_hooks_enabled("[features]\nhooks = true\n"));
+
+        // Robust to formatting the hand-rolled parser used to miss.
+        assert!(codex_hooks_enabled(
+            "[features]\nhooks = true  # enable all\n"
+        ));
+        assert!(codex_hooks_enabled("[features]\nhooks=true\n"));
+
+        // Explicitly disabled or absent → not enabled.
+        assert!(!codex_hooks_enabled("[features]\nhooks = false\n"));
+        assert!(!codex_hooks_enabled(""));
+        assert!(!codex_hooks_enabled("[other]\nhooks = true\n")); // wrong table
+
+        // Garbage TOML → false, no panic.
+        assert!(!codex_hooks_enabled("not valid toml !!! [[["));
     }
 }
