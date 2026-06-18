@@ -21,6 +21,29 @@
   let variants = $state<VariantPool | null>(null);
   let landscape = $state<AdaptationLandscape | null>(null);
 
+  // ── Update-flash: glow a section's border when its data changes.
+  // Uses a canonical (sorted-key) JSON signature so backend HashMap
+  // iteration-order non-determinism does not cause false-positive flashes.
+  function canon(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+    const obj = value as Record<string, unknown>;
+    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
+  }
+  let flash = $state<Record<string, boolean>>({});
+  const prevSnap: Record<string, string> = {};
+  function flashIfChanged(key: string, payload: unknown): void {
+    const sig = canon(payload);
+    if (prevSnap[key] !== undefined && prevSnap[key] !== sig) {
+      // Re-trigger the CSS animation by flipping the flag off→on.
+      flash[key] = false;
+      // microtask so Svelte re-renders the off state before re-adding
+      queueMicrotask(() => { flash[key] = true; });
+      window.setTimeout(() => { flash[key] = false; }, 1700);
+    }
+    prevSnap[key] = sig;
+  }
+
   type RawRow = Record<string, unknown>;
 
   function deriveTrend(rows: RawRow[], idx: number): 'improving' | 'declining' | 'stable' {
@@ -106,6 +129,12 @@
       seesaw = sw.status === 'fulfilled' ? sw.value : null;
       variants = vp.status === 'fulfilled' ? vp.value : null;
       landscape = al.status === 'fulfilled' ? al.value : null;
+      // Trigger a border-glow flash on any section whose payload changed
+      // since the previous poll (skips the very first load).
+      flashIfChanged('metrics', metrics);
+      flashIfChanged('seesaw', seesaw);
+      flashIfChanged('variants', variants);
+      flashIfChanged('landscape', landscape);
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -154,7 +183,7 @@
 </div>
 
 {#if metrics?.reward_hacking_suspected}
-  <div class="rh-banner" role="alert">
+  <div class="rh-banner" class:hx-flash={flash.metrics} role="alert">
     ⚠️ <strong>Reward hacking suspected</strong> — execution_cost rising while output_quality falls.
     Skill seeding is blocked this round until the divergence resolves.
   </div>
@@ -163,7 +192,7 @@
 {#if !loading && (seesaw || variants || landscape)}
   <div class="harnessx-panels">
     {#if seesaw && seesaw.total_solved > 0}
-      <div class="hx-panel">
+      <div class="hx-panel" class:hx-flash={flash.seesaw}>
         <h3>Seesaw — solved tasks ({seesaw.total_solved})</h3>
         <p class="hx-muted">Per-task regression gate (HarnessX §4.1). Tasks below their best score − tolerance block seeding.</p>
         <ul class="hx-list">
@@ -175,7 +204,7 @@
     {/if}
 
     {#if variants && variants.variants.length > 0}
-      <div class="hx-panel">
+      <div class="hx-panel" class:hx-flash={flash.variants}>
         <h3>Variants ({variants.variants.length})</h3>
         <p class="hx-muted">Variant isolation / ensemble routing (§4.5). Fork-on-regression prevents catastrophic forgetting.</p>
         <ul class="hx-list">
@@ -187,7 +216,7 @@
     {/if}
 
     {#if landscape}
-      <div class="hx-panel">
+      <div class="hx-panel" class:hx-flash={flash.landscape}>
         <h3>Adaptation landscape</h3>
         <p class="hx-muted">Planner (§4.3). Under-exploration signal + persistent failures.</p>
         {#if landscape.persistent_failures.length > 0}

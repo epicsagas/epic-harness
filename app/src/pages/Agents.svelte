@@ -12,6 +12,30 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
+  // ── Update-flash: glow a section's border when its data changes.
+  // Agents polls every 5s, so only the status signal (id+state) triggers a
+  // flash — not every poll — to avoid constant blinking.
+  let flash = $state<Record<string, boolean>>({});
+  const flashPrev: Record<string, string> = {};
+  function canon(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+    const obj = value as Record<string, unknown>;
+    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
+  }
+  function flashIfChanged(key: string, payload: unknown): void {
+    const sig = canon(payload);
+    if (flashPrev[key] !== undefined && flashPrev[key] !== sig) {
+      flash[key] = false;
+      queueMicrotask(() => { flash[key] = true; });
+      window.setTimeout(() => { flash[key] = false; }, 1700);
+    }
+    flashPrev[key] = sig;
+  }
+  function statusSignal(): string {
+    return [...agentStatuses.entries()].map(([id, s]) => `${id}:${s.state ?? '?'}`).sort().join('|');
+  }
+
   async function load() {
     try {
       error = null;
@@ -35,6 +59,7 @@
         );
         agentStatuses = statusMap;
       }
+      flashIfChanged('agents', statusSignal());
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -175,7 +200,7 @@
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
         {#each run.agents as agent}
           {@const status = agentStatuses.get(agent.id)}
-          <div class="agent-card">
+          <div class="agent-card" class:hx-flash={flash.agents}>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
               <div class="agent-name">{agent.role}</div>
               <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>

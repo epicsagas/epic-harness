@@ -9,6 +9,25 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
+  // ── Update-flash: glow a section's border when its data changes.
+  let flash = $state<Record<string, boolean>>({});
+  const flashPrev: Record<string, string> = {};
+  function canon(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+    const obj = value as Record<string, unknown>;
+    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
+  }
+  function flashIfChanged(key: string, payload: unknown): void {
+    const sig = canon(payload);
+    if (flashPrev[key] !== undefined && flashPrev[key] !== sig) {
+      flash[key] = false;
+      queueMicrotask(() => { flash[key] = true; });
+      window.setTimeout(() => { flash[key] = false; }, 1700);
+    }
+    flashPrev[key] = sig;
+  }
+
   // ── filters
   let filterGoal = $state('');
   let filterProject = $state('');
@@ -53,6 +72,7 @@
     try {
       error = null;
       pipelines = await getOrbitPipelines();
+      flashIfChanged('pipelines', pipelines);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -178,7 +198,7 @@
   </div>
 {:else if runningPipelines.length > 0}
   {#each runningPipelines as p}
-    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--accent);">
+    <div class="panel" style="margin-bottom:16px;border-left:3px solid var(--accent);" class:hx-flash={flash.pipelines}>
       <div class="panel-header">
         <h3><span class="pill info" style="margin-right:8px;">RUNNING</span>{p.goal_slug ?? $tStore('noGoal')}</h3>
         <div class="panel-actions" style="display:flex;align-items:center;gap:8px;">
