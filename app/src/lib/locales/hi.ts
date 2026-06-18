@@ -54,7 +54,7 @@ export default {
   patternExpertPoolDesc: 'कार्य प्रकार के अनुसार विशेषज्ञ को रूट करें',
   patternProducerReviewerDesc: 'एक बनाता है, एक समीक्षा करता है, दोहराएं',
   patternSupervisorDesc: 'केंद्रीय समन्वयक कार्यकर्ताओं को कार्य वितरित करता है',
-  pageCommands: 'कमांड',
+  pageCommands: 'पाइपलाइन',
   pageCommandsDesc3: '3 शीर्ष-स्तरीय कमांड — orbit, evolve, team — कार्ड पर क्लिक करें',
   cmdEvolveDesc: 'कौशल विकास का निरीक्षण या ट्रिगर करें',
   cmdTeamDesc: 'प्रोजेक्ट-विशिष्ट एजेंट टीम बनाएं',

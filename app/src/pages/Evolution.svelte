@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { getEvolvedSkills } from '../lib/harness.js';
-  import type { EvolutionData } from '../lib/harness.js';
+  import { getEvolvedSkills, getHarnessMetrics, getSeesawRegistry, getVariantPool, getAdaptationLandscape } from '../lib/harness.js';
+  import type { EvolutionData, HarnessMetrics, SolvedTaskRegistry, VariantPool, AdaptationLandscape } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   const SEEDING_THRESHOLDS = [
     { typeKey: 'seedTypeWeakTool',       threshKey: 'seedThreshWeakTool' },
@@ -15,6 +15,34 @@
   let data  = $state<EvolutionData | null>(null);
   let error = $state<string | null>(null);
   let loading = $state(true);
+  // HarnessX evolution-engine state (4-PR stack)
+  let metrics = $state<HarnessMetrics | null>(null);
+  let seesaw = $state<SolvedTaskRegistry | null>(null);
+  let variants = $state<VariantPool | null>(null);
+  let landscape = $state<AdaptationLandscape | null>(null);
+
+  // ── Update-flash: glow a section's border when its data changes.
+  // Uses a canonical (sorted-key) JSON signature so backend HashMap
+  // iteration-order non-determinism does not cause false-positive flashes.
+  function canon(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+    const obj = value as Record<string, unknown>;
+    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
+  }
+  let flash = $state<Record<string, boolean>>({});
+  const prevSnap: Record<string, string> = {};
+  function flashIfChanged(key: string, payload: unknown): void {
+    const sig = canon(payload);
+    if (prevSnap[key] !== undefined && prevSnap[key] !== sig) {
+      // Re-trigger the CSS animation by flipping the flag off→on.
+      flash[key] = false;
+      // microtask so Svelte re-renders the off state before re-adding
+      queueMicrotask(() => { flash[key] = true; });
+      window.setTimeout(() => { flash[key] = false; }, 1700);
+    }
+    prevSnap[key] = sig;
+  }
 
   type RawRow = Record<string, unknown>;
 
@@ -89,6 +117,24 @@
   async function load() {
     try {
       data = await getEvolvedSkills();
+      // Fetch HarnessX evolution-engine surfaces in parallel (best-effort;
+      // these may be absent on a cold project — treat null as empty).
+      const [m, sw, vp, al] = await Promise.allSettled([
+        getHarnessMetrics(),
+        getSeesawRegistry(),
+        getVariantPool(),
+        getAdaptationLandscape(),
+      ]);
+      metrics = m.status === 'fulfilled' ? m.value : null;
+      seesaw = sw.status === 'fulfilled' ? sw.value : null;
+      variants = vp.status === 'fulfilled' ? vp.value : null;
+      landscape = al.status === 'fulfilled' ? al.value : null;
+      // Trigger a border-glow flash on any section whose payload changed
+      // since the previous poll (skips the very first load).
+      flashIfChanged('metrics', metrics);
+      flashIfChanged('seesaw', seesaw);
+      flashIfChanged('variants', variants);
+      flashIfChanged('landscape', landscape);
       error = null;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -123,11 +169,13 @@
     return '—';
   }
 
-  let pollInterval: ReturnType<typeof setInterval>;
-  onMount(() => {
+  // Reload whenever the selected project changes (projectArgs() reads it at
+  // call time), then poll on an interval. $effect re-runs on project switch.
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
     load();
-    pollInterval = setInterval(load, 30_000);
-    return () => clearInterval(pollInterval);
+    const id = setInterval(() => { if (!document.hidden) load(); }, 30_000);
+    return () => clearInterval(id);
   });
 </script>
 
@@ -135,6 +183,68 @@
   <h2>{$tStore('pageEvolve')} <span class="subtitle-tag">Ring 3</span></h2>
   <p>{$tStore('pageEvolveDesc')}</p>
 </div>
+
+{#if metrics?.reward_hacking_suspected}
+  <div class="rh-banner" class:hx-flash={flash.metrics} role="alert">
+    ⚠️ <strong>Reward hacking suspected</strong> — execution_cost rising while output_quality falls.
+    Skill seeding is blocked this round until the divergence resolves.
+  </div>
+{/if}
+
+{#if !loading && (seesaw || variants || landscape)}
+  <div class="harnessx-panels">
+    {#if seesaw && seesaw.total_solved > 0}
+      <div class="hx-panel" class:hx-flash={flash.seesaw}>
+        <h3>Seesaw — solved tasks ({seesaw.total_solved})</h3>
+        <p class="hx-muted">Per-task regression gate (HarnessX §4.1). Tasks below their best score − tolerance block seeding.</p>
+        <ul class="hx-list">
+          {#each Object.entries(seesaw.solved).slice(0, 8) as [task, best]}
+            <li><code>{task}</code> → best {Number(best).toFixed(2)}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
+    {#if variants && variants.variants.length > 0}
+      <div class="hx-panel" class:hx-flash={flash.variants}>
+        <h3>Variants ({variants.variants.length})</h3>
+        <p class="hx-muted">Variant isolation / ensemble routing (§4.5). Fork-on-regression prevents catastrophic forgetting.</p>
+        <ul class="hx-list">
+          {#each variants.variants as v}
+            <li><code>{v.id}</code> · tags [{v.domain_tags.join(', ')}] · {v.skills.length} skill(s) · avg {v.avg_score.toFixed(2)}</li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+
+    {#if landscape}
+      <div class="hx-panel" class:hx-flash={flash.landscape}>
+        <h3>Adaptation landscape</h3>
+        <p class="hx-muted">Planner (§4.3). Under-exploration signal + persistent failures.</p>
+        {#if landscape.persistent_failures.length > 0}
+          <div class="hx-subhead">Persistent failures ({landscape.persistent_failures.length})</div>
+          <ul class="hx-list">
+            {#each landscape.persistent_failures.slice(0, 6) as pf}
+              <li><code>{pf.failure_category}</code> · {pf.sessions_seen} session(s){pf.resolved ? ' · resolved' : ''}</li>
+            {/each}
+          </ul>
+        {/if}
+        {#if landscape.untried_edit_types.length > 0}
+          <div class="hx-subhead">Untried edit types</div>
+          <div class="hx-tags">{#each landscape.untried_edit_types as t}<span class="hx-tag">{t}</span>{/each}</div>
+        {/if}
+        {#if Object.keys(landscape.edit_type_coverage).length > 0}
+          <div class="hx-subhead">Edit-type coverage</div>
+          <ul class="hx-list">
+            {#each Object.entries(landscape.edit_type_coverage) as [t, c]}
+              <li><code>{t}</code> · {c} attempt(s)</li>
+            {/each}
+          </ul>
+        {/if}
+      </div>
+    {/if}
+  </div>
+{/if}
 
 {#if loading}
   <div style="color:var(--muted);padding:32px 0;text-align:center;font-family:var(--font-mono);font-size:13px;">
@@ -251,6 +361,7 @@
               <th>{$tStore('colSummaryPatterns')}</th>
               <th style="text-align:right;">{$tStore('colObs')}</th>
               <th style="text-align:right;">{$tStore('colSkills')}</th>
+              <th>Edit</th>
               <th>{$tStore('colTrend')}</th>
               <th style="text-align:right;">{$tStore('colAvgScore')}</th>
             </tr>
@@ -270,6 +381,9 @@
                 </td>
                 <td style="font-family:var(--font-mono);text-align:right;">
                   {row['skills_seeded'] ?? 0}
+                </td>
+                <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted);">
+                  {row['edit_type'] ?? 'add_skill'}
                 </td>
                 <td>
                   {#if row['_trend'] === 'improving'}
@@ -332,3 +446,68 @@
     </div>
   </div>
 {/if}
+
+<style>
+  .rh-banner {
+    background: var(--danger-soft);
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    padding: 10px 14px;
+    border-radius: var(--radius, 8px);
+    font-size: 13px;
+    margin: 8px 0 16px;
+  }
+  .harnessx-panels {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+    margin: 8px 0 20px;
+  }
+  .hx-panel {
+    background: var(--surface, rgba(255,255,255,0.03));
+    border: 1px solid var(--border, rgba(255,255,255,0.08));
+    border-radius: var(--radius, 8px);
+    padding: 12px 14px;
+    font-size: 12px;
+  }
+  .hx-panel h3 {
+    margin: 0 0 4px;
+    font-size: 13px;
+  }
+  .hx-muted {
+    color: var(--muted, #8b949e);
+    margin: 0 0 8px;
+    font-size: 11px;
+  }
+  .hx-list {
+    list-style: none;
+    padding: 0;
+    margin: 4px 0 0;
+  }
+  .hx-list li {
+    padding: 2px 0;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    color: var(--fg-secondary, #b1bac4);
+  }
+  .hx-subhead {
+    font-size: 11px;
+    color: var(--muted, #8b949e);
+    margin-top: 8px;
+    margin-bottom: 2px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .hx-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .hx-tag {
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+  }
+</style>

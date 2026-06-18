@@ -1,16 +1,40 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { tStore } from '$lib/i18n.js';
   import { getOrchestratorRun, getOrchestratorAgentStatus } from '../lib/harness.js';
   import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
   import { getObsSummary } from '../lib/harness.js';
   import type { ObsSummary } from '../lib/harness.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let run = $state<OrchestrationRun | null>(null);
   let agentStatuses = $state<Map<string, OrchAgentStatus>>(new Map());
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
+
+  // ── Update-flash: glow a section's border when its data changes.
+  // Agents polls every 5s, so only the status signal (id+state) triggers a
+  // flash — not every poll — to avoid constant blinking.
+  let flash = $state<Record<string, boolean>>({});
+  const flashPrev: Record<string, string> = {};
+  function canon(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+    const obj = value as Record<string, unknown>;
+    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
+  }
+  function flashIfChanged(key: string, payload: unknown): void {
+    const sig = canon(payload);
+    if (flashPrev[key] !== undefined && flashPrev[key] !== sig) {
+      flash[key] = false;
+      queueMicrotask(() => { flash[key] = true; });
+      window.setTimeout(() => { flash[key] = false; }, 1700);
+    }
+    flashPrev[key] = sig;
+  }
+  function statusSignal(): string {
+    return [...agentStatuses.entries()].map(([id, s]) => `${id}:${s.state ?? '?'}`).sort().join('|');
+  }
 
   async function load() {
     try {
@@ -35,6 +59,7 @@
         );
         agentStatuses = statusMap;
       }
+      flashIfChanged('agents', statusSignal());
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -42,9 +67,11 @@
     }
   }
 
-  onMount(() => {
+  // Reload on project switch (getObsSummary is project-scoped) + poll for live view.
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
     load();
-    const id = setInterval(load, 5000); // Refresh every 5s for live view
+    const id = setInterval(load, 5000);
     return () => clearInterval(id);
   });
 
@@ -92,6 +119,23 @@
   );
   const failedCount = $derived(
     run ? run.agents.filter(a => a.status === 'failed').length : 0
+  );
+
+  // Cards only show agents active or completed within the last 24h — older
+  // ones are still available in the completed table below, so the card grid
+  // stays focused on recent activity.
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  function within24h(agent: OrchAgentDef): boolean {
+    if (agent.status === 'running') return true;
+    const ts = agent.completed_at ?? agent.started_at;
+    if (!ts) return false;
+    return Date.now() - new Date(ts).getTime() < DAY_MS;
+  }
+  const recentAgents = $derived(
+    run ? run.agents.filter(within24h) : []
+  );
+  const olderCount = $derived(
+    run ? run.agents.length - recentAgents.length : 0
   );
 
   // Low success tools from obs
@@ -157,7 +201,7 @@
         <div class="stat-card">
           <div class="stat-label"><span class="dot" style="background:var(--info)"></span> {$tStore('activeLabel')}</div>
           <div class="stat-value">{activeCount}</div>
-          <div class="stat-sub">{$tStore('ofAgents')(run.agents.length)}</div>
+          <div class="stat-sub">{$tStore('ofAgents', run.agents.length)}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('completedLabel')}</div>
@@ -171,11 +215,11 @@
         </div>
       </div>
 
-      <!-- Agent Cards -->
+      <!-- Agent Cards — last 24h only (older agents in the completed table) -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
-        {#each run.agents as agent}
+        {#each recentAgents as agent}
           {@const status = agentStatuses.get(agent.id)}
-          <div class="agent-card">
+          <div class="agent-card" class:hx-flash={flash.agents}>
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
               <div class="agent-name">{agent.role}</div>
               <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
@@ -207,6 +251,17 @@
           </div>
         {/each}
       </div>
+
+      {#if recentAgents.length === 0}
+        <div style="text-align:center;padding:32px 16px;color:var(--muted);font-size:13px;">
+          {$tStore('noActiveOrchestration')} — last 24h
+        </div>
+      {/if}
+      {#if olderCount > 0}
+        <div style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--font-mono);text-align:right;">
+          +{olderCount} older agents — see completed table below
+        </div>
+      {/if}
 
       <!-- Dependency Graph -->
       {#if Object.keys(run.dependency_graph).length > 0}

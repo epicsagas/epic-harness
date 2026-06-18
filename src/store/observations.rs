@@ -292,6 +292,194 @@ pub async fn query_obs_stats_all_pool(
     query_obs_stats_pool(pool, from_ts, to_ts).await
 }
 
+/// Project-scoped observation stats.
+///
+/// When `project` is `Some(p)`, every query adds `AND project = ?`. When
+/// `None`, behaves like the unfiltered variant (cross-project aggregate).
+pub async fn query_obs_stats_scoped_pool(
+    pool: &AnyPool,
+    from_ts: &str,
+    to_ts: &str,
+    project: Option<&str>,
+) -> io::Result<ObsStats> {
+    let from = if from_ts.len() == 10 {
+        format!("{}T00:00:00", from_ts)
+    } else {
+        from_ts.to_string()
+    };
+    let to = if to_ts.len() == 10 {
+        format!("{}T23:59:59", to_ts)
+    } else {
+        to_ts.to_string()
+    };
+
+    // Overall stats — two static-SQL branches so sqlx 0.9's SqlSafeStr guard
+    // (which rejects dynamic strings to prevent injection) is satisfied.
+    let (total, successes, avg_score): (i64, i64, f64) = if let Some(p) = project {
+        let row = sqlx::query(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(AVG(score), 0.0)
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ? AND project = ?",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(p)
+        .fetch_one(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+        (
+            row.try_get(0).map_err(super::sqlx_err)?,
+            row.try_get(1).map_err(super::sqlx_err)?,
+            row.try_get(2).map_err(super::sqlx_err)?,
+        )
+    } else {
+        let row = sqlx::query(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(AVG(score), 0.0)
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ?",
+        )
+        .bind(&from)
+        .bind(&to)
+        .fetch_one(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+        (
+            row.try_get(0).map_err(super::sqlx_err)?,
+            row.try_get(1).map_err(super::sqlx_err)?,
+            row.try_get(2).map_err(super::sqlx_err)?,
+        )
+    };
+
+    // Per-tool stats
+    let tool_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT tool, COUNT(*) as calls,
+                    SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
+                    COALESCE(AVG(score), 0.0) as avg_score
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ? AND project = ?
+             GROUP BY tool ORDER BY calls DESC LIMIT 100",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(p)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT tool, COUNT(*) as calls,
+                    SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
+                    COALESCE(AVG(score), 0.0) as avg_score
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ?
+             GROUP BY tool ORDER BY calls DESC LIMIT 100",
+        )
+        .bind(&from)
+        .bind(&to)
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(super::sqlx_err)?;
+    let mut tool_stats = Vec::with_capacity(tool_rows.len());
+    for r in tool_rows {
+        tool_stats.push(ToolStatRow {
+            tool: r.try_get::<String, _>(0).map_err(super::sqlx_err)?,
+            calls: r.try_get::<i64, _>(1).map_err(super::sqlx_err)?,
+            successes: r.try_get::<i64, _>(2).map_err(super::sqlx_err)?,
+            avg_score: r.try_get::<f64, _>(3).map_err(super::sqlx_err)?,
+        });
+    }
+
+    // Per-error stats
+    let err_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT failure_category, COUNT(*) as cnt
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ? AND project = ?
+               AND failure_category IS NOT NULL
+             GROUP BY failure_category ORDER BY cnt DESC LIMIT 50",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(p)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT failure_category, COUNT(*) as cnt
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ?
+               AND failure_category IS NOT NULL
+             GROUP BY failure_category ORDER BY cnt DESC LIMIT 50",
+        )
+        .bind(&from)
+        .bind(&to)
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(super::sqlx_err)?;
+    let mut error_stats = Vec::with_capacity(err_rows.len());
+    for r in err_rows {
+        error_stats.push((
+            r.try_get::<String, _>(0).map_err(super::sqlx_err)?,
+            r.try_get::<i64, _>(1).map_err(super::sqlx_err)?,
+        ));
+    }
+
+    // Per-session stats
+    let sess_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT session_id, COUNT(*) as calls,
+                    COALESCE(AVG(score), 0.0) as avg_score,
+                    SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ? AND project = ?
+             GROUP BY session_id ORDER BY session_id DESC LIMIT 20",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(p)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT session_id, COUNT(*) as calls,
+                    COALESCE(AVG(score), 0.0) as avg_score,
+                    SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ?
+             GROUP BY session_id ORDER BY session_id DESC LIMIT 20",
+        )
+        .bind(&from)
+        .bind(&to)
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(super::sqlx_err)?;
+    let mut session_stats = Vec::with_capacity(sess_rows.len());
+    for r in sess_rows {
+        session_stats.push(SessionStatRow {
+            session_id: r.try_get::<String, _>(0).map_err(super::sqlx_err)?,
+            calls: r.try_get::<i64, _>(1).map_err(super::sqlx_err)?,
+            avg_score: r.try_get::<f64, _>(2).map_err(super::sqlx_err)?,
+            failures: r.try_get::<i64, _>(3).map_err(super::sqlx_err)?,
+        });
+    }
+
+    Ok(ObsStats {
+        total,
+        successes,
+        avg_score,
+        tool_stats,
+        error_stats,
+        session_stats,
+    })
+}
+
 /// Get the last action for a given session.
 pub async fn query_last_action_pool(
     pool: &AnyPool,

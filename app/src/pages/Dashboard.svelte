@@ -10,6 +10,25 @@
   let error = $state<string | null>(null);
   let loadGeneration = 0;
 
+  // ── Update-flash: glow a section's border when its data changes.
+  let flash = $state<Record<string, boolean>>({});
+  const flashPrev: Record<string, string> = {};
+  function canon(value: unknown): string {
+    if (value === null || typeof value !== 'object') return JSON.stringify(value);
+    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+    const obj = value as Record<string, unknown>;
+    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
+  }
+  function flashIfChanged(key: string, payload: unknown): void {
+    const sig = canon(payload);
+    if (flashPrev[key] !== undefined && flashPrev[key] !== sig) {
+      flash[key] = false;
+      queueMicrotask(() => { flash[key] = true; });
+      window.setTimeout(() => { flash[key] = false; }, 1700);
+    }
+    flashPrev[key] = sig;
+  }
+
   const totalFailures = $derived(
     obs ? obs.recent_sessions.reduce((sum, s) => sum + s.failures, 0) : 0
   );
@@ -52,6 +71,8 @@
       if (generation !== loadGeneration) return;
       metrics = m;
       obs = o;
+      flashIfChanged('metrics', metrics);
+      flashIfChanged('obs', obs);
     } catch (e) {
       if (generation !== loadGeneration) return;
       error = e instanceof Error ? e.message : String(e);
@@ -131,7 +152,7 @@
 {/if}
 
 <!-- Key Metrics -->
-<div class="stats-grid">
+<div class="stats-grid" class:hx-flash={flash.metrics}>
   <!-- Sessions -->
   <div class="stat-card">
     <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('statSessions')}</div>
@@ -275,7 +296,7 @@
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" class:hx-flash={flash.obs}>
     <div class="panel-header">
       <h3>{$tStore('toolStatsTitle')}</h3>
     </div>

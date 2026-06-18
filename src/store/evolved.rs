@@ -98,6 +98,45 @@ pub async fn list_skills_full_pool(pool: &AnyPool) -> io::Result<Vec<EvolvedSkil
     Ok(skills)
 }
 
+/// Project-scoped variant. `Some(p)` filters to `WHERE project = ?`; `None`
+/// returns all (same as list_skills_full_pool). Static-SQL two-branch form.
+pub async fn list_skills_full_scoped_pool(
+    pool: &AnyPool,
+    project: Option<&str>,
+) -> io::Result<Vec<EvolvedSkillRow>> {
+    let rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT name, origin, confidence, project, skill_md, active, created, updated
+             FROM evolved_skills WHERE project = ? ORDER BY name",
+        )
+        .bind(p)
+    } else {
+        sqlx::query(
+            "SELECT name, origin, confidence, project, skill_md, active, created, updated
+             FROM evolved_skills ORDER BY name",
+        )
+    }
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    let mut skills = Vec::with_capacity(rows.len());
+    for r in rows {
+        let active_i32: i32 = r.try_get(5).map_err(super::sqlx_err)?;
+        skills.push(EvolvedSkillRow {
+            name: r.try_get(0).map_err(super::sqlx_err)?,
+            origin: r.try_get(1).map_err(super::sqlx_err)?,
+            confidence: r.try_get(2).map_err(super::sqlx_err)?,
+            project: r.try_get(3).map_err(super::sqlx_err)?,
+            skill_md: r.try_get(4).map_err(super::sqlx_err)?,
+            active: active_i32 != 0,
+            created: r.try_get(6).map_err(super::sqlx_err)?,
+            updated: r.try_get(7).map_err(super::sqlx_err)?,
+        });
+    }
+    Ok(skills)
+}
+
 /// Read a single skill's markdown content.
 pub async fn read_skill_md_pool(pool: &AnyPool, name: &str) -> io::Result<Option<String>> {
     let row = sqlx::query("SELECT skill_md FROM evolved_skills WHERE name = ?")

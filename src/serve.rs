@@ -162,11 +162,37 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 json_response(&body)
             }
 
+            // ── Project list ─────────────────────────────────
+            // Returns the sorted list of project slugs discovered under
+            // ~/.harness/projects/. The frontend project dropdown populates
+            // from this; without it the dropdown is empty and the previously-
+            // selected project stays pinned (cannot switch, cannot see all).
+            (Method::Get, "/api/projects") => {
+                let root = crate::shared::paths::harness_projects_root();
+                let mut slugs: Vec<String> = Vec::new();
+                if let Ok(rd) = std::fs::read_dir(&root) {
+                    for entry in rd.filter_map(|e| e.ok()) {
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                            if let Some(name) = entry.file_name().to_str() {
+                                slugs.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+                slugs.sort();
+                json_response(&serde_json::to_string(&slugs).unwrap_or_else(|_| "[]".into()))
+            }
+
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
                 let cmd = parse_query_param(url, "cmd").unwrap_or_default();
+                // `project` selects a specific project slug; absent or
+                // `__all__` means cross-project aggregate. The frontend's
+                // projectArgs() omits the param entirely for "all".
+                let project =
+                    parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
                 let harness_dir = common::harness_dir();
-                let body = handle_harness_cmd(&cmd, &harness_dir);
+                let body = handle_harness_cmd(&cmd, &harness_dir, project.as_deref());
                 json_response(&body)
             }
 
@@ -425,25 +451,29 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
     None
 }
 
-fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
+fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<&str>) -> String {
     use std::fs;
     match cmd {
         "get_harness_metrics" => {
-            // Try SQLite first, fallback to JSON file
+            // Project-scoped load: a specific slug, or cross-project aggregate
+            // when `project` is None. Uses the (key, project)-keyed
+            // metrics_state table correctly (the unfiltered loader returned
+            // indeterminate results with multiple projects).
             if let Ok(metrics) = crate::store::runtime::block_on(async {
                 let pool = crate::store::pool::harness_pool().await?;
-                crate::store::metrics::load_metrics_pool(&pool).await
+                crate::store::metrics::load_metrics_scoped_pool(&pool, project).await
             }) {
                 return serde_json::to_string(&metrics).unwrap_or_else(|_| "null".into());
             }
+            // File fallback — only meaningful for the active project dir.
             let p = harness_dir.join("metrics.json");
             fs::read_to_string(&p).unwrap_or_else(|_| "null".into())
         }
         "get_evolved_skills" => {
-            // Try SQLite first
+            // Try SQLite first — scoped to the selected project.
             if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
                 let skills = crate::store::runtime::block_on(
-                    crate::store::evolved::list_skills_full_pool(&pool),
+                    crate::store::evolved::list_skills_full_scoped_pool(&pool, project),
                 )
                 .unwrap_or_default()
                 .into_iter()
@@ -456,14 +486,14 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
                 })
                 .collect::<Vec<_>>();
                 let history = crate::store::runtime::block_on(
-                    crate::store::evolution::query_recent_records_pool(&pool, 50),
+                    crate::store::evolution::query_recent_records_scoped_pool(&pool, 50, project),
                 )
                 .unwrap_or_default()
                 .into_iter()
                 .filter_map(|r| serde_json::to_value(r).ok())
                 .collect::<Vec<_>>();
                 let total_sessions = crate::store::runtime::block_on(
-                    crate::store::metrics::load_metrics_pool(&pool),
+                    crate::store::metrics::load_metrics_scoped_pool(&pool, project),
                 )
                 .map(|m| m.total_sessions)
                 .unwrap_or(0);
@@ -537,10 +567,11 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
             // Try SQLite first, fallback to JSONL
             if let Ok(stats) = crate::store::runtime::block_on(async {
                 let pool = crate::store::pool::harness_pool().await?;
-                crate::store::observations::query_obs_stats_pool(
+                crate::store::observations::query_obs_stats_scoped_pool(
                     &pool,
                     "2020-01-01", // all data
                     "2099-12-31",
+                    project,
                 )
                 .await
             }) {
@@ -821,6 +852,89 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path) -> String {
         }
         "get_graph" => {
             graph::rebuild_graph_json().unwrap_or_else(|_| r#"{"nodes":[],"edges":[]}"#.into())
+        }
+        // ── HarnessX evolution-engine surfaces ────────────────────────────
+        // These read the state the 4-PR evolution stack writes, so the
+        // dashboard can surface reward-hacking, regression, variant, and
+        // adaptation-landscape state. Each is a thin reader; computation
+        // stays in the evolve modules.
+        "get_seesaw_registry" => {
+            let reg = crate::evolve::seesaw::load_registry();
+            serde_json::to_string(&reg).unwrap_or_else(|_| "null".into())
+        }
+        "get_variant_pool" => {
+            let pool = crate::evolve::variants::VariantPool::load();
+            serde_json::to_string(&pool).unwrap_or_else(|_| "null".into())
+        }
+        "get_harness_snapshot" => {
+            let snap = crate::evolve::snapshot::build_snapshot();
+            serde_json::to_string(&snap).unwrap_or_else(|_| "null".into())
+        }
+        "get_adaptation_landscape" => {
+            // Landscape is computed from evolution history + current digests.
+            // For the dashboard we compute it from history + an empty digest
+            // set (the per-session digests are reflect-only here); the
+            // persistent_failures / edit_type_coverage / untried_edit_types
+            // come from history alone.
+            let history = crate::store::runtime::block_on(async {
+                let pool = crate::store::pool::harness_pool().await?;
+                crate::store::evolution::query_all_records_pool(&pool).await
+            })
+            .unwrap_or_default();
+            let landscape = crate::evolve::planner::build_landscape(&history, &[], 2);
+            serde_json::to_string(&landscape).unwrap_or_else(|_| "null".into())
+        }
+        "get_manifests" => {
+            // Tail-read the falsifiability ledger sidecar (manifests.jsonl).
+            // Cap at the most recent 50 to bound payload size.
+            let path = crate::shared::paths::manifests_file();
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for line in text.lines().rev().take(50) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        items.push(v);
+                    }
+                }
+            }
+            serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+        }
+        // ── Previously-broken panels (returned "null" via the fallthrough) ─
+        "get_session_snapshots" => {
+            // List session snapshot files in the project's sessions/ dir.
+            let sessions_dir = harness_dir.join("sessions");
+            let mut snaps: Vec<String> = Vec::new();
+            if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
+                for e in rd.flatten() {
+                    if let Some(n) = e.file_name().to_str() {
+                        if n.ends_with(".json") {
+                            snaps.push(n.to_string());
+                        }
+                    }
+                }
+            }
+            snaps.sort();
+            serde_json::to_string(&snaps).unwrap_or_else(|_| "[]".into())
+        }
+        "get_global_patterns" => {
+            // Cross-project global patterns (opt-in feature). Parse the JSONL
+            // ledger line-by-line into a JSON array; raw text would not parse
+            // as a single JSON value on the TS client. Cap at recent 50.
+            let path = crate::shared::paths::global_patterns_file();
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for line in text.lines().rev().take(50) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        items.push(v);
+                    }
+                }
+            }
+            serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+        }
+        "get_effect_pending" => {
+            // Whether a cross-project effect export is pending this session.
+            // We approximate: present if the marker file exists.
+            let marker = harness_dir.join(".cross-project-enabled");
+            serde_json::json!({ "enabled": marker.exists() }).to_string()
         }
         _ => "null".into(),
     }

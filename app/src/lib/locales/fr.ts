@@ -54,7 +54,7 @@ export default {
   patternExpertPoolDesc: 'Routage vers le spécialiste par type de tâche',
   patternProducerReviewerDesc: 'Un construit, un révise, itérer',
   patternSupervisorDesc: 'Coordinateur central distribue aux workers',
-  pageCommands: 'Commandes',
+  pageCommands: 'Pipeline',
   pageCommandsDesc3: '3 commandes principales — orbit, evolve, team — cliquez pour copier',
   cmdEvolveDesc: 'Inspecter ou déclencher l\'évolution des compétences',
   cmdTeamDesc: 'Générer une équipe d\'agents spécifique au projet',

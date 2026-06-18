@@ -54,7 +54,7 @@ export default {
   patternExpertPoolDesc: '依任務類型路由到專家',
   patternProducerReviewerDesc: '一人建構，一人審查，迭代',
   patternSupervisorDesc: '中央協調器向工作節點分發任務',
-  pageCommands: '命令',
+  pageCommands: '流水線',
   pageCommandsDesc3: '3個頂級命令 — orbit、evolve、team — 點擊卡片複製',
   cmdEvolveDesc: '檢查或觸發技能進化',
   cmdTeamDesc: '生成專案專屬代理團隊',
