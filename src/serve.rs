@@ -916,9 +916,19 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             serde_json::to_string(&snaps).unwrap_or_else(|_| "[]".into())
         }
         "get_global_patterns" => {
-            // Cross-project global patterns (opt-in feature).
+            // Cross-project global patterns (opt-in feature). Parse the JSONL
+            // ledger line-by-line into a JSON array; raw text would not parse
+            // as a single JSON value on the TS client. Cap at recent 50.
             let path = crate::shared::paths::global_patterns_file();
-            std::fs::read_to_string(&path).unwrap_or_else(|_| "[]".into())
+            let mut items: Vec<serde_json::Value> = Vec::new();
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                for line in text.lines().rev().take(50) {
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                        items.push(v);
+                    }
+                }
+            }
+            serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
         }
         "get_effect_pending" => {
             // Whether a cross-project effect export is pending this session.
