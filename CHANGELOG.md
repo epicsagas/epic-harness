@@ -5,22 +5,6 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.8.0] — 2026-06-19
-
-Project-scoped evolution dashboard + evolution-engine accuracy follow-ups. Every dashboard panel now reflects the selected project, and `from_db_str` no longer distorts unknown edit types. Continues the 0.7.0 HarnessX work; closes #81, #83, #84, #91.
-
-### Added — Project-scoped dashboard (#92, #93)
-- File-based evolution readers (`seesaw`/`variants`/`snapshot`/`manifests`) thread `project` via `*_for(project)` helpers — switching projects now updates all panels.
-- `metrics_state` / `evolution_records` / `score_history` / `skill_attribution` writers bind the project slug; scoped readers return per-project rows.
-- `metrics_state` PK `(key)` → `(key, project)` and `skill_attribution` PK `(skill_name)` → `(skill_name, project)` via idempotent table-rebuild migrations (`_harness_meta` guards, transactional).
-- `score_history` DELETE is project-scoped (was whole-table — a latent cross-project data-loss bug).
-- (#80) Dashboard surfaces evolution-engine state (reward hacking, seesaw, variants, adaptation landscape, manifests) + `get_global_patterns` JSONL→array serialization fix.
-
-### Fixed — Evolution engine accuracy (#81, #95)
-- `EditType::from_db_str` no longer distorts unknown DB values into `AddSkill` — added `EditType::Unknown` (excluded from coverage) and made `"add_skill"` explicit.
-- `edit_type_roundtrips` test timestamp is index-based (structurally unique, survives future UNIQUE constraints / new variants).
-- `token_estimate` / `estimate_tokens` documented as intentional scaffold (no longer a silently-unused field).
-
 ## [0.7.0] — 2026-06-17
 
 The HarnessX evolution-engine release. Adapts the AEGIS pipeline (arXiv:2606.14249v1) to epic-harness's single-agent, per-project evolution loop. The evolution engine went from "reactive single-agent + SKILL.md-only" to **strategic, typed, regression-protected, and self-verifying**. ~5,000 LOC across 5 PRs (#75–#80), +69 tests, all CI green. Driven by the gap-analysis at `docs/analysis/harnessx-vs-epic-harness-gap-analysis.md` (vault mirror `ref-010`).
