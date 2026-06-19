@@ -59,6 +59,9 @@ the task directory. Env overrides: `COST_CAP` (default 5.0 USD per arm),
   test (guarantees epic is absent in bare). The main run should switch to a
   per-plugin toggle (`enabledPlugins['epic@epicsagas']` via `--settings`) so that
   **only** the plugin varies.
-- SWE-bench Verified grading still requires Docker — run the main run on a
-  Docker-equipped host. These tasks use plain `pytest` so no Docker is needed here.
+- SWE-bench Verified grading needs a Docker-compatible container runtime — **Docker or
+  Podman** (Podman verified: `swebench` 4.x uses the `docker` Python SDK, which talks to the
+  podman socket). One gotcha: a `~/.docker/config.json` with `credsStore: "desktop"` breaks
+  pulls/builds (`docker-credential-desktop not installed`); use a clean `DOCKER_CONFIG`.
+  These smoke tasks use plain `pytest` so no container is needed here.
 - `pass@1` from a single run is a feasibility signal, not a statistic.

@@ -93,10 +93,16 @@ trivial tasks that cannot engage the plugin.
 3. **Tighten the toggle for purity.** `--bare` also strips LSP/mcp/hooks, not only the
    plugin. Acceptable for smoke; for the main run switch to a per-plugin toggle
    (`enabledPlugins['epic@epicsagas']` via `--settings`) so *only* the plugin varies.
-4. **Docker + budget.** SWE-bench Verified grading needs Docker (absent on this host) —
-   run the main run on a Docker-equipped machine. Budget: epic ~$0.6/instance here × 10–20
-   instances × (harder tasks ⇒ more turns) ⇒ plan **$30–120+**; set the `$5/arm` cap and
-   watch it.
+4. **Container runtime + budget.** SWE-bench Verified grading needs a Docker-compatible
+   container runtime — **not Docker specifically: Podman works** (verified, see Appendix).
+   `swebench` 4.x drives containers via the `docker` Python SDK, which talks to podman's
+   socket transparently (`/var/run/docker.sock` → podman machine). Actual host requirements:
+   (a) a runtime exposing a Docker-compatible socket; (b) a clean docker config —
+   `~/.docker/config.json` with `credsStore: "desktop"` breaks every pull/build with
+   `docker-credential-desktop not installed`; point `DOCKER_CONFIG` at a `{}` config;
+   (c) ~1.3 GB base + ~2.2 GB env (shared) + ~2.4 GB/instance disk. Budget: epic
+   ~$0.6/instance here × 10–20 instances × (harder tasks ⇒ more turns) ⇒ plan **$30–120+**;
+   set the `$5/arm` cap and watch it.
 
 ## Limitations
 
@@ -104,3 +110,32 @@ trivial tasks that cannot engage the plugin.
 - Trivial tasks bias against the plugin (see Analysis).
 - `--bare` is not a surgically plugin-only toggle (see requirement 3).
 - Cost figures are GLM-5.2[1m] spot prices; rerun for current pricing.
+
+## Appendix — Podman grading verified (2026-06-19, post-smoke)
+
+The smoke tasks are Docker-free by design (plain `pytest`). To confirm the main run's
+container grading is not actually Docker-gated, the harness (`swebench` 4.1.0) was driven
+end-to-end under **Podman 5.8.2** on an arm64 host against one real SWE-bench Verified
+instance (`sympy__sympy-23950`, sympy 1.12).
+
+| patch | verdict | FAIL_TO_PASS (`test_as_set`) | PASS_TO_PASS (4) | wall |
+|-------|---------|------------------------------|------------------|------|
+| gold (`return self.args[1]`) | **resolved** | success | all success | 91.7 s* |
+| wrong (`return self.args[0]`) | **unresolved** | failure | all success | 18.6 s |
+
+\* includes base+env+eval image build (native arm64); the test run itself was 2.2 s. The
+wrong-patch row reused cached images. Verdict discrimination confirmed: the gold patch
+resolves, a one-character-off patch is rejected.
+
+- **Runtime:** Podman 5.8.2 (arm64 machine). `docker.from_env()` connects to the podman
+  socket; no shim or `docker` CLI needed.
+- **Blocker found:** `credsStore: "desktop"` in `~/.docker/config.json` →
+  `docker-credential-desktop not installed` → every pull/build died with a `StoreError`.
+  Fixed by pointing `DOCKER_CONFIG` at a dir containing a `{}` config. This was the real
+  failure on the host — not Docker-vs-Podman.
+- **Arch:** the harness defaults to x86_64; this run forced native arm64
+  (`arch="arm64"` + local build, since the registry pre-built images are x86_64 only).
+  Native arm64 is clean for pure-Python repos; C-extension repos are the open risk.
+- **Implication for requirement 4:** the main run does **not** require relocating to "a
+  Docker host" — any Docker-compatible runtime with a clean config suffices. Prefer a
+  native x86_64 host to match the pre-built images and skip the build.
