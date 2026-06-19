@@ -198,7 +198,9 @@ mod tests {
             manifests: vec![],
         };
 
-        insert_record_pool(&pool, &rec, "test-project").await.unwrap();
+        insert_record_pool(&pool, &rec, "test-project")
+            .await
+            .unwrap();
 
         let results = query_recent_records_pool(&pool, 10).await.unwrap();
         assert_eq!(results.len(), 1);
@@ -225,7 +227,9 @@ mod tests {
                 edit_type: ty.clone(),
                 manifests: vec![],
             };
-            insert_record_pool(&pool, &rec, "test-project").await.unwrap();
+            insert_record_pool(&pool, &rec, "test-project")
+                .await
+                .unwrap();
         }
 
         let results = query_recent_records_pool(&pool, 100).await.unwrap();

@@ -164,8 +164,20 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         Ok(())
     }
 
-    upsert(&mut tx, "total_sessions", &m.total_sessions.to_string(), project).await?;
-    upsert(&mut tx, "avg_success_rate", &m.avg_success_rate.to_string(), project).await?;
+    upsert(
+        &mut tx,
+        "total_sessions",
+        &m.total_sessions.to_string(),
+        project,
+    )
+    .await?;
+    upsert(
+        &mut tx,
+        "avg_success_rate",
+        &m.avg_success_rate.to_string(),
+        project,
+    )
+    .await?;
     upsert(
         &mut tx,
         "total_evolved_skills",
@@ -294,7 +306,13 @@ pub async fn save_metrics_direct(
     }
 
     upsert(tx, "total_sessions", &m.total_sessions.to_string(), project).await?;
-    upsert(tx, "avg_success_rate", &m.avg_success_rate.to_string(), project).await?;
+    upsert(
+        tx,
+        "avg_success_rate",
+        &m.avg_success_rate.to_string(),
+        project,
+    )
+    .await?;
     upsert(
         tx,
         "total_evolved_skills",
@@ -792,7 +810,10 @@ mod tests {
         let lb = load_metrics_scoped_pool(&pool, Some("proj-b"))
             .await
             .unwrap();
-        assert_eq!(la.total_sessions, 5, "proj-a must not be overwritten by proj-b");
+        assert_eq!(
+            la.total_sessions, 5,
+            "proj-a must not be overwritten by proj-b"
+        );
         assert_eq!(lb.total_sessions, 99);
     }
 
