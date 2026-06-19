@@ -248,19 +248,24 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         .map_err(super::sqlx_err)?;
     }
 
-    // Skill attribution — project column not yet in schema (tracked in a
-    // separate issue); left unscoped intentionally.
+    // Skill attribution — scoped to (skill_name, project).
     for sa in m.skill_attribution.values() {
         sqlx::query(
-            "INSERT OR REPLACE INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?,?,?,?,?)",
+            "INSERT INTO skill_attribution
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project)
+             VALUES (?,?,?,?,?,?)
+             ON CONFLICT (skill_name, project) DO UPDATE SET
+                sessions_active = excluded.sessions_active,
+                avg_score_with = excluded.avg_score_with,
+                avg_score_without = excluded.avg_score_without,
+                first_seen = excluded.first_seen",
         )
         .bind(&sa.skill_name)
         .bind(super::u64_to_i64(sa.sessions_active))
         .bind(sa.avg_score_with)
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
+        .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -382,18 +387,24 @@ pub async fn save_metrics_direct(
         .map_err(super::sqlx_err)?;
     }
 
-    // Skill attribution
+    // Skill attribution — scoped to (skill_name, project).
     for sa in m.skill_attribution.values() {
         sqlx::query(
-            "INSERT OR REPLACE INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?,?,?,?,?)",
+            "INSERT INTO skill_attribution
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project)
+             VALUES (?,?,?,?,?,?)
+             ON CONFLICT (skill_name, project) DO UPDATE SET
+                sessions_active = excluded.sessions_active,
+                avg_score_with = excluded.avg_score_with,
+                avg_score_without = excluded.avg_score_without,
+                first_seen = excluded.first_seen",
         )
         .bind(&sa.skill_name)
         .bind(super::u64_to_i64(sa.sessions_active))
         .bind(sa.avg_score_with)
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
+        .bind(project)
         .execute(&mut **tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -617,12 +628,19 @@ pub async fn load_metrics_scoped_pool(
         })
         .collect();
 
-    // Skill attribution — not yet project-scoped: the table has no project
-    // column yet (#91). Return all rows regardless of the requested project.
-    let sa_rows = sqlx::query(
-        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
-         FROM skill_attribution",
-    )
+    // Skill attribution — scoped by project (Some), or all (None).
+    let sa_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+             FROM skill_attribution WHERE project = ?",
+        )
+        .bind(p)
+    } else {
+        sqlx::query(
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+             FROM skill_attribution",
+        )
+    }
     .fetch_all(pool)
     .await
     .map_err(super::sqlx_err)?;

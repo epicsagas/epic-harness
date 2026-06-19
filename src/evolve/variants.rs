@@ -52,7 +52,13 @@ impl VariantPool {
     /// `variants.json` must NOT panic — it resets to an empty pool so the
     /// session degrades gracefully rather than crashing every dispatch.
     pub fn load() -> VariantPool {
-        let path = crate::shared::paths::variant_pool_path();
+        VariantPool::load_for(None)
+    }
+
+    /// Project-scoped load: reads `variants.json` from the requested project's
+    /// dir (None/empty = CWD project, the pre-existing behavior).
+    pub fn load_for(project: Option<&str>) -> VariantPool {
+        let path = crate::shared::paths::variant_pool_path_for(project);
         match std::fs::read_to_string(&path) {
             Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
             Err(_) => VariantPool::default(),
