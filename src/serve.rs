@@ -878,7 +878,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             // come from history alone.
             let history = crate::store::runtime::block_on(async {
                 let pool = crate::store::pool::harness_pool().await?;
-                crate::store::evolution::query_all_records_pool(&pool).await
+                crate::store::evolution::query_recent_records_scoped_pool(&pool, i64::MAX, project)
+                    .await
             })
             .unwrap_or_default();
             let landscape = crate::evolve::planner::build_landscape(&history, &[], 2);

@@ -140,59 +140,74 @@ pub fn load_metrics() -> io::Result<Metrics> {
 
 // ── Save ─────────────────────────────────────────────
 
-/// Save the full Metrics struct to SQLite.
-pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
+/// Save the full Metrics struct to SQLite, scoped to `project`.
+pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io::Result<()> {
     let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
 
-    // Scalar state — upsert each key
+    // Scalar state — upsert each key scoped to (key, project).
     async fn upsert(
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         key: &str,
         value: &str,
+        project: &str,
     ) -> io::Result<()> {
-        sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?, ?)")
-            .bind(key)
-            .bind(value)
-            .execute(&mut **tx)
-            .await
-            .map_err(super::sqlx_err)?;
+        sqlx::query(
+            "INSERT INTO metrics_state (key, value, project) VALUES (?, ?, ?) \
+             ON CONFLICT (key, project) DO UPDATE SET value = excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .bind(project)
+        .execute(&mut **tx)
+        .await
+        .map_err(super::sqlx_err)?;
         Ok(())
     }
 
-    upsert(&mut tx, "total_sessions", &m.total_sessions.to_string()).await?;
-    upsert(&mut tx, "avg_success_rate", &m.avg_success_rate.to_string()).await?;
+    upsert(&mut tx, "total_sessions", &m.total_sessions.to_string(), project).await?;
+    upsert(&mut tx, "avg_success_rate", &m.avg_success_rate.to_string(), project).await?;
     upsert(
         &mut tx,
         "total_evolved_skills",
         &m.total_evolved_skills.to_string(),
+        project,
     )
     .await?;
     if let Some(ref v) = m.last_session {
-        upsert(&mut tx, "last_session", v).await?;
+        upsert(&mut tx, "last_session", v, project).await?;
     }
     if let Some(v) = m.best_score {
-        upsert(&mut tx, "best_score", &v.to_string()).await?;
+        upsert(&mut tx, "best_score", &v.to_string(), project).await?;
     }
-    upsert(&mut tx, "best_session", &m.best_session).await?;
-    upsert(&mut tx, "trend", &m.trend).await?;
-    upsert(&mut tx, "stagnation_count", &m.stagnation_count.to_string()).await?;
+    upsert(&mut tx, "best_session", &m.best_session, project).await?;
+    upsert(&mut tx, "trend", &m.trend, project).await?;
+    upsert(
+        &mut tx,
+        "stagnation_count",
+        &m.stagnation_count.to_string(),
+        project,
+    )
+    .await?;
     if let Some(ref v) = m.last_error_context {
-        upsert(&mut tx, "last_error_context", v).await?;
+        upsert(&mut tx, "last_error_context", v, project).await?;
     }
     upsert(
         &mut tx,
         "reward_hacking_suspected",
         &m.reward_hacking_suspected.to_string(),
+        project,
     )
     .await?;
     if let Some(ref epoch) = m.epoch_class {
         if let Ok(s) = serde_json::to_string(epoch) {
-            upsert(&mut tx, "epoch_class", &s).await?;
+            upsert(&mut tx, "epoch_class", &s, project).await?;
         }
     }
 
-    // Score history — keep the most recent MAX_SCORE_HISTORY entries.
-    sqlx::query("DELETE FROM score_history")
+    // Score history — project-scoped: delete only this project's rows, then
+    // re-insert the most recent MAX_SCORE_HISTORY entries.
+    sqlx::query("DELETE FROM score_history WHERE project = ?")
+        .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -206,7 +221,7 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
     for entry in entries.into_iter().rev() {
         sqlx::query(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
-             dim_success, dim_quality, dim_cost) VALUES (?,?,?,?,?,?,?)",
+             dim_success, dim_quality, dim_cost, project) VALUES (?,?,?,?,?,?,?,?)",
         )
         .bind(&entry.timestamp)
         .bind(entry.success_rate)
@@ -215,12 +230,14 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
         .bind(entry.dimension_averages.tool_success)
         .bind(entry.dimension_averages.output_quality)
         .bind(entry.dimension_averages.execution_cost)
+        .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(super::sqlx_err)?;
     }
 
-    // Skill attribution — UPSERT per skill
+    // Skill attribution — project column not yet in schema (tracked in a
+    // separate issue); left unscoped intentionally.
     for sa in m.skill_attribution.values() {
         sqlx::query(
             "INSERT OR REPLACE INTO skill_attribution
@@ -243,9 +260,10 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics) -> io::Result<()> {
 
 /// Standalone save.
 pub fn save_metrics(m: &Metrics) -> io::Result<()> {
+    let project = crate::shared::paths::project_slug().to_string();
     super::runtime::block_on(async {
         let pool = super::pool::harness_pool().await?;
-        save_metrics_pool(&pool, m).await
+        save_metrics_pool(&pool, m, &project).await
     })
 }
 
@@ -254,55 +272,70 @@ pub fn save_metrics(m: &Metrics) -> io::Result<()> {
 pub async fn save_metrics_direct(
     tx: &mut sqlx::Transaction<'_, sqlx::Any>,
     m: &Metrics,
+    project: &str,
 ) -> io::Result<()> {
     async fn upsert(
         tx: &mut sqlx::Transaction<'_, sqlx::Any>,
         key: &str,
         value: &str,
+        project: &str,
     ) -> io::Result<()> {
-        sqlx::query("INSERT OR REPLACE INTO metrics_state (key, value) VALUES (?, ?)")
-            .bind(key)
-            .bind(value)
-            .execute(&mut **tx)
-            .await
-            .map_err(super::sqlx_err)?;
+        sqlx::query(
+            "INSERT INTO metrics_state (key, value, project) VALUES (?, ?, ?) \
+             ON CONFLICT (key, project) DO UPDATE SET value = excluded.value",
+        )
+        .bind(key)
+        .bind(value)
+        .bind(project)
+        .execute(&mut **tx)
+        .await
+        .map_err(super::sqlx_err)?;
         Ok(())
     }
 
-    upsert(tx, "total_sessions", &m.total_sessions.to_string()).await?;
-    upsert(tx, "avg_success_rate", &m.avg_success_rate.to_string()).await?;
+    upsert(tx, "total_sessions", &m.total_sessions.to_string(), project).await?;
+    upsert(tx, "avg_success_rate", &m.avg_success_rate.to_string(), project).await?;
     upsert(
         tx,
         "total_evolved_skills",
         &m.total_evolved_skills.to_string(),
+        project,
     )
     .await?;
     if let Some(ref v) = m.last_session {
-        upsert(tx, "last_session", v).await?;
+        upsert(tx, "last_session", v, project).await?;
     }
     if let Some(v) = m.best_score {
-        upsert(tx, "best_score", &v.to_string()).await?;
+        upsert(tx, "best_score", &v.to_string(), project).await?;
     }
-    upsert(tx, "best_session", &m.best_session).await?;
-    upsert(tx, "trend", &m.trend).await?;
-    upsert(tx, "stagnation_count", &m.stagnation_count.to_string()).await?;
+    upsert(tx, "best_session", &m.best_session, project).await?;
+    upsert(tx, "trend", &m.trend, project).await?;
+    upsert(
+        tx,
+        "stagnation_count",
+        &m.stagnation_count.to_string(),
+        project,
+    )
+    .await?;
     if let Some(ref v) = m.last_error_context {
-        upsert(tx, "last_error_context", v).await?;
+        upsert(tx, "last_error_context", v, project).await?;
     }
     upsert(
         tx,
         "reward_hacking_suspected",
         &m.reward_hacking_suspected.to_string(),
+        project,
     )
     .await?;
     if let Some(ref epoch) = m.epoch_class {
         if let Ok(s) = serde_json::to_string(epoch) {
-            upsert(tx, "epoch_class", &s).await?;
+            upsert(tx, "epoch_class", &s, project).await?;
         }
     }
 
-    // Score history
-    sqlx::query("DELETE FROM score_history")
+    // Score history — project-scoped.
+    sqlx::query("DELETE FROM score_history WHERE project = ?")
+        .bind(project)
         .execute(&mut **tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -316,7 +349,7 @@ pub async fn save_metrics_direct(
     for entry in entries.into_iter().rev() {
         sqlx::query(
             "INSERT INTO score_history (timestamp, success_rate, avg_score, observations,
-             dim_success, dim_quality, dim_cost) VALUES (?,?,?,?,?,?,?)",
+             dim_success, dim_quality, dim_cost, project) VALUES (?,?,?,?,?,?,?,?)",
         )
         .bind(&entry.timestamp)
         .bind(entry.success_rate)
@@ -325,6 +358,7 @@ pub async fn save_metrics_direct(
         .bind(entry.dimension_averages.tool_success)
         .bind(entry.dimension_averages.output_quality)
         .bind(entry.dimension_averages.execution_cost)
+        .bind(project)
         .execute(&mut **tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -565,19 +599,12 @@ pub async fn load_metrics_scoped_pool(
         })
         .collect();
 
-    // Skill attribution — filter by project, or all.
-    let sa_rows = if let Some(p) = project {
-        sqlx::query(
-            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
-             FROM skill_attribution WHERE project = ?",
-        )
-        .bind(p)
-    } else {
-        sqlx::query(
-            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
-             FROM skill_attribution",
-        )
-    }
+    // Skill attribution — not yet project-scoped: the table has no project
+    // column yet (#91). Return all rows regardless of the requested project.
+    let sa_rows = sqlx::query(
+        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+         FROM skill_attribution",
+    )
     .fetch_all(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -675,7 +702,7 @@ mod tests {
     async fn save_and_load_metrics() {
         let pool = test_pool().await;
         let m = sample_metrics();
-        save_metrics_pool(&pool, &m).await.unwrap();
+        save_metrics_pool(&pool, &m, "test-project").await.unwrap();
 
         let loaded = load_metrics_pool(&pool).await.unwrap();
         assert_eq!(loaded.total_sessions, 10);
@@ -695,7 +722,7 @@ mod tests {
     async fn save_and_load_metrics_round_trips_reward_hacking_flag() {
         let pool = test_pool().await;
         let m = sample_metrics_reward_hacking();
-        save_metrics_pool(&pool, &m).await.unwrap();
+        save_metrics_pool(&pool, &m, "test-project").await.unwrap();
 
         let loaded = load_metrics_pool(&pool).await.unwrap();
         assert!(
@@ -730,7 +757,7 @@ mod tests {
                 dimension_averages: ScoreDimensions::default(),
             });
         }
-        save_metrics_pool(&pool, &m).await.unwrap();
+        save_metrics_pool(&pool, &m, "test-project").await.unwrap();
 
         let loaded = load_metrics_pool(&pool).await.unwrap();
         assert!(loaded.score_history.len() <= 50);
@@ -743,6 +770,56 @@ mod tests {
             first.observations >= 10,
             "expected observations >= 10, got {}",
             first.observations
+        );
+    }
+
+    #[tokio::test]
+    async fn metrics_state_isolates_by_project() {
+        // AC1: writers scoped to project; a scoped read returns only that
+        // project's rows. Requires the composite PK (key, project).
+        let pool = test_pool().await;
+        let mut a = sample_metrics();
+        a.total_sessions = 5;
+        save_metrics_pool(&pool, &a, "proj-a").await.unwrap();
+
+        let mut b = sample_metrics();
+        b.total_sessions = 99;
+        save_metrics_pool(&pool, &b, "proj-b").await.unwrap();
+
+        let la = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+        let lb = load_metrics_scoped_pool(&pool, Some("proj-b"))
+            .await
+            .unwrap();
+        assert_eq!(la.total_sessions, 5, "proj-a must not be overwritten by proj-b");
+        assert_eq!(lb.total_sessions, 99);
+    }
+
+    #[tokio::test]
+    async fn score_history_delete_is_project_scoped() {
+        // AC3: saving proj-a must not wipe proj-b's score_history.
+        let pool = test_pool().await;
+        let mut b = sample_metrics();
+        b.score_history.push(SessionScoreEntry {
+            timestamp: "2026-06-01T10:00:00Z".into(),
+            success_rate: 0.9,
+            avg_score: 0.85,
+            observations: 1,
+            dimension_averages: ScoreDimensions::default(),
+        });
+        save_metrics_pool(&pool, &b, "proj-b").await.unwrap();
+
+        let a = sample_metrics();
+        save_metrics_pool(&pool, &a, "proj-a").await.unwrap();
+
+        let lb = load_metrics_scoped_pool(&pool, Some("proj-b"))
+            .await
+            .unwrap();
+        assert_eq!(
+            lb.score_history.len(),
+            2,
+            "proj-b score_history must survive a proj-a save"
         );
     }
 }
