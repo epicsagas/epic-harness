@@ -1,6 +1,6 @@
 {
   "name": "epic-harness",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "3 commands + 19 auto-trigger skills + self-evolving agent harness for Antigravity",
   "contextFileName": "GEMINI.md",
   "mcpServers": {

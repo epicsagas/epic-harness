@@ -3,7 +3,7 @@ members = [".", "src-tauri"]
 
 [package]
 name = "epic-harness"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 rust-version = "1.87.0"
 description = "3 commands + 19 auto-trigger skills + self-evolving agent harness with autonomous pipeline"
