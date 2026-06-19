@@ -240,6 +240,10 @@ fn tool_sequence(seg: &[&ObsRecord]) -> Vec<String> {
 }
 
 /// Rough token estimate: ~4 chars per token across action + result + snippet text.
+///
+/// Scaffold (#81 item 3): stored on `TaskDigest.token_estimate` but no
+/// gate/proposal reads it yet. Kept so the field stays populated for future
+/// planner cost-weighting.
 fn estimate_tokens(seg: &[&ObsRecord]) -> usize {
     let chars: usize = seg
         .iter()

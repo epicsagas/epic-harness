@@ -212,9 +212,9 @@ mod tests {
     async fn edit_type_roundtrips() {
         // R1: edit_type must persist and read back for every variant.
         let pool = test_pool().await;
-        for ty in crate::shared::evolution::EditType::all() {
+        for (i, ty) in crate::shared::evolution::EditType::all().iter().enumerate() {
             let rec = EvolutionRecord {
-                timestamp: format!("2026-06-16T10:00:0{}Z", ty.as_str().len()),
+                timestamp: format!("2026-06-16T10:00:0{}Z", i),
                 observations: 1,
                 success_rate: 0.5,
                 avg_score: 0.5,

@@ -24,6 +24,10 @@ pub enum EditType {
     AddGuardRule,
     /// Modify an existing skill's prompt (auto-tuning).
     ModifyPrompt,
+    /// An unrecognized/legacy DB value. Not a real edit; used so unknown rows
+    /// don't get silently distorted into `AddSkill` and pollute edit-type
+    /// coverage. Excluded from `all()` (never an "untried" edit).
+    Unknown,
 }
 
 impl EditType {
@@ -47,20 +51,25 @@ impl EditType {
             EditType::ModifyConfig => "modify_config",
             EditType::AddGuardRule => "add_guard_rule",
             EditType::ModifyPrompt => "modify_prompt",
+            EditType::Unknown => "unknown",
         }
     }
 
     /// Parse an edit type from its database string representation.
-    /// Falls back to `AddSkill` for unknown/legacy values, which is the
-    /// historically dominant edit type and the safe default.
+    ///
+    /// Unknown/legacy values decode to `Unknown` rather than being silently
+    /// distorted into `AddSkill` (which would mis-count edit-type coverage).
+    /// `Unknown` is excluded from `all()` so it never appears as an "untried"
+    /// edit in the planner.
     pub fn from_db_str(s: &str) -> Self {
         match s {
+            "add_skill" => EditType::AddSkill,
             "modify_skill" => EditType::ModifySkill,
             "add_instinct" => EditType::AddInstinct,
             "modify_config" => EditType::ModifyConfig,
             "add_guard_rule" => EditType::AddGuardRule,
             "modify_prompt" => EditType::ModifyPrompt,
-            _ => EditType::AddSkill,
+            _ => EditType::Unknown,
         }
     }
 }
@@ -324,6 +333,10 @@ pub struct TaskDigest {
     /// Number of previous iterations this task was seen (cross-iteration persistence).
     pub iterations_seen: u32,
     /// Estimated token count of the original trace segment.
+    ///
+    /// Scaffold (#81 item 3): populated by `digester::estimate_tokens` but not
+    /// yet read by any gate/proposal. Retained for future planner
+    /// cost-weighting.
     pub token_estimate: usize,
     /// Number of observations in this segment.
     pub observation_count: u64,
@@ -498,4 +511,29 @@ pub struct SkillVariant {
     pub avg_score: f64,
     /// Patterns that route tasks to this variant.
     pub task_routing: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditType;
+
+    #[test]
+    fn from_db_str_unknown_is_not_distorted_to_add_skill() {
+        // AC1 (#81 item 1): unknown DB values decode to Unknown, not AddSkill.
+        assert_eq!(EditType::from_db_str("bogus_type"), EditType::Unknown);
+        assert_eq!(EditType::from_db_str(""), EditType::Unknown);
+        // Known values still decode — incl. add_skill, which the old wildcard
+        // arm caught (must stay explicit after the fallback changed).
+        assert_eq!(EditType::from_db_str("add_skill"), EditType::AddSkill);
+        assert_eq!(
+            EditType::from_db_str("modify_prompt"),
+            EditType::ModifyPrompt
+        );
+    }
+
+    #[test]
+    fn unknown_excluded_from_all() {
+        // Unknown must never show up as an "untried" edit in coverage analysis.
+        assert!(!EditType::all().contains(&EditType::Unknown));
+    }
 }
