@@ -135,7 +135,12 @@ resolves, a one-character-off patch is rejected.
   failure on the host — not Docker-vs-Podman.
 - **Arch:** the harness defaults to x86_64; this run forced native arm64
   (`arch="arm64"` + local build, since the registry pre-built images are x86_64 only).
-  Native arm64 is clean for pure-Python repos; C-extension repos are the open risk.
+  Native arm64 is clean for pure-Python repos. **C-extension repos confirmed to break**:
+  `scikit-learn__scikit-learn-14141` (sklearn 0.22) env build died because its
+  `setup_env.sh` pins `pip install scipy==1.5.2`, which has no aarch64 wheel → source
+  build → needs `gfortran` (absent from the base image) → `library mach has Fortran
+  sources but no Fortran compiler found`. (conda-forge's aarch64 scipy 1.5.3 was fine; the
+  pip downgrade is what broke it.)
 - **Implication for requirement 4:** the main run does **not** require relocating to "a
   Docker host" — any Docker-compatible runtime with a clean config suffices. Prefer a
   native x86_64 host to match the pre-built images and skip the build.
