@@ -39,6 +39,7 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     // Rebuild metrics_state PK (key) -> (key, project) for legacy databases.
     // New databases already get the composite PK from DDL_SQLITE above.
     migrate_metrics_state_pk(pool).await?;
+    migrate_skill_attribution_pk(pool).await?;
 
     Ok(())
 }
@@ -83,6 +84,91 @@ async fn ensure_column(
 /// transaction. New databases already get the composite PK from `DDL_SQLITE`.
 /// Idempotent: guarded by `_harness_meta.metrics_pk_v2` and a
 /// `pragma_table_info` PK-column count check.
+/// Migrate `skill_attribution` PK `(skill_name)` → `(skill_name, project)`.
+///
+/// Legacy rows are attributed to `project=''` (single-project assumption —
+/// the writer had no project binding before this change). A multi-project
+/// legacy DB would collapse pre-existing rows to one `(skill_name, '')`, which
+/// is acceptable since pre-#92 data was CWD-only.
+async fn migrate_skill_attribution_pk(pool: &AnyPool) -> io::Result<()> {
+    let done: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM _harness_meta WHERE key = 'skill_attribution_pk_v2' AND value = '1'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    if done > 0 {
+        return Ok(());
+    }
+
+    let pk_cols: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info('skill_attribution') WHERE pk > 0",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    if pk_cols >= 2 {
+        sqlx::query(
+            "INSERT INTO _harness_meta (key, value) VALUES ('skill_attribution_pk_v2', '1') \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .execute(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+        return Ok(());
+    }
+
+    // Legacy single-PK table: rebuild to composite PK in one transaction.
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "CREATE TABLE skill_attribution_new (\
+            skill_name TEXT NOT NULL, sessions_active INTEGER NOT NULL DEFAULT 0, \
+            avg_score_with REAL NOT NULL DEFAULT 0.0, avg_score_without REAL NOT NULL DEFAULT 0.0, \
+            first_seen TEXT NOT NULL, project TEXT NOT NULL DEFAULT '', \
+            PRIMARY KEY (skill_name, project))",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "INSERT INTO skill_attribution_new \
+            (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project) \
+         SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, '' \
+         FROM skill_attribution \
+         ON CONFLICT (skill_name, project) DO UPDATE SET \
+            sessions_active = excluded.sessions_active, \
+            avg_score_with = excluded.avg_score_with, \
+            avg_score_without = excluded.avg_score_without, \
+            first_seen = excluded.first_seen",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    sqlx::query("DROP TABLE skill_attribution")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    sqlx::query("ALTER TABLE skill_attribution_new RENAME TO skill_attribution")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "INSERT INTO _harness_meta (key, value) VALUES ('skill_attribution_pk_v2', '1') \
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    tx.commit().await.map_err(super::sqlx_err)?;
+    Ok(())
+}
+
 async fn migrate_metrics_state_pk(pool: &AnyPool) -> io::Result<()> {
     let done: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM _harness_meta WHERE key = 'metrics_pk_v2' AND value = '1'",
@@ -245,11 +331,13 @@ pub(crate) const DDL_SQLITE: &str = r#"
     );
 
     CREATE TABLE IF NOT EXISTS skill_attribution (
-        skill_name        TEXT PRIMARY KEY,
+        skill_name        TEXT NOT NULL,
         sessions_active   INTEGER NOT NULL DEFAULT 0,
         avg_score_with    REAL NOT NULL DEFAULT 0.0,
         avg_score_without REAL NOT NULL DEFAULT 0.0,
-        first_seen        TEXT NOT NULL
+        first_seen        TEXT NOT NULL,
+        project           TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (skill_name, project)
     );
 
     CREATE TABLE IF NOT EXISTS orch_runs (

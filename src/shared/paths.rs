@@ -187,6 +187,31 @@ pub fn manifests_file() -> PathBuf {
     harness_dir().join("manifests.jsonl")
 }
 
+/// Resolve the per-project harness dir for a request. Falls back to the
+/// CWD-derived dir when `project` is `None`/empty (preserves existing callers
+/// that don't pass a project). Used by the dashboard read-path to scope
+/// file-backed readers (seesaw/variants/snapshot/manifests) to the selected
+/// project.
+pub fn resolve_harness_dir(project: Option<&str>) -> PathBuf {
+    match project {
+        Some(p) if !p.is_empty() => harness_dir_for_slug(p),
+        _ => harness_dir(),
+    }
+}
+
+pub fn project_seesaw_path_for(project: Option<&str>) -> PathBuf {
+    resolve_harness_dir(project).join("seesaw.json")
+}
+pub fn variant_pool_path_for(project: Option<&str>) -> PathBuf {
+    resolve_harness_dir(project).join("variants.json")
+}
+pub fn evolved_dir_for(project: Option<&str>) -> PathBuf {
+    resolve_harness_dir(project).join("evolved")
+}
+pub fn manifests_file_for(project: Option<&str>) -> PathBuf {
+    resolve_harness_dir(project).join("manifests.jsonl")
+}
+
 /// guard-rules.yaml stays in the project tree only if the user/team explicitly
 /// created it there. Otherwise, we default to the per-project global directory
 /// to keep the project tree clean.
@@ -269,4 +294,25 @@ pub fn claude_plugin_cache_dir() -> PathBuf {
         return PathBuf::from(d);
     }
     claude_config_dir().join("plugins")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_path_helpers_resolve_by_slug() {
+        // AC1: file-backed reader paths scope to the requested project.
+        // Distinct slugs → distinct dirs; None/"" fall back to the CWD default.
+        let a = project_seesaw_path_for(Some("proj-a"));
+        let b = project_seesaw_path_for(Some("proj-b"));
+        assert_ne!(a, b);
+        assert!(a.to_string_lossy().contains("proj-a"));
+        assert!(b.to_string_lossy().contains("proj-b"));
+        // None and "" both resolve to the CWD harness_dir.
+        assert_eq!(
+            project_seesaw_path_for(None),
+            project_seesaw_path_for(Some(""))
+        );
+    }
 }

@@ -18,9 +18,8 @@ use serde_json::Value;
 use crate::config::CONFIG;
 use crate::shared::evolution::{ConfigSummary, HarnessSnapshot, MetricsSummary};
 use crate::shared::helpers::list_dirs;
-use crate::shared::paths::{evolved_dir, guard_rules_file, project_slug};
+use crate::shared::paths::{evolved_dir_for, guard_rules_file, project_slug};
 use crate::shared::types::current_hook_profile;
-use crate::store::metrics::load_metrics;
 
 /// Recursively collect every leaf value in a JSON tree as dotted "path=value"
 /// strings, sorted canonically. Used so the hash is insensitive to map key
@@ -123,16 +122,23 @@ fn read_guard_rule_lines() -> Vec<String> {
 
 /// Build a MetricsSummary from the project's metrics, defaulting gracefully
 /// when the DB has no data yet (cold start).
-fn metrics_summary() -> MetricsSummary {
-    match load_metrics() {
-        Ok(m) => MetricsSummary {
+/// Project-scoped metrics summary via the scoped loader (None/empty = CWD).
+fn metrics_summary_for(project: Option<&str>) -> MetricsSummary {
+    let m = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await.ok()?;
+        crate::store::metrics::load_metrics_scoped_pool(&pool, project)
+            .await
+            .ok()
+    });
+    match m {
+        Some(m) => MetricsSummary {
             total_sessions: m.total_sessions,
             best_score: m.best_score,
             trend: m.trend,
             total_evolved: m.total_evolved_skills,
             stagnation_count: m.stagnation_count,
         },
-        Err(_) => MetricsSummary::default(),
+        None => MetricsSummary::default(),
     }
 }
 
@@ -155,7 +161,17 @@ fn config_summary() -> ConfigSummary {
 /// Pure read: touches only `evolved_dir`, `guard_rules_file`, the metrics DB,
 /// and the resolved CONFIG. Never mutates state.
 pub fn build_snapshot() -> HarnessSnapshot {
-    let evolved = evolved_dir();
+    build_snapshot_for(None)
+}
+
+/// Project-scoped snapshot: reads the evolved dir + metrics for the requested
+/// project (None/empty = CWD project, the pre-existing behavior).
+///
+/// Scope note: only `evolved_dir` and `metrics_summary` vary by project.
+/// `guard_rules` (project-tree/global file) and `config_summary` (global
+/// CONFIG) are intentionally project-independent.
+pub fn build_snapshot_for(project: Option<&str>) -> HarnessSnapshot {
+    let evolved = evolved_dir_for(project);
     // `evolved_dir` holds auto-evolved skills; treat those as both the active
     // and evolved skill sets (static skills ship in the binary and are not
     // per-project state). Listing the same dir for both is intentional — it
@@ -166,7 +182,7 @@ pub fn build_snapshot() -> HarnessSnapshot {
 
     let guard_rules = read_guard_rule_lines();
     let config = config_summary();
-    let metrics = metrics_summary();
+    let metrics = metrics_summary_for(project);
 
     // ISO-8601-ish UTC timestamp (stdlib only — no chrono dep required).
     let timestamp = {
@@ -177,7 +193,10 @@ pub fn build_snapshot() -> HarnessSnapshot {
         format!("{secs}")
     };
 
-    let project_slug = project_slug();
+    let project_slug = match project {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => project_slug(),
+    };
 
     // Compute hash from a snapshot with empty placeholder hash/timestamp so the
     // hash field does not feed into itself.

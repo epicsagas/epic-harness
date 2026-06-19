@@ -248,19 +248,24 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         .map_err(super::sqlx_err)?;
     }
 
-    // Skill attribution — project column not yet in schema (tracked in a
-    // separate issue); left unscoped intentionally.
+    // Skill attribution — scoped to (skill_name, project).
     for sa in m.skill_attribution.values() {
         sqlx::query(
-            "INSERT OR REPLACE INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?,?,?,?,?)",
+            "INSERT INTO skill_attribution
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project)
+             VALUES (?,?,?,?,?,?)
+             ON CONFLICT (skill_name, project) DO UPDATE SET
+                sessions_active = excluded.sessions_active,
+                avg_score_with = excluded.avg_score_with,
+                avg_score_without = excluded.avg_score_without,
+                first_seen = excluded.first_seen",
         )
         .bind(&sa.skill_name)
         .bind(super::u64_to_i64(sa.sessions_active))
         .bind(sa.avg_score_with)
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
+        .bind(project)
         .execute(&mut *tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -382,18 +387,24 @@ pub async fn save_metrics_direct(
         .map_err(super::sqlx_err)?;
     }
 
-    // Skill attribution
+    // Skill attribution — scoped to (skill_name, project).
     for sa in m.skill_attribution.values() {
         sqlx::query(
-            "INSERT OR REPLACE INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen)
-             VALUES (?,?,?,?,?)",
+            "INSERT INTO skill_attribution
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project)
+             VALUES (?,?,?,?,?,?)
+             ON CONFLICT (skill_name, project) DO UPDATE SET
+                sessions_active = excluded.sessions_active,
+                avg_score_with = excluded.avg_score_with,
+                avg_score_without = excluded.avg_score_without,
+                first_seen = excluded.first_seen",
         )
         .bind(&sa.skill_name)
         .bind(super::u64_to_i64(sa.sessions_active))
         .bind(sa.avg_score_with)
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
+        .bind(project)
         .execute(&mut **tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -617,12 +628,19 @@ pub async fn load_metrics_scoped_pool(
         })
         .collect();
 
-    // Skill attribution — not yet project-scoped: the table has no project
-    // column yet (#91). Return all rows regardless of the requested project.
-    let sa_rows = sqlx::query(
-        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
-         FROM skill_attribution",
-    )
+    // Skill attribution — scoped by project (Some), or all (None).
+    let sa_rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+             FROM skill_attribution WHERE project = ?",
+        )
+        .bind(p)
+    } else {
+        sqlx::query(
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+             FROM skill_attribution",
+        )
+    }
     .fetch_all(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -842,5 +860,57 @@ mod tests {
             2,
             "proj-b score_history must survive a proj-a save"
         );
+    }
+
+    #[tokio::test]
+    async fn skill_attribution_isolates_by_project() {
+        // AC2: skill_attribution rows are scoped to (skill_name, project).
+        let pool = test_pool().await;
+        let mut a = sample_metrics();
+        a.skill_attribution.clear();
+        a.skill_attribution.insert(
+            "skill-a".into(),
+            SkillAttribution {
+                skill_name: "skill-a".into(),
+                sessions_active: 1,
+                avg_score_with: 0.8,
+                avg_score_without: 0.5,
+                first_seen: "2026-06-19".into(),
+            },
+        );
+        save_metrics_pool(&pool, &a, "proj-a").await.unwrap();
+
+        let mut b = sample_metrics();
+        b.skill_attribution.clear();
+        b.skill_attribution.insert(
+            "skill-b".into(),
+            SkillAttribution {
+                skill_name: "skill-b".into(),
+                sessions_active: 2,
+                avg_score_with: 0.7,
+                avg_score_without: 0.4,
+                first_seen: "2026-06-19".into(),
+            },
+        );
+        save_metrics_pool(&pool, &b, "proj-b").await.unwrap();
+
+        let la = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+        let lb = load_metrics_scoped_pool(&pool, Some("proj-b"))
+            .await
+            .unwrap();
+        assert!(la.skill_attribution.contains_key("skill-a"));
+        assert!(!la.skill_attribution.contains_key("skill-b"));
+        assert!(lb.skill_attribution.contains_key("skill-b"));
+        assert!(!lb.skill_attribution.contains_key("skill-a"));
+    }
+
+    #[tokio::test]
+    async fn init_schema_pool_is_idempotent() {
+        // AC2: re-running init (and thus both PK migrations) must be a no-op.
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
     }
 }

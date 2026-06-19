@@ -29,7 +29,13 @@ pub const DEFAULT_TOLERANCE: f64 = 0.1;
 
 /// Load the solved-task registry from disk, or return an empty one.
 pub fn load_registry() -> SolvedTaskRegistry {
-    let path = crate::shared::paths::project_seesaw_path();
+    load_registry_for(None)
+}
+
+/// Project-scoped load: reads `seesaw.json` from the requested project's dir
+/// (None/empty = CWD project, the pre-existing behavior).
+pub fn load_registry_for(project: Option<&str>) -> SolvedTaskRegistry {
+    let path = crate::shared::paths::project_seesaw_path_for(project);
     match std::fs::read_to_string(&path) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
         Err(_) => SolvedTaskRegistry::default(),

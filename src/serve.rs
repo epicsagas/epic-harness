@@ -859,15 +859,15 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
         // adaptation-landscape state. Each is a thin reader; computation
         // stays in the evolve modules.
         "get_seesaw_registry" => {
-            let reg = crate::evolve::seesaw::load_registry();
+            let reg = crate::evolve::seesaw::load_registry_for(project);
             serde_json::to_string(&reg).unwrap_or_else(|_| "null".into())
         }
         "get_variant_pool" => {
-            let pool = crate::evolve::variants::VariantPool::load();
+            let pool = crate::evolve::variants::VariantPool::load_for(project);
             serde_json::to_string(&pool).unwrap_or_else(|_| "null".into())
         }
         "get_harness_snapshot" => {
-            let snap = crate::evolve::snapshot::build_snapshot();
+            let snap = crate::evolve::snapshot::build_snapshot_for(project);
             serde_json::to_string(&snap).unwrap_or_else(|_| "null".into())
         }
         "get_adaptation_landscape" => {
@@ -888,7 +888,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
         "get_manifests" => {
             // Tail-read the falsifiability ledger sidecar (manifests.jsonl).
             // Cap at the most recent 50 to bound payload size.
-            let path = crate::shared::paths::manifests_file();
+            let path = crate::shared::paths::manifests_file_for(project);
             let mut items: Vec<serde_json::Value> = Vec::new();
             if let Ok(text) = std::fs::read_to_string(&path) {
                 for line in text.lines().rev().take(50) {
