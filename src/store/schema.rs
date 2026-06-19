@@ -36,6 +36,10 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     )
     .await?;
 
+    // Rebuild metrics_state PK (key) -> (key, project) for legacy databases.
+    // New databases already get the composite PK from DDL_SQLITE above.
+    migrate_metrics_state_pk(pool).await?;
+
     Ok(())
 }
 
@@ -69,6 +73,88 @@ async fn ensure_column(
             .await
             .map_err(super::sqlx_err)?;
     }
+    Ok(())
+}
+
+/// Migrate `metrics_state` primary key from `(key)` to `(key, project)`.
+///
+/// SQLite cannot ALTER an existing table's primary key, so for legacy
+/// databases we rebuild the table (create-copy-drop-rename) inside a
+/// transaction. New databases already get the composite PK from `DDL_SQLITE`.
+/// Idempotent: guarded by `_harness_meta.metrics_pk_v2` and a
+/// `pragma_table_info` PK-column count check.
+async fn migrate_metrics_state_pk(pool: &AnyPool) -> io::Result<()> {
+    let done: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM _harness_meta WHERE key = 'metrics_pk_v2' AND value = '1'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    if done > 0 {
+        return Ok(());
+    }
+
+    // Number of columns participating in the PK: (key) = 1, (key, project) = 2.
+    let pk_cols: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM pragma_table_info('metrics_state') WHERE pk > 0")
+            .fetch_one(pool)
+            .await
+            .map_err(super::sqlx_err)?;
+
+    if pk_cols >= 2 {
+        // Already composite (new DB) — just stamp the guard.
+        sqlx::query(
+            "INSERT INTO _harness_meta (key, value) VALUES ('metrics_pk_v2', '1') \
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        )
+        .execute(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+        return Ok(());
+    }
+
+    // Legacy single-PK table: rebuild to composite PK in one transaction.
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "CREATE TABLE metrics_state_new (\
+            key TEXT NOT NULL, value TEXT NOT NULL, \
+            project TEXT NOT NULL DEFAULT '', \
+            PRIMARY KEY (key, project))",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "INSERT INTO metrics_state_new (key, value, project) \
+         SELECT key, value, COALESCE(project, '') FROM metrics_state \
+         ON CONFLICT (key, project) DO UPDATE SET value = excluded.value",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    sqlx::query("DROP TABLE metrics_state")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    sqlx::query("ALTER TABLE metrics_state_new RENAME TO metrics_state")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "INSERT INTO _harness_meta (key, value) VALUES ('metrics_pk_v2', '1') \
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    tx.commit().await.map_err(super::sqlx_err)?;
     Ok(())
 }
 
@@ -140,9 +226,10 @@ pub(crate) const DDL_SQLITE: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);
 
     CREATE TABLE IF NOT EXISTS metrics_state (
-        key     TEXT PRIMARY KEY,
+        key     TEXT NOT NULL,
         value   TEXT NOT NULL,
-        project TEXT NOT NULL DEFAULT ''
+        project TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY (key, project)
     );
 
     CREATE TABLE IF NOT EXISTS score_history (

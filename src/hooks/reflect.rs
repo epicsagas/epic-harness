@@ -999,7 +999,8 @@ pub fn run(_input: &HookInput) -> i32 {
     // Write evolution record to SQLite (primary) + JSONL (fallback)
     let _ = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::evolution::insert_record_pool(&pool, &record).await
+        let slug = crate::shared::paths::project_slug();
+        crate::store::evolution::insert_record_pool(&pool, &record, &slug).await
     });
     append_jsonl(&evolution_file(), &record);
 
@@ -1082,7 +1083,8 @@ pub fn run(_input: &HookInput) -> i32 {
     // Save metrics to SQLite (primary) + JSON file (fallback)
     let _ = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::save_metrics_pool(&pool, &metrics).await
+        let slug = crate::shared::paths::project_slug();
+        crate::store::metrics::save_metrics_pool(&pool, &metrics, &slug).await
     });
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);

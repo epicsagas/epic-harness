@@ -7,8 +7,12 @@ use std::io;
 
 use crate::shared::evolution::EvolutionRecord;
 
-/// Insert an evolution record.
-pub async fn insert_record_pool(pool: &AnyPool, rec: &EvolutionRecord) -> io::Result<i64> {
+/// Insert an evolution record, scoped to `project`.
+pub async fn insert_record_pool(
+    pool: &AnyPool,
+    rec: &EvolutionRecord,
+    project: &str,
+) -> io::Result<i64> {
     let error_json = serde_json::to_string(&rec.error_patterns).unwrap_or_else(|_| "{}".into());
     let failure_json = serde_json::to_string(&rec.failure_patterns).unwrap_or_else(|_| "[]".into());
 
@@ -16,8 +20,8 @@ pub async fn insert_record_pool(pool: &AnyPool, rec: &EvolutionRecord) -> io::Re
         "INSERT INTO evolution_records
          (timestamp, observations, success_rate, avg_score, error_patterns,
           failure_patterns, skills_seeded, skills_rolled_back, total_evolved,
-          analysis_summary, edit_type)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+          analysis_summary, edit_type, project)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
     )
     .bind(&rec.timestamp)
     .bind(super::u64_to_i64(rec.observations))
@@ -30,6 +34,7 @@ pub async fn insert_record_pool(pool: &AnyPool, rec: &EvolutionRecord) -> io::Re
     .bind(super::u64_to_i64(rec.total_evolved))
     .bind(&rec.analysis_summary)
     .bind(rec.edit_type.as_str())
+    .bind(project)
     .execute(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -43,9 +48,10 @@ pub async fn insert_record_pool(pool: &AnyPool, rec: &EvolutionRecord) -> io::Re
 
 /// Standalone insert.
 pub fn insert_record(rec: &EvolutionRecord) -> io::Result<i64> {
+    let project = crate::shared::paths::project_slug().to_string();
     super::runtime::block_on(async {
         let pool = super::pool::harness_pool().await?;
-        insert_record_pool(&pool, rec).await
+        insert_record_pool(&pool, rec, &project).await
     })
 }
 
@@ -192,7 +198,9 @@ mod tests {
             manifests: vec![],
         };
 
-        insert_record_pool(&pool, &rec).await.unwrap();
+        insert_record_pool(&pool, &rec, "test-project")
+            .await
+            .unwrap();
 
         let results = query_recent_records_pool(&pool, 10).await.unwrap();
         assert_eq!(results.len(), 1);
@@ -219,7 +227,9 @@ mod tests {
                 edit_type: ty.clone(),
                 manifests: vec![],
             };
-            insert_record_pool(&pool, &rec).await.unwrap();
+            insert_record_pool(&pool, &rec, "test-project")
+                .await
+                .unwrap();
         }
 
         let results = query_recent_records_pool(&pool, 100).await.unwrap();
