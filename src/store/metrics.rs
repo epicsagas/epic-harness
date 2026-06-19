@@ -861,4 +861,56 @@ mod tests {
             "proj-b score_history must survive a proj-a save"
         );
     }
+
+    #[tokio::test]
+    async fn skill_attribution_isolates_by_project() {
+        // AC2: skill_attribution rows are scoped to (skill_name, project).
+        let pool = test_pool().await;
+        let mut a = sample_metrics();
+        a.skill_attribution.clear();
+        a.skill_attribution.insert(
+            "skill-a".into(),
+            SkillAttribution {
+                skill_name: "skill-a".into(),
+                sessions_active: 1,
+                avg_score_with: 0.8,
+                avg_score_without: 0.5,
+                first_seen: "2026-06-19".into(),
+            },
+        );
+        save_metrics_pool(&pool, &a, "proj-a").await.unwrap();
+
+        let mut b = sample_metrics();
+        b.skill_attribution.clear();
+        b.skill_attribution.insert(
+            "skill-b".into(),
+            SkillAttribution {
+                skill_name: "skill-b".into(),
+                sessions_active: 2,
+                avg_score_with: 0.7,
+                avg_score_without: 0.4,
+                first_seen: "2026-06-19".into(),
+            },
+        );
+        save_metrics_pool(&pool, &b, "proj-b").await.unwrap();
+
+        let la = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+        let lb = load_metrics_scoped_pool(&pool, Some("proj-b"))
+            .await
+            .unwrap();
+        assert!(la.skill_attribution.contains_key("skill-a"));
+        assert!(!la.skill_attribution.contains_key("skill-b"));
+        assert!(lb.skill_attribution.contains_key("skill-b"));
+        assert!(!lb.skill_attribution.contains_key("skill-a"));
+    }
+
+    #[tokio::test]
+    async fn init_schema_pool_is_idempotent() {
+        // AC2: re-running init (and thus both PK migrations) must be a no-op.
+        let pool = super::super::pool::test_memory_pool().await;
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+        super::super::schema::init_schema_pool(&pool).await.unwrap();
+    }
 }

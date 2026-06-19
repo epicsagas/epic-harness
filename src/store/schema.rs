@@ -84,6 +84,12 @@ async fn ensure_column(
 /// transaction. New databases already get the composite PK from `DDL_SQLITE`.
 /// Idempotent: guarded by `_harness_meta.metrics_pk_v2` and a
 /// `pragma_table_info` PK-column count check.
+/// Migrate `skill_attribution` PK `(skill_name)` → `(skill_name, project)`.
+///
+/// Legacy rows are attributed to `project=''` (single-project assumption —
+/// the writer had no project binding before this change). A multi-project
+/// legacy DB would collapse pre-existing rows to one `(skill_name, '')`, which
+/// is acceptable since pre-#92 data was CWD-only.
 async fn migrate_skill_attribution_pk(pool: &AnyPool) -> io::Result<()> {
     let done: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM _harness_meta WHERE key = 'skill_attribution_pk_v2' AND value = '1'",

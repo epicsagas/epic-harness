@@ -166,6 +166,10 @@ pub fn build_snapshot() -> HarnessSnapshot {
 
 /// Project-scoped snapshot: reads the evolved dir + metrics for the requested
 /// project (None/empty = CWD project, the pre-existing behavior).
+///
+/// Scope note: only `evolved_dir` and `metrics_summary` vary by project.
+/// `guard_rules` (project-tree/global file) and `config_summary` (global
+/// CONFIG) are intentionally project-independent.
 pub fn build_snapshot_for(project: Option<&str>) -> HarnessSnapshot {
     let evolved = evolved_dir_for(project);
     // `evolved_dir` holds auto-evolved skills; treat those as both the active

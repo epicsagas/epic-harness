@@ -295,3 +295,24 @@ pub fn claude_plugin_cache_dir() -> PathBuf {
     }
     claude_config_dir().join("plugins")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_path_helpers_resolve_by_slug() {
+        // AC1: file-backed reader paths scope to the requested project.
+        // Distinct slugs → distinct dirs; None/"" fall back to the CWD default.
+        let a = project_seesaw_path_for(Some("proj-a"));
+        let b = project_seesaw_path_for(Some("proj-b"));
+        assert_ne!(a, b);
+        assert!(a.to_string_lossy().contains("proj-a"));
+        assert!(b.to_string_lossy().contains("proj-b"));
+        // None and "" both resolve to the CWD harness_dir.
+        assert_eq!(
+            project_seesaw_path_for(None),
+            project_seesaw_path_for(Some(""))
+        );
+    }
+}
