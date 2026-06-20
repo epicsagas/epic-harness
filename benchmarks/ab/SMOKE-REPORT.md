@@ -8,11 +8,14 @@
 GLM drives a coding task headless end-to-end, the bare/epic toggle takes effect, and
 cost/turns/latency/tokens are all capturable.
 
-**On these tasks, epic = pure overhead** — same pass@1 as bare at 9–20× the cost and
-2.5–4× the latency. **This does not mean epic is useless**: the tasks here are trivial
-single-function fixes that never engage epic's skills (spec/tdd/secure/debug/orbit). The
-result is predetermined for trivial tasks. The main run must use tasks hard enough to
-exercise epic before any conclusion about the plugin's value is valid.
+**On trivial tasks, the only measurable axis is cost — this is a feasibility ceiling effect,
+not a value finding.** Both arms solved both tasks (same pass@1), so the instrument could only
+surface per-attempt overhead (epic at 9–20× the cost, 2.5–4× the latency). Trivial
+single-function fixes structurally cannot engage epic's skills (spec/tdd/secure/debug/orbit),
+so a value of zero is a ceiling effect on the dependent variable — not a finding about the
+plugin. The value test requires SWE-bench Verified at real difficulty; see
+[`METHODOLOGY.md`](./METHODOLOGY.md) for why "pure overhead" was tautological, the
+multi-dimensional metrics, and the pre-registered value-vs-cost decision rule.
 
 ## Feasibility questions (answered)
 
@@ -27,6 +30,10 @@ exercise epic before any conclusion about the plugin's value is valid.
 - **Router/model held fixed:** `claudy zai` → GLM-5.2[1m] (Z.AI anthropic-compatible endpoint). The plugin is the only variable.
 - **bare arm:** `claudy zai --bare -p …` → `claude --bare` (skips plugins/hooks/LSP/mcp)
 - **epic arm:** `claudy zai -p …` → normal launch, `epic@epicsagas` plugin loaded
+- ⚠️ **Toggle impurity (smoke limitation):** `--bare` strips plugins **and** hooks/LSP/mcp, so
+  this smoke is "epic + tooling vs stripped," not "plugin vs not-plugin." The main run must use
+  a per-plugin `enabledPlugins` toggle so only the plugin varies (requirement 3; `METHODOLOGY.md`
+  §6.2 BLOCKER 2).
 - **Tasks:** 2 self-contained Python tasks, Docker-free, graded by independent `pytest` (tests fail before, pass after a correct fix — validated).
   - `task1-palindrome` (easy): fix a buggy `is_palindrome`
   - `task2-moving-average` (medium, TDD-framed): implement `moving_average` to a test spec
@@ -43,11 +50,18 @@ exercise epic before any conclusion about the plugin's value is valid.
 | **totals** | **bare** | 2/2 | **$0.094** | 12 | — | 5,428 | 54 |
 | **totals** | **epic** | 2/2 | **$1.168** | 13 | — | 173,719 | 161 |
 
-**Per-instance overhead of loading epic (same model, same outcome):**
-- cost: **9–20×** ($/instance)
+**Per-attempt overhead of loading epic (same model, same outcome — both arms pass):**
+- cost: **9–20×** ($/attempt)
 - latency: **2.5–4×**
-- context: **+83–85k input tokens/instance** (the cost driver)
+- context: **+83–85k input tokens/attempt** (the cost driver)
 - turns: +0 to +1
+
+> ⚠️ This is **per-attempt** overhead, not value-normalized cost. Per-attempt cost penalizes the
+> arm that injects context regardless of whether that context buys value. The fair denominator
+> is cost **per resolved instance** (CPRI) — which is *undefined* on a tie where both arms
+> resolve everything, so it defaults to "overhead." That is why this number is context only, not
+> the headline; the main-run cost headline is CPRI on the hard difficulty band
+> ([`METHODOLOGY.md`](./METHODOLOGY.md) §3.4, §4).
 
 ## Analysis
 
