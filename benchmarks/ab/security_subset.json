@@ -1,0 +1,2202 @@
+{
+  "tools_used": [
+    "path-regex",
+    "bandit"
+  ],
+  "n_total": 500,
+  "n_security_relevant": 96,
+  "instances": {
+    "astropy__astropy-12907": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-13033": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-13236": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-13398": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "astropy__astropy-13453": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-13579": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-13977": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14096": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14182": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14309": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14365": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14369": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14508": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14539": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14598": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-14995": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-7166": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-7336": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-7606": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-7671": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-8707": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "astropy__astropy-8872": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-10097": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-10554": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-10880": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-10914": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-10973": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-10999": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11066": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11087": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11095": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11099": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11119": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11133": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11138": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11141": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11149": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11163": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11179": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11206": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11211": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11239": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11265": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11276": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11292": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11299": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11333": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11400": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11433": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11451": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11477": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11490": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11532": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11551": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11555": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11603": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11728": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11734": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11740": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11749": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11790": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11815": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11820": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11848": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11880": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11885": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11951": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-11964": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-11999": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12039": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12050": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12125": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12143": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12155": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12193": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12209": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12262": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12273": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12276": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12304": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12308": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12325": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12406": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12419": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12663": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12708": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12713": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12741": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12754": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12774": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-12858": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-12965": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13012": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13023": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13028": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13033": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13089": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13109": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13112": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13121": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13128": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13158": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13195": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13212": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13279": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13297": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13315": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13343": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13344": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13346": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13363": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13401": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13406": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13410": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13417": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13449": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13512": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13513": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13516": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13551": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13568": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13569": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13590": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13658": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13670": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13741": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13786": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13794": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13807": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13809": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13810": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13820": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13821": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13837": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13925": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-13933": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-13964": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14007": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14011": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14017": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14034": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14053": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14089": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14122": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14140": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14155": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14170": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14238": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14311": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14315": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14349": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14351": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14373": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14376": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14404": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14434": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14493": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14500": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14534": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14539": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14559": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14580": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14608": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14631": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14672": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14725": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14752": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14765": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14771": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14787": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14792": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14855": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-14915": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-14999": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15022": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15037": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15098": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15103": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15104": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15127": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15128": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15161": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15252": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15268": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15277": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15278": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15280": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15315": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15368": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15375": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15380": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15382": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15467": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15499": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15503": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15525": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15554": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15561": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15563": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15569": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15572": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15629": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15695": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15731": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15732": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15741": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15814": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15851": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15863": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15916": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-15930": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15957": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15973": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-15987": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16032": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16082": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16100": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16116": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16136": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16139": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16145": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16255": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16256": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16263": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16315": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16333": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16429": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16454": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16485": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16493": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16502": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16527": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16560": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16569": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16595": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16612": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16631": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16642": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16661": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16662": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16667": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16801": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16819": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16877": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16899": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-16901": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16938": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-16950": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-17029": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-17084": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-17087": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "django__django-7530": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "django__django-9296": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-13989": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-14623": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-20488": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-20676": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-20826": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-20859": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-21568": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-22719": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-22865": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-22871": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-23299": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-23314": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-23412": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-23476": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24026": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24149": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24177": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24570": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24627": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24637": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24870": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-24970": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25122": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25287": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25311": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25332": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25479": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25775": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-25960": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-26113": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-26208": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-26291": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-26342": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "matplotlib__matplotlib-26466": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "mwaskom__seaborn-3069": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "mwaskom__seaborn-3187": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pallets__flask-5014": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "psf__requests-1142": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "psf__requests-1724": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "psf__requests-1766": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "psf__requests-1921": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "psf__requests-2317": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "psf__requests-2931": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "psf__requests-5414": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "psf__requests-6028": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-2905": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-3095": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-3151": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-3305": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-3677": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-3993": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4075": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4094": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4356": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4629": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4687": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4695": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-4966": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-6461": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-6599": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-6721": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-6744": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-6938": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-6992": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-7229": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-7233": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pydata__xarray-7393": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-4551": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-4604": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-4661": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-4970": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-6386": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-6528": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-6903": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-7080": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-7277": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pylint-dev__pylint-8898": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-10051": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-10081": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-10356": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-5262": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-5631": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-5787": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-5809": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-5840": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-6197": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-6202": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7205": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7236": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7324": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7432": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7490": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7521": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7571": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-7982": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "pytest-dev__pytest-8399": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-10297": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-10844": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-10908": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-11310": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-11578": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-12585": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-12682": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-12973": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13124": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13135": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13142": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13328": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13439": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13496": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-13779": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14053": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14087": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14141": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14496": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14629": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14710": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14894": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-14983": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-15100": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-25102": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-25232": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-25747": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-25931": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-25973": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-26194": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-26323": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "scikit-learn__scikit-learn-9288": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-10323": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-10435": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-10449": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-10466": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-10614": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-10673": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-11445": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-11510": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7440": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7454": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7462": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7590": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7748": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7757": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7889": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7910": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-7985": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8035": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8056": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8120": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8265": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8269": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8459": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8475": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8548": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8551": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8593": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8595": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8621": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "sphinx-doc__sphinx-8638": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-8721": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9229": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9230": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9258": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9281": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9320": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9367": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9461": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9591": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9602": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9658": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9673": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9698": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sphinx-doc__sphinx-9711": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-11618": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-12096": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-12419": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-12481": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-12489": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13031": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13091": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13372": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13480": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13551": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13615": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13647": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13757": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13798": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13852": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13877": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13878": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-13974": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-14248": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-14531": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-14711": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-14976": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15017": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15345": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15349": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15599": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15809": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15875": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-15976": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-16450": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-16597": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-16766": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-16792": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-16886": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "sympy__sympy-17139": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-17318": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-17630": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-17655": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-18189": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-18199": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-18211": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-18698": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-18763": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-19040": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-19346": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-19495": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-19637": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-19783": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-19954": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-20154": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-20428": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-20438": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-20590": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-20801": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-20916": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-21379": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-21596": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-21612": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-21847": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-21930": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-22080": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-22456": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-22714": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-22914": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-23262": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-23413": {
+      "security_relevant": true,
+      "reason": [
+        "path-regex"
+      ]
+    },
+    "sympy__sympy-23534": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-23824": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-23950": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-24066": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-24213": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-24443": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-24539": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-24562": {
+      "security_relevant": false,
+      "reason": []
+    },
+    "sympy__sympy-24661": {
+      "security_relevant": false,
+      "reason": []
+    }
+  }
+}
