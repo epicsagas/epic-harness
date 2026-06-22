@@ -1,0 +1,15 @@
+{
+  "arm": "epic",
+  "task": "task1-palindrome",
+  "ok": true,
+  "pass1": 1,
+  "is_error": false,
+  "cost_usd": 0.542347,
+  "num_turns": 6,
+  "duration_ms": 68970,
+  "input_tokens": 85278,
+  "wall_s": 72,
+  "rc": 0,
+  "cost_capped": 0,
+  "workdir": null
+}

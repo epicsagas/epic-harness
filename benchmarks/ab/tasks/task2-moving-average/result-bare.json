@@ -1,0 +1,15 @@
+{
+  "arm": "bare",
+  "task": "task2-moving-average",
+  "ok": true,
+  "pass1": 1,
+  "is_error": false,
+  "cost_usd": 0.067381,
+  "num_turns": 6,
+  "duration_ms": 34903,
+  "input_tokens": 3757,
+  "wall_s": 36,
+  "rc": 0,
+  "cost_capped": 0,
+  "workdir": "/var/folders/wk/4n_h65590p36wmkhcwllc31r0000gn/T/ab-bare-task2-moving-average.XXXX.MUw7v329DM"
+}

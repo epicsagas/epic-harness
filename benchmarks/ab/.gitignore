@@ -1,0 +1,14 @@
+# main-run outputs (regenerable — produced by run_swebench.sh / lib scripts)
+clone-cache/
+runs/
+predictions/
+manifest.jsonl
+manifest.sample.jsonl
+verdicts.jsonl
+verdicts.sample.jsonl
+*.log
+__pycache__/
+*.pyc
+
+# NOTE: difficulty_map.json and security_subset.json ARE committed — they are the
+# locked pre-registration inputs (band assignments + security subset) per METHODOLOGY §6.3.

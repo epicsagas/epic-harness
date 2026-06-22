@@ -1,0 +1,15 @@
+{
+  "arm": "bare",
+  "task": "task1-palindrome",
+  "ok": true,
+  "pass1": 1,
+  "is_error": false,
+  "cost_usd": 0.026577999999999997,
+  "num_turns": 6,
+  "duration_ms": 17063,
+  "input_tokens": 1671,
+  "wall_s": 18,
+  "rc": 0,
+  "cost_capped": 0,
+  "workdir": null
+}
