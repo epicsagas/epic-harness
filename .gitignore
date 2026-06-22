@@ -279,10 +279,12 @@ $RECYCLE.BIN/
 *.crl
 *.pem.txt
 
-.claude/
+.claude/*
+!.claude/skills
 .agents/
 !.agents/
 !.agents/plugins/
+!.agents/skills/
 .collet/
 .harness/
 .cursor/
