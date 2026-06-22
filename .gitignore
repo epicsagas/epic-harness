@@ -294,3 +294,5 @@ $RECYCLE.BIN/
 benchmarks/results/
 benchmarks/baselines/
 !benchmarks/baselines/latest.json
+# Smoke task run results (model-specific, generated at benchmark time)
+benchmarks/ab/tasks/**/result-*-*.json
