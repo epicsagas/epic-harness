@@ -83,10 +83,10 @@ Anti-patterns to reject:
 
 ## Orbit — Autonomous Pipeline
 
-Chains spec → go → check → ship in a single session.
+Chains spec → go → audit → ship in a single session.
 
 **Two modes:**
-- **Interactive**: User describes the problem, then spec/go/check/ship skills fire automatically
+- **Interactive**: User describes the problem, then spec/go/audit/ship skills fire automatically
 - **Council auto-spec**: 4-voice council (Architect, Skeptic, Pragmatist, Critic) analyzes the request and generates a spec. User approves or rejects.
 
 **After spec approved**, runs autonomously:
@@ -99,4 +99,4 @@ Chains spec → go → check → ship in a single session.
 
 **Human checkpoints:**
 - Spec must be explicitly approved before autonomous execution begins
-- 3 failed check cycles → pause for user decision (continue or abort)
+- 3 failed audit cycles → pause for user decision (continue or abort)

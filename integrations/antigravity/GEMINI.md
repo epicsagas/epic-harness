@@ -19,7 +19,7 @@ All commands are namespaced under `/harness:` (e.g., `/harness:orbit`).
 |---------|---------|
 | `/harness:evolve` | Analyze session observations, auto-evolve skills |
 | `/harness:team` | Agent team design and management |
-| `/harness:orbit` | Full autonomous pipeline (spec → go → check → ship) |
+| `/harness:orbit` | Full autonomous pipeline (spec → go → audit → ship) |
 
 ## Auto Skills
 

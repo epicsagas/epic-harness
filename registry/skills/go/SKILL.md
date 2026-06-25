@@ -141,7 +141,7 @@ After all tasks complete:
 - Remaining issues: none / [list]
 ```
 
-Tell the user: **"Build complete. Run `/check` to verify before shipping."**
+Tell the user: **"Build complete. Run `/audit` to verify before shipping."**
 
 ## Skills Auto-Triggered
 

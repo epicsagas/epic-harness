@@ -1,10 +1,10 @@
 ---
-description: "Autonomous pipeline that orchestrates skills: spec → go → check → ship → evolve in one shot. Selects mode automatically — Interactive (vague requirement, user runs discover+spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries check up to 3 times before pausing for user input. Runs evolve automatically on PR+CI success."
+description: "Autonomous pipeline that orchestrates skills: spec → go → audit → ship → evolve in one shot. Selects mode automatically — Interactive (vague requirement, user runs discover+spec first), Council (complex, 4-voice parallel spec), or Direct (clear requirement, immediate build). Auto-retries audit up to 3 times before pausing for user input. Runs evolve automatically on PR+CI success."
 ---
 
 # /orbit — Complete Orbit
 
-Autonomous pipeline that orchestrates skills: spec → go → check → ship → evolve in one shot.
+Autonomous pipeline that orchestrates skills: spec → go → audit → ship → evolve in one shot.
 
 ## Phase Recovery Protocol
 
@@ -25,7 +25,7 @@ If no file with `"status": "running"` exists, orbit was not started or has compl
 
 **Crash recovery**: If `updated_at` is older than 45 minutes and the pipeline is in `status: running`, assume a crash occurred. Read the state, determine the last completed phase from `phase_history` (rule 5 above applies), and resume from there. Report the recovery to the user.
 
-> **Worktree crash safety**: Pipeline state (`PIPELINE-*.json`), spec files, and check reports live in `$HARNESS_DIR` (shared across worktrees — same git remote → same project slug). They survive worktree loss. If the worktree was cleaned up externally during a crash, abort the orbit and warn the user.
+> **Worktree crash safety**: Pipeline state (`PIPELINE-*.json`), spec files, and audit reports live in `$HARNESS_DIR` (shared across worktrees — same git remote → same project slug). They survive worktree loss. If the worktree was cleaned up externally during a crash, abort the orbit and warn the user.
 
 > **Note:** The crash staleness threshold (45 min) is intentionally larger than the pipeline deadline (30 min) to avoid misclassifying a timeout'd-but-active pipeline as crashed. A pipeline that hit its deadline will show `status: timeout`, not `status: running`.
 
@@ -66,9 +66,9 @@ Create `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
   "branch": null,
   "worktree_name": null,
   "original_cwd": null,
-  "check_fail_count": 0,
+  "audit_fail_count": 0,
   "max_retries": 3,
-  "check_report": null,
+  "audit_report": null,
   "deadline": "{ISO-8601, now + 30 minutes}",
   "started_at": "{ISO-8601}",
   "updated_at": "{ISO-8601}",
@@ -221,7 +221,7 @@ Enter an isolated git worktree so other sessions can freely switch branches with
    - Creates `.claude/worktrees/orbit-{goal_slug}/` with a fresh branch from `origin/{default-branch}`
    - The worktree branch is `orbit-{goal_slug}`
 3. Record `worktree_name` and `branch` in pipeline state
-4. All subsequent phases (go/check/ship) execute inside the worktree
+4. All subsequent phases (go/audit/ship) execute inside the worktree
 5. State files remain accessible: `$HARNESS_DIR` resolves to the same `~/.harness/projects/{slug}/` (same git remote → same project slug)
 
 > **Why worktree?** Orbit pipelines can run for 30+ minutes. Without isolation, switching branches in another session corrupts the in-progress worktree — uncommitted changes, branch state, and file edits collide. Worktree isolation guarantees the orbit operates on its own copy of the repo.
@@ -269,21 +269,21 @@ When `orchestration_id` is present in pipeline state:
 ```bash
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 jq --arg now "$NOW" \
-  '.phase = "check" | .updated_at = $now |
+  '.phase = "audit" | .updated_at = $now |
    .phase_history += [{"phase": "go", "status": "complete", "completed_at": $now}]' \
   "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
 ```
 
 ---
 
-## Step 4: Check Phase
+## Step 4: Audit Phase
 
-State is already `"phase": "check"` from the go checkpoint. Set `check_report` path now:
+State is already `"phase": "audit"` from the go checkpoint. Set `audit_report` path now:
 ```bash
-CHECK_REPORT="$HARNESS_DIR/orbit/CHECK-${PIPELINE_ID}.md"
+AUDIT_REPORT="$HARNESS_DIR/orbit/AUDIT-${PIPELINE_ID}.md"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-jq --arg now "$NOW" --arg report "$CHECK_REPORT" \
-  '.check_report = $report | .updated_at = $now' \
+jq --arg now "$NOW" --arg report "$AUDIT_REPORT" \
+  '.audit_report = $report | .updated_at = $now' \
   "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
 ```
 
@@ -295,9 +295,9 @@ git diff --name-only $(git merge-base HEAD main)
 Classify changed files by scope: API · Frontend · Backend · Database · Infra · Docs · Tests.
 
 **Launch 3 core skill execution modes in parallel** (`run_in_background: true`):
-1. **check:code** — code quality, logic, style, test coverage, spec Requirements coverage
-2. **check:security** — security (OWASP Top 10) + performance (N+1, leaks)
-3. **check:test** — full test suite, AC verification, coverage delta
+1. **audit:code** — code quality, logic, style, test coverage, spec Requirements coverage
+2. **audit:security** — security (OWASP Top 10) + performance (N+1, leaks)
+3. **audit:test** — full test suite, AC verification, coverage delta
 
 **Conditional scope checks:**
 - API: contract testing, request validation
@@ -305,15 +305,15 @@ Classify changed files by scope: API · Frontend · Backend · Database · Infra
 - Database: migration safety, rollback plan
 - Infra: config validation, secret detection
 
-**Orchestration-aware Check:**
+**Orchestration-aware Audit:**
 When orchestration is active:
-1. The **check:code** execution reads `$HARNESS_DIR/orchestrator/` for activity history
-2. The **check:security** execution checks for concurrent write conflicts logged in execution streams
-3. Include orchestration-specific metrics in the Check Report
+1. The **audit:code** execution reads `$HARNESS_DIR/orchestrator/` for activity history
+2. The **audit:security** execution checks for concurrent write conflicts logged in execution streams
+3. Include orchestration-specific metrics in the Audit Report
 
-**Check Report:**
+**Audit Report:**
 ```
-## Check Report
+## Audit Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - Branch: {branch}
 - Scopes: [API, Backend, Tests, ...]
@@ -327,15 +327,15 @@ When orchestration is active:
 1. [blocker or warning]
 ```
 
-**Collect execution results before writing the report.** After all 3 background skill executions complete, synthesize their outputs into the Check Report. Do NOT write the file until all executions have reported back — a partial report is worse than no report for crash recovery.
+**Collect execution results before writing the report.** After all 3 background skill executions complete, synthesize their outputs into the Audit Report. Do NOT write the file until all executions have reported back — a partial report is worse than no report for crash recovery.
 
-Write full check report to `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md` — this is a separate file, not embedded in JSON. The `check_report` path was already set in pipeline state at the start of this step.
+Write full audit report to `$HARNESS_DIR/orbit/AUDIT-{pipeline_id}.md` — this is a separate file, not embedded in JSON. The `audit_report` path was already set in pipeline state at the start of this step.
 
 > **Security note:** `pipeline_id` used in the filename must contain only `a-z`, `0-9`, `-`, `_`. Replace any other characters with `-` before constructing the path. This prevents path traversal via a malformed pipeline ID.
 
 **Checkpoint — confirm report written:**
 ```bash
-[ -f "$CHECK_REPORT" ] || (echo "ERROR: Check report not written. Do not proceed." && exit 1)
+[ -f "$AUDIT_REPORT" ] || (echo "ERROR: Audit report not written. Do not proceed." && exit 1)
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 jq --arg now "$NOW" '.updated_at = $now' \
   "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
@@ -349,16 +349,16 @@ jq --arg now "$NOW" '.updated_at = $now' \
 
 | Result | Action |
 |--------|--------|
-| All PASS + all AC ✅ | Write checkpoint (check: pass) → **Step 6** |
-| WARN | Write checkpoint (check: warn), auto-proceed → **Step 6** |
-| FAIL or AC missing | Increment `check_fail_count`, write checkpoint |
+| All PASS + all AC ✅ | Write checkpoint (audit: pass) → **Step 6** |
+| WARN | Write checkpoint (audit: warn), auto-proceed → **Step 6** |
+| FAIL or AC missing | Increment `audit_fail_count`, write checkpoint |
 
 **Checkpoint on PASS or WARN:**
 ```bash
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 jq --arg now "$NOW" --arg verdict "pass" \
   '.phase = "ship" | .updated_at = $now |
-   .phase_history += [{"phase": "check", "status": $verdict, "completed_at": $now}]' \
+   .phase_history += [{"phase": "audit", "status": $verdict, "completed_at": $now}]' \
   "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
 ```
 
@@ -366,20 +366,20 @@ jq --arg now "$NOW" --arg verdict "pass" \
 ```bash
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 jq --arg now "$NOW" \
-  '.check_fail_count += 1 | .updated_at = $now |
-   .phase_history += [{"phase": "check", "status": "fail", "completed_at": $now}]' \
+  '.audit_fail_count += 1 | .updated_at = $now |
+   .phase_history += [{"phase": "audit", "status": "fail", "completed_at": $now}]' \
   "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
 ```
 
-**On FAIL — if `check_fail_count < 3`:**
-1. Read Action Items from check report
+**On FAIL — if `audit_fail_count < 3`:**
+1. Read Action Items from audit report
 2. Plan targeted fix tasks per blocker
 3. Execute via skill execution modes (TDD + debug + verify)
 4. Return to **Step 4**
 
-**On FAIL — if `check_fail_count >= 3`:** set `"status": "paused"`.
+**On FAIL — if `audit_fail_count >= 3`:** set `"status": "paused"`.
 
-> **Orbit paused** — 3 check cycles failed. Decide:
+> **Orbit paused** — 3 audit cycles failed. Decide:
 > - **"continue"** — another fix cycle (increments `max_retries`)
 > - **"abort"** — stop, set `"status": "aborted"`
 
@@ -397,7 +397,7 @@ On FAIL:
 
 Update state: `"phase": "ship"`.
 
-**Gate:** Read check report from `$HARNESS_DIR/orbit/CHECK-{pipeline_id}.md`. If file does not exist → STOP. Report must show PASS/WARN.
+**Gate:** Read audit report from `$HARNESS_DIR/orbit/AUDIT-{pipeline_id}.md`. If file does not exist → STOP. Report must show PASS/WARN.
 
 **6a. Integration verification** — run directly in worktree (already isolated from main tree):
 - Clean build artifacts first: `cargo clean` / `npm run clean` / equivalent
@@ -426,8 +426,8 @@ gh pr create --title "<goal from spec>" --body "$(cat <<'EOF'
 ## Acceptance Criteria Verified
 - AC1: ✅  AC2: ✅
 
-## Check Report
-<content of $HARNESS_DIR/orbit/CHECK-{pipeline_id}.md>
+## Audit Report
+<content of $HARNESS_DIR/orbit/AUDIT-{pipeline_id}.md>
 
 **Orchestration data in PR:**
 Include in PR body:
@@ -494,7 +494,7 @@ jq --arg now "$NOW" \
   "$PIPELINE_FILE" > /tmp/_orbit_tmp.json && mv /tmp/_orbit_tmp.json "$PIPELINE_FILE"
 ```
 
-**6e. Exit worktree:** Call `ExitWorktree` with `action: "keep"` (preserve worktree and branch until user merges the PR — branch is needed for PR head). The session returns to the original working directory. Pipeline state, specs, and check reports are already in `$HARNESS_DIR` (shared).
+**6e. Exit worktree:** Call `ExitWorktree` with `action: "keep"` (preserve worktree and branch until user merges the PR — branch is needed for PR head). The session returns to the original working directory. Pipeline state, specs, and audit reports are already in `$HARNESS_DIR` (shared).
 
 > **Orbit context:** After pushing ship to `phase_history`, **immediately proceed to Step 7 (Orbit Complete + Evolve)**. Do NOT stop here.
 
@@ -525,7 +525,7 @@ jq --arg now "$NOW" \
 |-------|----------|------------------|
 | Spec  | approved | 0                |
 | Go    | complete | 0                |
-| Check | PASS     | {check_fail_count}|
+| Audit | PASS     | {audit_fail_count}|
 | Ship  | complete | 0                |
 
 | Orchestration | {enabled/disabled} | {execution_count} skill executions |
@@ -534,7 +534,7 @@ jq --arg now "$NOW" \
 {from council/direct synthesis}
 
 ### Go Report     {embedded}
-### Check Report  {embedded}
+### Audit Report  {embedded}
 ### Ship Report   {embedded}
 ```
 
@@ -569,11 +569,11 @@ jq --arg now "$NOW" \
 ## Red Flags
 - Skipping mode selection without episteme results present
 - Proceeding past spec without `status: approved`
-- Continuing after 3 check failures without user consent
+- Continuing after 3 audit failures without user consent
 - Skipping isolated integration test before PR
-- Shipping with FAIL on any security check item
-- Losing `check_report` between phases
-- Creating PR without full check report in body
+- Shipping with FAIL on any security audit item
+- Losing `audit_report` between phases
+- Creating PR without full audit report in body
 - Starting a second orbit while one is already running
 - Ignoring the Phase Recovery Protocol after context compaction
 - Proceeding past deadline without user consent
@@ -582,6 +582,6 @@ jq --arg now "$NOW" \
 - Forgetting to exit worktree before orbit complete (leaves session in wrong directory)
 - Entering worktree without saving original_cwd (can't find state files after)
 - Skipping a phase checkpoint jq write — if context compacts mid-orbit, the phase will re-run
-- Launching background check skill executions before setting `check_report` path in pipeline state
-- Writing check report before all skill executions have completed — partial reports cause wrong verdicts
+- Launching background audit skill executions before setting `audit_report` path in pipeline state
+- Writing audit report before all skill executions have completed — partial reports cause wrong verdicts
 - Skipping `updated_at` refresh — stale timestamp triggers false crash recovery after 45 minutes

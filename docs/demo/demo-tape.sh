@@ -75,7 +75,7 @@ sleep 1
 echo ""
 echo "$ epic mem add --title 'Always verify before ship' --type pattern --project demo-app"
 sleep 0.3
-epic mem add --title "Always verify before ship" --type pattern --project demo-app --body "Run /check after /go. Never skip verification even for small changes."
+epic mem add --title "Always verify before ship" --type pattern --project demo-app --body "Run /audit after /go. Never skip verification even for small changes."
 sleep 1
 
 echo ""
@@ -198,15 +198,15 @@ sleep 1
 # ── 8. Full workflow — LIVE Claude Code session ────────
 #
 # Launches Claude Code in examples/terminal-tetris (Python curses TUI game).
-# epic-harness hooks auto-load — /spec /go /check /ship /evolve available.
+# epic-harness hooks auto-load — /spec /go /audit /ship /evolve available.
 #
 # In Claude Code, type:
 #   /spec "Build a TUI Tetris game in Python using curses"
 #   /go
-#   /check
+#   /audit
 #   /ship
 #
-section "8. Full workflow — /spec → /go → /check → /ship → /evolve"
+section "8. Full workflow — /spec → /go → /audit → /ship → /evolve"
 sleep 0.5
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -239,7 +239,7 @@ cd - > /dev/null
 section "Links"
 echo "  GitHub:   https://github.com/epicsagas/epic-harness"
 echo "  Docs:     QUICKSTART.md"
-echo "  Commands: /spec  /go  /check  /ship  /team  /evolve"
+echo "  Commands: /spec  /go  /audit  /ship  /team  /evolve"
 echo ""
 echo "  Install:  cargo install epic-harness"
 echo "  Setup:    epic install"

@@ -21,7 +21,7 @@ static SKILL_DISCOVER: &str = include_str!("../registry/skills/discover/SKILL.md
 static SKILL_ORCHESTRATE: &str = include_str!("../registry/skills/orchestrate/SKILL.md");
 static SKILL_SPEC: &str = include_str!("../registry/skills/spec/SKILL.md");
 static SKILL_GO: &str = include_str!("../registry/skills/go/SKILL.md");
-static SKILL_CHECK: &str = include_str!("../registry/skills/check/SKILL.md");
+static SKILL_AUDIT: &str = include_str!("../registry/skills/audit/SKILL.md");
 static SKILL_SHIP: &str = include_str!("../registry/skills/ship/SKILL.md");
 // _dispatch is Claude Code only, not installed to other tools
 static CMD_EVOLVE: &str = include_str!("../registry/commands/evolve.md");
@@ -47,7 +47,7 @@ static CANONICAL_SKILLS: &[(&str, &str)] = &[
     ("orchestrate", SKILL_ORCHESTRATE),
     ("spec", SKILL_SPEC),
     ("go", SKILL_GO),
-    ("check", SKILL_CHECK),
+    ("audit", SKILL_AUDIT),
     ("ship", SKILL_SHIP),
 ];
 
@@ -855,7 +855,7 @@ fn sync_plugin_cache(home: &str, dry_run: bool) {
         ("skills/orchestrate/SKILL.md", SKILL_ORCHESTRATE),
         ("skills/spec/SKILL.md", SKILL_SPEC),
         ("skills/go/SKILL.md", SKILL_GO),
-        ("skills/check/SKILL.md", SKILL_CHECK),
+        ("skills/audit/SKILL.md", SKILL_AUDIT),
         ("skills/ship/SKILL.md", SKILL_SHIP),
     ];
 
@@ -1178,6 +1178,7 @@ fn cleanup_legacy_files(target_dir: &Path) {
         "spec",
         "go",
         "check",
+        "audit",
         "ship",
         "intervene",
         "status",
@@ -1882,7 +1883,7 @@ mod tests {
         // Consolidated skills (absorbed from commands)
         assert!(paths.contains(&"skills/spec/SKILL.md"));
         assert!(paths.contains(&"skills/go/SKILL.md"));
-        assert!(paths.contains(&"skills/check/SKILL.md"));
+        assert!(paths.contains(&"skills/audit/SKILL.md"));
         assert!(paths.contains(&"skills/ship/SKILL.md"));
         // Remaining command-skills
         assert!(paths.contains(&"skills/orbit/SKILL.md"));
@@ -1978,17 +1979,17 @@ mod tests {
 description: \"Run tests and verify\"
 ---
 
-# /check — Verify
+# /audit — Verify
 
 Run all tests.
 ";
-        let result = prompt_to_antigravity_command("check", input);
+        let result = prompt_to_antigravity_command("audit", input);
         assert!(
             result.starts_with("prompt = '''"),
             "should start with TOML prompt field"
         );
         assert!(
-            result.contains("# /check — Verify"),
+            result.contains("# /audit — Verify"),
             "should contain body content"
         );
         assert!(
