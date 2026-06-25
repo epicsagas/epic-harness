@@ -3,8 +3,6 @@ mod eval;
 mod evolve;
 mod harness_cli;
 mod hooks;
-mod install;
-mod install_wizard;
 mod mem;
 mod orchestrate;
 mod serve;
@@ -74,15 +72,7 @@ fn main() {
         std::process::exit(0);
     }
 
-    // install / telemetry: skip consent check (they set it).
-    if subcmd == "install" {
-        let code = install::run(&args[2..]);
-        std::process::exit(code);
-    }
-    if subcmd == "uninstall" {
-        let code = install::run_uninstall(&args[2..]);
-        std::process::exit(code);
-    }
+    // telemetry: skip consent check (it sets it).
     if subcmd == "telemetry" {
         let code = telemetry::run_cli(&args[2..]);
         std::process::exit(code);
@@ -210,8 +200,8 @@ fn main() {
                 }
             }
         }
-        "install" | "uninstall" | "mem" | "team" | "org" | "eval" | "harness" | "telemetry"
-        | "serve" | "dashboard" | "update" => {
+        "mem" | "team" | "org" | "eval" | "harness" | "telemetry" | "serve" | "dashboard"
+        | "update" => {
             unreachable!()
         }
         "path" => {
@@ -282,18 +272,12 @@ fn main() {
             );
             eprintln!("  dashboard    Open web dashboard in browser (default port: 7700)");
             eprintln!("  serve        Start dashboard web server without opening browser");
-            eprintln!("  install      Install harness into a supported AI tool");
-            eprintln!("  uninstall    Remove harness from a supported AI tool");
             eprintln!("  update       Self-update to the latest release");
             eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
             eprintln!("  path         Print the harness data directory");
             eprintln!("  slug         Print the current project slug (worktree-safe)");
             eprintln!("  version      Print version");
             eprintln!("  --version, -v  Print version\n");
-            eprintln!("INSTALL TARGETS:  codex  antigravity  cursor  opencode  cline  aider");
-            eprintln!("  --local           Install in ./.claude/ instead of ~/.claude/");
-            eprintln!("  --target <path>   Override install target directory");
-            eprintln!("  --dry-run         Preview without writing\n");
             eprintln!("Run 'epic-harness mem help' for memory subcommand details.");
             if is_unknown { 1 } else { 0 }
         }

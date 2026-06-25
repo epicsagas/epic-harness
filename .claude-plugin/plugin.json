@@ -18,6 +18,6 @@
     "code-review",
     "automation"
   ],
-  "skills": "./registry/skills/",
-  "commands": "./registry/commands/"
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json"
 }

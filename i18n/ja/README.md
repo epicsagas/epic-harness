@@ -88,6 +88,8 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 
 > **初めての方は** [クイックスタートガイド（5分）](../../docs/quickstart.md)をお読みください。
 
+epic-harnessは**プラグイン**として配布されます — スキル、フック、`harness-mem` MCPサーバーはプラグインレイアウト（`skills/`, `hooks.json`, `.mcp.json`）から直接ロードされます。`install` サブコマンドはなく、各ツールがディスクからプラグインを読み取ります。
+
 ### Claude Code（推奨）
 
 ```
@@ -95,7 +97,15 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 /plugin install epic@epicsagas
 ```
 
-バイナリを自動インストールし、すべてのフックを一度に登録します。
+バイナリ、スキル、フック、`harness-mem` MCPサーバーを一度に自動インストールします。
+
+### agy（Antigravity CLI）
+
+```bash
+agy plugin install .
+```
+
+27個のスキル、フック、`harness-mem` MCPサーバーがプラグインの `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` から自動検出されます。
 
 ### Codex CLI
 
@@ -105,77 +115,43 @@ codex plugin marketplace add epicsagas/plugins
 
 スキルとエージェントがすぐに利用可能 — 追加手順不要。
 
-### macOS / Linux
+### バイナリのみ（プラグインホストなし）
 
 ```bash
-brew install epicsagas/tap/epic-harness
+brew install epicsagas/tap/epic-harness      # macOS / Linux (Homebrew)
+cargo binstall epic-harness                  # プリビルドバイナリ (Rust)
+cargo install epic-harness                   # ソースからビルド
 ```
 
-Homebrewがない場合は、インストーラースクリプトを使用:
+Homebrewがない場合はインストーラースクリプトを使用:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
-### Windows
+Windows:
 
 ```powershell
 irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
-### Rustツールチェーン経由
-
-```bash
-cargo binstall epic-harness   # プリビルドバイナリ（高速）
-cargo install epic-harness    # ソースからビルド
-```
-
-その後、セットアップウィザードを実行:
-
-```bash
-epic install               # Claude Code（デフォルト）
-epic install codex         # Codex CLI
-epic install antigravity   # Antigravity
-```
+バイナリは初回フック実行時に `~/.harness/config.toml` と `HARNESS.md` を自動シードします — セットアップウィザードや `install` 手順は不要です。
 
 > `epic-harness --version` で確認。`brew upgrade epic-harness` またはインストーラースクリプトの再実行で更新。
 
 前提条件: **Git**。ソース/バイナリインストールには [Rustツールチェーン](https://rustup.rs) も必要です。
 
-### `epic install` — セットアップウィザード
-
-バイナリをインストールした後、`epic install`（または `epic install claude`）を実行して:
-
-1. `~/.harness/` ディレクトリ構造を作成
-2. コマンド、スキルをツールの設定ディレクトリに同期
-3. Claude CodeにMCPサーバー（harness-mem）を登録
-4. 不在の場合、デフォルト設定で `~/.harness/config.toml` を作成
-
-Claude Codeでは、`hooks/install.js` がセッション開始時に自動実行され、バイナリが欠落している場合はインストールされます。初回クローン後に手動の手順は不要です。
-
-### その他のツール
-
-```bash
-epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
-epic install cursor         # Cursor         → ~/.cursor/ (Cursor 1.7+が必要)
-epic install opencode     # OpenCode    → ~/.config/opencode/
-epic install cline        # Cline       → ~/Documents/Cline/Rules/
-epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-epic install              # インタラクティブメニュー
-```
-
-統合ファイルはバイナリから**同期**されます: 欠落または古いファイルが書き込まれます。`AGENTS.md` は不在の場合のみ作成されます。
-
 ### 確認
 
 ```bash
-epic --version              # バイナリがインストールされている
-ls ~/.harness/              # データディレクトリが存在する
+epic --version              # バイナリがインストール済み
+ls ~/.harness/              # データディレクトリ（初回セッションで自動作成）
 ```
 
 Claude Codeセッション内: `/evolve status`
+
+> **テレメトリ**: 使用状況レポートはデフォルトで有効（opt-out）です。`epic-harness telemetry status|on|off` で切り替え。
 
 ---
 
@@ -699,7 +675,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 インストールを再実行してフックをClaude Code設定に同期:
 
 ```bash
-epic install claude
+/plugin install epic@epicsagas
 ```
 
 その後Claude Codeを再起動。フックは `~/.claude/settings.json` に書き込まれます。

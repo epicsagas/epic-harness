@@ -1,3 +1,0 @@
-# epic global aider configuration
-# Automatically loads coding conventions into every session.
-read: ~/.aider/CONVENTIONS.md

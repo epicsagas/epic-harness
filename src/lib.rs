@@ -2,8 +2,6 @@ pub mod config;
 pub mod eval;
 pub mod evolve;
 pub mod hooks;
-pub mod install;
-mod install_wizard;
 pub mod mem;
 pub mod orchestrate;
 pub mod serve;

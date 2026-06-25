@@ -75,6 +75,8 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 
 > **पहली बार?** [त्वरित प्रारंभ गाइड (5 मिनट)](../../docs/quickstart.md) पढ़ें।
 
+epic-harness एक **प्लगइन** के रूप में वितरित होता है — स्किल्स, hooks और `harness-mem` MCP सर्वर सीधे प्लगइन लेआउट (`skills/`, `hooks.json`, `.mcp.json`) से लोड होते हैं। कोई `install` सबकमांड नहीं है; प्रत्येक टूल प्लगइन को डिस्क से पढ़ता है।
+
 ### Claude Code (अनुशंसित)
 
 ```
@@ -82,79 +84,61 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 /plugin install epic@epicsagas
 ```
 
-बाइनरी ऑटो-इंस्टॉल करता है और सभी hooks को एक ही चरण में रजिस्टर करता है।
+बाइनरी, स्किल्स, hooks और `harness-mem` MCP सर्वर को एक ही चरण में ऑटो-इंस्टॉल करता है।
 
-### macOS / Linux
+### agy (Antigravity CLI)
 
 ```bash
-brew install epicsagas/tap/epic-harness
+agy plugin install .
+```
+
+27 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` से ऑटो-डिस्कवर होते हैं।
+
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+स्किल्स और एजेंट तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं।
+
+### केवल बाइनरी (प्लगइन होस्ट के बिना)
+
+```bash
+brew install epicsagas/tap/epic-harness      # macOS / Linux (Homebrew)
+cargo binstall epic-harness                  # प्री-बिल्ट बाइनरी (Rust)
+cargo install epic-harness                   # सोर्स से बिल्ड
 ```
 
 Homebrew नहीं है? इंस्टॉलर स्क्रिप्ट का उपयोग करें:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.sh | sh
+  https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
-### Windows
+Windows:
 
 ```powershell
-irm https://github.com/epicsagas/epic-harness/releases/latest/download/epic-harness-installer.ps1 | iex
+irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
-### Rust टूलचेन के माध्यम से
-
-```bash
-cargo binstall epic-harness   # प्री-बिल्ट बाइनरी (तेज़)
-cargo install epic-harness    # सोर्स से बिल्ड
-```
-
-फिर सेटअप विज़ार्ड चलाएं:
-
-```bash
-epic install          # Claude Code (डिफ़ॉल्ट)
-epic install codex    # Codex CLI
-epic install gemini   # Antigravity
-```
+बाइनरी पहली hook रन पर `~/.harness/config.toml` और `HARNESS.md` को ऑटो-सीड करता है — सेटअप विज़ार्ड या `install` चरण की कोई आवश्यकता नहीं।
 
 > `epic-harness --version` सत्यापित करने के लिए। `brew upgrade epic-harness` या इंस्टॉलर स्क्रिप्ट दोबारा चलाकर अपडेट करें।
 
 पूर्वापेक्षाएं: **Git**। सोर्स/बाइनरी इंस्टॉल के लिए [Rust टूलचेन](https://rustup.rs) भी आवश्यक।
 
-### `epic install` — सेटअप विज़ार्ड
-
-बाइनरी इंस्टॉल करने के बाद, `epic install` (या `epic install claude`) चलाएं:
-
-1. `~/.harness/` डायरेक्टरी संरचना बनाएं
-2. कमांड और स्किल्स को टूल के कॉन्फिग डायरेक्टरी में सिंक करें
-3. Claude Code के लिए MCP सर्वर (harness-mem) रजिस्टर करें
-4. यदि अनुपस्थित हो तो `~/.harness/config.toml` डिफ़ॉल्ट के साथ बनाएं
-
-Claude Code में, `hooks/install.js` सेशन स्टार्ट पर ऑटो-चलता है और यदि बाइनरी गायब हो तो इंस्टॉल करता है। प्रारंभिक क्लोन के बाद कोई मैन्युअल चरण आवश्यक नहीं।
-
-### अन्य टूल्स
-
-```bash
-epic install codex        # Codex CLI   → ~/.codex/ + ~/.agents/skills/
-epic install gemini       # Antigravity  → ~/.gemini/
-epic install cursor       # Cursor      → ~/.cursor/ (Cursor 1.7+ आवश्यक)
-epic install opencode     # OpenCode    → ~/.config/opencode/
-epic install cline        # Cline       → ~/Documents/Cline/Rules/
-epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-epic install              # इंटरेक्टिव मेनू
-```
-
-इंटीग्रेशन फ़ाइलें बाइनरी से **सिंक** होती हैं: गायब या पुरानी फ़ाइलें लिखी जाती हैं। `GEMINI.md` और `AGENTS.md` केवल तभी बनाए जाते हैं जब अनुपस्थित हों।
-
 ### सत्यापन
 
 ```bash
 epic --version              # बाइनरी इंस्टॉल है
-ls ~/.harness/              # डेटा डायरेक्टरी मौजूद है
+ls ~/.harness/              # डेटा डायरेक्टरी (पहले सेशन पर ऑटो-क्रिएटेड)
 ```
 
 Claude Code सेशन के अंदर: `/evolve status`
+
+> **टेलीमेट्री**: उपयोग रिपोर्टिंग डिफ़ॉल्ट रूप से चालू (opt-out) है। `epic-harness telemetry status|on|off` से टॉगल करें।
 
 ---
 
@@ -632,7 +616,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 Hooks को Claude Code settings में sync करने के लिए install दोबारा चलाएं:
 
 ```bash
-epic install claude
+/plugin install epic@epicsagas
 ```
 
 फिर Claude Code restart करें। Hooks `~/.claude/settings.json` में लिखे जाते हैं।

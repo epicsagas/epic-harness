@@ -510,6 +510,28 @@ fn validate_config(cfg: &mut HarnessConfig) {
 
 // ── Default Config Template ─────────────────────────
 
+static HARNESS_MD: &str = include_str!("../integrations/common/HARNESS.md");
+
+/// Ensure `~/.harness/config.toml` (write-once) and `HARNESS.md` (synced) exist.
+/// Called from the resume hook on session start so a plugin-only install works
+/// without the deprecated `install` subcommand.
+pub fn ensure_global_config() {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| "/tmp".to_string());
+    let harness_dir = PathBuf::from(&home).join(".harness");
+    let _ = std::fs::create_dir_all(&harness_dir);
+
+    // config.toml: write-once (never overwrites user edits)
+    let config_path = harness_dir.join("config.toml");
+    if !config_path.exists() {
+        let _ = std::fs::write(&config_path, default_config_template());
+    }
+
+    // HARNESS.md: synced to stay current across binary upgrades
+    let _ = std::fs::write(harness_dir.join("HARNESS.md"), HARNESS_MD);
+}
+
 /// Returns a commented default config suitable for writing to `~/.harness/config.toml`.
 #[allow(dead_code)] // Used by epic config init CLI command
 pub fn default_config_template() -> &'static str {

@@ -88,6 +88,8 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 
 > **第一次使用？** 請閱讀[快速入門指南（5 分鐘）](../../docs/quickstart.md)。
 
+epic-harness 以**外掛**形式分發 — 技能、掛鉤和 `harness-mem` MCP 伺服器直接從外掛佈局（`skills/`、`hooks.json`、`.mcp.json`）載入。沒有 `install` 子命令，各工具直接從磁碟讀取外掛。
+
 ### Claude Code（推薦）
 
 ```
@@ -95,7 +97,15 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 /plugin install epic@epicsagas
 ```
 
-一步完成二進位安裝和所有掛鉤註冊。
+一步自動安裝二進位檔案、技能、掛鉤和 `harness-mem` MCP 伺服器。
+
+### agy（Antigravity CLI）
+
+```bash
+agy plugin install .
+```
+
+27 個技能、掛鉤和 `harness-mem` MCP 伺服器從外掛的 `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` 自動發現。
 
 ### Codex CLI
 
@@ -105,10 +115,12 @@ codex plugin marketplace add epicsagas/plugins
 
 技能和智能體立即可用 — 無需額外步驟。
 
-### macOS / Linux
+### 僅二進位（無外掛宿主）
 
 ```bash
-brew install epicsagas/tap/epic-harness
+brew install epicsagas/tap/epic-harness      # macOS / Linux (Homebrew)
+cargo binstall epic-harness                  # 預建二進位 (Rust)
+cargo install epic-harness                   # 從原始碼建置
 ```
 
 沒有 Homebrew？使用安裝腳本：
@@ -118,64 +130,28 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
-### Windows
+Windows:
 
 ```powershell
 irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
-### 透過 Rust 工具鏈
-
-```bash
-cargo binstall epic-harness   # 預建二進位（快速）
-cargo install epic-harness    # 從原始碼建置
-```
-
-然後執行安裝精靈：
-
-```bash
-epic install               # Claude Code（預設）
-epic install codex         # Codex CLI
-epic install antigravity   # Antigravity
-```
+二進位檔案在首次掛鉤執行時自動播種 `~/.harness/config.toml` 和 `HARNESS.md` — 無需安裝精靈或 `install` 步驟。
 
 > 執行 `epic-harness --version` 驗證安裝。使用 `brew upgrade epic-harness` 或重新執行安裝腳本進行更新。
 
 前置條件：**Git**。原始碼/二進位安裝還需要 [Rust 工具鏈](https://rustup.rs)。
 
-### `epic install` — 安裝精靈
-
-安裝二進位檔案後，執行 `epic install`（或 `epic install claude`）以：
-
-1. 建立 `~/.harness/` 目錄結構
-2. 將命令和技能同步到工具的設定目錄
-3. 為 Claude Code 註冊 MCP 伺服器（harness-mem）
-4. 若不存在，則建立含預設值的 `~/.harness/config.toml`
-
-在 Claude Code 中，`hooks/install.js` 在工作階段啟動時自動執行，並在二進位檔案缺失時自動安裝。初次複製後無需手動操作。
-
-### 其他工具
-
-```bash
-epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
-epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
-epic install opencode     # OpenCode    → ~/.config/opencode/
-epic install cline        # Cline       → ~/Documents/Cline/Rules/
-epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-epic install              # 互動式選單
-```
-
-整合檔案從二進位**同步**而來：缺失或過時的檔案會被寫入。`AGENTS.md` 僅在不存在時才會建立。
-
 ### 驗證
 
 ```bash
 epic --version              # 二進位已安裝
-ls ~/.harness/              # 資料目錄存在
+ls ~/.harness/              # 資料目錄（首次工作階段自動建立）
 ```
 
 在 Claude Code 工作階段中：`/evolve status`
+
+> **遙測**：使用量報告預設開啟（opt-out）。使用 `epic-harness telemetry status|on|off` 切換。
 
 ---
 
@@ -699,7 +675,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 重新執行安裝以同步掛鉤到 Claude Code 設定：
 
 ```bash
-epic install claude
+/plugin install epic@epicsagas
 ```
 
 然後重新啟動 Claude Code。掛鉤會寫入 `~/.claude/settings.json`。

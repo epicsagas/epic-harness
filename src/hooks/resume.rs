@@ -184,6 +184,11 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
 
+    // Seed ~/.harness/config.toml + HARNESS.md on first run (replaces the
+    // deprecated `install` subcommand). Idempotent: config.toml is write-once,
+    // HARNESS.md is synced to stay current with binary upgrades.
+    crate::config::ensure_global_config();
+
     let wd = cwd();
 
     // Migrate legacy .harness/ from project dir to ~/.harness/projects/{slug}/

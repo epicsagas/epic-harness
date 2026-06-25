@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic guard"
+          }
+        ],
+        "description": "위험 명령어(force push, DB 삭제 등) 차단 가드레일"
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic polish"
+          }
+        ],
+        "description": "파일 수정 후 자동 포맷팅 및 린트 검사"
+      },
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic observe",
+            "async": true,
+            "timeout": 5
+          }
+        ],
+        "description": "도구 실행 결과를 기록하고 학습 루프에 반영"
+      }
+    ]
+  }
+}

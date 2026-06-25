@@ -88,6 +88,8 @@ $ /orbit "为登录 API 添加 JWT 认证"
 
 > **首次使用？** 阅读[快速入门指南（5 分钟）](../../docs/quickstart.md)。
 
+epic-harness 以**插件**形式分发 — 技能、hooks 和 `harness-mem` MCP 服务器直接从插件布局（`skills/`、`hooks.json`、`.mcp.json`）加载。没有 `install` 子命令，各工具直接从磁盘读取插件。
+
 ### Claude Code（推荐）
 
 ```
@@ -95,7 +97,15 @@ $ /orbit "为登录 API 添加 JWT 认证"
 /plugin install epic@epicsagas
 ```
 
-自动安装二进制文件并一步注册所有 hooks。
+一步自动安装二进制文件、技能、hooks 和 `harness-mem` MCP 服务器。
+
+### agy（Antigravity CLI）
+
+```bash
+agy plugin install .
+```
+
+27 个技能、hooks 和 `harness-mem` MCP 服务器从插件的 `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` 自动发现。
 
 ### Codex CLI
 
@@ -105,10 +115,12 @@ codex plugin marketplace add epicsagas/plugins
 
 技能和智能体立即可用 — 无需进一步操作。
 
-### macOS / Linux
+### 仅二进制（无插件宿主）
 
 ```bash
-brew install epicsagas/tap/epic-harness
+brew install epicsagas/tap/epic-harness      # macOS / Linux (Homebrew)
+cargo binstall epic-harness                  # 预编译二进制 (Rust)
+cargo install epic-harness                   # 从源码构建
 ```
 
 没有 Homebrew？使用安装脚本：
@@ -118,64 +130,28 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
-### Windows
+Windows:
 
 ```powershell
 irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
-### 通过 Rust 工具链
-
-```bash
-cargo binstall epic-harness   # 预编译二进制（快速）
-cargo install epic-harness    # 从源码构建
-```
-
-然后运行安装向导：
-
-```bash
-epic install               # Claude Code（默认）
-epic install codex         # Codex CLI
-epic install antigravity   # Antigravity
-```
+二进制文件在首次 hook 运行时自动播种 `~/.harness/config.toml` 和 `HARNESS.md` — 无需安装向导或 `install` 步骤。
 
 > 使用 `epic-harness --version` 验证。通过 `brew upgrade epic-harness` 或重新运行安装脚本来更新。
 
 前置条件：**Git**。源码/二进制安装还需要 [Rust 工具链](https://rustup.rs)。
 
-### `epic install` — 安装向导
-
-安装二进制文件后，运行 `epic install`（或 `epic install claude`）来：
-
-1. 创建 `~/.harness/` 目录结构
-2. 同步命令和技能到工具的配置目录
-3. 注册 MCP 服务器（harness-mem）用于 Claude Code
-4. 如不存在则创建带默认值的 `~/.harness/config.toml`
-
-在 Claude Code 中，`hooks/install.js` 在会话启动时自动运行，并在二进制文件缺失时安装。初始克隆后无需手动步骤。
-
-### 其他工具
-
-```bash
-epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
-epic install antigravity   # Antigravity    → ~/.gemini/config/plugins/epic/
-epic install cursor         # Cursor         → ~/.cursor/（需要 Cursor 1.7+）
-epic install opencode     # OpenCode    → ~/.config/opencode/
-epic install cline        # Cline       → ~/Documents/Cline/Rules/
-epic install aider        # Aider       → ~/.aider.conf.yml + ~/.aider/
-epic install              # 交互式菜单
-```
-
-集成文件从二进制文件**同步**：缺失或过期的文件会被写入。`AGENTS.md` 仅在不存在时创建。
-
 ### 验证
 
 ```bash
 epic --version              # 二进制已安装
-ls ~/.harness/              # 数据目录存在
+ls ~/.harness/              # 数据目录（首次会话自动创建）
 ```
 
 在 Claude Code 会话中：`/evolve status`
+
+> **遥测**：使用量报告默认开启（opt-out）。使用 `epic-harness telemetry status|on|off` 切换。
 
 ---
 
@@ -699,7 +675,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 重新运行安装以将 hooks 同步到 Claude Code 设置：
 
 ```bash
-epic install claude
+/plugin install epic@epicsagas
 ```
 
 然后重启 Claude Code。Hooks 写入到 `~/.claude/settings.json`。

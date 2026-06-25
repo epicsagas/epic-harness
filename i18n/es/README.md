@@ -88,6 +88,8 @@ Al cerrar la sesión, el **bucle evolve** analiza qué falló, genera habilidade
 
 > **¿Primera vez?** Lee la [Guía de inicio rápido (5 min)](../../docs/quickstart.md).
 
+epic-harness se distribuye como **plugin** — las skills, hooks y el servidor MCP `harness-mem` se cargan directamente desde el diseño del plugin (`skills/`, `hooks.json`, `.mcp.json`). No hay subcomando `install`; cada herramienta lee el plugin desde el disco.
+
 ### Claude Code (recomendado)
 
 ```
@@ -95,7 +97,15 @@ Al cerrar la sesión, el **bucle evolve** analiza qué falló, genera habilidade
 /plugin install epic@epicsagas
 ```
 
-Instala automáticamente el binario y registra todos los hooks en un solo paso.
+Instala automáticamente el binario, las skills, los hooks y el servidor MCP `harness-mem` en un solo paso.
+
+### agy (Antigravity CLI)
+
+```bash
+agy plugin install .
+```
+
+Las 27 skills, los hooks y el servidor MCP `harness-mem` se descubren automáticamente desde `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` del plugin.
 
 ### Codex CLI
 
@@ -105,10 +115,12 @@ codex plugin marketplace add epicsagas/plugins
 
 Las skills y agentes están disponibles inmediatamente — no se necesitan pasos adicionales.
 
-### macOS / Linux
+### Solo binario (sin host de plugin)
 
 ```bash
-brew install epicsagas/tap/epic-harness
+brew install epicsagas/tap/epic-harness      # macOS / Linux (Homebrew)
+cargo binstall epic-harness                  # binario precompilado (Rust)
+cargo install epic-harness                   # compilar desde el código fuente
 ```
 
 ¿No tienes Homebrew? Usa el script de instalación:
@@ -118,64 +130,28 @@ curl --proto '=https' --tlsv1.2 -LsSf \
   https://github.com/epicsagas/epic-harness/releases/latest/download/install.sh | sh
 ```
 
-### Windows
+Windows:
 
 ```powershell
 irm https://github.com/epicsagas/epic-harness/releases/latest/download/install.ps1 | iex
 ```
 
-### Vía toolchain de Rust
-
-```bash
-cargo binstall epic-harness   # binario precompilado (rápido)
-cargo install epic-harness    # compilar desde el código fuente
-```
-
-Luego ejecuta el asistente de configuración:
-
-```bash
-epic install               # Claude Code (predeterminado)
-epic install codex         # Codex CLI
-epic install antigravity   # Antigravity
-```
+El binario crea automáticamente `~/.harness/config.toml` y `HARNESS.md` en la primera ejecución del hook — sin asistente de configuración ni paso `install`.
 
 > `epic-harness --version` para verificar. Actualiza con `brew upgrade epic-harness` o vuelve a ejecutar el script de instalación.
 
 Requisitos previos: **Git**. Las instalaciones desde el código fuente o binario también necesitan el [toolchain de Rust](https://rustup.rs).
 
-### `epic install` — asistente de configuración
-
-Después de instalar el binario, ejecuta `epic install` (o `epic install claude`) para:
-
-1. Crear la estructura de directorios `~/.harness/`
-2. Sincronizar comandos y habilidades al directorio de configuración de la herramienta
-3. Registrar el servidor MCP (harness-mem) para Claude Code
-4. Crear `~/.harness/config.toml` con valores predeterminados si no existe
-
-En Claude Code, `hooks/install.js` se ejecuta automáticamente al inicio de la sesión e instala el binario si falta. No se necesita ningún paso manual después del clon inicial.
-
-### Otras herramientas
-
-```bash
-epic install codex          # Codex CLI      → ~/.codex/ + ~/.agents/skills/
-epic install antigravity    # Antigravity    → ~/.gemini/config/plugins/epic/
-epic install cursor         # Cursor         → ~/.cursor/ (requiere Cursor 1.7+)
-epic install opencode       # OpenCode       → ~/.config/opencode/
-epic install cline          # Cline          → ~/Documents/Cline/Rules/
-epic install aider          # Aider          → ~/.aider.conf.yml + ~/.aider/
-epic install                # Menú interactivo
-```
-
-Los archivos de integración se **sincronizan** desde el binario: los archivos faltantes u obsoletos se escriben. `AGENTS.md` solo se crea cuando está ausente.
-
 ### Verificación
 
 ```bash
 epic --version              # Binario instalado
-ls ~/.harness/              # Directorio de datos existe
+ls ~/.harness/              # Directorio de datos (creado automáticamente en la primera sesión)
 ```
 
 Dentro de una sesión de Claude Code: `/evolve status`
+
+> **Telemetría**: los informes de uso están activados por defecto (opt-out). Alterna con `epic-harness telemetry status|on|off`.
 
 ---
 
@@ -699,7 +675,7 @@ Añade esta línea a tu `~/.zshrc` o `~/.bashrc` para hacerlo permanente.
 Vuelve a ejecutar la instalación para sincronizar los hooks en la configuración de Claude Code:
 
 ```bash
-epic install claude
+/plugin install epic@epicsagas
 ```
 
 Luego reinicia Claude Code. Los hooks se escriben en `~/.claude/settings.json`.

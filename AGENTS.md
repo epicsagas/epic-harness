@@ -4,8 +4,8 @@
 
 ## Structure
 
+- `skills/` — 27 skills + _dispatch engine
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
-  - `skills/` — 26 skills + _dispatch engine
   - `presets/` — Cold-start skill templates
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
   - `hooks/bin/epic-harness` — Rust single binary
