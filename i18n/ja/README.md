@@ -672,13 +672,13 @@ export PATH="$HOME/.cargo/bin:$PATH"
 <details>
 <summary>Claude Codeでフックが実行されない</summary>
 
-インストールを再実行してフックをClaude Code設定に同期:
+プラグインを再インストールしてフックを再読み込み:
 
-```bash
+```
 /plugin install epic@epicsagas
 ```
 
-その後Claude Codeを再起動。フックは `~/.claude/settings.json` に書き込まれます。
+その後Claude Codeを再起動。フックはプラグインの `hooks.json` から読み込まれます。
 </details>
 
 <details>

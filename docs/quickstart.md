@@ -10,19 +10,35 @@
 
 ## Install
 
-```bash
-# Via Claude Code plugin marketplace
+epic-harness ships as a **plugin** — skills, hooks, and the `harness-mem` MCP server load directly from the plugin layout. There is no `install` step; the plugin self-seeds `~/.harness/config.toml` and `HARNESS.md` on the first session.
+
+### Claude Code (recommended)
+
+```
 /plugin marketplace add epicsagas/plugins
-/plugin install harness@epic
+/plugin install epic@epicsagas
 ```
 
-Or manually:
+The binary is auto-installed and all hooks register in one step.
+
+### agy (Antigravity CLI)
 
 ```bash
-git clone https://github.com/epicsagas/epic-harness.git ~/.claude/plugins/epic
+agy plugin install .   # from a clone, or via marketplace
 ```
 
-The Rust binary handles all hooks. If you also want to install for other tools (Codex, Antigravity, Cursor, OpenCode, Cline, Aider), run `epic install` for an interactive menu.
+### Codex CLI
+
+```bash
+codex plugin marketplace add epicsagas/plugins
+```
+
+### Binary-only (no plugin host)
+
+```bash
+brew install epicsagas/tap/epic-harness      # macOS / Linux
+cargo binstall epic-harness                  # or build from source
+```
 
 ## First Session
 
@@ -75,7 +91,7 @@ If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is 
 
 | Symptom | Fix |
 |---------|-----|
-| Hooks not running | Verify the `epic` (or `epic-harness`) binary is in PATH (`which epic`); run `hooks/setup.sh` to auto-install |
+| Hooks not running | Verify the `epic` binary is in PATH (`which epic`); reinstall the plugin (`/plugin install epic@epicsagas`) and restart Claude Code |
 | `~/.harness/projects/` not created | Restart Claude Code session (resume hook initializes it) |
 | `/evolve status` empty | Need at least 1 completed session first |
 

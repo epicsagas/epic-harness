@@ -672,13 +672,13 @@ export PATH="$HOME/.cargo/bin:$PATH"
 <details>
 <summary>掛鉤在 Claude Code 中未觸發</summary>
 
-重新執行安裝以同步掛鉤到 Claude Code 設定：
+重新安裝外掛以重新載入掛鉤：
 
-```bash
+```
 /plugin install epic@epicsagas
 ```
 
-然後重新啟動 Claude Code。掛鉤會寫入 `~/.claude/settings.json`。
+然後重新啟動 Claude Code。掛鉤從外掛的 `hooks.json` 載入。
 </details>
 
 <details>

@@ -672,13 +672,13 @@ Ajoutez cette ligne a votre `~/.zshrc` ou `~/.bashrc` pour la rendre permanente.
 <details>
 <summary>Les hooks ne se declenchent pas dans Claude Code</summary>
 
-Re-executez l'installation pour synchroniser les hooks dans les parametres de Claude Code :
+Réinstallez le plugin pour recharger les hooks :
 
-```bash
+```
 /plugin install epic@epicsagas
 ```
 
-Puis redemarrez Claude Code. Les hooks sont ecrits dans `~/.claude/settings.json`.
+Puis redémarrez Claude Code. Les hooks sont chargés depuis le `hooks.json` du plugin.
 </details>
 
 <details>

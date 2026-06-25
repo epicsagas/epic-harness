@@ -672,13 +672,13 @@ export PATH="$HOME/.cargo/bin:$PATH"
 <details>
 <summary>Hooks 在 Claude Code 中未触发</summary>
 
-重新运行安装以将 hooks 同步到 Claude Code 设置：
+重新安装插件以重新加载 hooks：
 
-```bash
+```
 /plugin install epic@epicsagas
 ```
 
-然后重启 Claude Code。Hooks 写入到 `~/.claude/settings.json`。
+然后重启 Claude Code。Hooks 从插件的 `hooks.json` 加载。
 </details>
 
 <details>
