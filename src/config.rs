@@ -519,7 +519,13 @@ pub fn ensure_global_config() {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| "/tmp".to_string());
-    let harness_dir = PathBuf::from(&home).join(".harness");
+    ensure_global_config_in(PathBuf::from(&home).join(".harness"));
+}
+
+/// Inner form taking an explicit harness dir, so it is unit-testable without
+/// touching the real `HOME`. Idempotent: config.toml is write-once, HARNESS.md
+/// is rewritten only when its content is missing or stale.
+fn ensure_global_config_in(harness_dir: PathBuf) {
     let _ = std::fs::create_dir_all(&harness_dir);
 
     // config.toml: write-once (never overwrites user edits)
@@ -528,8 +534,16 @@ pub fn ensure_global_config() {
         let _ = std::fs::write(&config_path, default_config_template());
     }
 
-    // HARNESS.md: synced to stay current across binary upgrades
-    let _ = std::fs::write(harness_dir.join("HARNESS.md"), HARNESS_MD);
+    // HARNESS.md: sync only when missing or stale — avoids rewriting the same
+    // file every session while still updating it across binary upgrades.
+    let harness_md_path = harness_dir.join("HARNESS.md");
+    let stale = match std::fs::read_to_string(&harness_md_path) {
+        Ok(existing) => existing != HARNESS_MD,
+        Err(_) => true,
+    };
+    if stale {
+        let _ = std::fs::write(&harness_md_path, HARNESS_MD);
+    }
 }
 
 /// Returns a commented default config suitable for writing to `~/.harness/config.toml`.
@@ -1068,5 +1082,61 @@ max_docs = 5
         auto_correct_driver_from_url(&mut cfg);
 
         assert_eq!(cfg.db.driver, "postgres");
+    }
+
+    fn scratch_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("eh-ensure-{label}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn config_toml_is_write_once() {
+        let dir = scratch_dir("toml");
+        ensure_global_config_in(dir.clone());
+
+        // First run writes the default template.
+        let config = std::fs::read_to_string(dir.join("config.toml")).unwrap();
+        assert!(
+            config.contains("[hook]"),
+            "default config should be written"
+        );
+
+        // A user edit must survive a second run (write-once).
+        std::fs::write(dir.join("config.toml"), "# user edited").unwrap();
+        ensure_global_config_in(dir.clone());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.toml")).unwrap(),
+            "# user edited",
+            "config.toml must not be overwritten once it exists"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn harness_md_syncs_only_when_stale() {
+        let dir = scratch_dir("md");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Stale content is replaced with the embedded template.
+        std::fs::write(dir.join("HARNESS.md"), "stale").unwrap();
+        ensure_global_config_in(dir.clone());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("HARNESS.md")).unwrap(),
+            HARNESS_MD,
+            "stale HARNESS.md must be synced"
+        );
+
+        // Already-current content is left untouched on the next run (idempotent).
+        let before = std::fs::read_to_string(dir.join("HARNESS.md")).unwrap();
+        ensure_global_config_in(dir.clone());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("HARNESS.md")).unwrap(),
+            before,
+            "already-current HARNESS.md must not be rewritten"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
