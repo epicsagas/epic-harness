@@ -5,6 +5,25 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-06-26
+
+The plugin-native release. epic-harness now distributes as a single plugin layout that Claude Code, agy (Antigravity CLI), and codex read directly from disk — the `install` subcommand and the embed+copy pipeline are gone.
+
+### Changed — Plugin-native distribution (breaking)
+- **Removed `epic-harness install`/`uninstall`** + `install.rs`/`install_wizard.rs` (~2,330 LOC). Skills, hooks, and the `harness-mem` MCP server now load from a root plugin layout (`plugin.json`, `skills/`, `hooks.json`, `.mcp.json`) read directly by each tool.
+- **Skills moved to repo root** (`registry/skills/` → `skills/`). `registry/commands/` dropped (commands were already consolidated into skills).
+- **Config seeding relocated**: `~/.harness/config.toml` + `HARNESS.md` are now self-seeded by the resume hook (`config::ensure_global_config`) on first session — idempotent (config.toml write-once, HARNESS.md synced only when stale).
+- **Tool support narrowed to Claude Code + agy + codex.** The cursor/opencode/cline/aider integrations were removed.
+
+### Added
+- **agy (Antigravity CLI) support**: root `plugin.json` manifest + auto-scanned `skills/`/`hooks.json`/`.mcp.json`. `agy plugin validate .` passes (27 skills + hooks processed).
+- **Telemetry documentation**: dedicated `## Telemetry` section in README + 9 i18n + quickstart — what is collected (command/duration/outcome/failure class/hook events + product/version/os/install_id), what is never collected (code/paths/secrets/PII), opt-out default-on, `epic-harness telemetry status|on|off`.
+- Unit tests for `ensure_global_config` (config.toml write-once, HARNESS.md stale-only sync).
+
+### Fixed
+- Security: `time` 0.3.45 → 0.3.47, `undici` 7.25.0 → 7.28.0 (7 of 8 dependabot advisories). `glib` 0.20 remains blocked on tauri's `gtk-rs ^0.18` pin — upstream, tracked separately.
+- The `check` phase is unified into `audit` everywhere (manifests, orbit, go/ship/_dispatch skills, integrations, docs).
+
 ## [0.7.0] — 2026-06-19
 
 The HarnessX evolution-engine release. Adapts the AEGIS pipeline (arXiv:2606.14249v1) to epic-harness's single-agent, per-project evolution loop. The evolution engine went from "reactive single-agent + SKILL.md-only" to **strategic, typed, regression-protected, and self-verifying**. ~5,000 LOC across 5 PRs (#75–#80), +69 tests, all CI green. Driven by the gap-analysis at `docs/analysis/harnessx-vs-epic-harness-gap-analysis.md` (vault mirror `ref-010`).
