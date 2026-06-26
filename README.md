@@ -155,6 +155,26 @@ Inside a Claude Code session: `/evolve status`
 
 ---
 
+## Telemetry
+
+epic-harness collects **anonymous** usage telemetry by default (opt-out) to improve hook reliability and skill evolution. Events are sent to Posthog.
+
+**What we collect:** command name, duration, outcome (success/failure), failure class, and hook block/failure events — plus `product`, `product_version`, `os`, and a random `install_id` (a UUID generated on first run, stored at `~/.config/epic-harness/install-id`).
+
+**What we never collect:** source code, file contents, file paths, environment variables, secrets, or any personally-identifiable information.
+
+**Control it:**
+
+```bash
+epic-harness telemetry status   # show current consent
+epic-harness telemetry off      # disable (stops all sending immediately)
+epic-harness telemetry on       # re-enable
+```
+
+Consent is stored at `~/.config/epic-harness/telemetry-consent`. When off, no telemetry is sent.
+
+---
+
 ## Commands
 
 | Command | What it does |

@@ -40,6 +40,8 @@ brew install epicsagas/tap/epic-harness      # macOS / Linux
 cargo binstall epic-harness                  # or build from source
 ```
 
+> **Telemetry**: anonymous usage reporting is on by default (opt-out). Disable with `epic-harness telemetry off` — see the README [Telemetry](../../README.md#telemetry) section for what is collected.
+
 ## First Session
 
 1. **Open any project** in Claude Code. epic-harness auto-detects the stack (Node, Go, Python, Rust, …) and initializes your data directory in `~/.harness/projects/{slug}/` on the first session.

@@ -155,6 +155,26 @@ Dans une session Claude Code : `/evolve status`
 
 ---
 
+## Télémétrie
+
+epic-harness collecte une télémétrie d'utilisation **anonyme** par défaut (opt-out) pour améliorer la fiabilité des hooks et l'évolution des skills. Les événements sont envoyés à Posthog.
+
+**Ce que nous collectons :** nom de la commande, durée, résultat (succès/échec), classe d'échec et événements de blocage/échec des hooks — plus `product`, `product_version`, `os` et un `install_id` aléatoire (UUID généré au premier lancement, stocké dans `~/.config/epic-harness/install-id`).
+
+**Ce que nous ne collectons jamais :** code source, contenu de fichiers, chemins de fichiers, variables d'environnement, secrets ou toute information personnelle.
+
+**Contrôle :**
+
+```bash
+epic-harness telemetry status   # afficher le consentement actuel
+epic-harness telemetry off      # désactiver (arrête tout envoi)
+epic-harness telemetry on       # réactiver
+```
+
+Le consentement est stocké dans `~/.config/epic-harness/telemetry-consent`. Lorsque off, aucune télémétrie n'est envoyée.
+
+---
+
 ## Commandes
 
 | Commande | Ce qu'elle fait |

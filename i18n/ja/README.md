@@ -155,6 +155,26 @@ Claude Codeセッション内: `/evolve status`
 
 ---
 
+## テレメトリ
+
+epic-harnessはフックの信頼性とスキル進化の改善のため、デフォルトで**匿名**の使用テレメトリを収集します（opt-out）。イベントは Posthog に送信されます。
+
+**収集するもの:** コマンド名、実行時間、結果（成功/失敗）、失敗分類、フック遮断/失敗イベント — および `product`、`product_version`、`os`、ランダムな `install_id`（初回実行時に生成された UUID、`~/.config/epic-harness/install-id` に保存）。
+
+**収集しないもの:** ソースコード、ファイル内容、ファイルパス、環境変数、シークレット、個人識別情報。
+
+**制御:**
+
+```bash
+epic-harness telemetry status   # 現在の同意状態を表示
+epic-harness telemetry off      # 無効化（送信を即時停止）
+epic-harness telemetry on       # 再び有効化
+```
+
+同意は `~/.config/epic-harness/telemetry-consent` に保存されます。off の場合、テレメトリは送信されません。
+
+---
+
 ## コマンド
 
 | コマンド | 機能 |

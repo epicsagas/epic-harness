@@ -155,6 +155,26 @@ ls ~/.harness/              # 数据目录（首次会话自动创建）
 
 ---
 
+## 遥测
+
+epic-harness 默认收集**匿名**使用遥测（opt-out），以改进 hook 可靠性和技能进化。事件发送到 Posthog。
+
+**我们收集：** 命令名称、持续时间、结果（成功/失败）、失败分类、hook 阻止/失败事件 — 以及 `product`、`product_version`、`os` 和随机 `install_id`（首次运行时生成的 UUID，存储在 `~/.config/epic-harness/install-id`）。
+
+**我们绝不收集：** 源码、文件内容、文件路径、环境变量、密钥或任何个人身份信息。
+
+**控制：**
+
+```bash
+epic-harness telemetry status   # 显示当前同意状态
+epic-harness telemetry off      # 禁用（立即停止发送）
+epic-harness telemetry on       # 重新启用
+```
+
+同意存储在 `~/.config/epic-harness/telemetry-consent`。关闭时不发送任何遥测。
+
+---
+
 ## 命令
 
 | 命令 | 功能说明 |

@@ -155,6 +155,26 @@ ls ~/.harness/              # 資料目錄（首次工作階段自動建立）
 
 ---
 
+## 遙測
+
+epic-harness 預設收集**匿名**使用遙測（opt-out），以改進 hook 可靠性和技能進化。事件傳送到 Posthog。
+
+**我們收集：** 命令名稱、持續時間、結果（成功/失敗）、失敗分類、hook 阻止/失敗事件 — 以及 `product`、`product_version`、`os` 和隨機 `install_id`（首次執行時產生的 UUID，儲存在 `~/.config/epic-harness/install-id`）。
+
+**我們絕不收集：** 原始碼、檔案內容、檔案路徑、環境變數、金鑰或任何個人識別資訊。
+
+**控制：**
+
+```bash
+epic-harness telemetry status   # 顯示目前同意狀態
+epic-harness telemetry off      # 停用（立即停止傳送）
+epic-harness telemetry on       # 重新啟用
+```
+
+同意儲存在 `~/.config/epic-harness/telemetry-consent`。關閉時不傳送任何遙測。
+
+---
+
 ## 命令
 
 | 命令 | 功能 |

@@ -155,6 +155,26 @@ Dentro de uma sessão do Claude Code: `/evolve status`
 
 ---
 
+## Telemetria
+
+epic-harness coleta **telemetria anônima** de uso por padrão (opt-out) para melhorar a confiabilidade dos hooks e a evolução das skills. Os eventos são enviados ao Posthog.
+
+**O que coletamos:** nome do comando, duração, resultado (sucesso/falha), classe de falha e eventos de bloqueio/falha de hooks — além de `product`, `product_version`, `os` e um `install_id` aleatório (UUID gerado na primeira execução, armazenado em `~/.config/epic-harness/install-id`).
+
+**O que nunca coletamos:** código-fonte, conteúdo de arquivos, caminhos de arquivos, variáveis de ambiente, segredos ou qualquer informação pessoal.
+
+**Controle:**
+
+```bash
+epic-harness telemetry status   # mostrar o consentimento atual
+epic-harness telemetry off      # desativar (interrompe todo envio)
+epic-harness telemetry on       # reativar
+```
+
+O consentimento é armazenado em `~/.config/epic-harness/telemetry-consent`. Quando off, nenhuma telemetria é enviada.
+
+---
+
 ## Comandos
 
 | Comando | O que faz |

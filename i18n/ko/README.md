@@ -155,6 +155,26 @@ Claude Code 세션 안에서: `/evolve status`
 
 ---
 
+## 텔레메트리
+
+epic-harness는 훅 안정성과 스킬 진화 개선을 위해 **익명** 사용 텔레메트리를 기본 수집합니다(opt-out). 이벤트는 Posthog로 전송됩니다.
+
+**수집 항목:** 명령 이름, 실행 시간, 결과(성공/실패), 실패 분류, 훅 차단/실패 이벤트 — 그리고 `product`, `product_version`, `os`, 임의 `install_id`(첫 실행 시 생성된 UUID, `~/.config/epic-harness/install-id`에 저장).
+
+**수집하지 않는 항목:** 소스 코드, 파일 내용, 파일 경로, 환경변수, 시크릿, 개인 식별 정보.
+
+**제어:**
+
+```bash
+epic-harness telemetry status   # 현재 동의 상태 표시
+epic-harness telemetry off      # 비활성화 (즉시 전송 중단)
+epic-harness telemetry on       # 다시 활성화
+```
+
+동의는 `~/.config/epic-harness/telemetry-consent`에 저장됩니다. off이면 텔레메트리가 전송되지 않습니다.
+
+---
+
 ## 명령어
 
 | 명령어 | 기능 |
