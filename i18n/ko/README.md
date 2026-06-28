@@ -472,7 +472,7 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 | **Cline** | ✓ 전체⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml`에 `codex_hooks = true` 필요 · ² 플러그인 설치; 서브에이전트 지원은 아직 미지원 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
+¹ `~/.codex/config.toml`에 `plugin_hooks = true` 필요 · ² 플러그인 설치; 서브에이전트 지원은 아직 미지원 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
 
 ---
 

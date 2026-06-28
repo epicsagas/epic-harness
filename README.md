@@ -500,7 +500,7 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | **Cline** | ✓ Full⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` in `~/.codex/config.toml` · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
+¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² Plugin install; subagent support not yet available · ³ Cursor 1.7+ · ⁴ JS plugin · ⁵ 5 hook scripts · ⁶ Conventions only
 
 ---
 

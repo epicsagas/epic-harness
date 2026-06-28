@@ -472,7 +472,7 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 | **Cline** | ✓ Complet⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` dans `~/.codex/config.toml` · ² Installation du plugin ; support de sous-agent pas encore disponible · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
+¹ `plugin_hooks = true` dans `~/.codex/config.toml` · ² Installation du plugin ; support de sous-agent pas encore disponible · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
 
 ---
 

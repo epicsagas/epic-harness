@@ -472,7 +472,7 @@ Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projec
 | **Cline** | ✓ Completo⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` em `~/.codex/config.toml` · ² Instalação via plugin; suporte a subagentes ainda não disponível · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Apenas convenções
+¹ `plugin_hooks = true` em `~/.codex/config.toml` · ² Instalação via plugin; suporte a subagentes ainda não disponível · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Apenas convenções
 
 ---
 

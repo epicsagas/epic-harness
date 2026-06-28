@@ -472,7 +472,7 @@ epic team delete backend --global      # orgストアから永久に削除
 | **Cline** | ✓ フル⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` で `codex_hooks = true` · ² プラグインインストール; サブエージェントサポートは未対応 · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
+¹ `~/.codex/config.toml` で `plugin_hooks = true` · ² プラグインインストール; サブエージェントサポートは未対応 · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
 
 ---
 

@@ -411,7 +411,7 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 | **Cline** | ✓ पूर्ण⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` में `codex_hooks = true` · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
+¹ `~/.codex/config.toml` में `plugin_hooks = true` · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
 
 ---
 

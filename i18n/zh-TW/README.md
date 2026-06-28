@@ -472,7 +472,7 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 | **Cline** | ✓ 完整⁵ | — | — | — |
 | **Aider** | —⁶ | — | — | — |
 
-¹ `codex_hooks = true` 在 `~/.codex/config.toml` · ² 外掛安裝；子代理支援尚不可用 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
+¹ `plugin_hooks = true` 在 `~/.codex/config.toml` · ² 外掛安裝；子代理支援尚不可用 · ³ Cursor 1.7+ · ⁴ JS 外掛 · ⁵ 5 個掛鉤腳本 · ⁶ 僅約定
 
 ---
 
