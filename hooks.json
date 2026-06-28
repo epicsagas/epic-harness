@@ -1,39 +1,25 @@
 {
-  "hooks": {
-    "PreToolUse": [
+  "epic": {
+    "PreInvocation": [
       {
-        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "epic guard"
+            "command": "epic resume"
           }
         ],
-        "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+        "description": "Restore session context and load memory"
       }
     ],
-    "PostToolUse": [
+    "PostInvocation": [
       {
-        "matcher": "Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "epic polish"
+            "command": "epic reflect"
           }
         ],
-        "description": "Auto-format + typecheck + lint warning after edits"
-      },
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "epic observe",
-            "async": true,
-            "timeout": 5
-          }
-        ],
-        "description": "Record tool result for evolution loop"
+        "description": "Analyze session observations and evolve skills"
       }
     ]
   }
