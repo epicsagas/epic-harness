@@ -12,13 +12,11 @@
 - `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
-- `integrations/` — Per-tool integration files (6 tools):
-  - `codex/` — hooks.json, config.toml
-  - `antigravity/` — gemini-extension.json, GEMINI.md, hooks/hooks.json
-  - `cursor/` — hooks.json, rules/
-  - `opencode/` — plugins/epic-harness.js
-  - `cline/` — hooks/(5 scripts), rules/epic-harness.md
-  - `aider/` — .aider.conf.yml, .aider/CONVENTIONS.md
+- `integrations/` — Per-tool integration files:
+  - `codex/` — hooks.json, config.toml, install.md
+  - `antigravity/` — gemini-extension.json, GEMINI.md
+  - `common/` — shared HARNESS.md
+  - `mcp-registration.md` — MCP server registration reference
 
 ## Architecture: 4-Ring Model
 

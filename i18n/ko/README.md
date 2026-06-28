@@ -467,12 +467,8 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 | **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 스킬 | Live |
 | **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
 | **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
-| **Cursor** | ✓ 전체³ | ✓ 3개 명령어 (/orbit 포함) | ✓ 규칙 경유 | Live |
-| **OpenCode** | ✓ 부분⁴ | ✓ 3개 명령어 (/orbit 포함) | — | — |
-| **Cline** | ✓ 전체⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml`에 `plugin_hooks = true` 필요 · ² 플러그인 설치; 서브에이전트 지원은 아직 미지원 · ³ Cursor 1.7+ · ⁴ JS 플러그인 · ⁵ 5개 훅 스크립트 · ⁶ 컨벤션만
+¹ `~/.codex/config.toml`에 `plugin_hooks = true` 필요 · ² PreInvocation/PostInvocation만 — PreToolUse 없음 (guard/polish 불가)
 
 ---
 

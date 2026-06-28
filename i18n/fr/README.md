@@ -467,12 +467,8 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 | **Claude Code** | ✓ Complet | ✓ 3 commandes (incl. /orbit) | ✓ 26 competences | Live |
 | **Codex CLI** | ✓ Complet¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
 | **Antigravity** | ✓ Partiel² | ✓ 3 commandes (incl. /orbit) | ✓ 26 | — |
-| **Cursor** | ✓ Complet³ | ✓ 3 commandes (incl. /orbit) | ✓ via rules | Live |
-| **OpenCode** | ✓ Partiel⁴ | ✓ 3 commandes (incl. /orbit) | — | — |
-| **Cline** | ✓ Complet⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
 
-¹ `plugin_hooks = true` dans `~/.codex/config.toml` · ² Installation du plugin ; support de sous-agent pas encore disponible · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Conventions uniquement
+¹ `plugin_hooks = true` dans `~/.codex/config.toml` · ² PreInvocation/PostInvocation uniquement — pas de PreToolUse (guard/polish indisponible)
 
 ---
 

@@ -406,12 +406,8 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 | **Claude Code** | ✓ पूर्ण | ✓ 3 कमांड (incl. /orbit) | ✓ 19 स्किल्स | Live |
 | **Codex CLI** | ✓ पूर्ण¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
 | **Antigravity** | ✓ आंशिक² | ✓ 3 कमांड (incl. /orbit) | ✓ 19 | — |
-| **Cursor** | ✓ पूर्ण³ | ✓ 3 कमांड (incl. /orbit) | ✓ rules के माध्यम से | Live |
-| **OpenCode** | ✓ आंशिक⁴ | ✓ 3 कमांड (incl. /orbit) | — | — |
-| **Cline** | ✓ पूर्ण⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` में `plugin_hooks = true` · ² Guard `BeforeModel` स्तर पर · ³ Cursor 1.7+ · ⁴ JS प्लगइन · ⁵ 5 hook स्क्रिप्ट · ⁶ केवल Conventions
+¹ `~/.codex/config.toml` में `plugin_hooks = true` · ² केवल PreInvocation/PostInvocation — PreToolUse नहीं (guard/polish अनुपलब्ध)
 
 ---
 

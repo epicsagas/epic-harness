@@ -467,12 +467,8 @@ epic team delete backend --global      # orgストアから永久に削除
 | **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 26スキル | Live |
 | **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 26 | — |
 | **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 26 | — |
-| **Cursor** | ✓ フル³ | ✓ 3コマンド（/orbitを含む） | ✓ ルール経由 | Live |
-| **OpenCode** | ✓ 部分⁴ | ✓ 3コマンド（/orbitを含む） | — | — |
-| **Cline** | ✓ フル⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
 
-¹ `~/.codex/config.toml` で `plugin_hooks = true` · ² プラグインインストール; サブエージェントサポートは未対応 · ³ Cursor 1.7+ · ⁴ JSプラグイン · ⁵ 5つのフックスクリプト · ⁶ 規約のみ
+¹ `~/.codex/config.toml` で `plugin_hooks = true` · ² PreInvocation/PostInvocationのみ — PreToolUseなし（guard/polish利用不可）
 
 ---
 

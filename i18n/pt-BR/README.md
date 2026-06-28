@@ -467,12 +467,8 @@ Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projec
 | **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 26 habilidades | Live |
 | **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
 | **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 26 | — |
-| **Cursor** | ✓ Completo³ | ✓ 3 comandos (incl. /orbit) | ✓ via rules | Live |
-| **OpenCode** | ✓ Parcial⁴ | ✓ 3 comandos (incl. /orbit) | — | — |
-| **Cline** | ✓ Completo⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
 
-¹ `plugin_hooks = true` em `~/.codex/config.toml` · ² Instalação via plugin; suporte a subagentes ainda não disponível · ³ Cursor 1.7+ · ⁴ Plugin JS · ⁵ 5 scripts de hook · ⁶ Apenas convenções
+¹ `plugin_hooks = true` em `~/.codex/config.toml` · ² Apenas PreInvocation/PostInvocation — sem PreToolUse (guard/polish indisponível)
 
 ---
 

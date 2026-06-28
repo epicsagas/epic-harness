@@ -467,12 +467,8 @@ epic team delete backend --global      # 从组织存储中永久删除
 | **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 26 个技能 | Live |
 | **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 26 | — |
 | **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 26 | — |
-| **Cursor** | ✓ 完整³ | ✓ 3 条命令（含 /orbit） | ✓ 通过 rules | Live |
-| **OpenCode** | ✓ 部分⁴ | ✓ 3 条命令（含 /orbit） | — | — |
-| **Cline** | ✓ 完整⁵ | — | — | — |
-| **Aider** | —⁶ | — | — | — |
 
-¹ `plugin_hooks = true` 在 `~/.codex/config.toml` 中 · ² 插件安装；子智能体支持尚不可用 · ³ Cursor 1.7+ · ⁴ JS 插件 · ⁵ 5 个 hook 脚本 · ⁶ 仅 Conventions
+¹ `plugin_hooks = true` 在 `~/.codex/config.toml` 中 · ² 仅 PreInvocation/PostInvocation — 无 PreToolUse（guard/polish 不可用）
 
 ---
 
