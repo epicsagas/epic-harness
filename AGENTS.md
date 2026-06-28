@@ -12,11 +12,7 @@
 - `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
-- `integrations/` — Per-tool integration files:
-  - `codex/` — hooks.json, config.toml, install.md
-  - `antigravity/` — gemini-extension.json, GEMINI.md
-  - `common/` — shared HARNESS.md
-  - `mcp-registration.md` — MCP server registration reference
+- `integrations/common/` — `HARNESS.md` embedded into the binary (`include_str!`), self-seeded to `~/.harness/HARNESS.md`
 
 ## Architecture: 4-Ring Model
 
@@ -276,10 +272,9 @@ When creating a new release tag, update ALL of the following to the same version
 | `app/package.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.codex-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
-| `integrations/antigravity/gemini-extension.json` | `"version": "x.y.z"` | `0.4.3` |
 | Git tag | `vx.y.z` | `v0.4.3` |
 
-All seven must match before tagging.
+All six must match before tagging.
 
 ### Dashboard rebuild (before tagging)
 

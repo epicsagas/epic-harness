@@ -365,13 +365,9 @@ epic-harness/
 │   ├── hooks.json     ← hook registration (Claude Code)
 │   ├── bin/
 │   │   └── epic-harness  ← Rust single binary
-├── integrations/      # Per-tool integration files
-│   ├── codex/         # hooks.json, config.toml
-│   ├── antigravity/   # gemini-extension.json, GEMINI.md, hooks/
-│   ├── cursor/        # hooks.json, rules/
-│   ├── opencode/      # plugins/epic-harness.js
-│   ├── cline/         # hooks/(5 scripts), rules/epic-harness.md
-│   └── aider/         # .aider.conf.yml, .aider/CONVENTIONS.md
+├── integrations/      # embedded assets
+│   └── common/
+│       └── HARNESS.md  # embedded via include_str!, seeded to ~/.harness/
 ├── references/        # Checklists
 │   ├── security.md
 │   ├── performance.md

@@ -190,16 +190,7 @@ accumulates knowledge from every project that creates or links it.
 
 ## Agent Integration
 
-Each coding agent integration contains a thin wrapper that delegates to `epic team`:
-
-```
-integrations/
-├── opencode/commands/team.md    → "run epic team"
-├── cursor/commands/team.md      → "run epic team"
-└── codex/prompts/team.md        → "run epic team"
-```
-
-No team logic lives in the integration layer. The CLI is the source of truth.
+Each tool's `/team` command delegates to `epic team` (Claude Code, Codex, Antigravity). No team logic lives in the plugin layer — the CLI is the source of truth.
 
 ---
 
