@@ -75,7 +75,7 @@ Auth या DB छू रहे हैं?   → secure ट्रिगर (OWAS
 
 > **पहली बार?** [त्वरित प्रारंभ गाइड (5 मिनट)](../../docs/quickstart.md) पढ़ें।
 
-epic-harness एक **प्लगइन** के रूप में वितरित होता है — स्किल्स, hooks और `harness-mem` MCP सर्वर सीधे प्लगइन लेआउट (`skills/`, `hooks.json`, `.mcp.json`) से लोड होते हैं। कोई `install` सबकमांड नहीं है; प्रत्येक टूल प्लगइन को डिस्क से पढ़ता है।
+epic-harness एक **प्लगइन** के रूप में वितरित होता है — स्किल्स, hooks और `harness-mem` MCP सर्वर सीधे प्लगइन लेआउट (`skills/`, `hooks.json`, `mcp_config.json`) से लोड होते हैं। कोई `install` सबकमांड नहीं है; प्रत्येक टूल प्लगइन को डिस्क से पढ़ता है।
 
 ### Claude Code (अनुशंसित)
 
@@ -86,14 +86,6 @@ epic-harness एक **प्लगइन** के रूप में वित�
 
 बाइनरी, स्किल्स, hooks और `harness-mem` MCP सर्वर को एक ही चरण में ऑटो-इंस्टॉल करता है।
 
-### agy (Antigravity CLI)
-
-```bash
-agy plugin install .
-```
-
-27 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` से ऑटो-डिस्कवर होते हैं।
-
 ### Codex CLI
 
 ```bash
@@ -101,6 +93,14 @@ codex plugin marketplace add epicsagas/plugins
 ```
 
 स्किल्स और एजेंट तुरंत उपलब्ध — कोई अतिरिक्त चरण आवश्यक नहीं।
+
+### agy (Antigravity CLI)
+
+```bash
+agy plugin install .
+```
+
+27 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` से ऑटो-डिस्कवर होते हैं।
 
 ### केवल बाइनरी (प्लगइन होस्ट के बिना)
 

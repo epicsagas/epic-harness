@@ -88,7 +88,7 @@ $ /orbit "为登录 API 添加 JWT 认证"
 
 > **首次使用？** 阅读[快速入门指南（5 分钟）](../../docs/quickstart.md)。
 
-epic-harness 以**插件**形式分发 — 技能、hooks 和 `harness-mem` MCP 服务器直接从插件布局（`skills/`、`hooks.json`、`.mcp.json`）加载。没有 `install` 子命令，各工具直接从磁盘读取插件。
+epic-harness 以**插件**形式分发 — 技能、hooks 和 `harness-mem` MCP 服务器直接从插件布局（`skills/`、`hooks.json`、`mcp_config.json`）加载。没有 `install` 子命令，各工具直接从磁盘读取插件。
 
 ### Claude Code（推荐）
 
@@ -99,14 +99,6 @@ epic-harness 以**插件**形式分发 — 技能、hooks 和 `harness-mem` MCP 
 
 一步自动安装二进制文件、技能、hooks 和 `harness-mem` MCP 服务器。
 
-### agy（Antigravity CLI）
-
-```bash
-agy plugin install .
-```
-
-27 个技能、hooks 和 `harness-mem` MCP 服务器从插件的 `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` 自动发现。
-
 ### Codex CLI
 
 ```bash
@@ -114,6 +106,14 @@ codex plugin marketplace add epicsagas/plugins
 ```
 
 技能和智能体立即可用 — 无需进一步操作。
+
+### agy（Antigravity CLI）
+
+```bash
+agy plugin install .
+```
+
+27 个技能、hooks 和 `harness-mem` MCP 服务器从插件的 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` 自动发现。
 
 ### 仅二进制（无插件宿主）
 

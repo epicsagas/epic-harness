@@ -88,7 +88,7 @@ $ /orbit "為登入 API 新增 JWT 驗證"
 
 > **第一次使用？** 請閱讀[快速入門指南（5 分鐘）](../../docs/quickstart.md)。
 
-epic-harness 以**外掛**形式分發 — 技能、掛鉤和 `harness-mem` MCP 伺服器直接從外掛佈局（`skills/`、`hooks.json`、`.mcp.json`）載入。沒有 `install` 子命令，各工具直接從磁碟讀取外掛。
+epic-harness 以**外掛**形式分發 — 技能、掛鉤和 `harness-mem` MCP 伺服器直接從外掛佈局（`skills/`、`hooks.json`、`mcp_config.json`）載入。沒有 `install` 子命令，各工具直接從磁碟讀取外掛。
 
 ### Claude Code（推薦）
 
@@ -99,14 +99,6 @@ epic-harness 以**外掛**形式分發 — 技能、掛鉤和 `harness-mem` MCP 
 
 一步自動安裝二進位檔案、技能、掛鉤和 `harness-mem` MCP 伺服器。
 
-### agy（Antigravity CLI）
-
-```bash
-agy plugin install .
-```
-
-27 個技能、掛鉤和 `harness-mem` MCP 伺服器從外掛的 `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` 自動發現。
-
 ### Codex CLI
 
 ```bash
@@ -114,6 +106,14 @@ codex plugin marketplace add epicsagas/plugins
 ```
 
 技能和智能體立即可用 — 無需額外步驟。
+
+### agy（Antigravity CLI）
+
+```bash
+agy plugin install .
+```
+
+27 個技能、掛鉤和 `harness-mem` MCP 伺服器從外掛的 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` 自動發現。
 
 ### 僅二進位（無外掛宿主）
 

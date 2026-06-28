@@ -88,7 +88,7 @@ auth/DB を変更?          → secure 発火 (OWASPチェックリスト、近�
 
 > **初めての方は** [クイックスタートガイド（5分）](../../docs/quickstart.md)をお読みください。
 
-epic-harnessは**プラグイン**として配布されます — スキル、フック、`harness-mem` MCPサーバーはプラグインレイアウト（`skills/`, `hooks.json`, `.mcp.json`）から直接ロードされます。`install` サブコマンドはなく、各ツールがディスクからプラグインを読み取ります。
+epic-harnessは**プラグイン**として配布されます — スキル、フック、`harness-mem` MCPサーバーはプラグインレイアウト（`skills/`, `hooks.json`, `mcp_config.json`）から直接ロードされます。`install` サブコマンドはなく、各ツールがディスクからプラグインを読み取ります。
 
 ### Claude Code（推奨）
 
@@ -105,7 +105,7 @@ epic-harnessは**プラグイン**として配布されます — スキル、�
 agy plugin install .
 ```
 
-27個のスキル、フック、`harness-mem` MCPサーバーがプラグインの `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` から自動検出されます。
+27個のスキル、フック、`harness-mem` MCPサーバーがプラグインの `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` から自動検出されます。
 
 ### Codex CLI
 

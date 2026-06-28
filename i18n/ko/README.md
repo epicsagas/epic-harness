@@ -88,7 +88,7 @@ auth/DB 코드를 수정했나요?   → secure 발동 (OWASP 체크리스트, �
 
 > **처음이라면?** [빠른 시작 가이드 (5분)](../../docs/quickstart.md)를 읽어보세요.
 
-epic-harness는 **플러그인**으로 배포됩니다 — 스킬, 훅, `harness-mem` MCP 서버가 플러그인 레이아웃(`skills/`, `hooks.json`, `.mcp.json`)에서 직접 로드됩니다. `install` 서브커맨드는 없으며, 각 도구가 디스크에서 플러그인을 읽습니다.
+epic-harness는 **플러그인**으로 배포됩니다 — 스킬, 훅, `harness-mem` MCP 서버가 플러그인 레이아웃(`skills/`, `hooks.json`, `mcp_config.json`)에서 직접 로드됩니다. `install` 서브커맨드는 없으며, 각 도구가 디스크에서 플러그인을 읽습니다.
 
 ### Claude Code (권장)
 
@@ -99,14 +99,6 @@ epic-harness는 **플러그인**으로 배포됩니다 — 스킬, 훅, `harness
 
 바이너리, 스킬, 훅, `harness-mem` MCP 서버를 한 번에 자동 설치합니다.
 
-### agy (Antigravity CLI)
-
-```bash
-agy plugin install .
-```
-
-27개 스킬, 훅, `harness-mem` MCP 서버가 플러그인의 `plugin.json` + `skills/` + `hooks.json` + `.mcp.json`에서 자동 발견됩니다.
-
 ### Codex CLI
 
 ```bash
@@ -114,6 +106,14 @@ codex plugin marketplace add epicsagas/plugins
 ```
 
 스킬과 에이전트를 즉시 사용할 수 있습니다 — 추가 단계가 필요 없습니다.
+
+### agy (Antigravity CLI)
+
+```bash
+agy plugin install .
+```
+
+27개 스킬, 훅, `harness-mem` MCP 서버가 플러그인의 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`에서 자동 발견됩니다.
 
 ### 바이너리만 (플러그인 호스트 없음)
 

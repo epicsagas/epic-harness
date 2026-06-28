@@ -19,5 +19,5 @@
     "automation"
   ],
   "skills": "./skills/",
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./mcp_config.json"
 }

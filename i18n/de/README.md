@@ -88,7 +88,7 @@ Nachdem die Session endet, analysiert die **evolve-Schleife**, was fehlschlug, g
 
 > **Zum ersten Mal hier?** Lesen Sie den [Schnellstart-Leitfaden (5 Min.)](../../docs/quickstart.md).
 
-epic-harness wird als **Plugin** ausgeliefert — Skills, Hooks und der `harness-mem` MCP-Server werden direkt aus dem Plugin-Layout (`skills/`, `hooks.json`, `.mcp.json`) geladen. Es gibt keinen `install`-Subcommand; jedes Tool liest das Plugin von der Festplatte.
+epic-harness wird als **Plugin** ausgeliefert — Skills, Hooks und der `harness-mem` MCP-Server werden direkt aus dem Plugin-Layout (`skills/`, `hooks.json`, `mcp_config.json`) geladen. Es gibt keinen `install`-Subcommand; jedes Tool liest das Plugin von der Festplatte.
 
 ### Claude Code (empfohlen)
 
@@ -99,14 +99,6 @@ epic-harness wird als **Plugin** ausgeliefert — Skills, Hooks und der `harness
 
 Installiert Binary, Skills, Hooks und den `harness-mem` MCP-Server in einem Schritt.
 
-### agy (Antigravity CLI)
-
-```bash
-agy plugin install .
-```
-
-27 Skills, Hooks und der `harness-mem` MCP-Server werden automatisch aus `plugin.json` + `skills/` + `hooks.json` + `.mcp.json` des Plugins erkannt.
-
 ### Codex CLI
 
 ```bash
@@ -114,6 +106,14 @@ codex plugin marketplace add epicsagas/plugins
 ```
 
 Skills und Agents sind sofort verfügbar — keine weiteren Schritte erforderlich.
+
+### agy (Antigravity CLI)
+
+```bash
+agy plugin install .
+```
+
+27 Skills, Hooks und der `harness-mem` MCP-Server werden automatisch aus `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` des Plugins erkannt.
 
 ### Nur Binary (ohne Plugin-Host)
 
