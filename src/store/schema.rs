@@ -41,6 +41,16 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     migrate_metrics_state_pk(pool).await?;
     migrate_skill_attribution_pk(pool).await?;
 
+    // Holdout A/B counter (added with attribution holdout rotation). Runs
+    // after the PK rebuild so legacy-rebuilt tables also gain the column.
+    ensure_column(
+        pool,
+        "skill_attribution",
+        "sessions_holdout",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
+    .await?;
+
     Ok(())
 }
 
@@ -337,6 +347,7 @@ pub(crate) const DDL_SQLITE: &str = r#"
         avg_score_without REAL NOT NULL DEFAULT 0.0,
         first_seen        TEXT NOT NULL,
         project           TEXT NOT NULL DEFAULT '',
+        sessions_holdout  INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (skill_name, project)
     );
 

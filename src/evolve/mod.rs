@@ -9,6 +9,7 @@ pub mod planner;
 pub mod seesaw;
 pub mod skills;
 pub mod snapshot;
+pub mod synthesis;
 pub mod variants;
 
 pub use analysis::{analyze_session, build_summary, detect_patterns};
@@ -16,8 +17,8 @@ pub use digester::digest_session;
 pub use ingest::ingest_to_memory;
 pub use instincts::{extract_instincts, promote_instincts_to_global};
 pub use metrics::{
-    check_stagnation, classify_epoch, compute_trend, detect_reward_hacking, safe_avg_score,
-    update_skill_attribution,
+    check_stagnation, classify_epoch, compute_trend, detect_reward_hacking, partition_holdout,
+    safe_avg_score, update_skill_attribution,
 };
 pub use planner::{build_landscape, recommends_exploration};
 pub use seesaw::{check as seesaw_check, load_registry, save_registry, scores_from_digests};

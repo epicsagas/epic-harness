@@ -112,6 +112,42 @@ pub struct EvolutionConfig {
     /// (per session, over the window) to consider the efficiency proxy "rising".
     #[serde(default = "default_reward_hacking_cost_rise")]
     pub reward_hacking_cost_rise: f64,
+
+    /// LLM skill synthesis: when true, seeded skill bodies are synthesized by
+    /// a headless `claude -p` call from real failure evidence instead of the
+    /// static templates. Any failure falls back to the template content.
+    /// Disabled in debug builds (test determinism) unless EPIC_SYNTH_FORCE=1.
+    #[serde(default = "default_llm_synthesis")]
+    pub llm_synthesis: bool,
+
+    /// Command used for LLM synthesis (must accept a prompt on stdin with `-p`).
+    #[serde(default = "default_llm_synthesis_cmd")]
+    pub llm_synthesis_cmd: String,
+
+    /// Model passed to the synthesis command via `--model`. Empty = CLI default.
+    #[serde(default = "default_llm_synthesis_model")]
+    pub llm_synthesis_model: String,
+
+    /// Wall-clock budget for one synthesis call. Keep well under the host's
+    /// SessionEnd hook timeout — reflect runs inside that budget.
+    #[serde(default = "default_llm_synthesis_timeout_secs")]
+    pub llm_synthesis_timeout_secs: u64,
+
+    /// Maximum skills synthesized per reflect round (the rest keep templates).
+    #[serde(default = "default_llm_synthesis_max_per_session")]
+    pub llm_synthesis_max_per_session: usize,
+
+    /// Holdout A/B evaluation window: while a skill's (active + holdout)
+    /// session count is below this, it is eligible for holdout rotation.
+    /// After the window, the with/without verdict is considered settled.
+    #[serde(default = "default_attribution_eval_sessions")]
+    pub attribution_eval_sessions: u64,
+
+    /// Holdout modulus: hash(skill, date) % modulus == 0 → skill withheld
+    /// for the day (~1/modulus of days). 0 disables holdout entirely
+    /// (legacy behavior: every session counts as exposure).
+    #[serde(default = "default_attribution_holdout_modulus")]
+    pub attribution_holdout_modulus: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,8 +247,45 @@ impl Default for EvolutionConfig {
             reward_hacking_window: default_reward_hacking_window(),
             reward_hacking_quality_drop: default_reward_hacking_quality_drop(),
             reward_hacking_cost_rise: default_reward_hacking_cost_rise(),
+            llm_synthesis: default_llm_synthesis(),
+            llm_synthesis_cmd: default_llm_synthesis_cmd(),
+            llm_synthesis_model: default_llm_synthesis_model(),
+            llm_synthesis_timeout_secs: default_llm_synthesis_timeout_secs(),
+            llm_synthesis_max_per_session: default_llm_synthesis_max_per_session(),
+            attribution_eval_sessions: default_attribution_eval_sessions(),
+            attribution_holdout_modulus: default_attribution_holdout_modulus(),
         }
     }
+}
+
+// ── LLM synthesis + attribution holdout defaults ─────
+
+fn default_llm_synthesis() -> bool {
+    true
+}
+
+fn default_llm_synthesis_cmd() -> String {
+    "claude".into()
+}
+
+fn default_llm_synthesis_model() -> String {
+    "haiku".into()
+}
+
+fn default_llm_synthesis_timeout_secs() -> u64 {
+    10
+}
+
+fn default_llm_synthesis_max_per_session() -> usize {
+    1
+}
+
+fn default_attribution_eval_sessions() -> u64 {
+    12
+}
+
+fn default_attribution_holdout_modulus() -> u64 {
+    3
 }
 
 // ── Reward-hacking defaults (HarnessX Tier 2.2) ─────

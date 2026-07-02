@@ -19,13 +19,21 @@ static MASK_SK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_
 static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret|private_key)[=:]\s*\S+").unwrap()
 });
+/// Absolute file paths — Unix (`/home/u/p/x.rs`), Windows (`C:\Users\me\y`),
+/// and tilde-home (`~/repo/z`). Error snippets reach an external LLM via
+/// skill synthesis and may land in generated SKILL.md, so paths are masked.
+static MASK_PATH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?:(?:/[A-Za-z][\w./-]*)|(?:[A-Za-z]:\\[^\s"']+)|(?:~[/\w.\\-]+))"#).unwrap()
+});
 
 /// Mask common secret patterns in a string.
-/// Covers: Bearer tokens, sk-* API keys, password/token/apikey/secret/private_key values.
+/// Covers: Bearer tokens, sk-* API keys, password/token/apikey/secret/private_key
+/// values, and absolute file paths (Unix/Windows/tilde-home).
 pub fn mask_secrets(s: &str) -> String {
     let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
     let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
     let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
+    let s = MASK_PATH.replace_all(&s, "<PATH>");
     s.into_owned()
 }
 
@@ -75,6 +83,30 @@ mod tests {
         assert_eq!(
             mask_secrets("Build the auth module"),
             "Build the auth module"
+        );
+    }
+
+    #[test]
+    fn mask_unix_path() {
+        assert_eq!(
+            mask_secrets("error at /home/u/proj/src/main.rs:42"),
+            "error at <PATH>:42"
+        );
+    }
+
+    #[test]
+    fn mask_windows_path() {
+        assert_eq!(
+            mask_secrets("failed in C:\\Users\\me\\proj\\x.cs"),
+            "failed in <PATH>"
+        );
+    }
+
+    #[test]
+    fn mask_tilde_home() {
+        assert_eq!(
+            mask_secrets("open ~/repo/z for editing"),
+            "open <PATH> for editing"
         );
     }
 }

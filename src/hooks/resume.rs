@@ -378,10 +378,49 @@ pub fn run(_input: &HookInput) -> i32 {
         }
     }
 
-    // 3. Evolved skills
+    // 3. Evolved skills — deterministic injection.
+    //
+    // Previously this emitted only the skill NAMES as a stderr hint and
+    // relied on _dispatch (prompt obedience) to go read the files. Now the
+    // active skills' bodies are printed to STDOUT, which SessionStart hooks
+    // inject directly into the model's context — the Ring 3 loop closes in
+    // code, not in prompt compliance.
+    //
+    // Skills on holdout rotation today (A/B counterfactual, see
+    // evolve::partition_holdout) are deliberately NOT injected; reflect
+    // credits this session's score to their `without` arm at session end.
     let evolved = list_dirs(&evolved_dir());
+    let today_str = today();
+    // Record the partition date so reflect (SessionEnd) reproduces the same
+    // holdout arm even when this session spans UTC midnight — otherwise an
+    // active-injected skill could be scored against the holdout baseline.
+    crate::shared::helpers::write_session_start(&today_str);
     if !evolved.is_empty() {
-        hint("resume", &format!("Evolved skills: {}", evolved.join(", ")));
+        let (active, holdout) = crate::evolve::partition_holdout(&evolved, &metrics, &today_str);
+        let bodies: Vec<(String, String)> = active
+            .iter()
+            .filter_map(|name| {
+                let content =
+                    std::fs::read_to_string(evolved_dir().join(name).join("SKILL.md")).ok()?;
+                Some((name.clone(), content))
+            })
+            .collect();
+        if !bodies.is_empty() {
+            println!("{}", build_evolved_injection(&bodies));
+            hint(
+                "resume",
+                &format!("Evolved skills injected: {}", active.join(", ")),
+            );
+        }
+        if !holdout.is_empty() {
+            hint(
+                "resume",
+                &format!(
+                    "Evolved skills on holdout today (A/B baseline): {}",
+                    holdout.join(", ")
+                ),
+            );
+        }
     }
 
     // 4. Cold-start presets (#1)
@@ -685,6 +724,35 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
     ))
 }
 
+/// Per-skill and total character budgets for evolved-skill context injection.
+/// SessionStart stdout lands verbatim in the model's context — keep it lean.
+const INJECT_PER_SKILL_CHARS: usize = 1_600;
+const INJECT_TOTAL_CHARS: usize = 10_000;
+
+/// Render active evolved skills as a context block for SessionStart stdout.
+/// Frontmatter is stripped (metadata noise), bodies are truncated to budget.
+fn build_evolved_injection(skills: &[(String, String)]) -> String {
+    let mut out = String::from(
+        "## Evolved Skills (epic-harness Ring 3)\n\
+         Learned from this project's past session failures. Apply when relevant.\n",
+    );
+    for (name, content) in skills {
+        if out.chars().count() >= INJECT_TOTAL_CHARS {
+            break;
+        }
+        // Strip `---\n...\n---` frontmatter; keep the body only.
+        let body = content
+            .strip_prefix("---")
+            .and_then(|rest| rest.split_once("\n---").map(|x| x.1))
+            .unwrap_or(content)
+            .trim();
+        let truncated: String = body.chars().take(INJECT_PER_SKILL_CHARS).collect();
+        out.push_str(&format!("\n### {name}\n{truncated}\n"));
+    }
+    let capped: String = out.chars().take(INJECT_TOTAL_CHARS).collect();
+    capped
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -694,6 +762,43 @@ mod tests {
     /// Helper: return a unique lock path inside a temp dir for this test.
     fn temp_lock(dir: &std::path::Path, name: &str) -> PathBuf {
         dir.join(format!("{name}.lock"))
+    }
+
+    #[test]
+    fn evolved_injection_strips_frontmatter_and_bounds_size() {
+        let skill = (
+            "evo-fix-test-fail".to_string(),
+            format!(
+                "---\nname: evo-fix-test-fail\ndescription: \"x\"\n---\n\n# evo-fix-test-fail\n\n{}",
+                "## Process\n1. step\n".repeat(300)
+            ),
+        );
+        let out = build_evolved_injection(&[skill]);
+        assert!(out.contains("### evo-fix-test-fail"));
+        assert!(
+            !out.contains("description:"),
+            "frontmatter must be stripped"
+        );
+        assert!(
+            out.chars().count() <= INJECT_TOTAL_CHARS,
+            "total injection must respect the budget"
+        );
+    }
+
+    #[test]
+    fn evolved_injection_lists_every_skill_within_budget() {
+        let skills: Vec<(String, String)> = (0..3)
+            .map(|i| {
+                (
+                    format!("evo-skill-{i}"),
+                    format!("---\nname: evo-skill-{i}\n---\n\n## Process\n1. do the thing\n"),
+                )
+            })
+            .collect();
+        let out = build_evolved_injection(&skills);
+        for i in 0..3 {
+            assert!(out.contains(&format!("### evo-skill-{i}")));
+        }
     }
 
     #[test]

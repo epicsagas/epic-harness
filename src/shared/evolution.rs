@@ -220,6 +220,11 @@ pub struct SessionAnalysis {
     /// (seen across multiple sessions). Used by the adaptation planner.
     #[serde(default)]
     pub persistent_failure_categories: Vec<String>,
+    /// Representative error snippets, one per failure category (highest-count
+    /// categories first). Secret-masked and truncated. Evidence for LLM skill
+    /// synthesis — templates never see raw errors, synthesized skills do.
+    #[serde(default)]
+    pub error_snippets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -238,6 +243,12 @@ pub struct SkillAttribution {
     pub avg_score_with: f64,
     pub avg_score_without: f64,
     pub first_seen: String,
+    /// Sessions where this skill was deliberately withheld (holdout rotation).
+    /// `avg_score_without` is a running average over these sessions only —
+    /// a genuine counterfactual, unlike the legacy derived-from-total value.
+    /// 0 means no holdout sample has been collected yet.
+    #[serde(default)]
+    pub sessions_holdout: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

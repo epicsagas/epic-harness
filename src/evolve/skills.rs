@@ -524,7 +524,20 @@ pub fn seed_smart_skills(
     }
 
     let mut counters = load_promotion_counters();
-    let plan = plan_skill_edits(analysis, existing, &mut counters);
+    let mut plan = plan_skill_edits(analysis, existing, &mut counters);
+
+    // LLM synthesis pass: replace template bodies with skill content
+    // synthesized from this session's real failure evidence. Runs between
+    // the pure planner and the executor so both stay unchanged; synthesized
+    // content passes the same validate/Critic/gate path as templates.
+    let synthesized = crate::evolve::synthesis::upgrade_edits(&mut plan.edits, analysis);
+    if synthesized > 0 {
+        hint(
+            "reflect",
+            &format!("LLM synthesis: {synthesized} skill(s) synthesized from failure evidence"),
+        );
+    }
+
     let outcome = apply_skill_edits(&plan, metrics);
 
     save_promotion_counters(&plan.counters);

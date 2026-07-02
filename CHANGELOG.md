@@ -5,6 +5,46 @@ All notable changes to epic-harness will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Ring 3 rework: the evolution loop now closes in code, measures honestly, and
+uses the LLM for the one step that needs intelligence.
+
+### Added
+- **LLM skill synthesis** (`src/evolve/synthesis.rs`): seeded skill bodies are
+  synthesized by a headless `claude -p` call from the session's real failure
+  evidence (per-category error snippets, counts, detected patterns) instead of
+  static templates. Falls back to the template body on any failure; synthesized
+  content passes the same validate → Critic → gate path. Config:
+  `[evolution] llm_synthesis` / `llm_synthesis_cmd` / `llm_synthesis_model` /
+  `llm_synthesis_timeout_secs` / `llm_synthesis_max_per_session`. Recursion
+  guard via `EPIC_SYNTH_CHILD=1` + `EPIC_HOOK_PROFILE=minimal`; disabled in
+  debug builds unless `EPIC_SYNTH_FORCE=1`.
+- **Error snippet evidence**: `SessionAnalysis.error_snippets` — one masked,
+  truncated representative snippet per failure category.
+- **Holdout A/B attribution**: deterministic date-keyed rotation
+  (`hash(skill, date) % attribution_holdout_modulus`) withholds under-evaluation
+  skills for ~1/3 of days; `avg_score_without` now averages genuine holdout
+  sessions (`SkillAttribution.sessions_holdout`, new SQLite column with
+  idempotent migration). Config: `attribution_eval_sessions`,
+  `attribution_holdout_modulus`.
+- **Deterministic evolved-skill injection**: `epic resume` prints active
+  evolved skills' bodies to stdout so SessionStart injects them into context —
+  no more reliance on `_dispatch` prompt obedience to scan `evolved/`.
+
+### Changed
+- Skill eviction now requires evidence from both arms (≥3 active AND ≥2
+  holdout sessions) instead of acting on the confounded legacy delta.
+- Attribution scores only skills the session actually saw: the pre-seed skill
+  listing is used, so skills seeded at session end no longer get credited with
+  that session's score.
+- `_dispatch` no longer instructs the model to scan `$HARNESS_DIR/evolved/`
+  (holdout-arm skills must stay out of context).
+
+### Fixed
+- Cargo.toml description and AGENTS.md structure line now match the real skill
+  count (26 + `_dispatch`).
+
 ## [0.8.0] — 2026-06-26
 
 The plugin-native release. epic-harness now distributes as a single plugin layout that Claude Code, agy (Antigravity CLI), and codex read directly from disk — the `install` subcommand and the embed+copy pipeline are gone.

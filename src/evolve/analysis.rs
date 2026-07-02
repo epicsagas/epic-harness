@@ -115,6 +115,7 @@ pub fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
     };
 
     let minibatch_insights = analyze_minibatches(&scored);
+    let error_snippets = collect_error_snippets(&errors, &error_stats);
 
     SessionAnalysis {
         total_observations: total,
@@ -129,7 +130,41 @@ pub fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         minibatch_insights,
         persistent_failure: false,
         persistent_failure_categories: vec![],
+        error_snippets,
     }
+}
+
+/// Max failure categories represented in `error_snippets`.
+const SNIPPET_CATEGORY_CAP: usize = 8;
+/// Max characters kept per snippet (evidence, not a transcript).
+const SNIPPET_CHAR_CAP: usize = 300;
+
+/// One representative (latest) snippet per failure category, highest-count
+/// categories first. Secret-masked and control-char-sanitized so snippets are
+/// safe to embed in a synthesis prompt or a generated SKILL.md.
+fn collect_error_snippets(
+    errors: &[&&ObsRecord],
+    error_stats: &HashMap<String, u64>,
+) -> Vec<String> {
+    let mut by_count: Vec<(&String, &u64)> = error_stats.iter().collect();
+    by_count.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+
+    by_count
+        .iter()
+        .take(SNIPPET_CATEGORY_CAP)
+        .filter_map(|(category, count)| {
+            let snippet = errors
+                .iter()
+                .rev()
+                .find(|o| o.failure_category.as_deref().unwrap_or("other") == category.as_str())
+                .and_then(|o| o.error_snippet.as_deref())?;
+            let clean = crate::shared::sanitize::sanitize_skill_content(
+                &crate::shared::sanitize::mask_secrets(snippet),
+            );
+            let truncated: String = clean.chars().take(SNIPPET_CHAR_CAP).collect();
+            Some(format!("[{category} x{count}] {}", truncated.trim()))
+        })
+        .collect()
 }
 
 /// SkillOpt Minibatch Reflection: partition observations into fixed-size batches

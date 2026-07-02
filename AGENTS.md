@@ -4,7 +4,7 @@
 
 ## Structure
 
-- `skills/` — 27 skills + _dispatch engine
+- `skills/` — 26 skills + _dispatch engine
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
   - `presets/` — Cold-start skill templates
 - `hooks/` — Ring 0 automation + Ring 3 evolution loop
@@ -131,12 +131,50 @@ Opt-in by creating `~/.harness/projects/{slug}/.cross-project-enabled`.
 On session end, patterns export to `~/.harness/global_patterns.jsonl`.
 On next session start, weak patterns from other projects shown as hints.
 
-## Skill Attribution
+## Skill Attribution (Holdout A/B)
 
-`metrics.json` tracks per-evolved-skill A/B scores:
-- `avg_score_with`: Average score in sessions where skill was active
-- `avg_score_without`: Average score in sessions where skill was absent
-- Positive delta = effective, negative delta = consider removing
+Per-evolved-skill effectiveness is measured with a genuine counterfactual:
+
+- Each day, each under-evaluation skill is deterministically assigned to the
+  **active** or **holdout** arm (`hash(skill, date) % attribution_holdout_modulus == 0`
+  → holdout). `resume` and `reflect` compute the same assignment independently.
+- Active skills are injected into context at session start; holdout skills are
+  withheld. `avg_score_with` averages active-arm sessions, `avg_score_without`
+  averages holdout-arm sessions (`sessions_holdout` counts them).
+- Skills seeded during a session are NOT credited with that session's score —
+  attribution uses the pre-seed skill listing.
+- Eviction requires evidence from BOTH arms: `sessions_active >= 3`,
+  `sessions_holdout >= 2`, and `avg_score_with < avg_score_without - 0.02`.
+- After `attribution_eval_sessions` (default 12) total samples the verdict is
+  settled: survivors stay active every session.
+
+The pre-holdout scheme (credit every skill on disk each session, derive
+"without" from pre-creation history) was confounded by regression to the mean
+and is gone.
+
+## LLM Skill Synthesis
+
+Seeded skill bodies are synthesized by a headless `claude -p` call from the
+session's real failure evidence (error snippets per category, counts, detected
+patterns) instead of static templates. Config (`[evolution]`):
+
+- `llm_synthesis` (default true), `llm_synthesis_cmd` (default `claude`),
+  `llm_synthesis_model` (default `haiku`), `llm_synthesis_timeout_secs`
+  (default 10), `llm_synthesis_max_per_session` (default 1)
+
+Fallback: any failure (CLI missing, timeout, malformed output) keeps the
+template body — synthesis can improve a skill, never block seeding. Synthesized
+content passes the same validate → Critic → gate path as templates. Recursion
+guard: the child runs with `EPIC_SYNTH_CHILD=1` + `EPIC_HOOK_PROFILE=minimal`.
+Debug builds disable synthesis (test determinism) unless `EPIC_SYNTH_FORCE=1`.
+
+## Evolved Skill Injection
+
+`epic resume` (SessionStart) prints active evolved skills' bodies to stdout,
+which the host injects into the model's context — the Ring 3 loop closes
+deterministically instead of relying on the model scanning `evolved/` by
+prompt instruction. Holdout-arm skills are withheld and only announced on
+stderr for transparency.
 
 ## SkillOpt-Inspired Optimization
 

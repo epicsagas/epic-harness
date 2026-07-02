@@ -174,6 +174,14 @@ pub fn variant_pool_path() -> PathBuf {
     harness_dir().join("variants.json")
 }
 
+/// Session-start state written by `resume` (SessionStart) and read by
+/// `reflect` (SessionEnd) so the holdout partition uses the same `date` on
+/// both ends — otherwise a session spanning UTC midnight attributes an
+/// active-injected skill to the holdout arm (or vice versa).
+pub fn session_start_file() -> PathBuf {
+    harness_dir().join("session_start.json")
+}
+
 /// Per-project edit-manifest log for the HarnessX falsifiability contract
 /// (Table 9). Each shipped edit appends its manifest here.
 ///
