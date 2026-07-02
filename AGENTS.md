@@ -160,7 +160,7 @@ patterns) instead of static templates. Config (`[evolution]`):
 
 - `llm_synthesis` (default true), `llm_synthesis_cmd` (default `claude`),
   `llm_synthesis_model` (default `haiku`), `llm_synthesis_timeout_secs`
-  (default 30), `llm_synthesis_max_per_session` (default 2)
+  (default 10), `llm_synthesis_max_per_session` (default 1)
 
 Fallback: any failure (CLI missing, timeout, malformed output) keeps the
 template body — synthesis can improve a skill, never block seeding. Synthesized

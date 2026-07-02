@@ -273,11 +273,11 @@ fn default_llm_synthesis_model() -> String {
 }
 
 fn default_llm_synthesis_timeout_secs() -> u64 {
-    30
+    10
 }
 
 fn default_llm_synthesis_max_per_session() -> usize {
-    2
+    1
 }
 
 fn default_attribution_eval_sessions() -> u64 {
