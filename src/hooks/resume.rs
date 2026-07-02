@@ -390,8 +390,12 @@ pub fn run(_input: &HookInput) -> i32 {
     // evolve::partition_holdout) are deliberately NOT injected; reflect
     // credits this session's score to their `without` arm at session end.
     let evolved = list_dirs(&evolved_dir());
+    let today_str = today();
+    // Record the partition date so reflect (SessionEnd) reproduces the same
+    // holdout arm even when this session spans UTC midnight — otherwise an
+    // active-injected skill could be scored against the holdout baseline.
+    crate::shared::helpers::write_session_start(&today_str);
     if !evolved.is_empty() {
-        let today_str = today();
         let (active, holdout) = crate::evolve::partition_holdout(&evolved, &metrics, &today_str);
         let bodies: Vec<(String, String)> = active
             .iter()

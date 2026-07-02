@@ -756,6 +756,24 @@ mod tests {
     }
 
     #[test]
+    fn partition_holdout_is_stable_for_same_date() {
+        // resume (SessionStart) and reflect (SessionEnd) call partition_holdout
+        // independently with the same date — the arm each skill lands in must
+        // be identical, or attribution credits an active-injected skill to the
+        // holdout baseline (regression of the bug this guards).
+        let metrics = default_metrics();
+        let skills: Vec<String> = (0..6).map(|i| format!("evo-skill-{i}")).collect();
+        let date = "2026-07-03";
+        let (active1, holdout1) = partition_holdout(&skills, &metrics, date);
+        let (active2, holdout2) = partition_holdout(&skills, &metrics, date);
+        assert_eq!(active1, active2, "same date must yield the same active arm");
+        assert_eq!(
+            holdout1, holdout2,
+            "same date must yield the same holdout arm"
+        );
+    }
+
+    #[test]
     fn classify_epoch_improving() {
         let history: Vec<SessionScoreEntry> = (0..5)
             .map(|i| SessionScoreEntry {

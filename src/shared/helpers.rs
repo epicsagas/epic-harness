@@ -124,6 +124,39 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T 
         .unwrap_or(fallback)
 }
 
+/// On-disk shape of `session_start_file` — just the partition date the
+/// SessionStart hook used, plus a write timestamp for debugging.
+#[derive(serde::Deserialize)]
+struct SessionStartRec {
+    date: String,
+}
+
+/// JSON payload for the session-start record. Separate so the write/read
+/// round-trip is unit-testable without touching `harness_dir()`.
+fn session_start_payload(date: &str) -> String {
+    serde_json::json!({ "date": date, "written_at": now_iso() }).to_string()
+}
+
+/// Record the partition date the SessionStart hook used this session, so
+/// SessionEnd reproduces the same holdout arm even if the session spans UTC
+/// midnight. Best-effort: failure is non-fatal (reflect falls back to today).
+pub fn write_session_start(date: &str) {
+    let _ = fs::write(
+        super::paths::session_start_file(),
+        session_start_payload(date),
+    );
+}
+
+/// The partition date the current session started with, if `resume` wrote one.
+/// None on a cold start (no session yet) or an unreadable/corrupt record —
+/// callers fall back to `today()`.
+pub fn read_session_start_date() -> Option<String> {
+    let data = fs::read_to_string(super::paths::session_start_file()).ok()?;
+    serde_json::from_str::<SessionStartRec>(&data)
+        .ok()
+        .map(|r| r.date)
+}
+
 pub fn read_jsonl(path: &Path) -> Vec<serde_json::Value> {
     fs::read_to_string(path)
         .unwrap_or_default()
@@ -266,4 +299,17 @@ pub fn normalize_error(snippet: &str) -> String {
     let s = WS_RE.replace_all(&s, " ");
     let trimmed = s.trim();
     trimmed[..trimmed.len().min(200)].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_start_payload_round_trips_date() {
+        let payload = session_start_payload("20260703");
+        let rec: SessionStartRec = serde_json::from_str(&payload).unwrap();
+        assert_eq!(rec.date, "20260703");
+        assert!(payload.contains("written_at"));
+    }
 }

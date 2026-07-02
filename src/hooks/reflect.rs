@@ -957,11 +957,14 @@ pub fn run(_input: &HookInput) -> i32 {
     // 6. Skill attribution — score only what the session actually saw.
     // `existing` is the pre-seed listing: skills seeded THIS round were not
     // in context during the session and must not be credited with its score.
-    // The holdout partition mirrors what resume computed at session start
-    // (same pure date-keyed function), so exposure accounting is genuine.
+    // The partition uses the date `resume` recorded at session start
+    // (session_start.json) so the arm matches what was actually injected —
+    // even when the session spans UTC midnight. Falls back to today on a
+    // cold start (no prior resume this session).
     let evolved_dirs = list_dirs(&evolved_dir());
+    let partition_date = crate::shared::helpers::read_session_start_date().unwrap_or_else(today);
     let (active_skills, holdout_skills) =
-        evolve::partition_holdout(&existing, &metrics, &today_str);
+        evolve::partition_holdout(&existing, &metrics, &partition_date);
     evolve::update_skill_attribution(&mut metrics, &analysis, &active_skills, &holdout_skills);
 
     // 7. Cross-project export
