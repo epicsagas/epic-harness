@@ -954,9 +954,15 @@ pub fn run(_input: &HookInput) -> i32 {
     // 5. Gate
     evolve::gate_skills();
 
-    // 6. Skill attribution (reuse listing after gate may have pruned)
+    // 6. Skill attribution — score only what the session actually saw.
+    // `existing` is the pre-seed listing: skills seeded THIS round were not
+    // in context during the session and must not be credited with its score.
+    // The holdout partition mirrors what resume computed at session start
+    // (same pure date-keyed function), so exposure accounting is genuine.
     let evolved_dirs = list_dirs(&evolved_dir());
-    evolve::update_skill_attribution(&mut metrics, &analysis, &evolved_dirs);
+    let (active_skills, holdout_skills) =
+        evolve::partition_holdout(&existing, &metrics, &today_str);
+    evolve::update_skill_attribution(&mut metrics, &analysis, &active_skills, &holdout_skills);
 
     // 7. Cross-project export
     evolve::export_to_global(&analysis, &analysis.failure_patterns);

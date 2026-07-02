@@ -268,22 +268,79 @@ pub fn detect_reward_hacking(metrics: &Metrics) -> bool {
         && cost_slope > CONFIG.evolution.reward_hacking_cost_rise
 }
 
+/// Minimum exposed sessions before eviction may fire.
+const EVICTION_MIN_ACTIVE: u64 = 3;
+/// Minimum holdout sessions before eviction may fire. Without a real
+/// counterfactual sample, avg_score_without is legacy noise — never act on it.
+const EVICTION_MIN_HOLDOUT: u64 = 2;
+/// avg_score_with must trail avg_score_without by more than this to evict.
+const EVICTION_DELTA: f64 = 0.02;
+
+/// Stable FNV-1a over `skill|date` — deterministic across processes and
+/// builds, so resume (session start) and reflect (session end) independently
+/// compute the same holdout assignment for the day.
+fn holdout_hash(skill: &str, date: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in skill.as_bytes().iter().chain(b"|").chain(date.as_bytes()) {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
+/// Whether `skill` is assigned to the holdout arm on `date` (YYYY-MM-DD).
+/// Pure date-keyed rotation: ~1/modulus of days are holdout days.
+pub fn is_holdout_day(skill: &str, date: &str) -> bool {
+    let modulus = CONFIG.evolution.attribution_holdout_modulus;
+    modulus > 0 && holdout_hash(skill, date).is_multiple_of(modulus)
+}
+
+/// Split the evolved-skill list into (active, holdout) for `date`.
+///
+/// A skill rotates into holdout only while it is still under evaluation
+/// (active + holdout sessions < attribution_eval_sessions). Once the A/B
+/// window is spent the verdict is settled: survivors stay active every
+/// session, losers are evicted by `update_skill_attribution`.
+pub fn partition_holdout(
+    skills: &[String],
+    metrics: &Metrics,
+    date: &str,
+) -> (Vec<String>, Vec<String>) {
+    let eval_window = CONFIG.evolution.attribution_eval_sessions;
+    let mut active = Vec::new();
+    let mut holdout = Vec::new();
+    for skill in skills {
+        let under_evaluation = metrics
+            .skill_attribution
+            .get(skill)
+            .map(|a| a.sessions_active + a.sessions_holdout < eval_window)
+            .unwrap_or(true);
+        if under_evaluation && is_holdout_day(skill, date) {
+            holdout.push(skill.clone());
+        } else {
+            active.push(skill.clone());
+        }
+    }
+    (active, holdout)
+}
+
+/// Update per-skill A/B attribution from one session.
+///
+/// `active` are skills that were exposed (injected at session start);
+/// `holdout` are skills deliberately withheld this session. The session score
+/// updates avg_score_with for the former and avg_score_without for the latter
+/// — a genuine counterfactual. The legacy scheme (credit every skill on disk,
+/// derive "without" from pre-creation history) was confounded by regression
+/// to the mean: skills are created after bad sessions, so any recovery looked
+/// like skill effectiveness.
 pub fn update_skill_attribution(
     metrics: &mut Metrics,
     analysis: &crate::shared::evolution::SessionAnalysis,
-    evolved_skills: &[String],
+    active: &[String],
+    holdout: &[String],
 ) {
-    for skill in evolved_skills {
-        let attr = metrics
-            .skill_attribution
-            .entry(skill.clone())
-            .or_insert(SkillAttribution {
-                skill_name: skill.clone(),
-                sessions_active: 0,
-                avg_score_with: 0.0,
-                avg_score_without: 0.0,
-                first_seen: now_iso(),
-            });
+    for skill in active {
+        let attr = entry_for(metrics, skill);
         attr.sessions_active += 1;
         attr.avg_score_with = super::analysis::round3(
             ((attr.avg_score_with * (attr.sessions_active - 1) as f64) + analysis.avg_score)
@@ -291,30 +348,25 @@ pub fn update_skill_attribution(
         );
     }
 
-    let total_sessions = metrics.total_sessions + 1;
-    // Sum of all composite avg_scores across all sessions (history + current).
-    // Use score_history (avg_score field, not avg_success_rate) for historical sessions.
-    let all_scores_sum = metrics
-        .score_history
-        .iter()
-        .map(|e| e.avg_score)
-        .sum::<f64>()
-        + analysis.avg_score;
-    for attr in metrics.skill_attribution.values_mut() {
-        let without = total_sessions.saturating_sub(attr.sessions_active);
-        if without > 0 {
-            attr.avg_score_without = super::analysis::round3(
-                (all_scores_sum - (attr.avg_score_with * attr.sessions_active as f64))
-                    / without as f64,
-            );
-        }
+    for skill in holdout {
+        let attr = entry_for(metrics, skill);
+        attr.sessions_holdout += 1;
+        // Running average over holdout sessions only. On the first holdout
+        // sample (count 1) this replaces any legacy derived value outright.
+        attr.avg_score_without = super::analysis::round3(
+            ((attr.avg_score_without * (attr.sessions_holdout - 1) as f64) + analysis.avg_score)
+                / attr.sessions_holdout as f64,
+        );
     }
 
-    // SkillOpt negative feedback: evict skills that are demonstrably ineffective
-    // (sessions_active >= 3 AND avg_score_with < avg_score_without by > 0.02)
+    // SkillOpt negative feedback: evict skills that are demonstrably
+    // ineffective against their own holdout baseline.
     let mut evicted: Vec<String> = Vec::new();
     for (name, attr) in &metrics.skill_attribution {
-        if attr.sessions_active >= 3 && attr.avg_score_with < attr.avg_score_without - 0.02 {
+        if attr.sessions_active >= EVICTION_MIN_ACTIVE
+            && attr.sessions_holdout >= EVICTION_MIN_HOLDOUT
+            && attr.avg_score_with < attr.avg_score_without - EVICTION_DELTA
+        {
             evicted.push(name.clone());
         }
     }
@@ -335,7 +387,21 @@ pub fn update_skill_attribution(
 
     metrics
         .skill_attribution
-        .retain(|name, _| evolved_skills.contains(name));
+        .retain(|name, _| active.contains(name) || holdout.contains(name));
+}
+
+fn entry_for<'m>(metrics: &'m mut Metrics, skill: &str) -> &'m mut SkillAttribution {
+    metrics
+        .skill_attribution
+        .entry(skill.to_string())
+        .or_insert_with(|| SkillAttribution {
+            skill_name: skill.to_string(),
+            sessions_active: 0,
+            avg_score_with: 0.0,
+            avg_score_without: 0.0,
+            first_seen: now_iso(),
+            sessions_holdout: 0,
+        })
 }
 
 #[cfg(test)]
@@ -542,39 +608,151 @@ mod tests {
     }
 
     #[test]
-    fn skill_attribution_uses_avg_score_not_success_rate() {
+    fn skill_attribution_active_updates_with_only() {
         let mut metrics = default_metrics();
-        metrics.avg_success_rate = 0.99;
-        metrics.score_history.push(SessionScoreEntry {
-            timestamp: "2026-04-09T00:00:00Z".into(),
-            success_rate: 0.99,
-            avg_score: 0.60,
-            observations: 10,
-            dimension_averages: ScoreDimensions::default(),
-        });
-        metrics.total_sessions = 1;
-
         let analysis = crate::shared::evolution::SessionAnalysis {
             avg_score: 0.70,
             ..Default::default()
         };
-        let evolved = vec!["evo-test".to_string()];
-        update_skill_attribution(&mut metrics, &analysis, &evolved);
+        let active = vec!["evo-test".to_string()];
+        update_skill_attribution(&mut metrics, &analysis, &active, &[]);
 
         let attr = metrics
             .skill_attribution
             .get("evo-test")
             .expect("attribution entry missing");
+        assert_eq!(attr.sessions_active, 1);
+        assert_eq!(attr.sessions_holdout, 0);
         assert!(
             (attr.avg_score_with - 0.70).abs() < 0.01,
             "avg_score_with should be 0.70, got {}",
             attr.avg_score_with
         );
+        assert_eq!(
+            attr.avg_score_without, 0.0,
+            "no holdout sample yet — avg_score_without must stay untouched"
+        );
+    }
+
+    #[test]
+    fn skill_attribution_holdout_updates_without_only() {
+        let mut metrics = default_metrics();
+        let analysis = crate::shared::evolution::SessionAnalysis {
+            avg_score: 0.55,
+            ..Default::default()
+        };
+        let holdout = vec!["evo-test".to_string()];
+        update_skill_attribution(&mut metrics, &analysis, &[], &holdout);
+
+        let attr = metrics.skill_attribution.get("evo-test").unwrap();
+        assert_eq!(attr.sessions_active, 0);
+        assert_eq!(attr.sessions_holdout, 1);
+        assert!((attr.avg_score_without - 0.55).abs() < 0.01);
+        assert_eq!(attr.avg_score_with, 0.0);
+    }
+
+    #[test]
+    fn skill_attribution_first_holdout_replaces_legacy_without() {
+        // Legacy metrics carry a derived avg_score_without with no holdout
+        // samples. The first genuine holdout session must replace it, not
+        // average into it.
+        let mut metrics = default_metrics();
+        metrics.skill_attribution.insert(
+            "evo-legacy".into(),
+            SkillAttribution {
+                skill_name: "evo-legacy".into(),
+                sessions_active: 5,
+                avg_score_with: 0.80,
+                avg_score_without: 0.33, // legacy derived value
+                first_seen: "2026-06-01T00:00:00Z".into(),
+                sessions_holdout: 0,
+            },
+        );
+        let analysis = crate::shared::evolution::SessionAnalysis {
+            avg_score: 0.90,
+            ..Default::default()
+        };
+        update_skill_attribution(&mut metrics, &analysis, &[], &["evo-legacy".to_string()]);
+
+        let attr = metrics.skill_attribution.get("evo-legacy").unwrap();
         assert!(
-            (attr.avg_score_without - 0.60).abs() < 0.05,
-            "avg_score_without should be ~0.60 (from score_history avg_score), got {}",
+            (attr.avg_score_without - 0.90).abs() < 0.01,
+            "first holdout sample must replace the legacy value, got {}",
             attr.avg_score_without
         );
+    }
+
+    #[test]
+    fn skill_attribution_eviction_requires_holdout_sample() {
+        // with < without - delta, enough active sessions, but NO holdout
+        // sessions → must not evict (legacy noise is not evidence).
+        let mut metrics = default_metrics();
+        metrics.skill_attribution.insert(
+            "evo-suspect".into(),
+            SkillAttribution {
+                skill_name: "evo-suspect".into(),
+                sessions_active: 5,
+                avg_score_with: 0.40,
+                avg_score_without: 0.90,
+                first_seen: "2026-06-01T00:00:00Z".into(),
+                sessions_holdout: 0,
+            },
+        );
+        let analysis = crate::shared::evolution::SessionAnalysis {
+            avg_score: 0.40,
+            ..Default::default()
+        };
+        update_skill_attribution(&mut metrics, &analysis, &["evo-suspect".to_string()], &[]);
+        assert!(
+            metrics.skill_attribution.contains_key("evo-suspect"),
+            "eviction without a holdout counterfactual is forbidden"
+        );
+    }
+
+    #[test]
+    fn holdout_day_is_deterministic() {
+        let a = is_holdout_day("evo-fix-test-fail", "2026-07-03");
+        let b = is_holdout_day("evo-fix-test-fail", "2026-07-03");
+        assert_eq!(a, b, "same skill+date must always agree");
+    }
+
+    #[test]
+    fn holdout_rotation_covers_both_arms() {
+        // Over a month of dates a skill must land in both arms at least once
+        // (modulus 3 → expected ~10 holdout days in 30).
+        let days: Vec<String> = (1..=30).map(|d| format!("2026-06-{d:02}")).collect();
+        let holdouts = days
+            .iter()
+            .filter(|d| is_holdout_day("evo-fix-test-fail", d))
+            .count();
+        assert!(
+            holdouts > 0 && holdouts < days.len(),
+            "rotation must produce both active and holdout days, got {holdouts}/30"
+        );
+    }
+
+    #[test]
+    fn partition_holdout_settles_after_eval_window() {
+        // A skill past the evaluation window never rotates into holdout.
+        let mut metrics = default_metrics();
+        metrics.skill_attribution.insert(
+            "evo-proven".into(),
+            SkillAttribution {
+                skill_name: "evo-proven".into(),
+                sessions_active: 20,
+                avg_score_with: 0.85,
+                avg_score_without: 0.70,
+                first_seen: "2026-05-01T00:00:00Z".into(),
+                sessions_holdout: 5,
+            },
+        );
+        let skills = vec!["evo-proven".to_string()];
+        for d in 1..=30 {
+            let date = format!("2026-06-{d:02}");
+            let (active, holdout) = partition_holdout(&skills, &metrics, &date);
+            assert_eq!(active.len(), 1, "settled skill must always be active");
+            assert!(holdout.is_empty());
+        }
     }
 
     #[test]

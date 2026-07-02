@@ -92,7 +92,7 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
 
     // Skill attribution
     let sa_rows = sqlx::query(
-        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+        "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, sessions_holdout
          FROM skill_attribution",
     )
     .fetch_all(pool)
@@ -108,6 +108,7 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
                 avg_score_with: r.try_get(2).ok()?,
                 avg_score_without: r.try_get(3).ok()?,
                 first_seen: r.try_get(4).ok()?,
+                sessions_holdout: r.try_get::<i64, _>(5).ok()? as u64,
             };
             Some((sa.skill_name.clone(), sa))
         })
@@ -252,13 +253,14 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
     for sa in m.skill_attribution.values() {
         sqlx::query(
             "INSERT INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project)
-             VALUES (?,?,?,?,?,?)
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project, sessions_holdout)
+             VALUES (?,?,?,?,?,?,?)
              ON CONFLICT (skill_name, project) DO UPDATE SET
                 sessions_active = excluded.sessions_active,
                 avg_score_with = excluded.avg_score_with,
                 avg_score_without = excluded.avg_score_without,
-                first_seen = excluded.first_seen",
+                first_seen = excluded.first_seen,
+                sessions_holdout = excluded.sessions_holdout",
         )
         .bind(&sa.skill_name)
         .bind(super::u64_to_i64(sa.sessions_active))
@@ -266,6 +268,7 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
         .bind(project)
+        .bind(super::u64_to_i64(sa.sessions_holdout))
         .execute(&mut *tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -391,13 +394,14 @@ pub async fn save_metrics_direct(
     for sa in m.skill_attribution.values() {
         sqlx::query(
             "INSERT INTO skill_attribution
-             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project)
-             VALUES (?,?,?,?,?,?)
+             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project, sessions_holdout)
+             VALUES (?,?,?,?,?,?,?)
              ON CONFLICT (skill_name, project) DO UPDATE SET
                 sessions_active = excluded.sessions_active,
                 avg_score_with = excluded.avg_score_with,
                 avg_score_without = excluded.avg_score_without,
-                first_seen = excluded.first_seen",
+                first_seen = excluded.first_seen,
+                sessions_holdout = excluded.sessions_holdout",
         )
         .bind(&sa.skill_name)
         .bind(super::u64_to_i64(sa.sessions_active))
@@ -405,6 +409,7 @@ pub async fn save_metrics_direct(
         .bind(sa.avg_score_without)
         .bind(&sa.first_seen)
         .bind(project)
+        .bind(super::u64_to_i64(sa.sessions_holdout))
         .execute(&mut **tx)
         .await
         .map_err(super::sqlx_err)?;
@@ -631,13 +636,13 @@ pub async fn load_metrics_scoped_pool(
     // Skill attribution — scoped by project (Some), or all (None).
     let sa_rows = if let Some(p) = project {
         sqlx::query(
-            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, sessions_holdout
              FROM skill_attribution WHERE project = ?",
         )
         .bind(p)
     } else {
         sqlx::query(
-            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen
+            "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, sessions_holdout
              FROM skill_attribution",
         )
     }
@@ -654,6 +659,7 @@ pub async fn load_metrics_scoped_pool(
                 avg_score_with: r.try_get(2).ok()?,
                 avg_score_without: r.try_get(3).ok()?,
                 first_seen: r.try_get(4).ok()?,
+                sessions_holdout: r.try_get::<i64, _>(5).ok()? as u64,
             };
             Some((sa.skill_name.clone(), sa))
         })
@@ -718,6 +724,7 @@ mod tests {
                         avg_score_with: 0.9,
                         avg_score_without: 0.7,
                         first_seen: "2026-05-01".into(),
+                        sessions_holdout: 0,
                     },
                 );
                 m
@@ -876,6 +883,7 @@ mod tests {
                 avg_score_with: 0.8,
                 avg_score_without: 0.5,
                 first_seen: "2026-06-19".into(),
+                sessions_holdout: 0,
             },
         );
         save_metrics_pool(&pool, &a, "proj-a").await.unwrap();
@@ -890,6 +898,7 @@ mod tests {
                 avg_score_with: 0.7,
                 avg_score_without: 0.4,
                 first_seen: "2026-06-19".into(),
+                sessions_holdout: 0,
             },
         );
         save_metrics_pool(&pool, &b, "proj-b").await.unwrap();
