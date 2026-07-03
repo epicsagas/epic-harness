@@ -1,5 +1,5 @@
 {
   "name": "epic",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Self-evolving agent harness — skills + hooks + harness-mem MCP. Loaded directly by agy (Antigravity CLI), Claude Code, and codex plugins."
 }

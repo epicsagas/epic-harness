@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-07-03
+
 Ring 3 rework: the evolution loop now closes in code, measures honestly, and
 uses the LLM for the one step that needs intelligence.
 
@@ -44,6 +46,15 @@ uses the LLM for the one step that needs intelligence.
 ### Fixed
 - Cargo.toml description and AGENTS.md structure line now match the real skill
   count (26 + `_dispatch`).
+- Holdout partition now uses the session-start date on both `resume` and
+  `reflect`, so a session spanning UTC midnight no longer credits an
+  active-injected skill to the holdout baseline (the confound this rework
+  removed).
+- `mask_secrets` now masks absolute file paths (Unix/Windows/tilde-home) so
+  error snippets can't leak repo paths into the synthesis prompt or generated
+  skills.
+- LLM synthesis default timeout/per-session tightened (30s×2 → 10s×1) to keep
+  the reflect SessionEnd hook well under host hook budgets.
 
 ## [0.8.0] — 2026-06-26
 
