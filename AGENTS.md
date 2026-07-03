@@ -306,13 +306,17 @@ When creating a new release tag, update ALL of the following to the same version
 | File | Field | Example |
 |------|-------|---------|
 | `Cargo.toml` | `version = "x.y.z"` | `0.4.3` |
+| `Cargo.lock` | `epic-harness` package version | `0.4.3` |
 | `package.json` | `"version": "x.y.z"` | `0.4.3` |
 | `app/package.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.codex-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | Git tag | `vx.y.z` | `v0.4.3` |
 
-All six must match before tagging.
+All seven must match before tagging. Update `Cargo.lock` with
+`cargo update -p epic-harness --precise x.y.z` after editing `Cargo.toml` — the
+`cargo publish` step of `release.yml` runs without `--allow-dirty`, so a stale
+lock fails the crates.io publish.
 
 ### Dashboard rebuild (before tagging)
 
