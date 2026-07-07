@@ -609,8 +609,8 @@ async fn import_metrics(
             macro_rules! kv {
                 ($k:expr, $v:expr) => {
                     sqlx::query(
-                        "INSERT INTO metrics_state (key, value, project) \
-                         VALUES ($1, $2, $3) ON CONFLICT (key, project) DO UPDATE SET value=excluded.value",
+                        "INSERT OR REPLACE INTO metrics_state (key, value, project) \
+                         VALUES (?, ?, ?)",
                     )
                     .bind($k)
                     .bind($v)

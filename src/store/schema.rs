@@ -144,15 +144,10 @@ async fn migrate_skill_attribution_pk(pool: &AnyPool) -> io::Result<()> {
     .map_err(super::sqlx_err)?;
 
     sqlx::query(
-        "INSERT INTO skill_attribution_new \
+        "INSERT OR REPLACE INTO skill_attribution_new \
             (skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, project) \
          SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, '' \
-         FROM skill_attribution \
-         ON CONFLICT (skill_name, project) DO UPDATE SET \
-            sessions_active = excluded.sessions_active, \
-            avg_score_with = excluded.avg_score_with, \
-            avg_score_without = excluded.avg_score_without, \
-            first_seen = excluded.first_seen",
+         FROM skill_attribution",
     )
     .execute(&mut *tx)
     .await
@@ -224,9 +219,8 @@ async fn migrate_metrics_state_pk(pool: &AnyPool) -> io::Result<()> {
     .map_err(super::sqlx_err)?;
 
     sqlx::query(
-        "INSERT INTO metrics_state_new (key, value, project) \
-         SELECT key, value, COALESCE(project, '') FROM metrics_state \
-         ON CONFLICT (key, project) DO UPDATE SET value = excluded.value",
+        "INSERT OR REPLACE INTO metrics_state_new (key, value, project) \
+         SELECT key, value, COALESCE(project, '') FROM metrics_state",
     )
     .execute(&mut *tx)
     .await
@@ -457,3 +451,53 @@ pub(crate) const DDL_SQLITE: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_global_ts      ON global_patterns(timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_global_project  ON global_patterns(project);
 "#;
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn migrate_metrics_state_legacy_single_pk_to_composite() {
+        // Regression: a legacy single-PK metrics_state must migrate to the
+        // composite (key, project) PK without error. Previously the rebuild
+        // used `INSERT ... SELECT ... ON CONFLICT (key, project) DO UPDATE`,
+        // which sqlx's Any driver rejected as `near "DO"` (a constraint-match
+        // failure surfaced as a syntax error), leaving metrics_state stuck on
+        // the single PK and breaking every reflect SQLite read.
+        let pool = super::super::pool::test_memory_pool().await;
+
+        sqlx::query(
+            "CREATE TABLE metrics_state \
+             (key TEXT PRIMARY KEY, value TEXT NOT NULL, project TEXT NOT NULL DEFAULT '')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO metrics_state (key, value, project) \
+             VALUES ('total_sessions', '5', 'demo')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let pk_cols: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('metrics_state') WHERE pk > 0",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            pk_cols, 2,
+            "metrics_state PK must be composite after migration"
+        );
+
+        let v: String = sqlx::query_scalar(
+            "SELECT value FROM metrics_state WHERE key='total_sessions' AND project='demo'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(v, "5", "row preserved across the rebuild");
+    }
+}
