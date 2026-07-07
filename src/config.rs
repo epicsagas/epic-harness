@@ -113,27 +113,14 @@ pub struct EvolutionConfig {
     #[serde(default = "default_reward_hacking_cost_rise")]
     pub reward_hacking_cost_rise: f64,
 
-    /// LLM skill synthesis: when true, seeded skill bodies are synthesized by
-    /// a headless `claude -p` call from real failure evidence instead of the
-    /// static templates. Any failure falls back to the template content.
-    /// Disabled in debug builds (test determinism) unless EPIC_SYNTH_FORCE=1.
+    /// Skill synthesis: when true, `reflect` emits pending-synthesis manifests
+    /// (failure evidence + template body) to `pending_synth.jsonl` for a host
+    /// agent to upgrade via `epic-harness evolve accept-synth`. When false,
+    /// skills keep their template bodies. Host-agnostic — no CLI/model pinned.
     #[serde(default = "default_llm_synthesis")]
     pub llm_synthesis: bool,
 
-    /// Command used for LLM synthesis (must accept a prompt on stdin with `-p`).
-    #[serde(default = "default_llm_synthesis_cmd")]
-    pub llm_synthesis_cmd: String,
-
-    /// Model passed to the synthesis command via `--model`. Empty = CLI default.
-    #[serde(default = "default_llm_synthesis_model")]
-    pub llm_synthesis_model: String,
-
-    /// Wall-clock budget for one synthesis call. Keep well under the host's
-    /// SessionEnd hook timeout — reflect runs inside that budget.
-    #[serde(default = "default_llm_synthesis_timeout_secs")]
-    pub llm_synthesis_timeout_secs: u64,
-
-    /// Maximum skills synthesized per reflect round (the rest keep templates).
+    /// Maximum pending-synthesis manifests emitted per reflect round.
     #[serde(default = "default_llm_synthesis_max_per_session")]
     pub llm_synthesis_max_per_session: usize,
 
@@ -248,9 +235,6 @@ impl Default for EvolutionConfig {
             reward_hacking_quality_drop: default_reward_hacking_quality_drop(),
             reward_hacking_cost_rise: default_reward_hacking_cost_rise(),
             llm_synthesis: default_llm_synthesis(),
-            llm_synthesis_cmd: default_llm_synthesis_cmd(),
-            llm_synthesis_model: default_llm_synthesis_model(),
-            llm_synthesis_timeout_secs: default_llm_synthesis_timeout_secs(),
             llm_synthesis_max_per_session: default_llm_synthesis_max_per_session(),
             attribution_eval_sessions: default_attribution_eval_sessions(),
             attribution_holdout_modulus: default_attribution_holdout_modulus(),
@@ -262,18 +246,6 @@ impl Default for EvolutionConfig {
 
 fn default_llm_synthesis() -> bool {
     true
-}
-
-fn default_llm_synthesis_cmd() -> String {
-    "claude".into()
-}
-
-fn default_llm_synthesis_model() -> String {
-    "haiku".into()
-}
-
-fn default_llm_synthesis_timeout_secs() -> u64 {
-    10
 }
 
 fn default_llm_synthesis_max_per_session() -> usize {

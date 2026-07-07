@@ -195,6 +195,16 @@ pub fn manifests_file() -> PathBuf {
     harness_dir().join("manifests.jsonl")
 }
 
+/// Per-project pending-synthesis manifest log. Each seeded skill eligible for
+/// host-agent synthesis gets one record here; `epic-harness evolve
+/// accept-synth` consumes them. Unconsumed records leave the template skill
+/// body in place — synthesis can only improve a skill, never block seeding.
+/// (Dedicated file: `EditManifest` in `manifests.jsonl` is the falsifiability
+/// ledger and shares no fields with a pending-synthesis record.)
+pub fn pending_synth_file() -> PathBuf {
+    harness_dir().join("pending_synth.jsonl")
+}
+
 /// Resolve the per-project harness dir for a request. Falls back to the
 /// CWD-derived dir when `project` is `None`/empty (preserves existing callers
 /// that don't pass a project). Used by the dashboard read-path to scope

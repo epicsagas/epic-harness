@@ -98,6 +98,10 @@ fn main() {
         let code = team::run_org(&args[1..]);
         std::process::exit(code);
     }
+    if subcmd == "evolve" {
+        let code = evolve::cli::run(&args[1..]);
+        std::process::exit(code);
+    }
     if subcmd == "eval" {
         let code = eval::run(&args[2..]);
         std::process::exit(code);
@@ -243,6 +247,12 @@ fn main() {
             eprintln!("    --all-projects       All projects under ~/.harness/projects/");
             eprintln!(
                 "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
+            );
+            eprintln!("EVOLUTION:");
+            eprintln!("  evolve       Skill synthesis handshake (host-agent)");
+            eprintln!("    accept-synth --skill <name> [--file <path> | --stdin]");
+            eprintln!(
+                "                       Apply a synthesized body to a pending-synth manifest"
             );
             eprintln!("USER SUBCOMMANDS:");
             eprintln!("  eval         Project quality & regression evaluation  (epic eval --init)");
