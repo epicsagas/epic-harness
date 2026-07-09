@@ -239,7 +239,7 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 1. **Evolved skill quality**: Auto-generated markdown quality scales with failure data volume. Early sessions may produce superficial skills.
 2. **Pattern detection precision**: Matches on same error category + same file. Subtle variations (different line, different root cause) are not distinguishable.
 3. **Metrics horizon**: Only the last 50 sessions are retained. Long-term trends require direct analysis of `evolution.jsonl`.
-4. **Single agent**: The evolution loop assumes a single Claude Code session. Concurrent multi-agent execution may cause observation conflicts.
+4. **Single agent**: The evolution loop assumes a single agent session (host-agnostic — claude/codex/agy). Concurrent multi-agent execution may cause observation conflicts. Skill synthesis is decoupled from the session via the pending-manifest protocol, so it survives across sessions and hosts.
 
 ## Unified Memory Layer — WIP
 

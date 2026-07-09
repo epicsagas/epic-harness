@@ -526,15 +526,15 @@ pub fn seed_smart_skills(
     let mut counters = load_promotion_counters();
     let mut plan = plan_skill_edits(analysis, existing, &mut counters);
 
-    // LLM synthesis pass: replace template bodies with skill content
-    // synthesized from this session's real failure evidence. Runs between
-    // the pure planner and the executor so both stay unchanged; synthesized
-    // content passes the same validate/Critic/gate path as templates.
-    let synthesized = crate::evolve::synthesis::upgrade_edits(&mut plan.edits, analysis);
-    if synthesized > 0 {
+    // Synthesis manifest pass: emit pending-synthesis manifests (failure
+    // evidence + template body) for up to N seeded skills. A host agent
+    // upgrades them later via `epic-harness evolve accept-synth`. Runs between
+    // the planner and the executor; skills keep template bodies until upgraded.
+    let emitted = crate::evolve::synthesis::upgrade_edits(&mut plan.edits, analysis);
+    if emitted > 0 {
         hint(
             "reflect",
-            &format!("LLM synthesis: {synthesized} skill(s) synthesized from failure evidence"),
+            &format!("Synthesis: {emitted} pending manifest(s) emitted for host-agent synthesis"),
         );
     }
 

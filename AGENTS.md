@@ -152,21 +152,27 @@ The pre-holdout scheme (credit every skill on disk each session, derive
 "without" from pre-creation history) was confounded by regression to the mean
 and is gone.
 
-## LLM Skill Synthesis
+## Skill Synthesis (host-agnostic)
 
-Seeded skill bodies are synthesized by a headless `claude -p` call from the
-session's real failure evidence (error snippets per category, counts, detected
-patterns) instead of static templates. Config (`[evolution]`):
+Seeded skills start from static templates. `reflect` then emits a
+**pending-synthesis manifest** (`$HARNESS_DIR/pending_synth.jsonl`) for each
+seeded skill — failure evidence (masked error snippets per category, counts,
+detected patterns) plus the template body. A host agent (claude/codex/agy,
+using its own subagent mechanism with no model specified) reads the manifest,
+synthesizes a better body, and applies it via:
 
-- `llm_synthesis` (default true), `llm_synthesis_cmd` (default `claude`),
-  `llm_synthesis_model` (default `haiku`), `llm_synthesis_timeout_secs`
-  (default 10), `llm_synthesis_max_per_session` (default 1)
+    epic-harness evolve accept-synth --skill <name> [--file <path> | --stdin]
 
-Fallback: any failure (CLI missing, timeout, malformed output) keeps the
-template body — synthesis can improve a skill, never block seeding. Synthesized
-content passes the same validate → Critic → gate path as templates. Recursion
-guard: the child runs with `EPIC_SYNTH_CHILD=1` + `EPIC_HOOK_PROFILE=minimal`.
-Debug builds disable synthesis (test determinism) unless `EPIC_SYNTH_FORCE=1`.
+The CLI validates the body and re-runs the Critic falsifiability gate before
+overwriting the template. Config (`[evolution]`):
+
+- `llm_synthesis` (default true) — gates manifest emission.
+- `llm_synthesis_max_per_session` (default 1) — caps manifests per session.
+
+If no host ever runs `accept-synth`, the template body persists — synthesis can
+only improve a skill, never block seeding. The harness references no CLI binary
+and no model name; the previous synchronous `claude -p` subprocess (which hung
+under slow/remote hosts) is gone.
 
 ## Evolved Skill Injection
 

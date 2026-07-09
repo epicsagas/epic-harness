@@ -1,151 +1,177 @@
-//! LLM-backed skill synthesis (Ring 3, the step templates could never do).
+//! Host-agnostic skill synthesis (Ring 3, the step templates could never do).
 //!
 //! The template builders in `skills.rs` emit the same generic advice for any
-//! failure. This module replaces a planned skill's body with one synthesized
-//! by a headless `claude -p` call from the session's REAL failure evidence
-//! (error snippets, category counts, detected patterns). The synthesized body
-//! flows through the exact same gates as template content: `HarnessEdit::
-//! validate()`, the Critic falsifiability gate, and `gate_skills()`.
+//! failure. This module records a **pending-synthesis manifest** for each
+//! seeded skill, carrying the session's REAL failure evidence (error snippets,
+//! category counts, detected patterns) plus the template body. A host agent
+//! (claude/codex/agy) — using ITS OWN subagent mechanism, with no model
+//! specified — reads the manifest, synthesizes a better body, and hands it back
+//! via `epic-harness evolve accept-synth`, which runs the synthesized body
+//! through the exact same gates as template content: `validate_body`, the
+//! Critic falsifiability gate, and `gate_skills()`.
 //!
-//! Failure of any kind — CLI missing, timeout, empty or malformed output —
-//! falls back to the template content the planner already produced. Synthesis
+//! If no host ever runs `accept-synth`, the template body persists — synthesis
 //! can only improve a skill, never block seeding.
 //!
-//! Recursion guard: the child process runs with `EPIC_SYNTH_CHILD=1` (blocks
-//! nested synthesis) and `EPIC_HOOK_PROFILE=minimal` (skips reflect/polish/
-//! snapshot hooks inside the child session).
+//! Host-agnostic by construction: this module references no CLI binary and no
+//! model name. The previous design spawned a synchronous `claude -p` subprocess
+//! from the SessionEnd `reflect` hook; that hung under slow/remote hosts and
+//! coupled the harness to one CLI. The manifest protocol removes the subprocess
+//! entirely — Rust only reads and writes JSONL.
 
-use std::io::Read;
-use std::io::Write;
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
 
 use crate::config::CONFIG;
 use crate::evolve::edits::HarnessEdit;
-use crate::shared::evolution::SessionAnalysis;
-use crate::shared::helpers::hint;
+use crate::shared::evolution::{DetectedPattern, SessionAnalysis};
+use crate::shared::helpers::{append_jsonl, now_iso, read_jsonl_typed};
+use crate::shared::paths::pending_synth_file;
 use crate::shared::sanitize::sanitize_skill_content;
-
-/// Set in the synthesis child's environment; its presence disables synthesis.
-pub const SYNTH_CHILD_ENV: &str = "EPIC_SYNTH_CHILD";
-/// Force-enable synthesis in debug builds (manual testing).
-pub const SYNTH_FORCE_ENV: &str = "EPIC_SYNTH_FORCE";
 
 /// Hard bounds on an accepted synthesized body.
 const BODY_MIN_CHARS: usize = 80;
 const BODY_MAX_CHARS: usize = 6_000;
+/// Bound on accumulated pending manifests so the file never grows unbounded.
+/// Oldest (by `created`) are dropped when exceeded.
+const MAX_PENDING_SYNTH: usize = 30;
 
-/// Whether synthesis may run in this process.
-///
-/// - Never inside a synthesis child (recursion guard).
-/// - Never in debug builds (test determinism) unless EPIC_SYNTH_FORCE=1.
-/// - Otherwise governed by `[evolution] llm_synthesis` (default: on).
+/// Failure evidence packaged for a host agent. All fields are already
+/// secret-masked and sanitized at analysis time (`collect_error_snippets`),
+/// so they are safe to hand to any host.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SynthEvidence {
+    /// Representative error snippets (one per failure category), cap 8.
+    #[serde(default)]
+    pub error_snippets: Vec<String>,
+    /// Failure category → count, highest-count first, cap 8.
+    #[serde(default)]
+    pub failure_category_counts: HashMap<String, u64>,
+    /// Detected failure patterns, cap 4.
+    #[serde(default)]
+    pub failure_patterns: Vec<DetectedPattern>,
+}
+
+/// One pending-synthesis record. Emitted by `reflect`'s `upgrade_edits`,
+/// consumed by `epic-harness evolve accept-synth`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingSynth {
+    pub schema_version: u32,
+    /// Join key — matches `AddSkill.name`.
+    pub skill_name: String,
+    pub origin: String,
+    /// From `AddSkill.confidence`; used by the higher-confidence guard.
+    pub confidence: f64,
+    pub evidence: SynthEvidence,
+    /// Full SKILL.md (frontmatter + body) the planner produced — the fallback
+    /// if no host ever synthesizes.
+    pub template_content: String,
+    /// Host-neutral instructions the synthesizing subagent follows.
+    pub prompt_guidance: String,
+    pub created: String,
+    /// "pending" | "synthesized".
+    #[serde(default = "default_status")]
+    pub status: String,
+    #[serde(default)]
+    pub consumed: Option<String>,
+}
+
+fn default_status() -> String {
+    "pending".to_string()
+}
+
+/// Whether synthesis may run in this process — governed solely by config.
+/// (No subprocess anymore, so no recursion guard or debug-disable is needed;
+/// manifest emission is deterministic and testable.)
 pub fn synthesis_enabled() -> bool {
-    if std::env::var(SYNTH_CHILD_ENV).is_ok() {
-        return false;
-    }
-    if std::env::var(SYNTH_FORCE_ENV).is_ok() {
-        return true;
-    }
-    if cfg!(debug_assertions) {
-        return false;
-    }
     CONFIG.evolution.llm_synthesis
 }
 
-/// Upgrade up to `llm_synthesis_max_per_session` AddSkill edits in-place with
-/// LLM-synthesized bodies. Returns how many were upgraded. Edits keep their
-/// template content when synthesis is unavailable or fails.
+/// Emit a pending-synthesis manifest for up to `llm_synthesis_max_per_session`
+/// AddSkill edits. The edits keep their template `content` unchanged — the
+/// manifest is the upgrade channel, not the seed. Returns how many manifests
+/// were emitted.
 pub fn upgrade_edits(edits: &mut [HarnessEdit], analysis: &SessionAnalysis) -> usize {
     if !synthesis_enabled() {
         return 0;
     }
     let budget = CONFIG.evolution.llm_synthesis_max_per_session;
-    let mut upgraded = 0usize;
+    let path = pending_synth_file();
+    let evidence = extract_evidence(analysis);
+    let mut emitted = 0usize;
     for edit in edits.iter_mut() {
-        if upgraded >= budget {
+        if emitted >= budget {
             break;
         }
         if let HarnessEdit::AddSkill {
             name,
             content,
             origin,
-            ..
+            confidence,
         } = edit
         {
-            match synthesize_skill(name, origin, analysis) {
-                Some(new_content) => {
-                    *content = new_content;
-                    upgraded += 1;
-                }
-                None => hint(
-                    "reflect",
-                    &format!("LLM synthesis failed for '{name}' — keeping template body"),
-                ),
-            }
+            let pending = PendingSynth {
+                schema_version: 1,
+                skill_name: name.clone(),
+                origin: origin.clone(),
+                confidence: *confidence,
+                evidence: evidence.clone(),
+                template_content: content.clone(),
+                prompt_guidance: prompt_guidance(name),
+                created: now_iso(),
+                status: "pending".into(),
+                consumed: None,
+            };
+            append_jsonl(&path, &pending);
+            emitted += 1;
         }
     }
-    upgraded
+    if emitted > 0 {
+        gc_pending(&path);
+    }
+    emitted
 }
 
-/// Synthesize a complete SKILL.md (frontmatter + body) for one skill.
-/// Returns None on any failure; the caller keeps the template content.
-fn synthesize_skill(name: &str, origin: &str, analysis: &SessionAnalysis) -> Option<String> {
-    let prompt = build_prompt(name, analysis);
-    let raw = run_synthesis_command(
-        &prompt,
-        Duration::from_secs(CONFIG.evolution.llm_synthesis_timeout_secs),
-    )?;
-    let body = validate_body(&raw)?;
-    Some(assemble_skill(name, origin, &body))
+/// Pull the bounded evidence a host agent needs out of a session analysis.
+/// Caps mirror the old `build_prompt` so manifests stay compact.
+pub fn extract_evidence(analysis: &SessionAnalysis) -> SynthEvidence {
+    let error_snippets = analysis.error_snippets.iter().take(8).cloned().collect();
+
+    let mut counts: Vec<(&String, &u64)> = analysis.per_error_stats.iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    let failure_category_counts = counts
+        .into_iter()
+        .take(8)
+        .map(|(k, v)| (k.clone(), *v))
+        .collect();
+
+    let failure_patterns = analysis.failure_patterns.iter().take(4).cloned().collect();
+
+    SynthEvidence {
+        error_snippets,
+        failure_category_counts,
+        failure_patterns,
+    }
 }
 
-/// The synthesis prompt: real evidence in, a bounded skill body out.
-fn build_prompt(name: &str, analysis: &SessionAnalysis) -> String {
-    let mut evidence = String::new();
-
-    if !analysis.error_snippets.is_empty() {
-        evidence.push_str("Error snippets from the session (category, count, latest message):\n");
-        for s in analysis.error_snippets.iter().take(8) {
-            evidence.push_str("- ");
-            evidence.push_str(s);
-            evidence.push('\n');
-        }
-    }
-
-    let mut cats: Vec<_> = analysis.per_error_stats.iter().collect();
-    cats.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
-    if !cats.is_empty() {
-        evidence.push_str("\nFailure category counts:\n");
-        for (cat, count) in cats.iter().take(8) {
-            evidence.push_str(&format!("- {cat}: {count}\n"));
-        }
-    }
-
-    for p in analysis.failure_patterns.iter().take(4) {
-        evidence.push_str(&format!(
-            "\nDetected pattern: {} ({}x) — {}. Files: {}\n",
-            p.pattern_type,
-            p.count,
-            p.description,
-            if p.involved_files.is_empty() {
-                "various".to_string()
-            } else {
-                p.involved_files.join(", ")
-            },
-        ));
-    }
-
+/// Host-neutral synthesis instructions. No CLI or model name — the host uses
+/// its own subagent mechanism.
+pub fn prompt_guidance(name: &str) -> String {
     format!(
-        "You are writing the body of a Claude Code skill named '{name}'. It will be \
-injected into future coding sessions in THIS project to prevent the failures below \
-from recurring.\n\n{evidence}\n\
-Write concrete, project-specific guidance grounded in the errors above — name the \
-actual error messages, files, and commands involved. Generic advice (\"read the \
-error carefully\") is worthless and will be rejected.\n\n\
+        "You are writing the body of an agent skill named '{name}'. It will be \
+injected into future coding sessions in THIS project to prevent the failures \
+recorded in the `evidence` field from recurring.\n\n\
+Using the `evidence` (error snippets, failure category counts, detected \
+patterns) from the accompanying manifest, write concrete, project-specific \
+guidance grounded in those errors — name the actual error messages, files, and \
+commands involved. Generic advice (\"read the error carefully\") is worthless \
+and will be rejected.\n\n\
 Output ONLY markdown body text (no YAML frontmatter, no code fences around the \
 whole output, no preamble) with exactly these sections:\n\
-## Process\n(numbered steps tied to the specific failures above)\n\
+## Process\n(numbered steps tied to the specific failures)\n\
 ## Anti-Rationalization\n(markdown table: Excuse | Rebuttal)\n\
 ## Evidence Required\n(checklist proving the failure class is fixed)\n\
 ## Red Flags\n(bullet list of early warnings specific to these errors)\n\n\
@@ -153,57 +179,65 @@ Hard limit: 60 lines."
     )
 }
 
-/// Run the synthesis command with the prompt on stdin and a wall-clock
-/// deadline. Returns captured stdout on clean exit, None otherwise.
-fn run_synthesis_command(prompt: &str, timeout: Duration) -> Option<String> {
-    let cmd = &CONFIG.evolution.llm_synthesis_cmd;
-    let mut command = Command::new(cmd);
-    command.arg("-p");
-    let model = &CONFIG.evolution.llm_synthesis_model;
-    if !model.is_empty() {
-        command.arg("--model").arg(model);
-    }
-    command
-        .env(SYNTH_CHILD_ENV, "1")
-        .env("EPIC_HOOK_PROFILE", "minimal")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
+/// Find the most recent pending manifest for a skill (the join key). If
+/// `reflect` ran more than once before `accept-synth` consumed the backlog,
+/// several pending records can accumulate for the same skill — the newest
+/// carries the freshest failure evidence, so it wins. `mark_consumed` still
+/// marks every pending record for the skill as consumed, so older records
+/// never resurface as separate synthesis targets.
+pub fn find_pending(skill_name: &str) -> Option<PendingSynth> {
+    read_jsonl_typed::<PendingSynth>(&pending_synth_file())
+        .into_iter()
+        .filter(|r| r.status == "pending" && r.skill_name == skill_name)
+        .max_by(|a, b| a.created.cmp(&b.created))
+}
 
-    let mut child = command.spawn().ok()?;
-    {
-        let mut stdin = child.stdin.take()?;
-        stdin.write_all(prompt.as_bytes()).ok()?;
-        // stdin drops here → EOF, the CLI starts generating.
+/// Mark every pending manifest for a skill as synthesized. Idempotent — a
+/// second call finds no pending record and does nothing.
+pub fn mark_consumed(skill_name: &str) {
+    let path = pending_synth_file();
+    let mut records: Vec<PendingSynth> = read_jsonl_typed(&path);
+    if records.is_empty() {
+        return;
     }
-
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                if !status.success() {
-                    return None;
-                }
-                break;
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return None;
-                }
-                std::thread::sleep(Duration::from_millis(150));
-            }
-            Err(_) => {
-                let _ = child.kill();
-                return None;
-            }
+    let now = now_iso();
+    let mut changed = false;
+    for r in records.iter_mut() {
+        if r.status == "pending" && r.skill_name == skill_name {
+            r.status = "synthesized".into();
+            r.consumed = Some(now.clone());
+            changed = true;
         }
     }
+    if changed {
+        rewrite_jsonl(&path, &records);
+    }
+}
 
-    let mut out = String::new();
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
-    Some(out)
+/// Drop consumed records and cap pending growth (oldest first by `created`,
+/// which is ISO-8601 so lexical order is chronological).
+fn gc_pending(path: &Path) {
+    let mut records: Vec<PendingSynth> = read_jsonl_typed(path);
+    records.retain(|r| r.status == "pending");
+    if records.len() > MAX_PENDING_SYNTH {
+        records.sort_by(|a, b| b.created.cmp(&a.created));
+        records.truncate(MAX_PENDING_SYNTH);
+    }
+    rewrite_jsonl(path, &records);
+}
+
+fn rewrite_jsonl(path: &Path, records: &[PendingSynth]) {
+    use std::io::Write;
+    let tmp = path.with_extension("jsonl.tmp");
+    let Ok(mut f) = fs::File::create(&tmp) else {
+        return;
+    };
+    for r in records {
+        if let Ok(j) = serde_json::to_string(r) {
+            let _ = writeln!(f, "{j}");
+        }
+    }
+    let _ = fs::rename(&tmp, path);
 }
 
 /// Validate and normalize a synthesized body. Rejects output that is too
@@ -230,11 +264,11 @@ pub(crate) fn validate_body(raw: &str) -> Option<String> {
     Some(sanitize_skill_content(body))
 }
 
-/// Wrap a validated body in canonical frontmatter. The `llm` origin marker
+/// Wrap a validated body in canonical frontmatter. The origin marker
 /// distinguishes synthesized skills in meta.json and the rejected buffer.
-fn assemble_skill(name: &str, origin: &str, body: &str) -> String {
+pub(crate) fn assemble_skill(name: &str, origin: &str, body: &str) -> String {
     sanitize_skill_content(&format!(
-        "---\nname: {name}\ndescription: \"Auto-evolved ({origin}, LLM-synthesized from session failure evidence).\"\n---\n\n# {name}\n\n{body}\n"
+        "---\nname: {name}\ndescription: \"Auto-evolved ({origin}, synthesized from session failure evidence).\"\n---\n\n# {name}\n\n{body}\n"
     ))
 }
 
@@ -250,6 +284,29 @@ mod tests {
 ## Red Flags\n- E0308 mismatched types in store/metrics.rs\n{}",
             " ".repeat(0)
         )
+    }
+
+    fn analysis_with(snippets: usize, patterns: usize) -> SessionAnalysis {
+        let error_snippets = (0..snippets)
+            .map(|i| format!("[cat{i} x9] error message {i}"))
+            .collect();
+        let per_error_stats = (0..snippets).map(|i| (format!("cat{i}"), 9u64)).collect();
+        let failure_patterns = (0..patterns)
+            .map(|i| DetectedPattern {
+                pattern_type: "repeated_same_error".into(),
+                description: format!("desc {i}"),
+                count: i as u64 + 1,
+                involved_files: vec![format!("src/{i}.rs")],
+                suggested_remediation: "fix root cause".into(),
+                implicated_components: vec![],
+            })
+            .collect();
+        SessionAnalysis {
+            error_snippets,
+            per_error_stats,
+            failure_patterns,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -289,31 +346,42 @@ mod tests {
     fn assemble_produces_canonical_frontmatter() {
         let skill = assemble_skill("evo-fix-test-fail", "high_freq_error", &valid_body());
         assert!(skill.starts_with("---\nname: evo-fix-test-fail\n"));
-        assert!(skill.contains("LLM-synthesized"));
+        assert!(skill.contains("synthesized"));
         assert!(skill.contains("## Process"));
     }
 
     #[test]
-    fn prompt_embeds_evidence() {
-        let analysis = crate::shared::evolution::SessionAnalysis {
-            error_snippets: vec!["[test_fail x4] assertion failed: left == right".into()],
-            per_error_stats: [("test_fail".to_string(), 4u64)].into_iter().collect(),
-            ..Default::default()
-        };
-        let prompt = build_prompt("evo-fix-test-fail", &analysis);
-        assert!(prompt.contains("assertion failed"));
-        assert!(prompt.contains("test_fail: 4"));
-        assert!(prompt.contains("## Process"));
+    fn extract_evidence_caps_snippets_and_patterns() {
+        let analysis = analysis_with(12, 7);
+        let ev = extract_evidence(&analysis);
+        assert_eq!(ev.error_snippets.len(), 8);
+        assert_eq!(ev.failure_patterns.len(), 4);
+        // category counts cap at 8 and are sorted by count desc then name
+        assert_eq!(ev.failure_category_counts.len(), 8);
     }
 
     #[test]
-    fn synthesis_disabled_in_child_env() {
-        // SAFETY: EPIC_SYNTH_CHILD is only touched by this single test, so
-        // the mutation cannot race with other tests.
-        unsafe {
-            std::env::set_var(SYNTH_CHILD_ENV, "1");
-            assert!(!synthesis_enabled());
-            std::env::remove_var(SYNTH_CHILD_ENV);
-        }
+    fn extract_evidence_preserves_category_order() {
+        let analysis = SessionAnalysis {
+            per_error_stats: [("low".to_string(), 1u64), ("high".to_string(), 9u64)]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+        let ev = extract_evidence(&analysis);
+        assert_eq!(ev.failure_category_counts.get("high"), Some(&9));
+        assert_eq!(ev.failure_category_counts.get("low"), Some(&1));
+    }
+
+    #[test]
+    fn prompt_guidance_is_host_neutral() {
+        let g = prompt_guidance("evo-fix-test-fail");
+        // Names the skill and required sections...
+        assert!(g.contains("evo-fix-test-fail"));
+        assert!(g.contains("## Process"));
+        assert!(g.contains("## Red Flags"));
+        // ...but never a host CLI or model.
+        assert!(!g.to_lowercase().contains("claude"));
+        assert!(!g.to_lowercase().contains("haiku"));
     }
 }

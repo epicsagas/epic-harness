@@ -1,4 +1,5 @@
 pub mod analysis;
+pub mod cli;
 pub mod critic;
 pub mod digester;
 pub mod edits;
