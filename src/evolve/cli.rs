@@ -168,3 +168,106 @@ fn flag(args: &[String], name: &str) -> Option<String> {
                 .cloned()
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ── flag() parser ──────────────────────────────────────
+
+    #[test]
+    fn flag_reads_space_separated_value() {
+        let a = args(&["--skill", "evo-fix-test-fail"]);
+        assert_eq!(flag(&a, "--skill").as_deref(), Some("evo-fix-test-fail"));
+    }
+
+    #[test]
+    fn flag_reads_equals_separated_value() {
+        let a = args(&["--skill=evo-fix-test-fail"]);
+        assert_eq!(flag(&a, "--skill").as_deref(), Some("evo-fix-test-fail"));
+    }
+
+    #[test]
+    fn flag_missing_returns_none() {
+        let a = args(&["--file", "body.md"]);
+        assert_eq!(flag(&a, "--skill"), None);
+    }
+
+    #[test]
+    fn flag_at_end_with_no_value_returns_none() {
+        let a = args(&["--skill"]);
+        assert_eq!(flag(&a, "--skill"), None);
+    }
+
+    // ── run() dispatch ─────────────────────────────────────
+
+    #[test]
+    fn run_with_no_subcommand_is_usage_error() {
+        assert_eq!(run(&args(&["evolve"])), EXIT_USAGE);
+    }
+
+    #[test]
+    fn run_with_unknown_subcommand_is_usage_error() {
+        assert_eq!(run(&args(&["evolve", "bogus"])), EXIT_USAGE);
+    }
+
+    // ── run_accept_synth: validation branches that never touch
+    //    harness_dir() (a process-global LazyLock, so filesystem-backed
+    //    end-to-end coverage belongs in an integration test, not here) ──
+
+    #[test]
+    fn accept_synth_missing_skill_is_usage_error() {
+        let a = args(&["evolve", "accept-synth", "--file", "body.md"]);
+        assert_eq!(run(&a), EXIT_USAGE);
+    }
+
+    #[test]
+    fn accept_synth_empty_skill_is_usage_error() {
+        let a = args(&["evolve", "accept-synth", "--skill", "", "--stdin"]);
+        assert_eq!(run(&a), EXIT_USAGE);
+    }
+
+    #[test]
+    fn accept_synth_file_and_stdin_together_is_usage_error() {
+        let a = args(&[
+            "evolve",
+            "accept-synth",
+            "--skill",
+            "evo-fix-test-fail",
+            "--file",
+            "body.md",
+            "--stdin",
+        ]);
+        assert_eq!(run(&a), EXIT_USAGE);
+    }
+
+    #[test]
+    fn accept_synth_unreadable_file_is_io_error() {
+        let a = args(&[
+            "evolve",
+            "accept-synth",
+            "--skill",
+            "evo-fix-test-fail",
+            "--file",
+            "/nonexistent/path/does-not-exist-8f3a.md",
+        ]);
+        assert_eq!(run(&a), EXIT_IO);
+    }
+
+    #[test]
+    fn accept_synth_no_source_is_usage_error() {
+        // Neither --file nor --stdin, and stdin is not piped in a `cargo test`
+        // process — falls through to the "provide a source" branch.
+        let a = args(&["evolve", "accept-synth", "--skill", "evo-fix-test-fail"]);
+        // Only assert this when stdin is actually a terminal (interactive);
+        // under a CI runner with redirected stdin this could read from stdin
+        // instead, so skip rather than flake.
+        if std::io::stdin().is_terminal() {
+            assert_eq!(run(&a), EXIT_USAGE);
+        }
+    }
+}

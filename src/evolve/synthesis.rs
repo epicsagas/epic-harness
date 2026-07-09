@@ -179,11 +179,17 @@ Hard limit: 60 lines."
     )
 }
 
-/// Find the first pending manifest for a skill (the join key).
+/// Find the most recent pending manifest for a skill (the join key). If
+/// `reflect` ran more than once before `accept-synth` consumed the backlog,
+/// several pending records can accumulate for the same skill — the newest
+/// carries the freshest failure evidence, so it wins. `mark_consumed` still
+/// marks every pending record for the skill as consumed, so older records
+/// never resurface as separate synthesis targets.
 pub fn find_pending(skill_name: &str) -> Option<PendingSynth> {
     read_jsonl_typed::<PendingSynth>(&pending_synth_file())
         .into_iter()
-        .find(|r| r.status == "pending" && r.skill_name == skill_name)
+        .filter(|r| r.status == "pending" && r.skill_name == skill_name)
+        .max_by(|a, b| a.created.cmp(&b.created))
 }
 
 /// Mark every pending manifest for a skill as synthesized. Idempotent — a

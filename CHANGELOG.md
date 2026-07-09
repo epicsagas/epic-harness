@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Skill synthesis is now host-agnostic**: `reflect` no longer spawns a
+  synchronous `claude -p --model haiku` subprocess (which could hang or time
+  out under slow/remote hosts). It now emits a pending-synthesis manifest
+  (`$HARNESS_DIR/pending_synth.jsonl`) with masked failure evidence + the
+  template body; any host agent synthesizes a better body out-of-band and
+  submits it via the new `epic-harness evolve accept-synth --skill <name>
+  [--file <path> | --stdin]` CLI, which re-validates and re-runs the Critic
+  gate before applying it. Unconsumed manifests leave the template body in
+  place — synthesis can only improve a skill, never block seeding.
+
+### Removed
+- `[evolution]` config fields `llm_synthesis_cmd`, `llm_synthesis_model`, and
+  `llm_synthesis_timeout_secs` — no longer meaningful now that synthesis runs
+  out-of-process via the manifest protocol above. Existing values for these
+  keys in `config.toml` are silently ignored (no error). `llm_synthesis` and
+  `llm_synthesis_max_per_session` are unchanged and still apply.
+
 ## [0.8.1] — 2026-07-03
 
 Ring 3 rework: the evolution loop now closes in code, measures honestly, and
