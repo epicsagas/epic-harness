@@ -1361,6 +1361,100 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn import_metrics_writes_and_upserts_kv_rows() {
+        // import_metrics' `kv!` macro had no direct test coverage. This locks
+        // in that every metrics.json field round-trips into metrics_state
+        // correctly under the `?`-placeholder convention this codebase uses
+        // for raw SqliteConnection queries (this PR replaced a Postgres-style
+        // `$1,$2,$3` + `ON CONFLICT ... DO UPDATE` that, while not actually
+        // broken against sqlx's SQLite driver here, didn't match the
+        // convention used everywhere else), and that re-importing the same
+        // metrics.json (e.g. a retried migration) upserts rather than
+        // erroring or duplicating rows.
+        let mut conn = make_global_conn().await;
+        let dir = tempfile::tempdir().unwrap();
+
+        let metrics = crate::shared::evolution::Metrics {
+            total_sessions: 7,
+            avg_success_rate: 0.875,
+            total_evolved_skills: 3,
+            last_session: Some("2026-07-01T00:00:00Z".into()),
+            best_score: Some(0.92),
+            best_session: "2026-06-15T00:00:00Z".into(),
+            trend: "improving".into(),
+            stagnation_count: 0,
+            last_error_context: Some("build_fail in src/main.rs".into()),
+            ..crate::shared::evolution::default_metrics()
+        };
+        std::fs::write(
+            dir.path().join("metrics.json"),
+            serde_json::to_string(&metrics).unwrap(),
+        )
+        .unwrap();
+
+        let mut stats = MigrationStats {
+            obs_imported: 0,
+            sess_imported: 0,
+            evo_imported: 0,
+            errors: 0,
+            total_lines: 0,
+        };
+
+        import_metrics(&mut conn, "demo-project", dir.path(), &mut stats)
+            .await
+            .unwrap();
+        assert_eq!(stats.errors, 0, "first import must not record errors");
+
+        async fn read_kv(conn: &mut sqlx::SqliteConnection, key: &str) -> String {
+            sqlx::query("SELECT value FROM metrics_state WHERE key = ? AND project = ?")
+                .bind(key)
+                .bind("demo-project")
+                .fetch_one(&mut *conn)
+                .await
+                .unwrap()
+                .try_get(0)
+                .unwrap()
+        }
+
+        assert_eq!(read_kv(&mut conn, "total_sessions").await, "7");
+        assert_eq!(read_kv(&mut conn, "avg_success_rate").await, "0.875");
+        assert_eq!(read_kv(&mut conn, "total_evolved_skills").await, "3");
+        assert_eq!(
+            read_kv(&mut conn, "last_session").await,
+            "2026-07-01T00:00:00Z"
+        );
+        assert_eq!(read_kv(&mut conn, "best_score").await, "0.92");
+        assert_eq!(
+            read_kv(&mut conn, "best_session").await,
+            "2026-06-15T00:00:00Z"
+        );
+        assert_eq!(read_kv(&mut conn, "trend").await, "improving");
+        assert_eq!(read_kv(&mut conn, "stagnation_count").await, "0");
+        assert_eq!(
+            read_kv(&mut conn, "last_error_context").await,
+            "build_fail in src/main.rs"
+        );
+
+        // Re-import (e.g. a retried migration) must upsert, not error or duplicate.
+        import_metrics(&mut conn, "demo-project", dir.path(), &mut stats)
+            .await
+            .unwrap();
+        assert_eq!(stats.errors, 0, "re-import must not record errors");
+
+        let row_count: i64 = sqlx::query("SELECT COUNT(*) FROM metrics_state WHERE project = ?")
+            .bind("demo-project")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
+        assert_eq!(
+            row_count, 9,
+            "re-import must upsert existing keys, not duplicate rows"
+        );
+    }
+
+    #[tokio::test]
     async fn to_global_merges_per_project_dbs() {
         // Use a file-based DB for global so ATTACH works correctly.
         let dir = tempfile::tempdir().unwrap();
