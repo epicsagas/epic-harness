@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-07-09
+
 ### Changed
 - **Skill synthesis is now host-agnostic**: `reflect` no longer spawns a
   synchronous `claude -p --model haiku` subprocess (which could hang or time
@@ -24,6 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   out-of-process via the manifest protocol above. Existing values for these
   keys in `config.toml` are silently ignored (no error). `llm_synthesis` and
   `llm_synthesis_max_per_session` are unchanged and still apply.
+
+### Fixed
+- **`reflect` SQLite `near "DO"` error**: the legacy `metrics_state` /
+  `skill_attribution` primary-key rebuild (`(key)` → `(key, project)`) used a
+  compound `INSERT...SELECT...ON CONFLICT DO UPDATE` that sqlx's `Any` driver
+  rejected as a syntax error, leaving affected databases stuck on the old
+  single-column PK and breaking every subsequent `ON CONFLICT (key, project)`
+  write. Rebuilds now use `INSERT OR REPLACE INTO ... SELECT` instead (no
+  `ON CONFLICT` needed for a copy into an empty table). Also fixed a
+  Postgres-style `$1,$2,$3` placeholder bug in the legacy JSONL→SQLite
+  `import_metrics` migration path.
 
 ## [0.8.1] — 2026-07-03
 
