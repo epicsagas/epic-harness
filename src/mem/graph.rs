@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 use super::store::conn::memory_pool_sync;
@@ -133,71 +133,62 @@ async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::R
 ///
 /// For each pair of nodes in different projects sharing at least one tag,
 /// creates a virtual edge with weight = Jaccard similarity of their tag sets.
+/// Nodes with no project assignment are excluded (an empty `projects` list
+/// would otherwise match every node and flood the graph).
 pub fn generate_virtual_edges(nodes: &[GraphNode]) -> Vec<GraphEdge> {
-    // Build inverted index: tag -> list of node indices
+    // Per-node deduped tag sets — guards against duplicate tags within a node
+    // inflating the Jaccard intersection.
+    let tag_sets: Vec<HashSet<&str>> = nodes
+        .iter()
+        .map(|n| n.tags.iter().map(String::as_str).collect())
+        .collect();
+
+    // Inverted index: tag -> node indices (each node appears at most once per tag).
     let mut tag_index: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (i, n) in nodes.iter().enumerate() {
-        for tag in &n.tags {
-            tag_index.entry(tag.as_str()).or_default().push(i);
+    for (i, set) in tag_sets.iter().enumerate() {
+        for tag in set {
+            tag_index.entry(tag).or_default().push(i);
         }
     }
 
-    // Accumulate shared tag counts per cross-project pair
-    let mut pair_shared: HashMap<(String, String), usize> = HashMap::new();
+    // Accumulate the shared-tag count (Jaccard intersection) per cross-project
+    // pair. Keying on node indices avoids both per-pair String allocation and a
+    // separate id->index lookup map (the old map was built in O(n^2)).
+    let mut pair_shared: HashMap<(usize, usize), usize> = HashMap::new();
     for indices in tag_index.values() {
         if indices.len() < 2 {
             continue;
         }
         for i in 0..indices.len() {
             for j in (i + 1)..indices.len() {
-                let a = &nodes[indices[i]];
-                let b = &nodes[indices[j]];
-                // Only cross-project pairs
-                if a.projects.iter().any(|p| b.projects.contains(p)) {
+                let (a, b) = (indices[i], indices[j]);
+                let pa = &nodes[a].projects;
+                let pb = &nodes[b].projects;
+                // Skip same-project pairs and nodes lacking a project.
+                if pa.is_empty() || pb.is_empty() || pa.iter().any(|p| pb.contains(p)) {
                     continue;
                 }
-                let key = if a.id <= b.id {
-                    (a.id.clone(), b.id.clone())
-                } else {
-                    (b.id.clone(), a.id.clone())
-                };
+                let key = if a <= b { (a, b) } else { (b, a) };
                 *pair_shared.entry(key).or_default() += 1;
             }
         }
     }
 
-    // Build per-node tag sets for Jaccard
-    let tag_sets: Vec<std::collections::HashSet<&str>> = nodes
-        .iter()
-        .map(|n| n.tags.iter().map(|t| t.as_str()).collect())
-        .collect();
-    let node_idx: HashMap<&str, usize> = nodes.iter().map(|n| (n.id.as_str(), n.id.as_str())).fold(
-        HashMap::new(),
-        |mut m, (id, _)| {
-            if let Some(idx) = nodes.iter().position(|n| n.id == id) {
-                m.insert(id, idx);
-            }
-            m
-        },
-    );
-
     let mut result: Vec<GraphEdge> = pair_shared
         .into_iter()
-        .filter_map(|((a_id, b_id), shared)| {
-            let ai = node_idx.get(a_id.as_str())?;
-            let bi = node_idx.get(b_id.as_str())?;
-            let union_size = tag_sets[*ai].union(&tag_sets[*bi]).count();
-            if union_size == 0 {
-                return None;
-            }
-            let weight = (shared as f64 / union_size as f64).clamp(0.1, 1.0);
-            Some(GraphEdge {
-                source: a_id,
-                target: b_id,
+        .map(|((a, b), shared)| {
+            // shared >= 1 => union >= 1, so weight is always in (0.0, 1.0] — no
+            // clamp or zero-union guard needed. Weak edges fall out naturally via
+            // the weight sort + truncate below.
+            let union = tag_sets[a].union(&tag_sets[b]).count();
+            let weight = shared as f64 / union as f64;
+            GraphEdge {
+                source: nodes[a].id.clone(),
+                target: nodes[b].id.clone(),
                 relation: "shared_tag".to_string(),
                 weight,
                 virtual_: true,
-            })
+            }
         })
         .collect();
 
@@ -542,6 +533,39 @@ mod tests {
         assert!(
             vjson.contains("\"virtual\":true"),
             "virtual edge should have virtual: true: {vjson}"
+        );
+    }
+
+    #[test]
+    fn generate_virtual_edges_empty_projects_excluded() {
+        let nodes = vec![
+            make_node("a", vec!["x"], vec![]),
+            make_node("b", vec!["x"], vec!["p1"]),
+        ];
+        let edges = generate_virtual_edges(&nodes);
+        assert!(
+            edges.is_empty(),
+            "node with no project must not get virtual edges"
+        );
+    }
+
+    #[test]
+    fn generate_virtual_edges_duplicate_tags_not_inflated() {
+        let nodes = vec![
+            make_node("a", vec!["x", "x", "y"], vec!["p1"]),
+            make_node("b", vec!["x", "y", "y"], vec!["p2"]),
+        ];
+        let edges = generate_virtual_edges(&nodes);
+        let ab = edges
+            .iter()
+            .find(|e| e.source == "a" && e.target == "b")
+            .expect("a-b cross-project edge should exist");
+        // Distinct tags are {x,y} for both => Jaccard = 2/2 = 1.0.
+        // Duplicate tags within a node must not inflate the weight above 1.0.
+        assert!(
+            (ab.weight - 1.0).abs() < 1e-9,
+            "expected Jaccard 1.0 for identical deduped tag sets, got {}",
+            ab.weight
         );
     }
 }
