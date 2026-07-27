@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Ring 3 read zero observations on every host** (#113): `today()` returns
+  `YYYYMMDD`, but the observation range query only ISO-expanded 10-character
+  `YYYY-MM-DD` bounds. `timestamp` is compared lexicographically and `'-'`
+  (0x2D) sorts below `'0'` (0x30), so `2026-07-27T..` compares *less than*
+  `20260727` and `WHERE timestamp >= '20260727'` matched nothing — no metrics,
+  no score history, no evolution records, however many observations were
+  stored. A new `day_bounds()` normalizes both forms and is now the single
+  source of truth for all three range queries (the project-scoped stats
+  variant had the identical bug).
+- **Reflection mixed other projects' observations** (#113): the range query had
+  no project predicate even though writes are project-tagged, so a reflection
+  could analyze mostly foreign data and save the result under the invoking
+  project. It now takes an explicit scope, with a new `idx_obs_project_ts`
+  index. Legacy rows written before observations carried a project (`NULL`)
+  are excluded from scoped reads — they cannot be attributed retroactively.
+- **Metrics and snapshots bypassed project isolation** (#113): reflect, resume
+  and `reflect --context` used the unscoped metrics/snapshot readers — which
+  their own docs describe as indeterminate once several projects have written
+  rows — while saves were already scoped. Snapshots were also inserted with no
+  project value, so resume could restore a different repository's state.
+- **JSONL fallback observations were silently dropped** (#113): observations go
+  to SQLite and reach JSONL only when a DB write fails, yet reflect read JSONL
+  *only if* SQLite returned nothing — so on any day the DB also had rows the
+  fallback records were ignored, and the error branch returned early despite a
+  comment claiming it fell through. Both stores are now read, merged and
+  deduped.
+- **`epic reflect --context` reported `obs_stats.total: 0`** (#113) for projects
+  with thousands of database observations, because it read only project
+  `obs/*.jsonl`. It now reads SQLite first.
+
+### Changed
+- **Codex hook registration corrected** (#113): `PostToolUse` observed only
+  `Bash`, hiding every edit, MCP and function-tool call from Ring 3 — it now
+  matches `*`. `PreCompact` is registered so snapshot/resume works. `reflect`
+  moved from `Stop` (turn-scoped, fires every turn) to `SessionEnd`; left on
+  `Stop`, the date fix above would have made every turn re-analyze the whole
+  day.
+- **Polish works on Codex** (#113): Codex edits arrive as `apply_patch` with the
+  patch body in `tool_input.command` and no `file_path`, so polish returned
+  immediately and never ran. It now resolves targets from the
+  `*** Update File:` / `*** Add File:` / `*** Move to:` headers.
+- **Resume context reaches the Codex model** (#113): everything resume surfaces
+  went to stderr, but Codex adds only plain *stdout* to model context — and
+  only for `SessionStart`, `SubagentStart` and `UserPromptSubmit`; tool events
+  discard plain text and the rest require JSON. New `shared::host` records the
+  active event so `hint`/`raw` pick the correct stream per event instead of
+  switching every hook to stdout. Claude Code behaviour is unchanged.
+- **`epic team sync` emits native Codex agents** (#113): it wrote Claude-style
+  Markdown into `~/.codex/agents/{team}/`, which Codex ignores. It now writes
+  flat `~/.codex/agents/{team}-{agent}.toml` with the required `name`,
+  `description` and `developer_instructions` keys. `model: sonnet` and Claude
+  `tools:`/`skills:` are dropped rather than mapped to invented equivalents.
+
 ## [0.8.2] — 2026-07-09
 
 ### Changed
