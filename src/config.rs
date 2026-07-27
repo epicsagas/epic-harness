@@ -373,6 +373,15 @@ pub struct DbConfig {
     /// - "require": TLS required, connection fails without it
     /// - "disable": no TLS
     pub tls_mode: String,
+
+    /// Days of observation history to keep. Older rows are deleted at session
+    /// end, together with the runtime files keyed on them.
+    ///
+    /// Observations accumulate at roughly one row per tool call and hold raw
+    /// (masked) command text, so an unbounded table grows steadily — the
+    /// reported installation reached ~22.8 MB in three days. `0` disables
+    /// deletion and keeps everything.
+    pub retention_days: u64,
 }
 
 impl Default for DbConfig {
@@ -383,6 +392,7 @@ impl Default for DbConfig {
             memory_url: String::new(),
             max_connections: 5,
             tls_mode: "prefer".into(),
+            retention_days: 90,
         }
     }
 }

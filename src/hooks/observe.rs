@@ -8,11 +8,144 @@ use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
 // mask_secrets is now in shared/sanitize.rs — re-exported via common
-use crate::hooks::common::mask_secrets;
+use crate::hooks::common::{mask_secrets, mask_secrets_keep_paths, truncate_utf8};
+
+/// Cap on the persisted `action` text. Enough for pattern detection, bounded so
+/// a single pasted heredoc cannot write tens of kilobytes per tool call.
+const MAX_ACTION_BYTES: usize = 2000;
+
+/// Cap on the persisted error snippet.
+const MAX_SNIPPET_BYTES: usize = 500;
 
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
 });
+
+/// Commands whose stdout is *file content*, not a report about the command.
+///
+/// Keyword classification cannot tell "this command failed" from "this command
+/// successfully printed a file that mentions TypeError". Reading a log, a diff or
+/// a test fixture used to be scored as a failed tool call, which is where the
+/// bulk of recorded failures came from. Without a structured exit status these
+/// calls record `unknown` instead of inventing a failure.
+///
+/// Commands that *report* on work (build, test, lint, package managers) are
+/// deliberately absent — their keywords are real evidence.
+static READ_ONLY_CMDS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^\s*(sudo\s+)?(cat|bat|nl|head|tail|less|more|sed|awk|cut|sort|uniq|wc|tr|rg|grep|egrep|fgrep|ag|ack|find|fd|ls|tree|stat|file|jq|yq|xxd|od|strings|diff|comm|echo|printf|pwd|which|type|env|date|git\s+(diff|log|show|blame|status|ls-files|cat-file|rev-parse))\b",
+    )
+    .unwrap()
+});
+
+/// True when the command only reads and prints existing content.
+///
+/// Applies to the *first* command in a pipeline or `&&` chain: `cat x | grep y`
+/// is a read, but `cargo test | tail -5` is not — the leading command decides
+/// what the output is evidence about.
+fn is_read_only_command(command: &str) -> bool {
+    !command.trim().is_empty() && READ_ONLY_CMDS.is_match(command)
+}
+
+/// True when a call's output is content it fetched, not a report about itself.
+///
+/// `Read`, `Grep` and `Glob` return file text by definition, so a keyword in
+/// their output describes the file, not the call. Bash depends on which command
+/// ran. A genuine failure of these tools is still recorded whenever the host
+/// reports one — this only governs the no-evidence fallback.
+fn outputs_file_content(tool_category: &str, command: &str) -> bool {
+    match tool_category {
+        "read" | "grep" | "glob" => true,
+        "bash" => is_read_only_command(command),
+        _ => false,
+    }
+}
+
+/// Explicit success/failure the host reported, if the payload carries one.
+///
+/// Returns `Some(true)` for a reported success, `Some(false)` for a reported
+/// failure, `None` when the host gave no structured signal. A structured signal
+/// is authoritative in *both* directions: it must be able to clear a false
+/// keyword match, not only create a failure.
+///
+/// Hosts disagree on the field name, so all the known spellings are accepted.
+/// Codex currently sends none of them for Bash, which is why the `None` path
+/// still has to be careful.
+fn reported_outcome(v: &serde_json::Value) -> Option<bool> {
+    let obj = v.as_object()?;
+
+    for key in ["exit_code", "exitCode", "returncode", "returnCode"] {
+        if let Some(code) = obj.get(key).and_then(|c| c.as_i64()) {
+            return Some(code == 0);
+        }
+    }
+    for key in ["is_error", "isError", "error"] {
+        if let Some(flag) = obj.get(key).and_then(|c| c.as_bool()) {
+            return Some(!flag);
+        }
+    }
+    for key in ["success", "ok"] {
+        if let Some(flag) = obj.get(key).and_then(|c| c.as_bool()) {
+            return Some(flag);
+        }
+    }
+    match obj.get("status").and_then(|s| s.as_str()) {
+        Some("success") | Some("ok") | Some("completed") => Some(true),
+        Some("error") | Some("failed") | Some("failure") => Some(false),
+        _ => None,
+    }
+}
+
+/// The recorded outcome of a tool call.
+pub(crate) struct Outcome {
+    /// `"success"`, `"error"` or `"unknown"`.
+    pub result: &'static str,
+    /// Failure category, set only when `result` is `"error"`.
+    pub failure: Option<&'static str>,
+}
+
+/// Decide a tool call's outcome from the strongest available evidence.
+///
+/// Precedence:
+/// 1. A structured status from the host — authoritative both ways.
+/// 2. With no structured status, a call whose output is fetched content
+///    (`outputs_file_content`) yields `unknown` on a keyword match rather than a
+///    fabricated failure. This is the case that produced most recorded failures.
+/// 3. Otherwise the previous behaviour: text keywords decide.
+///
+/// A reported failure still uses the text to pick a category, falling back to
+/// `runtime_error` when the text names nothing recognizable.
+pub(crate) fn decide_outcome(
+    reported: Option<bool>,
+    text_failure: Option<&'static str>,
+    tool_category: &str,
+    command: &str,
+) -> Outcome {
+    match reported {
+        Some(true) => Outcome {
+            result: "success",
+            failure: None,
+        },
+        Some(false) => Outcome {
+            result: "error",
+            failure: Some(text_failure.unwrap_or("runtime_error")),
+        },
+        None => match text_failure {
+            None => Outcome {
+                result: "success",
+                failure: None,
+            },
+            Some(_) if outputs_file_content(tool_category, command) => Outcome {
+                result: "unknown",
+                failure: None,
+            },
+            Some(cat) => Outcome {
+                result: "error",
+                failure: Some(cat),
+            },
+        },
+    }
+}
 
 fn get_next_sequence_id(session_file: &std::path::Path) -> u64 {
     std::fs::metadata(session_file)
@@ -50,8 +183,10 @@ fn failure_quality(failure_category: Option<&str>) -> f64 {
     }
 }
 
-fn score_bash(output: &str, command: &str) -> ScoreDimensions {
-    let failure = classify_failure(output);
+/// Score a Bash call. `failure` is the outcome already decided by the caller —
+/// the scorers do not re-classify, so text and structured evidence cannot
+/// disagree between the recorded result and the recorded dimensions.
+fn score_bash(output: &str, command: &str, failure: Option<&'static str>) -> ScoreDimensions {
     let tool_success = if failure.is_none() { 1.0 } else { 0.0 };
 
     let is_empty = output.trim().is_empty();
@@ -95,8 +230,8 @@ fn score_edit(
     output: &str,
     prev_action: Option<&str>,
     curr_action: Option<&str>,
+    failure: Option<&'static str>,
 ) -> ScoreDimensions {
-    let failure = classify_failure(output);
     let tool_success = if failure.is_none() { 1.0 } else { 0.0 };
 
     let quality = if failure.is_some() {
@@ -123,8 +258,7 @@ fn score_edit(
     }
 }
 
-fn score_write(output: &str) -> ScoreDimensions {
-    let failure = classify_failure(output);
+fn score_write(_output: &str, failure: Option<&'static str>) -> ScoreDimensions {
     let ok = failure.is_none();
     ScoreDimensions {
         tool_success: if ok { 1.0 } else { 0.0 },
@@ -133,8 +267,7 @@ fn score_write(output: &str) -> ScoreDimensions {
     }
 }
 
-fn score_read_search(output: &str) -> ScoreDimensions {
-    let failure = classify_failure(output);
+fn score_read_search(output: &str, failure: Option<&'static str>) -> ScoreDimensions {
     static NO_MATCH_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
     let has_results =
@@ -193,27 +326,48 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
     check_agent_timeout_with_dir(agent_id, &orch_dir)
 }
 
+/// True when this hook fire concerns a subagent, on either host.
+///
+/// Claude Code spawns subagents through the `Agent` tool; Codex reports its
+/// native subagents through `SubagentStart`/`SubagentStop` events that carry no
+/// `tool_name` at all, so a tool-name-only check saw none of them.
+fn is_agent_event(input: &HookInput) -> bool {
+    if input.tool_name.as_deref().unwrap_or("").to_lowercase() == "agent" {
+        return true;
+    }
+    matches!(
+        input.hook_event_name.as_deref(),
+        Some("SubagentStart") | Some("SubagentStop")
+    )
+}
+
 /// Track agent spawn/completion via the orchestrate module.
 ///
-/// Called on every Agent tool invocation in the observe hook (both PreToolUse and PostToolUse).
-/// - PreToolUse: `tool_output` is None → record "running" state
-/// - PostToolUse: `tool_output` exists → parse output and record final state
+/// Called on every subagent event in the observe hook.
+/// - start (`SubagentStart`, or an `Agent` PreToolUse) → record "running" state
+/// - stop (`SubagentStop`, or an `Agent` PostToolUse) → parse output, record final state
+///
+/// The event name decides when the host sends one: a `SubagentStop` carrying no
+/// payload would otherwise be misread as a spawn and reset the agent to running.
 fn track_agent_spawn(input: &HookInput) {
     use crate::orchestrate;
 
-    let has_output =
-        input.tool_output.is_some() || input.tool_response.is_some() || input.tool_result.is_some();
+    let is_completion = match input.hook_event_name.as_deref() {
+        Some("SubagentStart") => false,
+        Some("SubagentStop") => true,
+        _ => {
+            input.tool_output.is_some()
+                || input.tool_response.is_some()
+                || input.tool_result.is_some()
+        }
+    };
 
-    if has_output {
-        // PostToolUse: agent completed — let orchestrate::run_post handle it
+    if is_completion {
         if let Err(e) = orchestrate::run_post_checked(input) {
             eprintln!("[harness] agent track post error: {e}");
         }
-    } else {
-        // PreToolUse: agent starting — let orchestrate::run_pre handle it
-        if let Err(e) = orchestrate::run_pre_checked(input) {
-            eprintln!("[harness] agent track pre error: {e}");
-        }
+    } else if let Err(e) = orchestrate::run_pre_checked(input) {
+        eprintln!("[harness] agent track pre error: {e}");
     }
 }
 
@@ -348,6 +502,14 @@ pub fn run(input: &HookInput) -> i32 {
     }
     ensure_dir(&obs_dir());
 
+    // Codex's `SubagentStart`/`SubagentStop` carry no tool at all. They are
+    // lifecycle events, not tool calls: recording them as observations would add
+    // `unknown`-tool rows with no outcome to every statistic.
+    if input.tool_name.is_none() && is_agent_event(input) {
+        track_agent_spawn(input);
+        return 0;
+    }
+
     let sid = session_id();
 
     // Open harness DB pool for SQLite writes (fallback to JSONL if DB unavailable)
@@ -355,8 +517,14 @@ pub fn run(input: &HookInput) -> i32 {
     let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
+    // The action is persisted, so it is masked and capped first. Commands were
+    // previously stored verbatim and unbounded — one recorded command reached
+    // ~90 KB, and marker scans found authorization headers and key-shaped
+    // strings in the stored text. Paths survive masking: they are what
+    // file-level pattern detection keys on.
     let action = input.tool_input.as_ref().map(|v| {
-        v.get("command")
+        let raw = v
+            .get("command")
             .and_then(|c| c.as_str())
             .map(String::from)
             .or_else(|| {
@@ -366,8 +534,9 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
-                mask_secrets(&s[..s.len().min(200)])
-            })
+                truncate_utf8(&s, MAX_ACTION_BYTES).to_string()
+            });
+        mask_secrets_keep_paths(truncate_utf8(&raw, MAX_ACTION_BYTES))
     });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
@@ -393,17 +562,30 @@ pub fn run(input: &HookInput) -> i32 {
     };
 
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
+    // `stdout` is Claude Code's field name for a Bash response; `output` is the
+    // legacy structured shape. Reading only `output` silently dropped every
+    // object-shaped Bash result.
     let resolve_json_value = |v: &serde_json::Value| -> (String, String) {
         match v {
             serde_json::Value::String(s) => (s.clone(), String::new()),
             serde_json::Value::Object(obj) => {
-                let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
-                let err = obj.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
-                (format!("{out}\n{err}"), String::new())
+                let text = |key: &str| obj.get(key).and_then(|v| v.as_str()).unwrap_or("");
+                let out = match text("output") {
+                    "" => text("stdout"),
+                    o => o,
+                };
+                (out.to_string(), text("stderr").to_string())
             }
             other => (other.to_string(), String::new()),
         }
     };
+    // Structured status, when the host sends one, outranks the output text.
+    let reported = input
+        .tool_response
+        .as_ref()
+        .or(input.tool_result.as_ref())
+        .and_then(reported_outcome);
+
     let resolved_output: Option<(String, String)> = if let Some(to) = &input.tool_output {
         let out = to.output.as_deref().unwrap_or("").to_string();
         let err = to.stderr.as_deref().unwrap_or("").to_string();
@@ -416,75 +598,62 @@ pub fn run(input: &HookInput) -> i32 {
 
     if let Some((output, stderr)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
+        let command = input
+            .tool_input
+            .as_ref()
+            .and_then(|v| v.get("command"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
-        record.failure_category = classify_failure(&combined).map(String::from);
-        record.result = Some(
-            if record.failure_category.is_none() {
-                "success"
-            } else {
-                "error"
-            }
-            .into(),
-        );
+        let text_failure = classify_failure(&combined);
+        let outcome = decide_outcome(reported, text_failure, tool_cat, command);
 
-        let dims = match tool_cat {
-            "bash" => {
-                let cmd = input
-                    .tool_input
-                    .as_ref()
-                    .and_then(|v| v.get("command"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                score_bash(&combined, cmd)
-            }
-            "edit" => {
-                let prev = db
-                    .as_ref()
-                    .and_then(|pool| {
-                        crate::store::runtime::block_on(
-                            crate::store::observations::query_last_action_pool(pool, &sid),
-                        )
-                        .ok()
-                        .flatten()
-                    })
-                    .or_else(|| get_last_action(&session_file));
-                score_edit(&combined, prev.as_deref(), action.as_deref())
-            }
-            "write" => score_write(&combined),
-            "read" => ScoreDimensions {
-                tool_success: if record.failure_category.is_none() {
-                    1.0
-                } else {
-                    0.0
-                },
-                output_quality: if record.failure_category.is_none() {
-                    1.0
-                } else {
-                    failure_quality(record.failure_category.as_deref())
-                },
-                execution_cost: 1.0,
-            },
-            "glob" | "grep" => score_read_search(&combined),
-            _ => {
-                let fq = failure_quality(record.failure_category.as_deref());
-                ScoreDimensions {
-                    tool_success: if record.failure_category.is_none() {
+        record.failure_category = outcome.failure.map(String::from);
+        record.result = Some(outcome.result.into());
+
+        // An undetermined outcome is not scored. A neutral score would be an
+        // invented number, and a zero would be the false failure we are removing.
+        if outcome.result != "unknown" {
+            let failure = outcome.failure;
+            let dims = match tool_cat {
+                "bash" => score_bash(&combined, command, failure),
+                "edit" => {
+                    let prev = db
+                        .as_ref()
+                        .and_then(|pool| {
+                            crate::store::runtime::block_on(
+                                crate::store::observations::query_last_action_pool(pool, &sid),
+                            )
+                            .ok()
+                            .flatten()
+                        })
+                        .or_else(|| get_last_action(&session_file));
+                    score_edit(&combined, prev.as_deref(), action.as_deref(), failure)
+                }
+                "write" => score_write(&combined, failure),
+                "read" => ScoreDimensions {
+                    tool_success: if failure.is_none() { 1.0 } else { 0.0 },
+                    output_quality: if failure.is_none() {
                         1.0
                     } else {
-                        0.0
+                        failure_quality(failure)
                     },
-                    output_quality: fq,
                     execution_cost: 1.0,
-                }
-            }
-        };
+                },
+                "glob" | "grep" => score_read_search(&combined, failure),
+                _ => ScoreDimensions {
+                    tool_success: if failure.is_none() { 1.0 } else { 0.0 },
+                    output_quality: failure_quality(failure),
+                    execution_cost: 1.0,
+                },
+            };
 
-        record.dimensions = Some(dims);
-        record.score = Some(compute_score(&dims));
+            record.dimensions = Some(dims);
+            record.score = Some(compute_score(&dims));
+        }
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(&combined[..combined.len().min(500)]);
-            record.error_snippet = Some(masked);
+            record.error_snippet = Some(mask_secrets(truncate_utf8(&combined, MAX_SNIPPET_BYTES)));
         }
     }
 
@@ -528,17 +697,18 @@ pub fn run(input: &HookInput) -> i32 {
 
     // Agent tracking: record spawn/completion to orchestrator state for
     // dashboard display. Always active — no EPIC_ORCHESTRATION gate.
-    let tool_name_lower = input.tool_name.as_deref().unwrap_or("").to_lowercase();
-    if tool_name_lower == "agent" {
+    if is_agent_event(input) {
         track_agent_spawn(input);
 
         // Timeout detection still gated by EPIC_ORCHESTRATION
-        if let Some(agent_id) = input
-            .tool_input
-            .as_ref()
-            .and_then(|v| v.get("agent_id"))
-            .and_then(|v| v.as_str())
-            && let Some(timeout_msg) = check_agent_timeout(agent_id)
+        if let Some(agent_id) = crate::shared::host::agent_id().or_else(|| {
+            input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("agent_id"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        }) && let Some(timeout_msg) = check_agent_timeout(&agent_id)
         {
             hint("agent-timeout", &timeout_msg);
         }
@@ -551,6 +721,30 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    // The scorers take the decided failure category as a parameter so the
+    // recorded result and the recorded dimensions cannot disagree. These shims
+    // derive it from the text, which is what the scoring tests below exercise —
+    // the decision itself is covered by the `decide_outcome` tests.
+    fn score_bash(output: &str, command: &str) -> ScoreDimensions {
+        super::score_bash(output, command, classify_failure(output))
+    }
+
+    fn score_edit(
+        output: &str,
+        prev_action: Option<&str>,
+        curr_action: Option<&str>,
+    ) -> ScoreDimensions {
+        super::score_edit(output, prev_action, curr_action, classify_failure(output))
+    }
+
+    fn score_write(output: &str) -> ScoreDimensions {
+        super::score_write(output, classify_failure(output))
+    }
+
+    fn score_read_search(output: &str) -> ScoreDimensions {
+        super::score_read_search(output, classify_failure(output))
+    }
 
     // ── score_bash ──────────────────────────────────
     #[test]
@@ -631,6 +825,170 @@ mod tests {
     fn edit_different_actions_full_quality() {
         let dims = score_edit("file updated", Some("/src/main.rs"), Some("/src/lib.rs"));
         assert_eq!(dims.output_quality, 1.0);
+    }
+
+    // ── decide_outcome ──────────────────────────────
+    // The reported regression: reading a file whose *content* mentions a failure
+    // was scored as a failed tool call. 66% of classified errors came from
+    // read-oriented commands.
+
+    #[test]
+    fn reading_a_file_containing_failure_words_is_not_a_failure() {
+        for cmd in [
+            "cat build.log",
+            "sed -n '1,40p' src/main.rs",
+            "rg 'TypeError' src/",
+            "nl notes.md",
+            "git diff HEAD~1",
+            "find . -name '*.rs'",
+            "  sudo tail -n 200 /var/log/syslog",
+        ] {
+            let o = decide_outcome(None, Some("type_error"), "bash", cmd);
+            assert_eq!(o.result, "unknown", "{cmd} must not be scored as a failure");
+            assert!(o.failure.is_none(), "{cmd} must record no failure category");
+        }
+    }
+
+    #[test]
+    fn a_reporting_command_still_fails_on_its_own_keywords() {
+        // These commands report on work they performed; their keywords are real
+        // evidence and must keep producing a failure.
+        for cmd in ["cargo test", "npm run build", "pytest -q", "node main.js"] {
+            let o = decide_outcome(None, Some("test_fail"), "bash", cmd);
+            assert_eq!(o.result, "error", "{cmd} must stay a failure");
+            assert_eq!(o.failure, Some("test_fail"));
+        }
+    }
+
+    #[test]
+    fn a_pipeline_is_judged_by_its_leading_command() {
+        // `cat x | grep y` is a read; `cargo test | tail -5` is not.
+        assert_eq!(
+            decide_outcome(None, Some("not_found"), "bash", "cat a.txt | grep foo").result,
+            "unknown"
+        );
+        assert_eq!(
+            decide_outcome(None, Some("test_fail"), "bash", "cargo test | tail -5").result,
+            "error"
+        );
+    }
+
+    #[test]
+    fn a_reported_exit_code_outranks_the_text() {
+        // Both directions: a non-zero exit makes a read a real failure, and a
+        // zero exit clears a false keyword match.
+        let failed = decide_outcome(Some(false), None, "bash", "cat missing.txt");
+        assert_eq!(failed.result, "error");
+        assert_eq!(
+            failed.failure,
+            Some("runtime_error"),
+            "a reported failure with unrecognizable text still needs a category"
+        );
+
+        let ok = decide_outcome(Some(true), Some("type_error"), "bash", "cargo test");
+        assert_eq!(ok.result, "success");
+        assert!(ok.failure.is_none());
+    }
+
+    #[test]
+    fn a_reported_failure_keeps_the_text_category() {
+        let o = decide_outcome(Some(false), Some("build_fail"), "bash", "make");
+        assert_eq!(o.result, "error");
+        assert_eq!(o.failure, Some("build_fail"));
+    }
+
+    #[test]
+    fn clean_output_is_a_success() {
+        assert_eq!(
+            decide_outcome(None, None, "bash", "cat a.txt").result,
+            "success"
+        );
+    }
+
+    #[test]
+    fn content_returning_tools_get_the_exemption_too() {
+        // Read/Grep/Glob return file text by definition, so a keyword in their
+        // output describes the file, not the call.
+        for cat in ["read", "grep", "glob"] {
+            let o = decide_outcome(None, Some("type_error"), cat, "");
+            assert_eq!(o.result, "unknown", "{cat} must not invent a failure");
+        }
+    }
+
+    #[test]
+    fn tools_that_report_on_their_own_work_do_not_get_the_exemption() {
+        for cat in ["edit", "write", "other"] {
+            let o = decide_outcome(None, Some("permission_denied"), cat, "");
+            assert_eq!(o.result, "error", "{cat} must stay a failure");
+        }
+    }
+
+    #[test]
+    fn a_reported_status_still_wins_for_content_tools() {
+        // The exemption only governs the no-evidence fallback; a host that
+        // reports a real Read failure is still believed.
+        assert_eq!(
+            decide_outcome(Some(false), Some("not_found"), "read", "").result,
+            "error"
+        );
+    }
+
+    // ── subagent events ─────────────────────────────
+    #[test]
+    fn codex_subagent_events_are_agent_events() {
+        for ev in ["SubagentStart", "SubagentStop"] {
+            let input = HookInput {
+                hook_event_name: Some(ev.into()),
+                ..Default::default()
+            };
+            assert!(is_agent_event(&input), "{ev} must be tracked");
+            assert!(
+                input.tool_name.is_none(),
+                "{ev} carries no tool, so it must not become an observation"
+            );
+        }
+    }
+
+    #[test]
+    fn the_claude_agent_tool_is_still_an_agent_event() {
+        let input = HookInput {
+            tool_name: Some("Agent".into()),
+            ..Default::default()
+        };
+        assert!(is_agent_event(&input));
+    }
+
+    #[test]
+    fn ordinary_tool_calls_are_not_agent_events() {
+        for (tool, event) in [("Bash", "PostToolUse"), ("Edit", "PreToolUse")] {
+            let input = HookInput {
+                tool_name: Some(tool.into()),
+                hook_event_name: Some(event.into()),
+                ..Default::default()
+            };
+            assert!(!is_agent_event(&input), "{tool} must not be tracked");
+        }
+    }
+
+    // ── reported_outcome ────────────────────────────
+    #[test]
+    fn structured_status_is_read_from_each_known_spelling() {
+        let cases = [
+            (serde_json::json!({"exit_code": 0}), Some(true)),
+            (serde_json::json!({"exit_code": 1}), Some(false)),
+            (serde_json::json!({"exitCode": 2}), Some(false)),
+            (serde_json::json!({"is_error": true}), Some(false)),
+            (serde_json::json!({"isError": false}), Some(true)),
+            (serde_json::json!({"success": true}), Some(true)),
+            (serde_json::json!({"status": "failed"}), Some(false)),
+            (serde_json::json!({"status": "completed"}), Some(true)),
+            (serde_json::json!({"status": "running"}), None),
+            (serde_json::json!({"stdout": "hi"}), None),
+            (serde_json::json!("plain string"), None),
+        ];
+        for (payload, want) in cases {
+            assert_eq!(reported_outcome(&payload), want, "payload {payload}");
+        }
     }
 
     // ── score_write ─────────────────────────────────

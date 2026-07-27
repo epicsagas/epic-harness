@@ -26,15 +26,43 @@ static MASK_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?:(?:/[A-Za-z][\w./-]*)|(?:[A-Za-z]:\\[^\s"']+)|(?:~[/\w.\\-]+))"#).unwrap()
 });
 
+/// Mask credential patterns but leave file paths intact.
+///
+/// Covers Bearer tokens, `sk-*` API keys, and
+/// password/token/apikey/secret/private_key assignments.
+///
+/// Use this for values that stay on the machine and whose paths carry meaning —
+/// an observation's `action` drives file-level pattern detection, and replacing
+/// every path with `<PATH>` would make every edit look like the same file.
+pub fn mask_secrets_keep_paths(s: &str) -> String {
+    let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
+    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
+    let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
+    s.into_owned()
+}
+
 /// Mask common secret patterns in a string.
 /// Covers: Bearer tokens, sk-* API keys, password/token/apikey/secret/private_key
 /// values, and absolute file paths (Unix/Windows/tilde-home).
 pub fn mask_secrets(s: &str) -> String {
-    let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
-    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-    let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
-    let s = MASK_PATH.replace_all(&s, "<PATH>");
-    s.into_owned()
+    MASK_PATH
+        .replace_all(&mask_secrets_keep_paths(s), "<PATH>")
+        .into_owned()
+}
+
+/// Truncate to at most `max_bytes`, never splitting a UTF-8 character.
+///
+/// `&s[..n]` panics when `n` lands inside a multi-byte character, which a byte
+/// cap over arbitrary command output eventually will.
+pub fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 #[cfg(test)]
@@ -108,5 +136,59 @@ mod tests {
             mask_secrets("open ~/repo/z for editing"),
             "open <PATH> for editing"
         );
+    }
+
+    // ── mask_secrets_keep_paths ─────────────────────
+
+    #[test]
+    fn keep_paths_still_masks_credentials() {
+        assert_eq!(
+            mask_secrets_keep_paths("curl -H 'Authorization: Bearer abc123def456' https://x"),
+            "curl -H 'Authorization: Bearer <REDACTED>' https://x"
+        );
+        assert_eq!(
+            mask_secrets_keep_paths("export API_KEY=supersecretvalue"),
+            "export API_KEY=<REDACTED>"
+        );
+    }
+
+    #[test]
+    fn keep_paths_leaves_file_paths_readable() {
+        // Observation actions key file-level pattern detection; `<PATH>` would
+        // make every edit look like the same file.
+        let cmd = "cargo test --manifest-path /home/u/proj/Cargo.toml";
+        assert_eq!(mask_secrets_keep_paths(cmd), cmd);
+    }
+
+    // ── truncate_utf8 ───────────────────────────────
+
+    #[test]
+    fn truncate_shorter_than_cap_is_unchanged() {
+        assert_eq!(truncate_utf8("abc", 10), "abc");
+    }
+
+    #[test]
+    fn truncate_never_splits_a_character() {
+        // "日" is three bytes, so byte 3 lands inside it — a naive &s[..3]
+        // would panic. Every cap must yield a prefix on a boundary.
+        let s = "a日本語";
+        for cap in 0..=s.len() + 2 {
+            let out = truncate_utf8(s, cap);
+            assert!(s.starts_with(out), "cap {cap} produced {out:?}");
+            assert!(out.len() <= cap, "cap {cap} produced {out:?}");
+        }
+        assert_eq!(truncate_utf8(s, 3), "a");
+    }
+
+    #[test]
+    fn truncate_at_an_exact_boundary_keeps_the_character() {
+        // 'a' + '日' is exactly four bytes.
+        assert_eq!(truncate_utf8("a日本語", 4), "a日");
+    }
+
+    #[test]
+    fn truncate_to_zero_yields_empty() {
+        assert_eq!(truncate_utf8("日", 0), "");
+        assert_eq!(truncate_utf8("日", 1), "");
     }
 }

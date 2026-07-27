@@ -45,12 +45,20 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
   "audit_fail_count": 0,
   "max_retries": 3,
   "audit_report": null,
+  "pr_url": null,
   "deadline": "{ISO-8601, now + 30 minutes}",
   "started_at": "{ISO-8601}",
   "updated_at": "{ISO-8601}",
   "phase_history": []
 }
 ```
+
+**Completion invariants.** `epic reflect` checks every pipeline marked `complete`
+and reports the ones whose own state contradicts it. Do not set
+`"status": "complete"` unless both hold:
+
+- `pr_url` is set (or `phase_history` has a `ship` entry with `status: complete`)
+- `audit_fail_count` is not above `max_retries` — above it, Step 5 requires a pause
 
 ## Step 1: Auto-Detect Mode
 
@@ -160,7 +168,9 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
    - Full build from scratch · complete test suite · linter + formatter
    - Fail → STOP. Do NOT create PR.
 3. **Git hygiene**: conventional commits, rebase, squash fixups
-4. **Create PR** via `gh pr create` with spec + audit report in body
+4. **Create PR** via `gh pr create` with spec + audit report in body.
+   Record the returned URL in pipeline state as `pr_url` — this is the evidence
+   the completion invariant checks for.
 5. **CI watch** via `gh pr checks --watch`, auto-fix failures
 6. **Exit worktree**: Return to original directory and keep the worktree
 

@@ -5,4 +5,5 @@ pub mod polish;
 pub mod processor;
 pub mod reflect;
 pub mod resume;
+pub mod retention;
 pub mod snapshot;

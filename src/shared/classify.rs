@@ -68,11 +68,16 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     None
 }
 
+/// Map a host's tool name onto the categories Ring 3 scores.
+///
+/// `apply_patch` is Codex's edit tool. Leaving it in `other` meant every Codex
+/// edit was scored by the generic branch and never appeared in edit statistics,
+/// so observing `apply_patch` at all would not have produced edit signal.
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
-        "bash" => "bash",
-        "edit" => "edit",
-        "write" => "write",
+        "bash" | "shell" => "bash",
+        "edit" | "apply_patch" | "multiedit" => "edit",
+        "write" | "notebookedit" => "write",
         "read" => "read",
         "glob" => "glob",
         "grep" => "grep",

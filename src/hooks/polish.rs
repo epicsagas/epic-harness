@@ -200,11 +200,12 @@ pub fn patched_files(command: &str) -> Vec<String> {
     files
 }
 
-/// Resolve which files this hook invocation should polish.
+/// Resolve which files a hook invocation touches.
 ///
 /// Claude Code supplies `file_path` for Edit/Write; Codex supplies an
-/// `apply_patch` envelope in `command`.
-fn target_files(input: &HookInput) -> Vec<String> {
+/// `apply_patch` envelope in `command`. Shared with `guard`, which needs the
+/// same answer for concurrent-write conflict detection.
+pub(crate) fn target_files(input: &HookInput) -> Vec<String> {
     let Some(ti) = input.tool_input.as_ref() else {
         return Vec::new();
     };

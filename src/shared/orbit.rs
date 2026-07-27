@@ -131,6 +131,52 @@ pub fn normalize_pipeline_id(id: &str) -> String {
         .collect()
 }
 
+/// Check the invariants a completed orbit pipeline is supposed to satisfy.
+///
+/// The pipeline file is written by the orbit skill, so nothing in the harness
+/// could previously contradict it: pipelines were observed marked `complete`
+/// with no PR recorded, and one with `audit_fail_count` above its own
+/// `max_retries` — the skill is supposed to pause instead. Detection cannot stop
+/// a bad write, but it stops a bad write from being read as evidence.
+///
+/// Returns one message per violated invariant; empty means the state is
+/// self-consistent. Pipelines that are not complete are not checked — an
+/// in-flight pipeline is legitimately missing most of this.
+pub fn completion_violations(pipeline: &serde_json::Value) -> Vec<String> {
+    let status = pipeline.get("status").and_then(|v| v.as_str());
+    if !matches!(status, Some("complete") | Some("shipped")) {
+        return Vec::new();
+    }
+
+    let mut violations = Vec::new();
+    let num = |key: &str| pipeline.get(key).and_then(|v| v.as_u64());
+
+    if let (Some(fails), Some(max)) = (num("audit_fail_count"), num("max_retries"))
+        && fails > max
+    {
+        violations.push(format!(
+            "completed with audit_fail_count={fails} above max_retries={max}; the run should have paused for a decision"
+        ));
+    }
+
+    let has_pr = pipeline
+        .get("pr_url")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.trim().is_empty());
+    let shipped = pipeline
+        .get("phase_history")
+        .and_then(|v| v.as_array())
+        .is_some_and(|h| {
+            h.iter()
+                .any(|e| e["phase"] == "ship" && e["status"] == "complete")
+        });
+    if !has_pr && !shipped {
+        violations.push("completed with no PR recorded and no completed ship phase".to_string());
+    }
+
+    violations
+}
+
 /// Sanitize a string extracted from pipeline state before emitting to LLM context.
 ///
 /// Strips:
@@ -155,4 +201,72 @@ pub fn sanitize_orbit_field(s: &str) -> String {
         })
         .take(256)
         .collect()
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::completion_violations as violations;
+    use serde_json::json;
+
+    #[test]
+    fn a_clean_completion_reports_nothing() {
+        let pipeline = json!({
+            "status": "complete",
+            "audit_fail_count": 1,
+            "max_retries": 3,
+            "pr_url": "https://github.com/o/r/pull/1",
+            "phase_history": [{"phase": "ship", "status": "complete"}]
+        });
+        assert!(violations(&pipeline).is_empty());
+    }
+
+    #[test]
+    fn a_running_pipeline_is_not_checked() {
+        // In-flight state is legitimately incomplete.
+        let pipeline = json!({"status": "running", "audit_fail_count": 9, "max_retries": 3});
+        assert!(violations(&pipeline).is_empty());
+    }
+
+    #[test]
+    fn exceeding_max_retries_is_reported() {
+        let pipeline = json!({
+            "status": "complete",
+            "audit_fail_count": 5,
+            "max_retries": 3,
+            "pr_url": "https://github.com/o/r/pull/1"
+        });
+        let v = violations(&pipeline);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].contains("audit_fail_count=5"), "{}", v[0]);
+    }
+
+    #[test]
+    fn completing_without_ship_evidence_is_reported() {
+        let pipeline = json!({"status": "complete", "audit_fail_count": 0, "max_retries": 3});
+        let v = violations(&pipeline);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].contains("no PR recorded"), "{}", v[0]);
+    }
+
+    #[test]
+    fn a_completed_ship_phase_counts_as_evidence() {
+        // Pipelines predating `pr_url` still record the ship phase.
+        let pipeline = json!({
+            "status": "shipped",
+            "phase_history": [{"phase": "ship", "status": "complete"}]
+        });
+        assert!(violations(&pipeline).is_empty());
+    }
+
+    #[test]
+    fn a_blank_pr_url_is_not_evidence() {
+        let pipeline = json!({"status": "complete", "pr_url": "   "});
+        assert_eq!(violations(&pipeline).len(), 1);
+    }
+
+    #[test]
+    fn both_invariants_report_independently() {
+        let pipeline = json!({"status": "complete", "audit_fail_count": 4, "max_retries": 3});
+        assert_eq!(violations(&pipeline).len(), 2);
+    }
 }

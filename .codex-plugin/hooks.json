@@ -22,6 +22,16 @@
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+      },
+      {
+        "matcher": "apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Orchestration pause directives and concurrent write conflict warnings (Codex edits are apply_patch, not Edit/Write)"
       }
     ],
     "PostToolUse": [
@@ -44,6 +54,30 @@
           }
         ],
         "description": "Auto-format + typecheck after edits (Codex edits arrive as apply_patch)"
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Record a native Codex subagent starting — carries the host agent_id, so orchestration state no longer depends on a Claude-style Agent tool"
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Record a native Codex subagent finishing and unblock its dependents"
       }
     ],
     "PreCompact": [

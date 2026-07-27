@@ -8,6 +8,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A hook process was treated as a session** (#113): `session_id()` was
+  `YYYYMMDD_PID`, but hosts run each hook in its own process — one installation
+  produced 37,611 "sessions" from 40,804 observations, which broke sequence
+  detection, repeated-error analysis, the 50-event telemetry cap and lock
+  cleanup. `HookInput` now keeps the host's `session_id`, `turn_id`,
+  `tool_use_id`, `agent_id` and `agent_type`, and `session_id()` uses the host
+  id when present. Ids are sanitized to `[A-Za-z0-9_-]` and capped, since they
+  reach `session_{id}.jsonl` and `resume.{id}.lock`.
+- **Reading a file was scored as a failed tool call** (#113): success came from
+  matching output text for `FAIL`, `TypeError`, `timeout` and similar, so
+  reading a log or a diff that merely *mentions* an error counted as a failure —
+  66% of all classified errors came from read-oriented commands. Structured
+  status (`exit_code`, `is_error`, `success`, `status`) is now authoritative in
+  both directions, and without it, calls whose output is fetched content
+  (`Read`, `Grep`, `Glob`, read-only Bash) record `unknown` instead of a
+  fabricated failure. Build and test failures are unaffected. `unknown`
+  observations stay unscored and are excluded from success rates rather than
+  counted against them.
+- **Object-shaped Bash responses lost their output** (#113): only `output` was
+  read from a `tool_response` object, never Claude Code's `stdout`, so those
+  observations were scored against empty text.
+- **Codex `apply_patch` was categorized as `other`** (#113): Codex's edit tool
+  never produced edit statistics, so observing it could not feed the edit side
+  of Ring 3.
+- **The live-agent `running` transition never fired** (#113): it depends on an
+  `Agent` `PreToolUse` event, but the Claude manifest invoked `observe` only
+  after tool use — a general defect, not Codex-specific. Both manifests now
+  register the subagent lifecycle, Codex through native
+  `SubagentStart`/`SubagentStop`.
+- **Codex edits escaped orchestration safety** (#113): the pause directive and
+  concurrent-write conflict checks matched `Edit`/`Write` only, so
+  `apply_patch` bypassed both. `guard` now recognizes it and checks every file
+  in the patch envelope, not a single `file_path`.
+- **Commands were persisted verbatim and unbounded** (#113): one stored command
+  reached ~90 KB, and marker scans found authorization headers and key-shaped
+  strings. `action` is now credential-masked and capped at 2 KB. File paths are
+  deliberately preserved — file-level pattern detection keys on them. A latent
+  panic on byte-slicing multi-byte UTF-8 in the same paths is fixed.
+- **Nothing ever deleted observations** (#113): the deletion function had no
+  caller outside its own test, so the database only grew (~22.8 MB in three
+  days). New `db.retention_days` (default 90, `0` disables) prunes at session
+  end and sweeps stale `resume.*.lock` and `telemetry_error_count_*.txt` files.
+- **Orbit could report completion it had not earned** (#113): pipelines were
+  observed marked `complete` with no PR, and one with `audit_fail_count` above
+  its own `max_retries`. `reflect` now reports both, and the orbit skill records
+  `pr_url` at ship time.
+- **`epic team status` and `unlink` could not see Codex agents** (#113): both
+  scanned `.claude/agents/` only, so the flat `~/.codex/agents/{team}-*.toml`
+  files `sync` writes were invisible and never cleaned up. `status` lists them
+  and `unlink --global` removes them; a project-scoped unlink now says they
+  remain and how to remove them.
 - **Ring 3 read zero observations on every host** (#113): `today()` returns
   `YYYYMMDD`, but the observation range query only ISO-expanded 10-character
   `YYYY-MM-DD` bounds. `timestamp` is compared lexicographically and `'-'`

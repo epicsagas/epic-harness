@@ -91,6 +91,31 @@ pub fn codex_agent_name(team: &str, agent: &str) -> String {
     format!("{team}-{agent}")
 }
 
+/// The Codex agent files a team owns, inside `agents_dir`.
+///
+/// `sync` writes flat `{team}-{agent}.toml` files, so nothing else can find or
+/// remove them by team — `status` reported no Codex agents at all and `unlink`
+/// left them behind. The prefix match is the inverse of `codex_agent_name`.
+pub fn team_agent_files(agents_dir: &std::path::Path, team: &str) -> Vec<std::path::PathBuf> {
+    let prefix = format!("{team}-");
+    let Ok(entries) = std::fs::read_dir(agents_dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().and_then(|x| x.to_str()) == Some("toml")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with(&prefix))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
 /// Convert one team agent Markdown document into a Codex agent definition.
 pub fn to_codex_agent(team: &str, agent: &str, markdown: &str) -> CodexAgent {
     let (fm, body) = split_frontmatter(markdown);
@@ -120,6 +145,40 @@ pub fn to_codex_agent(team: &str, agent: &str, markdown: &str) -> CodexAgent {
 /// and backslashes in the instructions are escaped correctly.
 pub fn render_codex_toml(agent: &CodexAgent) -> Result<String, toml::ser::Error> {
     toml::to_string_pretty(agent)
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::team_agent_files;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn finds_only_this_teams_toml_agents() {
+        let dir = tempdir().unwrap();
+        let base = dir.path();
+        for name in [
+            "alpha-reviewer.toml",
+            "alpha-builder.toml",
+            "beta-reviewer.toml",
+            "alpha-notes.md",
+        ] {
+            fs::write(base.join(name), "x").unwrap();
+        }
+        fs::create_dir(base.join("alpha-subdir.toml")).unwrap();
+
+        let found: Vec<String> = team_agent_files(base, "alpha")
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+            .collect();
+        assert_eq!(found, vec!["alpha-builder.toml", "alpha-reviewer.toml"]);
+    }
+
+    #[test]
+    fn a_missing_directory_yields_nothing() {
+        let dir = tempdir().unwrap();
+        assert!(team_agent_files(&dir.path().join("absent"), "alpha").is_empty());
+    }
 }
 
 #[cfg(test)]

@@ -218,7 +218,8 @@ pub async fn query_obs_stats_pool(
     let row = sqlx::query(
         "SELECT COUNT(*),
                 COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
-                COALESCE(AVG(score), 0.0)
+                COALESCE(AVG(score), 0.0),
+                COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0)
          FROM observations
          WHERE timestamp >= ? AND timestamp <= ?",
     )
@@ -231,12 +232,14 @@ pub async fn query_obs_stats_pool(
     let total: i64 = row.try_get(0).map_err(super::sqlx_err)?;
     let successes: i64 = row.try_get(1).map_err(super::sqlx_err)?;
     let avg_score: f64 = row.try_get(2).map_err(super::sqlx_err)?;
+    let unknowns: i64 = row.try_get(3).map_err(super::sqlx_err)?;
 
     // Per-tool stats
     let tool_rows = sqlx::query(
         "SELECT tool, COUNT(*) as calls,
                 SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
-                COALESCE(AVG(score), 0.0) as avg_score
+                COALESCE(AVG(score), 0.0) as avg_score,
+                COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0) as unknowns
          FROM observations
          WHERE timestamp >= ? AND timestamp <= ?
          GROUP BY tool
@@ -256,6 +259,7 @@ pub async fn query_obs_stats_pool(
             calls: r.try_get::<i64, _>(1).map_err(super::sqlx_err)?,
             successes: r.try_get::<i64, _>(2).map_err(super::sqlx_err)?,
             avg_score: r.try_get::<f64, _>(3).map_err(super::sqlx_err)?,
+            unknowns: r.try_get::<i64, _>(4).map_err(super::sqlx_err)?,
         });
     }
 
@@ -283,11 +287,13 @@ pub async fn query_obs_stats_pool(
         ));
     }
 
-    // Per-session stats
+    // Per-session stats. Failures are counted from the explicit 'error' value:
+    // `result != 'success'` would also sweep in 'unknown', which is exactly the
+    // outcome we could not determine.
     let sess_rows = sqlx::query(
         "SELECT session_id, COUNT(*) as calls,
                 COALESCE(AVG(score), 0.0) as avg_score,
-                SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+                SUM(CASE WHEN result = 'error' THEN 1 ELSE 0 END) as failures
          FROM observations
          WHERE timestamp >= ? AND timestamp <= ?
          GROUP BY session_id
@@ -313,6 +319,7 @@ pub async fn query_obs_stats_pool(
     Ok(ObsStats {
         total,
         successes,
+        unknowns,
         avg_score,
         tool_stats,
         error_stats,
@@ -343,11 +350,12 @@ pub async fn query_obs_stats_scoped_pool(
 
     // Overall stats — two static-SQL branches so sqlx 0.9's SqlSafeStr guard
     // (which rejects dynamic strings to prevent injection) is satisfied.
-    let (total, successes, avg_score): (i64, i64, f64) = if let Some(p) = project {
+    let (total, successes, avg_score, unknowns): (i64, i64, f64, i64) = if let Some(p) = project {
         let row = sqlx::query(
             "SELECT COUNT(*),
                     COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
-                    COALESCE(AVG(score), 0.0)
+                    COALESCE(AVG(score), 0.0),
+                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0)
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ? AND project = ?",
         )
@@ -361,12 +369,14 @@ pub async fn query_obs_stats_scoped_pool(
             row.try_get(0).map_err(super::sqlx_err)?,
             row.try_get(1).map_err(super::sqlx_err)?,
             row.try_get(2).map_err(super::sqlx_err)?,
+            row.try_get(3).map_err(super::sqlx_err)?,
         )
     } else {
         let row = sqlx::query(
             "SELECT COUNT(*),
                     COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
-                    COALESCE(AVG(score), 0.0)
+                    COALESCE(AVG(score), 0.0),
+                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0)
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ?",
         )
@@ -379,6 +389,7 @@ pub async fn query_obs_stats_scoped_pool(
             row.try_get(0).map_err(super::sqlx_err)?,
             row.try_get(1).map_err(super::sqlx_err)?,
             row.try_get(2).map_err(super::sqlx_err)?,
+            row.try_get(3).map_err(super::sqlx_err)?,
         )
     };
 
@@ -387,7 +398,8 @@ pub async fn query_obs_stats_scoped_pool(
         sqlx::query(
             "SELECT tool, COUNT(*) as calls,
                     SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
-                    COALESCE(AVG(score), 0.0) as avg_score
+                    COALESCE(AVG(score), 0.0) as avg_score,
+                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0) as unknowns
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ? AND project = ?
              GROUP BY tool ORDER BY calls DESC LIMIT 100",
@@ -401,7 +413,8 @@ pub async fn query_obs_stats_scoped_pool(
         sqlx::query(
             "SELECT tool, COUNT(*) as calls,
                     SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
-                    COALESCE(AVG(score), 0.0) as avg_score
+                    COALESCE(AVG(score), 0.0) as avg_score,
+                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0) as unknowns
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ?
              GROUP BY tool ORDER BY calls DESC LIMIT 100",
@@ -419,6 +432,7 @@ pub async fn query_obs_stats_scoped_pool(
             calls: r.try_get::<i64, _>(1).map_err(super::sqlx_err)?,
             successes: r.try_get::<i64, _>(2).map_err(super::sqlx_err)?,
             avg_score: r.try_get::<f64, _>(3).map_err(super::sqlx_err)?,
+            unknowns: r.try_get::<i64, _>(4).map_err(super::sqlx_err)?,
         });
     }
 
@@ -463,7 +477,7 @@ pub async fn query_obs_stats_scoped_pool(
         sqlx::query(
             "SELECT session_id, COUNT(*) as calls,
                     COALESCE(AVG(score), 0.0) as avg_score,
-                    SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+                    SUM(CASE WHEN result = 'error' THEN 1 ELSE 0 END) as failures
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ? AND project = ?
              GROUP BY session_id ORDER BY session_id DESC LIMIT 20",
@@ -477,7 +491,7 @@ pub async fn query_obs_stats_scoped_pool(
         sqlx::query(
             "SELECT session_id, COUNT(*) as calls,
                     COALESCE(AVG(score), 0.0) as avg_score,
-                    SUM(CASE WHEN result != 'success' AND result IS NOT NULL THEN 1 ELSE 0 END) as failures
+                    SUM(CASE WHEN result = 'error' THEN 1 ELSE 0 END) as failures
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ?
              GROUP BY session_id ORDER BY session_id DESC LIMIT 20",
@@ -501,6 +515,7 @@ pub async fn query_obs_stats_scoped_pool(
     Ok(ObsStats {
         total,
         successes,
+        unknowns,
         avg_score,
         tool_stats,
         error_stats,
@@ -544,12 +559,24 @@ pub async fn delete_obs_older_than_pool(pool: &AnyPool, cutoff_ts: &str) -> io::
 
 #[derive(Debug, Clone)]
 pub struct ObsStats {
+    /// Every observation in range, including those with an undetermined outcome.
     pub total: i64,
     pub successes: i64,
+    /// Observations the host gave no outcome evidence for. Neither a success nor
+    /// a failure — see `evaluated`.
+    pub unknowns: i64,
     pub avg_score: f64,
     pub tool_stats: Vec<ToolStatRow>,
     pub error_stats: Vec<(String, i64)>,
     pub session_stats: Vec<SessionStatRow>,
+}
+
+impl ObsStats {
+    /// Observations with a determined outcome — the correct denominator for a
+    /// success rate. Using `total` would let undetermined calls read as failures.
+    pub fn evaluated(&self) -> i64 {
+        self.total - self.unknowns
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -558,6 +585,15 @@ pub struct ToolStatRow {
     pub calls: i64,
     pub successes: i64,
     pub avg_score: f64,
+    /// Calls with an undetermined outcome. See `ObsStats::unknowns`.
+    pub unknowns: i64,
+}
+
+impl ToolStatRow {
+    /// Calls with a determined outcome — the denominator for this tool's rate.
+    pub fn evaluated(&self) -> i64 {
+        self.calls - self.unknowns
+    }
 }
 
 #[derive(Debug, Clone)]

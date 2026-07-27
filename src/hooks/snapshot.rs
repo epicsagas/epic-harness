@@ -9,8 +9,11 @@ fn get_obs_summary() -> Option<String> {
         crate::store::observations::query_obs_stats_pool(&pool, &today_str, &today_str).await
     }) {
         if stats.total > 0 {
-            let success_rate = if stats.total > 0 {
-                ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
+            // Rate over calls with a determined outcome; `total` would let
+            // undetermined calls read as failures.
+            let evaluated = stats.evaluated();
+            let success_rate = if evaluated > 0 {
+                ((stats.successes as f64 / evaluated as f64) * 100.0) as u32
             } else {
                 100
             };

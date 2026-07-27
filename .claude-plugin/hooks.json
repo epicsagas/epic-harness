@@ -24,6 +24,26 @@
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic observe"
+          }
+        ],
+        "description": "Record agent spawn — the 'running' transition needs the pre-tool event; PostToolUse alone only ever sees a finished agent"
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic guard"
+          }
+        ],
+        "description": "Orchestration pause directives and concurrent write conflict warnings"
       }
     ],
     "PostToolUse": [

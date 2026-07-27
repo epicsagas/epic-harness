@@ -19,6 +19,22 @@ pub struct HookInput {
     /// When present, stdout follows the Codex hook protocol instead of Claude
     /// Code's stdin-passthrough contract.
     pub hook_event_name: Option<String>,
+
+    // ── Host-supplied identity ──────────────────────────
+    // Codex sends these on every hook payload; Claude Code sends `session_id`.
+    // Keeping them is what lets `session_id()` stop manufacturing `YYYYMMDD_PID`
+    // (see shared::host). A hook process is not a session — Codex runs each hook
+    // in its own process, so a PID-derived id produced one "session" per tool call.
+    /// Stable per-conversation id. Survives across hook processes.
+    pub session_id: Option<String>,
+    /// Per-turn id. Present on Codex; a turn is one user message, not a session.
+    pub turn_id: Option<String>,
+    /// Per-tool-call id, unique within a turn.
+    pub tool_use_id: Option<String>,
+    /// Subagent id on `SubagentStart`/`SubagentStop`, when the host spawns one.
+    pub agent_id: Option<String>,
+    /// Subagent type/name reported alongside `agent_id`.
+    pub agent_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

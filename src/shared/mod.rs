@@ -118,6 +118,15 @@ mod tests {
         assert_eq!(classify_tool("Agent"), "other");
     }
 
+    #[test]
+    fn codex_apply_patch_is_an_edit() {
+        // Codex's edit tool. Left in `other` it produced no edit statistics, so
+        // observing it would not have fed the edit side of Ring 3.
+        assert_eq!(classify_tool("apply_patch"), "edit");
+        assert_eq!(classify_tool("MultiEdit"), "edit");
+        assert_eq!(classify_tool("NotebookEdit"), "write");
+    }
+
     // ── extract_file_ext ────────────────────────────
     #[test]
     fn ext_from_file_path() {
@@ -316,17 +325,38 @@ warned:
     }
 
     // ── session_id ──────────────────────────────────
+    // These read the same process-global host state that `host::init` writes,
+    // so they take the host test lock.
     #[test]
     fn session_id_contains_today() {
+        let _g = host::testing::lock();
+        host::testing::reset();
         let id = session_id();
         assert!(id.starts_with(&today()));
     }
 
     #[test]
-    fn session_id_contains_pid() {
+    fn session_id_falls_back_to_pid_without_a_host_id() {
+        let _g = host::testing::lock();
+        host::testing::reset();
         let id = session_id();
         let pid = std::process::id().to_string();
         assert!(id.contains(&pid));
+    }
+
+    #[test]
+    fn session_id_prefers_the_host_conversation_id() {
+        // A hook runs in its own process; only the host id is stable across them.
+        let _g = host::testing::lock();
+        host::init(&types::HookInput {
+            session_id: Some("conv-abc123".into()),
+            ..Default::default()
+        });
+        let id = session_id();
+        host::testing::reset();
+
+        assert_eq!(id, format!("{}_conv-abc123", today()));
+        assert!(!id.contains(&std::process::id().to_string()));
     }
 
     // ── default_metrics ─────────────────────────────

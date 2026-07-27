@@ -320,6 +320,17 @@ fn installed_tool_agents_dir(tool: &str) -> Option<PathBuf> {
     }
 }
 
+/// Codex agent files this team owns, if Codex is installed.
+///
+/// `sync` writes them globally to `~/.codex/agents/` whatever the sync scope, so
+/// they are the one piece of generated state the project-local commands cannot
+/// see through `.claude/agents/`.
+fn codex_team_files(team: &str) -> Vec<PathBuf> {
+    installed_tool_agents_dir("codex")
+        .map(|dir| crate::team::codex::team_agent_files(&dir, team))
+        .unwrap_or_default()
+}
+
 fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
     validate_team_name(team)?;
 
@@ -1258,10 +1269,14 @@ fn cmd_delete(args: &[String]) -> i32 {
         }
 
         let store_dir = team_store_dir(&org, &team);
+        let codex_files = codex_team_files(&team);
         println!("This will permanently delete:");
         println!("  Global store: {}", store_dir.display());
         if local_agents_dir.exists() {
             println!("  Local agents: {}", local_agents_dir.display());
+        }
+        for f in &codex_files {
+            println!("  Codex agent: {}", f.display());
         }
         println!();
         println!("  ⚠  This cannot be undone. All agents and .history/ backups will be removed.");
@@ -1288,6 +1303,12 @@ fn cmd_delete(args: &[String]) -> i32 {
                 Err(e) => eprintln!("warning: could not remove local agents: {}", e),
             }
         }
+        for f in &codex_files {
+            match fs::remove_file(f) {
+                Ok(_) => println!("✓ Removed Codex agent: {}", f.display()),
+                Err(e) => eprintln!("warning: could not remove {}: {}", f.display(), e),
+            }
+        }
         println!();
         println!("Team '{}' permanently deleted from org '{}'.", team, org);
     } else {
@@ -1306,6 +1327,20 @@ fn cmd_delete(args: &[String]) -> i32 {
                     "  (Global store untouched. Use 'epic team link {}' to re-attach.)",
                     team
                 );
+                // `sync` writes Codex agents globally whatever the sync scope, so
+                // a project-scoped unlink cannot remove them. Say so rather than
+                // leaving files the user cannot see.
+                let codex_files = codex_team_files(&team);
+                if !codex_files.is_empty() {
+                    println!(
+                        "  {} Codex agent file(s) remain (global, shared by all projects):",
+                        codex_files.len()
+                    );
+                    for f in &codex_files {
+                        println!("    {}", f.display());
+                    }
+                    println!("  Remove them with 'epic team unlink {} --global'.", team);
+                }
                 // Deregister project: remove current cwd path from projects list, also purge stale entries.
                 let cwd_path = std::env::current_dir()
                     .ok()
@@ -1505,6 +1540,19 @@ fn cmd_status(args: &[String]) -> i32 {
                 agents.join(", ")
             }
         );
+
+        // Codex agents live flat in ~/.codex/agents/ and are named
+        // `{team}-{agent}.toml`, so scanning .claude/agents/ alone reported none
+        // even when sync had written them.
+        let codex_files = codex_team_files(team);
+        if !codex_files.is_empty() {
+            let names: Vec<String> = codex_files
+                .iter()
+                .filter_map(|p| p.file_stem().and_then(|s| s.to_str()))
+                .map(String::from)
+                .collect();
+            println!("             codex:  {}", names.join(", "));
+        }
     }
 
     println!();

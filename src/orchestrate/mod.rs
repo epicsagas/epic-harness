@@ -246,8 +246,15 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
 }
 
 /// Extract the agent ID from hook input.
-/// Agent tool input typically has a "prompt" or "id" field.
+///
+/// A host-supplied `agent_id` wins: Codex names its own subagents, and a
+/// prompt-derived hash would give the same agent a new identity whenever the
+/// prompt text changed. Otherwise the Claude `Agent` tool input is hashed, since
+/// Claude supplies no id of its own.
 fn extract_agent_id(input: &HookInput) -> Option<String> {
+    if let Some(host_id) = crate::shared::host::agent_id() {
+        return Some(host_id);
+    }
     let tool = input.tool_name.as_deref()?;
     if tool.to_lowercase() != "agent" {
         return None;

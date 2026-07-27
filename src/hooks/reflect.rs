@@ -78,6 +78,8 @@ pub fn run_context(
     let date_to = today();
 
     let mut total_obs: u64 = 0;
+    // Observations the host gave no outcome evidence for.
+    let mut unknown_obs: u64 = 0;
     let mut tool_counts: HashMap<String, u64> = HashMap::new();
     let mut failure_cats: HashMap<String, u64> = HashMap::new();
     let mut file_ext_counts: HashMap<String, u64> = HashMap::new();
@@ -172,12 +174,18 @@ pub fn run_context(
                     }
                 }
             }
-            let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-            entry.1 += 1;
-            if r.result.as_deref() == Some("success")
-                || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-            {
-                entry.0 += 1;
+            // Calls with no outcome evidence are counted separately: they are
+            // neither a success nor a failure, so they stay out of the rate.
+            if r.result.as_deref() == Some("unknown") {
+                unknown_obs += 1;
+            } else {
+                let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+                entry.1 += 1;
+                if r.result.as_deref() == Some("success")
+                    || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+                {
+                    entry.0 += 1;
+                }
             }
         }
     }
@@ -255,6 +263,7 @@ pub fn run_context(
 
     let obs_stats = serde_json::json!({
         "total": total_obs,
+        "unknown_outcome": unknown_obs,
         "avg_score": avg_score,
         "score_distribution": { "high_ge09": high_ge09, "mid_06_09": mid_06_09, "low_lt06": low_lt06 },
         "top_tools": top_tools_map,
@@ -1195,6 +1204,12 @@ pub fn run(_input: &HookInput) -> i32 {
         }
     }
 
+    // 11.6a. Orbit completion invariants — report pipelines whose own state
+    //        contradicts "complete" instead of trusting the flag.
+    for (id, violation) in orbit_completion_violations(&orbit_dir()) {
+        hint("reflect", &format!("Orbit {id}: {violation}"));
+    }
+
     // 11.6. Orbit evolve gap — retroactively close ship-but-no-evolve pipelines
     let evolve_patched = patch_orbit_evolve_gap(&orbit_dir(), &now_iso());
     if evolve_patched > 0 {
@@ -1206,6 +1221,15 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 11.7. Workspace manifest
     evolve::write_workspace_manifest();
+
+    // 11.8. Retention — age out observations and per-session scratch files.
+    //       Runs after analysis so the current session is never pruned first.
+    let (pruned_rows, pruned_files) = super::retention::run();
+    if pruned_rows > 0 || pruned_files > 0 {
+        eprintln!(
+            "[reflect] retention: {pruned_rows} observation(s), {pruned_files} stale file(s)"
+        );
+    }
 
     // 12. Report
     hint(
@@ -1343,6 +1367,38 @@ pub fn run(_input: &HookInput) -> i32 {
 /// evolve analysis, calling this afterward retroactively closes the gap by
 /// adding an evolve entry to the phase_history.  Idempotent: already-patched
 /// pipelines are skipped.  Returns the number of pipelines patched.
+/// Collect invariant violations across every completed pipeline in `orbit_dir`.
+///
+/// Returns `(pipeline_id, violation)` pairs. See
+/// `shared::orbit::completion_violations` for what is checked and why.
+fn orbit_completion_violations(orbit_dir: &std::path::Path) -> Vec<(String, String)> {
+    let Ok(entries) = fs::read_dir(orbit_dir) else {
+        return Vec::new();
+    };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !name.starts_with("PIPELINE-") || !name.ends_with(".json") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(pipeline) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        let id = pipeline["id"]
+            .as_str()
+            .unwrap_or(name.trim_end_matches(".json"));
+        for v in crate::shared::orbit::completion_violations(&pipeline) {
+            found.push((normalize_pipeline_id(id), v));
+        }
+    }
+    found.sort();
+    found
+}
+
 fn patch_orbit_evolve_gap(orbit_dir: &std::path::Path, now: &str) -> usize {
     let entries = match fs::read_dir(orbit_dir) {
         Ok(e) => e,

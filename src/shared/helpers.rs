@@ -22,15 +22,11 @@ pub fn ensure_dir(path: &Path) {
     let _ = fs::create_dir_all(path);
 }
 
-pub fn today() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+/// Civil date `YYYYMMDD` for a count of days since the Unix epoch.
+fn civil_date(days_since_epoch: i64) -> String {
     // Simple date calc (no chrono dep)
-    let days = now / 86400;
     let mut y = 1970i64;
-    let mut remaining = days as i64;
+    let mut remaining = days_since_epoch;
     loop {
         let leap = is_leap(y);
         let days_in_year = if leap { 366 } else { 365 };
@@ -55,6 +51,23 @@ pub fn today() -> String {
         remaining -= d as i64;
     }
     format!("{:04}{:02}{:02}", y, m + 1, remaining + 1)
+}
+
+fn epoch_days() -> i64 {
+    (std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        / 86400) as i64
+}
+
+pub fn today() -> String {
+    civil_date(epoch_days())
+}
+
+/// `YYYYMMDD` for the UTC date `n` days before today. Used for retention cutoffs.
+pub fn days_ago(n: u64) -> String {
+    civil_date(epoch_days().saturating_sub(n as i64).max(0))
 }
 
 fn is_leap(y: i64) -> bool {
@@ -280,8 +293,21 @@ pub fn rm_dir(dir: &Path) {
     }
 }
 
+/// Identifier for the current conversation, stable across hook processes.
+///
+/// Prefers the host-supplied conversation id recorded by `host::init`. The PID
+/// fallback only applies when the host sends none: a hook runs in its own
+/// process, so on Codex the PID form produced a distinct "session" for nearly
+/// every tool call, which broke sequence detection, repeated-error analysis and
+/// the per-session telemetry cap.
+///
+/// The `YYYYMMDD_` prefix is kept in both forms — the dashboard derives a
+/// session's date from it, and reflect scopes analysis by day.
 pub fn session_id() -> String {
-    format!("{}_{}", today(), std::process::id())
+    match super::host::session_id() {
+        Some(host_id) => format!("{}_{}", today(), host_id),
+        None => format!("{}_{}", today(), std::process::id()),
+    }
 }
 
 /// Returns true when EPIC_ORCHESTRATION=enabled env var is set.

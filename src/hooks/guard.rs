@@ -160,13 +160,15 @@ fn is_orchestration_enabled() -> bool {
     false
 }
 
-/// Extract the file path targeted by an Edit or Write tool_input.
-fn extract_file_path_from_tool_input(tool_input: &serde_json::Value) -> Option<String> {
-    tool_input
-        .get("file_path")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(String::from)
+/// True when this tool writes to files, on either host.
+///
+/// Codex edits arrive as `apply_patch`, so an `Edit`/`Write`-only check left
+/// every Codex edit outside the orchestration pause and conflict checks.
+fn is_write_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name.to_lowercase().as_str(),
+        "edit" | "write" | "apply_patch" | "multiedit" | "notebookedit"
+    )
 }
 
 /// Resolve the orchestrator base directory from `$HARNESS_DIR/orchestrator`.
@@ -275,7 +277,9 @@ fn detect_concurrent_write_conflict(
 
 /// Current agent ID from `EPIC_AGENT_ID` env var.
 fn current_agent_id() -> Option<String> {
-    std::env::var("EPIC_AGENT_ID").ok()
+    // The host names its own subagents; `EPIC_AGENT_ID` only covers agents the
+    // harness spawned itself.
+    crate::shared::host::agent_id().or_else(|| std::env::var("EPIC_AGENT_ID").ok())
 }
 
 /// Check if `control.json` has a "pause" directive targeting the current agent.
@@ -334,12 +338,11 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
 
-    // ── Orchestration checks (Edit/Write tools only) ────
+    // ── Orchestration checks (file-writing tools only) ────
     if is_orchestration_enabled() {
         let tool_name = input.tool_name.as_deref().unwrap_or("");
-        let tool_lower = tool_name.to_lowercase();
 
-        if tool_lower == "edit" || tool_lower == "write" {
+        if is_write_tool(tool_name) {
             let orch_dir = orchestrator_dir();
 
             // control.json pause check — blocks the tool call entirely
@@ -357,21 +360,22 @@ pub fn run(input: &HookInput) -> i32 {
                 return 2;
             }
 
-            // Concurrent write conflict detection — informational warning only
-            if let Some(ref tool_input) = input.tool_input
-                && let Some(file_path) = extract_file_path_from_tool_input(tool_input)
-                && let Some(ref orch) = orch_dir
-            {
-                let conflicts =
-                    detect_concurrent_write_conflict(&file_path, agent_id.as_deref(), orch);
-                for other_id in &conflicts {
-                    hint(
-                        "guard",
-                        &format!(
-                            "Concurrent write conflict: agent {} recently modified {}",
-                            other_id, file_path
-                        ),
-                    );
+            // Concurrent write conflict detection — informational warning only.
+            // An `apply_patch` envelope can touch several files, so every target
+            // is checked, not just a single `file_path`.
+            if let Some(ref orch) = orch_dir {
+                for file_path in super::polish::target_files(input) {
+                    let conflicts =
+                        detect_concurrent_write_conflict(&file_path, agent_id.as_deref(), orch);
+                    for other_id in &conflicts {
+                        hint(
+                            "guard",
+                            &format!(
+                                "Concurrent write conflict: agent {} recently modified {}",
+                                other_id, file_path
+                            ),
+                        );
+                    }
                 }
             }
         }
@@ -861,34 +865,61 @@ mod tests {
 
     // ── Orchestration: concurrent write conflict detection ──
 
+    fn targets(tool_input: serde_json::Value) -> Vec<String> {
+        super::super::polish::target_files(&HookInput {
+            tool_input: Some(tool_input),
+            ..Default::default()
+        })
+    }
+
     #[test]
     fn extract_file_path_from_edit_input() {
-        let input = serde_json::json!({"file_path": "/src/main.rs", "old_string": "fn main()", "new_string": "fn main() {}"});
         assert_eq!(
-            extract_file_path_from_tool_input(&input),
-            Some("/src/main.rs".into())
+            targets(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "fn main()", "new_string": "fn main() {}"})
+            ),
+            vec!["/src/main.rs".to_string()]
         );
     }
 
     #[test]
     fn extract_file_path_from_write_input() {
-        let input = serde_json::json!({"file_path": "/src/lib.ts", "content": "export {}"});
         assert_eq!(
-            extract_file_path_from_tool_input(&input),
-            Some("/src/lib.ts".into())
+            targets(serde_json::json!({"file_path": "/src/lib.ts", "content": "export {}"})),
+            vec!["/src/lib.ts".to_string()]
         );
     }
 
     #[test]
     fn extract_file_path_missing_returns_none() {
-        let input = serde_json::json!({"command": "git status"});
-        assert_eq!(extract_file_path_from_tool_input(&input), None);
+        assert!(targets(serde_json::json!({"command": "git status"})).is_empty());
     }
 
     #[test]
     fn extract_file_path_empty_returns_none() {
-        let input = serde_json::json!({"file_path": "", "content": ""});
-        assert_eq!(extract_file_path_from_tool_input(&input), None);
+        assert!(targets(serde_json::json!({"file_path": "", "content": ""})).is_empty());
+    }
+
+    #[test]
+    fn apply_patch_targets_every_file_in_the_envelope() {
+        // Codex edits carry no file_path; conflict detection must still see
+        // every file the patch touches.
+        let patch =
+            "*** Begin Patch\n*** Update File: src/a.rs\n*** Add File: src/b.rs\n*** End Patch";
+        assert_eq!(
+            targets(serde_json::json!({ "command": patch })),
+            vec!["src/a.rs".to_string(), "src/b.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn apply_patch_is_a_write_tool() {
+        for tool in ["Edit", "write", "apply_patch", "MultiEdit"] {
+            assert!(is_write_tool(tool), "{tool} must take the write path");
+        }
+        for tool in ["Bash", "Read", "Grep", ""] {
+            assert!(!is_write_tool(tool), "{tool} must not take the write path");
+        }
     }
 
     #[test]

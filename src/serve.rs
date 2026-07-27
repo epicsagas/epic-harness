@@ -581,8 +581,10 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                                 serde_json::json!({
                                     "tool": t.tool,
                                     "calls": t.calls,
-                                    "success_rate": if t.calls > 0 {
-                                        (t.successes as f64 / t.calls as f64 * 1000.0).round() / 1000.0
+                                    "unknowns": t.unknowns,
+                                    // Denominator excludes calls with no outcome evidence.
+                                    "success_rate": if t.evaluated() > 0 {
+                                        (t.successes as f64 / t.evaluated() as f64 * 1000.0).round() / 1000.0
                                     } else { 0.0 },
                                     "avg_score": (t.avg_score * 1000.0).round() / 1000.0
                                 })

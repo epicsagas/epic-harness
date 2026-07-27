@@ -171,9 +171,10 @@ fn main() {
     };
 
     // Decide once whether human-facing output belongs on stdout (Codex reads it
-    // as model context for some events) or stderr. Must happen before any hook
-    // runs, since `hint`/`raw` consult it.
-    shared::host::init(input.hook_event_name.as_deref());
+    // as model context for some events) or stderr, and record the host-supplied
+    // session/agent ids. Must happen before any hook runs, since `hint`/`raw`
+    // and `session_id()` consult it.
+    shared::host::init(&input);
 
     let exit_code = match subcmd {
         "resume" => hooks::resume::run(&input),

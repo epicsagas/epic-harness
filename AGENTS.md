@@ -139,10 +139,64 @@ Notes that are easy to get wrong:
 `model: sonnet` has no defensible Codex equivalent, and `tools:`/`skills:` are
 Claude/Epic concepts.
 
-Still Claude-oriented (tracked in #113, not yet addressed): session identity is
-`YYYYMMDD_PID` rather than the host's `session_id`/`turn_id`; live-agent
-orchestration registers no `SubagentStart`/`SubagentStop`; tool success is inferred
-from output text rather than exit status.
+### Host identity
+
+`HookInput` keeps the host's `session_id`, `turn_id`, `tool_use_id`, `agent_id`
+and `agent_type`; `shared::host::init` records them once per process.
+
+- `session_id()` returns `{YYYYMMDD}_{host session id}`, falling back to
+  `{YYYYMMDD}_{pid}` only when the host sends none. A hook runs in its own
+  process, so the PID form produced a distinct "session" per tool call — one
+  installation showed 40,804 observations across 37,611 "sessions". The date
+  prefix stays because the dashboard reads a session's date from it.
+- Ids are sanitized to `[A-Za-z0-9_-]` and capped at 64 characters: they land in
+  `session_{id}.jsonl` and `resume.{id}.lock`.
+- `agent_id` is preferred over `EPIC_AGENT_ID` and over hashing an `Agent`
+  prompt, so Codex's own subagents keep a stable identity.
+
+### Outcome evidence
+
+Tool success is no longer inferred from output text alone.
+
+1. A structured status in the response (`exit_code`, `is_error`, `success`,
+   `status`) is authoritative **both ways** — it can clear a false keyword match
+   as well as create a failure.
+2. Without one, a call whose output is *fetched content* — `Read`, `Grep`,
+   `Glob`, or a read-only Bash command — records `result: "unknown"` instead of a
+   failure. Reading a log that contains `TypeError` is not a failed tool call;
+   this pattern was 66% of all classified errors.
+3. Everything else keeps keyword classification, so build and test failures are
+   unaffected.
+
+`unknown` observations are left unscored (`score`/`dimensions` NULL) and excluded
+from success rates via `ObsStats::evaluated()` — never counted as failures.
+
+### Subagents
+
+Both manifests register the subagent lifecycle: Claude observes `Agent` on
+`PreToolUse` (the `running` transition needs it; `PostToolUse` only ever sees a
+finished agent), and Codex registers `SubagentStart`/`SubagentStop`. Codex's
+subagent events carry no tool, so they update orchestration state without
+writing an observation. `guard` treats `apply_patch` as a write tool and reads
+every file in the patch envelope for conflict detection.
+
+### Retention
+
+`db.retention_days` (default 90, `0` disables) deletes older observations at
+session end and sweeps stale `resume.*.lock` and `telemetry_error_count_*.txt`
+files older than 24h. Persisted `action` text is masked for credentials —
+keeping paths, which file-level pattern detection needs — and capped at 2 KB.
+
+### Orbit invariants
+
+`reflect` reports any pipeline marked `complete` whose own state contradicts it:
+`audit_fail_count` above `max_retries`, or no `pr_url` and no completed `ship`
+phase. Detection only — the orbit skill writes the file.
+
+Still Claude-oriented (tracked in #113, not yet addressed): `turn_id` and
+`tool_use_id` are retained but not yet used to model turn-scoped analysis;
+project identity is still a sanitized repository basename, so unrelated
+same-named repositories share harness state.
 
 ## Concurrent Session Safety
 
