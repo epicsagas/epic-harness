@@ -498,10 +498,15 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 26 skills | Live |
-| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
+| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | Generated³ |
 | **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 26 | — |
 
 ¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable)
+
+³ `epic team sync` writes native Codex custom agents (flat `~/.codex/agents/*.toml` with
+`name`/`description`/`developer_instructions`). Live multi-agent *orchestration* — spawning and
+tracking subagents — is still Claude-only: Epic registers no `SubagentStart`/`SubagentStop` hooks
+and does not yet retain Codex agent IDs.
 
 ---
 

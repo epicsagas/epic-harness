@@ -141,7 +141,13 @@ pub fn run(input: &HookInput) -> i32 {
     // Write to SQLite (primary)
     let _ = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::sessions::insert_snapshot_pool(&pool, &snapshot, millis).await
+        crate::store::sessions::insert_snapshot_pool(
+            &pool,
+            &snapshot,
+            millis,
+            &crate::shared::paths::project_slug(),
+        )
+        .await
     });
 
     // Also write JSONL file for backward compatibility

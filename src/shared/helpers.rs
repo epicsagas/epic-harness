@@ -109,12 +109,27 @@ pub fn now_iso() -> String {
     )
 }
 
+/// Emit a tagged human-facing line.
+///
+/// Routed to stdout when the host consumes plain stdout as model context (Codex
+/// `SessionStart`), otherwise to stderr. Without this, everything `resume`
+/// surfaces — previous snapshot, pending work, metrics, memory, team and
+/// orchestration state — was written to stderr and never reached a Codex model.
 pub fn hint(tag: &str, msg: &str) {
-    eprintln!("[{tag}] {msg}");
+    if crate::shared::host::stdout_is_context() {
+        println!("[{tag}] {msg}");
+    } else {
+        eprintln!("[{tag}] {msg}");
+    }
 }
 
+/// Emit an untagged human-facing line. Same routing rules as [`hint`].
 pub fn raw(line: &str) {
-    eprintln!("{line}");
+    if crate::shared::host::stdout_is_context() {
+        println!("{line}");
+    } else {
+        eprintln!("{line}");
+    }
 }
 
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T {

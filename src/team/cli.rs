@@ -447,19 +447,44 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
                 eprintln!("[harness] warn: team path escapes agents dir for {tool}, skipping");
                 continue;
             }
+            // Codex reads flat `*.toml` custom agents straight out of
+            // `~/.codex/agents/`; a Markdown file in a per-team subdirectory is
+            // silently ignored. Every other tool keeps the Markdown layout.
+            let is_codex = *tool == "codex";
+            let write_dir = if is_codex {
+                &agents_dir
+            } else {
+                &tool_team_dir
+            };
             eprintln!(
                 "[harness] syncing team '{team}' to {tool} ({})",
-                tool_team_dir.display()
+                write_dir.display()
             );
             for agent_name in &agents {
                 if let Some(content) = load_agent(org, team, agent_name) {
-                    // No tool-specific agent transforms needed — agents use their defaults.
                     let injected =
                         inject_team_context(&content, org, team, &config.team_type, &mission);
-                    let dest_path = tool_team_dir.join(format!("{}.md", agent_name));
+
+                    let (dest_path, payload) = if is_codex {
+                        let agent = crate::team::codex::to_codex_agent(team, agent_name, &injected);
+                        match crate::team::codex::render_codex_toml(&agent) {
+                            Ok(toml_str) => {
+                                (agents_dir.join(format!("{}.toml", agent.name)), toml_str)
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[harness] warn: could not render Codex agent '{agent_name}': {e}"
+                                );
+                                continue;
+                            }
+                        }
+                    } else {
+                        (tool_team_dir.join(format!("{}.md", agent_name)), injected)
+                    };
+
                     let existing = fs::read_to_string(&dest_path).unwrap_or_default();
-                    if existing != injected {
-                        fs::write(&dest_path, &injected).unwrap_or_else(|e| {
+                    if existing != payload {
+                        fs::write(&dest_path, &payload).unwrap_or_else(|e| {
                             eprintln!(
                                 "[harness] warn: could not write {}: {}",
                                 dest_path.display(),

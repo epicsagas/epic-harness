@@ -52,6 +52,15 @@ pub fn run_context(
         return 1;
     }
 
+    // Scope for metrics/snapshot reads: one target project scopes exactly,
+    // `--all-projects` aggregates. Without this the unscoped readers return
+    // indeterminate rows once more than one project has written state.
+    let scope: Option<&str> = if project_slugs.len() == 1 {
+        Some(project_slugs[0].as_str())
+    } else {
+        None
+    };
+
     // 1. Obs stats — compute date range
     let (cutoff_tag, date_from) = if let Some(ref s) = since {
         (s.clone(), s.clone())
@@ -94,52 +103,81 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
+        // SQLite is the primary observation store — `observe` only writes JSONL
+        // when a DB write fails. Reading JSONL alone (the old behaviour) made
+        // `obs_stats` report 0 for projects with thousands of DB rows.
+        let mut recs: Vec<ObsRecord> = crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::harness_pool().await?;
+            crate::store::observations::query_obs_for_date_range_pool(
+                &pool,
+                &date_from,
+                &date_to,
+                Some(slug.as_str()),
+            )
+            .await
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("[reflect] SQLite obs read failed for {slug}, using JSONL only: {e}");
+            Vec::new()
+        });
+
         let slug_obs_dir = slug_harness.join("obs");
-        if !slug_obs_dir.is_dir() {
-            continue;
+        if slug_obs_dir.is_dir() {
+            let all_obs = list_files(&slug_obs_dir, ".jsonl");
+            let filtered: Vec<String> = all_obs
+                .into_iter()
+                .filter(|f| {
+                    let tag = f.replace("session_", "");
+                    tag.get(..8)
+                        .map(|s| s >= cutoff_tag.as_str())
+                        .unwrap_or(true)
+                })
+                .collect();
+            for f in &filtered {
+                recs.extend(read_jsonl_typed::<ObsRecord>(&slug_obs_dir.join(f)));
+            }
         }
-        let all_obs = list_files(&slug_obs_dir, ".jsonl");
-        let filtered: Vec<String> = all_obs
-            .into_iter()
-            .filter(|f| {
-                let tag = f.replace("session_", "");
-                tag.get(..8)
-                    .map(|s| s >= cutoff_tag.as_str())
-                    .unwrap_or(true)
-            })
-            .collect();
-        for f in &filtered {
-            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
-            for r in &recs {
-                total_obs += 1;
-                *tool_counts.entry(r.tool.clone()).or_default() += 1;
-                if let Some(ref fc) = r.failure_category {
-                    *failure_cats.entry(fc.clone()).or_default() += 1;
-                }
-                if let Some(ref ext) = r.file_ext {
-                    *file_ext_counts.entry(ext.clone()).or_default() += 1;
-                }
-                if let Some(s) = r.score {
-                    scores.push(s);
-                }
-                if let Some(ref dims) = r.dimensions {
-                    let ds = serde_json::to_value(dims).ok();
-                    if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
-                        for (k, v) in obj {
-                            if let Some(n) = v.as_f64() {
-                                *dim_sums.entry(k.clone()).or_default() += n;
-                                *dim_counts.entry(k.clone()).or_default() += 1;
-                            }
+
+        // Dedupe across the two stores, then accumulate.
+        let mut seen = std::collections::HashSet::new();
+        recs.retain(|r| {
+            seen.insert((
+                r.timestamp.clone(),
+                r.tool.clone(),
+                r.action.clone(),
+                r.result.clone(),
+            ))
+        });
+
+        for r in &recs {
+            total_obs += 1;
+            *tool_counts.entry(r.tool.clone()).or_default() += 1;
+            if let Some(ref fc) = r.failure_category {
+                *failure_cats.entry(fc.clone()).or_default() += 1;
+            }
+            if let Some(ref ext) = r.file_ext {
+                *file_ext_counts.entry(ext.clone()).or_default() += 1;
+            }
+            if let Some(s) = r.score {
+                scores.push(s);
+            }
+            if let Some(ref dims) = r.dimensions {
+                let ds = serde_json::to_value(dims).ok();
+                if let Some(obj) = ds.as_ref().and_then(|v| v.as_object()) {
+                    for (k, v) in obj {
+                        if let Some(n) = v.as_f64() {
+                            *dim_sums.entry(k.clone()).or_default() += n;
+                            *dim_counts.entry(k.clone()).or_default() += 1;
                         }
                     }
                 }
-                let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
-                entry.1 += 1;
-                if r.result.as_deref() == Some("success")
-                    || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
-                {
-                    entry.0 += 1;
-                }
+            }
+            let entry = tool_success_map.entry(r.tool.clone()).or_insert((0, 0));
+            entry.1 += 1;
+            if r.result.as_deref() == Some("success")
+                || (r.result.is_none() && r.score.unwrap_or(0.0) >= 0.7)
+            {
+                entry.0 += 1;
             }
         }
     }
@@ -315,7 +353,7 @@ pub fn run_context(
     // 3. Metrics summary (SQLite first, fallback to JSON)
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, scope).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
@@ -393,7 +431,7 @@ pub fn run_context(
     // 4. Session snapshots (SQLite first, fallback to JSON)
     let snapshots: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::sessions::list_recent_snapshots_pool(&pool, 5).await
+        crate::store::sessions::list_recent_snapshots_pool(&pool, 5, scope).await
     })
     .map(|snaps| {
         snaps
@@ -762,40 +800,53 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
 
-    // 1. Collect today's observations from SQLite (fallback to JSONL)
+    // 1. Collect today's observations for THIS project.
+    //
+    // Both stores are always read and then merged, because they hold disjoint
+    // records: `observe` writes to SQLite and only falls back to JSONL when the
+    // DB write fails. Reading JSONL solely when SQLite came back empty (the old
+    // behaviour) permanently dropped every fallback record on any day the DB
+    // also had rows, and an Err returned early instead of falling back at all
+    // despite the comment claiming otherwise.
     let today_str = today();
-    let observations = match crate::store::runtime::block_on(async {
+    let slug = crate::shared::paths::project_slug();
+    let mut observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::observations::query_obs_for_date_range_pool(&pool, &today_str, &today_str)
-            .await
+        crate::store::observations::query_obs_for_date_range_pool(
+            &pool,
+            &today_str,
+            &today_str,
+            Some(&slug),
+        )
+        .await
     }) {
         Ok(recs) => recs,
         Err(e) => {
-            eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-            // Fallthrough to JSONL path below
-            return 0;
+            eprintln!("[reflect] SQLite observations read failed, using JSONL only: {e}");
+            Vec::new()
         }
     };
-    let observations = if !observations.is_empty() {
-        observations
-    } else {
-        // Fallback: read from JSONL files
-        if !obs_dir().is_dir() {
-            return 0;
-        }
+    if obs_dir().is_dir() {
         let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
             .into_iter()
             .filter(|f| f.contains(&today_str))
             .collect();
-        if obs_files.is_empty() {
-            return 0;
-        }
-        let mut recs: Vec<ObsRecord> = vec![];
         for f in &obs_files {
-            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
+            let recs: Vec<ObsRecord> = read_jsonl_typed(&obs_dir().join(f));
+            observations.extend(recs);
         }
-        recs
-    };
+    }
+    // Dedupe in case a record reached both stores, then restore time order.
+    let mut seen = std::collections::HashSet::new();
+    observations.retain(|r| {
+        seen.insert((
+            r.timestamp.clone(),
+            r.tool.clone(),
+            r.action.clone(),
+            r.result.clone(),
+        ))
+    });
+    observations.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     if observations.len() < 3 {
         return 0;
     }
@@ -835,10 +886,13 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    // 3. Stagnation (load metrics from SQLite, fallback to JSON)
+    // 3. Stagnation (load metrics from SQLite, fallback to JSON).
+    // Scoped to this project — the unscoped reader is indeterminate once a
+    // second project has written metrics_state rows, and `save_metrics_pool`
+    // below already writes scoped by slug.
     let mut metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&slug)).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");

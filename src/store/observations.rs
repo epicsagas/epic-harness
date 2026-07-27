@@ -9,6 +9,36 @@ use std::io;
 use crate::shared::obs::ObsRecord;
 use crate::shared::scoring::ScoreDimensions;
 
+/// Normalize one date bound to the ISO shape the `timestamp` column stores.
+///
+/// Accepts `YYYYMMDD` (what `shared::helpers::today()` produces) and
+/// `YYYY-MM-DD`, expanding both to `YYYY-MM-DDTHH:MM:SS`. Anything else passes
+/// through so callers may still supply an exact timestamp.
+///
+/// `timestamp` is compared lexicographically, and the bare `20260727` form
+/// sorts *above* every `2026-07-27T..` value because `'0'` (0x30) > `'-'`
+/// (0x2D). An un-normalized `YYYYMMDD` bound therefore matches zero rows
+/// instead of a whole day — which silently starved the Ring 3 evolution loop.
+fn iso_bound(raw: &str, end_of_day: bool) -> String {
+    let dashed = if raw.len() == 8 && raw.chars().all(|c| c.is_ascii_digit()) {
+        format!("{}-{}-{}", &raw[..4], &raw[4..6], &raw[6..8])
+    } else {
+        raw.to_string()
+    };
+    if dashed.len() == 10 {
+        let suffix = if end_of_day { "T23:59:59" } else { "T00:00:00" };
+        format!("{dashed}{suffix}")
+    } else {
+        dashed
+    }
+}
+
+/// Inclusive ISO bounds for a `(from, to)` date pair. Single source of truth
+/// for every observation range query.
+pub fn day_bounds(from_ts: &str, to_ts: &str) -> (String, String) {
+    (iso_bound(from_ts, false), iso_bound(to_ts, true))
+}
+
 /// Insert a single observation record.
 ///
 /// `project` is the project slug to attribute this observation to. The caller
@@ -72,35 +102,51 @@ pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> 
     })
 }
 
-/// Query observations for a date range (inclusive).
+/// Query observations for a date range (inclusive), optionally scoped to one
+/// project.
+///
+/// When `project` is `Some(p)` only rows attributed to `p` are returned. Rows
+/// written before observations carried a project (legacy `NULL`) are therefore
+/// excluded from scoped reads — they cannot be attributed after the fact.
+/// `None` aggregates across every project.
 pub async fn query_obs_for_date_range_pool(
     pool: &AnyPool,
     from_ts: &str,
     to_ts: &str,
+    project: Option<&str>,
 ) -> io::Result<Vec<ObsRecord>> {
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let (from, to) = day_bounds(from_ts, to_ts);
 
-    let rows = sqlx::query(
-        "SELECT timestamp, tool, tool_category, action, result, score,
-                dim_success, dim_quality, dim_cost,
-                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
-         FROM observations
-         WHERE timestamp >= ? AND timestamp <= ?
-         ORDER BY timestamp ASC",
-    )
-    .bind(&from)
-    .bind(&to)
-    .fetch_all(pool)
-    .await
+    // Two static-SQL branches so sqlx 0.9's SqlSafeStr guard (which rejects
+    // dynamically built strings) is satisfied — same pattern as the stats query.
+    let rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT timestamp, tool, tool_category, action, result, score,
+                    dim_success, dim_quality, dim_cost,
+                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ? AND project = ?
+             ORDER BY timestamp ASC",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(p)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT timestamp, tool, tool_category, action, result, score,
+                    dim_success, dim_quality, dim_cost,
+                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+             FROM observations
+             WHERE timestamp >= ? AND timestamp <= ?
+             ORDER BY timestamp ASC",
+        )
+        .bind(&from)
+        .bind(&to)
+        .fetch_all(pool)
+        .await
+    }
     .map_err(super::sqlx_err)?;
 
     let mut records = Vec::with_capacity(rows.len());
@@ -166,16 +212,7 @@ pub async fn query_obs_stats_pool(
     from_ts: &str,
     to_ts: &str,
 ) -> io::Result<ObsStats> {
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let (from, to) = day_bounds(from_ts, to_ts);
 
     // Overall stats
     let row = sqlx::query(
@@ -302,16 +339,7 @@ pub async fn query_obs_stats_scoped_pool(
     to_ts: &str,
     project: Option<&str>,
 ) -> io::Result<ObsStats> {
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let (from, to) = day_bounds(from_ts, to_ts);
 
     // Overall stats — two static-SQL branches so sqlx 0.9's SqlSafeStr guard
     // (which rejects dynamic strings to prevent injection) is satisfied.
@@ -577,12 +605,109 @@ mod tests {
             .unwrap();
         assert!(id > 0);
 
-        let results = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02")
+        let results = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02", None)
             .await
             .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool, "Bash");
         assert_eq!(results[0].score, Some(0.95));
+    }
+
+    /// Regression: `helpers::today()` yields `YYYYMMDD`, and that form must
+    /// match the same rows as the dashed form. Before `day_bounds()` the bare
+    /// digits sorted above every `YYYY-MM-DDT..` timestamp, so reflect read
+    /// zero observations and the Ring 3 loop never closed.
+    #[tokio::test]
+    async fn compact_date_bound_matches_same_day() {
+        let pool = test_pool().await;
+        let rec = ObsRecord {
+            timestamp: "2026-06-02T10:00:00".into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: Some("cargo test".into()),
+            result: Some("success".into()),
+            score: Some(0.9),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        };
+        insert_observation_pool(&pool, &rec, "20260602_1", "p1")
+            .await
+            .unwrap();
+
+        let compact = query_obs_for_date_range_pool(&pool, "20260602", "20260602", None)
+            .await
+            .unwrap();
+        let dashed = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02", None)
+            .await
+            .unwrap();
+        assert_eq!(compact.len(), 1, "YYYYMMDD bound must match the day");
+        assert_eq!(compact.len(), dashed.len());
+    }
+
+    #[test]
+    fn day_bounds_normalizes_both_date_forms() {
+        assert_eq!(
+            day_bounds("20260602", "20260602"),
+            (
+                "2026-06-02T00:00:00".to_string(),
+                "2026-06-02T23:59:59".to_string()
+            )
+        );
+        assert_eq!(
+            day_bounds("2026-06-02", "2026-06-02"),
+            (
+                "2026-06-02T00:00:00".to_string(),
+                "2026-06-02T23:59:59".to_string()
+            )
+        );
+        // Exact timestamps pass through untouched.
+        let exact = day_bounds("2026-06-02T08:30:00", "2026-06-02T09:00:00");
+        assert_eq!(exact.0, "2026-06-02T08:30:00");
+        assert_eq!(exact.1, "2026-06-02T09:00:00");
+        // Non-numeric 8-char input is not misread as a compact date.
+        assert_eq!(day_bounds("garbage!", "garbage!").0, "garbage!");
+    }
+
+    /// Reflection must not mix other projects' observations into this
+    /// project's analysis.
+    #[tokio::test]
+    async fn date_range_query_scopes_to_project() {
+        let pool = test_pool().await;
+        let mk = |tool: &str| ObsRecord {
+            timestamp: "2026-06-02T10:00:00".into(),
+            tool: tool.into(),
+            tool_category: "bash".into(),
+            action: None,
+            result: Some("success".into()),
+            score: Some(0.8),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        };
+        insert_observation_pool(&pool, &mk("Mine"), "s1", "mine")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &mk("Theirs"), "s2", "theirs")
+            .await
+            .unwrap();
+
+        let scoped = query_obs_for_date_range_pool(&pool, "20260602", "20260602", Some("mine"))
+            .await
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].tool, "Mine");
+
+        let all = query_obs_for_date_range_pool(&pool, "20260602", "20260602", None)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 2);
     }
 
     #[tokio::test]
@@ -664,7 +789,7 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, 1);
 
-        let results = query_obs_for_date_range_pool(&pool, "2026-05-01", "2026-05-31")
+        let results = query_obs_for_date_range_pool(&pool, "2026-05-01", "2026-05-31", None)
             .await
             .unwrap();
         assert!(results.is_empty());

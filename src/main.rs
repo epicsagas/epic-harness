@@ -170,6 +170,11 @@ fn main() {
         serde_json::from_str(&stdin_buf).unwrap_or_default()
     };
 
+    // Decide once whether human-facing output belongs on stdout (Codex reads it
+    // as model context for some events) or stderr. Must happen before any hook
+    // runs, since `hint`/`raw` consult it.
+    shared::host::init(input.hook_event_name.as_deref());
+
     let exit_code = match subcmd {
         "resume" => hooks::resume::run(&input),
         "guard" => hooks::guard::run(&input),
@@ -309,11 +314,13 @@ fn main() {
                 // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
             }
             "resume" => {
-                // SessionStart: plain text on stdout = developer context.
-                // hint() already writes to stderr; no extra stdout needed.
+                // SessionStart: plain text on stdout = developer context, and
+                // `host::init` has already switched hint()/raw() to stdout for
+                // this event, so the resume context was written there directly.
             }
             "reflect" => {
-                // Stop: MUST output JSON — plain text is invalid for this event.
+                // SessionEnd (and Stop, if a host still maps it there): these
+                // events expect structured JSON — plain text is invalid.
                 println!(r#"{{"continue":true}}"#);
             }
             _ => {}

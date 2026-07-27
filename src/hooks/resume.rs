@@ -268,7 +268,11 @@ pub fn run(_input: &HookInput) -> i32 {
     // 1. Latest session snapshot (SQLite first, fallback to JSON file)
     if let Ok(Some(snap)) = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::sessions::get_latest_snapshot_pool(&pool).await
+        crate::store::sessions::get_latest_snapshot_pool(
+            &pool,
+            Some(crate::shared::paths::project_slug().as_str()),
+        )
+        .await
     }) {
         if !snap.summary.is_empty() {
             hint("resume", &format!("Previous: {}", snap.summary));
@@ -309,7 +313,11 @@ pub fn run(_input: &HookInput) -> i32 {
     // 2. Eval metrics — try SQLite first, fall back to JSON file
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(
+            &pool,
+            Some(crate::shared::paths::project_slug().as_str()),
+        )
+        .await
     })
     .ok()
     .filter(|m| m.total_sessions > 0)

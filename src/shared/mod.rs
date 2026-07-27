@@ -1,6 +1,7 @@
 pub mod classify;
 pub mod evolution;
 pub mod helpers;
+pub mod host;
 pub mod obs;
 pub mod orbit;
 pub mod paths;

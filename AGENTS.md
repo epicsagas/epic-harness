@@ -106,6 +106,44 @@ All static skills include 4 core sections:
 - **Evidence Required**: Checklist of proof needed for completion claims
 - **Red Flags**: Anti-pattern warnings
 
+## Codex Host Support
+
+Codex consumes hook output differently from Claude Code, and the difference is
+**per event**, not per host. `src/shared/host.rs` records the one bit the output
+helpers need; `hint()`/`raw()` then pick the stream.
+
+| Codex event | Manifest entry | stdout contract |
+|---|---|---|
+| `SessionStart` | `epic resume` | plain text **is** developer context → `hint`/`raw` write to stdout |
+| `PreToolUse` (`Bash`) | `epic guard` | plain text ignored; JSON `permissionDecision` blocks |
+| `PostToolUse` (`*`) | `epic observe` | plain text ignored |
+| `PostToolUse` (`apply_patch\|Edit\|Write`) | `epic polish` | plain text ignored |
+| `PreCompact` | `epic snapshot` | exit 0 with no output = success |
+| `SessionEnd` | `epic reflect` | structured JSON required (`{"continue":true}`) |
+
+Notes that are easy to get wrong:
+
+- **`reflect` belongs on `SessionEnd`, not `Stop`.** `Stop` is turn-scoped and fires
+  once per turn, so mapping reflection there re-analyzes the whole day every turn
+  and inflates `total_sessions`.
+- **`PostToolUse` uses `*`.** Matching only `Bash` hid every edit, MCP and function
+  tool call from Ring 3.
+- **Codex edits arrive as `apply_patch`** with the patch body in
+  `tool_input.command` and no `file_path`. `polish::patched_files` reads the
+  `*** Update File:` / `*** Add File:` / `*** Move to:` headers.
+- **Never write plain text to stdout on tool events** — Codex discards it there,
+  and on the JSON events it would corrupt the payload.
+
+`epic team sync` writes native Codex agents as flat `~/.codex/agents/{team}-{agent}.toml`
+(`name`, `description`, `developer_instructions`). Claude-only frontmatter is dropped:
+`model: sonnet` has no defensible Codex equivalent, and `tools:`/`skills:` are
+Claude/Epic concepts.
+
+Still Claude-oriented (tracked in #113, not yet addressed): session identity is
+`YYYYMMDD_PID` rather than the host's `session_id`/`turn_id`; live-agent
+orchestration registers no `SubagentStart`/`SubagentStop`; tool success is inferred
+from output text rather than exit status.
+
 ## Concurrent Session Safety
 
 Obs files use `session_{date}_{pid}_{random}.jsonl` format for per-session isolation.

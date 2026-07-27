@@ -9,7 +9,7 @@
             "command": "node ${PLUGIN_ROOT}/registry/scripts/install.js; epic resume"
           }
         ],
-        "description": "Restore previous session context + load project memory and evolved skills"
+        "description": "Restore previous session context + load project memory and evolved skills (plain stdout becomes developer context)"
       }
     ],
     "PreToolUse": [
@@ -26,37 +26,39 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
           }
         ],
-        "description": "Record Bash tool result for evolution loop (Codex PostToolUse only intercepts Bash)"
+        "description": "Record every tool result for the evolution loop — Bash, apply_patch and MCP tools alike ('*' matches all)"
       },
       {
-        "matcher": "Edit",
+        "matcher": "apply_patch|Edit|Write",
         "hooks": [
           {
             "type": "command",
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic not found'"
           }
         ],
-        "description": "Auto-format + typecheck after edits"
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic not found'"
-          }
-        ],
-        "description": "Auto-format + typecheck after file writes"
+        "description": "Auto-format + typecheck after edits (Codex edits arrive as apply_patch)"
       }
     ],
-    "Stop": [
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Save working state before context compaction so resume can restore it"
+      }
+    ],
+    "SessionEnd": [
       {
         "matcher": "*",
         "hooks": [
@@ -65,7 +67,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic not found'"
           }
         ],
-        "description": "Analyze session observations -> evolve skills -> gate mutations"
+        "description": "Analyze session observations -> evolve skills -> gate mutations (session-scoped; Stop fires once per turn)"
       }
     ]
   }

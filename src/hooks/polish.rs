@@ -154,39 +154,107 @@ fn format_go(file_path: &str, wd: &Path) {
     }
 }
 
-pub fn run(input: &HookInput) -> i32 {
-    if !should_run(PROFILE_POLISH) {
-        return 0;
+/// Extract the files touched by an `apply_patch` envelope.
+///
+/// Codex's edit tool is `apply_patch`: it carries the whole patch in
+/// `tool_input.command` and supplies no `file_path`, so a `file_path`-only
+/// polish hook never fires on Codex at all. The envelope marks each target with
+/// a `*** <verb> File:` header:
+///
+/// ```text
+/// *** Begin Patch
+/// *** Update File: src/main.rs
+/// *** Add File: src/new.py
+/// *** Delete File: src/old.go
+/// *** End Patch
+/// ```
+///
+/// `Delete File` is skipped — there is nothing left to format. A `*** Move to:`
+/// header renames the previous target, so the destination replaces it.
+pub fn patched_files(command: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for line in command.lines() {
+        let line = line.trim();
+        let Some(rest) = line.strip_prefix("***") else {
+            continue;
+        };
+        let rest = rest.trim();
+        if let Some(p) = rest
+            .strip_prefix("Update File:")
+            .or_else(|| rest.strip_prefix("Add File:"))
+        {
+            let p = p.trim();
+            if !p.is_empty() {
+                files.push(p.to_string());
+            }
+        } else if let Some(p) = rest.strip_prefix("Move to:") {
+            // Rename: format the destination, not the vanished source.
+            let p = p.trim();
+            if !p.is_empty() {
+                files.pop();
+                files.push(p.to_string());
+            }
+        }
+    }
+    files.dedup();
+    files
+}
+
+/// Resolve which files this hook invocation should polish.
+///
+/// Claude Code supplies `file_path` for Edit/Write; Codex supplies an
+/// `apply_patch` envelope in `command`.
+fn target_files(input: &HookInput) -> Vec<String> {
+    let Some(ti) = input.tool_input.as_ref() else {
+        return Vec::new();
+    };
+
+    if let Some(fp) = ti.get("file_path").and_then(|v| v.as_str())
+        && !fp.is_empty()
+    {
+        return vec![fp.to_string()];
     }
 
-    let file_path = input
-        .tool_input
-        .as_ref()
-        .and_then(|v| v.get("file_path"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    if file_path.is_empty() {
-        return 0;
+    // Codex `apply_patch` — patch body lives in `command`.
+    if let Some(cmd) = ti.get("command").and_then(|v| v.as_str()) {
+        return patched_files(cmd);
     }
 
+    Vec::new()
+}
+
+fn polish_file(file_path: &str, wd: &Path) {
     let ext = Path::new(file_path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
 
-    let wd = cwd();
-
     match ext {
         "js" | "jsx" | "ts" | "tsx" => {
-            format_js(file_path, &wd);
+            format_js(file_path, wd);
             if ext == "ts" || ext == "tsx" {
-                check_ts(file_path, &wd);
+                check_ts(file_path, wd);
             }
         }
-        "py" => format_python(file_path, &wd),
-        "go" => format_go(file_path, &wd),
+        "py" => format_python(file_path, wd),
+        "go" => format_go(file_path, wd),
         _ => {}
+    }
+}
+
+pub fn run(input: &HookInput) -> i32 {
+    if !should_run(PROFILE_POLISH) {
+        return 0;
+    }
+
+    let targets = target_files(input);
+    if targets.is_empty() {
+        return 0;
+    }
+
+    let wd = cwd();
+    for file_path in &targets {
+        polish_file(file_path, &wd);
     }
 
     0
@@ -250,5 +318,74 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = try_exec_args("true", &[], dir.path());
         assert!(result.is_some(), "zero exit must return Some");
+    }
+
+    // ── Codex apply_patch targeting ──────────────────
+
+    #[test]
+    fn patched_files_reads_update_and_add() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/main.rs
+@@ fn main
+-old
++new
+*** Add File: src/new.py
++print('hi')
+*** End Patch";
+        assert_eq!(patched_files(patch), vec!["src/main.rs", "src/new.py"]);
+    }
+
+    #[test]
+    fn patched_files_skips_deletes() {
+        let patch = "\
+*** Begin Patch
+*** Delete File: src/gone.go
+*** End Patch";
+        assert!(patched_files(patch).is_empty(), "nothing to format");
+    }
+
+    #[test]
+    fn patched_files_follows_move_destination() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/old.ts
+*** Move to: src/new.ts
+*** End Patch";
+        assert_eq!(patched_files(patch), vec!["src/new.ts"]);
+    }
+
+    #[test]
+    fn patched_files_ignores_non_patch_text() {
+        assert!(patched_files("cargo test --all").is_empty());
+    }
+
+    /// The Codex path: `apply_patch` carries no `file_path`, so the old
+    /// `file_path`-only lookup made polish a permanent no-op on Codex.
+    #[test]
+    fn target_files_handles_apply_patch_input() {
+        let input = HookInput {
+            tool_name: Some("apply_patch".into()),
+            tool_input: Some(serde_json::json!({
+                "command": "*** Begin Patch\n*** Update File: a.py\n*** End Patch"
+            })),
+            ..Default::default()
+        };
+        assert_eq!(target_files(&input), vec!["a.py"]);
+    }
+
+    #[test]
+    fn target_files_still_handles_claude_file_path() {
+        let input = HookInput {
+            tool_name: Some("Edit".into()),
+            tool_input: Some(serde_json::json!({"file_path": "/src/main.rs"})),
+            ..Default::default()
+        };
+        assert_eq!(target_files(&input), vec!["/src/main.rs"]);
+    }
+
+    #[test]
+    fn target_files_empty_without_tool_input() {
+        assert!(target_files(&HookInput::default()).is_empty());
     }
 }

@@ -1,6 +1,7 @@
 //! team/mod.rs — Org-level agent team management
 
 pub mod cli;
+pub mod codex;
 pub mod store;
 
 /// Process-wide mutex that serializes tests mutating the HOME environment variable.
