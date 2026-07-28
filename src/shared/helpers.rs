@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::LazyLock;
 
-use super::paths::harness_dir;
+use super::paths::{harness_dir, session_state_dir};
 use super::sanitize::truncate_utf8;
 
 /// Agent timeout threshold in seconds (default: 600 = 10 minutes).
@@ -278,6 +278,14 @@ fn session_start_path(base: &Path, session_key: &str) -> std::path::PathBuf {
     base.join(format!("session_start.{session_key}.json"))
 }
 
+fn read_host_session_start_date(session_key: &str) -> io::Result<Option<String>> {
+    let path = session_start_path(&session_state_dir(), session_key);
+    if let Some(date) = read_session_start_date_at(&path)? {
+        return Ok(Some(date));
+    }
+    read_session_start_date_at(&session_start_path(&harness_dir(), session_key))
+}
+
 fn parse_session_start_date(data: &str) -> io::Result<String> {
     let record: SessionStartRec = serde_json::from_str(data)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
@@ -346,15 +354,36 @@ fn ensure_session_start_date_at(path: &Path, current_date: &str) -> io::Result<S
 /// date. Corruption and persistence failures are returned to the SessionStart
 /// hook instead of silently switching to a new UTC date.
 pub fn ensure_session_start_date(current_date: &str) -> io::Result<String> {
-    let path = session_start_path(&harness_dir(), &session_start_key());
-    ensure_session_start_date_at(&path, current_date)
+    let session_key = session_start_key();
+    let Some(_) = super::host::session_id() else {
+        let path = session_start_path(&harness_dir(), &session_key);
+        return ensure_session_start_date_at(&path, current_date);
+    };
+
+    // Preserve sessions established by a pre-global-state runtime. A
+    // SessionStart in the same project migrates the old record atomically;
+    // future hooks can then follow the host session across directories.
+    let path = session_start_path(&session_state_dir(), &session_key);
+    let date =
+        read_host_session_start_date(&session_key)?.unwrap_or_else(|| current_date.to_string());
+    ensure_session_start_date_at(&path, &date)
 }
 
 /// The partition date the current session started with, if `resume` wrote one.
 /// Missing state returns `None`; corrupt or unreadable state is reported.
 pub fn read_session_start_date() -> Option<String> {
-    let path = session_start_path(&harness_dir(), &session_start_key());
-    match read_session_start_date_at(&path) {
+    let session_key = session_start_key();
+    let path = if super::host::session_id().is_some() {
+        session_start_path(&session_state_dir(), &session_key)
+    } else {
+        session_start_path(&harness_dir(), &session_key)
+    };
+    let date = if super::host::session_id().is_some() {
+        read_host_session_start_date(&session_key)
+    } else {
+        read_session_start_date_at(&path)
+    };
+    match date {
         Ok(date) => date,
         Err(error) => {
             eprintln!(
@@ -545,8 +574,9 @@ pub fn rm_dir(dir: &Path) {
 pub fn session_id() -> String {
     let host_id = super::host::session_id();
     let recorded_date = host_id.as_ref().and_then(|_| {
-        let path = session_start_path(&harness_dir(), &session_start_key());
-        match read_session_start_date_at(&path) {
+        let session_key = session_start_key();
+        let path = session_start_path(&session_state_dir(), &session_key);
+        match read_host_session_start_date(&session_key) {
             Ok(date) => date,
             Err(error) => {
                 eprintln!(
@@ -573,14 +603,28 @@ pub fn session_id() -> String {
 /// established host session. SessionStart persists the required date before
 /// calling this function.
 pub fn try_session_id() -> io::Result<String> {
-    session_id_at(
-        &harness_dir(),
-        super::host::session_id().as_deref(),
+    let host_id = super::host::session_id();
+    let recorded_start_date = match host_id.as_deref() {
+        Some(host_id) => {
+            let path = session_start_path(&session_state_dir(), host_id);
+            Some(read_host_session_start_date(host_id)?.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("session start record is missing: {}", path.display()),
+                )
+            })?)
+        }
+        None => None,
+    };
+    session_id_for_date(
+        host_id.as_deref(),
         &today(),
+        recorded_start_date.as_deref(),
         std::process::id(),
     )
 }
 
+#[cfg(test)]
 fn session_id_at(
     base: &Path,
     host_id: Option<&str>,

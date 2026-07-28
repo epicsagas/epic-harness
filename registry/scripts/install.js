@@ -98,7 +98,11 @@ function getPluginRuntime() {
       `cannot read plugin manifest ${manifestPath}: ${error.message}`,
     );
   }
-  if (!/^\d+\.\d+\.\d+$/.test(manifest.version ?? "")) {
+  const versionMatch =
+    /^(\d+\.\d+\.\d+)(?:\+codex\.[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(
+      manifest.version ?? "",
+    );
+  if (!versionMatch) {
     throw new Error(`plugin manifest has an invalid version: ${manifest.version}`);
   }
   const revisionPath = join(pluginRoot, "runtime-revision.txt");
@@ -113,7 +117,7 @@ function getPluginRuntime() {
   if (!/^[1-9]\d*$/.test(revision)) {
     throw new Error(`runtime revision must be a positive integer: ${revision}`);
   }
-  return { version: manifest.version, revision };
+  return { version: versionMatch[1], revision };
 }
 
 function installerUrl(version, extension) {

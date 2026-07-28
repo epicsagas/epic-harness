@@ -378,6 +378,65 @@ exit /b 0`,
   }
 });
 
+test("SessionStart accepts a Codex cachebuster while comparing the base runtime version", () => {
+  const fixture = makeFixture(
+    "PLUGIN_ROOT",
+    ".codex-plugin",
+    `${PLUGIN_VERSION}+codex.20260728181552`,
+  );
+  const calls = join(fixture.root, "calls.txt");
+
+  try {
+    writeCommand(
+      fixture.bin,
+      "epic-harness",
+      `if [ "$1" = "version" ]; then
+  printf '%s\\n' 'epic-harness ${PLUGIN_VERSION} runtime-revision ${RUNTIME_REVISION}' >&2
+  exit 0
+fi
+printf '%s\\n' "$*" >> "$EPIC_TEST_CALLS"
+printf '%s\\n' '{}'`,
+      `if "%1"=="version" (
+  echo epic-harness ${PLUGIN_VERSION} runtime-revision ${RUNTIME_REVISION} 1>&2
+  exit /b 0
+)
+echo %*>>"%EPIC_TEST_CALLS%"
+echo {}`,
+    );
+
+    const result = runScript(
+      ["hook", "SessionStart", "resume"],
+      { ...fixture.env, EPIC_TEST_CALLS: calls },
+      JSON.stringify({ hook_event_name: "SessionStart", session_id: "session-1" }),
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(assertSingleJsonObject(result.stdout, "SessionStart"), {});
+    assert.equal(readFileSync(calls, "utf8").trim(), "resume");
+  } finally {
+    rmSync(fixture.root, { force: true, recursive: true });
+  }
+});
+
+test("bootstrap rejects versions outside the base or Codex-cachebuster contract", () => {
+  for (const version of [
+    `${PLUGIN_VERSION}+other.20260728181552`,
+    `${PLUGIN_VERSION}+codex.`,
+    `${PLUGIN_VERSION}+codex.bad..token`,
+  ]) {
+    const fixture = makeFixture("PLUGIN_ROOT", ".codex-plugin", version);
+
+    try {
+      const result = runScript([], fixture.env);
+
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /plugin manifest has an invalid version/i);
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
+  }
+});
+
 test("a same-version runtime with a different revision is reinstalled and verified", () => {
   const fixture = makeFixture("PLUGIN_ROOT", ".codex-plugin");
   const calls = join(fixture.root, "calls.txt");

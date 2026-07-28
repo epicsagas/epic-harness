@@ -142,8 +142,8 @@ Notes that are easy to get wrong:
 - **All plugin hooks use the Node runner.** It quotes plugin paths, provides
   Windows command overrides, resolves `epic-harness` consistently, and reports
   a missing binary on stderr without corrupting event output. SessionStart
-  installs the exact plugin version and runtime revision, then verifies both
-  before `resume`.
+  strips an optional `+codex.<cachebuster>` cache identity, then installs and
+  verifies the exact base binary version and runtime revision before `resume`.
 - **Windows overrides select `cmd.exe` explicitly and enter `run-hook.cmd`.**
   Codex may execute them through PowerShell, where `%PLUGIN_ROOT%` stays literal
   and a native exit 2 is collapsed to exit 1. The wrapper expands the path and
@@ -165,8 +165,12 @@ and `agent_type`; `shared::host::init` records them once per process.
   process, so the PID form produced a distinct "session" per tool call — one
   installation showed 40,804 observations across 37,611 "sessions". The date
   prefix stays because the dashboard reads a session's date from it.
-  SessionStart persists that partition date per host session. Later host hooks
-  fail if the record is missing or corrupt instead of inventing a new identity.
+  SessionStart persists that partition date per host session under
+  `~/.harness/session-state/`, outside every project directory, so hooks keep
+  the same identity when a Claude or Codex conversation continues from another
+  working directory. A same-project legacy record is migrated on SessionStart;
+  later host hooks still read it during upgrades. Missing or corrupt state fails
+  instead of inventing a new identity.
 - Ids are sanitized to `[A-Za-z0-9_-]` and capped at 64 characters: they land in
   `session_{id}.jsonl` and `resume.{id}.lock`.
 - `agent_id` is preferred over `EPIC_AGENT_ID` and over hashing an `Agent`
@@ -231,6 +235,11 @@ is reserved for the safety rules. A gap in the harness's own bookkeeping — a
 missing SessionStart record, an unresolvable session identity — is reported on
 stderr, falls back to today's date, and still evaluates the safety rules. The
 other hooks may fail visibly; there it costs an observation, not the shell.
+
+`polish` never formats outside the current workspace. An absolute target from
+an already-completed external edit is reported as a skipped formatter target and
+returns success; traversal, option-like paths, symlinks, invalid in-workspace
+targets, and actual formatter failures remain errors.
 
 `guard`'s orchestration checks resolve the state directory the same way
 `orchestrate` does. `$HARNESS_DIR` remains an override for tests and embedded

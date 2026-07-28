@@ -565,6 +565,28 @@ fn validate_targets(raw_targets: Vec<String>, workspace: &Path) -> Result<Vec<Pa
     Ok(targets)
 }
 
+fn formatter_targets_in_workspace(raw_targets: Vec<String>, workspace: &Path) -> Vec<String> {
+    let Ok(workspace) = canonical_for_compare(workspace) else {
+        return raw_targets;
+    };
+    raw_targets
+        .into_iter()
+        .filter(|raw| {
+            let path = Path::new(raw);
+            if !path.is_absolute() {
+                return true;
+            }
+            match canonical_for_compare(path) {
+                Ok(target) if !target.starts_with(&workspace) => {
+                    eprintln!("[polish] skipped formatter target outside workspace: {raw}");
+                    false
+                }
+                _ => true,
+            }
+        })
+        .collect()
+}
+
 fn polish_targets(targets: &[PathBuf], wd: &Path) -> io::Result<()> {
     let deadline = Instant::now() + POLISH_HOOK_TIMEOUT;
     let by_extension = |extensions: &[&str]| {
@@ -612,12 +634,12 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
 
-    let raw_targets = target_files(input);
+    let wd = cwd();
+    let raw_targets = formatter_targets_in_workspace(target_files(input), &wd);
     if raw_targets.is_empty() {
         return 0;
     }
 
-    let wd = cwd();
     let targets = match validate_targets(raw_targets, &wd) {
         Ok(targets) => targets,
         Err(error) => {

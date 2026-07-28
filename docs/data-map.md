@@ -11,6 +11,9 @@ Complete inventory of every data artifact written to disk.
 ├── config.toml             ← Global configuration
 ├── graph.json              ← Memory graph visualization cache
 │
+├── session-state/                  ← Host-session identity (working-directory independent)
+│   └── session_start.{id}.json     ← Fixed session partition date
+│
 ├── global/
 │   ├── patterns.jsonl              ← Cross-project learning patterns (opt-in)
 │   └── .cross-project-enabled      ← Empty file (opt-in marker)
@@ -94,6 +97,12 @@ Single file at `~/.harness/memory.db`. Project-agnostic (projects stored as tags
 | `edges` | Relationships between nodes |
 | `_meta` | Schema version |
 
+## Global Files
+
+| Path | Format | Writer Hook | Purpose |
+|------|--------|-------------|---------|
+| `session-state/session_start.{id}.json` | JSON | resume | Stable host-session partition date across project-directory changes |
+
 ## Per-Project Files
 
 All paths are under `~/.harness/projects/{slug}/`. The slug uses the canonical
@@ -125,6 +134,7 @@ name remain separate.
 | `evolved/manifest.json` | JSON | `workspace_manifest` |
 | `memory/nodes/*.md` | Markdown | `nodes` (memory.db) |
 | `memory/edges.jsonl` | JSONL | `edges` (memory.db) |
+| `session_start.{id}.json` | JSON | Global `session-state/` record on the next same-project SessionStart |
 
 ## Dual-Write Pattern
 

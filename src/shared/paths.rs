@@ -138,6 +138,13 @@ pub fn harness_projects_root() -> PathBuf {
     dirs_home().join(".harness").join("projects")
 }
 
+/// Host-session identity is global because one conversation may continue from
+/// a different project directory. Project observations and snapshots remain
+/// under the project harness directory.
+pub fn session_state_dir() -> PathBuf {
+    dirs_home().join(".harness").join("session-state")
+}
+
 /// Lists all project slugs that have harness data directories.
 fn list_harness_project_slugs_in(root: &std::path::Path) -> Vec<String> {
     if !root.is_dir() {

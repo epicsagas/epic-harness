@@ -52,6 +52,16 @@ fn establish_host_session_state(home: &Path, project: &Path, session_id: &str) {
     .expect("session start state");
 }
 
+fn establish_global_host_session_state(home: &Path, session_id: &str) {
+    let state = home.join(".harness").join("session-state");
+    fs::create_dir_all(&state).expect("global session state directory");
+    fs::write(
+        state.join(format!("session_start.{session_id}.json")),
+        r#"{"date":"20260728","written_at":"2026-07-28T00:00:00Z"}"#,
+    )
+    .expect("global session start state");
+}
+
 fn run_hook(home: &Path, project: &Path, command: &str, input: &str) -> Output {
     run_hook_with_env(home, project, command, input, &[])
 }
@@ -491,6 +501,71 @@ fn non_start_hooks_reject_missing_host_session_state() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&stop.stdout).expect("SubagentStop JSON"),
         serde_json::json!({})
+    );
+}
+
+#[test]
+fn precompact_survives_a_project_directory_change() {
+    let root = tempfile::tempdir().expect("temp root");
+    let first_project = root.path().join("project-a");
+    let second_project = root.path().join("project-b");
+    fs::create_dir_all(&first_project).expect("first project");
+    fs::create_dir_all(&second_project).expect("second project");
+    fs::create_dir_all(harness_path(root.path(), &first_project)).expect("first harness");
+    let second_harness = harness_path(root.path(), &second_project);
+    fs::create_dir_all(&second_harness).expect("second harness");
+    establish_global_host_session_state(root.path(), "cross-project-session");
+
+    let snapshot = run_hook(
+        root.path(),
+        &second_project,
+        "snapshot",
+        r#"{"hook_event_name":"PreCompact","session_id":"cross-project-session","conversation_summary":"same host session, new project directory","pending_tasks":[],"context_usage":0.7}"#,
+    );
+
+    assert!(
+        snapshot.status.success(),
+        "{}",
+        String::from_utf8_lossy(&snapshot.stderr)
+    );
+    let snapshots = fs::read_dir(second_harness.join("sessions"))
+        .expect("snapshot directory")
+        .filter_map(Result::ok)
+        .count();
+    assert_eq!(snapshots, 1, "PreCompact must persist in the new project");
+}
+
+#[test]
+fn polish_skips_absolute_targets_outside_the_current_project() {
+    let root = tempfile::tempdir().expect("temp root");
+    let project = project_path(root.path());
+    fs::create_dir_all(&project).expect("project");
+    establish_host_session_state(root.path(), &project, "outside-polish-session");
+    let outside = root.path().join("outside.py");
+    fs::write(&outside, "print('unchanged')\n").expect("outside target");
+    let patch = format!(
+        "*** Begin Patch\n*** Update File: {}\n@@\n-print('old')\n+print('unchanged')\n*** End Patch",
+        outside.display()
+    );
+    let input = serde_json::json!({
+        "hook_event_name": "PostToolUse",
+        "session_id": "outside-polish-session",
+        "tool_name": "apply_patch",
+        "tool_input": { "command": patch },
+        "tool_response": { "success": true },
+    })
+    .to_string();
+
+    let polish = run_hook(root.path(), &project, "polish", &input);
+
+    assert!(
+        polish.status.success(),
+        "{}",
+        String::from_utf8_lossy(&polish.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(outside).expect("outside target remains readable"),
+        "print('unchanged')\n"
     );
 }
 

@@ -757,8 +757,10 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 <details>
 <summary>epic: binary not found inside plugin hooks</summary>
 
-The SessionStart bootstrap installs the plugin's exact binary version and
-runtime revision, then verifies both before any hook subcommand runs. This
+The SessionStart bootstrap installs the plugin's base binary version and exact
+runtime revision, then verifies both before any hook subcommand runs. A Codex
+`+codex.<cachebuster>` suffix identifies the plugin cache only and is not part
+of the binary version. This
 prevents an unreleased plugin fix from reusing an older binary with the same
 semantic version. If it reports a failure, install the required revision shown
 in the error and make sure `epic-harness` is on `PATH`. The plugin does not use
@@ -776,7 +778,7 @@ cargo test                                                    # Tests
 
 Hooks use the cross-platform Node runner in `registry/scripts/install.js`. It
 resolves one `epic-harness` binary from `PATH`; SessionStart verifies that its
-version and runtime revision match the plugin before it runs `resume`.
+base version and runtime revision match the plugin before it runs `resume`.
 
 ---
 
