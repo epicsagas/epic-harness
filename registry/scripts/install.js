@@ -7,17 +7,15 @@
 
 "use strict";
 
-const { execSync, spawnSync } = require("child_process");
-const {
+import { spawnSync } from "node:child_process";
+import {
   createWriteStream,
-  mkdirSync,
   chmodSync,
-  existsSync,
   readFileSync,
-} = require("fs");
-const { join } = require("path");
-const https = require("https");
-const os = require("os");
+} from "node:fs";
+import { join } from "node:path";
+import https from "node:https";
+import os from "node:os";
 
 const REPO = "epicsagas/epic-harness";
 const BINARY = "epic-harness";
@@ -47,9 +45,12 @@ function getBinaryVersion() {
 
 function getPluginVersion() {
   try {
+    const isClaude = !!process.env.CLAUDE_PLUGIN_ROOT;
+    const pluginRoot =
+      process.env.CLAUDE_PLUGIN_ROOT || process.env.PLUGIN_ROOT || "";
     const manifestPath = join(
-      process.env.CLAUDE_PLUGIN_ROOT || "",
-      ".claude-plugin",
+      pluginRoot,
+      isClaude ? ".claude-plugin" : ".codex-plugin",
       "plugin.json",
     );
     const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -150,14 +151,8 @@ async function install() {
   }
 }
 
-function seed() {
-  const r = spawnSync(BINARY, ["install", "claude"], { stdio: "inherit" });
-  if (r.status !== 0) process.exit(r.status ?? 1);
-}
-
 async function main() {
   const pluginVersion = getPluginVersion();
-  const isPlugin = !!process.env.CLAUDE_PLUGIN_ROOT;
 
   // 1. Binary not found — fresh install
   if (!hasCommand(BINARY)) {
@@ -169,8 +164,6 @@ async function main() {
       log(`Install manually: https://github.com/${REPO}#installation`);
       process.exit(0); // non-fatal — don't break the session
     }
-    // Plugin mode: skills/agents auto-discovered from plugin cache, skip manual seeding
-    if (hasCommand(BINARY) && !isPlugin) seed();
     return;
   }
 
@@ -192,9 +185,6 @@ async function main() {
       }
     }
   }
-
-  // 3. Seed skills/agents/commands/MCP (standalone installs only)
-  if (!isPlugin) seed();
 }
 
 main().catch((e) => {

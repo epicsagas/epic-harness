@@ -5,23 +5,30 @@
 //!
 //! * Claude Code follows the stdin-passthrough contract — `main` echoes stdin on
 //!   stdout and every human-facing line belongs on stderr.
-//! * Codex adds **plain text written to stdout** to the model's context, but only
-//!   for `SessionStart`, `SubagentStart` and `UserPromptSubmit`. `PreToolUse` and
-//!   `PostToolUse` discard plain text outright, and the remaining events
-//!   (`Stop`, `SessionEnd`, `PreCompact`, `PostCompact`, `SubagentStop`) expect
+//! * Codex accepts model context from `SessionStart`, `SubagentStart` and
+//!   `UserPromptSubmit`. SessionStart context is emitted as structured JSON
+//!   because tagged text beginning with `[` is otherwise parsed as malformed
+//!   JSON. The other two accept plain stdout. `PreToolUse` and `PostToolUse`
+//!   discard plain text outright, and the remaining events (`Stop`,
+//!   `SessionEnd`, `PreCompact`, `PostCompact`, `SubagentStop`) expect
 //!   structured JSON, where stray text would corrupt the payload.
 //!
 //! So resume context sent to stderr never reached a Codex model at all, while
 //! blindly switching every hook to stdout would either be dropped or break the
 //! JSON events. `init` records the one bit the output helpers need.
 
-use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, RwLock};
 
 use super::types::HookInput;
 
 /// Whether plain text on stdout is picked up by the host as model context.
 static STDOUT_IS_CONTEXT: AtomicBool = AtomicBool::new(false);
+
+/// SessionStart context must be emitted as one JSON object on Codex. Buffer
+/// the lines that `hint`/`raw` would otherwise print separately.
+static CAPTURE_SESSION_START: AtomicBool = AtomicBool::new(false);
+static SESSION_START_CONTEXT: Mutex<String> = Mutex::new(String::new());
 
 /// Host-supplied conversation id, sanitized for use in filenames.
 static HOST_SESSION_ID: RwLock<Option<String>> = RwLock::new(None);
@@ -50,7 +57,7 @@ fn sanitize_id(raw: &str) -> Option<String> {
 
 /// Codex events whose plain stdout becomes extra developer context.
 fn event_takes_plain_stdout(event: &str) -> bool {
-    matches!(event, "SessionStart" | "SubagentStart" | "UserPromptSubmit")
+    matches!(event, "SubagentStart" | "UserPromptSubmit")
 }
 
 /// Record the active host protocol and identity from the parsed hook input.
@@ -62,12 +69,17 @@ fn event_takes_plain_stdout(event: &str) -> bool {
 /// "session" per hook process. Both hosts supply `session_id`; only Codex
 /// supplies `agent_id`.
 pub fn init(input: &HookInput) {
+    let capture_session_start = input.hook_event_name.as_deref() == Some("SessionStart");
     let takes = input
         .hook_event_name
         .as_deref()
         .map(event_takes_plain_stdout)
         .unwrap_or(false);
+    CAPTURE_SESSION_START.store(capture_session_start, Ordering::Relaxed);
     STDOUT_IS_CONTEXT.store(takes, Ordering::Relaxed);
+    if let Ok(mut context) = SESSION_START_CONTEXT.lock() {
+        context.clear();
+    }
 
     let sid = input.session_id.as_deref().and_then(sanitize_id);
     if let Ok(mut slot) = HOST_SESSION_ID.write() {
@@ -82,6 +94,36 @@ pub fn init(input: &HookInput) {
 /// True when `hint`/`raw` should write to stdout so the model actually sees it.
 pub fn stdout_is_context() -> bool {
     STDOUT_IS_CONTEXT.load(Ordering::Relaxed)
+}
+
+/// True when SessionStart context must be buffered for structured output.
+pub fn captures_session_start_context() -> bool {
+    CAPTURE_SESSION_START.load(Ordering::Relaxed)
+}
+
+/// Add one context fragment to the current SessionStart response.
+pub fn append_session_start_context(fragment: &str) {
+    if let Ok(mut context) = SESSION_START_CONTEXT.lock() {
+        if !context.is_empty() {
+            context.push('\n');
+        }
+        context.push_str(fragment);
+    }
+}
+
+/// Consume the buffered context as Codex's SessionStart output contract.
+pub fn take_session_start_output() -> String {
+    let context = SESSION_START_CONTEXT
+        .lock()
+        .map(|mut context| std::mem::take(&mut *context))
+        .unwrap_or_default();
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": context,
+        }
+    })
+    .to_string()
 }
 
 /// The host's conversation id, sanitized, or `None` when the host sent none.
@@ -136,10 +178,32 @@ mod tests {
     }
 
     #[test]
-    fn codex_session_start_uses_stdout() {
+    fn codex_session_start_captures_structured_context() {
         let _g = lock();
         init(&event(Some("SessionStart")));
-        assert!(stdout_is_context());
+        assert!(captures_session_start_context());
+        assert!(!stdout_is_context());
+    }
+
+    #[test]
+    fn codex_session_start_serializes_exact_context_as_one_json_object() {
+        let _g = lock();
+        init(&event(Some("SessionStart")));
+        let context = "[resume] Previous: \"quoted\"\n\n## Evolved Skills\n`[markdown]`";
+
+        append_session_start_context(context);
+        let stdout = take_session_start_output();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&stdout).expect("SessionStart stdout must be valid JSON");
+
+        assert_eq!(
+            parsed["hookSpecificOutput"]["hookEventName"],
+            "SessionStart"
+        );
+        assert_eq!(
+            parsed["hookSpecificOutput"]["additionalContext"], context,
+            "quotes, newlines, Markdown, and a leading '[' must round-trip exactly"
+        );
     }
 
     #[test]

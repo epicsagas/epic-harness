@@ -101,11 +101,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immediately and never ran. It now resolves targets from the
   `*** Update File:` / `*** Add File:` / `*** Move to:` headers.
 - **Resume context reaches the Codex model** (#113): everything resume surfaces
-  went to stderr, but Codex adds only plain *stdout* to model context — and
-  only for `SessionStart`, `SubagentStart` and `UserPromptSubmit`; tool events
-  discard plain text and the rest require JSON. New `shared::host` records the
-  active event so `hint`/`raw` pick the correct stream per event instead of
-  switching every hook to stdout. Claude Code behaviour is unchanged.
+  went to stderr, and the first stdout fix emitted tagged lines beginning with
+  `[` that Codex parsed as malformed JSON. Resume now buffers all context and
+  emits one valid SessionStart `additionalContext` object, including evolved
+  skill Markdown. Other events retain their event-specific output contracts,
+  and Claude Code behaviour is unchanged.
+- **Dashboard opens on Codex session startup/resume** (#113): server reuse no
+  longer suppresses the browser open. `clear` and `compact` starts stay quiet,
+  and browser-spawn errors are reported instead of discarded.
+- **Plugin bootstrap works under Node ESM and Codex** (#113): the SessionStart
+  script now uses ESM imports, reads `PLUGIN_ROOT` plus `.codex-plugin/plugin.json`,
+  stays silent on stdout, and no longer invokes the removed
+  `epic-harness install claude` seeding path.
 - **`epic team sync` emits native Codex agents** (#113): it wrote Claude-style
   Markdown into `~/.codex/agents/{team}/`, which Codex ignores. It now writes
   flat `~/.codex/agents/{team}-{agent}.toml` with the required `name`,

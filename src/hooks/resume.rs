@@ -171,7 +171,7 @@ fn get_cross_project_hints() -> Vec<String> {
     hints
 }
 
-pub fn run(_input: &HookInput) -> i32 {
+pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_RESUME) {
         return 0;
     }
@@ -414,7 +414,13 @@ pub fn run(_input: &HookInput) -> i32 {
             })
             .collect();
         if !bodies.is_empty() {
-            println!("{}", build_evolved_injection(&bodies));
+            let injection = build_evolved_injection(&bodies);
+            if crate::shared::host::captures_session_start_context() {
+                raw(&injection);
+            } else {
+                // Preserve Claude Code's existing SessionStart output contract.
+                println!("{injection}");
+            }
             hint(
                 "resume",
                 &format!("Evolved skills injected: {}", active.join(", ")),
@@ -572,8 +578,8 @@ pub fn run(_input: &HookInput) -> i32 {
     // 9a. Clean up stale auto-tracked agent runs (complete > 1h, running > 2h)
     crate::orchestrate::state::auto_cleanup_stale_runs(&harness_dir());
 
-    // 10. Auto-launch dashboard (exactly one instance across all sessions)
-    spawn_dashboard_once();
+    // 10. Keep one dashboard server, but open it for each root session start.
+    spawn_dashboard_once(input);
 
     // 11. Telemetry — session_started event (consent already ensured in main.rs)
     Telemetry::init().track_session_started();
@@ -588,23 +594,61 @@ fn is_dashboard_running(port: u16) -> bool {
     TcpStream::connect(format!("127.0.0.1:{port}")).is_ok()
 }
 
-/// Spawn the dashboard server exactly once using a filesystem lock.
+#[derive(Debug, PartialEq, Eq)]
+struct DashboardPlan {
+    start_server: bool,
+    open_browser: bool,
+}
+
+fn dashboard_plan(server_running: bool, open_browser: bool) -> DashboardPlan {
+    DashboardPlan {
+        start_server: !server_running,
+        open_browser,
+    }
+}
+
+/// Open only for a root startup/resume event. Clear and compact must not create
+/// extra tabs. Inputs without a Codex event preserve Claude's existing behavior.
+fn should_open_dashboard_browser(input: &HookInput) -> bool {
+    match input.hook_event_name.as_deref() {
+        Some("SessionStart") => matches!(input.source.as_deref(), Some("startup" | "resume")),
+        Some(_) => false,
+        None => true,
+    }
+}
+
+fn open_dashboard_browser(url: &str) {
+    if let Err(e) = open_browser_bg(url) {
+        hint("resume", &format!("Dashboard browser open failed: {e}"));
+    }
+}
+
+/// Keep one dashboard server using a filesystem lock.
 ///
 /// Uses `dashboard.lock` under the harness dir with atomic `create_new` to
 /// prevent races across concurrent sessions. If we win the lock and no server
-/// is listening, we spawn `epic-harness serve` in the background and open the
-/// browser. The lock file is advisory — stale locks are cleaned up when the
-/// port is free.
+/// is listening, we spawn `epic-harness serve` in the background. Browser
+/// opening is separate: a root startup/resume opens the configured URL even
+/// when the server already exists. The lock file is advisory — stale locks are
+/// cleaned up when the port is free.
 ///
 /// Port and auto-open are configurable via `~/.harness/config.toml` `[dashboard]`.
 /// Set `port = 0` to disable auto-launch entirely.
-fn spawn_dashboard_once() {
+fn spawn_dashboard_once(input: &HookInput) {
     let port = CONFIG.dashboard.port;
     if port == 0 {
         return;
     }
 
-    if is_dashboard_running(port) {
+    let url = format!("http://localhost:{port}");
+    let plan = dashboard_plan(
+        is_dashboard_running(port),
+        CONFIG.dashboard.auto_open && should_open_dashboard_browser(input),
+    );
+    if !plan.start_server {
+        if plan.open_browser {
+            open_dashboard_browser(&url);
+        }
         return;
     }
 
@@ -644,10 +688,9 @@ fn spawn_dashboard_once() {
                 }
             }
             if bound {
-                let url = format!("http://localhost:{port}");
                 hint("resume", &format!("Dashboard → {url}"));
-                if CONFIG.dashboard.auto_open {
-                    open_browser_bg(&url);
+                if plan.open_browser {
+                    open_dashboard_browser(&url);
                 }
             } else {
                 hint("resume", "Dashboard server start timed out");
@@ -659,20 +702,34 @@ fn spawn_dashboard_once() {
     }
 }
 
-fn open_browser_bg(url: &str) {
+fn open_browser_bg(url: &str) -> std::io::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let _ = std::process::Command::new("open").arg(url).spawn();
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
     }
     #[cfg(target_os = "linux")]
     {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
+        std::process::Command::new("cmd")
             .args(["/c", "start", url])
-            .spawn();
+            .spawn()
+            .map(|_| ())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "browser open is unsupported on this platform",
+        ))
     }
 }
 
@@ -831,6 +888,49 @@ mod tests {
         assert!(
             !acquire_session_lock(&lock),
             "second acquire on same lock must return false"
+        );
+    }
+
+    #[test]
+    fn codex_dashboard_browser_opens_only_for_root_start_or_resume() {
+        for source in ["startup", "resume"] {
+            let input = HookInput {
+                hook_event_name: Some("SessionStart".into()),
+                source: Some(source.into()),
+                ..Default::default()
+            };
+            assert!(
+                should_open_dashboard_browser(&input),
+                "{source} must open the dashboard"
+            );
+        }
+
+        for source in ["clear", "compact"] {
+            let input = HookInput {
+                hook_event_name: Some("SessionStart".into()),
+                source: Some(source.into()),
+                ..Default::default()
+            };
+            assert!(
+                !should_open_dashboard_browser(&input),
+                "{source} must not open another dashboard tab"
+            );
+        }
+    }
+
+    #[test]
+    fn running_dashboard_still_requests_browser_open_on_session_start() {
+        let input = HookInput {
+            hook_event_name: Some("SessionStart".into()),
+            source: Some("startup".into()),
+            ..Default::default()
+        };
+
+        let plan = dashboard_plan(true, should_open_dashboard_browser(&input));
+        assert!(!plan.start_server, "an existing server must be reused");
+        assert!(
+            plan.open_browser,
+            "reusing the server must not suppress the browser open"
         );
     }
 

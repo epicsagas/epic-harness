@@ -114,7 +114,7 @@ helpers need; `hint()`/`raw()` then pick the stream.
 
 | Codex event | Manifest entry | stdout contract |
 |---|---|---|
-| `SessionStart` | `epic resume` | plain text **is** developer context → `hint`/`raw` write to stdout |
+| `SessionStart` | `epic resume` | one JSON object carries `additionalContext`; tagged text must not be emitted directly |
 | `PreToolUse` (`Bash`) | `epic guard` | plain text ignored; JSON `permissionDecision` blocks |
 | `PostToolUse` (`*`) | `epic observe` | plain text ignored |
 | `PostToolUse` (`apply_patch\|Edit\|Write`) | `epic polish` | plain text ignored |
@@ -132,7 +132,8 @@ Notes that are easy to get wrong:
   `tool_input.command` and no `file_path`. `polish::patched_files` reads the
   `*** Update File:` / `*** Add File:` / `*** Move to:` headers.
 - **Never write plain text to stdout on tool events** — Codex discards it there,
-  and on the JSON events it would corrupt the payload.
+  and on JSON events it corrupts the payload. SessionStart is also serialized:
+  a context line beginning with `[` otherwise looks like malformed JSON.
 
 `epic team sync` writes native Codex agents as flat `~/.codex/agents/{team}-{agent}.toml`
 (`name`, `description`, `developer_instructions`). Claude-only frontmatter is dropped:
@@ -268,11 +269,12 @@ under slow/remote hosts) is gone.
 
 ## Evolved Skill Injection
 
-`epic resume` (SessionStart) prints active evolved skills' bodies to stdout,
-which the host injects into the model's context — the Ring 3 loop closes
-deterministically instead of relying on the model scanning `evolved/` by
-prompt instruction. Holdout-arm skills are withheld and only announced on
-stderr for transparency.
+`epic resume` (SessionStart) injects active evolved skills through the host's
+context contract. Codex receives one JSON `additionalContext` value; Claude
+keeps its existing SessionStart output path. The Ring 3 loop closes
+deterministically instead of relying on the model scanning `evolved/` by prompt
+instruction. Holdout-arm skills are withheld and only announced on stderr for
+transparency.
 
 ## SkillOpt-Inspired Optimization
 

@@ -19,6 +19,8 @@ pub struct HookInput {
     /// When present, stdout follows the Codex hook protocol instead of Claude
     /// Code's stdin-passthrough contract.
     pub hook_event_name: Option<String>,
+    /// SessionStart cause: `startup`, `resume`, `clear`, or `compact`.
+    pub source: Option<String>,
 
     // ── Host-supplied identity ──────────────────────────
     // Codex sends these on every hook payload; Claude Code sends `session_id`.
@@ -108,3 +110,18 @@ pub const PROFILE_POLISH: HookProfile = HookProfile::Standard;
 pub const PROFILE_REFLECT: HookProfile = HookProfile::Standard;
 pub const PROFILE_SNAPSHOT: HookProfile = HookProfile::Standard;
 pub const PROFILE_RESUME: HookProfile = HookProfile::Minimal;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_start_source_is_retained_from_host_input() {
+        let input: HookInput = serde_json::from_str(
+            r#"{"hook_event_name":"SessionStart","session_id":"session-1","source":"resume"}"#,
+        )
+        .expect("valid hook input");
+
+        assert_eq!(input.source.as_deref(), Some("resume"));
+    }
+}

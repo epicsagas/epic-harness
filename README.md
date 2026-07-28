@@ -34,7 +34,7 @@ A Claude Code plugin that **consolidates 30+ commands into 3 commands + 26 auto-
 
 ### Web Dashboard — auto-launches on session start
 
-10-screen real-time metrics for eval scores, tool stats, orbit pipelines, evolved skills, and hook health. Opens automatically with the first Claude Code session — no manual setup needed. The **Eval & Evolve** screen surfaces the HarnessX evolution-engine state: reward-hacking warnings, seesaw solved-task registry, variant pool, and the adaptation landscape (persistent failures + untried edit types).
+10-screen real-time metrics for eval scores, tool stats, orbit pipelines, evolved skills, and hook health. Opens automatically when a Claude Code or Codex session starts or resumes — no manual setup needed. The **Eval & Evolve** screen surfaces the HarnessX evolution-engine state: reward-hacking warnings, seesaw solved-task registry, variant pool, and the adaptation landscape (persistent failures + untried edit types).
 
 <p align="center">
   <img src="./assets/dashboard.png" alt="Dashboard" width="49%" />
@@ -42,11 +42,11 @@ A Claude Code plugin that **consolidates 30+ commands into 3 commands + 26 auto-
 </p>
 
 ```bash
-# Auto-launches on first session (default: http://localhost:7700)
+# Auto-launches on session startup/resume (default: http://localhost:7700)
 # Configure port or disable in ~/.harness/config.toml:
 [dashboard]
 port = 7700       # set to 0 to disable auto-launch
-auto_open = true  # open browser on first session
+auto_open = true  # open browser on session startup/resume
 ```
 
 Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings

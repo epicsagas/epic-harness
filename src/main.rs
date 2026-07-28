@@ -315,9 +315,10 @@ fn main() {
                 // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
             }
             "resume" => {
-                // SessionStart: plain text on stdout = developer context, and
-                // `host::init` has already switched hint()/raw() to stdout for
-                // this event, so the resume context was written there directly.
+                // A leading `[` or `{` makes Codex parse SessionStart stdout as
+                // JSON. Emit one valid object so tagged hints and Markdown can
+                // never be misclassified as malformed structured output.
+                println!("{}", shared::host::take_session_start_output());
             }
             "reflect" => {
                 // SessionEnd (and Stop, if a host still maps it there): these

@@ -129,7 +129,9 @@ pub fn now_iso() -> String {
 /// surfaces — previous snapshot, pending work, metrics, memory, team and
 /// orchestration state — was written to stderr and never reached a Codex model.
 pub fn hint(tag: &str, msg: &str) {
-    if crate::shared::host::stdout_is_context() {
+    if crate::shared::host::captures_session_start_context() {
+        crate::shared::host::append_session_start_context(&format!("[{tag}] {msg}"));
+    } else if crate::shared::host::stdout_is_context() {
         println!("[{tag}] {msg}");
     } else {
         eprintln!("[{tag}] {msg}");
@@ -138,7 +140,9 @@ pub fn hint(tag: &str, msg: &str) {
 
 /// Emit an untagged human-facing line. Same routing rules as [`hint`].
 pub fn raw(line: &str) {
-    if crate::shared::host::stdout_is_context() {
+    if crate::shared::host::captures_session_start_context() {
+        crate::shared::host::append_session_start_context(line);
+    } else if crate::shared::host::stdout_is_context() {
         println!("{line}");
     } else {
         eprintln!("{line}");
