@@ -144,6 +144,9 @@ Notes that are easy to get wrong:
   a missing binary on stderr without corrupting event output. SessionStart
   installs the exact plugin version and runtime revision, then verifies both
   before `resume`.
+- **Windows overrides select `cmd.exe` explicitly.** Codex may execute them
+  through PowerShell, where `%PLUGIN_ROOT%` stays literal; entering `cmd.exe`
+  first keeps the same override valid in both Codex and Claude Code.
 
 `epic team sync` writes native Codex agents as flat `~/.codex/agents/{team}-{agent}.toml`
 (`name`, `description`, `developer_instructions`). Claude-only frontmatter is dropped:

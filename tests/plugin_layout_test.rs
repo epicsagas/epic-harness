@@ -40,6 +40,51 @@ fn hook_commands(manifest: &serde_json::Value) -> Vec<String> {
     out
 }
 
+/// Every hook object in a hooks manifest.
+fn hooks(manifest: &serde_json::Value) -> Vec<&serde_json::Value> {
+    manifest
+        .get("hooks")
+        .and_then(|h| h.as_object())
+        .into_iter()
+        .flat_map(|events| events.values())
+        .flat_map(|entries| entries.as_array().into_iter().flatten())
+        .flat_map(|entry| {
+            entry
+                .get("hooks")
+                .and_then(|h| h.as_array())
+                .into_iter()
+                .flatten()
+        })
+        .collect()
+}
+
+/// Codex executes hooks through the session shell. On Windows that may be
+/// PowerShell, which does not expand cmd.exe's `%VAR%` syntax. Route Windows
+/// overrides through cmd.exe explicitly so they work under either host shell.
+#[test]
+fn codex_windows_hook_commands_select_their_own_shell() {
+    let manifest = read_json(&repo_root().join(".codex-plugin/hooks.json"));
+
+    for hook in hooks(&manifest) {
+        let command = hook
+            .get("commandWindows")
+            .and_then(|c| c.as_str())
+            .expect("every Codex hook must provide commandWindows");
+        assert!(
+            command.starts_with("cmd.exe /d /s /c "),
+            "Codex may run commandWindows through PowerShell; select cmd.exe before using %PLUGIN_ROOT%: {command}"
+        );
+    }
+
+    let session_end = manifest["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"]
+        .as_u64()
+        .expect("SessionEnd must declare its timeout");
+    assert_eq!(
+        session_end, 3,
+        "Codex clamps SessionEnd hooks to its three-second maximum"
+    );
+}
+
 /// Claude Code auto-discovers plugin hooks from `<root>/hooks/hooks.json` and
 /// from nowhere else — a manifest under `.claude-plugin/` is never read, so
 /// hooks defined there never run.

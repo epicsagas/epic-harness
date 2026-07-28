@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionStart resume",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionStart resume"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionStart resume"
           }
         ]
       }
@@ -20,7 +20,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PreToolUse guard",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreToolUse guard"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreToolUse guard"
           }
         ]
       },
@@ -30,7 +30,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PreToolUse guard",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreToolUse guard"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreToolUse guard"
           }
         ]
       }
@@ -42,7 +42,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PostToolUse observe",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PostToolUse observe"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PostToolUse observe"
           }
         ]
       },
@@ -52,7 +52,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PostToolUse polish",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PostToolUse polish"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PostToolUse polish"
           }
         ]
       }
@@ -64,7 +64,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SubagentStart observe",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SubagentStart observe"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SubagentStart observe"
           }
         ]
       }
@@ -76,7 +76,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SubagentStop observe",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SubagentStop observe"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SubagentStop observe"
           }
         ]
       }
@@ -88,7 +88,7 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PreCompact snapshot",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreCompact snapshot"
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreCompact snapshot"
           }
         ]
       }
@@ -100,8 +100,8 @@
           {
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionEnd reflect",
-            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionEnd reflect",
-            "timeout": 60
+            "commandWindows": "cmd.exe /d /s /c node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionEnd reflect",
+            "timeout": 3
           }
         ]
       }
