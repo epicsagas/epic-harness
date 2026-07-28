@@ -291,8 +291,28 @@ fn migration_temp_path(anchor: &Path, label: &str) -> std::path::PathBuf {
         ))
 }
 
+fn migration_would_recurse(source: &Path, destination: &Path) -> bool {
+    if destination.starts_with(source) {
+        return true;
+    }
+    let Ok(source) = source.canonicalize() else {
+        return false;
+    };
+    let mut ancestor = Some(destination);
+    while let Some(path) = ancestor {
+        if let Ok(path) = path.canonicalize() {
+            return path.starts_with(source);
+        }
+        ancestor = path.parent();
+    }
+    false
+}
+
 fn migrate_legacy_dir(local: &Path, destination: &Path, root_guard: &Path) -> CopyResult {
     let failed = || CopyResult { ok: 0, errors: 1 };
+    if migration_would_recurse(local, destination) {
+        return failed();
+    }
     if crate::shared::helpers::validate_regular_tree(local).is_err() {
         return failed();
     }
@@ -430,7 +450,7 @@ fn initialize_project(harness_was_missing: bool) {
         .symlink_metadata()
         .map(|m| m.file_type().is_dir())
         .unwrap_or(false);
-    if is_real_dir && harness_was_missing {
+    if is_real_dir && harness_was_missing && !migration_would_recurse(&local, &harness_dir()) {
         let root_guard = cwd().join("guard-rules.yaml");
         let copied = migrate_legacy_dir(&local, &harness_dir(), &root_guard);
         if copied.errors > 0 {
@@ -1634,6 +1654,26 @@ mod tests {
         assert!(source.exists(), "rejected migration must keep its source");
         assert!(source.join("safe.txt").exists());
         assert!(!destination.join("nested").join("linked.txt").exists());
+    }
+
+    #[test]
+    fn nested_legacy_destination_is_rejected_before_copying() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join(".harness");
+        let destination = source.join("projects").join("project-state");
+        let root_guard = dir.path().join("guard-rules.yaml");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("state.json"), "{}").unwrap();
+
+        let result = migrate_legacy_dir(&source, &destination, &root_guard);
+
+        assert_eq!(
+            result.ok, 0,
+            "a destination inside its source must be rejected before any copy"
+        );
+        assert!(result.errors > 0);
+        assert!(source.join("state.json").exists());
+        assert!(!destination.exists());
     }
 
     #[test]

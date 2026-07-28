@@ -540,6 +540,42 @@ fn fresh_session_start_migrates_legacy_project_local_harness() {
 }
 
 #[test]
+fn session_start_from_home_does_not_migrate_the_global_harness_root() {
+    let home = tempfile::tempdir().expect("temp home");
+    let global_harness = home.path().join(".harness");
+    fs::create_dir_all(&global_harness).expect("global harness");
+    fs::write(global_harness.join("global-state.txt"), "keep global").expect("global state");
+
+    let output = run_hook(
+        home.path(),
+        home.path(),
+        "resume",
+        r#"{"hook_event_name":"SessionStart","session_id":"home-session","source":"startup"}"#,
+    );
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let context = session_start_context(&output);
+    assert!(
+        !context.contains("Migration failed"),
+        "the global harness root is not project-local legacy state: {context}"
+    );
+    assert_eq!(
+        fs::read_to_string(global_harness.join("global-state.txt")).expect("global state remains"),
+        "keep global"
+    );
+    let project_harness = harness_path(home.path(), home.path());
+    assert!(project_harness.is_dir());
+    assert!(
+        !project_harness.join("global-state.txt").exists(),
+        "global state must not be copied into the home-directory project"
+    );
+}
+
+#[test]
 fn native_codex_subagent_lifecycle_persists_running_then_done() {
     let root = tempfile::tempdir().expect("temp root");
     let project = project_path(root.path());
