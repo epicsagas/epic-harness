@@ -403,7 +403,7 @@ observe（100% 确认）→ extract_instincts() → instinct 节点（置信度 
 
 Polish 反馈到 observe：格式化失败 → `lint_fail`，TypeScript 错误 → `build_fail`。编辑→错误交替模式即使在错误来自 polish 时也能被检测到。
 
-每次会话写入自己的 `session_{date}_{pid}_{random}.jsonl` — 多个并发会话不会互相破坏数据。
+每次会话写入自己的 `session_{date}_{host-session-id}.jsonl` — 多个并发会话不会互相破坏数据。
 
 ### Hook 配置方案
 
@@ -465,10 +465,10 @@ epic team delete backend --global      # 从组织存储中永久删除
 | 工具 | Ring 0 Hooks | 命令 | 技能 | 智能体 |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 26 个技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 26 | — |
+| **Codex CLI** | ✓ 完整 | ✓ 3 个提示（含 /orbit） | ✓ 26 | — |
+| **Antigravity** | ✓ 部分¹ | ✓ 3 条命令（含 /orbit） | ✓ 26 | — |
 
-¹ `plugin_hooks = true` 在 `~/.codex/config.toml` 中 · ² 仅 PreInvocation/PostInvocation — 无 PreToolUse（guard/polish 不可用）
+¹ 仅 PreInvocation/PostInvocation — 无 PreToolUse（guard/polish 不可用）
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic：插件 hooks 中找不到二进制文件</summary>
-
-插件首先在 `hooks/bin/epic-harness` 中查找二进制文件。通过 `cargo install` 更新后，请复制它：
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## 开发
 
 ```bash
 cargo install --path .                                        # 构建 + 安装
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # 更新插件二进制
 cargo test                                                    # 测试
 ```
-
-Hooks 在两个位置查找二进制文件：`hooks/bin/epic-harness`（插件本地） → `~/.cargo/bin/epic-harness`（PATH）。
 
 ---
 

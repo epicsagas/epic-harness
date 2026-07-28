@@ -1,18 +1,56 @@
 //! schema.rs — Harness operational database schema
 //!
 //! Creates all tables for observations, sessions, evolution, metrics,
-//! orchestrator, orbit pipelines, evolved skills, and global patterns.
+//! orchestrator, orbit pipelines, and global patterns.
 
 use sqlx::AnyPool;
 use std::io;
 
 /// Current schema version. Bump when DDL changes.
-#[cfg(test)]
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 6;
+
+async fn stored_schema_version(pool: &AnyPool) -> io::Result<Option<u32>> {
+    match sqlx::query_scalar::<_, String>(
+        "SELECT value FROM _harness_meta WHERE key = 'schema_version'",
+    )
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(version) => Ok(version.and_then(|value| value.parse().ok())),
+        Err(error) => {
+            let missing_meta = error.as_database_error().is_some_and(|database_error| {
+                let message = database_error.message();
+                message.contains("no such table: _harness_meta")
+                    || (message.contains("_harness_meta") && message.contains("does not exist"))
+            });
+            if missing_meta {
+                Ok(None)
+            } else {
+                Err(super::sqlx_err(error))
+            }
+        }
+    }
+}
+
+async fn stamp_schema_version(pool: &AnyPool) -> io::Result<()> {
+    sqlx::query(
+        "INSERT INTO _harness_meta (key, value) VALUES ('schema_version', ?) \
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+    )
+    .bind(SCHEMA_VERSION.to_string())
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    Ok(())
+}
 
 /// Apply the full operational schema to a pool.
 /// Safe to call multiple times (uses `IF NOT EXISTS`).
 pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
+    if stored_schema_version(pool).await? == Some(SCHEMA_VERSION) {
+        return Ok(());
+    }
+
     // PRAGMAs are set in pool.rs build_sqlite_pool() — no need to set here.
 
     for ddl in DDL_SQLITE.split(';') {
@@ -35,11 +73,40 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         "TEXT NOT NULL DEFAULT 'add_skill'",
     )
     .await?;
+    ensure_column(pool, "evolution_records", "session_id", "TEXT").await?;
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_evo_project_session
+         ON evolution_records(project, session_id)",
+    )
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    ensure_column(pool, "observations", "tool_use_id", "TEXT").await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_obs_tool_use_id ON observations(tool_use_id)")
+        .execute(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+    ensure_column(
+        pool,
+        "global_patterns",
+        "session_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_global_project_session
+         ON global_patterns(project, session_id)
+         WHERE session_id <> ''",
+    )
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
 
     // Rebuild metrics_state PK (key) -> (key, project) for legacy databases.
     // New databases already get the composite PK from DDL_SQLITE above.
     migrate_metrics_state_pk(pool).await?;
     migrate_skill_attribution_pk(pool).await?;
+    migrate_orbit_pipeline_pk(pool).await?;
 
     // Holdout A/B counter (added with attribution holdout rotation). Runs
     // after the PK rebuild so legacy-rebuilt tables also gain the column.
@@ -51,6 +118,78 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     )
     .await?;
 
+    // A current marker proves that every DDL and migration above completed.
+    // Never stamp earlier: a partial initialization must retry on the next open.
+    stamp_schema_version(pool).await?;
+
+    Ok(())
+}
+
+/// Migrate `orbit_pipelines` primary key from `(id)` to `(project, id)`.
+///
+/// SQLite cannot alter a primary key in place. Legacy tables are rebuilt in
+/// one transaction, preserving every row. Primary-key inspection makes this
+/// safe to retry and avoids a separate migration marker.
+async fn migrate_orbit_pipeline_pk(pool: &AnyPool) -> io::Result<()> {
+    let pk_columns: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_table_info('orbit_pipelines')
+         WHERE pk > 0 ORDER BY pk",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    if pk_columns == ["project", "id"] {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+    sqlx::query("DROP TABLE IF EXISTS orbit_pipelines_new")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    sqlx::query(
+        "CREATE TABLE orbit_pipelines_new (
+            id          TEXT NOT NULL,
+            project     TEXT NOT NULL,
+            status      TEXT NOT NULL DEFAULT 'running',
+            phase       TEXT,
+            mode        TEXT,
+            state_json  TEXT NOT NULL DEFAULT '{}',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL,
+            PRIMARY KEY (project, id)
+        )",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+    sqlx::query(
+        "INSERT INTO orbit_pipelines_new
+            (id, project, status, phase, mode, state_json, created_at, updated_at)
+         SELECT id, project, status, phase, mode, state_json, created_at, updated_at
+         FROM orbit_pipelines",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+    sqlx::query("DROP TABLE orbit_pipelines")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    sqlx::query("ALTER TABLE orbit_pipelines_new RENAME TO orbit_pipelines")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    sqlx::query("CREATE INDEX idx_orbit_status ON orbit_pipelines(status)")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    sqlx::query("CREATE INDEX idx_orbit_project ON orbit_pipelines(project)")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+    tx.commit().await.map_err(super::sqlx_err)?;
     Ok(())
 }
 
@@ -255,8 +394,6 @@ pub(crate) const DDL_SQLITE: &str = r#"
         value TEXT NOT NULL
     );
 
-    INSERT OR IGNORE INTO _harness_meta (key, value) VALUES ('schema_version', '1');
-
     CREATE TABLE IF NOT EXISTS observations (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp        TEXT NOT NULL,
@@ -274,6 +411,7 @@ pub(crate) const DDL_SQLITE: &str = r#"
         file_ext         TEXT,
         sequence_id      INTEGER,
         pipeline_id      TEXT,
+        tool_use_id      TEXT,
         project          TEXT
     );
 
@@ -282,6 +420,9 @@ pub(crate) const DDL_SQLITE: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
     CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);
     CREATE INDEX IF NOT EXISTS idx_obs_proj_ts    ON observations(project, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_obs_sess_proj_id ON observations(session_id, project, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_obs_proj_ts_id ON observations(project, timestamp DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_obs_ts_id      ON observations(timestamp DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -311,10 +452,25 @@ pub(crate) const DDL_SQLITE: &str = r#"
         total_evolved     INTEGER NOT NULL DEFAULT 0,
         analysis_summary  TEXT NOT NULL DEFAULT '',
         edit_type         TEXT NOT NULL DEFAULT 'add_skill',
+        session_id        TEXT,
         project           TEXT NOT NULL DEFAULT ''
     );
 
     CREATE INDEX IF NOT EXISTS idx_evo_ts ON evolution_records(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS idx_evo_project_id ON evolution_records(project, id DESC);
+
+    CREATE TABLE IF NOT EXISTS reflection_sessions (
+        session_id   TEXT NOT NULL,
+        project      TEXT NOT NULL,
+        completed_at TEXT NOT NULL,
+        PRIMARY KEY (session_id, project)
+    );
+
+    CREATE TABLE IF NOT EXISTS reflection_metrics (
+        session_id TEXT NOT NULL,
+        project    TEXT NOT NULL,
+        PRIMARY KEY (session_id, project)
+    );
 
     CREATE TABLE IF NOT EXISTS metrics_state (
         key     TEXT NOT NULL,
@@ -334,6 +490,9 @@ pub(crate) const DDL_SQLITE: &str = r#"
         dim_cost     REAL NOT NULL DEFAULT 0.0,
         project      TEXT NOT NULL DEFAULT ''
     );
+
+    CREATE INDEX IF NOT EXISTS idx_score_history_project_id
+        ON score_history(project, id DESC);
 
     CREATE TABLE IF NOT EXISTS skill_attribution (
         skill_name        TEXT NOT NULL,
@@ -399,30 +558,19 @@ pub(crate) const DDL_SQLITE: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_orch_inbox  ON orch_agent_inbox(agent_id, timestamp);
 
     CREATE TABLE IF NOT EXISTS orbit_pipelines (
-        id          TEXT PRIMARY KEY,
+        id          TEXT NOT NULL,
         project     TEXT NOT NULL,
         status      TEXT NOT NULL DEFAULT 'running',
         phase       TEXT,
         mode        TEXT,
         state_json  TEXT NOT NULL DEFAULT '{}',
         created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
+        updated_at  TEXT NOT NULL,
+        PRIMARY KEY (project, id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_orbit_status  ON orbit_pipelines(status);
     CREATE INDEX IF NOT EXISTS idx_orbit_project ON orbit_pipelines(project);
-
-    CREATE TABLE IF NOT EXISTS evolved_skills (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        name        TEXT NOT NULL UNIQUE,
-        origin      TEXT NOT NULL DEFAULT '',
-        confidence  REAL NOT NULL DEFAULT 0.5,
-        project     TEXT NOT NULL,
-        skill_md    TEXT NOT NULL DEFAULT '',
-        active      INTEGER NOT NULL DEFAULT 1,
-        created     TEXT NOT NULL,
-        updated     TEXT NOT NULL
-    );
 
     CREATE TABLE IF NOT EXISTS promotion_counters (
         pattern_key TEXT NOT NULL,
@@ -442,6 +590,7 @@ pub(crate) const DDL_SQLITE: &str = r#"
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp        TEXT NOT NULL,
         project          TEXT NOT NULL,
+        session_id        TEXT NOT NULL DEFAULT '',
         success_rate     REAL NOT NULL DEFAULT 0.0,
         avg_score        REAL NOT NULL DEFAULT 0.0,
         per_error_stats  TEXT NOT NULL DEFAULT '{}',
@@ -455,6 +604,287 @@ pub(crate) const DDL_SQLITE: &str = r#"
 
 #[cfg(test)]
 mod tests {
+    use super::SCHEMA_VERSION;
+
+    #[tokio::test]
+    async fn current_schema_version_skips_full_initialization() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO _harness_meta (key, value) VALUES ('schema_version', ?)")
+            .bind(SCHEMA_VERSION.to_string())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let observations: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'observations'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(observations, 0, "current schema must skip full DDL");
+    }
+
+    #[tokio::test]
+    async fn outdated_schema_version_runs_upgrade_and_stamps_current() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '0')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let observations: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'observations'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let version: String =
+            sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'schema_version'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(observations, 1);
+        assert_eq!(version, SCHEMA_VERSION.to_string());
+    }
+
+    #[tokio::test]
+    async fn v3_schema_upgrades_to_durable_reflection_sessions() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '3')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let reflection_sessions: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'reflection_sessions'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(reflection_sessions, 1);
+    }
+
+    #[tokio::test]
+    async fn failed_initialization_does_not_stamp_schema_version() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("CREATE VIEW observations AS SELECT 1 AS id")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        assert!(super::init_schema_pool(&pool).await.is_err());
+
+        let version: Option<String> =
+            sqlx::query_scalar("SELECT value FROM _harness_meta WHERE key = 'schema_version'")
+                .fetch_optional(&pool)
+                .await
+                .unwrap();
+        assert_eq!(version, None);
+    }
+
+    #[tokio::test]
+    async fn reflection_sessions_are_unique_per_project_and_session() {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::init_schema_pool(&pool).await.unwrap();
+        sqlx::query(
+            "INSERT INTO reflection_sessions (session_id, project, completed_at) VALUES (?, ?, ?)",
+        )
+        .bind("session-a")
+        .bind("project-a")
+        .bind("2026-07-28T10:00:00Z")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            sqlx::query(
+                "INSERT INTO reflection_sessions (session_id, project, completed_at) VALUES (?, ?, ?)",
+            )
+            .bind("session-a")
+            .bind("project-a")
+            .bind("2026-07-28T10:01:00Z")
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn legacy_observations_gain_tool_identity_before_its_index() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE observations (
+                id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, session_id TEXT NOT NULL,
+                tool TEXT NOT NULL, tool_category TEXT NOT NULL, action TEXT, result TEXT,
+                score REAL, dim_success REAL, dim_quality REAL, dim_cost REAL,
+                failure_category TEXT, error_snippet TEXT, file_ext TEXT,
+                sequence_id INTEGER, pipeline_id TEXT, project TEXT)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let columns: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pragma_table_info('observations') WHERE name = 'tool_use_id'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let index: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_obs_tool_use_id'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(columns, 1);
+        assert_eq!(index, 1);
+    }
+
+    #[tokio::test]
+    async fn v5_orbit_identity_migrates_to_project_and_id_without_losing_rows() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '5')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE orbit_pipelines (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'running',
+                phase TEXT,
+                mode TEXT,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO orbit_pipelines
+                (id, project, status, state_json, created_at, updated_at)
+             VALUES ('PIPELINE-legacy', 'project-a', 'running', '{}', '1', '1')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let pk_columns: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM pragma_table_info('orbit_pipelines')
+             WHERE pk > 0 ORDER BY pk",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let preserved: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM orbit_pipelines WHERE project='project-a'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(pk_columns, vec!["project", "id"]);
+        assert_eq!(preserved, 1);
+    }
+
+    #[tokio::test]
+    async fn v5_global_patterns_gain_nonempty_session_identity_without_losing_legacy_rows() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::query("CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO _harness_meta (key, value) VALUES ('schema_version', '5')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "CREATE TABLE global_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                project TEXT NOT NULL,
+                success_rate REAL NOT NULL DEFAULT 0.0,
+                avg_score REAL NOT NULL DEFAULT 0.0,
+                per_error_stats TEXT NOT NULL DEFAULT '{}',
+                failure_patterns TEXT NOT NULL DEFAULT '[]',
+                weak_tools TEXT NOT NULL DEFAULT '[]'
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for timestamp in ["1", "2"] {
+            sqlx::query(
+                "INSERT INTO global_patterns (timestamp, project)
+                 VALUES (?, 'project-a')",
+            )
+            .bind(timestamp)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let legacy_rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM global_patterns
+             WHERE project = 'project-a' AND session_id = ''",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy_rows, 2);
+
+        sqlx::query(
+            "INSERT INTO global_patterns (timestamp, project, session_id)
+             VALUES ('3', 'project-a', 'session-a')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let duplicate = sqlx::query(
+            "INSERT INTO global_patterns (timestamp, project, session_id)
+             VALUES ('4', 'project-a', 'session-a')",
+        )
+        .execute(&pool)
+        .await;
+        assert!(duplicate.is_err());
+    }
+
     #[tokio::test]
     async fn migrate_metrics_state_legacy_single_pk_to_composite() {
         // Regression: a legacy single-PK metrics_state must migrate to the

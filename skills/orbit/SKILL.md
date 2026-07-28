@@ -46,6 +46,7 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
   "max_retries": 3,
   "audit_report": null,
   "pr_url": null,
+  "ci_status": null,
   "deadline": "{ISO-8601, now + 30 minutes}",
   "started_at": "{ISO-8601}",
   "updated_at": "{ISO-8601}",
@@ -55,9 +56,10 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 
 **Completion invariants.** `epic reflect` checks every pipeline marked `complete`
 and reports the ones whose own state contradicts it. Do not set
-`"status": "complete"` unless both hold:
+`"status": "complete"` unless all hold:
 
-- `pr_url` is set (or `phase_history` has a `ship` entry with `status: complete`)
+- `pr_url` is a nonempty concrete GitHub pull-request URL returned by `gh pr create`
+- `ci_status` is exactly `"success"`
 - `audit_fail_count` is not above `max_retries` — above it, Step 5 requires a pause
 
 ## Step 1: Auto-Detect Mode
@@ -171,14 +173,18 @@ and reports the ones whose own state contradicts it. Do not set
 4. **Create PR** via `gh pr create` with spec + audit report in body.
    Record the returned URL in pipeline state as `pr_url` — this is the evidence
    the completion invariant checks for.
-5. **CI watch** via `gh pr checks --watch`, auto-fix failures
-6. **Exit worktree**: Return to original directory and keep the worktree
+5. Set `"ci_status": "running"`, then watch CI via `gh pr checks --watch`.
+   - On success, record `"ci_status": "success"`.
+   - On CI failure, record `"ci_status": "failed"` and `"status": "failed"`.
+     STOP. Do not run Evolve and do not mark the pipeline complete.
+   - Only successful CI proceeds to Step 7.
+6. **Exit worktree**: Return to original directory and keep the worktree.
 
 ## Step 7: Evolve
 
 Run the evolution engine to analyze this session and generate/improve skills.
 
-1. **Always run** — regardless of CI outcome:
+1. Verify `ci_status` is `"success"`, then run:
    ```bash
    epic-harness reflect
    ```
@@ -192,7 +198,7 @@ Run the evolution engine to analyze this session and generate/improve skills.
    ```
    Unconsumed manifests leave the template skill body in place.
 
-2. **If CI green** (all checks passed): additionally run
+2. Run the contextual reflection:
    ```bash
    epic-harness reflect --context --days 1
    ```
@@ -205,7 +211,8 @@ Run the evolution engine to analyze this session and generate/improve skills.
 
 3. Report the evolution outcome in the final summary (evolved skills generated, score trend).
 
-4. Update pipeline state: `"phase": "evolve"`, `"status": "complete"`.
+4. Verify the completion invariants again. Then update pipeline state:
+   `"phase": "evolve"`, `"status": "complete"`.
 
 ## Step 8: Report
 
@@ -242,4 +249,4 @@ Run the evolution engine to analyze this session and generate/improve skills.
 - Losing audit report between phases
 - Creating branch with dirty working tree
 - Losing worktree reference between phases
-- Skipping evolve step after ship (evolve must always run, even if CI fails)
+- Running Evolve or marking the pipeline complete after CI failure

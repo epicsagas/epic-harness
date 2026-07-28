@@ -261,16 +261,14 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
 fn parse_composite_score(stdout: &str) -> Option<f64> {
     for line in stdout.lines().rev() {
         let line = line.trim();
-        if line.starts_with('{') {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                if let Some(s) = v
-                    .get("composite")
-                    .or_else(|| v.get("score"))
-                    .and_then(|v| v.as_f64())
-                {
-                    return Some(s.clamp(0.0, 1.0));
-                }
-            }
+        if line.starts_with('{')
+            && let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
+            && let Some(s) = v
+                .get("composite")
+                .or_else(|| v.get("score"))
+                .and_then(|v| v.as_f64())
+        {
+            return Some(s.clamp(0.0, 1.0));
         }
     }
     None

@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Cargo source builds depended on frontend tooling**: `build.rs` invoked
+  `pnpm` and could mutate the source tree while building. Cargo now embeds the
+  checked-in dashboard asset. `make dashboard-build` generates it, and CI
+  verifies an exact byte match. Source installation requires Rust 1.94 or newer
+  and does not require Node.js or `pnpm`.
+- **Orbit state could collide or dismiss the wrong project**: SQLite identity
+  is now `(project, id)` with a lossless schema-v6 migration. Dashboard
+  dismissal uses one exact project-scoped file-and-SQLite backend. Completion
+  requires a concrete pull-request URL and successful CI before Evolve.
+- **Evolved-skill dashboard data came from an orphaned SQLite copy**: bounded
+  project-scoped reads now use each project's `evolved/` directory, the same
+  source that writes `SKILL.md` and `meta.json`.
+- **SessionEnd reflection work could be lost or starved**: jobs now publish
+  atomically after durable writes, use two bounded worker slots and a 64-entry
+  scan, refresh ownership when claimed, and use atomic retry/completion
+  transitions. Per-session persistence keys make recovery idempotent. Malformed
+  or exhausted jobs move to `.failed`. Reflection fallback and Orbit reads now
+  apply file, record, and byte limits before parsing.
+- **Legacy project-state migration could cross file boundaries or remove its
+  only source**: SessionStart now validates the complete project-local
+  `.harness/` tree before copying. Symlinks, non-regular entries, and copy
+  failures keep the source tree. Only a complete migration removes it.
+- **Eval scaffolding could generate a recursive benchmark**: `epic eval --init`
+  no longer treats a Makefile or justfile `eval` wrapper that calls
+  `epic-harness eval` as a domain benchmark. Genuine domain `eval` targets
+  remain auto-detected.
+- **Plugin hooks could run a stale or missing runtime** (#113): the bootstrap
+  parsed `epic-harness version` from stdout even though the real binary writes
+  it to stderr, installed an unpinned `latest` release, accepted installer
+  success without verifying the result, and then ran `resume` through a
+  separate shell fragment. All shipping version owners now declare `0.8.3`.
+  A canonical runtime revision distinguishes unreleased fixes that share that
+  semantic version. The Node runner installs and verifies the exact version and
+  revision before SessionStart continues, and fails visibly without emitting
+  event-invalid stdout.
+- **Codex hook manifests were not portable or schema-valid** (#113): plugin
+  paths were unquoted, POSIX-only binary probes had no Windows override,
+  matcher groups used unsupported `description` fields, `SubagentStop`
+  succeeded with empty stdout instead of JSON, and `SessionEnd` inherited its
+  one-second default. Hooks now use one quoted cross-platform Node runner,
+  define `commandWindows`, validate and forward the runtime's subagent-stop JSON
+  (using `{}` only when it is silent), and give SessionEnd Codex's three-second
+  maximum. CI runs the bootstrap and manifest contracts on Linux, macOS, and
+  Windows, and supports a manual dispatch for fork PR verification.
 - **A hook process was treated as a session** (#113): `session_id()` was
   `YYYYMMDD_PID`, but hosts run each hook in its own process — one installation
   produced 37,611 "sessions" from 40,804 observations, which broke sequence
@@ -15,7 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanup. `HookInput` now keeps the host's `session_id`, `turn_id`,
   `tool_use_id`, `agent_id` and `agent_type`, and `session_id()` uses the host
   id when present. Ids are sanitized to `[A-Za-z0-9_-]` and capped, since they
-  reach `session_{id}.jsonl` and `resume.{id}.lock`.
+  reach `session_{id}.jsonl` and `resume.{id}.lock`. SessionStart persists the
+  host session's partition date; later hooks fail visibly if that record is
+  missing or corrupt instead of switching identity.
 - **Reading a file was scored as a failed tool call** (#113): success came from
   matching output text for `FAIL`, `TypeError`, `timeout` and similar, so
   reading a log or a diff that merely *mentions* an error counted as a failure —

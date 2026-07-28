@@ -323,7 +323,10 @@ On session start, the `resume` hook calls `harness mem context --project <slug>`
 - **CRUD**: Inline Markdown editor (marked.js rendering) + edge linking panel
 - **Theme**: Dark by default
 
-Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node routes, secret masking applied before storage, sensitive file paths filtered from auto-recorded content.
+Security: the server binds to `127.0.0.1` only. It has no application login by
+design and trusts processes that run as the same local operating-system
+account. UUID v4 path validation applies to all node routes. Secret masking
+applies before storage, and auto-recording filters sensitive file paths.
 
 ## File Map
 

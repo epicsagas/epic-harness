@@ -176,33 +176,6 @@ export interface AgentEvent {
   data: Record<string, unknown>;
 }
 
-export interface OrchAgentDef {
-  id: string;
-  role: string;
-  task: string;
-  satisfies: string[];
-  status: string;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
-export interface OrchestrationRun {
-  id: string;
-  status: string;
-  agents: OrchAgentDef[];
-  dependency_graph: Record<string, string[]>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface OrchAgentStatus {
-  agent_id: string;
-  phase: string;
-  progress: number;
-  last_heartbeat: string;
-  status: string;
-}
-
 export interface GraphNode {
   id: string;
   title: string;
@@ -374,10 +347,20 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
     trend,
   };
 }
-export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
-export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
-  const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  return res.json();
+export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines', projectArgs());
+export async function dismissOrbitPipeline(id: string, project: string): Promise<{ ok: boolean }> {
+  if (!project || project === '__all__') throw new Error('a concrete project is required');
+  if (!id) throw new Error('Orbit pipeline ID must not be empty');
+  if (isTauriRuntime()) {
+    return invoke<{ ok: boolean }>('dismiss_orbit', { project, id });
+  }
+  const res = await fetch(
+    `/api/orbit/${encodeURIComponent(id)}?project=${encodeURIComponent(project)}`,
+    { method: 'DELETE' },
+  );
+  const body = await res.json() as { ok: boolean; error?: string };
+  if (!res.ok || !body.ok) throw new Error(body.error ?? 'pipeline dismissal failed');
+  return body;
 }
 export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills', projectArgs());
 export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary', projectArgs());

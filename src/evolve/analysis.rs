@@ -17,8 +17,10 @@ pub fn analyze_session(observations: &[ObsRecord]) -> SessionAnalysis {
         .collect();
     let success_rate = if total > 0 {
         round3((total - errors.len() as u64) as f64 / total as f64)
-    } else {
+    } else if observations.is_empty() {
         1.0
+    } else {
+        0.0
     };
     let avg_score = if total > 0 {
         round3(scored.iter().map(|o| o.score.unwrap_or(0.0)).sum::<f64>() / total as f64)
@@ -209,10 +211,10 @@ pub fn analyze_minibatches(scored: &[&ObsRecord]) -> Vec<MinibatchInsight> {
         // File cluster (top 3 files)
         let mut file_counts: HashMap<String, u64> = HashMap::new();
         for o in chunk {
-            if let Some(action) = o.action.as_deref() {
-                if let Some(f) = crate::shared::classify::extract_file(action) {
-                    *file_counts.entry(f.to_string()).or_default() += 1;
-                }
+            if let Some(action) = o.action.as_deref()
+                && let Some(f) = crate::shared::classify::extract_file(action)
+            {
+                *file_counts.entry(f.to_string()).or_default() += 1;
             }
         }
         let mut files: Vec<_> = file_counts.into_iter().collect();
@@ -553,6 +555,7 @@ mod tests {
             },
             file_ext: Some(".ts".into()),
             sequence_id: Some(1),
+            tool_use_id: None,
             pipeline_id: None,
         }
     }
@@ -562,6 +565,18 @@ mod tests {
         let analysis = analyze_session(&[]);
         assert_eq!(analysis.total_observations, 0);
         assert_eq!(analysis.success_rate, 1.0);
+    }
+
+    #[test]
+    fn analyze_unknown_only_session_is_not_successful() {
+        let mut unknown = make_obs("Read", "read", "unknown", 0.0, Some("src/lib.rs"));
+        unknown.score = None;
+        unknown.dimensions = None;
+
+        let analysis = analyze_session(&[unknown]);
+
+        assert_eq!(analysis.total_observations, 0);
+        assert_eq!(analysis.success_rate, 0.0);
     }
 
     #[test]

@@ -156,8 +156,13 @@ pub fn atomic_write_json(path: &Path, data: &impl Serialize) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
     }
-    fs::rename(&tmp, path)?;
-    Ok(())
+    match crate::team::codex::atomic_replace_file(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&tmp);
+            Err(error)
+        }
+    }
 }
 
 /// Read a JSON file, returning None if missing or unparseable.
@@ -170,11 +175,15 @@ pub fn read_json_opt<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
 pub fn append_jsonl(path: &Path, record: &impl Serialize) -> io::Result<()> {
     use std::io::Write;
     let json = serde_json::to_string(record).map_err(io::Error::other)?;
+    let lock_path = path.with_extension("jsonl.lock");
+    let _lock = acquire_lock(&lock_path)?;
     let mut f = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)?;
-    writeln!(f, "{json}")?;
+    let mut line = json.into_bytes();
+    line.push(b'\n');
+    f.write_all(&line)?;
     Ok(())
 }
 
@@ -227,6 +236,16 @@ pub fn append_event(base: &Path, agent_id: &str, event: &AgentEvent) -> io::Resu
     let a_dir = agent_dir(base, agent_id);
     fs::create_dir_all(&a_dir)?;
     append_jsonl(&agent_stream_file(base, agent_id), event)
+}
+
+pub fn append_agent_tool_record(
+    base: &Path,
+    agent_id: &str,
+    record: &serde_json::Value,
+) -> io::Result<()> {
+    let a_dir = agent_dir(base, agent_id);
+    fs::create_dir_all(&a_dir)?;
+    append_jsonl(&agent_stream_file(base, agent_id), record)
 }
 
 /// Read all events from an agent's stream.jsonl.
@@ -313,7 +332,7 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 /// Acquire an exclusive advisory file lock on `path`.
 /// Returns the locked file handle (holds the lock until dropped).
 #[cfg(unix)]
-fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+pub(crate) fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .create(true)
@@ -334,71 +353,133 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
 }
 
 #[cfg(not(unix))]
-fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    use std::sync::OnceLock;
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        eprintln!(
-            "[harness] warning: file locking unavailable on this platform — \
-             concurrent agent spawns may race"
-        );
-    });
-    fs::OpenOptions::new()
-        .create_new(true)
+pub(crate) fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
         .write(true)
-        .open(lock_path)
-        .or_else(|_| fs::File::open(lock_path))
+        .open(lock_path)?;
+    lock_file_exclusive(&file)?;
+    Ok(file)
 }
 
-/// Upsert an agent into an auto-created run.json.
-///
-/// If `run.json` does not exist, creates a new auto-run with id `auto-{timestamp}`.
-/// If it exists, adds the agent or updates its status.
-/// Uses advisory file locking to prevent TOCTOU races during concurrent agent spawns.
-/// Returns the agent ID used.
-pub fn upsert_agent_to_run(
+#[cfg(any(windows, test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WindowsLockContract {
+    flags: u32,
+    bytes_low: u32,
+    bytes_high: u32,
+}
+
+#[cfg(any(windows, test))]
+const fn windows_lock_contract() -> WindowsLockContract {
+    WindowsLockContract {
+        flags: 0x0000_0002,
+        bytes_low: 1,
+        bytes_high: 0,
+    }
+}
+
+#[cfg(windows)]
+fn lock_file_exclusive(file: &fs::File) -> io::Result<()> {
+    use std::ffi::c_void;
+    use std::os::windows::io::AsRawHandle;
+
+    #[repr(C)]
+    struct Overlapped {
+        internal: usize,
+        internal_high: usize,
+        offset: u32,
+        offset_high: u32,
+        event: *mut c_void,
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn LockFileEx(
+            file: *mut c_void,
+            flags: u32,
+            reserved: u32,
+            bytes_low: u32,
+            bytes_high: u32,
+            overlapped: *mut Overlapped,
+        ) -> i32;
+    }
+
+    let contract = windows_lock_contract();
+    let mut overlapped: Overlapped = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        LockFileEx(
+            file.as_raw_handle(),
+            contract.flags,
+            0,
+            contract.bytes_low,
+            contract.bytes_high,
+            &mut overlapped,
+        )
+    };
+    if result == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn lock_file_exclusive(_file: &fs::File) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "cross-process file locking is unsupported on this platform",
+    ))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTransition {
+    pub unblocked: Vec<String>,
+}
+
+fn new_auto_run(now: &str) -> OrchestrationRun {
+    OrchestrationRun {
+        id: {
+            let compact = now.replace(['-', ':'], "").replace('T', "-");
+            let truncated: String = compact.chars().take(19).collect();
+            format!("auto-{truncated}")
+        },
+        status: RunStatus::Running,
+        agents: Vec::new(),
+        dependency_graph: HashMap::new(),
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+    }
+}
+
+/// Apply one agent transition and all derived dependency/run state under one lock.
+pub fn transition_agent_in_run(
     base: &Path,
     agent_id: &str,
     description: &str,
     subagent_type: &str,
     status: AgentStatus,
-) -> io::Result<String> {
+) -> io::Result<AgentTransition> {
     let orch_dir = orchestrator_dir(base);
     fs::create_dir_all(&orch_dir)?;
-
-    // Acquire advisory lock to prevent concurrent write races
     let lock_path = orch_dir.join("run.json.lock");
     let _lock = acquire_lock(&lock_path)?;
-
     let now = crate::shared::helpers::now_iso();
+    let mut run = read_run(base).unwrap_or_else(|| new_auto_run(&now));
 
-    let mut run = match read_run(base) {
-        Some(r) => r,
-        None => OrchestrationRun {
-            id: {
-                let compact = now.replace(['-', ':'], "").replace('T', "-");
-                let truncated: String = compact.chars().take(19).collect();
-                format!("auto-{truncated}")
-            },
-            status: RunStatus::Running,
-            agents: Vec::new(),
-            dependency_graph: HashMap::new(),
-            created_at: now.clone(),
-            updated_at: now.clone(),
-        },
-    };
-
-    // Ensure agent directory exists
-    let a_dir = agent_dir(base, agent_id);
-    fs::create_dir_all(&a_dir)?;
-
-    if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
+    fs::create_dir_all(agent_dir(base, agent_id))?;
+    if let Some(existing) = run.agents.iter_mut().find(|agent| agent.id == agent_id) {
         existing.status = status.clone();
         if status == AgentStatus::Done {
             existing.completed_at = Some(now.clone());
         }
-        if status == AgentStatus::Running && existing.started_at.is_none() {
-            existing.started_at = Some(now.clone());
+        if status == AgentStatus::Running {
+            existing.completed_at = None;
+            if existing.started_at.is_none() {
+                existing.started_at = Some(now.clone());
+            }
         }
     } else {
         run.agents.push(AgentDef {
@@ -407,31 +488,36 @@ pub fn upsert_agent_to_run(
             task: description.to_string(),
             satisfies: Vec::new(),
             status: status.clone(),
-            started_at: if status == AgentStatus::Running {
-                Some(now.clone())
-            } else {
-                None
-            },
-            completed_at: if status == AgentStatus::Done {
-                Some(now.clone())
-            } else {
-                None
-            },
+            started_at: (status == AgentStatus::Running).then(|| now.clone()),
+            completed_at: (status == AgentStatus::Done).then(|| now.clone()),
         });
     }
 
-    // Check if all agents are done
-    if is_run_complete(&run) {
-        run.status = RunStatus::Complete;
+    let unblocked = if status == AgentStatus::Done {
+        evaluate_dependencies(&run, agent_id)
+    } else {
+        Vec::new()
+    };
+    for unblocked_id in &unblocked {
+        if let Some(agent) = run
+            .agents
+            .iter_mut()
+            .find(|agent| agent.id == *unblocked_id)
+        {
+            agent.status = AgentStatus::Pending;
+        }
     }
+    run.status = if is_run_complete(&run) {
+        RunStatus::Complete
+    } else {
+        RunStatus::Running
+    };
     run.updated_at = now.clone();
     write_run(base, &run)?;
 
-    // Write agent status file for dashboard only when status meaningfully changes
-    // (skip on repeated "running" updates to reduce I/O during heartbeat cycles)
     let should_write_status = match read_agent_status(base, agent_id) {
         Some(existing) => existing.status != status,
-        None => true, // first time — always write
+        None => true,
     };
     if should_write_status {
         let status_file = AgentStatusFile {
@@ -454,6 +540,23 @@ pub fn upsert_agent_to_run(
         write_agent_status(base, agent_id, &status_file)?;
     }
 
+    Ok(AgentTransition { unblocked })
+}
+
+/// Upsert an agent into an auto-created run.json.
+///
+/// If `run.json` does not exist, creates a new auto-run with id `auto-{timestamp}`.
+/// If it exists, adds the agent or updates its status.
+/// Uses advisory file locking to prevent TOCTOU races during concurrent agent spawns.
+/// Returns the agent ID used.
+pub fn upsert_agent_to_run(
+    base: &Path,
+    agent_id: &str,
+    description: &str,
+    subagent_type: &str,
+    status: AgentStatus,
+) -> io::Result<String> {
+    transition_agent_in_run(base, agent_id, description, subagent_type, status.clone())?;
     Ok(agent_id.to_string())
 }
 
@@ -465,7 +568,9 @@ pub fn upsert_agent_to_run(
 pub fn auto_cleanup_stale_runs(base: &Path) {
     let orch_dir = orchestrator_dir(base);
     let lock_path = orch_dir.join("run.json.lock");
-    let _lock = acquire_lock(&lock_path);
+    let Ok(_lock) = acquire_lock(&lock_path) else {
+        return;
+    };
 
     let Some(mut run) = read_run(base) else {
         return;
@@ -744,6 +849,32 @@ mod tests {
         assert!(events.is_empty());
     }
 
+    #[test]
+    fn same_stream_append_waits_for_the_cross_process_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let stream = tmp.path().join("stream.jsonl");
+        let lock = acquire_lock(&stream.with_extension("jsonl.lock")).unwrap();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let writer_stream = stream.clone();
+        let writer = std::thread::spawn(move || {
+            let result = append_jsonl(&writer_stream, &serde_json::json!({"event": "edit"}));
+            finished_tx.send(result).unwrap();
+        });
+
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "an append must not pass another process holding the stream lock"
+        );
+        drop(lock);
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("append completes after lock release")
+            .unwrap();
+        writer.join().unwrap();
+    }
+
     // ── Test 4: Evaluating dependency graph when agent completes ──
 
     #[test]
@@ -827,6 +958,95 @@ mod tests {
 
         let unblocked = evaluate_dependencies(&run, "flaky");
         assert_eq!(unblocked, vec!["downstream"]);
+    }
+
+    #[test]
+    fn starting_new_agent_reopens_completed_auto_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let completed = make_run("auto-old", vec![("done", AgentStatus::Done)], vec![]);
+        init_run(tmp.path(), &completed).unwrap();
+
+        upsert_agent_to_run(
+            tmp.path(),
+            "new-agent",
+            "new task",
+            "worker",
+            AgentStatus::Running,
+        )
+        .unwrap();
+
+        let run = read_run(tmp.path()).unwrap();
+        assert_eq!(run.status, RunStatus::Running);
+        assert!(
+            run.agents
+                .iter()
+                .any(|agent| agent.id == "new-agent" && agent.status == AgentStatus::Running)
+        );
+    }
+
+    #[test]
+    fn completion_transition_updates_dependencies_in_one_state_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run = make_run(
+            "run-transition",
+            vec![
+                ("builder", AgentStatus::Running),
+                ("tester", AgentStatus::Blocked),
+            ],
+            vec![("tester", vec!["builder"])],
+        );
+        init_run(tmp.path(), &run).unwrap();
+
+        let transition =
+            transition_agent_in_run(tmp.path(), "builder", "build", "worker", AgentStatus::Done)
+                .unwrap();
+
+        assert_eq!(transition.unblocked, vec!["tester"]);
+        let persisted = read_run(tmp.path()).unwrap();
+        assert_eq!(
+            persisted
+                .agents
+                .iter()
+                .find(|agent| agent.id == "builder")
+                .unwrap()
+                .status,
+            AgentStatus::Done
+        );
+        assert_eq!(
+            persisted
+                .agents
+                .iter()
+                .find(|agent| agent.id == "tester")
+                .unwrap()
+                .status,
+            AgentStatus::Pending
+        );
+    }
+
+    #[test]
+    fn stale_cleanup_does_not_mutate_state_without_the_run_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut run = make_run(
+            "auto-locked",
+            vec![("worker", AgentStatus::Running)],
+            vec![],
+        );
+        run.agents[0].started_at = Some("1970-01-01T00:00:00Z".into());
+        init_run(tmp.path(), &run).unwrap();
+        fs::create_dir(orchestrator_dir(tmp.path()).join("run.json.lock")).unwrap();
+
+        auto_cleanup_stale_runs(tmp.path());
+
+        let persisted = read_run(tmp.path()).unwrap();
+        assert_eq!(persisted.agents[0].status, AgentStatus::Running);
+        assert_eq!(persisted.status, RunStatus::Running);
+    }
+
+    #[test]
+    fn windows_lock_contract_is_exclusive_and_covers_one_byte() {
+        let contract = windows_lock_contract();
+        assert_eq!(contract.flags, 0x0000_0002);
+        assert_eq!((contract.bytes_low, contract.bytes_high), (1, 0));
     }
 
     // ── Test 5: Control directive parsing ──
@@ -1128,5 +1348,18 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "file must be owner-read/write only");
+    }
+
+    #[test]
+    fn atomic_write_replaces_an_existing_destination() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("test.json");
+
+        atomic_write_json(&path, &serde_json::json!({"generation": 1})).unwrap();
+        atomic_write_json(&path, &serde_json::json!({"generation": 2})).unwrap();
+
+        let value: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value["generation"], 2);
+        assert!(!path.with_extension("json.tmp").exists());
     }
 }

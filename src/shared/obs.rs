@@ -18,6 +18,8 @@ pub struct ObsRecord {
     pub file_ext: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sequence_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pipeline_id: Option<String>,
 }

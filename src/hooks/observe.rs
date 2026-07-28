@@ -17,6 +17,28 @@ const MAX_ACTION_BYTES: usize = 2000;
 /// Cap on the persisted error snippet.
 const MAX_SNIPPET_BYTES: usize = 500;
 
+fn persisted_action(input: &serde_json::Value) -> String {
+    let raw = input
+        .get("command")
+        .and_then(|value| value.as_str())
+        .or_else(|| input.get("file_path").and_then(|value| value.as_str()))
+        .map(String::from)
+        .unwrap_or_else(|| {
+            let redacted = redact_json_credentials(input);
+            serde_json::to_string(&redacted).expect("JSON Value serialization cannot fail")
+        });
+    mask_secrets_keep_paths(truncate_utf8(&raw, MAX_ACTION_BYTES))
+}
+
+fn observation_tool_use_id(input: &HookInput) -> Option<String> {
+    input
+        .tool_use_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned)
+}
+
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
 });
@@ -111,7 +133,7 @@ pub(crate) struct Outcome {
 /// 2. With no structured status, a call whose output is fetched content
 ///    (`outputs_file_content`) yields `unknown` on a keyword match rather than a
 ///    fabricated failure. This is the case that produced most recorded failures.
-/// 3. Otherwise the previous behaviour: text keywords decide.
+/// 3. Otherwise text can prove a failure, but clean text cannot prove success.
 ///
 /// A reported failure still uses the text to pick a category, falling back to
 /// `runtime_error` when the text names nothing recognizable.
@@ -132,7 +154,7 @@ pub(crate) fn decide_outcome(
         },
         None => match text_failure {
             None => Outcome {
-                result: "success",
+                result: "unknown",
                 failure: None,
             },
             Some(_) if outputs_file_content(tool_category, command) => Outcome {
@@ -349,7 +371,7 @@ fn is_agent_event(input: &HookInput) -> bool {
 ///
 /// The event name decides when the host sends one: a `SubagentStop` carrying no
 /// payload would otherwise be misread as a spawn and reset the agent to running.
-fn track_agent_spawn(input: &HookInput) {
+fn track_agent_spawn(input: &HookInput) -> Result<(), Box<dyn std::error::Error>> {
     use crate::orchestrate;
 
     let is_completion = match input.hook_event_name.as_deref() {
@@ -363,12 +385,11 @@ fn track_agent_spawn(input: &HookInput) {
     };
 
     if is_completion {
-        if let Err(e) = orchestrate::run_post_checked(input) {
-            eprintln!("[harness] agent track post error: {e}");
-        }
-    } else if let Err(e) = orchestrate::run_pre_checked(input) {
-        eprintln!("[harness] agent track pre error: {e}");
+        orchestrate::run_post_checked(input)?;
+    } else {
+        orchestrate::run_pre_checked(input)?;
     }
+    Ok(())
 }
 
 /// Testable variant that accepts an explicit orchestrator directory.
@@ -506,8 +527,13 @@ pub fn run(input: &HookInput) -> i32 {
     // lifecycle events, not tool calls: recording them as observations would add
     // `unknown`-tool rows with no outcome to every statistic.
     if input.tool_name.is_none() && is_agent_event(input) {
-        track_agent_spawn(input);
-        return 0;
+        return match track_agent_spawn(input) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("[harness] native agent tracking failed: {error}");
+                1
+            }
+        };
     }
 
     let sid = session_id();
@@ -522,22 +548,7 @@ pub fn run(input: &HookInput) -> i32 {
     // ~90 KB, and marker scans found authorization headers and key-shaped
     // strings in the stored text. Paths survive masking: they are what
     // file-level pattern detection keys on.
-    let action = input.tool_input.as_ref().map(|v| {
-        let raw = v
-            .get("command")
-            .and_then(|c| c.as_str())
-            .map(String::from)
-            .or_else(|| {
-                v.get("file_path")
-                    .and_then(|c| c.as_str())
-                    .map(String::from)
-            })
-            .unwrap_or_else(|| {
-                let s = serde_json::to_string(v).unwrap_or_default();
-                truncate_utf8(&s, MAX_ACTION_BYTES).to_string()
-            });
-        mask_secrets_keep_paths(truncate_utf8(&raw, MAX_ACTION_BYTES))
-    });
+    let action = input.tool_input.as_ref().map(persisted_action);
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
     let seq_id = if db.is_none() {
@@ -558,6 +569,7 @@ pub fn run(input: &HookInput) -> i32 {
         error_snippet: None,
         file_ext,
         sequence_id: Some(seq_id),
+        tool_use_id: observation_tool_use_id(input),
         pipeline_id: super::common::detect_active_orbit_id(),
     };
 
@@ -660,9 +672,8 @@ pub fn run(input: &HookInput) -> i32 {
     // Storage policy: SQLite primary, JSONL fallback on transient write failure.
     // Rationale: observe runs on every tool use; a single DB write failure must not
     // drop the observation. The JSONL file acts as a circuit-breaker buffer.
-    // Note: reflect.rs reads from SQLite only — if a write falls back to JSONL,
-    // that observation is excluded from end-of-session analysis. This is an
-    // acceptable tradeoff; persistent DB failures are treated as a setup problem.
+    // Reflection merges this exact session's fallback file with its database
+    // rows using sequence/provenance identity.
     if let Some(ref pool) = db {
         if let Err(e) =
             crate::store::runtime::block_on(crate::store::observations::insert_observation_pool(
@@ -698,7 +709,10 @@ pub fn run(input: &HookInput) -> i32 {
     // Agent tracking: record spawn/completion to orchestrator state for
     // dashboard display. Always active — no EPIC_ORCHESTRATION gate.
     if is_agent_event(input) {
-        track_agent_spawn(input);
+        if let Err(error) = track_agent_spawn(input) {
+            eprintln!("[harness] agent tracking failed: {error}");
+            return 1;
+        }
 
         // Timeout detection still gated by EPIC_ORCHESTRATION
         if let Some(agent_id) = crate::shared::host::agent_id().or_else(|| {
@@ -712,6 +726,11 @@ pub fn run(input: &HookInput) -> i32 {
         {
             hint("agent-timeout", &timeout_msg);
         }
+    }
+
+    if let Err(error) = crate::orchestrate::record_native_agent_tool(input) {
+        eprintln!("[harness] native agent tool tracking failed: {error}");
+        return 1;
     }
 
     0
@@ -898,11 +917,37 @@ mod tests {
     }
 
     #[test]
-    fn clean_output_is_a_success() {
+    fn clean_output_without_structured_status_is_unknown() {
         assert_eq!(
             decide_outcome(None, None, "bash", "cat a.txt").result,
-            "success"
+            "unknown"
         );
+    }
+
+    #[test]
+    fn generic_persisted_action_redacts_nested_credentials() {
+        let input = serde_json::json!({
+            "request": [{"github_token": "ghp_nested", "query": "visible"}]
+        });
+        let action = persisted_action(&input);
+        assert!(!action.contains("ghp_nested"));
+        assert!(action.contains("<REDACTED>"));
+        assert!(action.contains("visible"));
+    }
+
+    #[test]
+    fn stable_tool_use_id_is_preserved_for_cross_store_deduplication() {
+        let input = HookInput {
+            tool_use_id: Some("call-123".into()),
+            ..HookInput::default()
+        };
+        assert_eq!(observation_tool_use_id(&input), Some("call-123".into()));
+
+        let blank = HookInput {
+            tool_use_id: Some("  ".into()),
+            ..HookInput::default()
+        };
+        assert_eq!(observation_tool_use_id(&blank), None);
     }
 
     #[test]
@@ -1072,7 +1117,7 @@ mod tests {
             "Bearer token must be redacted"
         );
         assert!(
-            output.contains("Bearer <REDACTED>"),
+            output.contains("Authorization: <REDACTED>"),
             "must have redacted placeholder"
         );
     }

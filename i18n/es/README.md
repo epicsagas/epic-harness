@@ -403,7 +403,7 @@ Se ejecutan de forma invisible en cada sesión. Binario único de Rust (`epic-ha
 
 Polish retroalimenta en observe: fallo de formato → `lint_fail`, error de TypeScript → `build_fail`. El thrashing Edit→Error se detecta incluso cuando los errores provienen de polish.
 
-Cada sesión escribe su propio `session_{date}_{pid}_{random}.jsonl` — múltiples sesiones concurrentes no corromperán los datos de las demás.
+Cada sesión escribe su propio `session_{date}_{host-session-id}.jsonl` — múltiples sesiones concurrentes no corromperán los datos de las demás.
 
 ### Perfiles de Hook
 
@@ -465,10 +465,10 @@ Todas las herramientas comparten el mismo directorio de datos `~/.harness/projec
 | Herramienta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
 |-------------|-------------|----------|-------------|---------|
 | **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 26 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 26 | — |
+| **Codex CLI** | ✓ Completo | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
+| **Antigravity** | ✓ Parcial¹ | ✓ 3 comandos (incl. /orbit) | ✓ 26 | — |
 
-¹ `plugin_hooks = true` en `~/.codex/config.toml` · ² Solo PreInvocation/PostInvocation — sin PreToolUse (guard/polish no disponible)
+¹ Solo PreInvocation/PostInvocation — sin PreToolUse (guard/polish no disponible)
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic: binario no encontrado dentro de los hooks del plugin</summary>
-
-El plugin busca el binario primero en `hooks/bin/epic-harness`. Después de actualizar con `cargo install`, cópialo:
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## Desarrollo
 
 ```bash
 cargo install --path .                                        # Compilar + instalar
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Actualizar binario del plugin
 cargo test                                                    # Pruebas
 ```
-
-Los hooks buscan el binario en dos lugares: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
 
 ---
 

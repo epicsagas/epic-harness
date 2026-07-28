@@ -1,6 +1,4 @@
-PLUGIN_CACHE := $(HOME)/.claude/plugins/cache/epicsagas/epic/0.1.0/hooks/bin/epic-harness
 CARGO_BIN    := $(HOME)/.cargo/bin/epic-harness
-HOOKS_BIN    := hooks/bin/epic-harness
 
 .PHONY: build install dashboard-build gen-skills gen-skills-dry lint-skills eval demo-record demo-gif demo-clean
 
@@ -14,10 +12,8 @@ build: dashboard-build
 	cargo build --release
 
 install: build
-	cp target/release/epic-harness $(HOOKS_BIN)
 	cp target/release/epic-harness $(CARGO_BIN)
-	@if [ -f "$(PLUGIN_CACHE)" ]; then cp target/release/epic-harness "$(PLUGIN_CACHE)"; fi
-	@echo "installed: $(HOOKS_BIN), $(CARGO_BIN)"
+	@echo "installed: $(CARGO_BIN)"
 
 # Generate/validate SKILL.md files across all skills
 gen-skills:

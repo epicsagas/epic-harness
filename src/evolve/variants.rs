@@ -23,7 +23,7 @@
 //! Per-variant seesaw (R5) is scoped: a candidate targeting variant k is
 //! tested only against tasks routed to k.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,8 @@ pub const MAX_VARIANTS: usize = 3;
 
 /// Minimum samples before stack-based cold-start yields to cluster prior.
 const WARM_ROUTING_MIN_SAMPLES: u32 = 4;
+/// Session replay markers only need to cover the retained reflection window.
+const MAX_VARIANT_SESSION_MARKERS: usize = 256;
 
 /// A pool of skill variants plus per-variant routing stats.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -44,6 +46,10 @@ pub struct VariantPool {
     pub variants: Vec<SkillVariant>,
     /// variant_id → (successes, total) for routed tasks.
     pub routing_stats: HashMap<String, (u32, u32)>,
+    /// Reflection session ids already included in `routing_stats`. This makes
+    /// recovery after a worker crash idempotent instead of double-counting.
+    #[serde(default)]
+    pub applied_sessions: HashSet<String>,
 }
 
 impl VariantPool {
@@ -73,10 +79,10 @@ impl VariantPool {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(self).unwrap_or_else(|_| "{}".into());
+        let json = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, json)?;
-        std::fs::rename(&tmp, &path)?;
+        crate::team::codex::atomic_replace_file(&tmp, &path)?;
         Ok(())
     }
 }
@@ -181,6 +187,30 @@ impl VariantPool {
         }
     }
 
+    /// Record a session's routing result at most once across process retries.
+    pub fn record_outcome_once(
+        &mut self,
+        session_id: &str,
+        variant_id: &str,
+        success: bool,
+    ) -> bool {
+        if !self.applied_sessions.insert(session_id.to_string()) {
+            return false;
+        }
+        while self.applied_sessions.len() > MAX_VARIANT_SESSION_MARKERS {
+            let Some(oldest) = self.applied_sessions.iter().min().cloned() else {
+                break;
+            };
+            self.applied_sessions.remove(&oldest);
+        }
+        self.record_outcome(variant_id, success);
+        true
+    }
+
+    pub fn has_session_outcome(&self, session_id: &str) -> bool {
+        self.applied_sessions.contains(session_id)
+    }
+
     fn lowest_scoring_index(&self) -> Option<usize> {
         self.variants
             .iter()
@@ -259,6 +289,7 @@ mod tests {
                 variant("python-ml", &["python"], 0.9),
             ],
             routing_stats: HashMap::new(),
+            applied_sessions: HashSet::new(),
         };
         // No warm samples → cold path picks the rust variant for a rust task.
         let chosen = pool.route(&["rust"]).unwrap();
@@ -273,6 +304,7 @@ mod tests {
                 variant("rust-b", &["rust"], 0.5), // declared low
             ],
             routing_stats: HashMap::new(),
+            applied_sessions: HashSet::new(),
         };
         // rust-b actually performs better in practice (warm samples).
         for _ in 0..5 {
@@ -294,6 +326,7 @@ mod tests {
                 variant("python-ml", &["python"], 0.9),
             ],
             routing_stats: HashMap::new(),
+            applied_sessions: HashSet::new(),
         };
         // No stack signal → fall back to highest avg_score.
         let chosen = pool.route(&["unknown"]).unwrap();
@@ -305,6 +338,7 @@ mod tests {
         let mut pool = VariantPool {
             variants: vec![variant("rust-backend", &["rust"], 0.7)],
             routing_stats: HashMap::new(),
+            applied_sessions: HashSet::new(),
         };
         let id = pool.fork_if_needed("rust-backend", true);
         assert!(id.starts_with("rust-backend-fork-"));
@@ -315,6 +349,7 @@ mod tests {
         let mut pool = VariantPool {
             variants: vec![variant("rust-backend", &["rust"], 0.7)],
             routing_stats: HashMap::new(),
+            applied_sessions: HashSet::new(),
         };
         let id = pool.fork_if_needed("rust-backend", false);
         assert_eq!(id, "rust-backend");
@@ -329,6 +364,7 @@ mod tests {
                 variant("v3", &["go"], 0.8),
             ],
             routing_stats: HashMap::new(),
+            applied_sessions: HashSet::new(),
         };
         // Pool at MAX (3); forking must retire the lowest (v2) first.
         let id = pool.fork_if_needed("v1", true);
@@ -357,5 +393,27 @@ mod tests {
         pool.record_outcome("v1", false);
         pool.record_outcome("v1", true);
         assert_eq!(pool.routing_stats.get("v1"), Some(&(2, 3)));
+    }
+
+    #[test]
+    fn session_outcome_is_idempotent_across_retries() {
+        let mut pool = VariantPool::default();
+        assert!(pool.record_outcome_once("session-a", "variant-a", true));
+        assert!(!pool.record_outcome_once("session-a", "variant-a", true));
+        assert_eq!(pool.routing_stats.get("variant-a"), Some(&(1, 1)));
+    }
+
+    #[test]
+    fn session_outcome_markers_keep_only_the_retained_window() {
+        let mut pool = VariantPool::default();
+        for index in 0..=MAX_VARIANT_SESSION_MARKERS {
+            let session = format!("20260728-{index:04}");
+            assert!(pool.record_outcome_once(&session, "variant-a", true));
+        }
+
+        assert_eq!(pool.applied_sessions.len(), MAX_VARIANT_SESSION_MARKERS);
+        assert!(!pool.has_session_outcome("20260728-0000"));
+        assert!(pool.has_session_outcome("20260728-0256"));
+        assert_eq!(pool.routing_stats.get("variant-a"), Some(&(257, 257)));
     }
 }

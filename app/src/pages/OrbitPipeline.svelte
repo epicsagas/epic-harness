@@ -147,10 +147,11 @@
     return raw?.replace(/-[a-f0-9]{6}$/, '') ?? '--';
   }
 
-  async function dismiss(id: string) {
+  async function dismiss(pipeline: OrbitPipeline) {
+    if (!pipeline._project) return;
     try {
-      await dismissOrbitPipeline(id);
-      pipelines = pipelines.filter(p => p.id !== id);
+      await dismissOrbitPipeline(pipeline.id, pipeline._project);
+      pipelines = pipelines.filter(p => p.id !== pipeline.id || p._project !== pipeline._project);
     } catch { /* ignore */ }
   }
 </script>
@@ -206,7 +207,7 @@
             ID: {shortId(p.id)} · Mode: {p.mode ?? '--'} · Check fails: {p.check_fail_count}
           </span>
           <button
-            onclick={() => dismiss(p.id)}
+            onclick={() => dismiss(p)}
             title="Dismiss"
             style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;cursor:pointer;padding:0;line-height:1;"
           >✕</button>
@@ -320,7 +321,7 @@
               <td style="font-family:var(--font-mono);text-align:right;">{$tStore('durationMin', durationMinutes(p.started_at, p.updated_at))}</td>
               <td>
                 <button
-                  onclick={() => dismiss(p.id)}
+                  onclick={() => dismiss(p)}
                   title="Dismiss"
                   style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
                 >✕</button>

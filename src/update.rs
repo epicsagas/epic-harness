@@ -42,71 +42,6 @@ fn sync_marker() -> PathBuf {
     harness_dir().join(".last-binary-sync")
 }
 
-// ── resolve binary ──────────────────────────────────────────────────
-
-fn resolve_binary() -> Option<PathBuf> {
-    // Plugin-bundled binary first
-    if let Ok(root) = std::env::var("CLAUDE_PLUGIN_ROOT") {
-        let bundled = Path::new(&root).join("hooks/bin/epic-harness");
-        if bundled.is_file() {
-            return Some(bundled);
-        }
-    }
-    // PATH lookup
-    let output = Command::new("which").arg(CRATE_NAME).output().ok()?;
-    if output.status.success() {
-        let p = String::from_utf8_lossy(&output.stdout);
-        let p = p.trim();
-        if !p.is_empty() {
-            return Some(PathBuf::from(p));
-        }
-    }
-    None
-}
-
-// ── install if missing ──────────────────────────────────────────────
-
-fn install_binary() -> Option<PathBuf> {
-    eprintln!("[epic] {CRATE_NAME} binary not found — installing...");
-    let status = if Command::new("brew").arg("--version").output().is_ok() {
-        Command::new("brew")
-            .args(["install", CRATE_NAME])
-            .status()
-            .ok()
-    } else {
-        None
-    };
-
-    let status = status.filter(|s| s.success()).or_else(|| {
-        if Command::new("cargo-binstall")
-            .arg("--version")
-            .output()
-            .is_ok()
-        {
-            Command::new("cargo-binstall")
-                .args(["-y", "--no-confirm", CRATE_NAME])
-                .status()
-                .ok()
-        } else {
-            None
-        }
-    });
-
-    let status = status.filter(|s| s.success()).or_else(|| {
-        Command::new("cargo")
-            .args(["install", CRATE_NAME])
-            .status()
-            .ok()
-    });
-
-    if status.map(|s| s.success()).unwrap_or(false) {
-        resolve_binary()
-    } else {
-        eprintln!("[epic] Neither brew nor cargo found. Install one and restart.");
-        None
-    }
-}
-
 // ── version helpers ─────────────────────────────────────────────────
 
 fn extract_semver(s: &str) -> Option<String> {
@@ -273,54 +208,12 @@ fn touch_sync_marker() {
 
 // ── Web UI ──────────────────────────────────────────────────────────
 
-fn start_webui() {
+fn start_webui() -> Result<(), String> {
     let port: u16 = std::env::var("HARNESS_WEBUI_PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_WEBUI_PORT);
-
-    let url = format!("http://127.0.0.1:{port}/");
-    if Command::new("curl").args(["-sf", &url]).output().is_ok() {
-        return; // already running
-    }
-
-    let exe = match std::env::current_exe().ok() {
-        Some(e) => e,
-        None => return,
-    };
-
-    // Detach from current process
-    let _ = Command::new(&exe)
-        .args(["mem", "serve", "--port", &port.to_string()])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
-
-    // Wait for bind, then open browser
-    for _ in 0..3 {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if Command::new("curl").args(["-sf", &url]).output().is_ok() {
-            break;
-        }
-    }
-    if Command::new("curl").args(["-sf", &url]).output().is_ok() {
-        let browse_url = format!("http://localhost:{port}");
-        #[cfg(target_os = "macos")]
-        {
-            let _ = Command::new("open").arg(&browse_url).spawn();
-        }
-        #[cfg(target_os = "linux")]
-        {
-            let _ = Command::new("xdg-open").arg(&browse_url).spawn();
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let _ = Command::new("cmd")
-                .args(["/c", "start", &browse_url])
-                .spawn();
-        }
-    }
+    crate::hooks::resume::start_dashboard_on_port(port, true)
 }
 
 // ── main entry ──────────────────────────────────────────────────────
@@ -329,15 +222,18 @@ pub fn run(args: &[String]) -> i32 {
     let check_only = args.iter().any(|a| a == "--check");
     let force = args.iter().any(|a| a == "--force");
 
-    // ── resolve or install binary ────────────────────────────────
-    let eh = resolve_binary().or_else(install_binary);
-    let eh = match eh {
-        Some(p) => p,
-        None => return 1,
+    // The update command is already running inside the intended binary. Reuse
+    // that executable for follow-up commands instead of resolving a second
+    // plugin-local or PATH-owned runtime.
+    let eh = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[epic] Cannot resolve the current executable: {error}");
+            return 1;
+        }
     };
 
     // ── auto-update check (cooled down) ─────────────────────────
-    let mut did_update = false;
     if !check_only
         && (force || should_check())
         && let Some(cur) = current_version()
@@ -347,21 +243,11 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!("[epic] Update available: {cur} → {latest}");
         let method = detect_install_method();
         eprintln!("[epic] Detected: {}", method.label());
-        match run_upgrade(&method, &latest) {
-            Ok(c) => {
-                did_update = c == 0;
-            }
-            Err(e) => eprintln!("[epic] Upgrade failed: {e}"),
+        if let Err(error) = run_upgrade(&method, &latest) {
+            eprintln!("[epic] Upgrade failed: {error}");
         }
         touch_sync_marker();
     }
-
-    // Re-resolve after potential update
-    let eh = if did_update {
-        resolve_binary().unwrap_or(eh)
-    } else {
-        eh
-    };
 
     // --check: report version status only, skip side effects
     if check_only {
@@ -383,7 +269,10 @@ pub fn run(args: &[String]) -> i32 {
     let _ = Command::new(&eh).args(["mem", "mcp-install"]).output();
 
     // ── Web UI ──────────────────────────────────────────────────
-    start_webui();
+    if let Err(error) = start_webui() {
+        eprintln!("[epic] {error}");
+        return 1;
+    }
 
     0
 }

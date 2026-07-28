@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,6 +14,24 @@ env:
   CI: 1
 
 jobs:
+  plugin-contract:
+    name: Plugin contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Test manifests and plugin bootstrap
+        run: node --test registry/scripts/install.test.js registry/scripts/manifest.test.js
+
   check:
     name: Check
     runs-on: ubuntu-latest
@@ -30,8 +49,20 @@ jobs:
         with:
           version: 11
       - uses: Swatinem/rust-cache@v2
-      - name: Test plugin bootstrap
-        run: node --test registry/scripts/install.test.js
+      - name: Install dashboard dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: Check dashboard
+        working-directory: app
+        run: pnpm run check
+      - name: Test dashboard
+        working-directory: app
+        run: pnpm exec vitest run
+      - name: Build dashboard
+        working-directory: app
+        run: pnpm run build
+      - name: Verify generated dashboard asset
+        run: cmp -s app/dist/index.html assets/dashboard.html
       - name: Check
         run: cargo check --all-targets
       - name: Clippy
@@ -49,6 +80,16 @@ jobs:
       - name: Test
         run: cargo test
 
+  msrv:
+    name: Minimum supported Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --locked
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
@@ -58,12 +99,7 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
       - name: Run audit
-        # RUSTSEC-2026-0009: time < 0.3.47 via tauri — ignored until tauri releases a fix
-        # RUSTSEC-2023-0071: rsa Marvin Attack (CVE-2023-49092) via tauri — no fix available
-        # RUSTSEC-2026-0194/0195: quick-xml DoS via plist (tauri toolchain) — fix needs
-        # quick-xml >= 0.41 but even plist 1.9.0 pins ^0.39; no untrusted XML is parsed.
-        # Revisit when plist releases a 0.41-compatible version.
-        run: cargo audit --ignore RUSTSEC-2026-0009 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+        run: cargo audit
 
   sbom:
     name: Generate SBOM

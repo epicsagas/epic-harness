@@ -29,12 +29,12 @@ pub struct HarnessMetrics {
 
 #[tauri::command]
 pub async fn get_harness_metrics(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<HarnessMetrics, String> {
     let pool = state.harness_db.clone();
 
-    let m = epic_harness::store::metrics::load_metrics_pool(&pool)
+    let m = epic_harness::store::metrics::load_metrics_scoped_pool(&pool, project.as_deref())
         .await
         .map_err(|e| format!("load metrics: {e}"))?;
 
@@ -90,18 +90,29 @@ pub struct OrbitPipeline {
     pub updated_at: String,
     pub deadline: Option<String>,
     pub phase_history: Vec<serde_json::Value>,
+    #[serde(rename = "_project")]
+    pub project: Option<String>,
 }
 
 #[tauri::command]
-pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<OrbitPipeline>, String> {
+pub async fn get_orbit_pipelines(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<OrbitPipeline>, String> {
     let pool = state.harness_db.clone();
 
-    let pipelines = epic_harness::store::orbit_store::list_all_pipelines_pool_limited(
+    let pipelines = epic_harness::store::orbit_store::list_pipelines_scoped_pool(
         &pool,
+        project.as_deref(),
         MAX_ORBIT_PIPELINES,
     )
     .await
     .map_err(|e| format!("list pipelines: {e}"))?;
+    let pipelines = epic_harness::shared::orbit::dashboard_pipelines_for_project(
+        pipelines,
+        project.as_deref(),
+        MAX_ORBIT_PIPELINES as usize,
+    );
 
     let result: Vec<OrbitPipeline> = pipelines
         .into_iter()
@@ -117,10 +128,42 @@ pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<Orbit
             updated_at: v["updated_at"].as_str().unwrap_or("").to_string(),
             deadline: v["deadline"].as_str().map(str::to_string),
             phase_history: v["phase_history"].as_array().cloned().unwrap_or_default(),
+            project: v["project"].as_str().map(str::to_string),
         })
         .collect();
 
     Ok(result)
+}
+
+#[derive(Serialize)]
+pub struct DismissOrbitResult {
+    pub ok: bool,
+    pub deleted_file: bool,
+    pub deleted_row: bool,
+}
+
+#[tauri::command]
+pub async fn dismiss_orbit(
+    project: String,
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<DismissOrbitResult, String> {
+    let project_harness_dir = epic_harness::shared::paths::resolve_external_harness_dir(&project)
+        .map_err(|error| format!("resolve Orbit project: {error}"))?;
+    let result = epic_harness::store::orbit_store::dismiss_pipeline_state_pool(
+        &state.harness_db,
+        &project,
+        &id,
+        &project_harness_dir,
+    )
+    .await
+    .map_err(|error| format!("dismiss Orbit pipeline: {error}"))?;
+
+    Ok(DismissOrbitResult {
+        ok: true,
+        deleted_file: result.deleted_file,
+        deleted_row: result.deleted_row,
+    })
 }
 
 // ── Evolved Skills ────────────────────────────────────────────────────────────
@@ -152,14 +195,12 @@ pub async fn get_evolved_skills(
 ) -> Result<EvolutionData, String> {
     let pool = state.harness_db.clone();
 
-    // Evolved skills — list_skills_full_pool is already cross-project;
-    // filter in-memory when a specific project is requested.
-    let skills = epic_harness::store::evolved::list_skills_full_pool(&pool)
-        .await
-        .map_err(|e| format!("list evolved skills: {e}"))?;
+    let skills =
+        epic_harness::store::evolved::list_skills_full_scoped_pool(&pool, project.as_deref())
+            .await
+            .map_err(|e| format!("list evolved skills: {e}"))?;
     let evolved_skills: Vec<EvolvedSkill> = skills
         .into_iter()
-        .filter(|s| project.as_ref().is_none_or(|p| s.project == *p))
         .map(|s| EvolvedSkill {
             name: s.name,
             origin: s.origin,
@@ -177,10 +218,13 @@ pub async fn get_evolved_skills(
         .collect();
 
     // Evolution history
-    let records =
-        epic_harness::store::evolution::query_recent_records_pool(&pool, MAX_EVOLUTION_ENTRIES)
-            .await
-            .map_err(|e| format!("query evolution records: {e}"))?;
+    let records = epic_harness::store::evolution::query_recent_records_scoped_pool(
+        &pool,
+        MAX_EVOLUTION_ENTRIES,
+        project.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("query evolution records: {e}"))?;
 
     let total_sessions = records.len() as u32;
     let patterns_detected: u32 = records
@@ -249,16 +293,20 @@ pub struct FailureCategory {
 
 #[tauri::command]
 pub async fn get_obs_summary(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ObsSummary, String> {
     let pool = state.harness_db.clone();
 
     // Use a wide date range to cover all stored data.
-    let stats =
-        epic_harness::store::observations::query_obs_stats_pool(&pool, "2000-01-01", "2099-12-31")
-            .await
-            .map_err(|e| format!("query obs stats: {e}"))?;
+    let stats = epic_harness::store::observations::query_obs_stats_scoped_pool(
+        &pool,
+        "2000-01-01",
+        "2099-12-31",
+        project.as_deref(),
+    )
+    .await
+    .map_err(|e| format!("query obs stats: {e}"))?;
 
     // Session summaries from aggregate stats
     let session_summaries: Vec<SessionSummary> = stats
@@ -329,13 +377,14 @@ pub struct SessionSnapshotResponse {
 
 #[tauri::command]
 pub async fn get_session_snapshots(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SessionSnapshotResponse>, String> {
     let pool = state.harness_db.clone();
-    let snaps = epic_harness::store::sessions::list_recent_snapshots_pool(&pool, 50)
-        .await
-        .map_err(|e| format!("query session snapshots: {e}"))?;
+    let snaps =
+        epic_harness::store::sessions::list_recent_snapshots_pool(&pool, 50, project.as_deref())
+            .await
+            .map_err(|e| format!("query session snapshots: {e}"))?;
 
     Ok(snaps
         .into_iter()

@@ -23,7 +23,6 @@ async fn schema_creates_all_tables() {
     let expected = [
         "_harness_meta",
         "evolution_records",
-        "evolved_skills",
         "global_patterns",
         "metrics_state",
         "observations",
@@ -47,6 +46,10 @@ async fn schema_creates_all_tables() {
             table
         );
     }
+    assert!(
+        !tables.iter().any(|table| table == "evolved_skills"),
+        "evolved skills are file-owned and must not get a new SQLite table"
+    );
 }
 
 #[tokio::test]
@@ -65,7 +68,7 @@ async fn meta_table_tracks_version() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(version, "1");
+    assert_eq!(version, super::schema::SCHEMA_VERSION.to_string());
 }
 
 #[tokio::test]
@@ -101,6 +104,7 @@ async fn obs_stats_tool_limit_is_enforced() {
             error_snippet: None,
             file_ext: None,
             sequence_id: None,
+            tool_use_id: None,
             pipeline_id: None,
         };
         insert_observation_pool(&pool, &rec, "sess_limit_test", "test-project")
@@ -139,6 +143,7 @@ async fn obs_error_stats_limit_is_enforced() {
             error_snippet: None,
             file_ext: None,
             sequence_id: None,
+            tool_use_id: None,
             pipeline_id: None,
         };
         insert_observation_pool(&pool, &rec, "sess_err_limit", "test-project")

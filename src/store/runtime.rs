@@ -7,17 +7,13 @@
 use std::future::Future;
 use std::sync::LazyLock;
 
-use crate::config::CONFIG;
-
 /// Global tokio runtime shared by all sync callers.
 ///
-/// Initialized once on first use. Worker threads are set to
-/// `min(max_connections + 2, 16)` to prevent excessive thread creation
-/// when `max_connections` is set to a high value.
+/// Hook invocations are one-shot processes, so a multi-thread executor created
+/// several worker threads for every tool call. Store operations are short,
+/// awaited database I/O; one current-thread executor is sufficient.
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
-    let workers = ((CONFIG.db.max_connections + 2) as usize).min(16);
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(workers)
+    tokio::runtime::Builder::new_current_thread()
         .enable_io()
         .enable_time()
         .build()
@@ -44,4 +40,17 @@ where
         );
     }
     RUNTIME.block_on(fut)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_shot_store_runtime_does_not_create_worker_threads() {
+        assert_eq!(
+            RUNTIME.handle().runtime_flavor(),
+            tokio::runtime::RuntimeFlavor::CurrentThread
+        );
+    }
 }

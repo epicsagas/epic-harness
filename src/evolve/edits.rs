@@ -33,7 +33,7 @@
 use crate::shared::evolution::EditType;
 
 /// A typed, manifest-carrying harness edit.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum HarnessEdit {
     /// Create a new evolved skill (SKILL.md + meta.json).
     AddSkill {
@@ -188,10 +188,10 @@ impl HarnessEdit {
                 content,
                 origin,
                 confidence,
-            } => {
-                super::skills::write_skill_with_meta(name, content, origin, *confidence);
-                EditOutcome::Applied
-            }
+            } => match super::skills::write_skill_with_meta(name, content, origin, *confidence) {
+                Ok(()) => EditOutcome::Applied,
+                Err(error) => EditOutcome::Skipped(format!("skill write failed: {error}")),
+            },
             HarnessEdit::ModifySkill {
                 skill_name,
                 section,

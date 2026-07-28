@@ -403,7 +403,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 
 Polish 回饋至 observe：格式化失敗 → `lint_fail`，TypeScript 錯誤 → `build_fail`。即使錯誤來自 polish，Edit→Error 抖振也會被偵測到。
 
-每個工作階段寫入各自的 `session_{date}_{pid}_{random}.jsonl` — 多個並行工作階段不會互相損壞資料。
+每個工作階段寫入各自的 `session_{date}_{host-session-id}.jsonl` — 多個並行工作階段不會互相損壞資料。
 
 ### 掛鉤設定檔
 
@@ -465,10 +465,10 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 | 工具 | Ring 0 掛鉤 | 命令 | 技能 | 智能體 |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ 完整 | ✓ 3 條命令（含 /orbit） | ✓ 26 個技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 條提示詞（含 /orbit） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 條命令（含 /orbit） | ✓ 26 | — |
+| **Codex CLI** | ✓ 完整 | ✓ 3 條提示詞（含 /orbit） | ✓ 26 | — |
+| **Antigravity** | ✓ 部分¹ | ✓ 3 條命令（含 /orbit） | ✓ 26 | — |
 
-¹ `plugin_hooks = true` 在 `~/.codex/config.toml` · ² 僅 PreInvocation/PostInvocation — 無 PreToolUse（guard/polish 不可用）
+¹ 僅 PreInvocation/PostInvocation — 無 PreToolUse（guard/polish 不可用）
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic：外掛掛鉤內找不到二進位</summary>
-
-外掛會先在 `hooks/bin/epic-harness` 尋找二進位。透過 `cargo install` 更新後，請複製它：
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## 開發
 
 ```bash
 cargo install --path .                                        # 建置 + 安裝
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # 更新外掛二進位
 cargo test                                                    # 測試
 ```
-
-掛鉤在兩處尋找二進位：`hooks/bin/epic-harness`（外掛本地）→ `~/.cargo/bin/epic-harness`（PATH）。
 
 ---
 

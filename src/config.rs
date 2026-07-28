@@ -534,16 +534,16 @@ fn validate_config(cfg: &mut HarnessConfig) {
     cross_validate_driver(&mut cfg.db.driver, &cfg.db.harness_url);
     // Warn if memory_url is explicitly set but its scheme differs from driver.
     // Do NOT correct driver — memory_url defaults to SQLite when empty.
-    if !cfg.db.memory_url.is_empty() {
-        if let Ok(detected) = crate::store::pool::DbType::from_url(&cfg.db.memory_url) {
-            let detected_name = detected.name();
-            if detected_name != cfg.db.driver {
-                eprintln!(
-                    "[harness] db.memory_url scheme is '{detected_name}:' but db.driver is '{}' — \
+    if !cfg.db.memory_url.is_empty()
+        && let Ok(detected) = crate::store::pool::DbType::from_url(&cfg.db.memory_url)
+    {
+        let detected_name = detected.name();
+        if detected_name != cfg.db.driver {
+            eprintln!(
+                "[harness] db.memory_url scheme is '{detected_name}:' but db.driver is '{}' — \
                      ensure both databases use the same backend or set memory_url explicitly",
-                    cfg.db.driver,
-                );
-            }
+                cfg.db.driver,
+            );
         }
     }
 

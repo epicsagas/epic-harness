@@ -41,6 +41,50 @@ pub async fn insert_pattern_pool(
     Ok(id)
 }
 
+/// Insert a reflection's global export at most once for one project.
+///
+/// Legacy rows use an empty `session_id` and remain queryable, but new
+/// reflection writes must carry a stable session identity so replay cannot
+/// duplicate cross-project evidence.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_pattern_once_pool(
+    pool: &AnyPool,
+    session_id: &str,
+    timestamp: &str,
+    project: &str,
+    success_rate: f64,
+    avg_score: f64,
+    per_error_stats_json: &str,
+    failure_patterns_json: &str,
+    weak_tools_json: &str,
+) -> io::Result<bool> {
+    if session_id.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "global pattern export requires a reflection session id",
+        ));
+    }
+    let result = sqlx::query(
+        "INSERT INTO global_patterns
+         (timestamp, project, session_id, success_rate, avg_score, per_error_stats,
+          failure_patterns, weak_tools)
+         VALUES (?,?,?,?,?,?,?,?)
+         ON CONFLICT(project, session_id) WHERE session_id <> '' DO NOTHING",
+    )
+    .bind(timestamp)
+    .bind(project)
+    .bind(session_id)
+    .bind(success_rate)
+    .bind(avg_score)
+    .bind(per_error_stats_json)
+    .bind(failure_patterns_json)
+    .bind(weak_tools_json)
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Query patterns for all projects except the given one.
 pub async fn query_patterns_excluding_pool(
     pool: &AnyPool,
@@ -114,7 +158,7 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
             eprintln!(
                 "[store/global] JSON parse failed ({}): '{}' — using fallback",
                 e,
-                &raw[..raw.len().min(100)]
+                crate::shared::sanitize::truncate_utf8(raw, 100)
             );
             fallback
         }
@@ -153,6 +197,67 @@ mod tests {
         assert!(patterns[0]["per_error_stats"].is_object());
         assert!(patterns[0]["failure_patterns"].is_array());
         assert!(patterns[0]["weak_tools"].is_array());
+    }
+
+    #[tokio::test]
+    async fn session_scoped_insert_is_exactly_once_and_rejects_empty_identity() {
+        let pool = test_pool().await;
+        assert!(
+            insert_pattern_once_pool(
+                &pool,
+                "session-a",
+                "2026-06-02T10:00:00Z",
+                "project-a",
+                0.9,
+                0.85,
+                "{}",
+                "[]",
+                "[]",
+            )
+            .await
+            .unwrap()
+        );
+        assert!(
+            !insert_pattern_once_pool(
+                &pool,
+                "session-a",
+                "2026-06-02T10:00:01Z",
+                "project-a",
+                0.8,
+                0.75,
+                "{}",
+                "[]",
+                "[]",
+            )
+            .await
+            .unwrap()
+        );
+        assert!(
+            insert_pattern_once_pool(
+                &pool,
+                "",
+                "2026-06-02T10:00:02Z",
+                "project-a",
+                0.8,
+                0.75,
+                "{}",
+                "[]",
+                "[]",
+            )
+            .await
+            .is_err()
+        );
+
+        assert_eq!(query_all_patterns_pool(&pool, 10).await.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn malformed_json_diagnostic_is_utf8_safe() {
+        let raw = format!("{}日", "x".repeat(99));
+        assert_eq!(
+            parse_json_field(&raw, serde_json::json!({"fallback": true})),
+            serde_json::json!({"fallback": true})
+        );
     }
 
     #[tokio::test]

@@ -37,6 +37,9 @@ Complete inventory of every data artifact written to disk.
     ├── evolved_backup/                  ← Stagnation rollback backup
     ├── orbit/
     │   └── PIPELINE-*.json              ← Orbit pipeline state
+    ├── reflect-queue/
+    │   ├── job_*.{pending,claimed,completed,failed}
+    │   └── worker-*.slot                ← Bounded SessionEnd workers
     ├── orchestrator/
     │   ├── run.json                     ← Orchestrator run state
     │   ├── control.json                 ← Control directive
@@ -50,6 +53,7 @@ Complete inventory of every data artifact written to disk.
     │   └── .migrated                    ← Migration marker
     ├── metrics.json                     ← Legacy metrics
     ├── evolution.jsonl                  ← Legacy evolution records
+    ├── pending_synth.jsonl              ← Bounded synthesis backlog
     └── guard-rules.yaml                 ← Custom guard rules
 ```
 
@@ -92,7 +96,9 @@ Single file at `~/.harness/memory.db`. Project-agnostic (projects stored as tags
 
 ## Per-Project Files
 
-All under `~/.harness/projects/{slug}/`. The slug is the project directory name (e.g., `epic-harness`), with non-alphanumeric characters replaced by `_`. Project names must be unique across the workspace.
+All paths are under `~/.harness/projects/{slug}/`. The slug uses the canonical
+project root name plus a stable hash, so repositories with the same directory
+name remain separate.
 
 ### Active Data (written by hooks)
 
@@ -105,6 +111,8 @@ All under `~/.harness/projects/{slug}/`. The slug is the project directory name 
 | `orbit/PIPELINE-*.json` | JSON | snapshot | Orbit pipeline state |
 | `orchestrator/run.json` | JSON | orchestrate | Orchestrator run |
 | `orchestrator/agents/{id}/*.jsonl` | JSONL | orchestrate | Agent events/inbox |
+| `reflect-queue/job_*` | JSON | reflect | Durable SessionEnd work |
+| `pending_synth.jsonl` | JSONL | reflect | Host skill-synthesis backlog |
 | `guard-rules.yaml` | YAML | User | Custom guard rules |
 
 ### Legacy Data (read by migrate, no longer written)
@@ -137,6 +145,11 @@ Hooks write to SQLite first; on DB failure, fall back to files.
 |---------|--------|-------------|
 | `migrate` | Per-project JSONL/JSON files | `~/.harness/harness.db` |
 | `migrate --to-global` | `~/.harness/projects/*/harness.db` | `~/.harness/harness.db` |
+
+SessionStart also migrates a legacy project-local `.harness/` directory. It
+validates the full source tree before copying. A symlink, non-regular entry, or
+copy failure keeps the source tree. The source is removed only after a complete
+copy.
 
 ## External Configuration (not in ~/.harness)
 

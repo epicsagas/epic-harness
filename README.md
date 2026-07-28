@@ -16,8 +16,8 @@
 </p>
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-3fb950?style=for-the-badge&labelColor=0d1117" /></a>
-  <img alt="Version" src="https://img.shields.io/badge/version-0.7.0-fc8d62?style=for-the-badge&labelColor=0d1117" />
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.82+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
+  <img alt="Version" src="https://img.shields.io/badge/version-0.8.3-fc8d62?style=for-the-badge&labelColor=0d1117" />
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.94+-d73a49?style=for-the-badge&labelColor=0d1117&logo=rust&logoColor=white" />
   <img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-plugin-bc8cff?style=for-the-badge&labelColor=0d1117" />
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
@@ -105,7 +105,10 @@ Auto-installs the binary, skills, hooks, and the `harness-mem` MCP server in one
 codex plugin marketplace add epicsagas/plugins
 ```
 
-Skills and agents are available immediately — no further steps needed.
+Skills and agents are available immediately. On the first session, the plugin
+installs the exact matching `epic-harness` binary and verifies its version
+before it runs `resume`. An install or compatibility failure stops the hook and
+reports the required version.
 
 ### agy (Antigravity CLI)
 
@@ -123,6 +126,9 @@ brew install epicsagas/tap/epic-harness      # macOS / Linux (Homebrew)
 cargo binstall epic-harness                  # pre-built binary (Rust)
 cargo install epic-harness                   # build from source
 ```
+
+`cargo install` requires Rust 1.94 or newer. It embeds the checked-in dashboard
+asset and does not require Node.js or `pnpm`.
 
 No Homebrew? Use the installer script:
 
@@ -436,7 +442,9 @@ Run invisibly on every session. Single Rust binary (`epic-harness`) with subcomm
 
 Polish feeds back into observe: format failure → `lint_fail`, TypeScript error → `build_fail`. Edit→Error thrashing gets detected even when errors come from polish.
 
-Each session writes its own `session_{date}_{pid}_{random}.jsonl` — multiple concurrent sessions won't corrupt each other's data.
+Each host session writes to `session_{date}_{host-session-id}.jsonl`. The
+sanitized host session ID stays stable across hook processes, so concurrent
+sessions remain separate without splitting one session into per-process files.
 
 ### Hook Profiles
 
@@ -498,15 +506,15 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 26 skills | Live |
-| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | Generated³ |
-| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 26 | — |
+| **Codex CLI** | ✓ Full | ✓ 3 prompts (incl. /orbit) | ✓ 26 | Generated² |
+| **Antigravity** | ✓ Partial¹ | ✓ 3 commands (incl. /orbit) | ✓ 26 | — |
 
-¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable)
+¹ PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable)
 
-³ `epic team sync` writes native Codex custom agents (flat `~/.codex/agents/*.toml` with
-`name`/`description`/`developer_instructions`). Live multi-agent *orchestration* — spawning and
-tracking subagents — is still Claude-only: Epic registers no `SubagentStart`/`SubagentStop` hooks
-and does not yet retain Codex agent IDs.
+² `epic team sync` writes native Codex custom agents (flat `~/.codex/agents/*.toml` with
+`name`/`description`/`developer_instructions`). Epic registers Codex
+`SubagentStart` and `SubagentStop`, retains the host agent ID/type, and updates
+live orchestration state for native Codex subagents.
 
 ---
 
@@ -749,11 +757,12 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 <details>
 <summary>epic: binary not found inside plugin hooks</summary>
 
-The plugin looks for the binary in `hooks/bin/epic-harness` first. After updating via `cargo install`, copy it:
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
+The SessionStart bootstrap installs the plugin's exact binary version and
+runtime revision, then verifies both before any hook subcommand runs. This
+prevents an unreleased plugin fix from reusing an older binary with the same
+semantic version. If it reports a failure, install the required revision shown
+in the error and make sure `epic-harness` is on `PATH`. The plugin does not use
+a bundled `hooks/bin` fallback.
 </details>
 
 ---
@@ -762,11 +771,12 @@ cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
 
 ```bash
 cargo install --path .                                        # Build + install
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Update plugin binary
 cargo test                                                    # Tests
 ```
 
-Hooks look for the binary in two places: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH).
+Hooks use the cross-platform Node runner in `registry/scripts/install.js`. It
+resolves one `epic-harness` binary from `PATH`; SessionStart verifies that its
+version and runtime revision match the plugin before it runs `resume`.
 
 ---
 

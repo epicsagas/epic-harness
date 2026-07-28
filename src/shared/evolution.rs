@@ -279,6 +279,9 @@ pub struct Metrics {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvolutionRecord {
+    /// Stable SessionEnd identity used to make JSONL fallback writes replay-safe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     pub timestamp: String,
     pub observations: u64,
     pub success_rate: f64,

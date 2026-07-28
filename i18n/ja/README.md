@@ -403,7 +403,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 
 Polishはobserveにフィードバックします: フォーマット失敗 → `lint_fail`、TypeScriptエラー → `build_fail`。polishからエラーが来る場合でも、Edit→Errorスラッシングが検出されます。
 
-各セッションは独自の `session_{date}_{pid}_{random}.jsonl` を書き込みます — 複数の並行セッションが互いのデータを破損することはありません。
+各セッションは独自の `session_{date}_{host-session-id}.jsonl` を書き込みます — 複数の並行セッションが互いのデータを破損することはありません。
 
 ### フックプロファイル
 
@@ -465,10 +465,10 @@ epic team delete backend --global      # orgストアから永久に削除
 | ツール | Ring 0 フック | コマンド | スキル | エージェント |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 26スキル | Live |
-| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 26 | — |
+| **Codex CLI** | ✓ フル | ✓ 3プロンプト（/orbitを含む） | ✓ 26 | — |
+| **Antigravity** | ✓ 部分¹ | ✓ 3コマンド（/orbitを含む） | ✓ 26 | — |
 
-¹ `~/.codex/config.toml` で `plugin_hooks = true` · ² PreInvocation/PostInvocationのみ — PreToolUseなし（guard/polish利用不可）
+¹ PreInvocation/PostInvocationのみ — PreToolUseなし（guard/polish利用不可）
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic: プラグインフック内でバイナリが見つからない</summary>
-
-プラグインはまず `hooks/bin/epic-harness` でバイナリを探します。`cargo install` で更新した後、コピーしてください:
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## 開発
 
 ```bash
 cargo install --path .                                        # ビルド + インストール
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # プラグインバイナリを更新
 cargo test                                                    # テスト
 ```
-
-フックはバイナリを2か所で探します: `hooks/bin/epic-harness`（プラグインローカル）→ `~/.cargo/bin/epic-harness`（PATH）。
 
 ---
 

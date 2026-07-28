@@ -21,23 +21,27 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::CONFIG;
 use crate::evolve::edits::HarnessEdit;
 use crate::shared::evolution::{DetectedPattern, SessionAnalysis};
-use crate::shared::helpers::{append_jsonl, now_iso, read_jsonl_typed};
+use crate::shared::helpers::now_iso;
 use crate::shared::paths::pending_synth_file;
 use crate::shared::sanitize::sanitize_skill_content;
 
 /// Hard bounds on an accepted synthesized body.
 const BODY_MIN_CHARS: usize = 80;
 const BODY_MAX_CHARS: usize = 6_000;
-/// Bound on accumulated pending manifests so the file never grows unbounded.
-/// Oldest (by `created`) are dropped when exceeded.
-const MAX_PENDING_SYNTH: usize = 30;
+/// A bounded durable synthesis backlog. We reject new work at capacity rather
+/// than silently losing an unconsumed pending request.
+const MAX_PENDING_SYNTH_RECORDS: usize = 256;
+const MAX_PENDING_SYNTH_LINE_BYTES: usize = 16 * 1024;
+static SYNTHESIS_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// Failure evidence packaged for a host agent. All fields are already
 /// secret-masked and sanitized at analysis time (`collect_error_snippets`),
@@ -59,6 +63,9 @@ pub struct SynthEvidence {
 /// consumed by `epic-harness evolve accept-synth`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingSynth {
+    /// Reflection session identity. Legacy records deserialize with no id.
+    #[serde(default)]
+    pub session_id: String,
     pub schema_version: u32,
     /// Join key — matches `AddSkill.name`.
     pub skill_name: String,
@@ -94,16 +101,19 @@ pub fn synthesis_enabled() -> bool {
 /// AddSkill edits. The edits keep their template `content` unchanged — the
 /// manifest is the upgrade channel, not the seed. Returns how many manifests
 /// were emitted.
-pub fn upgrade_edits(edits: &mut [HarnessEdit], analysis: &SessionAnalysis) -> usize {
+pub fn upgrade_edits(
+    edits: &mut [HarnessEdit],
+    analysis: &SessionAnalysis,
+    reflection_session_id: &str,
+) -> std::io::Result<usize> {
     if !synthesis_enabled() {
-        return 0;
+        return Ok(0);
     }
     let budget = CONFIG.evolution.llm_synthesis_max_per_session;
-    let path = pending_synth_file();
     let evidence = extract_evidence(analysis);
-    let mut emitted = 0usize;
+    let mut candidates = Vec::new();
     for edit in edits.iter_mut() {
-        if emitted >= budget {
+        if candidates.len() >= budget {
             break;
         }
         if let HarnessEdit::AddSkill {
@@ -114,6 +124,7 @@ pub fn upgrade_edits(edits: &mut [HarnessEdit], analysis: &SessionAnalysis) -> u
         } = edit
         {
             let pending = PendingSynth {
+                session_id: reflection_session_id.to_string(),
                 schema_version: 1,
                 skill_name: name.clone(),
                 origin: origin.clone(),
@@ -125,14 +136,39 @@ pub fn upgrade_edits(edits: &mut [HarnessEdit], analysis: &SessionAnalysis) -> u
                 status: "pending".into(),
                 consumed: None,
             };
-            append_jsonl(&path, &pending);
-            emitted += 1;
+            candidates.push(pending);
         }
     }
-    if emitted > 0 {
-        gc_pending(&path);
+    merge_pending_once(&pending_synth_file(), candidates)
+}
+
+fn merge_pending_once(path: &Path, candidates: Vec<PendingSynth>) -> std::io::Result<usize> {
+    if candidates.is_empty() {
+        return Ok(0);
     }
-    emitted
+    let lock = path.with_extension("jsonl.lock");
+    let _lock = crate::orchestrate::state::acquire_lock(&lock)?;
+    let records = read_pending_records(path)?;
+    let mut merged = records.clone();
+    let mut added = 0;
+    for candidate in candidates {
+        if !records.iter().any(|record| {
+            record.session_id == candidate.session_id && record.skill_name == candidate.skill_name
+        }) {
+            merged.push(candidate);
+            added += 1;
+        }
+    }
+    if merged.len() > MAX_PENDING_SYNTH_RECORDS {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::WouldBlock,
+            "pending synthesis backlog is full; consume pending manifests before adding more",
+        ));
+    }
+    if added > 0 {
+        rewrite_jsonl_checked(path, &merged)?;
+    }
+    Ok(added)
 }
 
 /// Pull the bounded evidence a host agent needs out of a session analysis.
@@ -186,7 +222,8 @@ Hard limit: 60 lines."
 /// marks every pending record for the skill as consumed, so older records
 /// never resurface as separate synthesis targets.
 pub fn find_pending(skill_name: &str) -> Option<PendingSynth> {
-    read_jsonl_typed::<PendingSynth>(&pending_synth_file())
+    read_pending_records(&pending_synth_file())
+        .ok()?
         .into_iter()
         .filter(|r| r.status == "pending" && r.skill_name == skill_name)
         .max_by(|a, b| a.created.cmp(&b.created))
@@ -194,50 +231,89 @@ pub fn find_pending(skill_name: &str) -> Option<PendingSynth> {
 
 /// Mark every pending manifest for a skill as synthesized. Idempotent — a
 /// second call finds no pending record and does nothing.
-pub fn mark_consumed(skill_name: &str) {
-    let path = pending_synth_file();
-    let mut records: Vec<PendingSynth> = read_jsonl_typed(&path);
+pub fn mark_consumed(skill_name: &str) -> std::io::Result<usize> {
+    mark_consumed_at(&pending_synth_file(), skill_name)
+}
+
+fn mark_consumed_at(path: &Path, skill_name: &str) -> std::io::Result<usize> {
+    let lock = path.with_extension("jsonl.lock");
+    let _lock = crate::orchestrate::state::acquire_lock(&lock)?;
+    let mut records = read_pending_records(path)?;
     if records.is_empty() {
-        return;
+        return Ok(0);
     }
     let now = now_iso();
-    let mut changed = false;
+    let mut changed = 0usize;
     for r in records.iter_mut() {
         if r.status == "pending" && r.skill_name == skill_name {
             r.status = "synthesized".into();
             r.consumed = Some(now.clone());
-            changed = true;
+            changed += 1;
         }
     }
-    if changed {
-        rewrite_jsonl(&path, &records);
+    if changed > 0 {
+        rewrite_jsonl_checked(path, &records)?;
     }
+    Ok(changed)
 }
 
-/// Drop consumed records and cap pending growth (oldest first by `created`,
-/// which is ISO-8601 so lexical order is chronological).
-fn gc_pending(path: &Path) {
-    let mut records: Vec<PendingSynth> = read_jsonl_typed(path);
-    records.retain(|r| r.status == "pending");
-    if records.len() > MAX_PENDING_SYNTH {
-        records.sort_by(|a, b| b.created.cmp(&a.created));
-        records.truncate(MAX_PENDING_SYNTH);
-    }
-    rewrite_jsonl(path, &records);
-}
-
-fn rewrite_jsonl(path: &Path, records: &[PendingSynth]) {
-    use std::io::Write;
-    let tmp = path.with_extension("jsonl.tmp");
-    let Ok(mut f) = fs::File::create(&tmp) else {
-        return;
+fn read_pending_records(path: &Path) -> std::io::Result<Vec<PendingSynth>> {
+    let file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
     };
-    for r in records {
-        if let Ok(j) = serde_json::to_string(r) {
-            let _ = writeln!(f, "{j}");
+    let mut records = Vec::new();
+    for line in BufReader::new(file).lines() {
+        let line = line?;
+        if line.is_empty() {
+            continue;
+        }
+        if line.len() > MAX_PENDING_SYNTH_LINE_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "pending synthesis line exceeds limit",
+            ));
+        }
+        records.push(serde_json::from_str(&line).map_err(std::io::Error::other)?);
+        if records.len() > MAX_PENDING_SYNTH_RECORDS {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "pending synthesis backlog exceeds limit",
+            ));
         }
     }
-    let _ = fs::rename(&tmp, path);
+    Ok(records)
+}
+
+fn rewrite_jsonl_checked(path: &Path, records: &[PendingSynth]) -> std::io::Result<()> {
+    use std::io::Write;
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "pending synthesis path has no parent",
+        )
+    })?;
+    let tmp = parent.join(format!(
+        ".{}.{}.{}.tmp",
+        path.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id(),
+        SYNTHESIS_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut f = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)?;
+    for r in records {
+        let json = serde_json::to_string(r).map_err(std::io::Error::other)?;
+        writeln!(f, "{json}")?;
+    }
+    f.sync_all()?;
+    if let Err(error) = crate::team::codex::atomic_replace_file(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
+    Ok(())
 }
 
 /// Validate and normalize a synthesized body. Rejects output that is too
@@ -307,6 +383,94 @@ mod tests {
             failure_patterns,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn pending_synth_retry_after_atomic_write_is_not_duplicated() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending_synth.jsonl");
+        let pending = PendingSynth {
+            session_id: "session-a".into(),
+            schema_version: 1,
+            skill_name: "skill-a".into(),
+            origin: "test".into(),
+            confidence: 1.0,
+            evidence: SynthEvidence {
+                error_snippets: vec![],
+                failure_category_counts: HashMap::new(),
+                failure_patterns: vec![],
+            },
+            template_content: "content".into(),
+            prompt_guidance: "guidance".into(),
+            created: "2026-07-28T00:00:00Z".into(),
+            status: "pending".into(),
+            consumed: None,
+        };
+        assert_eq!(merge_pending_once(&path, vec![pending.clone()]).unwrap(), 1);
+        assert_eq!(merge_pending_once(&path, vec![pending]).unwrap(), 0);
+        assert_eq!(read_pending_records(&path).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn mark_consumed_is_locked_and_reports_the_persisted_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending_synth.jsonl");
+        let pending = PendingSynth {
+            session_id: "session-a".into(),
+            schema_version: 1,
+            skill_name: "skill-a".into(),
+            origin: "test".into(),
+            confidence: 1.0,
+            evidence: SynthEvidence {
+                error_snippets: vec![],
+                failure_category_counts: HashMap::new(),
+                failure_patterns: vec![],
+            },
+            template_content: "content".into(),
+            prompt_guidance: "guidance".into(),
+            created: "2026-07-28T00:00:00Z".into(),
+            status: "pending".into(),
+            consumed: None,
+        };
+        merge_pending_once(&path, vec![pending]).unwrap();
+
+        assert_eq!(mark_consumed_at(&path, "skill-a").unwrap(), 1);
+        assert_eq!(mark_consumed_at(&path, "skill-a").unwrap(), 0);
+        assert_eq!(
+            read_pending_records(&path).unwrap()[0].status,
+            "synthesized"
+        );
+    }
+
+    #[test]
+    fn mark_consumed_reports_every_persisted_record_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending_synth.jsonl");
+        let mut first = PendingSynth {
+            session_id: "session-a".into(),
+            schema_version: 1,
+            skill_name: "skill-a".into(),
+            origin: "test".into(),
+            confidence: 1.0,
+            evidence: SynthEvidence {
+                error_snippets: vec![],
+                failure_category_counts: HashMap::new(),
+                failure_patterns: vec![],
+            },
+            template_content: "content".into(),
+            prompt_guidance: "guidance".into(),
+            created: "2026-01-01T00:00:00Z".into(),
+            status: "pending".into(),
+            consumed: None,
+        };
+        let mut second = first.clone();
+        let mut other = first.clone();
+        other.skill_name = "skill-b".into();
+        first.created = "2026-01-01T00:00:00Z".into();
+        second.created = "2026-01-01T00:01:00Z".into();
+        rewrite_jsonl_checked(&path, &[first, second, other]).unwrap();
+
+        assert_eq!(mark_consumed_at(&path, "skill-a").unwrap(), 2);
     }
 
     #[test]

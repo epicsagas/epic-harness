@@ -115,6 +115,16 @@ fn tools_for_role(role: &str) -> &'static str {
     }
 }
 
+fn replace_temp_file(temporary: &std::path::Path, destination: &std::path::Path) -> io::Result<()> {
+    match super::codex::atomic_replace_file(temporary, destination) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(temporary);
+            Err(error)
+        }
+    }
+}
+
 // ── Path helpers ───────────────────────────────────────
 
 pub fn orgs_base_dir() -> PathBuf {
@@ -202,8 +212,7 @@ pub fn save_team_config(config: &TeamConfig) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
     }
-    fs::rename(&tmp, &path)?;
-    Ok(())
+    replace_temp_file(&tmp, &path)
 }
 
 pub fn load_mission(org: &str, team: &str) -> Option<String> {
@@ -217,8 +226,7 @@ pub fn save_mission(org: &str, team: &str, content: &str) -> io::Result<()> {
     let path = dir.join("mission.md");
     let tmp = path.with_extension("md.tmp");
     fs::write(&tmp, sanitize_mission(content))?;
-    fs::rename(&tmp, &path)?;
-    Ok(())
+    replace_temp_file(&tmp, &path)
 }
 
 pub fn load_playbook(org: &str, team: &str) -> String {
@@ -268,8 +276,7 @@ pub fn append_playbook(
     }
     let tmp = path.with_extension("md.tmp");
     fs::write(&tmp, &new_content)?;
-    fs::rename(&tmp, &path)?;
-    Ok(())
+    replace_temp_file(&tmp, &path)
 }
 
 pub fn list_agents(org: &str, team: &str) -> Vec<String> {
@@ -361,8 +368,7 @@ pub fn save_agent(
     // Include PID to avoid collision when two processes write the same agent concurrently
     let tmp = agents_dir.join(format!("{}.{}.tmp", agent_name, std::process::id()));
     fs::write(&tmp, content)?;
-    fs::rename(&tmp, &agent_path)?;
-    Ok(())
+    replace_temp_file(&tmp, &agent_path)
 }
 
 pub fn list_history(org: &str, team: &str, agent_name: &str) -> Vec<String> {
@@ -869,7 +875,7 @@ pub fn install_default_team_if_needed(org: &str) -> bool {
     let playbook = build_playbook_section(team, DEFAULT_TEAM_TYPE, &agent_list, "—");
     let playbook_path = store_dir.join("playbook.md");
     let tmp = playbook_path.with_extension("md.tmp");
-    if fs::write(&tmp, &playbook).is_err() || fs::rename(&tmp, &playbook_path).is_err() {
+    if fs::write(&tmp, &playbook).is_err() || replace_temp_file(&tmp, &playbook_path).is_err() {
         return false;
     }
 
@@ -913,6 +919,46 @@ mod tests {
         assert!(
             !tmp_path.exists(),
             "no .tmp file should remain after atomic write"
+        );
+    }
+
+    #[test]
+    fn test_repeated_team_writes_replace_existing_files() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+
+        let mut config = TeamConfig {
+            name: "repeat".into(),
+            org: "testorg".into(),
+            team_type: "stream".into(),
+            projects: vec![],
+            created: "2026-01-01T00:00:00Z".into(),
+            updated: "2026-01-01T00:00:00Z".into(),
+        };
+        save_team_config(&config).unwrap();
+        config.updated = "2026-01-02T00:00:00Z".into();
+        save_team_config(&config).unwrap();
+        assert_eq!(
+            load_team_config("testorg", "repeat").unwrap().updated,
+            config.updated
+        );
+
+        save_mission("testorg", "repeat", "first").unwrap();
+        save_mission("testorg", "repeat", "second").unwrap();
+        assert_eq!(load_mission("testorg", "repeat").as_deref(), Some("second"));
+
+        append_playbook("testorg", "repeat", "first", "", "").unwrap();
+        append_playbook("testorg", "repeat", "second", "", "").unwrap();
+        assert!(load_playbook("testorg", "repeat").ends_with("second"));
+
+        save_agent("testorg", "repeat", "builder", "first", false).unwrap();
+        save_agent("testorg", "repeat", "builder", "second", false).unwrap();
+        assert_eq!(
+            load_agent("testorg", "repeat", "builder").as_deref(),
+            Some("second")
         );
     }
 

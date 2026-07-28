@@ -342,7 +342,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 
 Polish observe में फीडबैक देता है: format विफलता → `lint_fail`, TypeScript error → `build_fail`। Edit→Error thrashing तब भी detect होता है जब errors polish से आते हैं।
 
-प्रत्येक सेशन अपना `session_{date}_{pid}_{random}.jsonl` लिखता है — कई समवर्ती सेशन एक-दूसरे के डेटा को corrupt नहीं करेंगे।
+प्रत्येक सेशन अपना `session_{date}_{host-session-id}.jsonl` लिखता है — कई समवर्ती सेशन एक-दूसरे के डेटा को corrupt नहीं करेंगे।
 
 ### Hook प्रोफ़ाइल
 
@@ -404,10 +404,10 @@ Merge रणनीति: बदले गए एजेंट prompt करत�
 | टूल | Ring 0 Hooks | कमांड | स्किल्स | एजेंट |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ पूर्ण | ✓ 3 कमांड (incl. /orbit) | ✓ 19 स्किल्स | Live |
-| **Codex CLI** | ✓ पूर्ण¹ | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
-| **Antigravity** | ✓ आंशिक² | ✓ 3 कमांड (incl. /orbit) | ✓ 19 | — |
+| **Codex CLI** | ✓ पूर्ण | ✓ 3 prompts (incl. /orbit) | ✓ 19 | — |
+| **Antigravity** | ✓ आंशिक¹ | ✓ 3 कमांड (incl. /orbit) | ✓ 19 | — |
 
-¹ `~/.codex/config.toml` में `plugin_hooks = true` · ² केवल PreInvocation/PostInvocation — PreToolUse नहीं (guard/polish अनुपलब्ध)
+¹ केवल PreInvocation/PostInvocation — PreToolUse नहीं (guard/polish अनुपलब्ध)
 
 ---
 
@@ -649,27 +649,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic: plugin hooks के अंदर binary not found</summary>
-
-Plugin पहले `hooks/bin/epic-harness` में binary ढूंढता है। `cargo install` के माध्यम से update करने के बाद, इसे copy करें:
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## डेवलपमेंट
 
 ```bash
 cargo install --path .                                        # Build + install
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Plugin binary update
 cargo test                                                    # Tests
 ```
-
-Hooks binary दो जगहों पर ढूंढते हैं: `hooks/bin/epic-harness` (plugin local) → `~/.cargo/bin/epic-harness` (PATH)।
 
 ---
 

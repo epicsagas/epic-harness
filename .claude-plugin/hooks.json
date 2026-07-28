@@ -7,11 +7,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\"; epic resume",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionStart resume",
             "async": false
           }
-        ],
-        "description": "Install binary if missing (cross-platform), seed skills/agents/commands/MCP, restore session context"
+        ]
       }
     ],
     "PreToolUse": [
@@ -20,30 +19,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic guard"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook PreToolUse guard"
           }
-        ],
-        "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+        ]
       },
       {
         "matcher": "Agent",
         "hooks": [
           {
             "type": "command",
-            "command": "epic observe"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook SubagentStart observe"
           }
-        ],
-        "description": "Record agent spawn — the 'running' transition needs the pre-tool event; PostToolUse alone only ever sees a finished agent"
+        ]
       },
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
             "type": "command",
-            "command": "epic guard"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook PreToolUse guard"
           }
-        ],
-        "description": "Orchestration pause directives and concurrent write conflict warnings"
+        ]
       }
     ],
     "PostToolUse": [
@@ -52,22 +48,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic polish"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook PostToolUse polish"
           }
-        ],
-        "description": "Auto-format + typecheck + lint warning after edits"
+        ]
       },
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "epic observe",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook PostToolUse observe",
             "async": true,
             "timeout": 5
           }
-        ],
-        "description": "Record tool result for evolution loop"
+        ]
       }
     ],
     "PreCompact": [
@@ -76,10 +70,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic snapshot"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook PreCompact snapshot"
           }
-        ],
-        "description": "Save working state before context compaction"
+        ]
       }
     ],
     "SessionEnd": [
@@ -88,10 +81,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic reflect"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionEnd reflect"
           }
-        ],
-        "description": "Analyze session observations → evolve skills → gate mutations"
+        ]
       }
     ]
   }

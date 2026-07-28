@@ -325,10 +325,240 @@ fn installed_tool_agents_dir(tool: &str) -> Option<PathBuf> {
 /// `sync` writes them globally to `~/.codex/agents/` whatever the sync scope, so
 /// they are the one piece of generated state the project-local commands cannot
 /// see through `.claude/agents/`.
-fn codex_team_files(team: &str) -> Vec<PathBuf> {
+fn codex_team_files(org: &str, team: &str) -> Vec<PathBuf> {
     installed_tool_agents_dir("codex")
-        .map(|dir| crate::team::codex::team_agent_files(&dir, team))
+        .map(|dir| crate::team::codex::team_agent_files(&dir, org, team))
         .unwrap_or_default()
+}
+
+/// Resolve a project link only from matching `team:` and `org:` records written
+/// at sync time. Directory names and filename prefixes are not ownership proof.
+fn local_team_ownership(
+    local_agents_dir: &std::path::Path,
+    team: &str,
+) -> io::Result<Option<String>> {
+    // Check the team directory and the `.claude/agents` path components with
+    // lstat. A symlinked parent would make a local unlink/delete operate on an
+    // external directory even when the final component is a real directory.
+    let mut component = Some(local_agents_dir);
+    for _ in 0..3 {
+        let Some(path) = component else { break };
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    format!("team path has an unsafe component: {}", path.display()),
+                ));
+            }
+            Ok(_) => component = path.parent(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        }
+    }
+    let metadata = match fs::symlink_metadata(local_agents_dir) {
+        Ok(metadata) => metadata,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "team directory is not a regular directory: {}",
+                local_agents_dir.display()
+            ),
+        ));
+    }
+
+    let mut org: Option<String> = None;
+    for entry in fs::read_dir(local_agents_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file()
+            || entry.path().extension().and_then(|e| e.to_str()) != Some("md")
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "unowned entry in team directory: {}",
+                    entry.path().display()
+                ),
+            ));
+        }
+        let content = fs::read_to_string(entry.path())?;
+        let Some(recorded_team) = super::store::read_team_from_agent_file(&content) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("missing team ownership in {}", entry.path().display()),
+            ));
+        };
+        if recorded_team != team {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("foreign team ownership in {}", entry.path().display()),
+            ));
+        }
+        let Some(recorded_org) = read_org_from_agent_file(&content) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("missing org ownership in {}", entry.path().display()),
+            ));
+        };
+        if validate_org_name(&recorded_org).is_err() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid org ownership in {}", entry.path().display()),
+            ));
+        }
+        if let Some(existing) = &org
+            && existing != &recorded_org
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "conflicting team ownership records in {}",
+                    local_agents_dir.display()
+                ),
+            ));
+        }
+        org = Some(recorded_org);
+    }
+    Ok(org)
+}
+
+fn write_owned_agent_file(
+    destination: &std::path::Path,
+    payload: &str,
+    org: &str,
+    team: &str,
+) -> io::Result<()> {
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "agent destination is not a regular file: {}",
+                    destination.display()
+                ),
+            ));
+        }
+        Ok(_) => {
+            let existing = fs::read_to_string(destination)?;
+            if existing == payload {
+                return Ok(());
+            }
+            let owned = read_org_from_agent_file(&existing).as_deref() == Some(org)
+                && super::store::read_team_from_agent_file(&existing).as_deref() == Some(team);
+            if !owned {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    format!(
+                        "refusing to overwrite unowned agent: {}",
+                        destination.display()
+                    ),
+                ));
+            }
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    let parent = destination.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "agent destination has no parent",
+        )
+    })?;
+    let file_name = destination
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("agent");
+    for attempt in 0..32 {
+        let temporary = parent.join(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            attempt
+        ));
+        let mut file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+        if let Err(error) = file
+            .write_all(payload.as_bytes())
+            .and_then(|_| file.sync_all())
+        {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        drop(file);
+        if let Err(error) = super::codex::atomic_replace_file(&temporary, destination) {
+            let _ = fs::remove_file(&temporary);
+            return Err(error);
+        }
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!("could not allocate temporary file in {}", parent.display()),
+    ))
+}
+
+/// Create a directory only after every existing component from it to the first
+/// missing parent is verified with `symlink_metadata`. This prevents sync from
+/// creating a team directory through an already-present symlink.
+fn ensure_regular_directory(path: &std::path::Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("directory is not a regular directory: {}", path.display()),
+            ))
+        }
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = path.parent().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("directory has no parent: {}", path.display()),
+                )
+            })?;
+            ensure_regular_directory(parent)?;
+            match fs::create_dir(path) {
+                Ok(()) => ensure_regular_directory(path),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    ensure_regular_directory(path)
+                }
+                Err(error) => Err(error),
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn delete_global_team_files(
+    store_dir: &std::path::Path,
+    local_agents_dir: Option<&std::path::Path>,
+    codex_files: &[PathBuf],
+) -> io::Result<()> {
+    if let Some(local_agents_dir) = local_agents_dir {
+        match fs::remove_dir_all(local_agents_dir) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    for file in codex_files {
+        match fs::remove_file(file) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    fs::remove_dir_all(store_dir)
 }
 
 fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
@@ -345,63 +575,15 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
 
     let dest = if global {
         let base = crate::hooks::common::claude_config_dir().join("agents");
-        // Create and canonicalize base BEFORE creating team subdir (TOCTOU defense)
-        fs::create_dir_all(&base).map_err(|e| {
-            io::Error::new(
-                e.kind(),
-                format!("failed to create {}: {}", base.display(), e),
-            )
-        })?;
-        let canon_base = base.canonicalize().map_err(io::Error::other)?;
-        let candidate = canon_base.join(team);
-        // If team subdir already exists, verify it's not a symlink escaping base
-        if candidate.exists() {
-            let canon_candidate = candidate.canonicalize().map_err(io::Error::other)?;
-            if !canon_candidate.starts_with(&canon_base) {
-                return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    format!(
-                        "resolved path '{}' is outside ~/.claude/agents — aborting",
-                        canon_candidate.display()
-                    ),
-                ));
-            }
-        }
-        fs::create_dir_all(&candidate).map_err(|e| {
-            io::Error::new(
-                e.kind(),
-                format!("failed to create {}: {}", candidate.display(), e),
-            )
-        })?;
+        ensure_regular_directory(&base)?;
+        let candidate = base.join(team);
+        ensure_regular_directory(&candidate)?;
         candidate
     } else {
         let cwd = std::env::current_dir().map_err(io::Error::other)?;
         let d = cwd.join(".claude").join("agents").join(team);
-        fs::create_dir_all(&d).map_err(|e| {
-            io::Error::new(e.kind(), format!("failed to create {}: {}", d.display(), e))
-        })?;
-        // NOTE: TOCTOU window between create_dir_all and canonicalize is
-        // acceptable for a single-user CLI tool; full mitigation would
-        // require O_NOFOLLOW dir open, not available in std.
-        // Fix B-5: symlink escape 방어 — canonicalize 후 base 경로 검사
-        let canon = d.canonicalize().map_err(io::Error::other)?;
-        let base = cwd
-            .join(".claude")
-            .join("agents")
-            .canonicalize()
-            .map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    format!("cannot resolve agents base path: {e}"),
-                )
-            })?;
-        if !canon.starts_with(&base) {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "team path escapes .claude/agents/",
-            ));
-        }
-        canon
+        ensure_regular_directory(&d)?;
+        d
     };
 
     let agents = list_agents(org, team);
@@ -411,11 +593,7 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
         if let Some(content) = load_agent(org, team, agent_name) {
             let injected = inject_team_context(&content, org, team, &config.team_type, &mission);
             let dest_path = dest.join(format!("{}.md", agent_name));
-            // Fix W-2: 내용이 동일하면 mtime 갱신 안 함
-            let existing = fs::read_to_string(&dest_path).unwrap_or_default();
-            if existing != injected {
-                fs::write(&dest_path, &injected)?;
-            }
+            write_owned_agent_file(&dest_path, &injected, org, team)?;
             count += 1;
         }
     }
@@ -427,82 +605,88 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
     let other_tools = ["codex", "antigravity", "cursor", "opencode"];
     for tool in &other_tools {
         if let Some(agents_dir) = installed_tool_agents_dir(tool) {
-            let tool_team_dir = agents_dir.join(team);
-            if let Err(e) = fs::create_dir_all(&tool_team_dir) {
+            // Codex has a flat agent directory. Its files carry exact ownership
+            // metadata and use an atomic no-symlink write path, unlike the
+            // per-team Markdown layout used by the other tools.
+            if *tool == "codex" {
+                crate::team::codex::prepare_agents_dir(&agents_dir).map_err(|e| {
+                    io::Error::new(
+                        e.kind(),
+                        format!(
+                            "unsafe Codex agents destination {}: {e}",
+                            agents_dir.display()
+                        ),
+                    )
+                })?;
                 eprintln!(
-                    "[harness] warn: could not create {}: {}",
-                    tool_team_dir.display(),
-                    e
+                    "[harness] syncing team '{team}' to codex ({})",
+                    agents_dir.display()
                 );
+                for agent_name in &agents {
+                    let Some(content) = load_agent(org, team, agent_name) else {
+                        continue;
+                    };
+                    let injected =
+                        inject_team_context(&content, org, team, &config.team_type, &mission);
+                    let agent =
+                        crate::team::codex::to_codex_agent(org, team, agent_name, &injected);
+                    let payload = crate::team::codex::render_codex_toml(&agent).map_err(|e| {
+                        io::Error::other(format!(
+                            "could not render Codex agent '{agent_name}': {e}"
+                        ))
+                    })?;
+                    // Legacy flat names are ambiguous for hyphenated names. A
+                    // sync migrates by adding the new owned file, never by
+                    // renaming or deleting a legacy file that may be another
+                    // team's agent.
+                    let legacy = agents_dir.join(format!("{team}-{agent_name}.toml"));
+                    if fs::symlink_metadata(&legacy).is_ok() {
+                        eprintln!(
+                            "[harness] legacy Codex agent left untouched: {}; use the new owned identity {}",
+                            legacy.display(),
+                            agent.name
+                        );
+                    }
+                    crate::team::codex::write_agent_file(
+                        &agents_dir,
+                        org,
+                        team,
+                        agent_name,
+                        &payload,
+                    )
+                    .map_err(|e| {
+                        io::Error::new(
+                            e.kind(),
+                            format!("could not write Codex agent '{agent_name}': {e}"),
+                        )
+                    })?;
+                }
                 continue;
             }
-            // Symlink escape guard — same defense as the local .claude/agents/ path.
-            // NOTE: TOCTOU gap identical to the local path: create_dir_all runs before
-            // canonicalize, so a symlink at tool_team_dir could create content at the
-            // symlink target before the check fires. Acceptable for a single-user CLI.
-            let canon_agents = match agents_dir.canonicalize() {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("[harness] warn: agents dir unavailable for {tool}: {e}");
-                    continue;
-                }
-            };
-            let canon_team = match tool_team_dir.canonicalize() {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("[harness] warn: cannot resolve team dir for {tool}: {e}");
-                    continue;
-                }
-            };
-            if !canon_team.starts_with(&canon_agents) {
-                eprintln!("[harness] warn: team path escapes agents dir for {tool}, skipping");
-                continue;
-            }
-            // Codex reads flat `*.toml` custom agents straight out of
-            // `~/.codex/agents/`; a Markdown file in a per-team subdirectory is
-            // silently ignored. Every other tool keeps the Markdown layout.
-            let is_codex = *tool == "codex";
-            let write_dir = if is_codex {
-                &agents_dir
-            } else {
-                &tool_team_dir
-            };
+
+            let tool_team_dir = agents_dir.join(team);
+            ensure_regular_directory(&tool_team_dir).map_err(|error| {
+                io::Error::new(
+                    error.kind(),
+                    format!(
+                        "unsafe {tool} agents destination {}: {error}",
+                        tool_team_dir.display()
+                    ),
+                )
+            })?;
             eprintln!(
                 "[harness] syncing team '{team}' to {tool} ({})",
-                write_dir.display()
+                tool_team_dir.display()
             );
             for agent_name in &agents {
                 if let Some(content) = load_agent(org, team, agent_name) {
                     let injected =
                         inject_team_context(&content, org, team, &config.team_type, &mission);
 
-                    let (dest_path, payload) = if is_codex {
-                        let agent = crate::team::codex::to_codex_agent(team, agent_name, &injected);
-                        match crate::team::codex::render_codex_toml(&agent) {
-                            Ok(toml_str) => {
-                                (agents_dir.join(format!("{}.toml", agent.name)), toml_str)
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "[harness] warn: could not render Codex agent '{agent_name}': {e}"
-                                );
-                                continue;
-                            }
-                        }
-                    } else {
-                        (tool_team_dir.join(format!("{}.md", agent_name)), injected)
-                    };
+                    let (dest_path, payload) =
+                        (tool_team_dir.join(format!("{}.md", agent_name)), injected);
 
-                    let existing = fs::read_to_string(&dest_path).unwrap_or_default();
-                    if existing != payload {
-                        fs::write(&dest_path, &payload).unwrap_or_else(|e| {
-                            eprintln!(
-                                "[harness] warn: could not write {}: {}",
-                                dest_path.display(),
-                                e
-                            );
-                        });
-                    }
+                    write_owned_agent_file(&dest_path, &payload, org, team)?;
                 }
             }
         }
@@ -1235,26 +1419,19 @@ fn cmd_delete(args: &[String]) -> i32 {
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let local_agents_dir = cwd.join(".claude").join("agents").join(&team);
-
-    // Resolve org: --org flag > frontmatter in any local agent file > "epic"
-    let org = flags.get("org").cloned().unwrap_or_else(|| {
-        // Try reading org from frontmatter of any synced agent file
-        if local_agents_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&local_agents_dir)
-        {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
-                    && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
-                    && let Ok(content) = fs::read_to_string(entry.path())
-                    && let Some(org) = read_org_from_agent_file(&content)
-                    && validate_org_name(&org).is_ok()
-                {
-                    return org;
-                }
-            }
+    let local_org = match local_team_ownership(&local_agents_dir, &team) {
+        Ok(org) => org,
+        Err(e) => {
+            eprintln!("error: cannot verify local team ownership: {e}");
+            return 1;
         }
-        default_org()
-    });
+    };
+
+    // Resolve org: --org flag > exact local ownership record > "epic".
+    let org = flags
+        .get("org")
+        .cloned()
+        .unwrap_or_else(|| local_org.clone().unwrap_or_else(default_org));
 
     if let Err(e) = validate_org_name(&org) {
         eprintln!("error: {}", e);
@@ -1269,11 +1446,13 @@ fn cmd_delete(args: &[String]) -> i32 {
         }
 
         let store_dir = team_store_dir(&org, &team);
-        let codex_files = codex_team_files(&team);
+        let codex_files = codex_team_files(&org, &team);
         println!("This will permanently delete:");
         println!("  Global store: {}", store_dir.display());
-        if local_agents_dir.exists() {
+        if local_org.as_deref() == Some(&org) {
             println!("  Local agents: {}", local_agents_dir.display());
+        } else if local_agents_dir.exists() {
+            println!("  Local agents: skipped (ownership does not match)");
         }
         for f in &codex_files {
             println!("  Codex agent: {}", f.display());
@@ -1290,35 +1469,33 @@ fn cmd_delete(args: &[String]) -> i32 {
             return 0;
         }
 
-        match fs::remove_dir_all(&store_dir) {
-            Ok(_) => println!("✓ Deleted global store: {}", store_dir.display()),
-            Err(e) => {
-                eprintln!("error removing global store: {}", e);
-                return 1;
-            }
+        let owned_local =
+            (local_org.as_deref() == Some(&org)).then_some(local_agents_dir.as_path());
+        if let Err(error) = delete_global_team_files(&store_dir, owned_local, &codex_files) {
+            eprintln!(
+                "error deleting team artifacts; global store kept for retry when possible: {error}"
+            );
+            return 1;
         }
-        if local_agents_dir.exists() {
-            match fs::remove_dir_all(&local_agents_dir) {
-                Ok(_) => println!("✓ Removed local agents: .claude/agents/{}/", team),
-                Err(e) => eprintln!("warning: could not remove local agents: {}", e),
-            }
+        if owned_local.is_some() {
+            println!("✓ Removed local agents: .claude/agents/{}/", team);
+        } else if local_agents_dir.exists() {
+            eprintln!("warning: local agents were not removed because ownership does not match");
         }
         for f in &codex_files {
-            match fs::remove_file(f) {
-                Ok(_) => println!("✓ Removed Codex agent: {}", f.display()),
-                Err(e) => eprintln!("warning: could not remove {}: {}", f.display(), e),
-            }
+            println!("✓ Removed Codex agent: {}", f.display());
         }
+        println!("✓ Deleted global store: {}", store_dir.display());
         println!();
         println!("Team '{}' permanently deleted from org '{}'.", team, org);
     } else {
         // default: remove from current project only (.claude/agents/{team}/)
-        if !local_agents_dir.exists() {
+        if local_org.as_deref() != Some(&org) {
             println!(
-                "Team '{}' is not linked to this project (.claude/agents/{}/ not found).",
-                team, team
+                "Team '{}' is not linked to this project with an exact ownership record.",
+                team
             );
-            return 0;
+            return 1;
         }
         match fs::remove_dir_all(&local_agents_dir) {
             Ok(_) => {
@@ -1330,7 +1507,7 @@ fn cmd_delete(args: &[String]) -> i32 {
                 // `sync` writes Codex agents globally whatever the sync scope, so
                 // a project-scoped unlink cannot remove them. Say so rather than
                 // leaving files the user cannot see.
-                let codex_files = codex_team_files(&team);
+                let codex_files = codex_team_files(&org, &team);
                 if !codex_files.is_empty() {
                     println!(
                         "  {} Codex agent file(s) remain (global, shared by all projects):",
@@ -1339,7 +1516,7 @@ fn cmd_delete(args: &[String]) -> i32 {
                     for f in &codex_files {
                         println!("    {}", f.display());
                     }
-                    println!("  Remove them with 'epic team unlink {} --global'.", team);
+                    println!("  Remove them with 'epic team delete {} --global'.", team);
                 }
                 // Deregister project: remove current cwd path from projects list, also purge stale entries.
                 let cwd_path = std::env::current_dir()
@@ -1454,6 +1631,16 @@ fn cmd_status(args: &[String]) -> i32 {
                 .collect()
         })
         .unwrap_or_default();
+    team_dirs.retain(
+        |team| match local_team_ownership(&agents_base.join(team), team) {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(e) => {
+                eprintln!("warning: cannot verify team '{}': {}", team, e);
+                false
+            }
+        },
+    );
     team_dirs.sort();
 
     if team_dirs.is_empty() {
@@ -1489,7 +1676,10 @@ fn cmd_status(args: &[String]) -> i32 {
                 .find_map(|e| {
                     let content = fs::read_to_string(e.path()).ok()?;
                     let o = read_org_from_agent_file(&content)?;
-                    validate_org_name(&o).ok().map(|_| o)
+                    let recorded_team = super::store::read_team_from_agent_file(&content)?;
+                    (recorded_team == team.as_str())
+                        .then_some(o)
+                        .filter(|o| validate_org_name(o).is_ok())
                 })
                 .unwrap_or_else(|| "(unknown)".to_string());
 
@@ -1544,7 +1734,7 @@ fn cmd_status(args: &[String]) -> i32 {
         // Codex agents live flat in ~/.codex/agents/ and are named
         // `{team}-{agent}.toml`, so scanning .claude/agents/ alone reported none
         // even when sync had written them.
-        let codex_files = codex_team_files(team);
+        let codex_files = codex_team_files(&org, team);
         if !codex_files.is_empty() {
             let names: Vec<String> = codex_files
                 .iter()
@@ -1760,6 +1950,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_global_delete_keeps_store_when_artifact_cleanup_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("store");
+        let undeletable_as_file = dir.path().join("agent.toml");
+        fs::create_dir(&store).unwrap();
+        fs::create_dir(&undeletable_as_file).unwrap();
+
+        let result = delete_global_team_files(&store, None, &[undeletable_as_file]);
+
+        assert!(result.is_err());
+        assert!(store.is_dir(), "source store must remain retryable");
+    }
+
     // ── cmd_status tests ──────────────────────────────────
 
     /// cmd_status with no .claude/agents/ directory returns 0 and prints a 'no teams' message.
@@ -1815,6 +2019,35 @@ mod tests {
         assert_eq!(code, 0, "cmd_status with linked team must return 0");
     }
 
+    #[test]
+    fn test_local_ownership_rejects_a_foreign_team_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let team_dir = dir.path().join("alpha-beta");
+        fs::create_dir_all(&team_dir).unwrap();
+        fs::write(
+            team_dir.join("reviewer.md"),
+            "---\norg: \"exact-org\"\nteam: \"alpha\"\n---\n",
+        )
+        .unwrap();
+
+        assert!(local_team_ownership(&team_dir, "alpha-beta").is_err());
+    }
+
+    #[test]
+    fn test_local_ownership_rejects_mixed_or_unowned_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let team_dir = dir.path().join("alpha");
+        fs::create_dir_all(&team_dir).unwrap();
+        fs::write(
+            team_dir.join("owned.md"),
+            "---\norg: \"exact-org\"\nteam: \"alpha\"\n---\n",
+        )
+        .unwrap();
+        fs::write(team_dir.join("unowned.md"), "# personal file\n").unwrap();
+
+        assert!(local_team_ownership(&team_dir, "alpha").is_err());
+    }
+
     // ── cmd_sync symlink-escape defense ───────────────────
 
     /// cmd_sync rejects a symlink that escapes .claude/agents/ (local sync path).
@@ -1860,6 +2093,152 @@ mod tests {
             std::io::ErrorKind::PermissionDenied,
             "error kind must be PermissionDenied for symlink escape: {}",
             err
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_local_sync_does_not_create_a_team_dir_through_an_agents_symlink() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { env::set_var("HOME", tmp.path()) };
+        let project = tmp.path().join("project");
+        let escape = tmp.path().join("escape");
+        fs::create_dir_all(project.join(".claude")).unwrap();
+        fs::create_dir_all(&escape).unwrap();
+        std::os::unix::fs::symlink(&escape, project.join(".claude").join("agents")).unwrap();
+        seed_team(tmp.path(), "syncorg", "gamma");
+
+        let _cwd = CwdGuard(env::current_dir().unwrap());
+        env::set_current_dir(&project).unwrap();
+        assert!(sync_to_dest("syncorg", "gamma", false).is_err());
+        assert!(
+            !escape.join("gamma").exists(),
+            "sync must not create a team directory through a symlink"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_other_tool_sync_does_not_create_a_team_dir_through_an_agents_symlink() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe { env::set_var("HOME", tmp.path()) };
+        let project = tmp.path().join("project");
+        let tool_root = tmp
+            .path()
+            .join(".gemini")
+            .join("config")
+            .join("plugins")
+            .join("epic");
+        let escape = tmp.path().join("escape");
+        fs::create_dir_all(&project).unwrap();
+        fs::create_dir_all(&tool_root).unwrap();
+        fs::create_dir_all(&escape).unwrap();
+        std::os::unix::fs::symlink(&escape, tool_root.join("agents")).unwrap();
+        seed_team(tmp.path(), "syncorg", "gamma");
+
+        let _cwd = CwdGuard(env::current_dir().unwrap());
+        env::set_current_dir(&project).unwrap();
+        assert!(sync_to_dest("syncorg", "gamma", false).is_err());
+        assert!(
+            !escape.join("gamma").exists(),
+            "sync must not create another tool's team directory through a symlink"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_cmd_sync_rejects_final_agent_file_symlink() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+        let project_dir = tmp.path().join("project");
+        let team_dir = project_dir.join(".claude/agents/gamma");
+        fs::create_dir_all(&team_dir).unwrap();
+        seed_team(tmp.path(), "syncorg", "gamma");
+        let external = tmp.path().join("external.md");
+        fs::write(&external, "keep me").unwrap();
+        std::os::unix::fs::symlink(&external, team_dir.join("tester.md")).unwrap();
+
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        env::set_current_dir(&project_dir).unwrap();
+        assert!(sync_to_dest("syncorg", "gamma", false).is_err());
+        assert_eq!(fs::read_to_string(external).unwrap(), "keep me");
+    }
+
+    /// Codex's flat directory must not turn a legacy collision into an overwrite.
+    #[test]
+    fn test_codex_sync_does_not_overwrite_another_teams_legacy_collision() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+        let project_dir = tmp.path().join("project");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::create_dir_all(tmp.path().join(".codex").join("agents")).unwrap();
+        seed_team(tmp.path(), "syncorg", "alpha-beta");
+
+        // Legacy `alpha-beta-tester.toml` is ambiguous: it can be alpha-beta/tester
+        // or alpha/beta-tester. It must survive a sync of alpha-beta unchanged.
+        let legacy = tmp
+            .path()
+            .join(".codex")
+            .join("agents")
+            .join("alpha-beta-tester.toml");
+        let foreign_contents =
+            "name = \"alpha-beta-tester\"\ndescription = \"alpha/beta-tester\"\n";
+        fs::write(&legacy, foreign_contents).unwrap();
+
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        env::set_current_dir(&project_dir).unwrap();
+        sync_to_dest("syncorg", "alpha-beta", false).unwrap();
+
+        assert_eq!(fs::read_to_string(legacy).unwrap(), foreign_contents);
+        assert!(
+            tmp.path()
+                .join(".codex")
+                .join("agents")
+                .join("epic-7-syncorg-10-alpha-beta-6-tester.toml")
+                .is_file(),
+            "sync must migrate by writing a new unambiguous identity"
+        );
+    }
+
+    /// A symlinked flat Codex agent directory must be rejected before any write.
+    #[test]
+    #[cfg(unix)]
+    fn test_codex_sync_rejects_symlinked_agents_directory() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+        let project_dir = tmp.path().join("project");
+        let codex_dir = tmp.path().join(".codex");
+        let escape_dir = tmp.path().join("escape");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::create_dir_all(&escape_dir).unwrap();
+        std::os::unix::fs::symlink(&escape_dir, codex_dir.join("agents")).unwrap();
+        seed_team(tmp.path(), "syncorg", "gamma");
+
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        env::set_current_dir(&project_dir).unwrap();
+        let result = sync_to_dest("syncorg", "gamma", false);
+
+        assert!(
+            result.is_err(),
+            "Codex sync must reject a symlinked destination"
+        );
+        assert!(
+            fs::read_dir(&escape_dir).unwrap().next().is_none(),
+            "sync must not write through the symlink"
         );
     }
 

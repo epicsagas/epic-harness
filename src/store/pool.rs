@@ -170,13 +170,13 @@ async fn build_sqlite_pool(url: &str, max_connections: u32) -> io::Result<AnyPoo
 
         #[cfg(unix)]
         {
-            if path.exists() {
-                if let Err(e) = fs::set_permissions(&path, PermissionsExt::from_mode(0o600)) {
-                    eprintln!(
-                        "warning: failed to set permissions on {}: {e}",
-                        path.display()
-                    );
-                }
+            if path.exists()
+                && let Err(e) = fs::set_permissions(&path, PermissionsExt::from_mode(0o600))
+            {
+                eprintln!(
+                    "warning: failed to set permissions on {}: {e}",
+                    path.display()
+                );
             }
         }
     }
@@ -353,20 +353,20 @@ pub async fn harness_pool() -> io::Result<AnyPool> {
     // Fast path: read lock — no contention for concurrent readers.
     {
         let guard = recover_read(&HARNESS_POOL);
-        if let Some((cached_url, pool)) = guard.as_ref() {
-            if cached_url == &url {
-                return Ok(pool.clone());
-            }
+        if let Some((cached_url, pool)) = guard.as_ref()
+            && cached_url == &url
+        {
+            return Ok(pool.clone());
         }
     }
     // Slow path: take old pool under write lock, then drop before async work.
     let old_pool = {
         let mut guard = recover_write(&HARNESS_POOL);
         // Double-check after acquiring write lock.
-        if let Some((cached_url, pool)) = guard.as_ref() {
-            if cached_url == &url {
-                return Ok(pool.clone());
-            }
+        if let Some((cached_url, pool)) = guard.as_ref()
+            && cached_url == &url
+        {
+            return Ok(pool.clone());
         }
         guard.take() // Take old pool; slot becomes None.
     }; // Write lock dropped here.
@@ -409,19 +409,19 @@ pub async fn memory_pool() -> io::Result<AnyPool> {
     // Fast path: read lock.
     {
         let guard = recover_read(&MEMORY_POOL);
-        if let Some((cached_url, pool)) = guard.as_ref() {
-            if cached_url == &url {
-                return Ok(pool.clone());
-            }
+        if let Some((cached_url, pool)) = guard.as_ref()
+            && cached_url == &url
+        {
+            return Ok(pool.clone());
         }
     }
     // Slow path: take old pool under write lock, then drop before async work.
     let old_pool = {
         let mut guard = recover_write(&MEMORY_POOL);
-        if let Some((cached_url, pool)) = guard.as_ref() {
-            if cached_url == &url {
-                return Ok(pool.clone());
-            }
+        if let Some((cached_url, pool)) = guard.as_ref()
+            && cached_url == &url
+        {
+            return Ok(pool.clone());
         }
         guard.take()
     }; // Write lock dropped here.

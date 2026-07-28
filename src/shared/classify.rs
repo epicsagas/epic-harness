@@ -2,6 +2,8 @@ use regex::Regex;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use super::sanitize::truncate_utf8;
+
 // ── Failure Classification ──────────────────────────
 
 struct FailureRule {
@@ -59,7 +61,7 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    let sample = &output[..output.len().min(2000)];
+    let sample = truncate_utf8(output, 2000);
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(sample) {
             return Some(cat);
@@ -157,4 +159,15 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
 pub fn extract_file(action: &str) -> Option<&str> {
     static FILE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(/[\w./-]+\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::classify_failure;
+
+    #[test]
+    fn failure_sampling_does_not_split_utf8() {
+        let output = format!("{}日TypeError", "a".repeat(1999));
+        assert_eq!(classify_failure(&output), None);
+    }
 }

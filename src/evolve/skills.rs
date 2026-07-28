@@ -1,11 +1,27 @@
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::CONFIG;
 use crate::evolve::edits::HarnessEdit;
 use crate::shared::{evolution::*, helpers::*, paths::*, sanitize::sanitize_skill_content};
+
+static PAIR_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+/// Durable replay markers cover the retained reflection window, not all time.
+const MAX_PROMOTION_SESSION_MARKERS: usize = 256;
+
+#[cfg(test)]
+static SKILL_WRITE_FAILPOINT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+#[cfg(test)]
+static PROMOTION_COUNTER_SAVE_FAILPOINT: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
+#[cfg(test)]
+static PROMOTION_POST_APPLY_FAILPOINT: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(0);
 
 // ── Negative Feedback Buffer (SkillOpt §4) ────────────
 
@@ -180,6 +196,8 @@ pub(crate) fn is_rejected(name: &str, buf: &RejectedBuffer) -> bool {
 pub(crate) struct PromotionCounter {
     /// Map of skill name -> number of sessions that observed this pattern
     pub(crate) counts: HashMap<String, u64>,
+    #[serde(default)]
+    pub(crate) applied_sessions: std::collections::HashSet<String>,
 }
 
 fn promotion_file() -> std::path::PathBuf {
@@ -187,13 +205,16 @@ fn promotion_file() -> std::path::PathBuf {
 }
 
 fn load_promotion_counters() -> PromotionCounter {
-    read_json(&promotion_file(), PromotionCounter::default())
+    load_promotion_counters_at(&promotion_file())
 }
 
-fn save_promotion_counters(counters: &PromotionCounter) {
-    if let Ok(json) = serde_json::to_string_pretty(counters) {
-        let _ = fs::write(promotion_file(), json);
-    }
+fn load_promotion_counters_at(path: &Path) -> PromotionCounter {
+    read_json(path, PromotionCounter::default())
+}
+
+fn save_promotion_counters_at(path: &Path, counters: &PromotionCounter) -> std::io::Result<()> {
+    let json = serde_json::to_vec_pretty(counters).map_err(std::io::Error::other)?;
+    atomic_write_file(path, &json)
 }
 
 /// Check if a skill name has enough support to be promoted.
@@ -202,6 +223,15 @@ pub(crate) fn check_promotion(name: &str, counters: &mut PromotionCounter) -> bo
     let count = counters.counts.entry(name.into()).or_insert(0);
     *count += 1;
     *count >= CONFIG.evolution.gated_promotion_min
+}
+
+fn trim_promotion_session_markers(counters: &mut PromotionCounter) {
+    while counters.applied_sessions.len() > MAX_PROMOTION_SESSION_MARKERS {
+        let Some(oldest) = counters.applied_sessions.iter().min().cloned() else {
+            break;
+        };
+        counters.applied_sessions.remove(&oldest);
+    }
 }
 
 // -- R14: Solver-Proposes + Curator Pattern --
@@ -385,7 +415,7 @@ When encountering {err_cat} errors with {} operations on {files}:\n\
 ///
 /// `counters` is returned so the caller persists promotion-counter state at
 /// exactly the same point it did before the plan/apply split.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct SkillEditPlan {
     pub edits: Vec<HarnessEdit>,
     pub counters: PromotionCounter,
@@ -455,10 +485,175 @@ pub(crate) fn plan_skill_edits(
 /// them to falsify prior predictions is a deferred follow-up (today the
 /// per-edit Critic gate only consults the in-round reward-hacking flag — see
 /// `Critic::verify_against_evidence`).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ApplyOutcome {
     pub applied: u64,
     pub manifests: Vec<crate::evolve::edits::EditManifest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PromotionCommit {
+    session_id: String,
+    counters: PromotionCounter,
+    outcome: ApplyOutcome,
+    promoted_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PromotionIntent {
+    session_id: String,
+    plan: SkillEditPlan,
+    metrics: crate::shared::evolution::Metrics,
+}
+
+fn promotion_journal_dir(counter_path: &Path) -> PathBuf {
+    counter_path.with_extension("pending")
+}
+
+fn promotion_intent_dir(counter_path: &Path) -> PathBuf {
+    counter_path.with_extension("intents")
+}
+
+fn promotion_journal_path(counter_path: &Path, session_id: &str) -> std::io::Result<PathBuf> {
+    if session_id.is_empty()
+        || !session_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid promotion session id",
+        ));
+    }
+    Ok(promotion_journal_dir(counter_path).join(format!("{session_id}.json")))
+}
+
+fn promotion_intent_path(counter_path: &Path, session_id: &str) -> std::io::Result<PathBuf> {
+    let journal = promotion_journal_path(counter_path, session_id)?;
+    Ok(promotion_intent_dir(counter_path)
+        .join(journal.file_name().expect("validated journal has filename")))
+}
+
+fn persist_promotion_intent_at(
+    counter_path: &Path,
+    intent: &PromotionIntent,
+) -> std::io::Result<PathBuf> {
+    let path = promotion_intent_path(counter_path, &intent.session_id)?;
+    fs::create_dir_all(path.parent().expect("intent has parent"))?;
+    atomic_write_file(
+        &path,
+        &serde_json::to_vec(intent).map_err(std::io::Error::other)?,
+    )?;
+    Ok(path)
+}
+
+fn persist_promotion_commit_at(
+    counter_path: &Path,
+    commit: &PromotionCommit,
+) -> std::io::Result<()> {
+    let journal = promotion_journal_path(counter_path, &commit.session_id)?;
+    fs::create_dir_all(journal.parent().expect("journal has parent"))?;
+    atomic_write_file(
+        &journal,
+        &serde_json::to_vec(commit).map_err(std::io::Error::other)?,
+    )?;
+    #[cfg(test)]
+    if PROMOTION_COUNTER_SAVE_FAILPOINT.swap(0, Ordering::SeqCst) != 0 {
+        return Err(std::io::Error::other(
+            "injected promotion counter save failure",
+        ));
+    }
+    save_promotion_counters_at(counter_path, &commit.counters)?;
+    fs::remove_file(journal)
+}
+
+fn recover_promotion_commits_at(
+    counter_path: &Path,
+    requested_session: &str,
+) -> std::io::Result<Option<PromotionCommit>> {
+    let directory = promotion_journal_dir(counter_path);
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<_, _>>()?;
+    paths.sort();
+    let mut requested = None;
+    for path in paths {
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let commit: PromotionCommit =
+            serde_json::from_slice(&fs::read(&path)?).map_err(std::io::Error::other)?;
+        save_promotion_counters_at(counter_path, &commit.counters)?;
+        fs::remove_file(&path)?;
+        let intent_path = promotion_intent_path(counter_path, &commit.session_id)?;
+        if intent_path.exists() {
+            fs::remove_file(intent_path)?;
+        }
+        if commit.session_id == requested_session {
+            requested = Some(commit);
+        }
+    }
+    Ok(requested)
+}
+
+fn finish_promotion_intent_at(
+    counter_path: &Path,
+    intent_path: &Path,
+    intent: PromotionIntent,
+) -> std::io::Result<PromotionCommit> {
+    let outcome = apply_skill_edits(&intent.plan, &intent.metrics)?;
+    #[cfg(test)]
+    if PROMOTION_POST_APPLY_FAILPOINT.swap(0, Ordering::SeqCst) != 0 {
+        return Err(std::io::Error::other(
+            "injected post-apply promotion failure",
+        ));
+    }
+    let mut counters = intent.plan.counters;
+    counters.applied_sessions.insert(intent.session_id.clone());
+    trim_promotion_session_markers(&mut counters);
+    let commit = PromotionCommit {
+        session_id: intent.session_id,
+        counters,
+        outcome,
+        promoted_count: intent.plan.promoted_count,
+    };
+    persist_promotion_commit_at(counter_path, &commit)?;
+    fs::remove_file(intent_path)?;
+    Ok(commit)
+}
+
+fn recover_promotion_intents_at(
+    counter_path: &Path,
+    requested_session: &str,
+) -> std::io::Result<Option<PromotionCommit>> {
+    let directory = promotion_intent_dir(counter_path);
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<_, _>>()?;
+    paths.sort();
+    let mut requested = None;
+    for path in paths {
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let intent: PromotionIntent =
+            serde_json::from_slice(&fs::read(&path)?).map_err(std::io::Error::other)?;
+        let commit = finish_promotion_intent_at(counter_path, &path, intent)?;
+        if commit.session_id == requested_session {
+            requested = Some(commit);
+        }
+    }
+    Ok(requested)
 }
 
 /// Executor role: validate → Critic-verify → apply each typed edit.
@@ -469,7 +664,7 @@ pub struct ApplyOutcome {
 pub(crate) fn apply_skill_edits(
     plan: &SkillEditPlan,
     metrics: &crate::shared::evolution::Metrics,
-) -> ApplyOutcome {
+) -> std::io::Result<ApplyOutcome> {
     let mut outcome = ApplyOutcome::default();
     for edit in &plan.edits {
         if edit.validate().is_err() {
@@ -488,19 +683,42 @@ pub(crate) fn apply_skill_edits(
         {
             continue;
         }
-        if matches!(edit.apply(), crate::evolve::edits::EditOutcome::Applied) {
-            outcome.applied += 1;
-            outcome.manifests.push(manifest);
+        match edit.apply() {
+            crate::evolve::edits::EditOutcome::Applied => {
+                outcome.applied += 1;
+                outcome.manifests.push(manifest);
+            }
+            crate::evolve::edits::EditOutcome::Skipped(error)
+                if matches!(edit, HarnessEdit::AddSkill { .. }) =>
+            {
+                return Err(std::io::Error::other(error));
+            }
+            crate::evolve::edits::EditOutcome::Skipped(_)
+            | crate::evolve::edits::EditOutcome::NotImplemented => {}
         }
     }
-    outcome
+    Ok(outcome)
 }
 
 pub fn seed_smart_skills(
     analysis: &SessionAnalysis,
     existing: &[String],
     metrics: &crate::shared::evolution::Metrics,
-) -> ApplyOutcome {
+    reflection_session_id: &str,
+) -> std::io::Result<ApplyOutcome> {
+    let counter_path = promotion_file();
+    if let Some(parent) = counter_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    // The complete load → plan → apply → marker-save transaction must be
+    // serialized across the two reflection workers.
+    let _lock = crate::orchestrate::state::acquire_lock(&counter_path.with_extension("lock"))?;
+    if let Some(commit) = recover_promotion_commits_at(&counter_path, reflection_session_id)? {
+        return Ok(commit.outcome);
+    }
+    if let Some(commit) = recover_promotion_intents_at(&counter_path, reflection_session_id)? {
+        return Ok(commit.outcome);
+    }
     let avg_score = analysis.avg_score;
 
     // Graduated Scope: skip seeding for excellent sessions
@@ -512,7 +730,7 @@ pub fn seed_smart_skills(
                 "Graduated Scope: skipping skill seeding (avg_score={avg_score:.3} >= {skip})"
             ),
         );
-        return ApplyOutcome::default();
+        return Ok(ApplyOutcome::default());
     }
 
     let full_seeding = avg_score < CONFIG.pattern.graduated_scope_moderate;
@@ -524,13 +742,17 @@ pub fn seed_smart_skills(
     }
 
     let mut counters = load_promotion_counters();
+    if counters.applied_sessions.contains(reflection_session_id) {
+        return Ok(ApplyOutcome::default());
+    }
     let mut plan = plan_skill_edits(analysis, existing, &mut counters);
 
     // Synthesis manifest pass: emit pending-synthesis manifests (failure
     // evidence + template body) for up to N seeded skills. A host agent
     // upgrades them later via `epic-harness evolve accept-synth`. Runs between
     // the planner and the executor; skills keep template bodies until upgraded.
-    let emitted = crate::evolve::synthesis::upgrade_edits(&mut plan.edits, analysis);
+    let emitted =
+        crate::evolve::synthesis::upgrade_edits(&mut plan.edits, analysis, reflection_session_id)?;
     if emitted > 0 {
         hint(
             "reflect",
@@ -538,20 +760,24 @@ pub fn seed_smart_skills(
         );
     }
 
-    let outcome = apply_skill_edits(&plan, metrics);
-
-    save_promotion_counters(&plan.counters);
-    if plan.promoted_count > 0 {
+    let intent = PromotionIntent {
+        session_id: reflection_session_id.to_string(),
+        plan,
+        metrics: metrics.clone(),
+    };
+    let intent_path = persist_promotion_intent_at(&counter_path, &intent)?;
+    let commit = finish_promotion_intent_at(&counter_path, &intent_path, intent)?;
+    if commit.promoted_count > 0 {
         let min_obs = CONFIG.evolution.gated_promotion_min;
         hint(
             "reflect",
             &format!(
                 "Gated Promotion: {} skill(s) promoted after {min_obs}+ observations",
-                plan.promoted_count
+                commit.promoted_count
             ),
         );
     }
-    outcome
+    Ok(commit.outcome)
 }
 
 pub fn sanitize_skill_name(name: &str) -> bool {
@@ -563,19 +789,154 @@ pub fn sanitize_skill_name(name: &str) -> bool {
         && name.len() < 64
 }
 
-pub fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f64) {
+pub fn write_skill_with_meta(
+    name: &str,
+    content: &str,
+    origin: &str,
+    confidence: f64,
+) -> std::io::Result<()> {
     if !sanitize_skill_name(name) {
-        hint("reflect", &format!("Rejected invalid skill name: {name}"));
-        return;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid skill name: {name}"),
+        ));
     }
-    let dir = evolved_dir().join(name);
-    ensure_dir(&dir);
+    let root = evolved_dir();
+    fs::create_dir_all(&root)?;
+    let _lock = crate::orchestrate::state::acquire_lock(&root.join(format!(".{name}.pair.lock")))?;
+    write_skill_with_meta_at(&root, name, content, origin, confidence, &project_slug())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SkillPairTransaction {
+    stage: String,
+    backup: String,
+}
+
+fn unique_sibling(root: &Path, name: &str, suffix: &str) -> PathBuf {
+    root.join(format!(
+        ".{name}.{suffix}.{}.{}",
+        std::process::id(),
+        PAIR_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+fn atomic_write_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no parent")
+    })?;
+    let temp = unique_sibling(
+        parent,
+        &path.file_name().unwrap_or_default().to_string_lossy(),
+        "tmp",
+    );
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temp)?;
+    if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    drop(file);
+    if let Err(error) = crate::team::codex::atomic_replace_file(&temp, path) {
+        let _ = fs::remove_file(&temp);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn recover_skill_pair_transaction(root: &Path, name: &str) -> std::io::Result<()> {
+    let journal = root.join(format!(".{name}.pair-txn.json"));
+    let bytes = match fs::read(&journal) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let transaction: SkillPairTransaction =
+        serde_json::from_slice(&bytes).map_err(std::io::Error::other)?;
+    let target = root.join(name);
+    let stage = root.join(transaction.stage);
+    let backup = root.join(transaction.backup);
+    if !target.exists() {
+        if stage.is_dir() {
+            fs::rename(&stage, &target)?;
+        } else if backup.is_dir() {
+            fs::rename(&backup, &target)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "incomplete skill-pair transaction has no recoverable directory",
+            ));
+        }
+    }
+    if backup.exists() {
+        fs::remove_dir_all(backup)?;
+    }
+    if stage.exists() {
+        fs::remove_dir_all(stage)?;
+    }
+    fs::remove_file(journal)
+}
+
+fn fail_before_pair_promotion() -> std::io::Result<()> {
+    #[cfg(test)]
+    if SKILL_WRITE_FAILPOINT.swap(0, Ordering::SeqCst) != 0 {
+        return Err(std::io::Error::other(
+            "injected skill pair promotion failure",
+        ));
+    }
+    Ok(())
+}
+
+fn write_skill_with_meta_at(
+    root: &Path,
+    name: &str,
+    content: &str,
+    origin: &str,
+    confidence: f64,
+    project: &str,
+) -> std::io::Result<()> {
+    if !sanitize_skill_name(name) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid skill name: {name}"),
+        ));
+    }
+    fs::create_dir_all(root)?;
+    recover_skill_pair_transaction(root, name)?;
+    let target = root.join(name);
+    if target.exists() {
+        let meta_path = target.join("meta.json");
+        let meta: SkillMeta = serde_json::from_slice(&fs::read(&meta_path)?).map_err(|error| {
+            std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("refusing to overwrite unowned skill {name}: {error}"),
+            )
+        })?;
+        if meta.name != name || meta.project != project {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("refusing to overwrite unowned skill {name}"),
+            ));
+        }
+        if meta.origin == origin
+            && (meta.confidence - confidence).abs() < f64::EPSILON
+            && fs::read_to_string(target.join("SKILL.md"))? == content
+        {
+            return Ok(());
+        }
+    }
 
     let meta = SkillMeta {
         name: name.into(),
         origin: origin.into(),
         confidence,
-        project: project_slug(),
+        project: project.into(),
         created: now_iso(),
         updated: now_iso(),
         active: true,
@@ -588,24 +949,49 @@ pub fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence
                 "reflect",
                 &format!("Failed to serialize meta.json for {name}: {e}"),
             );
-            return;
+            return Err(std::io::Error::other(e));
         }
     };
-    if let Err(e) = fs::write(dir.join("meta.json"), json) {
-        hint(
-            "reflect",
-            &format!("Failed to write meta.json for {name}: {e}"),
-        );
-        return;
+    let stage = unique_sibling(root, name, "stage");
+    let backup = unique_sibling(root, name, "backup");
+    fs::create_dir(&stage)?;
+    let stage_result = (|| {
+        atomic_write_file(&stage.join("meta.json"), json.as_bytes())?;
+        atomic_write_file(&stage.join("SKILL.md"), content.as_bytes())?;
+        let transaction = SkillPairTransaction {
+            stage: stage
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            backup: backup
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+        };
+        let journal = root.join(format!(".{name}.pair-txn.json"));
+        atomic_write_file(
+            &journal,
+            &serde_json::to_vec(&transaction).map_err(std::io::Error::other)?,
+        )?;
+        if target.exists() {
+            fs::rename(&target, &backup)?;
+        }
+        fail_before_pair_promotion()?;
+        fs::rename(&stage, &target)?;
+        if backup.exists() {
+            fs::remove_dir_all(&backup)?;
+        }
+        fs::remove_file(journal)
+    })();
+    if stage_result.is_err()
+        && stage.exists()
+        && !root.join(format!(".{name}.pair-txn.json")).exists()
+    {
+        let _ = fs::remove_dir_all(&stage);
     }
-    if let Err(e) = fs::write(dir.join("SKILL.md"), content) {
-        hint(
-            "reflect",
-            &format!("Failed to write SKILL.md for {name}: {e}"),
-        );
-        // Clean up orphaned meta.json
-        let _ = fs::remove_file(dir.join("meta.json"));
-    }
+    stage_result
 }
 
 pub fn write_workspace_manifest() {
@@ -766,17 +1152,21 @@ pub fn gate_skills() {
     }
 }
 
-pub fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]) {
+/// Export one reflection's cross-project pattern evidence exactly once.
+///
+/// SQLite is the sole writable source of truth. Legacy JSONL remains readable
+/// by dashboard compatibility code, but writing it again would create a second
+/// replay path with no unique session constraint.
+pub fn export_to_global(
+    reflection_session_id: &str,
+    analysis: &SessionAnalysis,
+    patterns: &[DetectedPattern],
+) -> std::io::Result<bool> {
     if !cross_project_file().is_file() {
-        return;
+        return Ok(false);
     }
-    ensure_dir(&global_harness_dir());
-
-    let project_name = cwd()
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_string();
+    crate::shared::helpers::ensure_private_dir(&global_harness_dir())?;
+    let project_name = project_slug();
 
     let weak_tools: Vec<String> = analysis
         .per_tool_stats
@@ -788,39 +1178,23 @@ pub fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
         .map(|(cat, _)| cat.clone())
         .collect();
 
-    let record = serde_json::json!({
-        "timestamp": now_iso(),
-        "project": project_name,
-        "success_rate": analysis.success_rate,
-        "avg_score": analysis.avg_score,
-        "per_error_stats": analysis.per_error_stats,
-        "failure_patterns": patterns.iter().map(|p| serde_json::json!({
-            "pattern_type": p.pattern_type,
-            "count": p.count,
-            "remediation": p.suggested_remediation,
-        })).collect::<Vec<_>>(),
-        "weak_tools": weak_tools,
-    });
-
-    // Write to SQLite pool (primary) + JSONL (fallback)
-    if let Ok(pool) = crate::store::runtime::block_on(crate::store::pool::harness_pool()) {
-        let per_error_json = serde_json::to_string(&analysis.per_error_stats).unwrap_or_default();
-        let failure_json = serde_json::to_string(patterns).unwrap_or_default();
-        let weak_json = serde_json::to_string(&weak_tools).unwrap_or_default();
-        if let Err(e) = crate::store::runtime::block_on(crate::store::global::insert_pattern_pool(
-            &pool,
-            record["timestamp"].as_str().unwrap_or(""),
-            &project_name,
-            analysis.success_rate,
-            analysis.avg_score,
-            &per_error_json,
-            &failure_json,
-            &weak_json,
-        )) {
-            eprintln!("[skills] SQLite global pattern write failed: {e}");
-        }
-    }
-    append_jsonl(&global_patterns_file(), &record);
+    let timestamp = now_iso();
+    let per_error_json =
+        serde_json::to_string(&analysis.per_error_stats).map_err(std::io::Error::other)?;
+    let failure_json = serde_json::to_string(patterns).map_err(std::io::Error::other)?;
+    let weak_json = serde_json::to_string(&weak_tools).map_err(std::io::Error::other)?;
+    let pool = crate::store::runtime::block_on(crate::store::pool::harness_pool())?;
+    crate::store::runtime::block_on(crate::store::global::insert_pattern_once_pool(
+        &pool,
+        reflection_session_id,
+        &timestamp,
+        &project_name,
+        analysis.success_rate,
+        analysis.avg_score,
+        &per_error_json,
+        &failure_json,
+        &weak_json,
+    ))
 }
 
 // ── Prompt Auto-Tuning (#49) ─────────────────────────
@@ -1199,6 +1573,7 @@ mod tests {
                 m.insert("evo-other".into(), 1);
                 m
             },
+            applied_sessions: std::collections::HashSet::new(),
         };
         let json = serde_json::to_string_pretty(&counters).expect("serialize");
         let _ = fs::write(&path, &json);
@@ -1458,6 +1833,224 @@ mod tests {
         assert!(parsed.active);
     }
 
+    #[test]
+    #[serial_test::serial]
+    fn staged_skill_write_recovers_after_pair_promotion_failure() {
+        let root = tempfile::tempdir().unwrap();
+        write_skill_with_meta_at(root.path(), "evo-pair", "old skill", "old", 0.4, "test").unwrap();
+
+        SKILL_WRITE_FAILPOINT.store(1, std::sync::atomic::Ordering::SeqCst);
+        assert!(
+            write_skill_with_meta_at(root.path(), "evo-pair", "new skill", "new", 0.9, "test")
+                .is_err()
+        );
+
+        write_skill_with_meta_at(root.path(), "evo-pair", "new skill", "new", 0.9, "test").unwrap();
+        assert_eq!(
+            fs::read_to_string(root.path().join("evo-pair/SKILL.md")).unwrap(),
+            "new skill"
+        );
+        let meta: SkillMeta =
+            serde_json::from_slice(&fs::read(root.path().join("evo-pair/meta.json")).unwrap())
+                .unwrap();
+        assert_eq!(meta.origin, "new");
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn skill_write_rejects_foreign_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let target = root.path().join("evo-foreign");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("SKILL.md"), "foreign skill").unwrap();
+        let foreign = SkillMeta {
+            name: "evo-foreign".into(),
+            origin: "foreign".into(),
+            confidence: 1.0,
+            project: "other-project".into(),
+            created: "now".into(),
+            updated: "now".into(),
+            active: true,
+            prompt_tuning_history: vec![],
+        };
+        fs::write(
+            target.join("meta.json"),
+            serde_json::to_vec(&foreign).unwrap(),
+        )
+        .unwrap();
+
+        let error = write_skill_with_meta_at(
+            root.path(),
+            "evo-foreign",
+            "replacement",
+            "test",
+            1.0,
+            "this-project",
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(
+            fs::read_to_string(target.join("SKILL.md")).unwrap(),
+            "foreign skill"
+        );
+    }
+
+    #[test]
+    fn identical_owned_skill_replay_does_not_rewrite_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        write_skill_with_meta_at(root.path(), "evo-owned", "content", "test", 0.8, "project")
+            .unwrap();
+        let metadata = fs::read(root.path().join("evo-owned/meta.json")).unwrap();
+        write_skill_with_meta_at(root.path(), "evo-owned", "content", "test", 0.8, "project")
+            .unwrap();
+        assert_eq!(
+            fs::read(root.path().join("evo-owned/meta.json")).unwrap(),
+            metadata
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn promotion_commit_recovers_marker_after_post_skill_counter_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let counter_path = root.path().join("promotion_counters.json");
+        let mut counters = PromotionCounter::default();
+        counters.counts.insert("evo-test".into(), 2);
+        counters.applied_sessions.insert("session-a".into());
+        let commit = PromotionCommit {
+            session_id: "session-a".into(),
+            counters,
+            outcome: ApplyOutcome {
+                applied: 1,
+                manifests: vec![],
+            },
+            promoted_count: 1,
+        };
+
+        PROMOTION_COUNTER_SAVE_FAILPOINT.store(1, Ordering::SeqCst);
+        assert!(persist_promotion_commit_at(&counter_path, &commit).is_err());
+        assert!(
+            promotion_journal_path(&counter_path, "session-a")
+                .unwrap()
+                .is_file()
+        );
+        assert!(
+            !load_promotion_counters_at(&counter_path)
+                .applied_sessions
+                .contains("session-a")
+        );
+
+        let recovered = recover_promotion_commits_at(&counter_path, "session-a")
+            .unwrap()
+            .expect("same session must receive its original applied outcome");
+        assert_eq!(recovered.outcome.applied, 1);
+        assert!(
+            load_promotion_counters_at(&counter_path)
+                .applied_sessions
+                .contains("session-a")
+        );
+        assert!(
+            !promotion_journal_path(&counter_path, "session-a")
+                .unwrap()
+                .exists()
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn promotion_intent_recovers_after_skill_apply_before_commit_journal() {
+        let root = tempfile::tempdir().unwrap();
+        let counter_path = root.path().join("promotion_counters.json");
+        let skill_name = format!("evo-intent-fail-{}", std::process::id());
+        let skill_path = evolved_dir().join(&skill_name);
+        let _ = fs::remove_dir_all(&skill_path);
+        let intent = PromotionIntent {
+            session_id: "session-intent".into(),
+            plan: SkillEditPlan {
+                edits: vec![HarnessEdit::AddSkill {
+                    name: skill_name.clone(),
+                    content: "---\nname: intent\n---\n\nbody that is long enough to pass gating\n"
+                        .into(),
+                    origin: "test".into(),
+                    confidence: 0.9,
+                }],
+                counters: PromotionCounter::default(),
+                promoted_count: 1,
+            },
+            metrics: crate::shared::evolution::Metrics::default(),
+        };
+        let intent_path = persist_promotion_intent_at(&counter_path, &intent).unwrap();
+        PROMOTION_POST_APPLY_FAILPOINT.store(1, Ordering::SeqCst);
+        assert!(finish_promotion_intent_at(&counter_path, &intent_path, intent).is_err());
+        assert!(
+            skill_path.is_dir(),
+            "skill pair was promoted before the crash"
+        );
+        assert!(intent_path.exists());
+        assert!(
+            !load_promotion_counters_at(&counter_path)
+                .applied_sessions
+                .contains("session-intent")
+        );
+
+        let recovered = recover_promotion_intents_at(&counter_path, "session-intent")
+            .unwrap()
+            .expect("replay must finish the saved intent");
+        assert_eq!(recovered.outcome.applied, 1);
+        assert!(
+            load_promotion_counters_at(&counter_path)
+                .applied_sessions
+                .contains("session-intent")
+        );
+        assert!(!intent_path.exists());
+        let _ = fs::remove_dir_all(skill_path);
+    }
+
+    #[test]
+    fn promotion_lock_serializes_counter_marker_contenders() {
+        let root = tempfile::tempdir().unwrap();
+        let counter_path = root.path().join("promotion_counters.json");
+        let lock_path = counter_path.with_extension("lock");
+        let lock = crate::orchestrate::state::acquire_lock(&lock_path).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let contender = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let _lock = crate::orchestrate::state::acquire_lock(&lock_path).unwrap();
+            entered_tx.send(()).unwrap();
+        });
+        started_rx.recv().unwrap();
+        assert!(
+            entered_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+                .is_err()
+        );
+        drop(lock);
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        contender.join().unwrap();
+    }
+
+    #[test]
+    fn promotion_markers_keep_only_the_retained_window() {
+        let mut counters = PromotionCounter::default();
+        for index in 0..=MAX_PROMOTION_SESSION_MARKERS {
+            counters
+                .applied_sessions
+                .insert(format!("20260728-{index:04}"));
+        }
+
+        trim_promotion_session_markers(&mut counters);
+
+        assert_eq!(
+            counters.applied_sessions.len(),
+            MAX_PROMOTION_SESSION_MARKERS
+        );
+        assert!(!counters.applied_sessions.contains("20260728-0000"));
+        assert!(counters.applied_sessions.contains("20260728-0256"));
+    }
+
     // ── R1: Negative Feedback Buffer tests ──────────────
 
     #[test]
@@ -1702,7 +2295,7 @@ mod tests {
             promoted_count: 1,
         };
         let metrics = crate::shared::evolution::Metrics::default();
-        let outcome = apply_skill_edits(&plan, &metrics);
+        let outcome = apply_skill_edits(&plan, &metrics).unwrap();
         assert_eq!(outcome.applied, 1);
         assert_eq!(outcome.manifests.len(), 1);
         assert_eq!(outcome.manifests[0].target, "evo-unit-test-skill");
@@ -1710,6 +2303,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(
             crate::shared::paths::evolved_dir().join("evo-unit-test-skill"),
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn apply_outcome_excludes_manifest_when_skill_write_fails() {
+        let skill_path = crate::shared::paths::evolved_dir().join("evo-unit-test-write-failure");
+        let _ = std::fs::remove_dir_all(&skill_path);
+        let _ = std::fs::remove_file(&skill_path);
+        crate::shared::helpers::ensure_dir(&crate::shared::paths::evolved_dir());
+        std::fs::write(&skill_path, "blocks skill directory creation").unwrap();
+
+        let edit = HarnessEdit::AddSkill {
+            name: "evo-unit-test-write-failure".into(),
+            content:
+                "---\nname: evo-unit-test-write-failure\n---\nbody that is long enough to pass gating\n"
+                    .into(),
+            origin: "type_error".into(),
+            confidence: 0.8,
+        };
+        let plan = SkillEditPlan {
+            edits: vec![edit],
+            counters: PromotionCounter::default(),
+            promoted_count: 1,
+        };
+
+        let error = apply_skill_edits(&plan, &crate::shared::evolution::Metrics::default())
+            .expect_err("required AddSkill persistence failure must abort the transaction");
+
+        let _ = std::fs::remove_file(&skill_path);
+        assert!(error.to_string().contains("skill write failed"));
     }
 
     #[test]
@@ -1734,7 +2357,7 @@ mod tests {
             reward_hacking_suspected: true,
             ..crate::shared::evolution::Metrics::default()
         };
-        let outcome = apply_skill_edits(&plan, &metrics);
+        let outcome = apply_skill_edits(&plan, &metrics).unwrap();
         assert_eq!(outcome.applied, 0);
         assert!(outcome.manifests.is_empty());
         // nothing was written

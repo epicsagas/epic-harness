@@ -1,4 +1,5 @@
 use regex::Regex;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -171,14 +172,25 @@ fn is_write_tool(tool_name: &str) -> bool {
     )
 }
 
-/// Resolve the orchestrator base directory from `$HARNESS_DIR/orchestrator`.
+/// Resolve the orchestrator directory from an optional explicit base, then the
+/// normal per-project harness base used by hooks.
+fn resolve_orchestrator_dir(env_base: Option<PathBuf>, project_base: &Path) -> Option<PathBuf> {
+    env_base
+        .map(|base| base.join("orchestrator"))
+        .filter(|path| path.is_dir())
+        .or_else(|| {
+            let path = project_base.join("orchestrator");
+            path.is_dir().then_some(path)
+        })
+}
+
+/// Resolve the active project's orchestrator state. `HARNESS_DIR` remains an
+/// explicit override, but native hooks do not need it.
 fn orchestrator_dir() -> Option<PathBuf> {
-    std::env::var("HARNESS_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .map(|p| p.join("orchestrator"))
-        .filter(|p| p.is_dir())
+    resolve_orchestrator_dir(
+        std::env::var("HARNESS_DIR").ok().map(PathBuf::from),
+        &common::harness_dir(),
+    )
 }
 
 /// Return agent IDs whose `status.json` reports `"running"`.
@@ -211,10 +223,36 @@ fn running_agent_ids(orch_dir: &Path) -> Vec<String> {
 
 /// Read the last N lines of a JSONL file, parsed as generic JSON values.
 fn read_jsonl_tail(path: &Path, n: usize) -> Vec<serde_json::Value> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(c) => c,
+    use std::io::{Read, Seek, SeekFrom};
+
+    const MAX_TAIL_BYTES: u64 = 64 * 1024;
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
         Err(_) => return vec![],
     };
+    let len = match file.metadata() {
+        Ok(metadata) => metadata.len(),
+        Err(_) => return vec![],
+    };
+    let start = len.saturating_sub(MAX_TAIL_BYTES);
+    if file.seek(SeekFrom::Start(start)).is_err() {
+        return vec![];
+    }
+
+    let mut bytes = Vec::with_capacity((len - start) as usize);
+    if file.read_to_end(&mut bytes).is_err() {
+        return vec![];
+    }
+    let bytes = if start > 0 {
+        match bytes.iter().position(|byte| *byte == b'\n') {
+            Some(index) => &bytes[index + 1..],
+            None => return vec![],
+        }
+    } else {
+        &bytes
+    };
+    let content = String::from_utf8_lossy(bytes);
     content
         .lines()
         .filter(|l| !l.is_empty())
@@ -249,13 +287,33 @@ fn file_in_recent_entries(entries: &[serde_json::Value], file_path: &str) -> boo
 /// Detect concurrent write conflicts: returns agent IDs that recently modified
 /// the same file path, excluding `exclude_agent_id`.
 /// Accepts an explicit orchestrator directory for testability.
+#[cfg(test)]
 fn detect_concurrent_write_conflict(
     file_path: &str,
     exclude_agent_id: Option<&str>,
     orch_dir: &Path,
 ) -> Vec<String> {
+    build_conflict_index(&[file_path.to_string()], exclude_agent_id, orch_dir)
+        .remove(file_path)
+        .unwrap_or_default()
+}
+
+/// Build one conflict index for all deduplicated targets in this invocation.
+///
+/// Each running agent stream is tail-read once. The caller can then emit all
+/// target warnings without rescanning the same files.
+fn build_conflict_index(
+    file_paths: &[String],
+    exclude_agent_id: Option<&str>,
+    orch_dir: &Path,
+) -> BTreeMap<String, Vec<String>> {
     let running = running_agent_ids(orch_dir);
-    let mut conflicts = vec![];
+    let targets: BTreeSet<&str> = file_paths
+        .iter()
+        .map(String::as_str)
+        .filter(|path| !path.is_empty())
+        .collect();
+    let mut conflicts = BTreeMap::<String, Vec<String>>::new();
 
     for agent_id in &running {
         if let Some(exclude) = exclude_agent_id
@@ -268,8 +326,13 @@ fn detect_concurrent_write_conflict(
             continue;
         }
         let recent = read_jsonl_tail(&stream_path, CONFLICT_LOOKBACK);
-        if file_in_recent_entries(&recent, file_path) {
-            conflicts.push(agent_id.clone());
+        for target in &targets {
+            if file_in_recent_entries(&recent, target) {
+                conflicts
+                    .entry((*target).to_string())
+                    .or_default()
+                    .push(agent_id.clone());
+            }
         }
     }
     conflicts
@@ -283,54 +346,88 @@ fn current_agent_id() -> Option<String> {
 }
 
 /// Check if `control.json` has a "pause" directive targeting the current agent.
-/// Returns true if the tool call should be blocked.
+/// Missing state means no pause. Existing unreadable, malformed, or invalid
+/// state returns an error so the caller can block with the real reason.
 /// Accepts an explicit orchestrator directory for testability.
-fn check_control_json_pause(current_agent: Option<&str>, orch_dir: &Path) -> bool {
+fn check_control_json_pause(current_agent: Option<&str>, orch_dir: &Path) -> Result<bool, String> {
     let control_path = orch_dir.join("control.json");
     let content = match std::fs::read_to_string(&control_path) {
         Ok(c) => c,
-        Err(_) => return false,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(format!("cannot read {}: {error}", control_path.display()));
+        }
     };
-    let doc: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
+    let doc: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|error| format!("malformed {}: {error}", control_path.display()))?;
+    if !doc.is_object() {
+        return Err(format!(
+            "{} must contain a JSON object",
+            control_path.display()
+        ));
+    }
 
     // Format 1: ControlDirective style {"action": "pause", "target": "agent-x" or "all"}
-    if let Some(action) = doc.get("action").and_then(|v| v.as_str()) {
+    if let Some(action_value) = doc.get("action") {
+        let Some(action) = action_value.as_str() else {
+            return Err(format!(
+                "{} action must be a string",
+                control_path.display()
+            ));
+        };
         if action == "pause" {
-            let target = doc.get("target").and_then(|v| v.as_str()).unwrap_or("all");
+            let target = match doc.get("target") {
+                Some(value) => match value.as_str() {
+                    Some(target) if !target.is_empty() => target,
+                    _ => {
+                        return Err(format!(
+                            "{} pause target must be a nonempty string",
+                            control_path.display()
+                        ));
+                    }
+                },
+                None => "all",
+            };
             if target == "all" {
-                return true;
+                return Ok(true);
             }
             if let Some(agent) = current_agent {
-                return target == agent;
+                return Ok(target == agent);
             }
         }
-        return false;
+        return Ok(false);
     }
 
     // Format 2: Legacy {"pause": ["agent-1", "agent-2"]} or {"pause": "agent-1"} or {"pause": true}
     let pause_val = match doc.get("pause") {
         Some(v) => v,
-        None => return false,
+        None => return Ok(false),
     };
     if pause_val.is_boolean() {
-        return pause_val.as_bool().unwrap_or(false);
+        return Ok(pause_val.as_bool().unwrap_or(false));
     }
     if pause_val.is_string() {
         if let Some(agent) = current_agent {
-            return pause_val.as_str() == Some(agent);
+            return Ok(pause_val.as_str() == Some(agent));
         }
-        return false;
+        return Ok(false);
     }
     if let Some(arr) = pause_val.as_array() {
-        if let Some(agent) = current_agent {
-            return arr.iter().any(|v| v.as_str() == Some(agent));
+        if arr.iter().any(|value| !value.is_string()) {
+            return Err(format!(
+                "{} pause array must contain only agent strings",
+                control_path.display()
+            ));
         }
-        return false;
+        if let Some(agent) = current_agent {
+            return Ok(arr.iter().any(|v| v.as_str() == Some(agent)));
+        }
+        return Ok(false);
     }
-    false
+    Err(format!(
+        "{} pause must be a boolean, string, or string array",
+        control_path.display()
+    ))
 }
 
 pub fn run(input: &HookInput) -> i32 {
@@ -347,27 +444,34 @@ pub fn run(input: &HookInput) -> i32 {
 
             // control.json pause check — blocks the tool call entirely
             let agent_id = current_agent_id();
-            if let Some(ref orch) = orch_dir
-                && check_control_json_pause(agent_id.as_deref(), orch)
-            {
-                hint(
-                    "guard",
-                    &format!(
-                        "BLOCKED: control.json pause directive active for agent {}",
-                        agent_id.as_deref().unwrap_or("unknown")
-                    ),
-                );
-                return 2;
+            if let Some(ref orch) = orch_dir {
+                match check_control_json_pause(agent_id.as_deref(), orch) {
+                    Ok(true) => {
+                        hint(
+                            "guard",
+                            &format!(
+                                "BLOCKED: control.json pause directive active for agent {}",
+                                agent_id.as_deref().unwrap_or("unknown")
+                            ),
+                        );
+                        return 2;
+                    }
+                    Ok(false) => {}
+                    Err(error) => {
+                        hint("guard", &format!("BLOCKED: invalid control state: {error}"));
+                        return 2;
+                    }
+                }
             }
 
             // Concurrent write conflict detection — informational warning only.
             // An `apply_patch` envelope can touch several files, so every target
             // is checked, not just a single `file_path`.
             if let Some(ref orch) = orch_dir {
-                for file_path in super::polish::target_files(input) {
-                    let conflicts =
-                        detect_concurrent_write_conflict(&file_path, agent_id.as_deref(), orch);
-                    for other_id in &conflicts {
+                let targets = super::polish::target_files(input);
+                let conflicts = build_conflict_index(&targets, agent_id.as_deref(), orch);
+                for (file_path, other_agents) in conflicts {
+                    for other_id in other_agents {
                         hint(
                             "guard",
                             &format!(
@@ -947,6 +1051,19 @@ mod tests {
     }
 
     #[test]
+    fn read_jsonl_tail_does_not_scan_past_the_bounded_tail_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("stream.jsonl");
+        let content = format!("{{\"seq\":1}}\n{}\n", "x".repeat(128 * 1024));
+        std::fs::write(&path, content).unwrap();
+
+        assert!(
+            read_jsonl_tail(&path, 3).is_empty(),
+            "records outside the bounded tail window must not be scanned"
+        );
+    }
+
+    #[test]
     fn file_in_recent_entries_matches_tool_input_file_path() {
         let entries = vec![serde_json::json!({
             "tool_input": {"file_path": "/src/main.rs"}
@@ -1036,6 +1153,47 @@ mod tests {
         assert!(conflicts.is_empty());
     }
 
+    #[test]
+    fn conflict_index_deduplicates_targets_and_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        let agent_dir = orch_dir.join("agents").join("agent-1");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        std::fs::write(agent_dir.join("status.json"), "{\"status\":\"running\"}").unwrap();
+        std::fs::write(
+            agent_dir.join("stream.jsonl"),
+            concat!(
+                "{\"tool_input\":{\"file_path\":\"/src/a.rs\"}}\n",
+                "{\"tool_input\":{\"file_path\":\"/src/b.rs\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let targets = vec![
+            "/src/a.rs".to_string(),
+            "/src/a.rs".to_string(),
+            "/src/b.rs".to_string(),
+        ];
+        let index = build_conflict_index(&targets, None, &orch_dir);
+
+        assert_eq!(index.len(), 2);
+        assert_eq!(index["/src/a.rs"], vec!["agent-1".to_string()]);
+        assert_eq!(index["/src/b.rs"], vec!["agent-1".to_string()]);
+    }
+
+    #[test]
+    fn normal_project_harness_dir_enables_orchestration_without_env_override() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).expect("orchestrator dir");
+
+        assert_eq!(
+            resolve_orchestrator_dir(None, dir.path()),
+            Some(orch_dir),
+            "normal hooks must discover project orchestration state without HARNESS_DIR"
+        );
+    }
+
     // ── control.json pause enforcement ──────────────────────
 
     #[test]
@@ -1045,7 +1203,7 @@ mod tests {
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":true}").unwrap();
 
-        assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir).unwrap());
     }
 
     #[test]
@@ -1055,7 +1213,7 @@ mod tests {
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":false}").unwrap();
 
-        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir));
+        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir).unwrap());
     }
 
     #[test]
@@ -1065,8 +1223,8 @@ mod tests {
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-1\"}").unwrap();
 
-        assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
-        assert!(!check_control_json_pause(Some("agent-2"), &orch_dir));
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir).unwrap());
+        assert!(!check_control_json_pause(Some("agent-2"), &orch_dir).unwrap());
     }
 
     #[test]
@@ -1080,9 +1238,9 @@ mod tests {
         )
         .unwrap();
 
-        assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
-        assert!(!check_control_json_pause(Some("agent-2"), &orch_dir));
-        assert!(check_control_json_pause(Some("agent-3"), &orch_dir));
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir).unwrap());
+        assert!(!check_control_json_pause(Some("agent-2"), &orch_dir).unwrap());
+        assert!(check_control_json_pause(Some("agent-3"), &orch_dir).unwrap());
     }
 
     #[test]
@@ -1092,7 +1250,7 @@ mod tests {
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"resume\":true}").unwrap();
 
-        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir));
+        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir).unwrap());
     }
 
     #[test]
@@ -1102,7 +1260,17 @@ mod tests {
         // Dir exists but no control.json file
         std::fs::create_dir_all(&orch_dir).unwrap();
 
-        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir));
+        assert!(!check_control_json_pause(Some("agent-1"), &orch_dir).unwrap());
+    }
+
+    #[test]
+    fn malformed_control_json_fails_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(orch_dir.join("control.json"), "{\"pause\":").unwrap();
+
+        assert!(check_control_json_pause(Some("agent-1"), &orch_dir).is_err());
     }
 
     // ── run() integration with orchestration ────────────────

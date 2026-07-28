@@ -326,34 +326,64 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
     }
 
     // Makefile `eval` target
-    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile")) {
-        if content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-        {
-            found.push(Benchmark {
-                name: "make_eval".into(),
-                command: "make eval".into(),
-                result_type: "exit_code".into(),
-            });
-        }
+    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile"))
+        && has_domain_eval_target(&content)
+    {
+        found.push(Benchmark {
+            name: "make_eval".into(),
+            command: "make eval".into(),
+            result_type: "exit_code".into(),
+        });
     }
 
     // justfile `eval` recipe
-    if let Ok(content) = std::fs::read_to_string(cwd.join("justfile")) {
-        if content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-        {
-            found.push(Benchmark {
-                name: "just_eval".into(),
-                command: "just eval".into(),
-                result_type: "exit_code".into(),
-            });
-        }
+    if let Ok(content) = std::fs::read_to_string(cwd.join("justfile"))
+        && has_domain_eval_target(&content)
+    {
+        found.push(Benchmark {
+            name: "just_eval".into(),
+            command: "just eval".into(),
+            result_type: "exit_code".into(),
+        });
     }
 
     found
+}
+
+pub(super) fn has_domain_eval_target(content: &str) -> bool {
+    let mut found_target = false;
+    for line in content.lines() {
+        if line.starts_with("eval:") || line.starts_with("eval :") {
+            found_target = true;
+            continue;
+        }
+        if !found_target {
+            continue;
+        }
+        if line.trim().is_empty() || line.trim_start().starts_with('#') {
+            continue;
+        }
+        if !line
+            .chars()
+            .next()
+            .map(char::is_whitespace)
+            .unwrap_or(false)
+        {
+            break;
+        }
+        let tokens: Vec<&str> = line
+            .trim()
+            .trim_start_matches('@')
+            .split_whitespace()
+            .collect();
+        if tokens.windows(2).any(|pair| {
+            let executable = pair[0].rsplit(['/', '\\']).next().unwrap_or(pair[0]);
+            matches!(executable, "epic" | "epic-harness") && pair[1] == "eval"
+        }) {
+            return false;
+        }
+    }
+    found_target
 }
 
 /// Resolve commands from explicit config only — no stack-based defaults.
@@ -387,4 +417,32 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         mutation_command: mutation_cmd,
         stack,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn self_referential_make_eval_is_not_detected_as_a_benchmark() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            root.path().join("Makefile"),
+            "eval:\n\t@epic-harness eval --json\n",
+        )
+        .unwrap();
+
+        assert!(detect_benchmarks(root.path()).is_empty());
+    }
+
+    #[test]
+    fn domain_make_eval_remains_a_detected_benchmark() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("Makefile"), "eval:\n\tcargo bench\n").unwrap();
+
+        let benchmarks = detect_benchmarks(root.path());
+
+        assert_eq!(benchmarks.len(), 1);
+        assert_eq!(benchmarks[0].command, "make eval");
+    }
 }

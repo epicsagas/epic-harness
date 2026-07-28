@@ -403,7 +403,7 @@ S'executent de maniere invisible a chaque session. Binaire Rust unique (`epic-ha
 
 Polish alimente observe : echec de formatage → `lint_fail`, erreur TypeScript → `build_fail`. Le va-et-vient Edition→Erreur est detecte meme lorsque les erreurs proviennent de polish.
 
-Chaque session ecrit son propre `session_{date}_{pid}_{random}.jsonl` — des sessions concurrentes multiples ne corrompront pas les donnees des autres.
+Chaque session ecrit son propre `session_{date}_{host-session-id}.jsonl` — des sessions concurrentes multiples ne corrompront pas les donnees des autres.
 
 ### Profils de hook
 
@@ -465,10 +465,10 @@ Tous les outils partagent le meme repertoire de donnees `~/.harness/projects/{sl
 | Outil | Hooks Ring 0 | Commandes | Competences | Agents |
 |-------|-------------|-----------|-------------|--------|
 | **Claude Code** | ✓ Complet | ✓ 3 commandes (incl. /orbit) | ✓ 26 competences | Live |
-| **Codex CLI** | ✓ Complet¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Partiel² | ✓ 3 commandes (incl. /orbit) | ✓ 26 | — |
+| **Codex CLI** | ✓ Complet | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
+| **Antigravity** | ✓ Partiel¹ | ✓ 3 commandes (incl. /orbit) | ✓ 26 | — |
 
-¹ `plugin_hooks = true` dans `~/.codex/config.toml` · ² PreInvocation/PostInvocation uniquement — pas de PreToolUse (guard/polish indisponible)
+¹ PreInvocation/PostInvocation uniquement — pas de PreToolUse (guard/polish indisponible)
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic : binaire introuvable dans les hooks du plugin</summary>
-
-Le plugin cherche d'abord le binaire dans `hooks/bin/epic-harness`. Apres une mise a jour via `cargo install`, copiez-le :
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## Developpement
 
 ```bash
 cargo install --path .                                        # Compilation + installation
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Mettre a jour le binaire du plugin
 cargo test                                                    # Tests
 ```
-
-Les hooks cherchent le binaire a deux endroits : `hooks/bin/epic-harness` (local au plugin) → `~/.cargo/bin/epic-harness` (PATH).
 
 ---
 

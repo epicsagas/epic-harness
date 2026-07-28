@@ -403,7 +403,7 @@ Laufen unsichtbar bei jeder Session. Ein einzelnes Rust-Binary (`epic-harness`) 
 
 Polish meldet Ergebnisse zurück an observe: Formatierungsfehler → `lint_fail`, TypeScript-Fehler → `build_fail`. Edit→Error-Thrashing wird sogar erkannt, wenn die Fehler aus polish stammen.
 
-Jede Session schreibt ihre eigene `session_{date}_{pid}_{random}.jsonl` — mehrere gleichzeitige Sessions beschädigen nicht gegenseitig ihre Daten.
+Jede Session schreibt ihre eigene `session_{date}_{host-session-id}.jsonl` — mehrere gleichzeitige Sessions beschädigen nicht gegenseitig ihre Daten.
 
 ### Hook-Profile
 
@@ -465,10 +465,10 @@ Alle Tools teilen dasselbe `~/.harness/projects/{slug}/`-Datenverzeichnis.
 | Tool | Ring 0 Hooks | Befehle | Skills | Agents |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ Vollständig | ✓ 3 Befehle (inkl. /orbit) | ✓ 26 Skills | Live |
-| **Codex CLI** | ✓ Vollständig¹ | ✓ 3 Prompts (inkl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Teilweise² | ✓ 3 Befehle (inkl. /orbit) | ✓ 26 | — |
+| **Codex CLI** | ✓ Vollständig | ✓ 3 Prompts (inkl. /orbit) | ✓ 26 | — |
+| **Antigravity** | ✓ Teilweise¹ | ✓ 3 Befehle (inkl. /orbit) | ✓ 26 | — |
 
-¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² Nur PreInvocation/PostInvocation — kein PreToolUse (guard/polish nicht verfügbar)
+¹ Nur PreInvocation/PostInvocation — kein PreToolUse (guard/polish nicht verfügbar)
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic: Binary in Plugin-Hooks nicht gefunden</summary>
-
-Das Plugin sucht zuerst nach dem Binary in `hooks/bin/epic-harness`. Nach Aktualisierung über `cargo install` kopieren Sie es:
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## Entwicklung
 
 ```bash
 cargo install --path .                                        # Kompilieren + installieren
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # Plugin-Binary aktualisieren
 cargo test                                                    # Tests
 ```
-
-Hooks suchen das Binary an zwei Orten: `hooks/bin/epic-harness` (Plugin-lokal) → `~/.cargo/bin/epic-harness` (PATH).
 
 ---
 

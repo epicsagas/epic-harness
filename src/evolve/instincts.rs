@@ -167,6 +167,7 @@ mod tests {
             },
             file_ext: Some(".ts".into()),
             sequence_id: Some(1),
+            tool_use_id: None,
             pipeline_id: None,
         }
     }

@@ -144,6 +144,7 @@ fn scenario_variant_forks_on_regression() {
     let mut pool = VariantPool {
         variants: vec![parent],
         routing_stats: HashMap::new(),
+        applied_sessions: std::collections::HashSet::new(),
     };
     assert_eq!(pool.variants.len(), 1);
 
@@ -215,6 +216,7 @@ fn scenario_variant_forks_on_regression() {
             },
         ],
         routing_stats: HashMap::new(),
+        applied_sessions: std::collections::HashSet::new(),
     };
     // Reference MAX_VARIANTS by symbol — never hardcode the literal.
     assert_eq!(overflow_pool.variants.len(), MAX_VARIANTS);
@@ -241,6 +243,7 @@ fn scenario_variant_forks_on_regression() {
             task_routing: vec![],
         }],
         routing_stats: HashMap::new(),
+        applied_sessions: std::collections::HashSet::new(),
     };
     let no_fork_id = clean_pool.fork_if_needed("rust-backend", false);
     assert_eq!(

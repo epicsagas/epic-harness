@@ -3,9 +3,9 @@ members = [".", "src-tauri"]
 
 [package]
 name = "epic-harness"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2024"
-rust-version = "1.87.0"
+rust-version = "1.94.0"
 description = "3 commands + 26 auto-trigger skills + self-evolving agent harness with autonomous pipeline"
 license = "Apache-2.0"
 repository = "https://github.com/epicsagas/epic-harness"
@@ -13,7 +13,7 @@ homepage = "https://github.com/epicsagas/epic-harness"
 readme = "README.md"
 keywords = ["claude-code", "plugin", "agent", "harness", "ai"]
 categories = ["command-line-utilities", "development-tools"]
-exclude = ["ref/", "tests/", ".harness/", "hooks/bin/"]
+exclude = ["ref/", "tests/", ".harness/"]
 
 [[bin]]
 name = "epic-harness"

@@ -190,6 +190,7 @@ mod tests {
             error_patterns.insert((*c).to_string(), 1u64);
         }
         EvolutionRecord {
+            session_id: None,
             timestamp: ts.into(),
             observations: 10,
             success_rate: 0.5,

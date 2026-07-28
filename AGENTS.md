@@ -7,8 +7,7 @@
 - `skills/` — 26 skills + _dispatch engine
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
   - `presets/` — Cold-start skill templates
-- `hooks/` — Ring 0 automation + Ring 3 evolution loop
-  - `hooks/bin/epic-harness` — Rust single binary
+- `src/hooks/` — Ring 0 automation + Ring 3 evolution loop
 - `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
@@ -114,12 +113,14 @@ helpers need; `hint()`/`raw()` then pick the stream.
 
 | Codex event | Manifest entry | stdout contract |
 |---|---|---|
-| `SessionStart` | `epic resume` | one JSON object carries `additionalContext`; tagged text must not be emitted directly |
-| `PreToolUse` (`Bash`) | `epic guard` | plain text ignored; JSON `permissionDecision` blocks |
-| `PostToolUse` (`*`) | `epic observe` | plain text ignored |
-| `PostToolUse` (`apply_patch\|Edit\|Write`) | `epic polish` | plain text ignored |
-| `PreCompact` | `epic snapshot` | exit 0 with no output = success |
-| `SessionEnd` | `epic reflect` | structured JSON required (`{"continue":true}`) |
+| `SessionStart` | Node runner → `epic-harness resume` | one JSON object carries `additionalContext`; tagged text must not be emitted directly |
+| `PreToolUse` (`Bash`) | Node runner → `epic-harness guard` | plain text ignored; JSON `permissionDecision` blocks |
+| `PostToolUse` (`*`) | Node runner → `epic-harness observe` | plain text ignored |
+| `PostToolUse` (`apply_patch\|Edit\|Write`) | Node runner → `epic-harness polish` | plain text ignored |
+| `SubagentStart` | Node runner → `epic-harness observe` | empty output is valid |
+| `SubagentStop` | Node runner → `epic-harness observe` | runner validates and forwards JSON; emits `{}` only when the binary is silent |
+| `PreCompact` | Node runner → `epic-harness snapshot` | exit 0 with no output = success |
+| `SessionEnd` | Node runner → `epic-harness reflect` | advisory output; manifest uses Codex's three-second maximum |
 
 Notes that are easy to get wrong:
 
@@ -134,6 +135,11 @@ Notes that are easy to get wrong:
 - **Never write plain text to stdout on tool events** — Codex discards it there,
   and on JSON events it corrupts the payload. SessionStart is also serialized:
   a context line beginning with `[` otherwise looks like malformed JSON.
+- **All plugin hooks use the Node runner.** It quotes plugin paths, provides
+  Windows command overrides, resolves `epic-harness` consistently, and reports
+  a missing binary on stderr without corrupting event output. SessionStart
+  installs the exact plugin version and runtime revision, then verifies both
+  before `resume`.
 
 `epic team sync` writes native Codex agents as flat `~/.codex/agents/{team}-{agent}.toml`
 (`name`, `description`, `developer_instructions`). Claude-only frontmatter is dropped:
@@ -150,10 +156,14 @@ and `agent_type`; `shared::host::init` records them once per process.
   process, so the PID form produced a distinct "session" per tool call — one
   installation showed 40,804 observations across 37,611 "sessions". The date
   prefix stays because the dashboard reads a session's date from it.
+  SessionStart persists that partition date per host session. Later host hooks
+  fail if the record is missing or corrupt instead of inventing a new identity.
 - Ids are sanitized to `[A-Za-z0-9_-]` and capped at 64 characters: they land in
   `session_{id}.jsonl` and `resume.{id}.lock`.
 - `agent_id` is preferred over `EPIC_AGENT_ID` and over hashing an `Agent`
   prompt, so Codex's own subagents keep a stable identity.
+- `tool_use_id` is stored with each observation and is the stable key used to
+  deduplicate the same host tool call across file and SQLite stores.
 
 ### Outcome evidence
 
@@ -191,18 +201,19 @@ keeping paths, which file-level pattern detection needs — and capped at 2 KB.
 ### Orbit invariants
 
 `reflect` reports any pipeline marked `complete` whose own state contradicts it:
-`audit_fail_count` above `max_retries`, or no `pr_url` and no completed `ship`
-phase. Detection only — the orbit skill writes the file.
+`audit_fail_count` above `max_retries`, no concrete GitHub pull-request URL in
+`pr_url`, or `ci_status` other than `success`. Detection only — the orbit skill
+writes the file.
 
-Still Claude-oriented (tracked in #113, not yet addressed): `turn_id` and
-`tool_use_id` are retained but not yet used to model turn-scoped analysis;
-project identity is still a sanitized repository basename, so unrelated
-same-named repositories share harness state.
+`turn_id` is retained but is not yet used to model turn-scoped analysis.
+Project identity is a sanitized canonical project-root name plus a stable hash,
+so same-named repositories at different roots do not share harness state.
 
 ## Concurrent Session Safety
 
-Obs files use `session_{date}_{pid}_{random}.jsonl` format for per-session isolation.
-Reflect merges all same-day session files for analysis.
+Observation files use `session_{date}_{host-session-id}.jsonl`. The sanitized
+host session ID is stable across hook processes and isolates concurrent host
+sessions.
 
 ## Cold-Start Presets
 
@@ -262,10 +273,25 @@ overwriting the template. Config (`[evolution]`):
 - `llm_synthesis` (default true) — gates manifest emission.
 - `llm_synthesis_max_per_session` (default 1) — caps manifests per session.
 
+The pending-synthesis ledger uses a locked atomic rewrite. It accepts at most
+256 records and 16 KiB per JSONL line. A full or invalid ledger returns an error
+instead of dropping work.
+
 If no host ever runs `accept-synth`, the template body persists — synthesis can
 only improve a skill, never block seeding. The harness references no CLI binary
 and no model name; the previous synchronous `claude -p` subprocess (which hung
 under slow/remote hosts) is gone.
+
+## SessionEnd Reflection Queue
+
+`reflect` publishes each SessionEnd job only after it has synced a temporary
+file. Publication is no-clobber, so a partial write never appears as
+`*.pending`. Two worker slots process at most 64 queue candidates per scan.
+Each claim gets a fresh owned lease. Retry, completion, and dead-letter
+transitions use atomic replacement and sync the queue directory. Per-session
+database keys and typed file projections make crash recovery idempotent. Stale
+claims return to the queue. Malformed jobs and jobs that fail three times move
+to `*.failed`, which lets a later replay publish the same session again.
 
 ## Evolved Skill Injection
 
@@ -392,12 +418,19 @@ _dispatch skill runs `epic mem recall` with current task context before invoking
 - `orchestrator/` — Multi-agent orchestration state (run.json, control.json, agents/{id}/)
 - `dispatch/` — Skill dispatch logs (JSONL)
 - `orbit/` — /orbit pipeline state files (PIPELINE-*.json)
+- `reflect-queue/` — Durable SessionEnd jobs and worker slots
 - `eval/` — Eval config, baselines, and results (eval.yaml, baselines/*.json, results/*.json)
+- `pending_synth.jsonl` — Bounded host-synthesis backlog
 - `metrics.json` — Aggregate stats (score_history, trend, stagnation_count, skill_attribution)
 - `evolution.jsonl` — Evolution history (SessionAnalysis + patterns)
 - `.cross-project-enabled` — Cross-project learning opt-in marker (optional)
 
 `~/.harness/projects/{slug}/` auto-created on session start. Keep `.harness/guard-rules.yaml` in your project root to share safety rules with your team.
+
+On the first SessionStart, legacy project-local `.harness/` state is validated
+before it is copied here. A symlink, non-regular entry, or copy failure keeps
+the source tree in place. The migration removes the source only after every
+required copy succeeds.
 
 ## Version Bump Checklist
 
@@ -408,12 +441,15 @@ When creating a new release tag, update ALL of the following to the same version
 | `Cargo.toml` | `version = "x.y.z"` | `0.4.3` |
 | `Cargo.lock` | `epic-harness` package version | `0.4.3` |
 | `package.json` | `"version": "x.y.z"` | `0.4.3` |
+| `plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `app/package.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.codex-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | Git tag | `vx.y.z` | `v0.4.3` |
 
-All seven must match before tagging. Update `Cargo.lock` with
+All eight must match before tagging. The manifest contract test enumerates the
+seven shipping version files and rejects runtime changes made after an existing
+version tag. Update `Cargo.lock` with
 `cargo update -p epic-harness --precise x.y.z` after editing `Cargo.toml` — the
 `cargo publish` step of `release.yml` runs without `--allow-dirty`, so a stale
 lock fails the crates.io publish.
@@ -422,14 +458,20 @@ lock fails the crates.io publish.
 
 The web dashboard is a Svelte app under `app/` that builds to `assets/dashboard.html`,
 which is embedded into the binary at compile time. After bumping versions, rebuild
-and commit it so the bundled dashboard matches:
+and verify it so the bundled dashboard matches:
 
 ```bash
 make dashboard-build   # cd app && pnpm install --frozen-lockfile && pnpm run build && cp app/dist/index.html assets/dashboard.html
+cmp app/dist/index.html assets/dashboard.html
 git add assets/dashboard.html
 ```
 
+Cargo builds embed the checked-in `assets/dashboard.html`. They do not invoke
+`pnpm` or mutate source files. `make dashboard-build` owns local generation.
+CI runs the frozen frontend install, checks, tests, and build, then requires an
+exact byte comparison between `app/dist/index.html` and the checked-in asset.
+
 The running binary always stamps its own `CARGO_PKG_VERSION` into the served
 dashboard via `<meta name="harness-version">` (see `serve.rs`), so the version
-shown is correct even if this step is missed — but rebuilding keeps the
-fallback (dev mode) and Settings page in sync.
+shown matches the runtime. The asset rebuild remains required for frontend
+behavior, dev-mode fallback, and Settings-page changes.

@@ -28,6 +28,41 @@ fn orch_base() -> std::path::PathBuf {
     common::harness_dir()
 }
 
+pub fn record_native_agent_tool(input: &HookInput) -> Result<(), Box<dyn std::error::Error>> {
+    record_native_agent_tool_at(input, &orch_base())
+}
+
+fn record_native_agent_tool_at(
+    input: &HookInput,
+    base: &std::path::Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(agent_id) = extract_agent_id(input) else {
+        return Ok(());
+    };
+    if !orch_state::validate_agent_id(&agent_id) {
+        return Err(format!("invalid agent id: {agent_id}").into());
+    }
+    let mut targets = crate::hooks::polish::target_files(input);
+    targets.sort();
+    targets.dedup();
+    targets.truncate(64);
+    if targets.is_empty() {
+        return Ok(());
+    }
+    let action = targets
+        .into_iter()
+        .map(|target| target.chars().take(1024).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let record = serde_json::json!({
+        "timestamp": now_iso(),
+        "tool": input.tool_name.as_deref().unwrap_or("unknown"),
+        "action": action,
+    });
+    orch_state::append_agent_tool_record(base, &agent_id, &record)?;
+    Ok(())
+}
+
 /// Pre-invocation hook logic (returns exit code, errors logged to stderr).
 ///
 /// Always: record agent as "running" in orchestrator state (agent tracking).
@@ -41,12 +76,18 @@ pub fn run_pre(input: &HookInput) -> i32 {
 
 /// Pre-invocation hook logic (returns Result for callers that want error handling).
 pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
-    let tool = input.tool_name.as_deref().unwrap_or("");
-    if tool.to_lowercase() != "agent" {
+    let base = orch_base();
+    run_pre_checked_at(input, &base)
+}
+
+fn run_pre_checked_at(
+    input: &HookInput,
+    base: &std::path::Path,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    if !is_agent_start(input) {
         return Ok(0);
     }
 
-    let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
         None => return Ok(0),
@@ -54,13 +95,13 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
 
     // Runtime validation — always active (not gated by debug_assert)
     if !orch_state::validate_agent_id(&agent_id) {
-        return Ok(0);
+        return Err(format!("invalid agent id: {agent_id}").into());
     }
 
     // Always: record agent as running (agent tracking — no EPIC_ORCHESTRATION gate)
     let (description, subagent_type) = extract_agent_meta(input);
     orch_state::upsert_agent_to_run(
-        &base,
+        base,
         &agent_id,
         &description,
         &subagent_type,
@@ -73,7 +114,7 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     }
 
     // Check control directive
-    if let Some(directive) = orch_state::read_control(&base) {
+    if let Some(directive) = orch_state::read_control(base) {
         let matches_target = directive.target.as_deref() == Some(&agent_id)
             || directive.target.as_deref() == Some("all")
             || directive.target.is_none();
@@ -116,7 +157,7 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     }
 
     // Read inbox messages
-    let messages = orch_state::read_inbox(&base, &agent_id);
+    let messages = orch_state::read_inbox(base, &agent_id);
     for msg in &messages {
         hint(
             "orchestrator",
@@ -125,9 +166,9 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     }
 
     // Update heartbeat
-    if let Some(mut status) = orch_state::read_agent_status(&base, &agent_id) {
+    if let Some(mut status) = orch_state::read_agent_status(base, &agent_id) {
         status.last_heartbeat = now_iso();
-        let _ = orch_state::write_agent_status(&base, &agent_id, &status);
+        let _ = orch_state::write_agent_status(base, &agent_id, &status);
     } else {
         // First time seeing this agent -- create status
         let status = AgentStatusFile {
@@ -137,7 +178,7 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
             last_heartbeat: now_iso(),
             status: AgentStatus::Running,
         };
-        let _ = orch_state::write_agent_status(&base, &agent_id, &status);
+        let _ = orch_state::write_agent_status(base, &agent_id, &status);
     }
 
     Ok(0)
@@ -156,12 +197,24 @@ pub fn run_post(input: &HookInput) -> i32 {
 
 /// Post-invocation hook logic (returns Result for callers that want error handling).
 pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
-    let tool = input.tool_name.as_deref().unwrap_or("");
-    if tool.to_lowercase() != "agent" {
+    let base = orch_base();
+    let result = run_post_checked_at(input, &base);
+    if result.is_ok()
+        && let Some(response) = native_stop_response(input)
+    {
+        println!("{response}");
+    }
+    result
+}
+
+fn run_post_checked_at(
+    input: &HookInput,
+    base: &std::path::Path,
+) -> Result<i32, Box<dyn std::error::Error>> {
+    if !is_agent_stop(input) {
         return Ok(0);
     }
 
-    let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
         None => return Ok(0),
@@ -169,7 +222,7 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
 
     // Runtime validation — always active (not gated by debug_assert)
     if !orch_state::validate_agent_id(&agent_id) {
-        return Ok(0);
+        return Err(format!("invalid agent id: {agent_id}").into());
     }
 
     // Extract output text
@@ -179,8 +232,8 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
     // Always: update agent status in run.json (agent tracking — no gate)
     let final_status = new_status.clone().unwrap_or(orch_state::AgentStatus::Done);
     let (description, subagent_type) = extract_agent_meta(input);
-    orch_state::upsert_agent_to_run(
-        &base,
+    let transition = orch_state::transition_agent_in_run(
+        base,
         &agent_id,
         &description,
         &subagent_type,
@@ -202,47 +255,40 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
             "output_len": output.len(),
         }),
     };
-    let _ = orch_state::append_event(&base, &agent_id, &event);
+    let _ = orch_state::append_event(base, &agent_id, &event);
 
-    // Evaluate dependency graph if agent is done
-    if final_status == AgentStatus::Done
-        && let Some(mut run) = orch_state::read_run(&base)
-    {
-        // Update agent status in run
-        for agent in &mut run.agents {
-            if agent.id == agent_id {
-                agent.status = AgentStatus::Done;
-                agent.completed_at = Some(now_iso());
-            }
-        }
-
-        // Evaluate deps
-        let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
-        for ub_id in &unblocked {
+    if final_status == AgentStatus::Done {
+        for ub_id in &transition.unblocked {
             let msg = InboxMessage {
                 from: "orchestrator".to_string(),
                 timestamp: now_iso(),
                 message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
             };
-            let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
-
-            // Update run agent status
-            for agent in &mut run.agents {
-                if agent.id == *ub_id {
-                    agent.status = AgentStatus::Pending;
-                }
-            }
+            let _ = orch_state::post_inbox_message(base, ub_id, &msg);
         }
-
-        // Check if run is complete
-        if orch_state::is_run_complete(&run) {
-            run.status = orch_state::RunStatus::Complete;
-        }
-        run.updated_at = now_iso();
-        let _ = orch_state::write_run(&base, &run);
     }
 
     Ok(0)
+}
+
+fn is_agent_start(input: &HookInput) -> bool {
+    input.hook_event_name.as_deref() == Some("SubagentStart")
+        || input
+            .tool_name
+            .as_deref()
+            .is_some_and(|tool| tool.eq_ignore_ascii_case("agent"))
+}
+
+fn is_agent_stop(input: &HookInput) -> bool {
+    input.hook_event_name.as_deref() == Some("SubagentStop")
+        || input
+            .tool_name
+            .as_deref()
+            .is_some_and(|tool| tool.eq_ignore_ascii_case("agent"))
+}
+
+fn native_stop_response(input: &HookInput) -> Option<&'static str> {
+    (input.hook_event_name.as_deref() == Some("SubagentStop")).then_some(r#"{"continue":true}"#)
 }
 
 /// Extract the agent ID from hook input.
@@ -252,6 +298,9 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
 /// prompt text changed. Otherwise the Claude `Agent` tool input is hashed, since
 /// Claude supplies no id of its own.
 fn extract_agent_id(input: &HookInput) -> Option<String> {
+    if let Some(host_id) = input.agent_id.as_ref() {
+        return Some(host_id.clone());
+    }
     if let Some(host_id) = crate::shared::host::agent_id() {
         return Some(host_id);
     }
@@ -311,6 +360,7 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .as_ref()
         .and_then(|v| v.get("subagent_type"))
         .and_then(|v| v.as_str())
+        .or(input.agent_type.as_deref())
         .unwrap_or("general-purpose")
         .to_string();
     (desc, sub_type)
@@ -411,6 +461,131 @@ mod tests {
         }
         let input = HookInput::default();
         assert_eq!(run_post(&input), 0);
+    }
+
+    #[test]
+    fn native_codex_subagent_sequence_persists_running_then_done() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let start = HookInput {
+            hook_event_name: Some("SubagentStart".into()),
+            agent_id: Some("agent-native-1".into()),
+            agent_type: Some("reviewer".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(run_pre_checked_at(&start, dir.path()).unwrap(), 0);
+        let running = orch_state::read_run(dir.path()).expect("running state");
+        let agent = running
+            .agents
+            .iter()
+            .find(|agent| agent.id == "agent-native-1")
+            .expect("native agent");
+        assert_eq!(agent.status, AgentStatus::Running);
+        assert_eq!(agent.role, "reviewer");
+
+        let stop = HookInput {
+            hook_event_name: Some("SubagentStop".into()),
+            agent_id: Some("agent-native-1".into()),
+            agent_type: Some("reviewer".into()),
+            ..Default::default()
+        };
+        assert_eq!(run_post_checked_at(&stop, dir.path()).unwrap(), 0);
+
+        let completed = orch_state::read_run(dir.path()).expect("completed state");
+        let agent = completed
+            .agents
+            .iter()
+            .find(|agent| agent.id == "agent-native-1")
+            .expect("native agent");
+        assert_eq!(agent.status, AgentStatus::Done);
+        assert!(agent.completed_at.is_some());
+    }
+
+    #[test]
+    fn native_subagent_stop_response_is_valid_codex_json() {
+        let input = HookInput {
+            hook_event_name: Some("SubagentStop".into()),
+            ..Default::default()
+        };
+
+        let response = native_stop_response(&input).expect("SubagentStop response");
+        let parsed: serde_json::Value =
+            serde_json::from_str(response).expect("valid Codex hook JSON");
+
+        assert_eq!(parsed["continue"], true);
+    }
+
+    #[test]
+    fn native_agent_edit_is_recorded_for_conflict_detection() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = HookInput {
+            hook_event_name: Some("PostToolUse".into()),
+            agent_id: Some("agent-native-1".into()),
+            tool_name: Some("apply_patch".into()),
+            tool_input: Some(serde_json::json!({
+                "command": "*** Begin Patch\n*** Update File: src/lib.rs\n*** End Patch"
+            })),
+            ..Default::default()
+        };
+
+        record_native_agent_tool_at(&input, dir.path()).unwrap();
+
+        let stream =
+            std::fs::read_to_string(orch_state::agent_stream_file(dir.path(), "agent-native-1"))
+                .unwrap();
+        let record: serde_json::Value = serde_json::from_str(stream.trim()).unwrap();
+        assert_eq!(record["tool"], "apply_patch");
+        assert!(
+            record["action"]
+                .as_str()
+                .is_some_and(|action| action.contains("src/lib.rs"))
+        );
+    }
+
+    #[test]
+    fn invalid_native_agent_identity_is_a_visible_failure() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let input = HookInput {
+            hook_event_name: Some("SubagentStop".into()),
+            agent_id: Some("../outside".into()),
+            ..Default::default()
+        };
+
+        let error = run_post_checked_at(&input, dir.path()).expect_err("invalid id must fail");
+        assert!(error.to_string().contains("invalid agent id"));
+        assert!(orch_state::read_run(dir.path()).is_none());
+    }
+
+    #[test]
+    fn concurrent_native_starts_preserve_both_agents() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let base = dir.path().to_path_buf();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(3));
+        let mut handles = Vec::new();
+
+        for agent_id in ["agent-a", "agent-b"] {
+            let base = base.clone();
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let input = HookInput {
+                    hook_event_name: Some("SubagentStart".into()),
+                    agent_id: Some(agent_id.into()),
+                    agent_type: Some("worker".into()),
+                    ..Default::default()
+                };
+                barrier.wait();
+                run_pre_checked_at(&input, &base).unwrap();
+            }));
+        }
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("native start thread");
+        }
+
+        let run = orch_state::read_run(&base).expect("run state");
+        assert_eq!(run.agents.len(), 2);
+        assert!(run.agents.iter().any(|agent| agent.id == "agent-a"));
+        assert!(run.agents.iter().any(|agent| agent.id == "agent-b"));
     }
 
     #[test]

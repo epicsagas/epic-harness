@@ -1,4 +1,5 @@
 {
+  "description": "Epic Harness lifecycle, safety, observation, formatting, and reflection hooks.",
   "hooks": {
     "SessionStart": [
       {
@@ -6,10 +7,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/install.js; epic resume"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionStart resume",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionStart resume"
           }
-        ],
-        "description": "Restore previous session context + load project memory and evolved skills (plain stdout becomes developer context)"
+        ]
       }
     ],
     "PreToolUse": [
@@ -18,20 +19,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PreToolUse guard",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreToolUse guard"
           }
-        ],
-        "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+        ]
       },
       {
         "matcher": "apply_patch",
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PreToolUse guard",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreToolUse guard"
           }
-        ],
-        "description": "Orchestration pause directives and concurrent write conflict warnings (Codex edits are apply_patch, not Edit/Write)"
+        ]
       }
     ],
     "PostToolUse": [
@@ -40,20 +41,20 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PostToolUse observe",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PostToolUse observe"
           }
-        ],
-        "description": "Record every tool result for the evolution loop — Bash, apply_patch and MCP tools alike ('*' matches all)"
+        ]
       },
       {
         "matcher": "apply_patch|Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PostToolUse polish",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PostToolUse polish"
           }
-        ],
-        "description": "Auto-format + typecheck after edits (Codex edits arrive as apply_patch)"
+        ]
       }
     ],
     "SubagentStart": [
@@ -62,10 +63,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SubagentStart observe",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SubagentStart observe"
           }
-        ],
-        "description": "Record a native Codex subagent starting — carries the host agent_id, so orchestration state no longer depends on a Claude-style Agent tool"
+        ]
       }
     ],
     "SubagentStop": [
@@ -74,10 +75,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SubagentStop observe",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SubagentStop observe"
           }
-        ],
-        "description": "Record a native Codex subagent finishing and unblock its dependents"
+        ]
       }
     ],
     "PreCompact": [
@@ -86,10 +87,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook PreCompact snapshot",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook PreCompact snapshot"
           }
-        ],
-        "description": "Save working state before context compaction so resume can restore it"
+        ]
       }
     ],
     "SessionEnd": [
@@ -98,10 +99,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic not found'"
+            "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionEnd reflect",
+            "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionEnd reflect",
+            "timeout": 3
           }
-        ],
-        "description": "Analyze session observations -> evolve skills -> gate mutations (session-scoped; Stop fires once per turn)"
+        ]
       }
     ]
   }

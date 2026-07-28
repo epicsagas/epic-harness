@@ -15,6 +15,131 @@ mod update;
 use std::env;
 use std::io::{self, IsTerminal, Read};
 
+const HOOK_STDIN_MAX_BYTES: usize = 1024 * 1024;
+const CODEX_GUARD_DENY: &str =
+    r#"{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}"#;
+
+fn read_hook_input(mut reader: impl Read) -> Result<(hooks::common::HookInput, String), String> {
+    let mut bytes = Vec::new();
+    reader
+        .by_ref()
+        .take((HOOK_STDIN_MAX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("failed to read hook input: {error}"))?;
+
+    if bytes.len() > HOOK_STDIN_MAX_BYTES {
+        return Err(format!(
+            "hook input exceeds {HOOK_STDIN_MAX_BYTES} byte limit"
+        ));
+    }
+    if bytes.is_empty() {
+        return Ok((hooks::common::HookInput::default(), String::new()));
+    }
+
+    let input = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid hook input JSON: {error}"))?;
+    let raw =
+        String::from_utf8(bytes).map_err(|error| format!("hook input is not UTF-8: {error}"))?;
+    Ok((input, raw))
+}
+
+fn invalid_hook_input_exit_code(subcmd: &str) -> i32 {
+    if subcmd == "guard" { 2 } else { 1 }
+}
+
+fn invalid_hook_input_response(subcmd: &str) -> Option<&'static str> {
+    (subcmd == "guard").then_some(CODEX_GUARD_DENY)
+}
+
+fn validate_hook_input_for_subcommand(
+    subcmd: &str,
+    input: &hooks::common::HookInput,
+    raw: &str,
+) -> Result<(), String> {
+    if subcmd != "guard" {
+        return Ok(());
+    }
+    if raw.trim().is_empty() {
+        return Err("guard hook input is empty".into());
+    }
+    if let Some(event) = input.hook_event_name.as_deref()
+        && event != "PreToolUse"
+    {
+        return Err(format!("guard requires PreToolUse input, received {event}"));
+    }
+
+    let tool_name = input
+        .tool_name
+        .as_deref()
+        .filter(|name| !name.trim().is_empty())
+        .ok_or_else(|| "guard hook input is missing tool_name".to_string())?;
+    let tool_input = input
+        .tool_input
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "guard hook input requires an object tool_input".to_string())?;
+
+    match tool_name.to_ascii_lowercase().as_str() {
+        "bash" => {
+            let command = tool_input
+                .get("command")
+                .and_then(serde_json::Value::as_str)
+                .filter(|command| !command.trim().is_empty());
+            if command.is_none() {
+                return Err("Bash guard input requires a nonempty command".into());
+            }
+        }
+        "edit" | "write" | "multiedit" => {
+            let file_path = tool_input
+                .get("file_path")
+                .and_then(serde_json::Value::as_str)
+                .filter(|path| !path.trim().is_empty());
+            if file_path.is_none() {
+                return Err(format!("{tool_name} guard input requires file_path"));
+            }
+        }
+        "notebookedit" => {
+            let notebook_path = tool_input
+                .get("notebook_path")
+                .and_then(serde_json::Value::as_str)
+                .filter(|path| !path.trim().is_empty());
+            if notebook_path.is_none() {
+                return Err("NotebookEdit guard input requires notebook_path".into());
+            }
+        }
+        "apply_patch" => {
+            if hooks::polish::target_files(input).is_empty() {
+                return Err("apply_patch guard input requires at least one target".into());
+            }
+        }
+        _ => return Err(format!("unsupported guard tool: {tool_name}")),
+    }
+    Ok(())
+}
+
+fn validate_established_session_identity(subcmd: &str) -> Result<(), String> {
+    if subcmd == "resume" || shared::host::session_id().is_none() {
+        return Ok(());
+    }
+    if !matches!(
+        subcmd,
+        "guard" | "polish" | "observe" | "snapshot" | "reflect"
+    ) {
+        return Ok(());
+    }
+    shared::helpers::try_session_id()
+        .map(|_| ())
+        .map_err(|error| format!("host session identity is unavailable: {error}"))
+}
+
+fn version_line() -> String {
+    format!(
+        "epic-harness {} runtime-revision {}",
+        env!("CARGO_PKG_VERSION"),
+        env!("EPIC_HARNESS_RUNTIME_REVISION")
+    )
+}
+
 /// Parse `--flag <value>` or `--flag=<value>` → Option<u32>
 fn parse_flag_u32(args: &[String], flag: &str) -> Option<u32> {
     let eq = format!("{flag}=");
@@ -68,7 +193,7 @@ fn main() {
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     if subcmd == "--version" || subcmd == "-v" {
-        eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
+        eprintln!("{}", version_line());
         std::process::exit(0);
     }
 
@@ -159,15 +284,29 @@ fn main() {
     }
 
     // Read stdin once, pass to hook subcommands (skip if TTY — no EOF would arrive)
-    let mut stdin_buf = String::new();
-    if !io::stdin().is_terminal() {
-        let _ = io::stdin().read_to_string(&mut stdin_buf);
-    }
-
-    let input: hooks::common::HookInput = if stdin_buf.is_empty() {
-        hooks::common::HookInput::default()
+    let parsed_input = if io::stdin().is_terminal() {
+        Ok((hooks::common::HookInput::default(), String::new()))
     } else {
-        serde_json::from_str(&stdin_buf).unwrap_or_default()
+        read_hook_input(io::stdin().lock())
+    };
+    let (input, stdin_buf) = match parsed_input {
+        Ok((input, raw)) => {
+            if let Err(error) = validate_hook_input_for_subcommand(subcmd, &input, &raw) {
+                eprintln!("[{subcmd}] invalid hook input: {error}");
+                if let Some(response) = invalid_hook_input_response(subcmd) {
+                    println!("{response}");
+                }
+                exit_with_cleanup(invalid_hook_input_exit_code(subcmd), true);
+            }
+            (input, raw)
+        }
+        Err(error) => {
+            eprintln!("[{subcmd}] {error}");
+            if let Some(response) = invalid_hook_input_response(subcmd) {
+                println!("{response}");
+            }
+            exit_with_cleanup(invalid_hook_input_exit_code(subcmd), true);
+        }
     };
 
     // Decide once whether human-facing output belongs on stdout (Codex reads it
@@ -176,126 +315,135 @@ fn main() {
     // and `session_id()` consult it.
     shared::host::init(&input);
 
-    let exit_code = match subcmd {
-        "resume" => hooks::resume::run(&input),
-        "guard" => hooks::guard::run(&input),
-        "polish" => hooks::polish::run(&input),
-        "observe" => hooks::observe::run(&input),
-        "snapshot" => hooks::snapshot::run(&input),
-        "reflect" => hooks::reflect::run(&input),
-        "migrate" => {
-            let dry_run = args.iter().any(|a| a == "--dry-run");
-            let reset = args.iter().any(|a| a == "--reset");
-            let to_global = args.iter().any(|a| a == "--to-global");
-            if to_global {
-                store::migrate::run_to_global(dry_run)
-            } else {
-                store::migrate::run_subcommand(dry_run, reset)
-            }
-        }
-        "merge-project" => {
-            let from = parse_flag_str(&args, "--from");
-            let to = parse_flag_str(&args, "--to");
-            let dry_run = args.iter().any(|a| a == "--dry-run");
-            let delete_source = args.iter().any(|a| a == "--delete-source");
-            match (from, to) {
-                (Some(f), Some(t)) => {
-                    store::merge_project::run_merge(&f, &t, dry_run, delete_source)
-                }
-                _ => {
-                    eprintln!(
-                        "Usage: epic-harness merge-project --from <slug> --to <slug> [--dry-run] [--delete-source]"
-                    );
-                    1
+    let exit_code = if let Err(error) = validate_established_session_identity(subcmd) {
+        eprintln!("[{subcmd}] {error}");
+        invalid_hook_input_exit_code(subcmd)
+    } else {
+        match subcmd {
+            "resume" => hooks::resume::run(&input),
+            "guard" => hooks::guard::run(&input),
+            "polish" => hooks::polish::run(&input),
+            "observe" => hooks::observe::run(&input),
+            "snapshot" => hooks::snapshot::run(&input),
+            "reflect" => hooks::reflect::run(&input),
+            "migrate" => {
+                let dry_run = args.iter().any(|a| a == "--dry-run");
+                let reset = args.iter().any(|a| a == "--reset");
+                let to_global = args.iter().any(|a| a == "--to-global");
+                if to_global {
+                    store::migrate::run_to_global(dry_run)
+                } else {
+                    store::migrate::run_subcommand(dry_run, reset)
                 }
             }
-        }
-        "mem" | "team" | "org" | "eval" | "harness" | "telemetry" | "serve" | "dashboard"
-        | "update" => {
-            unreachable!()
-        }
-        "path" => {
-            println!("{}", hooks::common::harness_dir().display());
-            0
-        }
-        "slug" => {
-            println!("{}", shared::paths::project_slug());
-            0
-        }
-        "version" => {
-            eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
-            0
-        }
-        _ => {
-            let is_unknown = !matches!(subcmd, "help" | "--help" | "-h");
-            if is_unknown {
-                eprintln!("error: unknown subcommand '{subcmd}'\n");
+            "merge-project" => {
+                let from = parse_flag_str(&args, "--from");
+                let to = parse_flag_str(&args, "--to");
+                let dry_run = args.iter().any(|a| a == "--dry-run");
+                let delete_source = args.iter().any(|a| a == "--delete-source");
+                match (from, to) {
+                    (Some(f), Some(t)) => {
+                        store::merge_project::run_merge(&f, &t, dry_run, delete_source)
+                    }
+                    _ => {
+                        eprintln!(
+                            "Usage: epic-harness merge-project --from <slug> --to <slug> [--dry-run] [--delete-source]"
+                        );
+                        1
+                    }
+                }
             }
-            eprintln!(
-                "epic-harness {} — Self-evolving agent harness\n",
-                env!("CARGO_PKG_VERSION")
-            );
-            eprintln!("USAGE:");
-            eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
-            eprintln!("HOOK SUBCOMMANDS (invoked automatically by agent hooks):");
-            eprintln!("  resume       Restore session context on conversation start");
-            eprintln!("  guard        Block/warn on dangerous shell commands");
-            eprintln!("  observe      Record tool call observations for pattern analysis");
-            eprintln!("  polish       Auto-format and typecheck after file edits");
-            eprintln!("  snapshot     Save session state mid-conversation");
-            eprintln!("  reflect      Analyze observations and evolve skills (session end)");
-            eprintln!(
-                "  reflect --context [OPTIONS]  Collect harness data as JSON for /reflect skill"
-            );
-            eprintln!("    --days <N>           Analysis window in days (default: 30)");
-            eprintln!("    --since <YYYYMMDD>   Start date (overrides --days)");
-            eprintln!("    --project <slug>     Specific project slug");
-            eprintln!("    --all-projects       All projects under ~/.harness/projects/");
-            eprintln!(
-                "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
-            );
-            eprintln!("EVOLUTION:");
-            eprintln!("  evolve       Skill synthesis handshake (host-agent)");
-            eprintln!("    accept-synth --skill <name> [--file <path> | --stdin]");
-            eprintln!(
-                "                       Apply a synthesized body to a pending-synth manifest"
-            );
-            eprintln!("USER SUBCOMMANDS:");
-            eprintln!("  eval         Project quality & regression evaluation  (epic eval --init)");
-            eprintln!("    --init             Scaffold eval.yaml config");
-            eprintln!("    --scaffold         Generate stack-appropriate benchmark files");
-            eprintln!(
-                "                       Supports: rust python typescript node go java kotlin"
-            );
-            eprintln!("                                 ruby php csharp swift elixir cpp");
-            eprintln!("    --json             Output as JSON (for CI)");
-            eprintln!("    --baseline-update  Save current results as new baseline");
-            eprintln!("    --dimension <dim>  Run specific dimension only");
-            eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
-            eprintln!("    --to-global          Merge per-project harness.db files into global DB");
-            eprintln!("    --dry-run            Preview without writing");
-            eprintln!("    --reset              Retry interrupted migration");
-            eprintln!("  merge-project  Consolidate two project slugs into one");
-            eprintln!("    --from <slug>        Source slug to merge from");
-            eprintln!("    --to <slug>          Target slug to merge into");
-            eprintln!("    --dry-run            Preview without writing");
-            eprintln!("    --delete-source      Remove source directory after merge");
-            eprintln!("  org          Browse org team libraries  (epic org help)");
-            eprintln!("  team         Manage org-level agent teams  (epic team help)");
-            eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
-            eprintln!(
-                "  harness      Harness state as a first-class object  (epic harness snapshot|diff|restore)"
-            );
-            eprintln!("  dashboard    Open web dashboard in browser (default port: 7700)");
-            eprintln!("  serve        Start dashboard web server without opening browser");
-            eprintln!("  update       Self-update to the latest release");
-            eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
-            eprintln!("  path         Print the harness data directory");
-            eprintln!("  slug         Print the current project slug (worktree-safe)");
-            eprintln!("  version      Print version");
-            eprintln!("  --version, -v  Print version\n");
-            eprintln!("Run 'epic-harness mem help' for memory subcommand details.");
-            if is_unknown { 1 } else { 0 }
+            "mem" | "team" | "org" | "eval" | "harness" | "telemetry" | "serve" | "dashboard"
+            | "update" => {
+                unreachable!()
+            }
+            "path" => {
+                println!("{}", hooks::common::harness_dir().display());
+                0
+            }
+            "slug" => {
+                println!("{}", shared::paths::project_slug());
+                0
+            }
+            "version" => {
+                eprintln!("{}", version_line());
+                0
+            }
+            _ => {
+                let is_unknown = !matches!(subcmd, "help" | "--help" | "-h");
+                if is_unknown {
+                    eprintln!("error: unknown subcommand '{subcmd}'\n");
+                }
+                eprintln!(
+                    "epic-harness {} — Self-evolving agent harness\n",
+                    env!("CARGO_PKG_VERSION")
+                );
+                eprintln!("USAGE:");
+                eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
+                eprintln!("HOOK SUBCOMMANDS (invoked automatically by agent hooks):");
+                eprintln!("  resume       Restore session context on conversation start");
+                eprintln!("  guard        Block/warn on dangerous shell commands");
+                eprintln!("  observe      Record tool call observations for pattern analysis");
+                eprintln!("  polish       Auto-format and typecheck after file edits");
+                eprintln!("  snapshot     Save session state mid-conversation");
+                eprintln!("  reflect      Analyze observations and evolve skills (session end)");
+                eprintln!(
+                    "  reflect --context [OPTIONS]  Collect harness data as JSON for /reflect skill"
+                );
+                eprintln!("    --days <N>           Analysis window in days (default: 30)");
+                eprintln!("    --since <YYYYMMDD>   Start date (overrides --days)");
+                eprintln!("    --project <slug>     Specific project slug");
+                eprintln!("    --all-projects       All projects under ~/.harness/projects/");
+                eprintln!(
+                    "    --source <name>      Extra context source: harness|claude-session|alcove|all (repeatable)\n"
+                );
+                eprintln!("EVOLUTION:");
+                eprintln!("  evolve       Skill synthesis handshake (host-agent)");
+                eprintln!("    accept-synth --skill <name> [--file <path> | --stdin]");
+                eprintln!(
+                    "                       Apply a synthesized body to a pending-synth manifest"
+                );
+                eprintln!("USER SUBCOMMANDS:");
+                eprintln!(
+                    "  eval         Project quality & regression evaluation  (epic eval --init)"
+                );
+                eprintln!("    --init             Scaffold eval.yaml config");
+                eprintln!("    --scaffold         Generate stack-appropriate benchmark files");
+                eprintln!(
+                    "                       Supports: rust python typescript node go java kotlin"
+                );
+                eprintln!("                                 ruby php csharp swift elixir cpp");
+                eprintln!("    --json             Output as JSON (for CI)");
+                eprintln!("    --baseline-update  Save current results as new baseline");
+                eprintln!("    --dimension <dim>  Run specific dimension only");
+                eprintln!("  migrate      Import legacy JSONL/JSON data into harness.db");
+                eprintln!(
+                    "    --to-global          Merge per-project harness.db files into global DB"
+                );
+                eprintln!("    --dry-run            Preview without writing");
+                eprintln!("    --reset              Retry interrupted migration");
+                eprintln!("  merge-project  Consolidate two project slugs into one");
+                eprintln!("    --from <slug>        Source slug to merge from");
+                eprintln!("    --to <slug>          Target slug to merge into");
+                eprintln!("    --dry-run            Preview without writing");
+                eprintln!("    --delete-source      Remove source directory after merge");
+                eprintln!("  org          Browse org team libraries  (epic org help)");
+                eprintln!("  team         Manage org-level agent teams  (epic team help)");
+                eprintln!("  mem          Cross-agent unified memory  (harness mem help)");
+                eprintln!(
+                    "  harness      Harness state as a first-class object  (epic harness snapshot|diff|restore)"
+                );
+                eprintln!("  dashboard    Open web dashboard in browser (default port: 7700)");
+                eprintln!("  serve        Start dashboard web server without opening browser");
+                eprintln!("  update       Self-update to the latest release");
+                eprintln!("  telemetry    Manage telemetry consent  (on|off|status)");
+                eprintln!("  path         Print the harness data directory");
+                eprintln!("  slug         Print the current project slug (worktree-safe)");
+                eprintln!("  version      Print version");
+                eprintln!("  --version, -v  Print version\n");
+                eprintln!("Run 'epic-harness mem help' for memory subcommand details.");
+                if is_unknown { 1 } else { 0 }
+            }
         }
     };
 
@@ -307,9 +455,12 @@ fn main() {
         match subcmd {
             "guard" if exit_code == 2 => {
                 // PreToolUse block: explicit deny JSON so Codex never ignores the block
-                println!(
-                    r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#
-                );
+                println!("{CODEX_GUARD_DENY}");
+            }
+            "observe"
+                if exit_code != 0 && input.hook_event_name.as_deref() == Some("SubagentStop") =>
+            {
+                println!("{{}}");
             }
             "guard" | "observe" | "polish" => {
                 // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
@@ -354,7 +505,11 @@ fn exit_with_cleanup(code: i32, skip_shutdown: bool) -> ! {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_flag_multi, parse_flag_str, parse_flag_u32};
+    use super::{
+        HOOK_STDIN_MAX_BYTES, invalid_hook_input_exit_code, invalid_hook_input_response,
+        parse_flag_multi, parse_flag_str, parse_flag_u32, read_hook_input,
+        validate_hook_input_for_subcommand,
+    };
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|s| s.to_string()).collect()
@@ -452,5 +607,62 @@ mod tests {
         let args = s(&["reflect", "--source", "--context", "harness"]);
         // "--context" starts with '-', so it should NOT be treated as a value
         assert_eq!(parse_flag_multi(&args, "--source"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn malformed_guard_input_fails_closed() {
+        let malformed = br#"{"turn_id":42,"tool_input":{"command":"rm -rf /"}}"#;
+        assert!(read_hook_input(&malformed[..]).is_err());
+        assert_eq!(invalid_hook_input_exit_code("guard"), 2);
+        assert!(
+            invalid_hook_input_response("guard")
+                .unwrap()
+                .contains("\"deny\"")
+        );
+    }
+
+    #[test]
+    fn hook_input_larger_than_limit_is_rejected() {
+        let oversized = vec![b' '; HOOK_STDIN_MAX_BYTES + 1];
+        let error = read_hook_input(&oversized[..]).unwrap_err();
+        assert!(error.contains("exceeds"));
+    }
+
+    #[test]
+    fn empty_guard_input_fails_schema_validation() {
+        let (input, raw) = read_hook_input(&b""[..]).unwrap();
+        assert!(validate_hook_input_for_subcommand("guard", &input, &raw).is_err());
+    }
+
+    #[test]
+    fn empty_object_guard_input_fails_schema_validation() {
+        let (input, raw) = read_hook_input(&br#"{}"#[..]).unwrap();
+        assert!(validate_hook_input_for_subcommand("guard", &input, &raw).is_err());
+    }
+
+    #[test]
+    fn bash_guard_requires_a_nonempty_command() {
+        for tool_input in [
+            serde_json::json!({}),
+            serde_json::json!({"command": ""}),
+            serde_json::json!({"command": 42}),
+        ] {
+            let input = crate::hooks::common::HookInput {
+                tool_name: Some("Bash".into()),
+                tool_input: Some(tool_input),
+                ..Default::default()
+            };
+            assert!(validate_hook_input_for_subcommand("guard", &input, "{}").is_err());
+        }
+    }
+
+    #[test]
+    fn write_guard_requires_a_usable_target() {
+        let input = crate::hooks::common::HookInput {
+            tool_name: Some("Edit".into()),
+            tool_input: Some(serde_json::json!({"file_path": ""})),
+            ..Default::default()
+        };
+        assert!(validate_hook_input_for_subcommand("guard", &input, "{}").is_err());
     }
 }

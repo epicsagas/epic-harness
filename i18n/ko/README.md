@@ -403,7 +403,7 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 
 polish는 observe로 피드백됩니다: 포맷 실패 → `lint_fail`, TypeScript 에러 → `build_fail`. Edit→Error 쓰래싱은 에러가 polish에서 발생해도 감지됩니다.
 
-각 세션은 자체 `session_{date}_{pid}_{random}.jsonl`에 기록 — 여러 동시 세션이 서로의 데이터를 손상시키지 않습니다.
+각 세션은 자체 `session_{date}_{host-session-id}.jsonl`에 기록 — 여러 동시 세션이 서로의 데이터를 손상시키지 않습니다.
 
 ### 훅 프로파일
 
@@ -465,10 +465,10 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 | 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
 |------|-----------|--------|------|---------|
 | **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
-| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
+| **Codex CLI** | ✓ 전체 | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
+| **Antigravity** | ✓ 부분¹ | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
 
-¹ `~/.codex/config.toml`에 `plugin_hooks = true` 필요 · ² PreInvocation/PostInvocation만 — PreToolUse 없음 (guard/polish 불가)
+¹ PreInvocation/PostInvocation만 — PreToolUse 없음 (guard/polish 불가)
 
 ---
 
@@ -708,27 +708,14 @@ xattr -d com.apple.quarantine ~/.cargo/bin/epic
 ```
 </details>
 
-<details>
-<summary>epic: plugin hooks 내에서 바이너리를 찾을 수 없음</summary>
-
-플러그인은 먼저 `hooks/bin/epic-harness`에서 바이너리를 찾습니다. `cargo install`로 업데이트한 후 복사하세요:
-
-```bash
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness
-```
-</details>
-
 ---
 
 ## 개발
 
 ```bash
 cargo install --path .                                        # 빌드 + 설치
-cp ~/.cargo/bin/epic-harness hooks/bin/epic-harness           # 플러그인 바이너리 업데이트
 cargo test                                                    # 테스트
 ```
-
-훅은 두 곳에서 바이너리를 찾습니다: `hooks/bin/epic-harness` (플러그인 로컬) → `~/.cargo/bin/epic-harness` (PATH).
 
 ---
 

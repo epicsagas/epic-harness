@@ -5,76 +5,73 @@ pub fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Returns a stable slug for the current project: the sanitized git root dirname.
-///
-/// Uses git root when available (same slug for all subdirs of a repo).
-/// Falls back to CWD dirname outside git repos.
-///
-/// - Name is sanitized to `[a-zA-Z0-9_-]` to be safe as a directory component.
-/// - Project names must be unique — same-named directories are considered the same project.
+fn stable_path_hash(path: &std::path::Path) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    let text = path.to_string_lossy();
+    #[cfg(windows)]
+    let text = text.to_lowercase();
+    for byte in text.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn legacy_project_slug_for_root(root: &std::path::Path) -> String {
+    let name = root
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "project".into());
+    let slug = sanitize_slug_name(&name);
+    if slug.is_empty() {
+        "project".into()
+    } else {
+        slug
+    }
+}
+
+fn project_slug_for_root(root: &std::path::Path) -> String {
+    format!(
+        "{}-{:012x}",
+        legacy_project_slug_for_root(root),
+        stable_path_hash(root) & 0xffff_ffff_ffff
+    )
+}
+
+fn canonical_project_root() -> PathBuf {
+    let cwd_path = cwd();
+
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .output()
+        && output.status.success()
+    {
+        let common_git = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if common_git.is_absolute()
+            && let Some(root) = common_git.parent()
+        {
+            return root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        }
+    }
+
+    if let Ok(output) = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        && output.status.success()
+    {
+        let root = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if !root.as_os_str().is_empty() {
+            return root.canonicalize().unwrap_or(root);
+        }
+    }
+
+    cwd_path.canonicalize().unwrap_or(cwd_path)
+}
+
+/// Returns a stable collision-resistant slug for the canonical project root.
 pub fn project_slug() -> String {
-    static SLUG: LazyLock<String> = LazyLock::new(|| {
-        let cwd_path = cwd();
-
-        // Prefer --git-common-dir: returns an absolute path in linked worktrees,
-        // pointing to the main repo's .git directory, so the slug stays stable
-        // even when the hook fires from inside an orbit-{goal_slug} worktree.
-        // In a normal (non-worktree) checkout it returns the relative string ".git",
-        // in which case we fall back to --show-toplevel as before.
-        if let Ok(out) = std::process::Command::new("git")
-            .args(["rev-parse", "--git-common-dir"])
-            .output()
-        {
-            if out.status.success() {
-                let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                // Absolute path → linked worktree; derive project root from common .git dir.
-                if raw.starts_with('/') {
-                    let common_git = PathBuf::from(&raw);
-                    // common_git = /main/repo/.git  →  parent = /main/repo
-                    if let Some(repo_root) = common_git.parent() {
-                        let name = repo_root
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "project".into());
-                        return sanitize_slug_name(&name);
-                    }
-                }
-            }
-        }
-
-        // Normal repo (--git-common-dir returned ".git"): use --show-toplevel.
-        if let Ok(git_root) = std::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
-        {
-            if git_root.status.success() {
-                let root = String::from_utf8_lossy(&git_root.stdout).trim().to_string();
-                if !root.is_empty() {
-                    let root_path = PathBuf::from(&root);
-                    let name = root_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "project".into());
-                    return sanitize_slug_name(&name);
-                }
-            }
-        }
-
-        // Fallback: CWD-based (non-git directories).
-        let name = cwd_path
-            .components()
-            .filter_map(|c| {
-                if let std::path::Component::Normal(s) = c {
-                    s.to_str()
-                } else {
-                    None
-                }
-            })
-            .next_back()
-            .unwrap_or("project")
-            .to_string();
-        sanitize_slug_name(&name)
-    });
+    static SLUG: LazyLock<String> =
+        LazyLock::new(|| project_slug_for_root(&canonical_project_root()));
     SLUG.clone()
 }
 
@@ -108,21 +105,72 @@ pub fn harness_projects_root() -> PathBuf {
 }
 
 /// Lists all project slugs that have harness data directories.
-pub fn list_harness_project_slugs() -> Vec<String> {
-    let root = harness_projects_root();
+fn list_harness_project_slugs_in(root: &std::path::Path) -> Vec<String> {
     if !root.is_dir() {
         return vec![];
     }
-    let mut slugs: Vec<String> = std::fs::read_dir(&root)
+    let mut slugs: Vec<String> = std::fs::read_dir(root)
         .ok()
         .into_iter()
         .flatten()
         .filter_map(|e| e.ok())
-        .filter(|e| e.path().is_dir())
+        .filter(|e| e.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
     slugs.sort();
     slugs
+}
+
+pub fn list_harness_project_slugs() -> Vec<String> {
+    list_harness_project_slugs_in(&harness_projects_root())
+}
+
+fn resolve_external_harness_dir_in(root: &std::path::Path, slug: &str) -> std::io::Result<PathBuf> {
+    if slug.is_empty() || matches!(slug, "." | "..") || slug.contains('/') || slug.contains('\\') {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid harness project slug: {slug}"),
+        ));
+    }
+    let candidate = root.join(slug);
+    let metadata = candidate.symlink_metadata()?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "harness project is not a regular directory: {}",
+                candidate.display()
+            ),
+        ));
+    }
+    if !list_harness_project_slugs_in(root)
+        .iter()
+        .any(|known| known == slug)
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("unknown harness project slug: {slug}"),
+        ));
+    }
+    let canonical_root = root.canonicalize()?;
+    let canonical_project = candidate.canonicalize()?;
+    if !canonical_project.starts_with(&canonical_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!(
+                "harness project escapes projects root: {}",
+                candidate.display()
+            ),
+        ));
+    }
+    Ok(canonical_project)
+}
+
+/// Resolve an externally supplied project slug to an exact, existing project
+/// directory without following a project-directory symlink or escaping the
+/// canonical projects root.
+pub fn resolve_external_harness_dir(slug: &str) -> std::io::Result<PathBuf> {
+    resolve_external_harness_dir_in(&harness_projects_root(), slug)
 }
 
 /// Returns the harness data directory for a given project slug.
@@ -174,23 +222,8 @@ pub fn variant_pool_path() -> PathBuf {
     harness_dir().join("variants.json")
 }
 
-/// Session-start state written by `resume` (SessionStart) and read by
-/// `reflect` (SessionEnd) so the holdout partition uses the same `date` on
-/// both ends — otherwise a session spanning UTC midnight attributes an
-/// active-injected skill to the holdout arm (or vice versa).
-pub fn session_start_file() -> PathBuf {
-    harness_dir().join("session_start.json")
-}
-
 /// Per-project edit-manifest log for the HarnessX falsifiability contract
 /// (Table 9). Each shipped edit appends its manifest here.
-///
-/// STATUS (2026-06): write path is wired (reflect appends on every shipped
-/// edit). The READ path — a Critic that tails recent manifests to verify the
-/// prior round's predictions held — is a deferred follow-up; today the Critic
-/// only consults the in-round reward-hacking flag, not historical manifests.
-/// So this ledger currently accumulates without a consumer; the cross-round
-/// falsifiability loop is not yet closed.
 pub fn manifests_file() -> PathBuf {
     harness_dir().join("manifests.jsonl")
 }
@@ -331,6 +364,76 @@ mod tests {
         assert_eq!(
             project_seesaw_path_for(None),
             project_seesaw_path_for(Some(""))
+        );
+    }
+
+    #[test]
+    fn same_basename_repositories_have_distinct_project_slugs() {
+        let first = project_slug_for_root(std::path::Path::new("/work/acme/service"));
+        let second = project_slug_for_root(std::path::Path::new("/work/other/service"));
+
+        assert_ne!(first, second);
+        assert!(first.starts_with("service-"));
+        assert!(second.starts_with("service-"));
+    }
+
+    #[test]
+    fn legacy_basename_remains_available_for_explicit_merge() {
+        let root = std::path::Path::new("/work/acme/service");
+        assert_eq!(legacy_project_slug_for_root(root), "service");
+        assert_ne!(
+            legacy_project_slug_for_root(root),
+            project_slug_for_root(root)
+        );
+    }
+
+    #[test]
+    fn external_project_resolver_requires_an_exact_known_slug() {
+        let root = tempfile::tempdir().unwrap();
+        let known = root.path().join("known-project");
+        std::fs::create_dir(&known).unwrap();
+
+        assert_eq!(
+            resolve_external_harness_dir_in(root.path(), "known-project").unwrap(),
+            known.canonicalize().unwrap()
+        );
+        assert!(resolve_external_harness_dir_in(root.path(), "unknown-project").is_err());
+    }
+
+    #[test]
+    fn external_project_resolver_rejects_empty_and_path_syntax() {
+        let root = tempfile::tempdir().unwrap();
+
+        for slug in [
+            "",
+            ".",
+            "..",
+            "../project",
+            "project/child",
+            "project\\child",
+        ] {
+            assert_eq!(
+                resolve_external_harness_dir_in(root.path(), slug)
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::InvalidInput,
+                "{slug:?} must be rejected as invalid input"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn external_project_resolver_rejects_a_symlinked_project_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked-project")).unwrap();
+
+        assert_eq!(
+            resolve_external_harness_dir_in(root.path(), "linked-project")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
         );
     }
 }

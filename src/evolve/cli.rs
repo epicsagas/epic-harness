@@ -112,14 +112,14 @@ fn run_accept_synth(args: &[String]) -> i32 {
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("confidence").and_then(|c| c.as_f64()));
-    if let Some(c) = existing_conf {
-        if c > pending.confidence + 1e-9 {
-            eprintln!(
-                "existing skill '{skill}' has higher confidence ({c:.2} > {:.2}); refusing to downgrade",
-                pending.confidence
-            );
-            return EXIT_DOWNGRADE;
-        }
+    if let Some(c) = existing_conf
+        && c > pending.confidence + 1e-9
+    {
+        eprintln!(
+            "existing skill '{skill}' has higher confidence ({c:.2} > {:.2}); refusing to downgrade",
+            pending.confidence
+        );
+        return EXIT_DOWNGRADE;
     }
 
     // 6. Critic falsifiability gate — same gate as seed time. reward hacking
@@ -144,9 +144,17 @@ fn run_accept_synth(args: &[String]) -> i32 {
     }
 
     // 7. Apply, gate, mark consumed, ledger.
-    write_skill_with_meta(&skill, &assembled, &pending.origin, pending.confidence);
+    if let Err(error) =
+        write_skill_with_meta(&skill, &assembled, &pending.origin, pending.confidence)
+    {
+        eprintln!("failed to write synthesized skill: {error}");
+        return 1;
+    }
     gate_skills();
-    mark_consumed(&skill);
+    if let Err(error) = mark_consumed(&skill) {
+        eprintln!("failed to mark synthesized manifest consumed: {error}");
+        return 1;
+    }
     append_jsonl(&manifests_file(), &manifest);
     hint(
         "evolve",

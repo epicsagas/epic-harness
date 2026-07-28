@@ -4,6 +4,7 @@
 
 use sqlx::AnyPool;
 use sqlx::Row;
+use sqlx::any::AnyRow;
 use std::io;
 
 use crate::shared::obs::ObsRecord;
@@ -62,8 +63,8 @@ pub async fn insert_observation_pool(
         "INSERT INTO observations
          (timestamp, session_id, tool, tool_category, action, result, score,
           dim_success, dim_quality, dim_cost, failure_category, error_snippet,
-          file_ext, sequence_id, pipeline_id, project)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+          file_ext, sequence_id, pipeline_id, tool_use_id, project)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
     )
     .bind(&rec.timestamp)
     .bind(session_id)
@@ -80,6 +81,7 @@ pub async fn insert_observation_pool(
     .bind(&rec.file_ext)
     .bind(rec.sequence_id.map(super::u64_to_i64))
     .bind(&rec.pipeline_id)
+    .bind(&rec.tool_use_id)
     .bind(project)
     .execute(pool)
     .await
@@ -123,7 +125,7 @@ pub async fn query_obs_for_date_range_pool(
         sqlx::query(
             "SELECT timestamp, tool, tool_category, action, result, score,
                     dim_success, dim_quality, dim_cost,
-                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id, tool_use_id
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ? AND project = ?
              ORDER BY timestamp ASC",
@@ -137,7 +139,7 @@ pub async fn query_obs_for_date_range_pool(
         sqlx::query(
             "SELECT timestamp, tool, tool_category, action, result, score,
                     dim_success, dim_quality, dim_cost,
-                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+                    failure_category, error_snippet, file_ext, sequence_id, pipeline_id, tool_use_id
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ?
              ORDER BY timestamp ASC",
@@ -201,9 +203,151 @@ pub async fn query_obs_for_date_range_pool(
             pipeline_id: row
                 .try_get::<Option<String>, _>(13)
                 .map_err(super::sqlx_err)?,
+            tool_use_id: row
+                .try_get::<Option<String>, _>(14)
+                .map_err(super::sqlx_err)?,
         });
     }
     Ok(records)
+}
+
+/// Observation row with database provenance preserved for cross-store merging.
+#[derive(Debug, Clone)]
+pub(crate) struct StoredObservation {
+    pub row_id: i64,
+    pub session_id: String,
+    pub project: String,
+    pub record: ObsRecord,
+}
+
+fn decode_stored_observations(rows: Vec<AnyRow>) -> io::Result<Vec<StoredObservation>> {
+    let mut records = Vec::with_capacity(rows.len());
+    for row in rows {
+        let dim_s: Option<f64> = row.try_get(9).ok();
+        let dim_q: Option<f64> = row.try_get(10).ok();
+        let dim_c: Option<f64> = row.try_get(11).ok();
+        let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+        let seq_id: Option<i64> = row.try_get(15).ok();
+        records.push(StoredObservation {
+            row_id: row.try_get(0).map_err(super::sqlx_err)?,
+            session_id: row.try_get(1).map_err(super::sqlx_err)?,
+            project: row
+                .try_get::<Option<String>, _>(2)
+                .map_err(super::sqlx_err)?
+                .unwrap_or_default(),
+            record: ObsRecord {
+                timestamp: row.try_get(3).map_err(super::sqlx_err)?,
+                tool: row.try_get(4).map_err(super::sqlx_err)?,
+                tool_category: row.try_get(5).map_err(super::sqlx_err)?,
+                action: row.try_get(6).map_err(super::sqlx_err)?,
+                result: row.try_get(7).map_err(super::sqlx_err)?,
+                score: row.try_get(8).map_err(super::sqlx_err)?,
+                dimensions: any_some.then(|| ScoreDimensions {
+                    tool_success: dim_s.unwrap_or(0.0),
+                    output_quality: dim_q.unwrap_or(0.0),
+                    execution_cost: dim_c.unwrap_or(0.0),
+                }),
+                failure_category: row.try_get(12).map_err(super::sqlx_err)?,
+                error_snippet: row.try_get(13).map_err(super::sqlx_err)?,
+                file_ext: row.try_get(14).map_err(super::sqlx_err)?,
+                sequence_id: seq_id.map(|v| v as u64),
+                pipeline_id: row.try_get(16).map_err(super::sqlx_err)?,
+                tool_use_id: row.try_get(17).map_err(super::sqlx_err)?,
+            },
+        });
+    }
+    Ok(records)
+}
+
+/// Load one project's observations for one host session.
+///
+/// The inner descending query keeps the most recent `limit` rows when a session
+/// exceeds the reflection budget. The outer ascending order restores event
+/// order for pattern analysis. Database row ids remain attached as provenance,
+/// so same-second identical calls are never collapsed.
+pub(crate) async fn query_obs_for_session_pool(
+    pool: &AnyPool,
+    session_id: &str,
+    project: &str,
+    limit: i64,
+) -> io::Result<Vec<StoredObservation>> {
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(
+        "SELECT id, session_id, project, timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost, failure_category,
+                error_snippet, file_ext, sequence_id, pipeline_id, tool_use_id
+         FROM observations
+         WHERE id IN (
+             SELECT id FROM observations
+             WHERE session_id = ? AND project = ?
+             ORDER BY id DESC LIMIT ?
+         )
+         ORDER BY id ASC",
+    )
+    .bind(session_id)
+    .bind(project)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    decode_stored_observations(rows)
+}
+
+/// Bounded date-range load for reflection context.
+pub(crate) async fn query_obs_for_date_range_bounded_pool(
+    pool: &AnyPool,
+    from_ts: &str,
+    to_ts: &str,
+    project: Option<&str>,
+    limit: i64,
+) -> io::Result<Vec<StoredObservation>> {
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
+    let (from, to) = day_bounds(from_ts, to_ts);
+    let rows = if let Some(project) = project {
+        sqlx::query(
+            "SELECT id, session_id, project, timestamp, tool, tool_category, action, result, score,
+                    dim_success, dim_quality, dim_cost, failure_category,
+                    error_snippet, file_ext, sequence_id, pipeline_id, tool_use_id
+             FROM observations
+             WHERE id IN (
+                 SELECT id FROM observations
+                 WHERE timestamp >= ? AND timestamp <= ? AND project = ?
+                 ORDER BY timestamp DESC, id DESC LIMIT ?
+             )
+             ORDER BY timestamp ASC, id ASC",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(project)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT id, session_id, project, timestamp, tool, tool_category, action, result, score,
+                    dim_success, dim_quality, dim_cost, failure_category,
+                    error_snippet, file_ext, sequence_id, pipeline_id, tool_use_id
+             FROM observations
+             WHERE id IN (
+                 SELECT id FROM observations
+                 WHERE timestamp >= ? AND timestamp <= ?
+                 ORDER BY timestamp DESC, id DESC LIMIT ?
+             )
+             ORDER BY timestamp ASC, id ASC",
+        )
+        .bind(&from)
+        .bind(&to)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    }
+    .map_err(super::sqlx_err)?;
+    decode_stored_observations(rows)
 }
 
 /// Aggregate observation stats via SQL.
@@ -555,6 +699,58 @@ pub async fn delete_obs_older_than_pool(pool: &AnyPool, cutoff_ts: &str) -> io::
     Ok(result.rows_affected())
 }
 
+/// Delete expired rows while preserving the session currently being reflected.
+/// A long-running session can start before the cutoff and must remain readable
+/// until its SessionEnd analysis has completed.
+pub async fn delete_obs_older_than_except_session_pool(
+    pool: &AnyPool,
+    cutoff_ts: &str,
+    session_id: &str,
+    project: &str,
+) -> io::Result<u64> {
+    let result = sqlx::query(
+        "DELETE FROM observations
+         WHERE timestamp < ? AND NOT (session_id = ? AND project = ?)",
+    )
+    .bind(cutoff_ts)
+    .bind(session_id)
+    .bind(project)
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    Ok(result.rows_affected())
+}
+
+/// Delete expired rows while preserving every queued or actively-reflecting
+/// session. A global retention sweep can be triggered by another project, so
+/// excluding only its ending session would still destroy a long-running peer.
+pub async fn delete_obs_older_than_except_sessions_pool(
+    pool: &AnyPool,
+    cutoff_ts: &str,
+    sessions: &[(String, String)],
+) -> io::Result<u64> {
+    if sessions.is_empty() {
+        return delete_obs_older_than_pool(pool, cutoff_ts).await;
+    }
+
+    let sessions_json = serde_json::to_string(sessions).map_err(io::Error::other)?;
+    let result = sqlx::query(
+        "DELETE FROM observations
+         WHERE timestamp < ?
+           AND NOT EXISTS (
+                SELECT 1 FROM json_each(?) AS active
+                WHERE json_extract(active.value, '$[0]') = observations.session_id
+                  AND json_extract(active.value, '$[1]') = observations.project
+           )",
+    )
+    .bind(cutoff_ts)
+    .bind(sessions_json)
+    .execute(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    Ok(result.rows_affected())
+}
+
 // ── Stats types ──────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -634,6 +830,7 @@ mod tests {
             file_ext: Some(".rs".into()),
             sequence_id: Some(1),
             pipeline_id: None,
+            tool_use_id: None,
         };
 
         let id = insert_observation_pool(&pool, &rec, "20260602_12345", "test-project")
@@ -669,6 +866,7 @@ mod tests {
             file_ext: None,
             sequence_id: None,
             pipeline_id: None,
+            tool_use_id: None,
         };
         insert_observation_pool(&pool, &rec, "20260602_1", "p1")
             .await
@@ -726,6 +924,7 @@ mod tests {
             file_ext: None,
             sequence_id: None,
             pipeline_id: None,
+            tool_use_id: None,
         };
         insert_observation_pool(&pool, &mk("Mine"), "s1", "mine")
             .await
@@ -744,6 +943,123 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(all.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn reflection_query_is_session_scoped_and_keeps_distinct_calls() {
+        let pool = test_pool().await;
+        let rec = ObsRecord {
+            timestamp: "2026-06-02T10:00:00".into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: Some("cargo test".into()),
+            result: Some("success".into()),
+            score: Some(0.9),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: Some(0),
+            pipeline_id: None,
+            tool_use_id: None,
+        };
+        insert_observation_pool(&pool, &rec, "session-a", "project-a")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec, "session-a", "project-a")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec, "session-b", "project-a")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec, "session-a", "project-b")
+            .await
+            .unwrap();
+
+        let rows = query_obs_for_session_pool(&pool, "session-a", "project-a", 10)
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_ne!(rows[0].row_id, rows[1].row_id);
+    }
+
+    #[tokio::test]
+    async fn reflection_query_caps_to_most_recent_records_in_time_order() {
+        let pool = test_pool().await;
+        for i in 0..4 {
+            let rec = ObsRecord {
+                timestamp: format!("2026-06-02T10:00:0{i}"),
+                tool: format!("tool-{i}"),
+                tool_category: "bash".into(),
+                action: None,
+                result: Some("success".into()),
+                score: Some(0.9),
+                dimensions: None,
+                failure_category: None,
+                error_snippet: None,
+                file_ext: None,
+                sequence_id: Some(i),
+                pipeline_id: None,
+                tool_use_id: None,
+            };
+            insert_observation_pool(&pool, &rec, "session-a", "project-a")
+                .await
+                .unwrap();
+        }
+
+        let rows = query_obs_for_session_pool(&pool, "session-a", "project-a", 2)
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].record.tool, "tool-2");
+        assert_eq!(rows[1].record.tool, "tool-3");
+    }
+
+    #[tokio::test]
+    async fn context_range_query_is_project_scoped_and_bounded() {
+        let pool = test_pool().await;
+        for (project, tool) in [
+            ("project-a", "a-1"),
+            ("project-a", "a-2"),
+            ("project-a", "a-3"),
+            ("project-b", "b-1"),
+        ] {
+            let rec = ObsRecord {
+                timestamp: "2026-06-02T10:00:00".into(),
+                tool: tool.into(),
+                tool_category: "bash".into(),
+                action: None,
+                result: Some("success".into()),
+                score: Some(0.9),
+                dimensions: None,
+                failure_category: None,
+                error_snippet: None,
+                file_ext: None,
+                sequence_id: None,
+                pipeline_id: None,
+                tool_use_id: None,
+            };
+            insert_observation_pool(&pool, &rec, "session-a", project)
+                .await
+                .unwrap();
+        }
+
+        let rows = query_obs_for_date_range_bounded_pool(
+            &pool,
+            "20260602",
+            "20260602",
+            Some("project-a"),
+            2,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.project == "project-a"));
+        assert_eq!(rows[0].record.tool, "a-2");
+        assert_eq!(rows[1].record.tool, "a-3");
     }
 
     #[tokio::test]
@@ -782,6 +1098,7 @@ mod tests {
                 file_ext: None,
                 sequence_id: None,
                 pipeline_id: None,
+                tool_use_id: None,
             };
             insert_observation_pool(&pool, &rec, "20260602_12345", "test-project")
                 .await
@@ -815,6 +1132,7 @@ mod tests {
             file_ext: None,
             sequence_id: None,
             pipeline_id: None,
+            tool_use_id: None,
         };
         insert_observation_pool(&pool, &rec, "20260501_12345", "test-project")
             .await
@@ -829,6 +1147,102 @@ mod tests {
             .await
             .unwrap();
         assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn retention_preserves_the_ending_session() {
+        let pool = test_pool().await;
+        let rec = ObsRecord {
+            timestamp: "2026-05-01T10:00:00Z".into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: None,
+            result: Some("success".into()),
+            score: Some(1.0),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+            tool_use_id: None,
+        };
+        insert_observation_pool(&pool, &rec, "ending", "project-a")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec, "old", "project-a")
+            .await
+            .unwrap();
+
+        let deleted =
+            delete_obs_older_than_except_session_pool(&pool, "2026-05-15", "ending", "project-a")
+                .await
+                .unwrap();
+
+        assert_eq!(deleted, 1);
+        assert_eq!(
+            query_obs_for_session_pool(&pool, "ending", "project-a", 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn retention_preserves_all_queued_long_running_sessions() {
+        let pool = test_pool().await;
+        let rec = ObsRecord {
+            timestamp: "2026-05-01T10:00:00Z".into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: None,
+            result: Some("success".into()),
+            score: Some(1.0),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+            tool_use_id: None,
+        };
+        insert_observation_pool(&pool, &rec, "ending", "project-a")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec, "long-running", "project-b")
+            .await
+            .unwrap();
+        insert_observation_pool(&pool, &rec, "expired", "project-c")
+            .await
+            .unwrap();
+
+        let deleted = delete_obs_older_than_except_sessions_pool(
+            &pool,
+            "2026-05-15",
+            &[
+                ("ending".into(), "project-a".into()),
+                ("long-running".into(), "project-b".into()),
+            ],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(deleted, 1);
+        assert_eq!(
+            query_obs_for_session_pool(&pool, "ending", "project-a", 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            query_obs_for_session_pool(&pool, "long-running", "project-b", 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -848,6 +1262,7 @@ mod tests {
             file_ext: None,
             sequence_id: None,
             pipeline_id: None,
+            tool_use_id: None,
         };
         let rec2 = ObsRecord {
             timestamp: "2026-06-02T10:01:00Z".into(),
@@ -862,6 +1277,7 @@ mod tests {
             file_ext: None,
             sequence_id: None,
             pipeline_id: None,
+            tool_use_id: None,
         };
 
         insert_observation_pool(&pool, &rec1, "sess1", "test-project")

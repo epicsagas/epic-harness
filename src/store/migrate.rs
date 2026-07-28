@@ -976,17 +976,26 @@ impl std::ops::AddAssign for GlobalMergeStats {
 /// Detect old-format slugs (`{name}-{6hex}`) and return the name part.
 #[allow(dead_code)]
 fn strip_hash_suffix(slug: &str) -> Option<&str> {
-    if slug.len() > 7 {
-        let maybe_sep = &slug[slug.len() - 7..slug.len() - 6];
-        let maybe_hex = &slug[slug.len() - 6..];
-        if maybe_sep == "-" && maybe_hex.chars().all(|c| c.is_ascii_hexdigit()) {
-            let name = &slug[..slug.len() - 7];
-            if !name.is_empty() {
-                return Some(name);
-            }
-        }
+    let (name, maybe_hex) = slug.rsplit_once('-')?;
+    if !name.is_empty() && maybe_hex.len() == 6 && maybe_hex.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return Some(name);
     }
     None
+}
+
+#[cfg(test)]
+mod strip_hash_suffix_tests {
+    use super::strip_hash_suffix;
+
+    #[test]
+    fn unicode_legacy_slug_is_parsed_without_byte_slicing() {
+        assert_eq!(
+            strip_hash_suffix("projektas-日本語-a1b2c3"),
+            Some("projektas-日本語")
+        );
+        assert_eq!(strip_hash_suffix("projektas-日本語-nothex"), None);
+    }
 }
 
 /// Auto-normalize old hashed slugs to name-only format.

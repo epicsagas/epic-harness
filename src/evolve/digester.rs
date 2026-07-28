@@ -94,12 +94,13 @@ fn segment_by_time_gap(observations: &[ObsRecord]) -> Vec<(String, Vec<&ObsRecor
 
     for o in observations {
         let ts = parse_epoch(&o.timestamp);
-        if let (Some(prev), Some(now)) = (last_ts, ts) {
-            if now - prev > SEGMENT_GAP_SECS && !current.is_empty() {
-                let label = format!("segment-{idx}");
-                idx += 1;
-                segments.push((label, std::mem::take(&mut current)));
-            }
+        if let (Some(prev), Some(now)) = (last_ts, ts)
+            && now - prev > SEGMENT_GAP_SECS
+            && !current.is_empty()
+        {
+            let label = format!("segment-{idx}");
+            idx += 1;
+            segments.push((label, std::mem::take(&mut current)));
         }
         last_ts = ts.or(last_ts);
         current.push(o);
@@ -176,10 +177,10 @@ fn derive_components(seg: &[&ObsRecord]) -> Vec<String> {
         // The observation does not carry a direct file path; use the action field,
         // which often contains the edited path, falling back to error_snippet.
         for candidate in o.action.iter().chain(o.error_snippet.iter()) {
-            if let Some(c) = extract_component(candidate) {
-                if seen.insert(c.clone()) {
-                    components.push(c);
-                }
+            if let Some(c) = extract_component(candidate)
+                && seen.insert(c.clone())
+            {
+                components.push(c);
             }
         }
     }
@@ -309,6 +310,7 @@ mod tests {
             error_snippet: None,
             file_ext: None,
             sequence_id: None,
+            tool_use_id: None,
             pipeline_id: None,
         }
     }

@@ -33,7 +33,7 @@
     flashPrev[key] = sig;
   }
   function statusSignal(): string {
-    return [...agentStatuses.entries()].map(([id, s]) => `${id}:${s.state ?? '?'}`).sort().join('|');
+    return [...agentStatuses.entries()].map(([id, s]) => `${id}:${s.status ?? '?'}`).sort().join('|');
   }
 
   async function load() {

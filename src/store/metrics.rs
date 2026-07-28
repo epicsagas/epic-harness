@@ -16,6 +16,10 @@ use crate::shared::scoring::ScoreDimensions;
 
 /// Maximum score history entries to retain.
 const MAX_SCORE_HISTORY: usize = 50;
+/// Bounded cross-project views protect dashboard and reflection requests from
+/// materializing the sum of every project's retained history.
+const MAX_AGGREGATE_SCORE_HISTORY: i64 = 100;
+const MAX_AGGREGATE_SKILL_ATTRIBUTIONS: i64 = 500;
 
 // ── Load ─────────────────────────────────────────────
 
@@ -211,10 +215,10 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         project,
     )
     .await?;
-    if let Some(ref epoch) = m.epoch_class {
-        if let Ok(s) = serde_json::to_string(epoch) {
-            upsert(&mut tx, "epoch_class", &s, project).await?;
-        }
+    if let Some(ref epoch) = m.epoch_class
+        && let Ok(s) = serde_json::to_string(epoch)
+    {
+        upsert(&mut tx, "epoch_class", &s, project).await?;
     }
 
     // Score history — project-scoped: delete only this project's rows, then
@@ -276,6 +280,34 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
 
     tx.commit().await.map_err(super::sqlx_err)?;
     Ok(())
+}
+
+/// Atomically apply one reflection's metrics state. The marker and the full
+/// metrics update share a transaction, so retries observe either neither or
+/// the completed application — never a duplicate increment.
+pub async fn save_metrics_once_pool(
+    pool: &AnyPool,
+    m: &Metrics,
+    project: &str,
+    session_id: &str,
+) -> io::Result<bool> {
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+    let marker = sqlx::query(
+        "INSERT INTO reflection_metrics (session_id, project) VALUES (?, ?)
+         ON CONFLICT (session_id, project) DO NOTHING",
+    )
+    .bind(session_id)
+    .bind(project)
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+    if marker.rows_affected() == 0 {
+        tx.commit().await.map_err(super::sqlx_err)?;
+        return Ok(false);
+    }
+    save_metrics_direct(&mut tx, m, project).await?;
+    tx.commit().await.map_err(super::sqlx_err)?;
+    Ok(true)
 }
 
 /// Standalone save.
@@ -353,10 +385,10 @@ pub async fn save_metrics_direct(
         project,
     )
     .await?;
-    if let Some(ref epoch) = m.epoch_class {
-        if let Ok(s) = serde_json::to_string(epoch) {
-            upsert(tx, "epoch_class", &s, project).await?;
-        }
+    if let Some(ref epoch) = m.epoch_class
+        && let Ok(s) = serde_json::to_string(epoch)
+    {
+        upsert(tx, "epoch_class", &s, project).await?;
     }
 
     // Score history — project-scoped.
@@ -454,8 +486,21 @@ pub async fn load_metrics_scoped_pool(
         row.parse().ok()
     }
     async fn get_str(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<String> {
-        let v = get_sum(pool, key, project).await?;
-        Some(v.to_string())
+        let row = if let Some(p) = project {
+            sqlx::query_scalar::<_, String>(
+                "SELECT value FROM metrics_state WHERE key = ? AND project = ? LIMIT 1",
+            )
+            .bind(key)
+            .bind(p)
+            .fetch_optional(pool)
+            .await
+        } else {
+            sqlx::query_scalar::<_, String>("SELECT value FROM metrics_state WHERE key = ? LIMIT 1")
+                .bind(key)
+                .fetch_optional(pool)
+                .await
+        };
+        row.ok().flatten()
     }
 
     // Aggregate scalar metrics across projects for the "all" view, or take
@@ -595,28 +640,30 @@ pub async fn load_metrics_scoped_pool(
         None
     };
 
-    // Score history — filter by project, or union all.
+    // Score history — filter by project, or take a bounded cross-project tail.
     let sh_rows = if let Some(p) = project {
         sqlx::query(
             "SELECT timestamp, success_rate, avg_score, observations,
                     dim_success, dim_quality, dim_cost
-             FROM score_history WHERE project = ? ORDER BY id ASC",
+             FROM score_history WHERE project = ? ORDER BY id DESC LIMIT ?",
         )
         .bind(p)
+        .bind(MAX_SCORE_HISTORY as i64)
         .fetch_all(pool)
         .await
     } else {
         sqlx::query(
             "SELECT timestamp, success_rate, avg_score, observations,
                     dim_success, dim_quality, dim_cost
-             FROM score_history ORDER BY id ASC",
+             FROM score_history ORDER BY id DESC LIMIT ?",
         )
+        .bind(MAX_AGGREGATE_SCORE_HISTORY)
         .fetch_all(pool)
         .await
     }
     .map_err(super::sqlx_err)?;
 
-    let score_history: Vec<SessionScoreEntry> = sh_rows
+    let mut score_history: Vec<SessionScoreEntry> = sh_rows
         .iter()
         .filter_map(|r| {
             Some(SessionScoreEntry {
@@ -632,6 +679,7 @@ pub async fn load_metrics_scoped_pool(
             })
         })
         .collect();
+    score_history.reverse();
 
     // Skill attribution — scoped by project (Some), or all (None).
     let sa_rows = if let Some(p) = project {
@@ -643,8 +691,10 @@ pub async fn load_metrics_scoped_pool(
     } else {
         sqlx::query(
             "SELECT skill_name, sessions_active, avg_score_with, avg_score_without, first_seen, sessions_holdout
-             FROM skill_attribution",
+             FROM skill_attribution
+             ORDER BY sessions_active DESC, first_seen DESC LIMIT ?",
         )
+        .bind(MAX_AGGREGATE_SKILL_ATTRIBUTIONS)
     }
     .fetch_all(pool)
     .await
@@ -732,6 +782,27 @@ mod tests {
             last_error_context: Some("type_error in main.rs".into()),
             reward_hacking_suspected: false,
         }
+    }
+
+    #[tokio::test]
+    async fn reflection_metrics_replay_after_commit_is_not_applied_twice() {
+        let pool = test_pool().await;
+        let metrics = sample_metrics();
+        assert!(
+            save_metrics_once_pool(&pool, &metrics, "project-a", "session-a")
+                .await
+                .unwrap()
+        );
+        assert!(
+            !save_metrics_once_pool(&pool, &metrics, "project-a", "session-a")
+                .await
+                .unwrap()
+        );
+        let loaded = load_metrics_scoped_pool(&pool, Some("project-a"))
+            .await
+            .unwrap();
+        assert_eq!(loaded.total_sessions, metrics.total_sessions);
+        assert_eq!(loaded.score_history.len(), metrics.score_history.len());
     }
 
     fn sample_metrics_reward_hacking() -> Metrics {
@@ -840,6 +911,23 @@ mod tests {
             "proj-a must not be overwritten by proj-b"
         );
         assert_eq!(lb.total_sessions, 99);
+    }
+
+    #[tokio::test]
+    async fn scoped_string_metrics_round_trip() {
+        let pool = test_pool().await;
+        let m = sample_metrics();
+        save_metrics_pool(&pool, &m, "proj-a").await.unwrap();
+
+        let loaded = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+
+        assert_eq!(loaded.last_session, m.last_session);
+        assert_eq!(loaded.best_session, m.best_session);
+        assert_eq!(loaded.trend, m.trend);
+        assert_eq!(loaded.last_error_context, m.last_error_context);
+        assert_eq!(loaded.epoch_class, m.epoch_class);
     }
 
     #[tokio::test]

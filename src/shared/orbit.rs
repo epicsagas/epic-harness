@@ -135,9 +135,10 @@ pub fn normalize_pipeline_id(id: &str) -> String {
 ///
 /// The pipeline file is written by the orbit skill, so nothing in the harness
 /// could previously contradict it: pipelines were observed marked `complete`
-/// with no PR recorded, and one with `audit_fail_count` above its own
-/// `max_retries` — the skill is supposed to pause instead. Detection cannot stop
-/// a bad write, but it stops a bad write from being read as evidence.
+/// with no PR or CI proof, and one with `audit_fail_count` above its own
+/// `max_retries` — the skill is supposed to pause instead. Consumers must run
+/// this validation before persistence so a self-declared status cannot become
+/// dashboard evidence.
 ///
 /// Returns one message per violated invariant; empty means the state is
 /// self-consistent. Pipelines that are not complete are not checked — an
@@ -162,19 +163,68 @@ pub fn completion_violations(pipeline: &serde_json::Value) -> Vec<String> {
     let has_pr = pipeline
         .get("pr_url")
         .and_then(|v| v.as_str())
-        .is_some_and(|s| !s.trim().is_empty());
-    let shipped = pipeline
-        .get("phase_history")
-        .and_then(|v| v.as_array())
-        .is_some_and(|h| {
-            h.iter()
-                .any(|e| e["phase"] == "ship" && e["status"] == "complete")
-        });
-    if !has_pr && !shipped {
-        violations.push("completed with no PR recorded and no completed ship phase".to_string());
+        .is_some_and(is_github_pull_request_url);
+    if !has_pr {
+        violations.push("completed without a concrete GitHub pull-request URL".to_string());
+    }
+
+    if pipeline.get("ci_status").and_then(|v| v.as_str()) != Some("success") {
+        violations.push("completed without ci_status=\"success\" evidence".to_string());
     }
 
     violations
+}
+
+pub fn pipeline_is_dashboard_visible(pipeline: &serde_json::Value) -> bool {
+    completion_violations(pipeline).is_empty()
+}
+
+/// Filter dashboard pipeline state to one project before sorting and limiting.
+///
+/// SQLite rows use `project`; file fallbacks use `_project`.
+pub fn dashboard_pipelines_for_project(
+    pipelines: Vec<serde_json::Value>,
+    project: Option<&str>,
+    limit: usize,
+) -> Vec<serde_json::Value> {
+    let mut scoped: Vec<_> = pipelines
+        .into_iter()
+        .filter(pipeline_is_dashboard_visible)
+        .filter(|pipeline| {
+            project.is_none_or(|selected| {
+                pipeline
+                    .get("project")
+                    .or_else(|| pipeline.get("_project"))
+                    .and_then(|value| value.as_str())
+                    == Some(selected)
+            })
+        })
+        .collect();
+    scoped.sort_by(|left, right| {
+        let left = left["started_at"].as_str().unwrap_or("");
+        let right = right["started_at"].as_str().unwrap_or("");
+        right.cmp(left)
+    });
+    scoped.truncate(limit);
+    scoped
+}
+
+fn is_github_pull_request_url(raw: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(raw.trim()) else {
+        return false;
+    };
+    if parsed.scheme() != "https" || parsed.host_str() != Some("github.com") {
+        return false;
+    }
+    let segments: Vec<_> = parsed
+        .path_segments()
+        .map(|segments| segments.filter(|part| !part.is_empty()).collect())
+        .unwrap_or_default();
+    segments.len() == 4
+        && segments[2] == "pull"
+        && !segments[0].is_empty()
+        && !segments[1].is_empty()
+        && segments[3].chars().all(|c| c.is_ascii_digit())
 }
 
 /// Sanitize a string extracted from pipeline state before emitting to LLM context.
@@ -215,6 +265,7 @@ mod completion_tests {
             "audit_fail_count": 1,
             "max_retries": 3,
             "pr_url": "https://github.com/o/r/pull/1",
+            "ci_status": "success",
             "phase_history": [{"phase": "ship", "status": "complete"}]
         });
         assert!(violations(&pipeline).is_empty());
@@ -228,12 +279,42 @@ mod completion_tests {
     }
 
     #[test]
+    fn invalid_completion_is_hidden_from_dashboard_consumers() {
+        let pipeline = json!({"status": "complete"});
+        assert!(!super::pipeline_is_dashboard_visible(&pipeline));
+    }
+
+    #[test]
+    fn dashboard_pipeline_scope_filters_before_sorting_and_limiting() {
+        let pipelines = vec![
+            json!({"id": "a-old", "project": "project-a", "status": "running", "started_at": "1"}),
+            json!({"id": "b-new", "project": "project-b", "status": "running", "started_at": "3"}),
+            json!({"id": "a-invalid", "project": "project-a", "status": "complete", "started_at": "4"}),
+            json!({"id": "a-new", "project": "project-a", "status": "running", "started_at": "2"}),
+        ];
+
+        let selected =
+            super::dashboard_pipelines_for_project(pipelines.clone(), Some("project-a"), 10);
+        assert_eq!(
+            selected
+                .iter()
+                .map(|pipeline| pipeline["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec!["a-new", "a-old"]
+        );
+
+        let aggregate = super::dashboard_pipelines_for_project(pipelines, None, 1);
+        assert_eq!(aggregate[0]["id"], "b-new");
+    }
+
+    #[test]
     fn exceeding_max_retries_is_reported() {
         let pipeline = json!({
             "status": "complete",
             "audit_fail_count": 5,
             "max_retries": 3,
-            "pr_url": "https://github.com/o/r/pull/1"
+            "pr_url": "https://github.com/o/r/pull/1",
+            "ci_status": "success"
         });
         let v = violations(&pipeline);
         assert_eq!(v.len(), 1, "{v:?}");
@@ -241,32 +322,54 @@ mod completion_tests {
     }
 
     #[test]
-    fn completing_without_ship_evidence_is_reported() {
+    fn completing_without_pr_or_ci_evidence_is_reported() {
         let pipeline = json!({"status": "complete", "audit_fail_count": 0, "max_retries": 3});
         let v = violations(&pipeline);
-        assert_eq!(v.len(), 1, "{v:?}");
-        assert!(v[0].contains("no PR recorded"), "{}", v[0]);
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(v.iter().any(|message| message.contains("pull-request URL")));
+        assert!(v.iter().any(|message| message.contains("ci_status")));
     }
 
     #[test]
-    fn a_completed_ship_phase_counts_as_evidence() {
-        // Pipelines predating `pr_url` still record the ship phase.
+    fn a_completed_ship_phase_is_not_pr_or_ci_evidence() {
         let pipeline = json!({
             "status": "shipped",
             "phase_history": [{"phase": "ship", "status": "complete"}]
         });
-        assert!(violations(&pipeline).is_empty());
+        let found = violations(&pipeline);
+        assert_eq!(found.len(), 2, "{found:?}");
     }
 
     #[test]
     fn a_blank_pr_url_is_not_evidence() {
-        let pipeline = json!({"status": "complete", "pr_url": "   "});
+        let pipeline = json!({"status": "complete", "pr_url": "   ", "ci_status": "success"});
         assert_eq!(violations(&pipeline).len(), 1);
+    }
+
+    #[test]
+    fn a_non_pull_request_url_is_not_evidence() {
+        let pipeline = json!({
+            "status": "complete",
+            "pr_url": "https://github.com/o/r/issues/1",
+            "ci_status": "success"
+        });
+        assert_eq!(violations(&pipeline).len(), 1);
+    }
+
+    #[test]
+    fn missing_successful_ci_is_reported() {
+        let pipeline = json!({
+            "status": "complete",
+            "pr_url": "https://github.com/o/r/pull/1"
+        });
+        let found = violations(&pipeline);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("ci_status"), "{found:?}");
     }
 
     #[test]
     fn both_invariants_report_independently() {
         let pipeline = json!({"status": "complete", "audit_fail_count": 4, "max_retries": 3});
-        assert_eq!(violations(&pipeline).len(), 2);
+        assert_eq!(violations(&pipeline).len(), 3);
     }
 }
