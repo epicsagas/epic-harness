@@ -24,7 +24,7 @@ const INSTALLER_MAX_REDIRECTS = 5;
 const INSTALLER_REQUEST_TIMEOUT_MS = 15_000;
 const INSTALLER_TOTAL_TIMEOUT_MS = 60_000;
 const CODEX_GUARD_DENY =
-  '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny"}}';
+  '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked by Epic Harness guard"}}';
 const STRUCTURED_CODEX_EVENTS = new Set([
   "SessionStart",
   "SubagentStop",

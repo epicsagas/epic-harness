@@ -7,7 +7,7 @@ import test from "node:test";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const CODEX_PATH = join(ROOT, ".codex-plugin", "hooks.json");
-const CLAUDE_PATH = join(ROOT, ".claude-plugin", "hooks.json");
+const CLAUDE_PATH = join(ROOT, "hooks", "hooks.json");
 const CODEX = JSON.parse(readFileSync(CODEX_PATH, "utf8"));
 const CLAUDE = JSON.parse(readFileSync(CLAUDE_PATH, "utf8"));
 const CODEX_CONTRACT = [
@@ -32,7 +32,10 @@ const CLAUDE_CONTRACT = [
   ],
   [
     "PostToolUse",
-    [["Edit", "polish"], ["*", "observe", { async: true, timeout: 5 }]],
+    [
+      ["Edit|Write|MultiEdit|NotebookEdit", "polish"],
+      ["*", "observe", { async: true, timeout: 5 }],
+    ],
   ],
   ["PreCompact", [["*", "snapshot"]]],
   ["SessionEnd", [["*", "reflect"]]],
@@ -63,7 +66,7 @@ test("matcher groups contain only supported matcher and hooks fields", () => {
   }
 });
 
-test("Codex uses the quoted cross-platform Node runner for every hook", () => {
+test("Codex uses the Node runner and Windows status wrapper for every hook", () => {
   for (const { event, handler } of handlers(CODEX)) {
     assert.equal(handler.type, "command");
     assert.match(
@@ -73,8 +76,8 @@ test("Codex uses the quoted cross-platform Node runner for every hook", () => {
     );
     assert.match(
       handler.commandWindows,
-      /^node "%PLUGIN_ROOT%\\registry\\scripts\\install\.js" hook /,
-      `${event} must define a Windows command override`,
+      /^cmd\.exe \/d \/s \/c call "%PLUGIN_ROOT%\\registry\\scripts\\run-hook\.cmd" /,
+      `${event} must define a Windows status-preserving wrapper`,
     );
     assert.doesNotMatch(handler.command, /(?:^|[;&|])\s*epic(?:-harness)?\b/);
     assert.doesNotMatch(
@@ -121,7 +124,7 @@ function assertManifestContract(name, manifest, contract, rootVariable) {
       if (name === "Codex") {
         assert.equal(
           handler.commandWindows,
-          `node "%${rootVariable}%\\registry\\scripts\\install.js" hook ${runnerEvent} ${subcommand}`,
+          `cmd.exe /d /s /c call "%${rootVariable}%\\registry\\scripts\\run-hook.cmd" ${runnerEvent} ${subcommand}`,
           `${name} ${event} Windows command ${index}`,
         );
       }
@@ -183,7 +186,7 @@ test("all package and plugin version owners agree", () => {
     [
       "Cargo.lock",
       readFileSync(join(ROOT, "Cargo.lock"), "utf8").match(
-        /\[\[package\]\]\nname = "epic-harness"\nversion = "([^"]+)"/,
+        /\[\[package\]\]\r?\nname = "epic-harness"\r?\nversion = "([^"]+)"/,
       )?.[1],
     ],
     [
@@ -361,16 +364,21 @@ test("runtime owners do not retain the removed bundled hook binary", () => {
   }
 });
 
-test("npm package includes the hook runner and canonical runtime revision", () => {
+test("npm package includes the hook runners and canonical runtime revision", () => {
   const result = spawnSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: ROOT,
     encoding: "utf8",
+    shell: process.platform === "win32",
   });
   assert.equal(result.status, 0, result.stderr);
 
   const packed = JSON.parse(result.stdout);
   const files = new Set(packed[0]?.files?.map((file) => file.path));
-  for (const path of ["registry/scripts/install.js", "runtime-revision.txt"]) {
+  for (const path of [
+    "registry/scripts/install.js",
+    "registry/scripts/run-hook.cmd",
+    "runtime-revision.txt",
+  ]) {
     assert.ok(files.has(path), `${path} is missing from the npm artifact`);
   }
 });

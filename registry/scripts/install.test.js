@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import {
   chmodSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import https from "node:https";
@@ -18,6 +19,7 @@ import test from "node:test";
 import { downloadFile } from "./install.js";
 
 const SCRIPT = fileURLToPath(new URL("./install.js", import.meta.url));
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const IS_WINDOWS = process.platform === "win32";
 const PLUGIN_VERSION = JSON.parse(
   readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
@@ -772,6 +774,64 @@ exit /b 99`,
     rmSync(fixture.root, { force: true, recursive: true });
   }
 });
+
+test(
+  "the Windows Codex command turns a guard denial into successful structured output",
+  { skip: !IS_WINDOWS },
+  () => {
+    const fixture = makeFixture("PLUGIN_ROOT", ".codex-plugin");
+
+    try {
+      mkdirSync(join(fixture.root, "registry", "scripts"), { recursive: true });
+      copyFileSync(
+        join(ROOT, "registry", "scripts", "run-hook.cmd"),
+        join(fixture.root, "registry", "scripts", "run-hook.cmd"),
+      );
+      writeCommand(
+        fixture.bin,
+        "node",
+        "exit 99",
+        `echo {"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked by Epic Harness guard"}}
+exit /b 2`,
+      );
+      const manifest = JSON.parse(
+        readFileSync(join(ROOT, ".codex-plugin", "hooks.json"), "utf8"),
+      );
+      const command = manifest.hooks.PreToolUse[0].hooks[0].commandWindows;
+      const result = spawnSync(
+        "powershell.exe",
+        ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
+        {
+          encoding: "utf8",
+          env: {
+            ...fixture.env,
+            PLUGIN_ROOT: fixture.root,
+            PATH: `${fixture.bin}${delimiter}${process.env.PATH}`,
+          },
+          input:
+            '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}',
+        },
+      );
+
+      assert.equal(
+        result.status,
+        0,
+        `stdout: ${result.stdout}\nstderr: ${result.stderr}\ncommand: ${command}`,
+      );
+      const output = assertSingleJsonObject(result.stdout, "Windows guard deny");
+      assert.equal(
+        output.hookSpecificOutput.permissionDecision,
+        "deny",
+      );
+      assert.match(
+        output.hookSpecificOutput.permissionDecisionReason,
+        /Epic Harness guard/i,
+      );
+    } finally {
+      rmSync(fixture.root, { force: true, recursive: true });
+    }
+  },
+);
 
 test("a missing PreToolUse runtime fails closed with exit two and deny JSON", () => {
   const fixture = makeFixture("PLUGIN_ROOT", ".codex-plugin");
