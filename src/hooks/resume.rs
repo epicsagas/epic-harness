@@ -890,7 +890,7 @@ pub fn run(input: &HookInput) -> i32 {
     // 9a. Clean up stale auto-tracked agent runs (complete > 1h, running > 2h)
     crate::orchestrate::state::auto_cleanup_stale_runs(&harness_dir());
 
-    // 10. Keep one dashboard server, but open it for each root session start.
+    // 10. Keep one dashboard server and one browser window.
     if let Err(error) = spawn_dashboard_once(plan.open_dashboard) {
         hint("resume", &error);
         return 1;
@@ -971,7 +971,7 @@ struct DashboardPlan {
 fn dashboard_plan(server_running: bool, open_browser: bool) -> DashboardPlan {
     DashboardPlan {
         start_server: !server_running,
-        open_browser,
+        open_browser: open_browser && !server_running,
     }
 }
 
@@ -1100,8 +1100,8 @@ fn dashboard_server_program() -> std::io::Result<std::path::PathBuf> {
 /// Uses `dashboard.lock` under the harness dir to serialize concurrent starts.
 /// Unix uses an advisory OS lock, which is released if an owner crashes.
 /// Other platforms use an atomic timestamped ownership file with stale
-/// takeover. Browser opening is separate: a root startup/resume opens the
-/// configured URL even when the verified server already exists.
+/// takeover. Only the process that starts a new server opens the browser;
+/// sessions that find a healthy server reuse the existing dashboard window.
 ///
 /// Port and auto-open are configurable via `~/.harness/config.toml` `[dashboard]`.
 /// Set `port = 0` to disable auto-launch entirely.
@@ -1119,9 +1119,6 @@ pub(crate) fn start_dashboard_on_port(port: u16, open_browser: bool) -> Result<(
     }
     let plan = dashboard_plan(status == DashboardStatus::Epic, open_browser);
     if !plan.start_server {
-        if plan.open_browser {
-            open_dashboard_browser(&url)?;
-        }
         return Ok(());
     }
 
@@ -1132,12 +1129,7 @@ pub(crate) fn start_dashboard_on_port(port: u16, open_browser: bool) -> Result<(
         while std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(100));
             match dashboard_status(port) {
-                DashboardStatus::Epic => {
-                    if plan.open_browser {
-                        open_dashboard_browser(&url)?;
-                    }
-                    return Ok(());
-                }
+                DashboardStatus::Epic => return Ok(()),
                 DashboardStatus::Occupied => {
                     return Err(format!(
                         "Dashboard not opened: port {port} is occupied by a non-Epic service"
@@ -1151,12 +1143,7 @@ pub(crate) fn start_dashboard_on_port(port: u16, open_browser: bool) -> Result<(
 
     // Double-check after acquiring lock (another process may have started between checks).
     match dashboard_status(port) {
-        DashboardStatus::Epic => {
-            if plan.open_browser {
-                open_dashboard_browser(&url)?;
-            }
-            return Ok(());
-        }
+        DashboardStatus::Epic => return Ok(()),
         DashboardStatus::Occupied => {
             return Err(format!(
                 "Dashboard not started: port {port} is occupied by a non-Epic service"
@@ -1783,7 +1770,7 @@ mod tests {
     }
 
     #[test]
-    fn running_dashboard_still_requests_browser_open_on_session_start() {
+    fn running_dashboard_suppresses_duplicate_browser_open_on_session_start() {
         let input = HookInput {
             hook_event_name: Some("SessionStart".into()),
             source: Some("startup".into()),
@@ -1793,8 +1780,8 @@ mod tests {
         let plan = dashboard_plan(true, should_open_dashboard_browser(&input));
         assert!(!plan.start_server, "an existing server must be reused");
         assert!(
-            plan.open_browser,
-            "reusing the server must not suppress the browser open"
+            !plan.open_browser,
+            "reusing a healthy server must not open another browser window"
         );
     }
 

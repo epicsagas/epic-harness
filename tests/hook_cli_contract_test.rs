@@ -316,7 +316,7 @@ fn non_start_hooks_reject_missing_host_session_state() {
 
 #[cfg(unix)]
 #[test]
-fn startup_compact_resume_restores_context_and_routes_dashboard_opening() {
+fn startup_compact_resume_restores_context_without_duplicate_dashboard_opening() {
     use std::os::unix::fs::PermissionsExt;
 
     let root = tempfile::tempdir().expect("temp root");
@@ -359,6 +359,8 @@ fn startup_compact_resume_restores_context_and_routes_dashboard_opening() {
         ("EPIC_TEST_BROWSER_LOG", browser_log.as_os_str()),
     ];
     let session_id = "stable-host-session";
+    let expected_url = format!("http://localhost:{}", dashboard.port);
+    fs::write(&browser_log, format!("{expected_url}\n")).expect("existing dashboard window");
 
     let startup = run_hook_with_env(
         root.path(),
@@ -469,14 +471,14 @@ fn startup_compact_resume_restores_context_and_routes_dashboard_opening() {
     assert!(resume_context.contains("DURABLE_CONTEXT_MARKER"));
     assert!(resume_context.contains("DURABLE_PENDING_MARKER"));
     assert!(resume_context.contains("DURABLE_SKILL_CONTEXT_MARKER"));
-    wait_for_lines(&browser_log, 2);
-    let expected_url = format!("http://localhost:{}", dashboard.port);
+    thread::sleep(Duration::from_millis(100));
     assert_eq!(
         fs::read_to_string(&browser_log)
             .expect("browser decisions")
             .lines()
             .collect::<Vec<_>>(),
-        [expected_url.as_str(), expected_url.as_str()]
+        [expected_url.as_str()],
+        "a healthy dashboard that was already opened must be reused"
     );
 }
 
