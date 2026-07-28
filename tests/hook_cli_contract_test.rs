@@ -291,14 +291,34 @@ fn non_start_hooks_reject_missing_host_session_state() {
         String::from_utf8_lossy(&observe.stderr).contains("host session identity is unavailable")
     );
 
+    // `guard` is the exception: its exit code decides whether the user's tool
+    // call runs. Missing bookkeeping is not a safety condition, and denying on
+    // it locks the user out of their own shell for the rest of the session —
+    // upgrading the plugin mid-session reproduces exactly that. The gap is
+    // reported, the safety rules still run, and a benign command is allowed.
     let guard = run_hook(
         root.path(),
         &project,
         "guard",
         r#"{"hook_event_name":"PreToolUse","session_id":"missing-state","tool_name":"Bash","tool_input":{"command":"pwd"}}"#,
     );
-    assert_eq!(guard.status.code(), Some(2));
-    let deny: serde_json::Value = serde_json::from_slice(&guard.stdout).expect("guard deny JSON");
+    assert_eq!(guard.status.code(), Some(0));
+    assert!(
+        String::from_utf8_lossy(&guard.stderr).contains("host session identity is unavailable"),
+        "the gap must still be visible: {}",
+        String::from_utf8_lossy(&guard.stderr)
+    );
+
+    // ...and a genuinely dangerous command is still blocked in that state.
+    let dangerous = run_hook(
+        root.path(),
+        &project,
+        "guard",
+        r#"{"hook_event_name":"PreToolUse","session_id":"missing-state","tool_name":"Bash","tool_input":{"command":"git push --force origin main"}}"#,
+    );
+    assert_eq!(dangerous.status.code(), Some(2));
+    let deny: serde_json::Value =
+        serde_json::from_slice(&dangerous.stdout).expect("guard deny JSON");
     assert_eq!(deny["hookSpecificOutput"]["permissionDecision"], "deny");
 
     let stop = run_hook(

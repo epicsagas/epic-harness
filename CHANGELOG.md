@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A missing SessionStart record denied every tool call**: `guard`'s exit code
+  decides whether the user's command runs, and an unresolvable session identity
+  returned the deny code. Upgrading the plugin mid-session reproduces it — no
+  record exists for the running session, so every Bash, Edit and Write is
+  refused until the next SessionStart. Identity bookkeeping is not a safety
+  condition: `guard` now reports the gap on stderr, falls back to today's date,
+  and still runs its safety rules, so a force-push is blocked while `pwd` is
+  allowed. The other hooks keep failing visibly, where it costs an observation
+  rather than the user's shell.
+- **Almost nothing was scored**: a call with no structured status and no
+  failure text — the common case, since few tool responses carry `exit_code` or
+  `is_error` — recorded `unknown`. Measured on a live session, three of four
+  observations (a `Write` and two `Bash` calls) were stored unscored, and
+  `analyze()` only reads rows where `score.is_some()`, so Ring 3 evolved from a
+  quarter of the evidence and could not reach the seeding thresholds. `unknown`
+  now means what it was introduced to mean: failure-looking text in *fetched
+  content*, not the absence of any complaint.
 - **Claude Code loaded no plugin hooks at all** (#113): the manifest lived at
   `.claude-plugin/hooks.json`, a path Claude Code never reads — it
   auto-discovers `hooks/hooks.json` and nothing else. Every hook in the plugin

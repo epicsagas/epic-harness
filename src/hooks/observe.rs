@@ -153,8 +153,20 @@ pub(crate) fn decide_outcome(
             failure: Some(text_failure.unwrap_or("runtime_error")),
         },
         None => match text_failure {
+            // No structured status and nothing in the output that looks like a
+            // failure. The tool ran to completion and the host reported nothing
+            // wrong, which is the only success signal these hosts give us for
+            // most calls — very few responses carry `exit_code` or `is_error`.
+            //
+            // Treating this as `unknown` leaves almost everything unscored:
+            // measured on a live session, three of four observations (a `Write`
+            // and two `Bash` calls) recorded `unknown` with a NULL score, and
+            // `analyze()` filters on `score.is_some()`. Ring 3 then evolves from
+            // a quarter of the evidence and never reaches the seeding
+            // thresholds. `unknown` exists to replace a *fabricated failure*,
+            // not to discard a real success.
             None => Outcome {
-                result: "unknown",
+                result: "success",
                 failure: None,
             },
             Some(_) if outputs_file_content(tool_category, command) => Outcome {
@@ -924,11 +936,43 @@ mod tests {
         assert_eq!(o.failure, Some("build_fail"));
     }
 
+    /// Regression: a clean call with no structured status is the common case —
+    /// most hosts send no `exit_code`/`is_error` at all. Scoring it `unknown`
+    /// left three of four observations in a live session unscored, and
+    /// `analyze()` only reads rows where `score.is_some()`, so Ring 3 starved.
+    /// `unknown` is for evidence that *looks* like failure but cannot be
+    /// trusted, not for the absence of any complaint.
     #[test]
-    fn clean_output_without_structured_status_is_unknown() {
+    fn clean_output_without_structured_status_is_a_success() {
+        for (cat, cmd) in [
+            ("bash", "cat a.txt"),
+            ("bash", "cargo build"),
+            ("write", ""),
+            ("edit", ""),
+            ("read", ""),
+        ] {
+            let o = decide_outcome(None, None, cat, cmd);
+            assert_eq!(o.result, "success", "{cat} {cmd}");
+            assert_eq!(o.failure, None, "{cat} {cmd}");
+        }
+    }
+
+    /// The narrow case `unknown` exists for: failure-looking text in output
+    /// that is *fetched content* rather than the call's own outcome.
+    #[test]
+    fn failure_text_in_fetched_content_stays_unknown() {
         assert_eq!(
-            decide_outcome(None, None, "bash", "cat a.txt").result,
+            decide_outcome(None, Some("type_error"), "bash", "cat build.log").result,
             "unknown"
+        );
+        assert_eq!(
+            decide_outcome(None, Some("type_error"), "read", "").result,
+            "unknown"
+        );
+        // ...but the same text from a build is a real failure.
+        assert_eq!(
+            decide_outcome(None, Some("type_error"), "bash", "cargo build").result,
+            "error"
         );
     }
 

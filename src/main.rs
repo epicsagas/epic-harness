@@ -315,11 +315,30 @@ fn main() {
     // and `session_id()` consult it.
     shared::host::init(&input);
 
-    let exit_code = if let Err(error) = validate_established_session_identity(subcmd) {
-        eprintln!("[{subcmd}] {error}");
-        invalid_hook_input_exit_code(subcmd)
-    } else {
-        match subcmd {
+    let identity_gap = validate_established_session_identity(subcmd).err();
+
+    let exit_code = match identity_gap {
+        // `guard` is the one hook whose exit code decides whether the user's
+        // tool call runs at all. A gap in the harness's own session bookkeeping
+        // is not a safety condition, and `invalid_hook_input_exit_code("guard")`
+        // is a *deny* — so this path blocked every Bash, Edit and Write until
+        // the next SessionStart. Upgrading the plugin mid-session reproduces it
+        // on a live install: no record exists for the running session, and the
+        // harness locks the user out of their own shell.
+        //
+        // Report the gap and run the safety rules anyway. `session_id()` falls
+        // back to today's date, so the only cost is a session that spans
+        // midnight being split across two partitions — a far smaller failure
+        // than refusing to let anyone work.
+        Some(error) if subcmd == "guard" => {
+            eprintln!("[guard] {error}; continuing with today's date");
+            hooks::guard::run(&input)
+        }
+        Some(error) => {
+            eprintln!("[{subcmd}] {error}");
+            invalid_hook_input_exit_code(subcmd)
+        }
+        None => match subcmd {
             "resume" => hooks::resume::run(&input),
             "guard" => hooks::guard::run(&input),
             "polish" => hooks::polish::run(&input),
@@ -444,7 +463,7 @@ fn main() {
                 eprintln!("Run 'epic-harness mem help' for memory subcommand details.");
                 if is_unknown { 1 } else { 0 }
             }
-        }
+        },
     };
 
     // stdout output varies by host protocol:

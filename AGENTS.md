@@ -182,6 +182,12 @@ Tool success is no longer inferred from output text alone.
    this pattern was 66% of all classified errors.
 3. Everything else keeps keyword classification, so build and test failures are
    unaffected.
+4. No status **and** no failure text is a success, not an `unknown`. Few tool
+   responses carry `exit_code` or `is_error`, so this is the common case:
+   scoring it `unknown` left three of four observations in a live session
+   unscored, and `analyze()` only reads rows where `score.is_some()`. `unknown`
+   is for evidence that looks like failure but cannot be trusted — never for the
+   absence of any complaint.
 
 `unknown` observations are left unscored (`score`/`dimensions` NULL) and excluded
 from success rates via `ObsStats::evaluated()` — never counted as failures.
@@ -211,6 +217,15 @@ finished agent), and Codex registers `SubagentStart`/`SubagentStop`. Neither
 writes an observation — there is no outcome yet — they only update orchestration
 state. `guard` treats `apply_patch` as a write tool and reads every file in the
 patch envelope for conflict detection.
+
+### Hooks must not block the user
+
+`guard` is the only hook whose exit code decides whether a tool call runs, so it
+is the only one where a harness-internal problem can stop the user working. Deny
+is reserved for the safety rules. A gap in the harness's own bookkeeping — a
+missing SessionStart record, an unresolvable session identity — is reported on
+stderr, falls back to today's date, and still evaluates the safety rules. The
+other hooks may fail visibly; there it costs an observation, not the shell.
 
 `guard`'s orchestration checks resolve the state directory the same way
 `orchestrate` does. `$HARNESS_DIR` remains an override for tests and embedded
