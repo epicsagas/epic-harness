@@ -8,6 +8,10 @@
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
   - `presets/` — Cold-start skill templates
 - `src/hooks/` — Ring 0 automation + Ring 3 evolution loop
+- `hooks/hooks.json` — Claude Code hook manifest. This exact path is the only one
+  Claude Code auto-discovers; a manifest under `.claude-plugin/` is never read,
+  so hooks defined there never run. Asserted by `tests/plugin_layout_test.rs`.
+- `.codex-plugin/hooks.json` — Codex hook manifest
 - `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
@@ -182,14 +186,36 @@ Tool success is no longer inferred from output text alone.
 `unknown` observations are left unscored (`score`/`dimensions` NULL) and excluded
 from success rates via `ObsStats::evaluated()` — never counted as failures.
 
+An undetermined outcome must stay undetermined everywhere, so all three readers
+agree:
+
+- **Stats.** A NULL `result` counts as unknown, not success. Legacy rows carry no
+  verdict, and reading them as successes inflated every rate on the dashboard.
+- **JSONL dashboard path.** The same split — a row that is neither `success` nor
+  `error` is excluded from the rate denominator and from `avg_score`. This path
+  previously did the opposite of the SQLite path and read them as failures with a
+  zero score.
+- **Pattern detection.** `detect_patterns` skips them entirely. Reading the
+  failing file between two identical build failures is not evidence the failure
+  stopped, but it reset `repeated_same_error` streaks and consumed
+  `fix_then_break` lookahead slots.
+
+Nothing writes a verdict-less observation any more: a pre-invocation event has no
+tool output, so `observe` tracks the spawn and stores no row.
+
 ### Subagents
 
 Both manifests register the subagent lifecycle: Claude observes `Agent` on
 `PreToolUse` (the `running` transition needs it; `PostToolUse` only ever sees a
-finished agent), and Codex registers `SubagentStart`/`SubagentStop`. Codex's
-subagent events carry no tool, so they update orchestration state without
-writing an observation. `guard` treats `apply_patch` as a write tool and reads
-every file in the patch envelope for conflict detection.
+finished agent), and Codex registers `SubagentStart`/`SubagentStop`. Neither
+writes an observation — there is no outcome yet — they only update orchestration
+state. `guard` treats `apply_patch` as a write tool and reads every file in the
+patch envelope for conflict detection.
+
+`guard`'s orchestration checks resolve the state directory the same way
+`orchestrate` does. `$HARNESS_DIR` remains an override for tests and embedded
+hosts, but nothing in a real installation sets it, so reading only the env var
+left the pause directive and conflict warnings permanently dead.
 
 ### Retention
 
@@ -208,6 +234,20 @@ writes the file.
 `turn_id` is retained but is not yet used to model turn-scoped analysis.
 Project identity is a sanitized canonical project-root name plus a stable hash,
 so same-named repositories at different roots do not share harness state.
+
+### Plugin layout
+
+Claude Code auto-discovers plugin hooks from `hooks/hooks.json` and from nowhere
+else. A manifest under `.claude-plugin/` is never read, and the failure is
+silent: the plugin loads, `claude plugin details` still lists the hook events,
+and not one of them fires. Every hook routes through
+`registry/scripts/install.js`, so a stale path there disables the whole harness
+rather than one hook.
+
+`tests/plugin_layout_test.rs` asserts the manifest location, that no manifest
+survives under `.claude-plugin/`, that the bootstrap is loadable under
+`"type": "module"`, and that every `registry/scripts/…` path named by either
+manifest exists on disk.
 
 ## Concurrent Session Safety
 

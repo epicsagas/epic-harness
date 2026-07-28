@@ -674,20 +674,28 @@ pub fn run(input: &HookInput) -> i32 {
     // drop the observation. The JSONL file acts as a circuit-breaker buffer.
     // Reflection merges this exact session's fallback file with its database
     // rows using sequence/provenance identity.
-    if let Some(ref pool) = db {
-        if let Err(e) =
-            crate::store::runtime::block_on(crate::store::observations::insert_observation_pool(
-                pool,
-                &record,
-                &sid,
-                &crate::shared::paths::project_slug(),
-            ))
-        {
-            eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
+    //
+    // A pre-invocation event — an `Agent` PreToolUse, a Codex `SubagentStart` —
+    // carries no tool output, so no outcome was decided. Storing the record
+    // anyway leaves a result-less row that every consumer has to special-case,
+    // and `ObsStats` counted exactly those rows as successes: one phantom
+    // success per subagent spawn. Track the spawn below; store nothing here.
+    if record.result.is_some() {
+        if let Some(ref pool) = db {
+            if let Err(e) = crate::store::runtime::block_on(
+                crate::store::observations::insert_observation_pool(
+                    pool,
+                    &record,
+                    &sid,
+                    &crate::shared::paths::project_slug(),
+                ),
+            ) {
+                eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
+                append_jsonl(&session_file, &record);
+            }
+        } else {
             append_jsonl(&session_file, &record);
         }
-    } else {
-        append_jsonl(&session_file, &record);
     }
 
     // Fire tool_error telemetry only on failures to keep event volume low.

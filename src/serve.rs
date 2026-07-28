@@ -740,8 +740,11 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                 .to_string();
             }
             use std::collections::HashMap;
-            let mut tool_map: HashMap<String, (u64, u64, f64)> = HashMap::new();
-            let mut session_map: HashMap<String, (u64, f64, u64, String)> = HashMap::new();
+            // (calls, successes, score_sum, evaluated) and
+            // (calls, score_sum, failures, date, evaluated). `evaluated` excludes
+            // rows with no verdict — see the outcome split below.
+            let mut tool_map: HashMap<String, (u64, u64, f64, u64)> = HashMap::new();
+            let mut session_map: HashMap<String, (u64, f64, u64, String, u64)> = HashMap::new();
 
             let mut files: Vec<_> = fs::read_dir(&obs_dir)
                 .map(|rd| {
@@ -759,7 +762,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                 let date = fname.split('_').nth(1).unwrap_or("unknown").to_string();
                 let sess = session_map
                     .entry(session_key.clone())
-                    .or_insert((0, 0.0, 0, date));
+                    .or_insert((0, 0.0, 0, date, 0));
 
                 if let Ok(file) = fs::File::open(entry.path()) {
                     use std::io::{BufRead, Read};
@@ -772,21 +775,34 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                     {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                             let tool = v["tool"].as_str().unwrap_or("unknown").to_string();
-                            let is_success = v["result"].as_str() == Some("success")
-                                || v["tool_success"].as_bool() == Some(true);
+                            let result = v["result"].as_str();
+                            let tool_success = v["tool_success"].as_bool();
+                            let is_success =
+                                result == Some("success") || tool_success == Some(true);
+                            let is_failure = result == Some("error") || tool_success == Some(false);
+                            // Neither: an `unknown` outcome, or a legacy row that
+                            // carries no verdict at all. The old `!is_success` read
+                            // both as failures, and their absent score was folded in
+                            // as a zero — this path reported the mirror image of the
+                            // SQLite path, which counted the same rows as successes.
+                            let is_evaluated = is_success || is_failure;
                             let score = v["score"]
                                 .as_f64()
                                 .or_else(|| v["composite_score"].as_f64())
                                 .unwrap_or(0.0);
-                            let t = tool_map.entry(tool).or_insert((0, 0, 0.0));
+                            let t = tool_map.entry(tool).or_insert((0, 0, 0.0, 0));
                             t.0 += 1;
                             if is_success {
                                 t.1 += 1;
                             }
-                            t.2 += score;
                             sess.0 += 1;
-                            sess.1 += score;
-                            if !is_success {
+                            if is_evaluated {
+                                t.2 += score;
+                                t.3 += 1;
+                                sess.1 += score;
+                                sess.4 += 1;
+                            }
+                            if is_failure {
                                 sess.2 += 1;
                             }
                         }
@@ -797,15 +813,16 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             let tool_stats: Vec<serde_json::Value> = {
                 let mut v: Vec<_> = tool_map
                     .iter()
-                    .map(|(tool, (calls, successes, score_sum))| {
+                    .map(|(tool, (calls, successes, score_sum, evaluated))| {
                         serde_json::json!({
                             "tool": tool,
                             "calls": calls,
-                            "success_rate": if *calls > 0 {
-                                (*successes as f64 / *calls as f64 * 1000.0).round() / 1000.0
+                            "unknowns": calls - evaluated,
+                            "success_rate": if *evaluated > 0 {
+                                (*successes as f64 / *evaluated as f64 * 1000.0).round() / 1000.0
                             } else { 0.0 },
-                            "avg_score": if *calls > 0 {
-                                (score_sum / *calls as f64 * 1000.0).round() / 1000.0
+                            "avg_score": if *evaluated > 0 {
+                                (score_sum / *evaluated as f64 * 1000.0).round() / 1000.0
                             } else { 0.0 }
                         })
                     })
@@ -821,12 +838,12 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             let recent_sessions: Vec<serde_json::Value> = {
                 let mut v: Vec<_> = session_map.iter().collect();
                 v.sort_by(|a, b| b.0.cmp(a.0));
-                v.into_iter().take(10).map(|(sid, (calls, score_sum, failures, date))| {
+                v.into_iter().take(10).map(|(sid, (calls, score_sum, failures, date, evaluated))| {
                     serde_json::json!({
                         "session_id": sid,
                         "date": date,
                         "tool_calls": calls,
-                        "avg_score": if *calls > 0 { (*score_sum / *calls as f64 * 1000.0).round() / 1000.0 } else { 0.0 },
+                        "avg_score": if *evaluated > 0 { (*score_sum / *evaluated as f64 * 1000.0).round() / 1000.0 } else { 0.0 },
                         "failures": failures
                     })
                 }).collect()
@@ -835,14 +852,25 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                 .iter()
                 .map(|t| t["calls"].as_u64().unwrap_or(0))
                 .sum();
-            let avg = if total > 0 {
+            // Weight each tool's average by the calls it was actually scored on,
+            // not by its total calls — otherwise a tool with many unknowns pulls
+            // the fleet average toward a score nothing was measured at.
+            let evaluated_total: u64 = tool_stats
+                .iter()
+                .map(|t| {
+                    t["calls"].as_u64().unwrap_or(0) - t["unknowns"].as_u64().unwrap_or(0)
+                })
+                .sum();
+            let avg = if evaluated_total > 0 {
                 tool_stats
                     .iter()
                     .map(|t| {
-                        t["avg_score"].as_f64().unwrap_or(0.0) * t["calls"].as_f64().unwrap_or(0.0)
+                        let evaluated = t["calls"].as_f64().unwrap_or(0.0)
+                            - t["unknowns"].as_f64().unwrap_or(0.0);
+                        t["avg_score"].as_f64().unwrap_or(0.0) * evaluated
                     })
                     .sum::<f64>()
-                    / total as f64
+                    / evaluated_total as f64
             } else {
                 0.0
             };

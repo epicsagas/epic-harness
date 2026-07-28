@@ -261,7 +261,16 @@ pub fn analyze_minibatches(scored: &[&ObsRecord]) -> Vec<MinibatchInsight> {
 
 pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
     let mut patterns = vec![];
-    let scored: Vec<_> = observations.iter().filter(|o| o.result.is_some()).collect();
+    // An `unknown` carries no outcome evidence, so it must not interrupt an
+    // error sequence: reading the failing file between two identical build
+    // failures is not proof the failure stopped. Left in, those rows reset
+    // `repeated_same_error` streaks and consumed `fix_then_break` lookahead
+    // slots, so both patterns under-reported once outcomes became tri-state.
+    // `long_debug_loop` already filters to edit/write for the same reason.
+    let scored: Vec<_> = observations
+        .iter()
+        .filter(|o| matches!(o.result.as_deref(), Some(r) if r != "unknown"))
+        .collect();
 
     // Pattern 1: repeated_same_error (with error hash dedup)
     {
@@ -652,6 +661,33 @@ mod tests {
             patterns
                 .iter()
                 .any(|p| p.pattern_type == "repeated_same_error")
+        );
+    }
+
+    /// Regression: reading the failing file between retries is the normal debug
+    /// loop, and those reads now record `unknown`. Counting them as ordinary
+    /// observations reset the streak, so the pattern that drives skill seeding
+    /// stopped firing on exactly the sessions that needed it.
+    #[test]
+    fn unknown_observations_do_not_break_an_error_streak() {
+        let mut obs = vec![];
+        for _ in 0..4 {
+            obs.push(make_obs("Bash", "bash", "error", 0.0, Some("/src/main.ts")));
+            // The interleaved read carries no verdict and is left unscored.
+            let mut read = make_obs("Read", "read", "unknown", 0.0, Some("/src/main.ts"));
+            read.result = Some("unknown".into());
+            read.score = None;
+            read.dimensions = None;
+            read.error_snippet = None;
+            obs.push(read);
+        }
+
+        let patterns = detect_patterns(&obs);
+        assert!(
+            patterns
+                .iter()
+                .any(|p| p.pattern_type == "repeated_same_error"),
+            "an outcome-less read must not interrupt four identical failures"
         );
     }
 

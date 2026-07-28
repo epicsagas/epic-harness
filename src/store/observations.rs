@@ -361,9 +361,9 @@ pub async fn query_obs_stats_pool(
     // Overall stats
     let row = sqlx::query(
         "SELECT COUNT(*),
-                COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
                 COALESCE(AVG(score), 0.0),
-                COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0)
+                COALESCE(SUM(CASE WHEN result = 'unknown' OR result IS NULL THEN 1 ELSE 0 END), 0)
          FROM observations
          WHERE timestamp >= ? AND timestamp <= ?",
     )
@@ -381,9 +381,9 @@ pub async fn query_obs_stats_pool(
     // Per-tool stats
     let tool_rows = sqlx::query(
         "SELECT tool, COUNT(*) as calls,
-                SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
+                SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
                 COALESCE(AVG(score), 0.0) as avg_score,
-                COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0) as unknowns
+                COALESCE(SUM(CASE WHEN result = 'unknown' OR result IS NULL THEN 1 ELSE 0 END), 0) as unknowns
          FROM observations
          WHERE timestamp >= ? AND timestamp <= ?
          GROUP BY tool
@@ -497,9 +497,9 @@ pub async fn query_obs_stats_scoped_pool(
     let (total, successes, avg_score, unknowns): (i64, i64, f64, i64) = if let Some(p) = project {
         let row = sqlx::query(
             "SELECT COUNT(*),
-                    COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
                     COALESCE(AVG(score), 0.0),
-                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN result = 'unknown' OR result IS NULL THEN 1 ELSE 0 END), 0)
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ? AND project = ?",
         )
@@ -518,9 +518,9 @@ pub async fn query_obs_stats_scoped_pool(
     } else {
         let row = sqlx::query(
             "SELECT COUNT(*),
-                    COALESCE(SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END), 0),
                     COALESCE(AVG(score), 0.0),
-                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0)
+                    COALESCE(SUM(CASE WHEN result = 'unknown' OR result IS NULL THEN 1 ELSE 0 END), 0)
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ?",
         )
@@ -541,9 +541,9 @@ pub async fn query_obs_stats_scoped_pool(
     let tool_rows = if let Some(p) = project {
         sqlx::query(
             "SELECT tool, COUNT(*) as calls,
-                    SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
                     COALESCE(AVG(score), 0.0) as avg_score,
-                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0) as unknowns
+                    COALESCE(SUM(CASE WHEN result = 'unknown' OR result IS NULL THEN 1 ELSE 0 END), 0) as unknowns
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ? AND project = ?
              GROUP BY tool ORDER BY calls DESC LIMIT 100",
@@ -556,9 +556,9 @@ pub async fn query_obs_stats_scoped_pool(
     } else {
         sqlx::query(
             "SELECT tool, COUNT(*) as calls,
-                    SUM(CASE WHEN result = 'success' OR result IS NULL THEN 1 ELSE 0 END) as successes,
+                    SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successes,
                     COALESCE(AVG(score), 0.0) as avg_score,
-                    COALESCE(SUM(CASE WHEN result = 'unknown' THEN 1 ELSE 0 END), 0) as unknowns
+                    COALESCE(SUM(CASE WHEN result = 'unknown' OR result IS NULL THEN 1 ELSE 0 END), 0) as unknowns
              FROM observations
              WHERE timestamp >= ? AND timestamp <= ?
              GROUP BY tool ORDER BY calls DESC LIMIT 100",
@@ -759,7 +759,9 @@ pub struct ObsStats {
     pub total: i64,
     pub successes: i64,
     /// Observations the host gave no outcome evidence for. Neither a success nor
-    /// a failure — see `evaluated`.
+    /// a failure — see `evaluated`. A NULL `result` counts here too: rows written
+    /// before the tri-state outcome existed carry no verdict, and reading them as
+    /// successes inflated every rate on the dashboard.
     pub unknowns: i64,
     pub avg_score: f64,
     pub tool_stats: Vec<ToolStatRow>,
@@ -1113,6 +1115,61 @@ mod tests {
         assert_eq!(stats.tool_stats[0].tool, "Edit");
         assert_eq!(stats.error_stats.len(), 1);
         assert_eq!(stats.error_stats[0].0, "syntax_error");
+    }
+
+    /// Regression: a row with no verdict was counted as a success. Rows written
+    /// before the tri-state outcome existed carry `result = NULL`, and so did
+    /// every subagent spawn once `Agent` was wired to `PreToolUse` — each one
+    /// added a phantom success and hid real failures behind a diluted rate.
+    #[tokio::test]
+    async fn null_result_is_unknown_not_success() {
+        let pool = test_pool().await;
+
+        let mut rec = ObsRecord {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            tool: "Agent".into(),
+            tool_category: "other".into(),
+            action: None,
+            result: None,
+            score: None,
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+            tool_use_id: None,
+        };
+        insert_observation_pool(&pool, &rec, "20260602_12345", "test-project")
+            .await
+            .unwrap();
+
+        rec.timestamp = "2026-06-02T10:01:00Z".into();
+        rec.result = Some("error".into());
+        rec.score = Some(0.3);
+        rec.failure_category = Some("runtime_error".into());
+        insert_observation_pool(&pool, &rec, "20260602_12345", "test-project")
+            .await
+            .unwrap();
+
+        let stats = query_obs_stats_pool(&pool, "2026-06-02", "2026-06-02")
+            .await
+            .unwrap();
+
+        assert_eq!(stats.total, 2);
+        assert_eq!(stats.successes, 0, "a verdict-less row is not a success");
+        assert_eq!(stats.unknowns, 1, "NULL is an undetermined outcome");
+        assert_eq!(
+            stats.evaluated(),
+            1,
+            "only the row with a real verdict belongs in the denominator"
+        );
+
+        let agent = &stats.tool_stats[0];
+        assert_eq!(agent.calls, 2);
+        assert_eq!(agent.successes, 0);
+        assert_eq!(agent.unknowns, 1);
+        assert_eq!(agent.evaluated(), 1);
     }
 
     #[tokio::test]

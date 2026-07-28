@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Claude Code loaded no plugin hooks at all** (#113): the manifest lived at
+  `.claude-plugin/hooks.json`, a path Claude Code never reads — it
+  auto-discovers `hooks/hooks.json` and nothing else. Every hook in the plugin
+  was inert, so Ring 0 and Ring 3 never ran for plugin users. The failure was
+  silent: the plugin loaded and `claude plugin details` still listed all five
+  hook events. Moved to `hooks/hooks.json`, with
+  `tests/plugin_layout_test.rs` asserting the location, that nothing survives
+  under `.claude-plugin/`, that the bootstrap loads under `"type": "module"`,
+  and that every `registry/scripts/…` path either manifest names exists.
+- **Every subagent spawn recorded a phantom success**: a pre-invocation event
+  carries no tool output, so the observation was stored with `result` NULL —
+  which `ObsStats` counted as a success. `observe` now tracks the spawn and
+  stores no row, and a NULL `result` reads as an undetermined outcome. The
+  orchestrator still records the spawn, so the `running` transition is intact.
+- **The JSONL dashboard path counted undetermined outcomes as failures** and
+  folded their absent score in as a zero — the mirror image of the SQLite path,
+  which counted the same rows as successes. Both now exclude them from the rate
+  denominator and from `avg_score`, and the per-tool payload reports `unknowns`.
+- **Pattern detection under-reported once outcomes became tri-state**: an
+  `unknown` sat in the sequence as a non-error, resetting `repeated_same_error`
+  streaks and consuming `fix_then_break` lookahead. Reading the failing file
+  between two identical failures is not evidence the failure stopped, so those
+  rows are skipped — matching what `long_debug_loop` already did.
 - **Cargo source builds depended on frontend tooling**: `build.rs` invoked
   `pnpm` and could mutate the source tree while building. Cargo now embeds the
   checked-in dashboard asset. `make dashboard-build` generates it, and CI
