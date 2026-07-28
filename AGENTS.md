@@ -264,6 +264,35 @@ survives under `.claude-plugin/`, that the bootstrap is loadable under
 `"type": "module"`, and that every `registry/scripts/…` path named by either
 manifest exists on disk.
 
+Keep the two manifests' matchers in step. `guard` and `polish` must cover the
+same edit tools on a host — they drifted once, and `Write` went unformatted on
+Claude Code for as long as they did.
+
+### Hosts are not distinguished by `hook_event_name`
+
+Every supported host sends it, Claude Code included, and all of them read the
+same structured shapes (`hookSpecificOutput`, `permissionDecision`,
+`{"continue":true}`). Choose behaviour by **event**, never by an inferred host.
+`None` means only that no event name was supplied — a direct CLI run — and
+selects the conservative stderr contract.
+
+### Paths: compare normalized, never raw canonical
+
+`std::fs::canonicalize` returns a verbatim (`\\?\C:\…`) path on Windows, and
+`Path::starts_with`/`strip_prefix` match whole components, so `\\?\C:\a` and
+`C:\a` never compare equal. Any containment check that canonicalized one side
+was therefore false on Windows for every path that existed — which silently
+disabled `polish` and `reflect --context` there. Use
+`paths::canonical_for_compare` on **both** sides.
+
+### Child processes must not inherit hook stdio
+
+`runHook` reads a hook's stdout through a pipe and waits for EOF. Any child
+that outlives the hook — the dashboard server, the browser — keeps that pipe
+open and hangs the session. Give every spawned child null stdin, stdout and
+stderr. `tests/hook_cli_contract_test.rs` covers this with a stand-in that
+outlives the hook.
+
 ## Concurrent Session Safety
 
 Observation files use `session_{date}_{host-session-id}.jsonl`. The sanitized

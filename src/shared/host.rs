@@ -1,11 +1,22 @@
 //! host.rs — Host protocol capabilities.
 //!
-//! Claude Code and the Codex-family hosts (Codex, Antigravity) consume hook
-//! output differently, and the difference is per-event rather than per-host:
+//! The difference in how hosts consume hook output is **per-event, not
+//! per-host**, and `hook_event_name` is not a host discriminator: Claude Code
+//! sends it on every hook payload, exactly as the Codex-family hosts (Codex,
+//! Antigravity) do. Both also understand the same structured shapes —
+//! `hookSpecificOutput`, `permissionDecision`, `{"continue":true}`.
 //!
-//! * Claude Code follows the stdin-passthrough contract — `main` echoes stdin on
-//!   stdout and every human-facing line belongs on stderr.
-//! * Codex accepts model context from `SessionStart`, `SubagentStart` and
+//! An earlier version of this file claimed the opposite ("present only for
+//! Codex-family hosts; `None` means Claude Code"). Everything still worked,
+//! because the branch it selected happens to be right for Claude Code too, but
+//! it made `main`'s stdin-passthrough arm unreachable in practice and it is the
+//! kind of false invariant the next change gets built on. What `None` actually
+//! means is "no host event name was supplied" — a direct CLI run, or a host
+//! that has not sent one yet — so the conservative stderr contract applies.
+//!
+//! * With no event name, keep human-facing output on stderr and let `main`
+//!   echo stdin, which is safe for any consumer.
+//! * Hosts accept model context from `SessionStart`, `SubagentStart` and
 //!   `UserPromptSubmit`. SessionStart context is emitted as structured JSON
 //!   because tagged text beginning with `[` is otherwise parsed as malformed
 //!   JSON. The other two accept plain stdout. `PreToolUse` and `PostToolUse`
@@ -55,15 +66,16 @@ fn sanitize_id(raw: &str) -> Option<String> {
     (!cleaned.is_empty()).then_some(cleaned)
 }
 
-/// Codex events whose plain stdout becomes extra developer context.
+/// Events whose plain stdout becomes extra model context.
 fn event_takes_plain_stdout(event: &str) -> bool {
     matches!(event, "SubagentStart" | "UserPromptSubmit")
 }
 
-/// Record the active host protocol and identity from the parsed hook input.
+/// Record the active output protocol and identity from the parsed hook input.
 ///
-/// `hook_event_name` is present only for Codex-family hosts; `None` means the
-/// Claude Code contract, which keeps human-facing output on stderr.
+/// Keyed on the event, not on which host sent it — see the module comment. A
+/// missing `hook_event_name` selects the conservative stderr contract rather
+/// than identifying any particular host.
 ///
 /// The identity fields are what stop `session_id()` from manufacturing one
 /// "session" per hook process. Both hosts supply `session_id`; only Codex
@@ -170,11 +182,31 @@ mod tests {
     }
 
     #[test]
-    fn claude_code_keeps_stderr() {
+    fn missing_event_name_keeps_stderr() {
         let _g = lock();
-        // No hook_event_name => Claude Code stdin-passthrough contract.
+        // No hook_event_name => no host protocol was declared, so fall back to
+        // stderr. This is NOT "Claude Code": Claude Code sends an event name on
+        // every payload, the same as Codex. See `session_start_is_structured_on
+        // _every_host` for the shape both hosts actually receive.
         init(&event(None));
         assert!(!stdout_is_context());
+        assert!(!captures_session_start_context());
+    }
+
+    #[test]
+    fn session_start_is_structured_on_every_host() {
+        let _g = lock();
+        // Claude Code and Codex both send `hook_event_name` and both read
+        // `hookSpecificOutput.additionalContext`, so SessionStart takes the
+        // structured path regardless of which host is driving.
+        init(&event(Some("SessionStart")));
+        append_session_start_context("[resume] restored");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&take_session_start_output()).expect("valid JSON");
+        assert_eq!(
+            parsed["hookSpecificOutput"]["additionalContext"],
+            "[resume] restored"
+        );
     }
 
     #[test]

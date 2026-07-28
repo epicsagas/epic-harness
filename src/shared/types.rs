@@ -15,9 +15,9 @@ pub struct HookInput {
     pub conversation_summary: Option<String>,
     pub pending_tasks: Option<Vec<String>>,
     pub context_usage: Option<f64>,
-    /// Codex/Antigravity hook event name (e.g. "SessionStart", "PreToolUse").
-    /// When present, stdout follows the Codex hook protocol instead of Claude
-    /// Code's stdin-passthrough contract.
+    /// Host hook event name (e.g. "SessionStart", "PreToolUse"). Sent by every
+    /// supported host — Claude Code included — and used to pick the per-event
+    /// stdout protocol. Absent only on a direct CLI run.
     pub hook_event_name: Option<String>,
     /// SessionStart cause: `startup`, `resume`, `clear`, or `compact`.
     pub source: Option<String>,

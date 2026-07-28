@@ -225,7 +225,10 @@ fn commit_staged_target(target: &StagedTarget) -> io::Result<()> {
             ),
         ));
     }
-    if target.original.canonicalize()? != target.original {
+    // `validate_targets` hands us paths in `canonical_for_compare` form, so the
+    // re-check has to use the same form. Plain `canonicalize` would compare
+    // `\\?\C:\...` against `C:\...` on Windows and reject every commit.
+    if crate::shared::paths::canonical_for_compare(&target.original)? != target.original {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             format!(
@@ -491,8 +494,12 @@ fn validate_targets(raw_targets: Vec<String>, workspace: &Path) -> Result<Vec<Pa
         ));
     }
 
-    let workspace = workspace
-        .canonicalize()
+    // `canonical_for_compare`, not `canonicalize`: on Windows the latter
+    // returns `\\?\C:\...` while the host supplies `C:\...` in `file_path` (or
+    // in an `apply_patch` envelope), and `strip_prefix` matches whole
+    // components — so every absolute target looked like it was outside the
+    // workspace and `polish` never formatted anything there.
+    let workspace = canonical_for_compare(workspace)
         .map_err(|error| format!("cannot resolve workspace {}: {error}", workspace.display()))?;
     let mut seen = HashSet::new();
     let mut targets = Vec::new();
@@ -539,8 +546,7 @@ fn validate_targets(raw_targets: Vec<String>, workspace: &Path) -> Result<Vec<Pa
             }
         }
 
-        let canonical = candidate
-            .canonicalize()
+        let canonical = canonical_for_compare(&candidate)
             .map_err(|error| format!("cannot resolve formatter target {raw}: {error}"))?;
         if !canonical.starts_with(&workspace) {
             return Err(format!("formatter target escapes workspace: {raw}"));

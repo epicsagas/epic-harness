@@ -466,11 +466,11 @@ fn main() {
         },
     };
 
-    // stdout output varies by host protocol:
-    // - Claude Code: stdin passthrough (original contract)
-    // - Codex/Antigravity: event-specific JSON (detected via hook_event_name)
+    // stdout output is chosen by EVENT, not by host. Claude Code, Codex and
+    // Antigravity all send `hook_event_name` and all read the same structured
+    // shapes, so this arm is the live path on every supported host. The `else`
+    // arm is the no-event-name fallback (direct CLI runs), not "Claude Code".
     if input.hook_event_name.is_some() {
-        // Codex / Antigravity protocol
         match subcmd {
             "guard" if exit_code == 2 => {
                 // PreToolUse block: explicit deny JSON so Codex never ignores the block
@@ -498,7 +498,7 @@ fn main() {
             _ => {}
         }
     } else {
-        // Claude Code: stdin passthrough contract
+        // No host event name — echo stdin, which no consumer misreads.
         print!("{stdin_buf}");
     }
 

@@ -7,6 +7,7 @@ use std::time::Duration;
 use super::common::*;
 use crate::config::CONFIG;
 use crate::mem::store;
+use crate::serve::DASHBOARD_MARKER;
 use crate::telemetry::Telemetry;
 
 /// Atomically acquire a session lock file.
@@ -891,9 +892,16 @@ pub fn run(input: &HookInput) -> i32 {
     crate::orchestrate::state::auto_cleanup_stale_runs(&harness_dir());
 
     // 10. Keep one dashboard server and one browser window.
+    //
+    // Report a dashboard problem, never fail on one. `runHook` in install.js
+    // discards the hook's stdout when the binary exits non-zero and sends `{}`
+    // instead, so a `return 1` here threw away everything resume had already
+    // built: the evolved-skill bodies, knowledge-graph recall, the previous
+    // session summary, orchestration state and cross-project hints. The
+    // dashboard is optional; the context injection is the product, and the
+    // optional part must not be able to veto it.
     if let Err(error) = spawn_dashboard_once(plan.open_dashboard) {
         hint("resume", &error);
-        return 1;
     }
 
     // 11. Telemetry — session_started event (consent already ensured in main.rs)
@@ -911,8 +919,16 @@ enum DashboardStatus {
     Occupied,
 }
 
-/// Identify the listener by the version marker injected by Epic's dashboard.
+/// Identify the listener by the marker injected by Epic's dashboard.
 /// A successful TCP connect alone is only evidence that the port is occupied.
+///
+/// The match is on the marker's NAME, never on the version it carries. The
+/// dashboard is a detached, long-lived process, so after an upgrade the server
+/// still on the port was started by the previous binary. Comparing against
+/// `CARGO_PKG_VERSION` made the new binary classify its own dashboard as a
+/// foreign service, and `ensureCompatibleRuntime` auto-updates the binary on
+/// SessionStart — so publishing a release put every user in that state until
+/// they killed the old process by hand.
 fn dashboard_status(port: u16) -> DashboardStatus {
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(250)) else {
@@ -927,10 +943,7 @@ fn dashboard_status(port: u16) -> DashboardStatus {
         return DashboardStatus::Occupied;
     }
 
-    let marker = format!(
-        "<meta name=\"harness-version\" content=\"{}\">",
-        env!("CARGO_PKG_VERSION")
-    );
+    let marker = DASHBOARD_MARKER;
     let mut response = Vec::with_capacity(8 * 1024);
     while response.len() < 8 * 1024 {
         let mut chunk = [0u8; 1024];
@@ -938,7 +951,7 @@ fn dashboard_status(port: u16) -> DashboardStatus {
             Ok(0) => break,
             Ok(read) => {
                 response.extend_from_slice(&chunk[..read]);
-                if String::from_utf8_lossy(&response).contains(&marker) {
+                if String::from_utf8_lossy(&response).contains(marker) {
                     break;
                 }
             }
@@ -950,7 +963,7 @@ fn dashboard_status(port: u16) -> DashboardStatus {
     }
     let response = String::from_utf8_lossy(&response);
     if (response.starts_with("HTTP/1.0 200") || response.starts_with("HTTP/1.1 200"))
-        && response.contains(&marker)
+        && response.contains(marker)
     {
         DashboardStatus::Epic
     } else {
@@ -1158,6 +1171,7 @@ pub(crate) fn start_dashboard_on_port(port: u16, open_browser: bool) -> Result<(
     match std::process::Command::new(program)
         .arg("serve")
         .arg(format!("--port={port}"))
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
@@ -1199,25 +1213,37 @@ fn spawn_dashboard_once(open_browser: bool) -> Result<(), String> {
     )
 }
 
+/// Launch the browser without handing it the hook's stdio.
+///
+/// The browser outlives the hook, and a child inherits the parent's handles by
+/// default. `runHook` reads the hook's stdout through a pipe and waits for that
+/// pipe to reach EOF — which a browser holding the write end does not do until
+/// the user closes it. So SessionStart blocked for as long as the browser
+/// stayed open, on the one run that actually opens it. The dashboard server
+/// spawn a few lines up already nulls its stdio; this one has to as well.
 fn open_browser_bg(url: &str) -> std::io::Result<()> {
+    let mut command;
     #[cfg(target_os = "macos")]
     {
-        std::process::Command::new("open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
+        command = std::process::Command::new("open");
+        command.arg(url);
     }
     #[cfg(target_os = "linux")]
     {
-        std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn()
-            .map(|_| ())
+        command = std::process::Command::new("xdg-open");
+        command.arg(url);
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/c", "start", url])
+        command = std::process::Command::new("cmd");
+        command.args(["/c", "start", url]);
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+    {
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
             .spawn()
             .map(|_| ())
     }
@@ -1806,6 +1832,27 @@ mod tests {
             dashboard_status(port),
             DashboardStatus::Occupied,
             "a listening socket without Epic identity must not be reused"
+        );
+        server.join().expect("test server");
+    }
+
+    #[test]
+    fn dashboard_from_another_version_is_still_our_dashboard() {
+        // The server on the port was started by the previous binary, so it
+        // stamps the previous version. Keying the probe on the version made the
+        // upgraded binary call its own dashboard foreign, `resume` returned 1,
+        // and install.js replaced the whole SessionStart context with `{}`.
+        let body = format!("<html><head>{DASHBOARD_MARKER} content=\"0.0.1-old\"></head></html>");
+        let response = format!(
+            "HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        let (port, server) = one_shot_http_server(response);
+
+        assert_eq!(
+            dashboard_status(port),
+            DashboardStatus::Epic,
+            "a dashboard from any version must be recognised as ours"
         );
         server.join().expect("test server");
     }

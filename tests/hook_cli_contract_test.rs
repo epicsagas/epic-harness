@@ -151,6 +151,28 @@ struct FakeDashboard {
 #[cfg(unix)]
 impl FakeDashboard {
     fn start() -> Self {
+        Self::serving(format!(
+            "<html><head><meta name=\"harness-version\" content=\"{}\"></head></html>",
+            env!("CARGO_PKG_VERSION")
+        ))
+    }
+
+    /// A dashboard left behind by an earlier binary — the state every user is
+    /// in immediately after an upgrade, since the server is detached and
+    /// outlives the process that started it.
+    fn from_previous_version() -> Self {
+        Self::serving(
+            "<html><head><meta name=\"harness-version\" content=\"0.0.1-old\"></head></html>"
+                .to_string(),
+        )
+    }
+
+    /// Something else entirely on the port.
+    fn foreign() -> Self {
+        Self::serving("<html><head><title>not epic</title></head></html>".to_string())
+    }
+
+    fn serving(body: String) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("fake dashboard bind");
         listener
             .set_nonblocking(true)
@@ -162,10 +184,6 @@ impl FakeDashboard {
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = Arc::clone(&stop);
         let worker = thread::spawn(move || {
-            let body = format!(
-                "<html><head><meta name=\"harness-version\" content=\"{}\"></head></html>",
-                env!("CARGO_PKG_VERSION")
-            );
             while !worker_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
@@ -202,6 +220,148 @@ impl Drop for FakeDashboard {
             worker.join().expect("fake dashboard worker");
         }
     }
+}
+
+/// Run one SessionStart against a listener already holding the dashboard port.
+#[cfg(unix)]
+fn session_start_against_listener(port: u16) -> Output {
+    let root = tempfile::tempdir().expect("temp root");
+    let project = project_path(root.path());
+    fs::create_dir_all(&project).expect("project");
+    let global_harness = root.path().join(".harness");
+    fs::create_dir_all(&global_harness).expect("global harness");
+    fs::write(
+        global_harness.join("config.toml"),
+        format!("[dashboard]\nport = {port}\nauto_open = false\n"),
+    )
+    .expect("test config");
+
+    run_hook(
+        root.path(),
+        &project,
+        "resume",
+        &serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "dashboard-probe-session",
+            "source": "startup",
+        })
+        .to_string(),
+    )
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dashboard_from_a_previous_version_is_reused_not_rejected() {
+    // The probe used to demand an exact `CARGO_PKG_VERSION` match, so after an
+    // upgrade the new binary called its own dashboard a foreign service. Since
+    // the plugin auto-updates the binary on SessionStart, shipping a release
+    // was what put users there.
+    let dashboard = FakeDashboard::from_previous_version();
+    let output = session_start_against_listener(dashboard.port);
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let context = session_start_context(&output);
+    assert!(
+        !context.contains("non-Epic service"),
+        "a dashboard from another version must be recognised as ours: {context}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_foreign_listener_costs_the_dashboard_but_not_the_context() {
+    // `runHook` in install.js throws away the hook's stdout when the binary
+    // exits non-zero and sends `{}` instead. So a non-zero resume does not just
+    // skip the dashboard — it deletes every evolved skill, memory and
+    // orchestration hint resume had already assembled for the model.
+    let dashboard = FakeDashboard::foreign();
+    let output = session_start_against_listener(dashboard.port);
+
+    assert!(
+        output.status.success(),
+        "a foreign listener must not fail the SessionStart hook: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let context = session_start_context(&output);
+    assert!(
+        context.contains("non-Epic service"),
+        "the dashboard problem is still reported: {context}"
+    );
+    assert!(
+        context.contains("Ring 3 evolution loop active"),
+        "the rest of the SessionStart context still reaches the model: {context}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_browser_launch_does_not_hold_the_hooks_stdout_open() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // `runHook` reads the hook's stdout through a pipe and waits for EOF. A
+    // browser inherits the parent's handles unless told otherwise and outlives
+    // the hook, so it held the write end open and SessionStart blocked for as
+    // long as the browser stayed up — on the one run that actually opens it.
+    // The stand-in here just outlives the hook, like a real browser would.
+    let root = tempfile::tempdir().expect("temp root");
+    let project = project_path(root.path());
+    let fake_bin = root.path().join("fake-bin");
+    fs::create_dir_all(&project).expect("project");
+    fs::create_dir_all(&fake_bin).expect("fake bin");
+
+    for command in ["open", "xdg-open"] {
+        let path = fake_bin.join(command);
+        fs::write(&path, "#!/bin/sh\nsleep 30 &\nexit 0\n").expect("browser stand-in");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))
+            .expect("browser stand-in permissions");
+    }
+
+    let port = {
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("reserve port");
+        probe.local_addr().expect("reserved address").port()
+    };
+    let global_harness = root.path().join(".harness");
+    fs::create_dir_all(&global_harness).expect("global harness");
+    fs::write(
+        global_harness.join("config.toml"),
+        format!("[dashboard]\nport = {port}\nauto_open = true\n"),
+    )
+    .expect("test config");
+
+    let mut search_paths = vec![fake_bin];
+    search_paths.extend(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    ));
+    let test_path = std::env::join_paths(search_paths).expect("test PATH");
+
+    let started = Instant::now();
+    let output = run_hook_with_env(
+        root.path(),
+        &project,
+        "resume",
+        &serde_json::json!({
+            "hook_event_name": "SessionStart",
+            "session_id": "browser-handle-session",
+            "source": "startup",
+        })
+        .to_string(),
+        &[("PATH", test_path.as_os_str())],
+    );
+    let elapsed = started.elapsed();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        elapsed < Duration::from_secs(15),
+        "SessionStart waited {elapsed:?} on a process the browser leaked stdout to"
+    );
 }
 
 fn record_failed_observations(home: &Path, project: &Path, session_id: &str, error: &str) {

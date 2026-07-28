@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A stale dashboard made every later session start silently context-free**:
+  the port probe identified Epic's own dashboard by an exact
+  `CARGO_PKG_VERSION` match. The dashboard server is detached and outlives the
+  binary that started it, so after an upgrade the new binary called its own
+  dashboard "a non-Epic service", `resume` returned 1, and `runHook` discarded
+  the hook's stdout in favour of `{}` — costing the model every evolved skill,
+  memory recall, session summary and orchestration hint. Since the plugin
+  auto-installs the matching binary on SessionStart, publishing a release was
+  what put users in that state. The probe now matches the marker's name and
+  ignores the version, the marker is one constant shared with `serve`, and a
+  dashboard problem is reported instead of failing the hook.
+- **The browser launch blocked SessionStart for as long as the browser lived**:
+  the spawned browser inherited the hook's stdout handle, and `runHook` waits
+  for that pipe to reach EOF. Measured at 30 s against a stand-in that outlives
+  the hook; the dashboard server spawn already nulled its stdio, this one did
+  not. Both children now get null stdin, stdout and stderr.
+- **`polish` never ran on Windows**: `validate_targets` canonicalized the
+  workspace to a verbatim (`\\?\`) path and then stripped that prefix off the
+  plain absolute path the host supplies, which never matches — so every target
+  was rejected as "outside workspace" and every `Edit` reported a hook failure.
+- **`reflect --context` failed on Windows**: the same verbatim-prefix mismatch
+  made the containment check reject every project whose directory existed,
+  which is every project in real use. `/reflect` and `/orbit` are the only
+  consumers of that command and both received an error instead of data.
+  Both now share `paths::canonical_for_compare`, which normalizes each side.
+- **`polish` skipped most edits on Claude Code**: the PostToolUse matcher was
+  `Edit` alone while `guard`'s was `Edit|Write|MultiEdit|NotebookEdit` in the
+  same manifest. Files created by `Write` were never formatted or typechecked.
+- **Codex capped `reflect` at 3 seconds**: the SessionEnd hook runs the whole
+  Ring 3 round. Raised to 60 s, matching the Claude Code manifest.
 - **A missing SessionStart record denied every tool call**: `guard`'s exit code
   decides whether the user's command runs, and an unresolvable session identity
   returned the deny code. Upgrading the plugin mid-session reproduces it — no

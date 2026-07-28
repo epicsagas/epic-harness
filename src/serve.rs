@@ -27,10 +27,16 @@ static DASHBOARD_HTML: &str = include_str!("../assets/dashboard.html");
 // before release. Source of truth = the running binary, not the frontend build.
 const HARNESS_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Version-independent identity of an Epic dashboard, shared with the
+/// SessionStart port probe (`hooks::resume::dashboard_status`) so the two can
+/// never drift apart again. Only the attribute name identifies the server; the
+/// version it carries is informational.
+pub const DASHBOARD_MARKER: &str = "<meta name=\"harness-version\"";
+
 /// Inject the binary version into the embedded dashboard HTML as a meta tag.
 /// Called on every dashboard page serve so the version is always correct.
 fn dashboard_html_with_version() -> String {
-    let meta = format!("<meta name=\"harness-version\" content=\"{HARNESS_VERSION}\">");
+    let meta = format!("{DASHBOARD_MARKER} content=\"{HARNESS_VERSION}\">");
     // Inject immediately after the opening <head> (first occurrence only).
     match DASHBOARD_HTML.split_once("<head>") {
         Some((before, after)) => format!("{before}<head>{meta}{after}"),

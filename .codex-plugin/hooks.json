@@ -101,7 +101,7 @@
             "type": "command",
             "command": "node \"${PLUGIN_ROOT}/registry/scripts/install.js\" hook SessionEnd reflect",
             "commandWindows": "node \"%PLUGIN_ROOT%\\registry\\scripts\\install.js\" hook SessionEnd reflect",
-            "timeout": 3
+            "timeout": 60
           }
         ]
       }

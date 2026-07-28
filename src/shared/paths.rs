@@ -5,6 +5,40 @@ pub fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// Canonicalize, then drop Windows' verbatim (`\\?\`) prefix.
+///
+/// `std::fs::canonicalize` returns an extended-length path on Windows, so
+/// `\\?\C:\a` and `C:\a` name the same directory but compare as different
+/// paths: `Path::starts_with` and `strip_prefix` match whole components, and
+/// `Prefix(VerbatimDisk('C'))` is never equal to `Prefix(Disk('C'))`.
+///
+/// Every containment check that canonicalized one side and not the other was
+/// therefore false on Windows whenever the path existed. That silently
+/// disabled `polish` (`formatter target is outside workspace`) and
+/// `reflect --context` (`slug escapes harness root`) for every real project.
+/// Comparisons must run on the output of this function on both sides.
+pub fn canonical_for_compare(path: &std::path::Path) -> std::io::Result<PathBuf> {
+    Ok(strip_verbatim_prefix(path.canonicalize()?))
+}
+
+/// Rewrite `\\?\C:\...` as `C:\...`; a no-op on other platforms and on UNC
+/// (`\\?\UNC\...`) paths, which have no plain-prefix equivalent.
+pub fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut components = path.components();
+        if let Some(Component::Prefix(prefix)) = components.next()
+            && let Prefix::VerbatimDisk(drive) = prefix.kind()
+        {
+            let mut rebuilt = PathBuf::from(format!("{}:\\", drive as char));
+            rebuilt.extend(components.filter(|c| !matches!(c, Component::RootDir)));
+            return rebuilt;
+        }
+    }
+    path
+}
+
 fn stable_path_hash(path: &std::path::Path) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     let text = path.to_string_lossy();
@@ -350,6 +384,64 @@ pub fn claude_plugin_cache_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_directory_is_contained_by_its_own_parent() {
+        // The whole point of `canonical_for_compare`: on Windows the plain
+        // `canonicalize` returns `\\?\C:\...`, so a child compared against an
+        // uncanonicalized parent reported "escapes root" for every path that
+        // existed. Both sides must go through the same normalization.
+        let root = tempfile::tempdir().expect("temp root");
+        let child = root.path().join("nested");
+        std::fs::create_dir_all(&child).expect("nested dir");
+
+        let canonical_root = canonical_for_compare(root.path()).expect("canonical root");
+        let canonical_child = canonical_for_compare(&child).expect("canonical child");
+
+        assert!(
+            canonical_child.starts_with(&canonical_root),
+            "{} must be contained by {}",
+            canonical_child.display(),
+            canonical_root.display()
+        );
+        assert!(
+            canonical_child.strip_prefix(&canonical_root).is_ok(),
+            "strip_prefix must succeed for a real child"
+        );
+    }
+
+    #[test]
+    fn a_host_style_absolute_path_strips_against_a_normalized_workspace() {
+        // Hosts send plain absolute paths (`file_path`, `apply_patch`). Those
+        // must strip cleanly against the normalized workspace, which is what
+        // `polish` relies on to accept a target at all.
+        let root = tempfile::tempdir().expect("temp root");
+        let file = root.path().join("a.py");
+        std::fs::write(&file, "x = 1\n").expect("write target");
+
+        let workspace = canonical_for_compare(root.path()).expect("canonical workspace");
+        let host_style = workspace.join("a.py");
+
+        assert_eq!(
+            host_style.strip_prefix(&workspace).ok(),
+            Some(std::path::Path::new("a.py")),
+            "a file directly inside the workspace is inside the workspace"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_verbatim_prefix_is_removed() {
+        let root = tempfile::tempdir().expect("temp root");
+        let verbatim = root.path().canonicalize().expect("canonicalize");
+        assert!(
+            verbatim.to_string_lossy().starts_with(r"\\?\"),
+            "precondition: Windows canonicalize yields a verbatim path"
+        );
+        let plain = strip_verbatim_prefix(verbatim);
+        assert!(!plain.to_string_lossy().starts_with(r"\\?\"));
+        assert!(plain.is_dir(), "the stripped path still resolves");
+    }
 
     #[test]
     fn project_path_helpers_resolve_by_slug() {

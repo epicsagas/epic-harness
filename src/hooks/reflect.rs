@@ -138,12 +138,17 @@ pub fn run_context(
     // Collect bounded fallback records from all target project slugs.
     for slug in &project_slugs {
         // Fix 1: Verify resolved path stays within harness projects root
+        //
+        // Both sides go through `canonical_for_compare`. Canonicalizing only
+        // the candidate compared `\\?\C:\...` against `C:\...` on Windows and
+        // rejected every project whose directory existed — which is every
+        // project in real use, so `--context` never returned data there.
         let slug_harness = harness_dir_for_slug(slug);
+        let root = canonical_for_compare(&harness_projects_root())
+            .unwrap_or_else(|_| harness_projects_root());
         let safe = if slug_harness.exists() {
-            slug_harness
-                .canonicalize()
-                .ok()
-                .map(|p| p.starts_with(harness_projects_root()))
+            canonical_for_compare(&slug_harness)
+                .map(|p| p.starts_with(&root))
                 .unwrap_or(false)
         } else {
             slug_harness.starts_with(harness_projects_root())
