@@ -9,8 +9,9 @@ use super::paths::orbit_dir;
 /// Returns the most recent running pipeline (by filename sort order), or None.
 /// Returns None immediately if the directory does not exist (hot path optimization).
 /// Symlinks are skipped to prevent path traversal attacks.
-/// When multiple running files exist (should not happen; concurrent-orbit guard prevents it),
-/// logs a warning and returns the most recently named one deterministically.
+/// When multiple running files exist (should not happen; the orbit skill runs
+/// `epic orbit lock` first — see `try_acquire_orbit_lock`), logs a warning and
+/// returns the most recently named one deterministically.
 pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> {
     if !dir.is_dir() {
         return None;
@@ -107,6 +108,49 @@ pub fn detect_active_orbit_id() -> Option<String> {
     val.get("id")
         .and_then(|v| v.as_str())
         .map(normalize_pipeline_id)
+}
+
+// ── Concurrent-orbit guard ────────────────────────────
+//
+// `epic orbit lock` / `epic orbit unlock` (wired in main.rs). The lock must
+// outlive the short-lived CLI process, so it is a lock FILE, not a flock:
+// acquisition fails while any PIPELINE-*.json is still `running` and succeeds
+// otherwise. The running-pipeline scan is the source of truth for staleness —
+// a crashed orbit's leftover lock is reclaimable once no pipeline is running.
+
+/// Try to acquire the concurrent-orbit guard in `dir` (the orbit state dir).
+/// Returns true on success (creates `.orbit.lock`), false if another orbit is
+/// running. # ponytail: hole between acquire and the first PIPELINE write
+/// (seconds) — a second start inside that window is not excluded.
+pub fn try_acquire_orbit_lock(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let path = dir.join(".orbit.lock");
+    if path.exists() {
+        // Reclaimable when no pipeline is actually running (crashed orbit
+        // left the lock behind).
+        if scan_running_pipeline_in(dir).is_some() {
+            return false;
+        }
+        let _ = fs::remove_file(&path);
+    }
+    let epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let body = format!("{{\"pid\":{},\"acquired_at\":{epoch}}}", std::process::id());
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, body.as_bytes()))
+        .is_ok()
+}
+
+/// Release the concurrent-orbit guard (best-effort; safe if absent/foreign).
+pub fn release_orbit_lock(dir: &Path) {
+    let _ = fs::remove_file(dir.join(".orbit.lock"));
 }
 
 /// Read the full pipeline state for an active orbit (uncached, authoritative).

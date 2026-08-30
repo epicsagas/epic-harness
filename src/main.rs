@@ -158,9 +158,15 @@ fn main() {
         }
     }
 
-    // Read stdin once, pass to hook subcommands (skip if TTY — no EOF would arrive)
+    // Read stdin once, pass to hook subcommands only. Other subcommands
+    // (orbit, slug, …) never consume it — reading there hangs headless callers
+    // whose stdin is an open pipe with no EOF.
+    let hook_subcmd = matches!(
+        subcmd,
+        "resume" | "guard" | "polish" | "observe" | "snapshot" | "reflect"
+    );
     let mut stdin_buf = String::new();
-    if !io::stdin().is_terminal() {
+    if hook_subcmd && !io::stdin().is_terminal() {
         let _ = io::stdin().read_to_string(&mut stdin_buf);
     }
 
@@ -201,6 +207,28 @@ fn main() {
                         "Usage: epic-harness merge-project --from <slug> --to <slug> [--dry-run] [--delete-source]"
                     );
                     1
+                }
+            }
+        }
+        "orbit" => {
+            // Concurrent-orbit guard: `epic orbit lock` / `epic orbit unlock`.
+            let dir = shared::paths::orbit_dir();
+            match args.get(2).map(|s| s.as_str()) {
+                Some("lock") => {
+                    if shared::orbit::try_acquire_orbit_lock(&dir) {
+                        0
+                    } else {
+                        eprintln!("another orbit is running");
+                        1
+                    }
+                }
+                Some("unlock") => {
+                    shared::orbit::release_orbit_lock(&dir);
+                    0
+                }
+                _ => {
+                    eprintln!("usage: epic orbit lock|unlock");
+                    2
                 }
             }
         }

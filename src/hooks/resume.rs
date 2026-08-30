@@ -30,6 +30,33 @@ fn acquire_session_lock(lock: &Path) -> bool {
     }
 }
 
+/// Delete `resume.*.lock` files older than 7 days. They otherwise accumulate
+/// one per session start forever. Only touches the `resume.` prefix, so
+/// `dashboard.lock` and other locks are unaffected.
+fn prune_stale_resume_locks() {
+    const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+    let Ok(entries) = fs::read_dir(harness_dir()) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("resume.") || !name.ends_with(".lock") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age > MAX_AGE);
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 const BANNER: &[&str] = &[
     "",
     "  ┌─┐┌─┐┬┌─┐   ┬ ┬┌─┐┬─┐┌┐┌┌─┐┌─┐┌─┐",
@@ -171,15 +198,23 @@ fn get_cross_project_hints() -> Vec<String> {
     hints
 }
 
-pub fn run(_input: &HookInput) -> i32 {
+pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_RESUME) {
         return 0;
     }
     // Guard: SessionStart fires multiple times per session in Claude Code.
-    // Use a per-session lock file (keyed by date+pid) to run exactly once.
+    // Key the lock by the real session_id + SessionStart source so that
+    // compaction (`source: "compact"`) and explicit resume/clear re-inject
+    // evolved skills, while plain "startup" runs exactly once per session.
     // `acquire_session_lock` uses O_CREAT|O_EXCL — atomically prevents the
     // TOCTOU race that the old exists()+write() pattern introduced.
-    let lock = harness_dir().join(format!("resume.{}.lock", session_id()));
+    prune_stale_resume_locks();
+    let source = input
+        .source
+        .clone()
+        .unwrap_or_else(|| "startup".to_string());
+    let sid = input.session_id.clone().unwrap_or_else(session_id);
+    let lock = harness_dir().join(format!("resume.{sid}.{source}.lock"));
     if !acquire_session_lock(&lock) {
         return 0;
     }

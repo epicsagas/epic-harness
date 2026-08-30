@@ -19,6 +19,11 @@ pub struct HookInput {
     /// When present, stdout follows the Codex hook protocol instead of Claude
     /// Code's stdin-passthrough contract.
     pub hook_event_name: Option<String>,
+    /// Claude Code hook payload session_id. Absent on legacy hosts — callers
+    /// fall back to a date+pid key.
+    pub session_id: Option<String>,
+    /// Claude Code SessionStart source: "startup" | "resume" | "clear" | "compact".
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
