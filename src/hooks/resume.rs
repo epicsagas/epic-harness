@@ -430,10 +430,14 @@ pub fn run(input: &HookInput) -> i32 {
     // holdout arm even when this session spans UTC midnight — otherwise an
     // active-injected skill could be scored against the holdout baseline.
     crate::shared::helpers::write_session_start(&today_str);
+    // Frontier-class models skip template (un-synthesized) skill bodies —
+    // generic advice is noise there; synthesized skills always inject.
+    let inject_templates = crate::config::CONFIG.model.inject_templates();
     if !evolved.is_empty() {
         let (active, holdout) = crate::evolve::partition_holdout(&evolved, &metrics, &today_str);
         let bodies: Vec<(String, String)> = active
             .iter()
+            .filter(|name| inject_templates || crate::evolve::is_synthesized(name))
             .filter_map(|name| {
                 let content =
                     std::fs::read_to_string(evolved_dir().join(name).join("SKILL.md")).ok()?;
@@ -447,6 +451,23 @@ pub fn run(input: &HookInput) -> i32 {
                 &format!("Evolved skills injected: {}", active.join(", ")),
             );
         }
+        let withheld: Vec<&String> = active
+            .iter()
+            .filter(|name| !inject_templates && !crate::evolve::is_synthesized(name))
+            .collect();
+        if !withheld.is_empty() {
+            hint(
+                "resume",
+                &format!(
+                    "Template skills withheld (frontier class, awaiting accept-synth): {}",
+                    withheld
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
+        }
         if !holdout.is_empty() {
             hint(
                 "resume",
@@ -456,6 +477,18 @@ pub fn run(input: &HookInput) -> i32 {
                 ),
             );
         }
+    }
+
+    // Surface the synthesis backlog on stdout so the host agent sees it —
+    // stderr hints don't reach the model, and the loop only closes when a
+    // host runs `evolve accept-synth`.
+    let pending = pending_synth_count();
+    if pending > 0 {
+        println!(
+            "\n## Synthesis backlog: {pending} pending manifest(s)\n\
+             Run `/evolve` (or `epic-harness evolve accept-synth --skill <name>`) \
+             to upgrade the seeded skills with evidence-based bodies."
+        );
     }
 
     // 4. Cold-start presets (#1)
@@ -761,18 +794,42 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
 
 /// Per-skill and total character budgets for evolved-skill context injection.
 /// SessionStart stdout lands verbatim in the model's context — keep it lean.
-const INJECT_PER_SKILL_CHARS: usize = 1_600;
-const INJECT_TOTAL_CHARS: usize = 10_000;
+fn inject_per_skill_chars() -> usize {
+    crate::config::CONFIG.model.inject_per_skill_chars
+}
+
+fn inject_total_chars() -> usize {
+    crate::config::CONFIG.model.inject_total_chars
+}
+
+/// Count pending synthesis manifests awaiting host-agent upgrade.
+fn pending_synth_count() -> usize {
+    let path = crate::shared::paths::pending_synth_file();
+    std::fs::read_to_string(path)
+        .map(|s| {
+            s.lines()
+                .filter(|l| {
+                    serde_json::from_str::<serde_json::Value>(l)
+                        .ok()
+                        .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(String::from))
+                        .as_deref()
+                        == Some("pending")
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
 
 /// Render active evolved skills as a context block for SessionStart stdout.
 /// Frontmatter is stripped (metadata noise), bodies are truncated to budget.
 fn build_evolved_injection(skills: &[(String, String)]) -> String {
+    let (per_skill, total) = (inject_per_skill_chars(), inject_total_chars());
     let mut out = String::from(
         "## Evolved Skills (epic-harness Ring 3)\n\
          Learned from this project's past session failures. Apply when relevant.\n",
     );
     for (name, content) in skills {
-        if out.chars().count() >= INJECT_TOTAL_CHARS {
+        if out.chars().count() >= total {
             break;
         }
         // Strip `---\n...\n---` frontmatter; keep the body only.
@@ -781,10 +838,10 @@ fn build_evolved_injection(skills: &[(String, String)]) -> String {
             .and_then(|rest| rest.split_once("\n---").map(|x| x.1))
             .unwrap_or(content)
             .trim();
-        let truncated: String = body.chars().take(INJECT_PER_SKILL_CHARS).collect();
+        let truncated: String = body.chars().take(per_skill).collect();
         out.push_str(&format!("\n### {name}\n{truncated}\n"));
     }
-    let capped: String = out.chars().take(INJECT_TOTAL_CHARS).collect();
+    let capped: String = out.chars().take(total).collect();
     capped
 }
 
@@ -815,7 +872,7 @@ mod tests {
             "frontmatter must be stripped"
         );
         assert!(
-            out.chars().count() <= INJECT_TOTAL_CHARS,
+            out.chars().count() <= inject_total_chars(),
             "total injection must respect the budget"
         );
     }

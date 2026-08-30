@@ -14,9 +14,89 @@ pub struct HarnessConfig {
     pub scoring: ScoringConfig,
     pub evolution: EvolutionConfig,
     pub pattern: PatternConfig,
+    pub model: ModelConfig,
     pub context: ContextConfig,
     pub dashboard: DashboardConfig,
     pub db: DbConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ModelConfig {
+    /// Model class driving threshold/injection behavior: "auto" (detect from
+    /// env), "frontier", or "light".
+    pub class: String,
+    /// Pattern thresholds (repeated_error_min, debug_loop_min, thrash_*) are
+    /// multiplied by this for frontier-class models — their lower failure
+    /// rate means the same streak is a stronger signal.
+    pub frontier_threshold_scale: f64,
+    /// Inject template (un-synthesized) skill bodies at session start.
+    /// None = per-class default (light: yes, frontier: no — generic advice
+    /// is noise for frontier models; synthesized skills always inject).
+    pub inject_templates: Option<bool>,
+    /// Max chars injected per evolved skill.
+    pub inject_per_skill_chars: usize,
+    /// Max chars injected across all evolved skills per session.
+    pub inject_total_chars: usize,
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            class: "auto".into(),
+            frontier_threshold_scale: 2.0,
+            inject_templates: None,
+            inject_per_skill_chars: 1_600,
+            inject_total_chars: 10_000,
+        }
+    }
+}
+
+impl ModelConfig {
+    /// Resolved class: explicit config wins, else detect from env.
+    pub fn resolved_class(&self) -> &'static str {
+        match self.class.as_str() {
+            "light" => return "light",
+            "frontier" => return "frontier",
+            _ => {}
+        }
+        // Light-class markers in common model env vars. Unknown → frontier:
+        // frontier gets LESS injection, so a wrong guess degrades gracefully.
+        for key in [
+            "ANTHROPIC_MODEL",
+            "CLAUDE_MODEL",
+            "CLAUDE_CODE_MODEL",
+            "OPENAI_MODEL",
+        ] {
+            if let Ok(m) = std::env::var(key) {
+                let m = m.to_lowercase();
+                if ["haiku", "flash", "mini", "nano", "small", "lite"]
+                    .iter()
+                    .any(|t| m.contains(t))
+                {
+                    return "light";
+                }
+            }
+        }
+        "frontier"
+    }
+
+    /// Whether template (un-synthesized) skill bodies should be injected.
+    pub fn inject_templates(&self) -> bool {
+        self.inject_templates
+            .unwrap_or_else(|| self.resolved_class() == "light")
+    }
+
+    /// Threshold scaled for the resolved model class.
+    pub fn scaled_threshold(&self, base: u64) -> u64 {
+        if self.resolved_class() == "frontier" {
+            ((base as f64) * self.frontier_threshold_scale)
+                .round()
+                .max(1.0) as u64
+        } else {
+            base
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -676,6 +756,21 @@ gated_promotion_min = 2
 # graduated_scope_skip = 0.95
 # graduated_scope_moderate = 0.80
 
+# ── Model class ──────────────────────────────────────
+# Scales pattern thresholds and skill injection for the model in use.
+# class: "auto" (detect from ANTHROPIC_MODEL/CLAUDE_MODEL/etc.), "frontier",
+# or "light".
+[model]
+# class = "auto"
+# Frontier failure streaks are stronger signals — raise pattern thresholds.
+# frontier_threshold_scale = 2.0
+# Frontier models get only synthesized skill bodies injected (generic
+# template advice is noise); light models also get templates. Set true/false
+# to override per-class default.
+# inject_templates = true
+# inject_per_skill_chars = 1600
+# inject_total_chars = 10000
+
 # ── Context sources ──────────────────────────────────
 [context]
 # Default sources included in reflect --context output.
@@ -761,6 +856,48 @@ mod tests {
         assert!(c.db.memory_url.is_empty());
         assert_eq!(c.db.max_connections, 5);
         assert_eq!(c.db.tls_mode, "prefer");
+        assert_eq!(c.model.class, "auto");
+        assert!((c.model.frontier_threshold_scale - 2.0).abs() < f64::EPSILON);
+        assert!(c.model.inject_templates.is_none());
+        assert_eq!(c.model.inject_per_skill_chars, 1_600);
+        assert_eq!(c.model.inject_total_chars, 10_000);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn model_class_detection_and_scaling() {
+        let mut m = ModelConfig::default();
+        // Explicit class wins over env.
+        m.class = "light".into();
+        assert_eq!(m.resolved_class(), "light");
+        assert!(m.inject_templates(), "light default injects templates");
+        assert_eq!(m.scaled_threshold(3), 3, "light keeps base thresholds");
+
+        m.class = "frontier".into();
+        assert_eq!(m.resolved_class(), "frontier");
+        assert!(!m.inject_templates(), "frontier default skips templates");
+        assert!(m.inject_templates.is_none());
+        assert_eq!(m.scaled_threshold(3), 6, "frontier scales base by 2.0");
+        assert_eq!(m.scaled_threshold(0), 1, "scaled threshold floors at 1");
+
+        // Light marker in env (auto class).
+        m.class = "auto".into();
+        unsafe { std::env::set_var("ANTHROPIC_MODEL", "claude-haiku-4-5") };
+        assert_eq!(m.resolved_class(), "light");
+        unsafe { std::env::set_var("ANTHROPIC_MODEL", "claude-opus-5") };
+        assert_eq!(m.resolved_class(), "frontier");
+        unsafe { std::env::remove_var("ANTHROPIC_MODEL") };
+        assert_eq!(
+            m.resolved_class(),
+            "frontier",
+            "unknown defaults to frontier"
+        );
+
+        // Explicit override still beats env.
+        m.class = "light".into();
+        unsafe { std::env::set_var("ANTHROPIC_MODEL", "claude-opus-5") };
+        assert_eq!(m.resolved_class(), "light");
+        unsafe { std::env::remove_var("ANTHROPIC_MODEL") };
     }
 
     #[test]

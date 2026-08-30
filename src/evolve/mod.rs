@@ -24,6 +24,6 @@ pub use seesaw::{
     check as seesaw_check, load_registry, save_registry, scores_from_pipeline_digests,
 };
 pub use skills::{
-    export_to_global, gate_skills, prune_rejected_buffer, seed_smart_skills, update_meta_field,
-    write_workspace_manifest,
+    export_to_global, gate_skills, is_synthesized, prune_rejected_buffer, seed_smart_skills,
+    update_meta_field, write_workspace_manifest,
 };

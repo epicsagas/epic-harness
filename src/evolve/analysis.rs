@@ -303,7 +303,11 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 streak_category = curr.failure_category.clone().unwrap_or_default();
                 prev_hash = curr_hash;
             } else {
-                if streak >= CONFIG.pattern.repeated_error_min {
+                if streak
+                    >= CONFIG
+                        .model
+                        .scaled_threshold(CONFIG.pattern.repeated_error_min)
+                {
                     let hash_note = if !prev_hash.is_empty() {
                         format!(" [hash:{prev_hash}]")
                     } else {
@@ -322,7 +326,11 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 prev_hash.clear();
             }
         }
-        if streak >= CONFIG.pattern.repeated_error_min {
+        if streak
+            >= CONFIG
+                .model
+                .scaled_threshold(CONFIG.pattern.repeated_error_min)
+        {
             let hash_note = if !prev_hash.is_empty() {
                 format!(" [hash:{prev_hash}]")
             } else {
@@ -415,7 +423,9 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             if !file.is_empty() && file == prev_file {
                 run_length += 1;
             } else {
-                if run_length >= CONFIG.pattern.debug_loop_min && !prev_file.is_empty() {
+                if run_length >= CONFIG.model.scaled_threshold(CONFIG.pattern.debug_loop_min)
+                    && !prev_file.is_empty()
+                {
                     let entry = file_runs.entry(prev_file.clone()).or_default();
                     *entry = (*entry).max(run_length);
                 }
@@ -423,7 +433,9 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
                 run_length = 1;
             }
         }
-        if run_length >= CONFIG.pattern.debug_loop_min && !prev_file.is_empty() {
+        if run_length >= CONFIG.model.scaled_threshold(CONFIG.pattern.debug_loop_min)
+            && !prev_file.is_empty()
+        {
             let entry = file_runs.entry(prev_file.clone()).or_default();
             *entry = (*entry).max(run_length);
         }
@@ -465,8 +477,14 @@ pub fn detect_patterns(observations: &[ObsRecord]) -> Vec<DetectedPattern> {
             }
         }
         for (file, (edits, errors)) in &file_stats {
-            if *edits >= CONFIG.pattern.thrash_min_edits
-                && *errors >= CONFIG.pattern.thrash_min_errors
+            if *edits
+                >= CONFIG
+                    .model
+                    .scaled_threshold(CONFIG.pattern.thrash_min_edits)
+                && *errors
+                    >= CONFIG
+                        .model
+                        .scaled_threshold(CONFIG.pattern.thrash_min_errors)
             {
                 let basename = std::path::Path::new(file)
                     .file_name()
@@ -629,7 +647,12 @@ mod tests {
     #[test]
     fn detect_repeated_same_error() {
         let mut obs = vec![];
-        for _ in 0..4 {
+        // 2x the class-scaled threshold: fixtures must hold under both model classes.
+        let runs = CONFIG
+            .model
+            .scaled_threshold(CONFIG.pattern.repeated_error_min)
+            * 2;
+        for _ in 0..runs {
             obs.push(make_obs("Bash", "bash", "error", 0.0, Some("/src/main.ts")));
         }
         let patterns = detect_patterns(&obs);
@@ -657,7 +680,8 @@ mod tests {
     #[test]
     fn detect_long_debug_loop() {
         let mut obs = vec![];
-        for _ in 0..6 {
+        let runs = CONFIG.model.scaled_threshold(CONFIG.pattern.debug_loop_min) * 2;
+        for _ in 0..runs {
             obs.push(make_obs(
                 "Edit",
                 "edit",
@@ -691,7 +715,8 @@ mod tests {
         // Edit→Bash→Edit→Bash→... on the same file must still be detected
         // because Bash calls should not break the consecutive-file streak.
         let mut obs = vec![];
-        for _ in 0..6 {
+        let runs = CONFIG.model.scaled_threshold(CONFIG.pattern.debug_loop_min) * 2;
+        for _ in 0..runs {
             obs.push(make_obs(
                 "Edit",
                 "edit",
@@ -710,13 +735,17 @@ mod tests {
             .iter()
             .find(|p| p.pattern_type == "long_debug_loop")
             .unwrap();
-        assert_eq!(loop_pat.count, 6);
+        assert_eq!(loop_pat.count, runs as u64);
     }
 
     #[test]
     fn detect_thrashing() {
         let mut obs = vec![];
-        for _ in 0..4 {
+        let runs = CONFIG
+            .model
+            .scaled_threshold(CONFIG.pattern.thrash_min_edits)
+            * 2;
+        for _ in 0..runs {
             obs.push(make_obs(
                 "Edit",
                 "edit",

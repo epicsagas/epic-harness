@@ -110,7 +110,7 @@ impl HarnessEdit {
                 origin,
                 confidence,
             } => {
-                super::skills::write_skill_with_meta(name, content, origin, *confidence);
+                super::skills::write_skill_with_meta(name, content, origin, *confidence, false);
                 EditOutcome::Applied
             }
         }

@@ -563,7 +563,13 @@ pub fn sanitize_skill_name(name: &str) -> bool {
         && name.len() < 64
 }
 
-pub fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence: f64) {
+pub fn write_skill_with_meta(
+    name: &str,
+    content: &str,
+    origin: &str,
+    confidence: f64,
+    synthesized: bool,
+) {
     if !sanitize_skill_name(name) {
         hint("reflect", &format!("Rejected invalid skill name: {name}"));
         return;
@@ -579,6 +585,7 @@ pub fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence
         created: now_iso(),
         updated: now_iso(),
         active: true,
+        synthesized,
     };
     let json = match serde_json::to_string_pretty(&meta) {
         Ok(j) => j,
@@ -607,6 +614,17 @@ pub fn write_skill_with_meta(name: &str, content: &str, origin: &str, confidence
     }
 }
 
+/// Whether a skill's body was upgraded by a host agent (`evolve accept-synth`).
+/// Missing meta.json = seeded template = not synthesized.
+pub fn is_synthesized(name: &str) -> bool {
+    let meta_path = evolved_dir().join(name).join("meta.json");
+    fs::read_to_string(meta_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<SkillMeta>(&s).ok())
+        .map(|m| m.synthesized)
+        .unwrap_or(false)
+}
+
 pub fn write_workspace_manifest() {
     let evolved = evolved_dir();
     if !evolved.is_dir() {
@@ -632,6 +650,7 @@ pub fn write_workspace_manifest() {
                 created: now_iso(),
                 updated: now_iso(),
                 active,
+                synthesized: false,
             }
         };
         skills.push(SkillMeta { active, ..meta });
@@ -832,6 +851,11 @@ pub struct SkillMeta {
     pub created: String,
     pub updated: String,
     pub active: bool,
+    /// True once a host agent upgraded the body via `evolve accept-synth`.
+    /// Template (un-synthesized) skills are withheld from injection for
+    /// frontier-class models — generic advice is noise there.
+    #[serde(default)]
+    pub synthesized: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1174,6 +1198,7 @@ mod tests {
                 created: "2026-01-01T00:00:00Z".into(),
                 updated: "2026-01-01T00:00:00Z".into(),
                 active,
+                synthesized: false,
             });
         }
         let manifest = WorkspaceManifest {
@@ -1203,6 +1228,7 @@ mod tests {
             created: "2026-01-01T00:00:00Z".into(),
             updated: "2026-01-01T00:00:00Z".into(),
             active: true,
+            synthesized: false,
         };
         let json = serde_json::to_string_pretty(&meta).expect("serialize");
         let roundtrip: SkillMeta = serde_json::from_str(&json).expect("deserialize");
@@ -1233,6 +1259,7 @@ mod tests {
             created: "2026-01-01T00:00:00Z".into(),
             updated: "2026-01-01T00:00:00Z".into(),
             active: true,
+            synthesized: false,
         };
         let json = serde_json::to_string_pretty(&meta).expect("serialize meta");
         let _ = fs::write(skill_dir.join("meta.json"), &json);
