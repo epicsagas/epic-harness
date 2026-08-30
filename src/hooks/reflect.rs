@@ -771,9 +771,10 @@ pub fn run(_input: &HookInput) -> i32 {
     }) {
         Ok(recs) => recs,
         Err(e) => {
+            // Proceed with an empty set so the JSONL fallback below actually runs —
+            // an early `return 0` here silently dropped the whole evolution round.
             eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-            // Fallthrough to JSONL path below
-            return 0;
+            Vec::new()
         }
     };
     let observations = if !observations.is_empty() {
@@ -817,9 +818,11 @@ pub fn run(_input: &HookInput) -> i32 {
         analysis.persistent_failure = true;
         analysis.persistent_failure_categories = persistent_cats;
     }
+    // Bounded read: landscape stats only need recent history; an unbounded
+    // full-table scan grew linearly with project age on every SessionEnd.
     let history: Vec<EvolutionRecord> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::evolution::query_all_records_pool(&pool).await
+        crate::store::evolution::query_recent_records_pool(&pool, 100).await
     })
     .unwrap_or_default();
     let landscape = evolve::build_landscape(&history, &digests, 2);
@@ -918,7 +921,9 @@ pub fn run(_input: &HookInput) -> i32 {
     // for tasks that scored well by luck, masking future genuine regressions.
     if !seesaw_blocked {
         let mut reg = seesaw;
-        let scores = evolve::scores_from_digests(&digests);
+        // Pipeline digests only — synthetic "session"/"segment-N" ids would
+        // bloat the registry with entries no future round can ever match.
+        let scores = evolve::scores_from_pipeline_digests(&digests);
         reg.update(&scores);
         let _ = evolve::save_registry(&reg);
     }
@@ -975,20 +980,6 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 8. Memory auto-ingest (knowledge graph)
     let (mem_nodes, mem_edges) = evolve::ingest_to_memory(&analysis, &analysis.failure_patterns);
-
-    // 8.5. Instinct extraction and promotion
-    let instincts = evolve::extract_instincts(&observations, &analysis);
-    let instincts_promoted = if !instincts.is_empty() {
-        evolve::promote_instincts_to_global(&instincts)
-    } else {
-        0
-    };
-    if instincts_promoted > 0 {
-        hint(
-            "reflect",
-            &format!("Instinct: promoted {instincts_promoted} new instinct(s)"),
-        );
-    }
 
     // 9. Evolution record
     let record = EvolutionRecord {

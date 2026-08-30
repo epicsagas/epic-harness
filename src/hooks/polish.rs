@@ -73,8 +73,25 @@ fn feedback_to_observe(
         sequence_id: None,
     };
 
-    let session_file = obs_dir().join(format!("session_{}.jsonl", session_id()));
-    append_jsonl(&session_file, &record);
+    // Storage policy: SQLite primary, JSONL fallback — same as observe. reflect
+    // reads SQLite, so JSONL-only writes here never reached pattern detection
+    // (the "Polish → Observe Feedback" path was dead until this).
+    let sid = session_id();
+    let stored = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::observations::insert_observation_pool(
+            &pool,
+            &record,
+            &sid,
+            &crate::shared::paths::project_slug(),
+        )
+        .await
+    });
+    if let Err(e) = stored {
+        eprintln!("[polish] SQLite write failed, falling back to JSONL: {e}");
+        let session_file = obs_dir().join(format!("session_{sid}.jsonl"));
+        append_jsonl(&session_file, &record);
+    }
 }
 
 fn format_js(file_path: &str, wd: &Path) {
@@ -102,14 +119,63 @@ fn format_js(file_path: &str, wd: &Path) {
     }
 }
 
+/// Minimum seconds between full-project tsc runs. Models fire rapid successive
+/// edits; a blocking full typecheck per edit adds seconds of latency without
+/// new information. The tsbuildinfo file doubles as incremental cache and
+/// debounce timestamp.
+const TSC_DEBOUNCE_SECS: u64 = 5;
+
+/// Per-workspace tsbuildinfo path (under the user's home when available —
+/// shared /tmp would leak project paths and invite symlink planting —
+/// keyed by workspace path hash, never written into the user's project).
+fn tsc_tsbuildinfo(wd: &Path) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let base = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join(".harness").join("tsc");
+    std::fs::create_dir_all(&dir).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    wd.hash(&mut hasher);
+    Some(dir.join(format!("{:016x}.tsbuildinfo", hasher.finish())))
+}
+
 fn check_ts(file_path: &str, wd: &Path) {
     if !wd.join("tsconfig.json").is_file() {
         return;
     }
-    let output = Command::new("npx")
-        .args(["tsc", "--noEmit", "--pretty", "false"])
-        .current_dir(wd)
-        .output();
+    let Some(tsbuildinfo) = tsc_tsbuildinfo(wd) else {
+        return;
+    };
+    let Some(info_str) = tsbuildinfo.to_str() else {
+        return;
+    };
+    if let Ok(modified) = std::fs::metadata(&tsbuildinfo).and_then(|m| m.modified())
+        && let Ok(elapsed) = std::time::SystemTime::now().duration_since(modified)
+        && elapsed.as_secs() < TSC_DEBOUNCE_SECS
+    {
+        return; // a typecheck ran moments ago against this workspace
+    }
+
+    // Prefer the workspace-local tsc — resolving it via npx costs 1-3s per run.
+    let local_name = if cfg!(windows) { "tsc.cmd" } else { "tsc" };
+    let local_tsc = wd.join("node_modules").join(".bin").join(local_name);
+    let (prog, base_args): (String, Vec<&str>) = if local_tsc.exists() {
+        (local_tsc.to_string_lossy().into_owned(), vec![])
+    } else {
+        ("npx".into(), vec!["tsc"])
+    };
+
+    let mut args = base_args;
+    args.extend([
+        "--noEmit",
+        "--pretty",
+        "false",
+        "--incremental",
+        "--tsBuildInfoFile",
+        info_str,
+    ]);
+    let output = Command::new(&prog).args(&args).current_dir(wd).output();
     if let Ok(o) = output {
         let stdout = String::from_utf8_lossy(&o.stdout);
         let stderr = String::from_utf8_lossy(&o.stderr);
@@ -250,5 +316,15 @@ mod tests {
         let dir = tempdir().unwrap();
         let result = try_exec_args("true", &[], dir.path());
         assert!(result.is_some(), "zero exit must return Some");
+    }
+
+    #[test]
+    fn tsc_tsbuildinfo_deterministic_per_workspace() {
+        let dir = tempdir().unwrap();
+        let a = tsc_tsbuildinfo(&dir.path().join("ws-a")).unwrap();
+        let b = tsc_tsbuildinfo(&dir.path().join("ws-b")).unwrap();
+        assert_eq!(a, tsc_tsbuildinfo(&dir.path().join("ws-a")).unwrap());
+        assert_ne!(a, b);
+        assert!(a.to_string_lossy().ends_with(".tsbuildinfo"));
     }
 }

@@ -48,6 +48,34 @@ mod tests {
     }
 
     #[test]
+    fn classify_green_test_runs_are_not_failures() {
+        // Green cargo: "0 failed" must not classify (regression: `test.*fail`
+        // used to match this and recorded every green Rust test run as test_fail).
+        let cargo_green = "running 22 tests\ntest mem::tests::test_validate ... ok\n\
+                           test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured";
+        assert_eq!(classify_failure(cargo_green), None);
+        let jest_green = "Tests: 12 passed, 12 total\nSnapshots: 0 total";
+        assert_eq!(classify_failure(jest_green), None);
+        let rspec_green = "12 examples, 0 failures";
+        assert_eq!(classify_failure(rspec_green), None);
+    }
+
+    #[test]
+    fn classify_real_test_failures_still_detected() {
+        let cargo_fail = "test result: FAILED. 0 passed; 1 failed; 0 ignored\n\
+                          error: test failed, to rerun pass `--lib`";
+        assert_eq!(classify_failure(cargo_fail), Some("test_fail"));
+        let go_fail = "--- FAIL: TestParse\nFAIL\texample.com/pkg\t0.005s";
+        assert_eq!(classify_failure(go_fail), Some("test_fail"));
+        let pytest_fail = "FAILED tests/test_auth.py::test_login - assert 5 == 4\n\
+                           1 failed, 99 passed in 2.31s";
+        assert_eq!(classify_failure(pytest_fail), Some("test_fail"));
+        let rspec_fail = "Failures:\n\n1) User#login returns the token\n\
+                          12 examples, 3 failures";
+        assert_eq!(classify_failure(rspec_fail), Some("test_fail"));
+    }
+
+    #[test]
     fn classify_lint_fail() {
         assert_eq!(
             classify_failure("eslint error: no-unused-vars"),

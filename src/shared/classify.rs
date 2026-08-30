@@ -19,7 +19,9 @@ const FAILURE_RULES: &[FailureRule] = &[
         category: "syntax_error",
     },
     FailureRule {
-        pattern: r"(?i)FAIL(?:ED|ING)?[\s:]|test.*fail|AssertionError|assert\.\w+",
+        // Non-zero counts only (`[1-9]\d* failed`): green cargo/jest summaries
+        // ("test result: ok. 5 passed; 0 failed;") must not classify as failures.
+        pattern: r"(?i)\bFAIL(?:ED|ING)?[\s:.]|\btests?\s+failed\b|\b[1-9]\d*\s+failed\b|\b[1-9]\d*\s+failures\b|AssertionError|assertion\b|assert\.\w+",
         category: "test_fail",
     },
     FailureRule {
