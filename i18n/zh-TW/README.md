@@ -298,8 +298,6 @@ Curate (Accept/Merge/Skip, feedback masked from solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
     ↓ evolved_backup/ (best checkpoint)
-Instinct (high-success patterns → cross-project memory.db nodes)
-    ↓
 Reload (next session — resume loads evolved skills)
 ```
 
@@ -315,11 +313,7 @@ Reload (next session — resume loads evolved skills)
 |-----------|-------------|
 | **負反饋緩衝區** | 被拒絕的提案以 TTL 為基礎的過期機制儲存；未來的提案在生成前會先對照緩衝區檢查 |
 | **小批次反思** | 觀測資料分解為固定大小的批次以進行結構化模式提取；當主要錯誤 ≥60% + ≥2 個不同檔案時可重複使用 |
-| **慢速/元更新** | 對最近 5 個工作階段進行線性迴歸，將 epoch 分類為 Improving / Regressing / PersistentFailure / StableSuccess；自動淘汰表現不佳的技能 |
-
-### 提示詞自動調校
-
-表現不佳的進化技能會收到針對性的調校指引，附加在 `<!-- auto-tuned -->` 分隔符之後。原始內容永不修改。連續 3 個下降的工作階段 → 自動回滾調校，歷史記錄清除。
+| **慢速/元更新** | 對最近 5 個工作階段進行線性迴歸，將 epoch 分類為 Improving / Regressing / PersistentFailure / StableSuccess；歸因結論僅在儀表板中報告，從不自動執行 |
 
 ### 技能有效性
 
@@ -346,15 +340,6 @@ Reload (next session — resume loads evolved skills)
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### 直覺學習
-
-高成功率模式被提取並在專案間推廣：
-
-```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → promote to global when observed in ≥ 2 projects
-```
 
 ```bash
 /evolve              # 立即執行
@@ -399,7 +384,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | Edit 執行後 | 自動格式化（Biome/Prettier/ruff/gofmt）+ 型別檢查 |
 | **observe** | 每次工具呼叫 | 記錄到 `~/.harness/projects/{slug}/obs/`，用於進化 |
 | **snapshot** | 壓縮前 | 將狀態儲存到 `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | 工作階段結束 | 分析失敗、播種進化技能、門控、提取直覺 |
+| **reflect** | 工作階段結束 | 分析失敗、播種進化技能、門控 |
 
 Polish 回饋至 observe：格式化失敗 → `lint_fail`，TypeScript 錯誤 → `build_fail`。即使錯誤來自 polish，Edit→Error 抖振也會被偵測到。
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # 匯出為 Markdown
 | `resolution` | 手動 / MCP | 0.8 |
 | `concept` | 手動 / MCP | 0.7 |
 | `project` | 手動 / MCP | 0.7 |
-| `instinct` | 自動（reflect） | 0.7 |
 | `pattern` | 自動（reflect） | 0.5 |
 | `error` | 自動（reflect） | 0.4 |
 | `session` | 自動（reflect） | 0.2 |
@@ -617,7 +601,8 @@ epic mem export --out ./docs/memory                    # 匯出為 Markdown
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# 預設關閉 — 模型自帶驗證循環
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

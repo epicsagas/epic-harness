@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">A self-evolving AI coding agent harness — 3 commands, 26 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
+<blockquote><p align="center">A self-evolving AI coding agent harness — 3 commands, 25 skills, 1 autonomous pipeline, learns from your failures.</p></blockquote>
 
 <p align="center"><b>Less to memorize. More intelligence per keystroke. Gets smarter every session.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-A Claude Code plugin that **consolidates 30+ commands into 3 commands + 26 auto-trigger skills**, and **evolves new skills** from your own failure patterns.
+A Claude Code plugin that **consolidates 30+ commands into 3 commands + 25 auto-trigger skills**, and **evolves new skills** from your own failure patterns.
 
 <p align="center">
   <img src="./assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # set to 0 to disable auto-launch
 auto_open = true  # open browser on first session
 ```
 
-Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+Screens: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (25) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -114,7 +114,7 @@ agy plugin install https://github.com/epicsagas/epic-harness
 agy plugin enable epic
 ```
 
-Skills (27), hooks, and the `harness-mem` MCP server are auto-discovered from the plugin's `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`.
+Skills (25), hooks, and the `harness-mem` MCP server are auto-discovered from the plugin's `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`.
 
 ### Binary-only (no plugin host)
 
@@ -255,7 +255,7 @@ Skills trigger automatically based on context. You don't invoke them.
 | **reflect** | On-demand: are you using AI as a thought amplifier? Cold evidence-based self-assessment |
 | **commit** | Conventional Commits generation — auto-generates from git diff |
 
-> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 26 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
+> **Token budget note:** Claude Code loads skill descriptions into every session context. epic's 25 skills fit within the default `skillListingBudgetFraction: 0.01` (1%). If you install additional skills (e.g. episteme, alcove, obscura), the combined total may exceed the budget and trigger a "descriptions dropped" warning. Add this to `~/.claude/settings.json` to fix it:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -483,7 +483,7 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 26 skills | Live |
+| **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 25 skills | Live |
 | **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
 | **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 26 | — |
 

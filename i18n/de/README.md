@@ -49,7 +49,7 @@ port = 7700       # auf 0 setzen, um Auto-Start zu deaktivieren
 auto_open = true  # Browser bei erster Session öffnen
 ```
 
-Bildschirme: **Dashboard** · /orbit Pipeline · Befehle (3) · Skills (26) · Live-Agents · Eval & Evolve · Hooks (6) · Integrationen (6) · harness-mem · Einstellungen
+Bildschirme: **Dashboard** · /orbit Pipeline · Befehle (3) · Skills (25) · Live-Agents · Eval & Evolve · Hooks (6) · Integrationen (6) · harness-mem · Einstellungen
 
 ---
 
@@ -298,8 +298,6 @@ Curate (Akzeptieren/Zusammenführen/Überspringen, Feedback vom Solver maskiert)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (Formatprüfung, Dedup, Limit 10, gesteuerte Beförderung ≥ 3 Sessions)
     ↓ evolved_backup/ (bester Checkpoint)
-Instinct (Erfolgreiche Muster → projektübergreifende memory.db-Knoten)
-    ↓
 Reload (nächste Session — Resume lädt entwickelte Skills)
 ```
 
@@ -315,11 +313,7 @@ Drei vom Deep Learning inspirierte Techniken, adaptiert von [SkillOpt](https://a
 |-----------|-------------|
 | **Negative Feedback Buffer** | Abgelehnte Vorschläge werden mit TTL-basiertem Ablauf gespeichert; zukünftige Vorschläge werden vor der Generierung gegen den Buffer geprüft |
 | **Minibatch Reflection** | Beobachtungen werden in Batches fester Größe für strukturelle Musterextraktion zerlegt; wiederverwendbar wenn dominanter Fehler ≥60% + ≥2 verschiedene Dateien |
-| **Slow/Meta Update** | Lineare Regression über die letzten 5 Sessions klassifiziert Epochen als Improving / Regressing / PersistentFailure / StableSuccess; unterperformierende Skills werden automatisch entfernt |
-
-### Prompt Auto-Tuning
-
-Unterperformierende entwickelte Skills erhalten zielgerichtete Tuning-Anleitungen, die nach dem `<!-- auto-tuned -->`-Trennzeichen angehängt werden. Der Originalinhalt wird niemals geändert. 3 aufeinanderfolgende absteigende Sessions → automatischer Rollback des Tunings, Verlauf gelöscht.
+| **Slow/Meta Update** | Lineare Regression über die letzten 5 Sessions klassifiziert Epochen als Improving / Regressing / PersistentFailure / StableSuccess; Attribution-Urteile werden nur in Dashboards gemeldet, nie automatisch erzwungen |
 
 ### Skill-Effektivität
 
@@ -346,15 +340,6 @@ Bei der ersten Session werden stack-gerechte Vorlagen-Skills automatisch angewen
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Instinct-Lernen
-
-Erfolgreiche Muster werden extrahiert und projektübergreifend gefördert:
-
-```
-observe (100% bestätigt) → extract_instincts() → Instinct-Knoten (Konfidenz ≥ 0.8)
-    → global fördern wenn in ≥ 2 Projekten beobachtet
-```
 
 ```bash
 /evolve              # Jetzt ausführen
@@ -399,7 +384,7 @@ Laufen unsichtbar bei jeder Session. Ein einzelnes Rust-Binary (`epic-harness`) 
 | **polish** | Nach Edit | Auto-Formatierung (Biome/Prettier/ruff/gofmt) + Typprüfung |
 | **observe** | Jede Tool-Nutzung | In `~/.harness/projects/{slug}/obs/` für Evolution protokollieren |
 | **snapshot** | Vor Compact | Zustand in `~/.harness/projects/{slug}/sessions/` speichern |
-| **reflect** | Session-Ende | Fehler analysieren, entwickelte Skills seeden, prüfen, Instincts extrahieren |
+| **reflect** | Session-Ende | Fehler analysieren, entwickelte Skills seeden, prüfen |
 
 Polish meldet Ergebnisse zurück an observe: Formatierungsfehler → `lint_fail`, TypeScript-Fehler → `build_fail`. Edit→Error-Thrashing wird sogar erkannt, wenn die Fehler aus polish stammen.
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Nach Markdown exportier
 | `resolution` | Manuell / MCP | 0.8 |
 | `concept` | Manuell / MCP | 0.7 |
 | `project` | Manuell / MCP | 0.7 |
-| `instinct` | Auto (reflect) | 0.7 |
 | `pattern` | Auto (reflect) | 0.5 |
 | `error` | Auto (reflect) | 0.4 |
 | `session` | Auto (reflect) | 0.2 |
@@ -617,7 +601,8 @@ Alle einstellbaren Parameter in `~/.harness/config.toml`. Fehlt = fest codierte 
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# Standard: aus — Modelle führen ihre eigenen Verifikationsschleifen aus
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [Erfolg, Qualität, Kosten]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

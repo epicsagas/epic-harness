@@ -38,6 +38,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   subcommand; seeding happens idempotently in `epic resume`.
 
 ### Changed
+- **Model-class awareness**: new `[model]` config section (`class: auto|frontier|light`,
+  auto-detected from `ANTHROPIC_MODEL`/`CLAUDE_MODEL`/…). Frontier-class runs scale
+  pattern thresholds (`frontier_threshold_scale`, default ×2 — a frontier failure
+  streak is a stronger signal), skip template skill-body injection, and tune the
+  injection budget (`inject_per_skill_chars` / `inject_total_chars`).
+- **Synthesis-only injection for frontier models**: seeded skills carry a
+  `synthesized` flag (set by `evolve accept-synth`); template bodies are withheld
+  from SessionStart injection on frontier-class models and announced as
+  "awaiting accept-synth". `resume` also prints the pending-synthesis backlog
+  count to stdout (stderr hints never reached the model — the loop only closed
+  if a host ran `/evolve` on its own).
+- **vuln-scan rewritten reasoning-first**: trust-boundary mapping → data-flow
+  tracing → sink-context encoding judgment; grep demoted to a candidate
+  accelerator (never a finding source); framework-specific raw-escape sinks
+  (Knex/Prisma/SQLAlchemy/Sequelize/Django/Rails) added; findings must cite
+  source→sink chain; clean scans must name traced entry points.
+- **SWE-bench main run unblocked**: `benchmarks/ab/build_manifest.py` samples the
+  preregistered difficulty bands into the `manifest.jsonl` `run_swebench.sh`
+  consumes (deterministic per seed). Note: the current map holds only 3 B4
+  instances, so a 5/band pilot needs `--bands B1,B2,B3`.
+- Skill counts unified at 25 across README, AGENTS.md, plugin.json, and all
+  9 i18n locales (was a 26/27/19 mix); i18n locales synced with the removed
+  features (prompt auto-tuning, instincts) and new wording.
 - **polish tsc runs incremental + debounced** (5 s, per-workspace tsbuildinfo
   in the temp dir) and resolves the workspace-local `tsc` binary directly —
   no more blocking full `npx tsc` on every TS edit.

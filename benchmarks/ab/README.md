@@ -54,6 +54,22 @@ MODELS="zai native ollama" ./benchmarks/ab/run_smoke.sh benchmarks/ab/tasks/task
 MODELS="zai native openai deepseek" DRY_RUN=1 ./benchmarks/ab/run_smoke.sh benchmarks/ab/tasks/task1-palindrome 12
 ```
 
+### SWE-bench main run — manifest
+
+`build_manifest.py` samples `difficulty_map.json` into the `manifest.jsonl`
+that `run_swebench.sh` consumes (deterministic per `--seed`):
+
+```bash
+python3 benchmarks/ab/build_manifest.py --list-bands              # pool sizes
+python3 benchmarks/ab/build_manifest.py --per-band 5 --seed 7     # pilot
+python3 benchmarks/ab/build_manifest.py --per-band 125 --seed 7   # full run
+MANIFEST=benchmarks/ab/manifest.jsonl ./benchmarks/ab/run_swebench.sh
+```
+
+Note: the current map has only 3 B4 ("hardest") instances — a 5/band pilot
+fails on B4; use `--bands B1,B2,B3 --per-band 5` or accept the B4 cap.
+
+
 Precedence: the 3rd positional arg (single profile) wins over `MODELS`. With
 neither set, the default is `zai`.
 

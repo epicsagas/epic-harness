@@ -298,8 +298,6 @@ Curate (Accept/Merge/Skip, feedback masked from solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
     ↓ evolved_backup/ (best checkpoint)
-Instinct (high-success patterns → cross-project memory.db nodes)
-    ↓
 Reload (next session — resume loads evolved skills)
 ```
 
@@ -315,11 +313,7 @@ Reload (next session — resume loads evolved skills)
 |------|--------|
 | **ネガティブフィードバックバッファ** | 拒否された提案をTTLベースの有効期限付きで保存; 将来の提案は生成前にバッファと照合 |
 | **ミニバッチリフレクション** | 観測を固定サイズのバッチに分解して構造的パターンを抽出; 優位エラー ≥60% + ≥2の異なるファイルで再利用可能 |
-| **スロー/メタアップデート** | 直近5セッションの線形回帰でエポックを Improving / Regressing / PersistentFailure / StableSuccess に分類; パフォーマンス低下スキルを自動排除 |
-
-### プロンプト自動チューニング
-
-パフォーマンス低下の進化スキルは、`<!-- auto-tuned -->` 区切り文字の後にターゲット調整ガイダンスが追加されます。元のコンテンツは一切変更されません。3回連続でスコアが低下 → 自動ロールバックでチューニングを巻き戻し、履歴をクリア。
+| **スロー/メタアップデート** | 直近5セッションの線形回帰でエポックを Improving / Regressing / PersistentFailure / StableSuccess に分類; 属性判定はダッシュボードに表示されるのみで、自動適用されない |
 
 ### スキル有効性
 
@@ -346,15 +340,6 @@ Reload (next session — resume loads evolved skills)
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### 本能学習
-
-高成功率のパターンが抽出され、プロジェクト横断で促進されます:
-
-```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → promote to global when observed in ≥ 2 projects
-```
 
 ```bash
 /evolve              # 今すぐ実行
@@ -399,7 +384,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | 編集後 | 自動フォーマット（Biome/Prettier/ruff/gofmt）+ 型チェック |
 | **observe** | すべてのツール使用時 | `~/.harness/projects/{slug}/obs/` にログを記録（進化用） |
 | **snapshot** | compact前 | `~/.harness/projects/{slug}/sessions/` に状態を保存 |
-| **reflect** | セッション終了 | 失敗を分析、進化スキルをシード、ゲート、本能を抽出 |
+| **reflect** | セッション終了 | 失敗を分析、進化スキルをシード、ゲート |
 
 Polishはobserveにフィードバックします: フォーマット失敗 → `lint_fail`、TypeScriptエラー → `build_fail`。polishからエラーが来る場合でも、Edit→Errorスラッシングが検出されます。
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
 | `resolution` | 手動 / MCP | 0.8 |
 | `concept` | 手動 / MCP | 0.7 |
 | `project` | 手動 / MCP | 0.7 |
-| `instinct` | 自動（reflect） | 0.7 |
 | `pattern` | 自動（reflect） | 0.5 |
 | `error` | 自動（reflect） | 0.4 |
 | `session` | 自動（reflect） | 0.2 |
@@ -617,7 +601,8 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# デフォルトはオフ — モデルは自身の検証ループを実行する
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

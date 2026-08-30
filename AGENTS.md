@@ -1,10 +1,10 @@
 # epic-harness
 
-26 skills (9 pipeline + 17 quality) + self-evolving agent harness.
+25 skills (8 pipeline + 17 quality) + self-evolving agent harness.
 
 ## Structure
 
-- `skills/` — 27 skills + `_dispatch` router + `_critic` reviewer
+- `skills/` — 25 skills + `_dispatch` router + `_critic` reviewer
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
   - `presets/` — Cold-start skill templates
   - `rules/` — Seeded host rule files
@@ -132,6 +132,21 @@ warned:
 Opt-in by creating `~/.harness/projects/{slug}/.cross-project-enabled`.
 On session end, patterns export to `~/.harness/global_patterns.jsonl`.
 On next session start, weak patterns from other projects shown as hints.
+
+## Model Class Awareness
+
+`[model]` in `config.toml` scales the harness to the model in use
+(`class: auto` detects from `ANTHROPIC_MODEL`/`CLAUDE_MODEL`/etc.):
+
+- **Thresholds**: frontier-class failure streaks are stronger signals —
+  pattern thresholds (`repeated_error_min`, `debug_loop_min`, `thrash_*`)
+  scale by `frontier_threshold_scale` (default ×2).
+- **Injection**: frontier-class sessions inject only synthesized skill
+  bodies (template bodies are withheld and announced as awaiting
+  `accept-synth`); light-class sessions inject templates too.
+  `inject_templates: true|false` overrides per class.
+- **Budget**: `inject_per_skill_chars` / `inject_total_chars` cap the
+  SessionStart stdout injection.
 
 ## Skill Attribution (Holdout A/B)
 

@@ -49,7 +49,7 @@ port = 7700       # 0으로 설정하면 자동 실행 비활성화
 auto_open = true  # 첫 세션에서 브라우저 열기
 ```
 
-화면: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+화면: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (25) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -298,8 +298,6 @@ Curate (Accept/Merge/Skip, solver에게 피드백 마스킹)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (포맷 검사, 중복 제거, 10개 상한, 3세션 이상 게이티드 프로모션)
     ↓ evolved_backup/ (최적 체크포인트)
-Instinct (고성공 패턴 → 크로스 프로젝트 memory.db 노드)
-    ↓
 Reload (다음 세션 — resume이 진화 스킬 로드)
 ```
 
@@ -315,11 +313,7 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 |------|----------|
 | **Negative Feedback Buffer** | 거부된 제안을 TTL 기반 만료와 함께 저장; 향후 제안 생성 전 버퍼를 확인 |
 | **Minibatch Reflection** | 관측값을 고정 크기 배치로 분해하여 구조적 패턴 추출; 지배적 에러 ≥60% + ≥2개 이상의 서로 다른 파일일 때 재사용 가능 |
-| **Slow/Meta Update** | 최근 5개 세션에 대한 선형 회귀로 에포크를 Improving / Regressing / PersistentFailure / StableSuccess로 분류; 성과가 낮은 스킬 자동 퇴출 |
-
-### 프롬프트 자동 튜닝
-
-성과가 낮은 진화 스킬은 `<!-- auto-tuned -->` 구분자 뒤에 타겟팅된 튜닝 가이드가 추가됩니다. 원본 콘텐츠는 수정되지 않습니다. 3세션 연속 하락 시 → 튜닝 자동 롤백, 이력 초기화.
+| **Slow/Meta Update** | 최근 5개 세션에 대한 선형 회귀로 에포크를 Improving / Regressing / PersistentFailure / StableSuccess로 분류; attribution 판정은 대시보드에 표시만 될 뿐 자동 적용되지 않음 |
 
 ### 스킬 효과
 
@@ -346,15 +340,6 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Instinct 학습
-
-고성공 패턴이 추출되어 프로젝트 간 공유됩니다:
-
-```
-observe (100% 확인) → extract_instincts() → instinct 노드 (confidence ≥ 0.8)
-    → 2개 이상 프로젝트에서 관측 시 글로벌로 프로모션
-```
 
 ```bash
 /evolve              # 지금 실행
@@ -399,7 +384,7 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 | **polish** | Edit 후 | 자동 포맷 (Biome/Prettier/ruff/gofmt) + 타입체크 |
 | **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 진화용 로깅 |
 | **snapshot** | compact 전 | `~/.harness/projects/{slug}/sessions/`에 상태 저장 |
-| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트, instinct 추출 |
+| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트 |
 
 polish는 observe로 피드백됩니다: 포맷 실패 → `lint_fail`, TypeScript 에러 → `build_fail`. Edit→Error 쓰래싱은 에러가 polish에서 발생해도 감지됩니다.
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 | `resolution` | 수동 / MCP | 0.8 |
 | `concept` | 수동 / MCP | 0.7 |
 | `project` | 수동 / MCP | 0.7 |
-| `instinct` | 자동 (reflect) | 0.7 |
 | `pattern` | 자동 (reflect) | 0.5 |
 | `error` | 자동 (reflect) | 0.4 |
 | `session` | 자동 (reflect) | 0.2 |
@@ -617,7 +601,8 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# 기본값 false — 모델은 자체 검증 루프를 수행함
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

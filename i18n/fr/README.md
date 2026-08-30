@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 3 commandes, 26 skills, 1 pipeline autonome, apprend de vos echecs.</p></blockquote>
+<blockquote><p align="center">Un harnais d'agent de codage IA auto-evolutif — 3 commandes, 25 skills, 1 pipeline autonome, apprend de vos echecs.</p></blockquote>
 
 <p align="center"><b>Moins a memoriser. Plus d'intelligence par frappe. Devient plus intelligent a chaque session.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 26 skills a declenchement automatique**, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
+Un plugin Claude Code qui **consolide plus de 30 commandes en 3 commandes + 25 skills a declenchement automatique**, et **genere de nouvelles competences** a partir de vos propres schemas d'echec.
 
 <p align="center">
   <img src="./assets/features.png" alt="fonctionnalites epic harness" width="100%" />
@@ -113,7 +113,7 @@ Les skills et agents sont disponibles immédiatement — aucune étape suppléme
 agy plugin install .
 ```
 
-Les 27 skills, les hooks et le serveur MCP `harness-mem` sont découverts automatiquement depuis `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` du plugin.
+Les 25 skills, les hooks et le serveur MCP `harness-mem` sont découverts automatiquement depuis `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` du plugin.
 
 ### Binaire uniquement (sans hôte de plugin)
 
@@ -254,7 +254,7 @@ Les competences se declenchent automatiquement en fonction du contexte. Vous ne 
 | **reflect** | A la demande : utilisez-vous l'IA comme amplificateur de pensee ? Auto-evaluation basee sur des preuves froides |
 | **commit** | Generation Conventional Commits — cree automatiquement depuis git diff |
 
-> **Note sur le budget de tokens :** Claude Code charge les descriptions de competences dans chaque contexte de session. Les 26 skills d'epic s'inscrivent dans le `skillListingBudgetFraction: 0.01` par defaut (1 %). Si vous installez des competences supplementaires (par ex. episteme, alcove, obscura), le total combine peut depasser le budget et declencher un avertissement « descriptions dropped ». Ajoutez ceci a `~/.claude/settings.json` pour corriger :
+> **Note sur le budget de tokens :** Claude Code charge les descriptions de competences dans chaque contexte de session. Les 25 skills d'epic s'inscrivent dans le `skillListingBudgetFraction: 0.01` par defaut (1 %). Si vous installez des competences supplementaires (par ex. episteme, alcove, obscura), le total combine peut depasser le budget et declencher un avertissement « descriptions dropped ». Ajoutez ceci a `~/.claude/settings.json` pour corriger :
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -298,8 +298,6 @@ Curate (Accepter/Fusionner/Ignorer, retour masque au solveur)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (verification de format, dedoublonnage, plafond 10, promotion controlee ≥ 3 sessions)
     ↓ evolved_backup/ (meilleur point de controle)
-Instinct (schemas a fort taux de succes → noeuds memory.db inter-projets)
-    ↓
 Reload (prochaine session — resume charge les competences evoluees)
 ```
 
@@ -315,11 +313,7 @@ Trois techniques inspirees de l'apprentissage profond adaptees de [SkillOpt](htt
 |-----------|----------------------|
 | **Tampon de retour negatif** | Les propositions rejetees sont stockees avec une expiration basee sur un TTL ; les propositions futures sont verifiees par rapport au tampon avant generation |
 | **Reflexion par mini-lots** | Les observations sont decomposees en lots de taille fixe pour l'extraction de schemas structurels ; reutilisable quand l'erreur dominante ≥60 % + ≥2 fichiers distincts |
-| **Mise a jour lente/meta** | Une regression lineaire sur les 5 dernieres sessions classifie les epoques comme Improving / Regressing / PersistentFailure / StableSuccess ; supprime automatiquement les competences sous-performantes |
-
-### Auto-reglage des prompts
-
-Les competences evoluees sous-performantes recoivent des conseils de reglage cibles ajoutes apres le delimiteur `<!-- auto-tuned -->`. Le contenu original n'est jamais modifie. 3 sessions consecutives en baisse → retour automatique du reglage, historique efface.
+| **Mise a jour lente/meta** | Une regression lineaire sur les 5 dernieres sessions classifie les epoques comme Improving / Regressing / PersistentFailure / StableSuccess ; les verdicts d'attribution sont rapportes dans les dashboards, jamais appliques automatiquement |
 
 ### Efficacite des competences
 
@@ -346,15 +340,6 @@ Lors de la premiere session, des competences preset adaptees a la pile s'appliqu
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Apprentissage par instinct
-
-Les schemas a fort taux de succes sont extraits et promus entre projets :
-
-```
-observe (100 % confirme) → extract_instincts() → noeud instinct (confiance ≥ 0.8)
-    → promu au niveau global quand observe dans ≥ 2 projets
-```
 
 ```bash
 /evolve              # Executer maintenant
@@ -399,7 +384,7 @@ S'executent de maniere invisible a chaque session. Binaire Rust unique (`epic-ha
 | **polish** | Apres Edit | Formatage automatique (Biome/Prettier/ruff/gofmt) + verification de types |
 | **observe** | Chaque utilisation d'outil | Journaliser vers `~/.harness/projects/{slug}/obs/` pour l'evolution |
 | **snapshot** | Avant compactage | Sauvegarder l'etat vers `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fin de session | Analyser les echecs, seeding des competences evoluees, controle, extraire les instincts |
+| **reflect** | Fin de session | Analyser les echecs, seeding des competences evoluees, controle |
 
 Polish alimente observe : echec de formatage → `lint_fail`, erreur TypeScript → `build_fail`. Le va-et-vient Edition→Erreur est detecte meme lorsque les erreurs proviennent de polish.
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Exporter en Markdown
 | `resolution` | Manuel / MCP | 0.8 |
 | `concept` | Manuel / MCP | 0.7 |
 | `project` | Manuel / MCP | 0.7 |
-| `instinct` | Auto (reflect) | 0.7 |
 | `pattern` | Auto (reflect) | 0.5 |
 | `error` | Auto (reflect) | 0.4 |
 | `session` | Auto (reflect) | 0.2 |
@@ -617,7 +601,8 @@ Tous les parametres ajustables dans `~/.harness/config.toml`. Absent = valeurs p
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# Desactive par defaut — les modeles executent leurs propres boucles de verification
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [succes, qualite, cout]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>
