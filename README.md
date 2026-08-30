@@ -299,8 +299,6 @@ Curate (Accept/Merge/Skip, feedback masked from solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
     ↓ evolved_backup/ (best checkpoint)
-Instinct (high-success patterns → cross-project memory.db nodes)
-    ↓
 Reload (next session — resume loads evolved skills)
 ```
 
@@ -316,11 +314,7 @@ Three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.or
 |-----------|-------------|
 | **Negative Feedback Buffer** | Rejected proposals stored with TTL-based expiry; future proposals checked against buffer before generation |
 | **Minibatch Reflection** | Observations decomposed into fixed-size batches for structural pattern extraction; reusable when dominant error ≥60% + ≥2 distinct files |
-| **Slow/Meta Update** | Linear regression over last 5 sessions classifies epochs as Improving / Regressing / PersistentFailure / StableSuccess; auto-evicts underperforming skills |
-
-### Prompt Auto-Tuning
-
-Underperforming evolved skills receive targeted tuning guidance appended after `<!-- auto-tuned -->` delimiter. Original content is never modified. 3 consecutive declining sessions → auto-rollback tuning, history cleared.
+| **Slow/Meta Update** | Linear regression over last 5 sessions classifies epochs as Improving / Regressing / PersistentFailure / StableSuccess; attribution verdicts are reported in dashboards, never auto-enforced |
 
 ### Skill Effectiveness (Holdout A/B)
 
@@ -339,8 +333,9 @@ not a derived guess from pre-creation history.
 | evo-bash-discipline| 0.65 | 0.68    | 3         | -3%   |
 ```
 
-Positive delta = effective. Negative delta with ≥3 active and ≥2 holdout
-sessions → auto-evicted. Manual removal: `/evolve rollback`.
+Positive delta = effective. A skill trailing its holdout arm (≥3 active and
+≥2 holdout sessions) is flagged in dashboards — never auto-evicted. Manual
+removal: `/evolve rollback`.
 
 ### Cold-Start Presets
 
@@ -352,15 +347,6 @@ On first session, stack-appropriate preset skills auto-apply:
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Instinct Learning
-
-High-success patterns extracted and promoted across projects:
-
-```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → promote to global when observed in ≥ 2 projects
-```
 
 ```bash
 /evolve              # Run now
@@ -432,7 +418,7 @@ Run invisibly on every session. Single Rust binary (`epic-harness`) with subcomm
 | **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Session end | Analyze failures, seed evolved skills, gate, extract instincts |
+| **reflect** | Session end | Analyze failures, seed evolved skills, gate |
 
 Polish feeds back into observe: format failure → `lint_fail`, TypeScript error → `build_fail`. Edit→Error thrashing gets detected even when errors come from polish.
 
@@ -594,7 +580,6 @@ epic mem export --out ./docs/memory                    # Export to Markdown
 | `resolution` | Manual / MCP | 0.8 |
 | `concept` | Manual / MCP | 0.7 |
 | `project` | Manual / MCP | 0.7 |
-| `instinct` | Auto (reflect) | 0.7 |
 | `pattern` | Auto (reflect) | 0.5 |
 | `error` | Auto (reflect) | 0.4 |
 | `session` | Auto (reflect) | 0.2 |
@@ -650,7 +635,7 @@ All tunable parameters in `~/.harness/config.toml`. Absent = hardcoded defaults.
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+gateguard_hints = false      # static post-edit hints; enable for extra nudges
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -666,13 +651,6 @@ gated_promotion_min = 3
 # debug_loop_min = 5
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
-
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

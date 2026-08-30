@@ -11,7 +11,7 @@ While other harnesses expand breadth with 20-37 commands, epic-harness takes a d
 1. **Minimal Surface Area**: 30+ commands compressed to 8. The rest are auto-triggered (Ring 2) or learned from observation (Ring 3).
 2. **Observability**: Every tool call is quantitatively scored on 3 axes. Decisions are data-driven, not gut-driven.
 3. **Safe Evolution**: Evolved skills must survive gating (validation + cap + stagnation rollback). Static skills always take priority.
-4. **Zero Dependencies**: Only Node.js built-in modules. No install burden.
+4. **Zero Runtime Burden**: Single Rust binary + JS bootstrap (Node built-ins only). No install deps.
 
 ## 4-Ring Model
 
@@ -230,7 +230,7 @@ Invalid skills are automatically removed with a log message. This prevents malfo
 |-------|---------|--------|
 | 6 commands | 23+ commands (gstack) | Minimize surface area. The rest is automated. |
 | 7 tools (Claude Code + 6) | Universal cross-harness support | Deep hook integration required for full Ring 0 on each tool. |
-| JS single runtime | Python/Bun multi-runtime | Zero dependencies + simple install. |
+| Rust single binary (JS bootstrap only) | Python/Bun multi-runtime | One static binary; no runtime install burden. |
 | File+function tracking | Symbol-level tracking (Serena) | No LSP dependency. Function names via grep-level regex. |
 | Heuristic evolution | ML-based evolution (A-Evolve) | Hook execution time constraint + interpretability. |
 
@@ -329,50 +329,34 @@ Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node 
 
 ```
 epic-harness/
-├── skills/            # 22 skills (8 pipeline + 14 quality + dispatch)
-│   ├── _dispatch/SKILL.md    ← central dispatcher
-│   │
-│   │── Ring 1: Pipeline Skills (8)
-│   ├── discover/SKILL.md
-│   ├── spec/SKILL.md
-│   ├── go/SKILL.md
-│   ├── audit/SKILL.md
-│   ├── ship/SKILL.md
-│   ├── orbit/SKILL.md
-│   ├── evolve/SKILL.md
-│   └── team/SKILL.md
-│
-│   │── Ring 2: Quality Gates (13)
-│   ├── tdd/SKILL.md
-│   ├── debug/SKILL.md
-│   ├── secure/SKILL.md
-│   ├── perf/SKILL.md
-│   ├── simplify/SKILL.md
-│   ├── document/SKILL.md
-│   ├── verify/SKILL.md
-│   ├── context/SKILL.md
-│   ├── council/SKILL.md
-│   ├── reflect/SKILL.md
-│   ├── commit/SKILL.md
-│   ├── orchestrate/SKILL.md
-│   └── agent-introspection/SKILL.md
-├── agents/            # Internal agents (used by /go, /audit)
-│   ├── builder.md
-│   ├── reviewer.md
-│   ├── auditor.md
-│   └── planner.md
-├── hooks/             # Ring 0 + Ring 3
-│   ├── hooks.json     ← hook registration (Claude Code)
-│   ├── bin/
-│   │   └── epic-harness  ← Rust single binary
-├── integrations/      # embedded assets
-│   └── common/
-│       └── HARNESS.md  # embedded via include_str!, seeded to ~/.harness/
-├── references/        # Checklists
-│   ├── security.md
-│   ├── performance.md
-│   ├── testing.md
-│   └── team-patterns.md
-├── tests/             # Node.js built-in test runner
-└── CLAUDE.md          # Project context
+├── skills/            # 27 skills (pipeline + quality gates + _dispatch router + _critic)
+│   └── */SKILL.md     # one directory per skill
+├── registry/          # Seeding resources (embedded in the Rust binary at compile time)
+│   ├── presets/       # Cold-start skill templates per stack
+│   ├── rules/         # Seeded host rule files
+│   └── scripts/       # install.js plugin bootstrap
+├── hooks.json         # Antigravity/Codex-style host hook wiring (repo root)
+├── .claude-plugin/    # Claude Code plugin manifest + hooks.json + marketplace.json
+├── .codex-plugin/     # Codex plugin manifest
+├── mcp_config.json    # harness-mem MCP server wiring
+├── integrations/common/
+│   └── HARNESS.md     # embedded via include_str!, self-seeded to ~/.harness/
+├── src/               # Rust crate — single binary (`epic-harness`)
+│   ├── main.rs        # CLI dispatch (hooks, mem, team, eval, orbit, serve, ...)
+│   ├── hooks/         # Ring 0: guard, polish, observe, resume, snapshot, reflect
+│   ├── evolve/        # Ring 3: analysis, skills, metrics, critic, synthesis, seesaw...
+│   ├── store/         # SQLite persistence (observations, metrics, evolution, orbit)
+│   ├── mem/           # Unified memory graph (SQLite + FTS5)
+│   ├── eval/          # Eval runner, baselines, reports
+│   ├── orchestrate/   # Multi-agent orchestration state
+│   ├── team/          # `epic team` org/team designer
+│   ├── shared/        # types, classification, paths, sanitization, orbit state
+│   ├── serve.rs       # Dashboard server
+│   ├── config.rs      # ~/.harness/config.toml
+│   └── telemetry.rs   # PostHog + Sentry (opt-out)
+├── docs/              # architecture, quickstart, references/, specs/, demo/
+├── benchmarks/        # bare-vs-epic A/B harness + baselines
+├── app/               # Svelte dashboard (builds to assets/dashboard.html)
+├── src-tauri/         # Desktop dashboard shell
+└── AGENTS.md          # Project context
 ```

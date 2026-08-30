@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Green test runs no longer recorded as failures**: the `test_fail`
+  classifier's `test.*fail` pattern matched green cargo summaries
+  ("test result: ok. 5 passed; 0 failed;"), poisoning every Rust project's
+  observation data (success rates, pattern detection, skill attribution).
+  Now matches non-zero failure counts only.
+- **Guard blocks `git push -f origin main`** and every other force-push
+  flag/ordering (`--force` after the ref, `--force-with-lease`, `-C` before
+  `push`) — the old single-pattern rule only caught literal
+  `--force <remote> main`.
+- **reflect JSONL fallback actually engages** when the SQLite read fails —
+  it previously returned early and silently dropped the whole evolution round.
+- **Polish feedback reaches reflect**: polish results are written to SQLite
+  (primary) with JSONL fallback, matching observe — the JSONL-only path was
+  never read by reflect, so the documented Polish→Observe feedback loop was
+  dead.
+- **Seesaw gate no longer self-blocks**: digests from non-orbit sessions
+  ("session"/"segment-N" ids, reused across days) are skipped — the max-only
+  registry converged to 1.0 and then blocked all seeding forever.
+- **Evolved skills re-inject after compaction**: the resume lock is keyed by
+  `session_id + SessionStart source`, so `compact`/`clear` re-inject while
+  plain `startup` still runs once per session.
+- **`epic orbit lock|unlock`** — concurrent-orbit guard actually exists now
+  (the previous comment claimed one that didn't). `skills/orbit` Step 0
+  acquires it; stale locks are reclaimable once no pipeline is `running`.
+- **Headless-safe CLI**: only hook subcommands read stdin — `epic orbit
+  lock`, `epic slug` etc. no longer hang when stdin is an open pipe.
+- `registry/scripts/install.js` no longer calls the removed `install`
+  subcommand; seeding happens idempotently in `epic resume`.
+
+### Changed
+- **polish tsc runs incremental + debounced** (5 s, per-workspace tsbuildinfo
+  in the temp dir) and resolves the workspace-local `tsc` binary directly —
+  no more blocking full `npx tsc` on every TS edit.
+- **Attribution verdicts are reported, not enforced**: a skill trailing its
+  holdout arm is flagged in dashboards, never auto-deleted (3-vs-2 samples
+  carry less evidence than session-difficulty variance).
+- `gateguard_hints` default off — frontier models run their own verification
+  loops; static post-edit hints were noise.
+- `skills/_dispatch` trimmed: clear-signal-only triggering, dead routing rows
+  and the unwritten psychographic section removed; `skills/context` defers
+  compaction timing to the host; `skills/simplify` trigger raised to
+  500 lines.
+- reflect bounds its landscape history read to the last 100 records.
+- Stale `resume.*.lock` files pruned (7 days) on session start.
+
+### Removed
+- Dead evolution code (~1,300 lines): `auto_tune_skills` and prompt-tuning
+  infrastructure, the instincts extract/promote pipeline (promotion required
+  ≥2 projects but extraction always produced one), unwired
+  `ModifySkill`/`AddGuardRule`/`AddInstinct`/`ModifyConfig` edit types and
+  their guard-rule editor, the `processor` hook wrapper, and the
+  `[instinct]` config section (existing keys are ignored, not an error).
+
 ## [0.8.2] — 2026-07-09
 
 ### Changed

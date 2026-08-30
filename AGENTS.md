@@ -4,12 +4,14 @@
 
 ## Structure
 
-- `skills/` — 26 skills + _dispatch engine
+- `skills/` — 27 skills + `_dispatch` router + `_critic` reviewer
 - `registry/` — Seeding resources (embedded in Rust binary at compile time)
   - `presets/` — Cold-start skill templates
-- `hooks/` — Ring 0 automation + Ring 3 evolution loop
-  - `hooks/bin/epic-harness` — Rust single binary
-- `src/hooks/` — Rust source (common, guard, observe, polish, resume, snapshot, reflect)
+  - `rules/` — Seeded host rule files
+  - `scripts/install.js` — Plugin bootstrap (SessionStart)
+- `src/` — Rust crate; single binary (`epic-harness`)
+  - `src/hooks/` — Ring 0 automation (guard, polish, observe, resume, snapshot, reflect)
+  - `src/evolve/` — Ring 3 evolution loop
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
 - `integrations/common/` — `HARNESS.md` embedded into the binary (`include_str!`), self-seeded to `~/.harness/HARNESS.md`
@@ -100,7 +102,7 @@ Auto-validated by `gate_skills()` in reflect:
 Static skills (tdd, debug, secure, etc.) always take priority over evolved skills. Evolved skills supplement only.
 
 ### Skill Structure
-All static skills include 4 core sections:
+Core quality-gate skills (tdd, debug, secure, verify, ...) include 4 sections:
 - **Process**: Step-by-step execution procedure
 - **Anti-Rationalization**: Excuse | Rebuttal | What to do instead (table)
 - **Evidence Required**: Checklist of proof needed for completion claims
@@ -143,8 +145,10 @@ Per-evolved-skill effectiveness is measured with a genuine counterfactual:
   averages holdout-arm sessions (`sessions_holdout` counts them).
 - Skills seeded during a session are NOT credited with that session's score —
   attribution uses the pre-seed skill listing.
-- Eviction requires evidence from BOTH arms: `sessions_active >= 3`,
-  `sessions_holdout >= 2`, and `avg_score_with < avg_score_without - 0.02`.
+- A skill trailing its holdout arm (`sessions_active >= 3`,
+  `sessions_holdout >= 2`, `avg_score_with < avg_score_without - 0.02`) is
+  **flagged in dashboards** — it is not auto-evicted. Statistical deletion at
+  these sample sizes destroyed healthy skills on easy-holdout-day noise.
 - After `attribution_eval_sessions` (default 12) total samples the verdict is
   settled: survivors stay active every session.
 
@@ -202,14 +206,7 @@ Three deep learning-inspired techniques adapted from [SkillOpt](https://arxiv.or
 ### Slow/Meta Update
 - Epoch classification via linear regression over last 5 sessions: `Improving` / `Regressing` / `PersistentFailure` / `StableSuccess`
 - `meta.json` per evolved skill tracks `slow_updates` array (capped at 20)
-- Auto-eviction: `sessions_active ≥ 3 && avg_score_with < avg_score_without - 0.02` → remove + add to rejected buffer
-
-### Prompt Auto-Tuning
-- Underperforming evolved skills (where `avg_score_with < avg_score_without`) receive targeted tuning guidance
-- Tuning sections appended after `<!-- auto-tuned -->` delimiter in SKILL.md — original content never modified
-- Auto-rollback: 3 consecutive declining sessions → tuning stripped, history cleared
-- History tracked in `SkillMeta.prompt_tuning_history` (capped at 10 entries per skill)
-- Entry point: `auto_tune_skills(metrics)` in `src/evolve/skills.rs`
+- Attribution verdicts are **reported, not enforced**: a skill whose `avg_score_with` trails its holdout `avg_score_without` (beyond `sessions_active >= 3`, `sessions_holdout >= 2`, delta 0.02) is flagged in dashboards but never auto-deleted — 3-vs-2 samples carry less evidence than session-difficulty variance
 
 ## Security Pipeline (Ring 2)
 
