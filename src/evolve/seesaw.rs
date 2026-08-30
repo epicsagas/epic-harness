@@ -65,10 +65,32 @@ pub fn scores_from_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
         .collect()
 }
 
+/// Synthetic task ids are reused across days for non-orbit sessions (the
+/// digester labels them "session" / "segment-N"). Comparing them against the
+/// max-only registry eventually blocks all seeding: the best score converges
+/// to 1.0, then any ordinary partial-failure day exceeds the tolerance. Only
+/// digests from real pipeline runs (unique timestamped pipeline_id) are
+/// seesaw-gated.
+fn is_synthetic_task_id(id: &str) -> bool {
+    id == "session" || id.starts_with("segment-")
+}
+
+/// Per-task scores from digests, excluding synthetic non-orbit task ids
+/// ("session"/"segment-N" — reused across days, meaningless in the registry).
+pub fn scores_from_pipeline_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
+    scores_from_digests(digests)
+        .into_iter()
+        .filter(|(id, _)| !is_synthetic_task_id(id))
+        .collect()
+}
+
 /// Check a candidate round's digests against the registry.
 /// Returns the list of regressed task_ids (empty = passes the gate).
 pub fn check(reg: &SolvedTaskRegistry, digests: &[TaskDigest], tolerance: f64) -> Vec<String> {
-    let new_scores = scores_from_digests(digests);
+    let new_scores = scores_from_pipeline_digests(digests);
+    if new_scores.is_empty() {
+        return Vec::new();
+    }
     reg.check_seesaw(&new_scores, tolerance)
 }
 
@@ -153,6 +175,41 @@ mod tests {
         )];
         let regressed = check(&reg, &digests, DEFAULT_TOLERANCE);
         assert!(regressed.contains(&"A".to_string()));
+    }
+
+    #[test]
+    fn check_skips_synthetic_task_ids() {
+        // Regression: digester reuses "session"/"segment-N" labels across days
+        // for non-orbit sessions, so a converged best (1.0) + an ordinary
+        // partial-failure day used to block ALL seeding permanently.
+        let mut reg = SolvedTaskRegistry::default();
+        reg.update(&HashMap::from([
+            ("session".to_string(), 1.0),
+            ("segment-0".to_string(), 1.0),
+        ]));
+        let digests = vec![
+            digest(
+                "session",
+                TaskOutcome::PartialFailure {
+                    failed_steps: 3,
+                    total_steps: 10,
+                },
+                10,
+            ),
+            digest("segment-0", TaskOutcome::CompleteFailure, 5),
+        ];
+        assert!(check(&reg, &digests, DEFAULT_TOLERANCE).is_empty());
+        // Real pipeline ids are still gated.
+        let pipeline = vec![digest(
+            "PIPELINE-20260830T135758",
+            TaskOutcome::CompleteFailure,
+            5,
+        )];
+        reg.update(&HashMap::from([(
+            "PIPELINE-20260830T135758".to_string(),
+            1.0,
+        )]));
+        assert!(!check(&reg, &pipeline, DEFAULT_TOLERANCE).is_empty());
     }
 
     #[test]

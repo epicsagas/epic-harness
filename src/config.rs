@@ -14,7 +14,6 @@ pub struct HarnessConfig {
     pub scoring: ScoringConfig,
     pub evolution: EvolutionConfig,
     pub pattern: PatternConfig,
-    pub instinct: InstinctConfig,
     pub context: ContextConfig,
     pub dashboard: DashboardConfig,
     pub db: DbConfig,
@@ -180,33 +179,15 @@ pub struct PatternConfig {
     pub graduated_scope_moderate: f64,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct InstinctConfig {
-    /// Minimum confidence for an instinct to be considered for promotion.
-    pub confidence_threshold: f64,
-
-    /// Minimum number of projects where the pattern was observed
-    /// before promoting to global memory.
-    pub promotion_min_projects: usize,
-
-    /// Maximum number of instinct nodes stored globally.
-    pub max_instincts: usize,
-
-    /// Minimum session observations before instinct extraction runs.
-    pub min_observations: usize,
-
-    /// Minimum session avg_score before instinct extraction runs.
-    pub min_avg_score: f64,
-}
-
 // ── Defaults ────────────────────────────────────────
 
 impl Default for HookConfig {
     fn default() -> Self {
         Self {
             profile: "standard".into(),
-            gateguard_hints: true,
+            // Default off: frontier models run their own verification loops;
+            // static post-edit hints only add noise. Opt in via config.toml.
+            gateguard_hints: false,
         }
     }
 }
@@ -290,18 +271,6 @@ impl Default for PatternConfig {
             high_freq_error_min: 5,
             graduated_scope_skip: 0.95,
             graduated_scope_moderate: 0.80,
-        }
-    }
-}
-
-impl Default for InstinctConfig {
-    fn default() -> Self {
-        Self {
-            confidence_threshold: 0.8,
-            promotion_min_projects: 2,
-            max_instincts: 20,
-            min_observations: 10,
-            min_avg_score: 0.5,
         }
     }
 }
@@ -607,12 +576,13 @@ pub fn default_config_template() -> &'static str {
 # Override: EPIC_HOOK_PROFILE env var takes precedence over this value.
 profile = "standard"
 
-# Show file-type-aware investigation hints after Edit/Write.
+# Show file-type-aware investigation hints after Edit/Write (default false).
 # When true, outputs concrete verification questions like:
 #   .rs → "Run cargo check after this change"
 #   .ts → "Verify type compatibility — run tsc --noEmit"
-# Set to false if you find the hints noisy.
-gateguard_hints = true
+# Off by default: models already run their own verification loops, so the
+# static hints mostly add noise. Enable if you want the extra nudges.
+gateguard_hints = false
 
 # ── Scoring weights ─────────────────────────────────
 [scoring]
@@ -706,25 +676,6 @@ gated_promotion_min = 2
 # graduated_scope_skip = 0.95
 # graduated_scope_moderate = 0.80
 
-# ── Instinct learning ───────────────────────────────
-# High-success patterns extracted and promoted across projects.
-[instinct]
-# Minimum confidence for an instinct to be considered for global promotion.
-# confidence_threshold = 0.8
-
-# Number of distinct projects where the pattern must be observed
-# before promoting to global memory.
-# promotion_min_projects = 2
-
-# Maximum number of instinct nodes stored globally.
-# max_instincts = 20
-
-# Minimum session observations before instinct extraction runs.
-# min_observations = 10
-
-# Minimum session avg_score before instinct extraction runs.
-# min_avg_score = 0.5
-
 # ── Context sources ──────────────────────────────────
 [context]
 # Default sources included in reflect --context output.
@@ -790,7 +741,7 @@ mod tests {
     fn default_config_is_valid() {
         let c = HarnessConfig::default();
         assert_eq!(c.hook.profile, "standard");
-        assert!(c.hook.gateguard_hints);
+        assert!(!c.hook.gateguard_hints);
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
         assert_eq!(c.evolution.stagnation_limit, 3);
@@ -805,7 +756,6 @@ mod tests {
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.pattern.weak_ext_min_obs, 3);
-        assert_eq!(c.instinct.confidence_threshold, 0.8);
         assert_eq!(c.db.driver, "sqlite");
         assert!(c.db.harness_url.is_empty());
         assert!(c.db.memory_url.is_empty());
@@ -821,7 +771,7 @@ profile = "minimal"
 "#;
         let c: HarnessConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.hook.profile, "minimal");
-        assert!(c.hook.gateguard_hints); // default
+        assert!(!c.hook.gateguard_hints); // default
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]); // default
         assert_eq!(c.evolution.max_skills, 10); // default
     }
@@ -853,10 +803,6 @@ gated_promotion_min = 5
 repeated_error_min = 5
 debug_loop_min = 8
 graduated_scope_skip = 0.95
-
-[instinct]
-confidence_threshold = 0.9
-max_instincts = 10
 "#;
         let c: HarnessConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.hook.profile, "strict");
@@ -868,8 +814,6 @@ max_instincts = 10
         assert_eq!(c.pattern.repeated_error_min, 5);
         assert_eq!(c.pattern.debug_loop_min, 8);
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
-        assert_eq!(c.instinct.confidence_threshold, 0.9);
-        assert_eq!(c.instinct.max_instincts, 10);
     }
 
     #[test]
@@ -933,7 +877,7 @@ max_docs = 5
         let template = default_config_template();
         let c: HarnessConfig = toml::from_str(template).unwrap();
         assert_eq!(c.hook.profile, "standard");
-        assert!(c.hook.gateguard_hints);
+        assert!(!c.hook.gateguard_hints);
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
     }

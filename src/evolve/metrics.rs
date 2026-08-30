@@ -268,14 +268,6 @@ pub fn detect_reward_hacking(metrics: &Metrics) -> bool {
         && cost_slope > CONFIG.evolution.reward_hacking_cost_rise
 }
 
-/// Minimum exposed sessions before eviction may fire.
-const EVICTION_MIN_ACTIVE: u64 = 3;
-/// Minimum holdout sessions before eviction may fire. Without a real
-/// counterfactual sample, avg_score_without is legacy noise — never act on it.
-const EVICTION_MIN_HOLDOUT: u64 = 2;
-/// avg_score_with must trail avg_score_without by more than this to evict.
-const EVICTION_DELTA: f64 = 0.02;
-
 /// Stable FNV-1a over `skill|date` — deterministic across processes and
 /// builds, so resume (session start) and reflect (session end) independently
 /// compute the same holdout assignment for the day.
@@ -359,31 +351,16 @@ pub fn update_skill_attribution(
         );
     }
 
-    // SkillOpt negative feedback: evict skills that are demonstrably
-    // ineffective against their own holdout baseline.
-    let mut evicted: Vec<String> = Vec::new();
-    for (name, attr) in &metrics.skill_attribution {
-        if attr.sessions_active >= EVICTION_MIN_ACTIVE
-            && attr.sessions_holdout >= EVICTION_MIN_HOLDOUT
-            && attr.avg_score_with < attr.avg_score_without - EVICTION_DELTA
-        {
-            evicted.push(name.clone());
-        }
-    }
-    for name in &evicted {
-        // Remove from disk
-        let evolved = crate::shared::paths::evolved_dir();
-        let dir = evolved.join(name);
-        if dir.is_dir() {
-            crate::shared::helpers::rm_dir(&dir);
-            crate::evolve::skills::add_rejected(
-                name,
-                "ineffective_attribution",
-                0.0,
-                "attribution",
-            );
-        }
-    }
+    // Attribution verdicts are REPORTED, not enforced: a skill whose
+    // avg_score_with trails its holdout avg_score_without beyond the eviction
+    // thresholds is flagged in dashboards (verdict is derivable from the
+    // skill_attribution state below — with/without averages and session
+    // counts) but is no longer deleted from disk nor registered in the
+    // rejected buffer. 3-vs-2 samples with a 0.02 delta carry less evidence
+    // than session-to-session difficulty variance, so statistical eviction
+    // was destroying healthy skills on easy-holdout-day noise.
+    // The settled-verdict path (attribution_eval_sessions) is unchanged:
+    // after the eval window the skill simply stays active every session.
 
     metrics
         .skill_attribution
