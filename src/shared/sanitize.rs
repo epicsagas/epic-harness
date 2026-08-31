@@ -104,8 +104,12 @@ mod tests {
     /// home directory should survive into stored observations.
     #[test]
     fn outside_paths_are_still_masked() {
+        // The masked value is deliberately not interpolated into the failure
+        // message: printing the output of a masking function trips CodeQL's
+        // cleartext-logging rule, and the assertion is diagnostic without it.
         let masked = mask_path_action("/home/someone/secret/x.rs");
-        assert!(!masked.contains("someone"), "leaked home dir: {masked}");
+        assert!(!masked.contains("someone"), "home dir survived masking");
+        assert!(masked.contains("<PATH>"), "outside path was not masked");
     }
 
     #[test]
