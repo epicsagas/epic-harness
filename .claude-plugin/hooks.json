@@ -24,6 +24,18 @@
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic observe",
+            "async": true,
+            "timeout": 5
+          }
+        ],
+        "description": "Mark subagent running — PostToolUse alone only ever sees completion"
       }
     ],
     "PostToolUse": [
