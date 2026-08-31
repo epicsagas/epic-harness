@@ -626,6 +626,91 @@ pub fn read_org_from_agent_file(content: &str) -> Option<String> {
     read_frontmatter_field(content, "org:")
 }
 
+/// Read the `org` key from a Codex agent TOML file written by
+/// [`agent_md_to_codex_toml`]. Mirrors [`read_org_from_agent_file`] for the
+/// TOML form so `epic team status` can attribute Codex-only projects.
+pub fn read_org_from_codex_agent_toml(content: &str) -> Option<String> {
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("org")
+            && let Some(v) = rest.trim_start().strip_prefix('=')
+        {
+            let v = v.trim().trim_matches('"');
+            if !v.is_empty() {
+                return Some(v.to_string());
+            }
+        }
+        // Keys precede the instructions block; stop before scanning the body.
+        if line.starts_with("developer_instructions") {
+            break;
+        }
+    }
+    None
+}
+
+/// Escape a string for a TOML basic (double-quoted) value.
+fn toml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Render a Claude-style agent Markdown file as a Codex agent definition.
+///
+/// Codex loads agents from standalone TOML files keyed on `name`,
+/// `description` and `developer_instructions` — it cannot read the
+/// frontmatter Markdown Claude Code uses, so syncing the `.md` verbatim
+/// produced files Codex silently ignores.
+///
+/// The Markdown body (everything after the frontmatter) becomes
+/// `developer_instructions`; Claude-only frontmatter keys such as `model:`
+/// and `tools:` are dropped rather than translated, since their values name
+/// Claude models and Claude tool names.
+pub fn agent_md_to_codex_toml(agent_name: &str, content: &str) -> String {
+    let description = read_frontmatter_field(content, "description:").unwrap_or_default();
+    // Carried through so `epic team status` can name the owning org for a
+    // Codex-only project, the way it reads `org:` frontmatter from Markdown.
+    let org = read_frontmatter_field(content, "org:").unwrap_or_default();
+    let team = read_frontmatter_field(content, "team:").unwrap_or_default();
+
+    let body = if content.starts_with("---") {
+        content[3..]
+            .find("\n---")
+            .and_then(|end| content.get(3 + end + 4..))
+            .unwrap_or(content)
+    } else {
+        content
+    }
+    .trim_start_matches('\n')
+    .trim_end();
+
+    let mut out = format!(
+        "name = \"{}\"\ndescription = \"{}\"\n",
+        toml_escape(agent_name),
+        toml_escape(&description),
+    );
+    if !org.is_empty() {
+        out.push_str(&format!("org = \"{}\"\n", toml_escape(&org)));
+    }
+    if !team.is_empty() {
+        out.push_str(&format!("team = \"{}\"\n", toml_escape(&team)));
+    }
+    out.push_str(&format!(
+        "developer_instructions = \"\"\"\n{}\n\"\"\"\n",
+        body.replace('\\', "\\\\").replace("\"\"\"", "\\\"\\\"\\\""),
+    ));
+    out
+}
+
 /// Read the `team` field from an agent file's YAML frontmatter.
 /// Returns `None` if the file has no frontmatter or no `team:` field.
 #[cfg_attr(not(test), allow(dead_code))]
@@ -884,6 +969,45 @@ mod tests {
     // Serialize tests that mutate the process-wide HOME env var.
     // Shared with cli::tests via super::super::HOME_LOCK (declared in mod.rs).
     use super::super::HOME_LOCK;
+
+    #[test]
+    fn codex_toml_carries_name_description_and_body() {
+        let md = "---\nname: reviewer\ndescription: Reviews diffs\nmodel: sonnet\ntools: Read, Edit\n---\n\nYou review code.\n\nBe terse.\n";
+        let toml = agent_md_to_codex_toml("reviewer", md);
+
+        assert!(toml.contains("name = \"reviewer\""));
+        assert!(toml.contains("description = \"Reviews diffs\""));
+        assert!(toml.contains("developer_instructions = \"\"\""));
+        assert!(toml.contains("You review code."));
+        assert!(toml.contains("Be terse."));
+        // Claude-only keys must not leak into the Codex agent.
+        assert!(
+            !toml.contains("sonnet"),
+            "Claude model name must be dropped"
+        );
+        assert!(
+            !toml.contains("tools ="),
+            "Claude tool names must be dropped"
+        );
+    }
+
+    #[test]
+    fn codex_toml_escapes_quotes_in_description() {
+        let md = "---\ndescription: Say \"hi\" now\n---\nbody\n";
+        let toml = agent_md_to_codex_toml("a", md);
+        assert!(
+            toml.contains(r#"description = "Say \"hi\" now""#),
+            "got: {toml}"
+        );
+    }
+
+    #[test]
+    fn codex_toml_handles_missing_frontmatter() {
+        let toml = agent_md_to_codex_toml("plain", "just a body\n");
+        assert!(toml.contains("name = \"plain\""));
+        assert!(toml.contains("description = \"\""));
+        assert!(toml.contains("just a body"));
+    }
 
     #[test]
     fn test_save_team_config_atomic() {
