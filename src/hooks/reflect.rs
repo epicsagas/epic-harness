@@ -846,6 +846,50 @@ fn filter_past_watermark(observations: Vec<ObsRecord>, watermark: Option<&str>) 
     }
 }
 
+/// Cutoff timestamp for retention: `days` before `now`, as an ISO-8601 date.
+///
+/// Day-precision is enough — the sweep compares against `timestamp`, whose
+/// ISO form sorts lexically, so a bare `YYYY-MM-DD` cuts at that day's start.
+fn retention_cutoff(now_secs: u64, days: u64) -> String {
+    let cutoff_days = (now_secs / 86_400).saturating_sub(days) as i32;
+    let (y, m, d) = epoch_days_to_ymd(cutoff_days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Delete observations older than `db.obs_retention_days`, at most once a day.
+///
+/// The store grows ~20 MB per active week and nothing older than the analysis
+/// window is ever read, but `delete_obs_older_than_pool` had no caller, so it
+/// grew without bound. Guarded by a date-stamped marker file rather than run
+/// every round: Codex's `Stop` is turn-scoped, so an unguarded sweep would
+/// issue a DELETE on every turn.
+///
+/// Returns the number of rows deleted, or `None` when the sweep did not run.
+fn sweep_old_observations() -> Option<u64> {
+    let days = CONFIG.db.obs_retention_days;
+    if days == 0 {
+        return None;
+    }
+    let marker = retention_marker_file();
+    let today_str = today();
+    if fs::read_to_string(&marker).is_ok_and(|s| s.trim() == today_str) {
+        return None;
+    }
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let cutoff = retention_cutoff(now_secs, days);
+    let deleted = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::observations::delete_obs_older_than_pool(&pool, &cutoff).await
+    })
+    .ok()?;
+    // Stamp only after a successful sweep, so a DB error retries next round.
+    let _ = fs::write(&marker, &today_str);
+    Some(deleted)
+}
+
 pub fn run(_input: &HookInput) -> i32 {
     if !should_run(PROFILE_REFLECT) {
         return 0;
@@ -1265,7 +1309,20 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    // 11.7. Workspace manifest
+    // 11.7. Observation retention sweep (once per day)
+    if let Some(deleted) = sweep_old_observations() {
+        if deleted > 0 {
+            hint(
+                "reflect",
+                &format!(
+                    "Pruned {deleted} observation(s) older than {} days",
+                    CONFIG.db.obs_retention_days
+                ),
+            );
+        }
+    }
+
+    // 11.8. Workspace manifest
     evolve::write_workspace_manifest();
 
     // 12. Report
@@ -1570,6 +1627,34 @@ mod tests {
             obs_at("2026-08-31T11:00:00Z"),
         ];
         assert_eq!(filter_past_watermark(obs, None).len(), 2);
+    }
+
+    // ── retention cutoff ───────────────────────────────
+
+    /// 2026-08-31T00:00:00Z is epoch day 20696.
+    const DAY_2026_08_31: u64 = 20_696 * 86_400;
+
+    #[test]
+    fn retention_cutoff_subtracts_whole_days() {
+        assert_eq!(retention_cutoff(DAY_2026_08_31, 1), "2026-08-30");
+        assert_eq!(retention_cutoff(DAY_2026_08_31, 31), "2026-07-31");
+    }
+
+    /// The cutoff must sort lexically below the ISO timestamps it filters,
+    /// which is the whole basis for the `timestamp < cutoff` comparison.
+    #[test]
+    fn retention_cutoff_sorts_below_same_day_timestamps() {
+        let cutoff = retention_cutoff(DAY_2026_08_31, 0);
+        assert_eq!(cutoff, "2026-08-31");
+        assert!(cutoff.as_str() < "2026-08-31T00:00:00Z");
+        assert!(cutoff.as_str() > "2026-08-30T23:59:59Z");
+    }
+
+    /// A retention window wider than the epoch must not underflow.
+    #[test]
+    fn retention_cutoff_saturates_at_epoch() {
+        let out = retention_cutoff(DAY_2026_08_31, 10_000_000);
+        assert_eq!(out, "1970-01-01");
     }
 
     #[test]
