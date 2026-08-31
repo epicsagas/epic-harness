@@ -20,7 +20,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ("status", "Show teams linked to the current project"),
     (
         "sync",
-        "Sync team agents to .claude/agents/ (--global for ~/.claude/agents/)",
+        "Sync team agents to the host agent dir (--global for the home one)",
     ),
     ("link", "Link a team to the current project"),
     ("unlink", "Remove team agents from current project"),
@@ -1343,8 +1343,8 @@ fn cmd_delete(args: &[String]) -> i32 {
         // default: remove from current project only (.claude/ and .codex/)
         if !local_agents_dir.exists() && !local_codex_dir.exists() {
             println!(
-                "Team '{}' is not linked to this project (.claude/agents/{}/ not found).",
-                team, team
+                "Team '{}' is not linked to this project (no .claude/agents/{}/ or .codex/agents/{}/).",
+                team, team, team
             );
             return 0;
         }

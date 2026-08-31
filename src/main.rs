@@ -228,6 +228,11 @@ fn main() {
                     }
                 }
                 Some("unlock") => {
+                    // Advisory: the skill sets `status: complete` before
+                    // unlocking, so this is where the documented completion
+                    // invariants can finally be checked against real state.
+                    // Warn only — unlock also runs on abort and after a crash.
+                    shared::orbit::warn_on_invalid_completion(&dir);
                     shared::orbit::release_orbit_lock(&dir);
                     0
                 }
