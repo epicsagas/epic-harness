@@ -484,10 +484,28 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 25 skills | Live |
-| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 25 | — |
+| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 25 | Live³ |
 | **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 25 | — |
 
-¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable)
+¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable) · ³ via `SubagentStart`/`SubagentStop`
+
+### Codex specifics
+
+Codex differs from Claude Code in ways the harness adapts to rather than
+papers over:
+
+- **Edits arrive as `apply_patch`**, not `Edit`/`Write` — observed, polished,
+  and guarded through the patch body, which may name several files at once.
+- **Model context comes from stdout.** Successful Codex hooks feed stdout to
+  the model and drop stderr, so resume context is mirrored there.
+- **`Stop` is turn-scoped, not session-scoped.** Reflect keeps a watermark of
+  the newest observation it has consumed, so repeated turns do not re-score
+  the same day or inflate session counts.
+- **Team agents are generated as TOML** under `~/.codex/agents/` (and a
+  project's `.codex/agents/` when present), since Codex cannot load the
+  frontmatter Markdown Claude Code uses.
+- **Subagents are tracked** through `SubagentStart`/`SubagentStop`, using the
+  host-supplied `agent_id`/`agent_type`.
 
 ---
 
