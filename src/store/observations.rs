@@ -71,22 +71,35 @@ pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> 
     })
 }
 
+/// Expand day bounds for SQL comparison against stored ISO timestamps.
+///
+/// Callers pass either "YYYY-MM-DD" (10 chars) or the compact "YYYYMMDD"
+/// form `today()` produces (8 chars). Both expand to full ISO bounds; a
+/// compact string compared directly against ISO timestamps ('-' < '0' in
+/// ASCII) matches nothing, which silently zeroed reflect's queries after
+/// the SQLite migration made them the primary path.
+fn expand_day_bounds(from_ts: &str, to_ts: &str) -> (String, String) {
+    let expand = |ts: &str, end_of_day: bool| match ts.len() {
+        8 => format!(
+            "{}-{}-{}T{}",
+            &ts[0..4],
+            &ts[4..6],
+            &ts[6..8],
+            if end_of_day { "23:59:59" } else { "00:00:00" }
+        ),
+        10 => format!("{}T{}", ts, if end_of_day { "23:59:59" } else { "00:00:00" }),
+        _ => ts.to_string(),
+    };
+    (expand(from_ts, false), expand(to_ts, true))
+}
+
 /// Query observations for a date range (inclusive).
 pub async fn query_obs_for_date_range_pool(
     pool: &AnyPool,
     from_ts: &str,
     to_ts: &str,
 ) -> io::Result<Vec<ObsRecord>> {
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let (from, to) = expand_day_bounds(from_ts, to_ts);
 
     let rows = sqlx::query(
         "SELECT timestamp, tool, tool_category, action, result, score,
@@ -165,16 +178,7 @@ pub async fn query_obs_stats_pool(
     from_ts: &str,
     to_ts: &str,
 ) -> io::Result<ObsStats> {
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let (from, to) = expand_day_bounds(from_ts, to_ts);
 
     // Overall stats
     let row = sqlx::query(
@@ -301,16 +305,7 @@ pub async fn query_obs_stats_scoped_pool(
     to_ts: &str,
     project: Option<&str>,
 ) -> io::Result<ObsStats> {
-    let from = if from_ts.len() == 10 {
-        format!("{}T00:00:00", from_ts)
-    } else {
-        from_ts.to_string()
-    };
-    let to = if to_ts.len() == 10 {
-        format!("{}T23:59:59", to_ts)
-    } else {
-        to_ts.to_string()
-    };
+    let (from, to) = expand_day_bounds(from_ts, to_ts);
 
     // Overall stats — two static-SQL branches so sqlx 0.9's SqlSafeStr guard
     // (which rejects dynamic strings to prevent injection) is satisfied.
@@ -543,6 +538,35 @@ pub struct SessionStatRow {
 mod tests {
     use super::*;
 
+    #[test]
+    fn expand_day_bounds_accepts_compact_and_hyphenated() {
+        // Compact (today() form) must expand to ISO bounds that actually
+        // compare against stored timestamps.
+        assert_eq!(
+            expand_day_bounds("20260831", "20260831"),
+            (
+                "2026-08-31T00:00:00".to_string(),
+                "2026-08-31T23:59:59".to_string()
+            )
+        );
+        // Hyphenated form keeps its existing behavior.
+        assert_eq!(
+            expand_day_bounds("2026-06-02", "2026-06-02"),
+            (
+                "2026-06-02T00:00:00".to_string(),
+                "2026-06-02T23:59:59".to_string()
+            )
+        );
+        // Full timestamps pass through untouched.
+        assert_eq!(
+            expand_day_bounds("2026-06-02T09:00:00", "2026-06-02T11:00:00"),
+            (
+                "2026-06-02T09:00:00".to_string(),
+                "2026-06-02T11:00:00".to_string()
+            )
+        );
+    }
+
     async fn test_pool() -> AnyPool {
         let pool = super::super::pool::test_memory_pool().await;
         super::super::schema::init_schema_pool(&pool).await.unwrap();
@@ -582,6 +606,13 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool, "Bash");
         assert_eq!(results[0].score, Some(0.95));
+
+        // Compact "YYYYMMDD" bounds (what reflect's today() passes) must
+        // find the same rows — pre-fix this returned 0 silently.
+        let compact = query_obs_for_date_range_pool(&pool, "20260602", "20260602")
+            .await
+            .unwrap();
+        assert_eq!(compact.len(), 1, "compact date bounds must match ISO rows");
     }
 
     #[tokio::test]
