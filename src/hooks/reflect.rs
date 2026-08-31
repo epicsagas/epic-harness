@@ -341,9 +341,17 @@ pub fn run_context(
     });
 
     // 3. Metrics summary (SQLite first, fallback to JSON)
+    // Scoped to the invoking project unless --all-projects asked for the
+    // cross-project aggregate; the unscoped loader is indeterminate when
+    // several projects share the harness DB.
+    let metrics_scope: Option<String> = if all_projects {
+        None
+    } else {
+        project_slugs.first().cloned()
+    };
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, metrics_scope.as_deref()).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
@@ -952,9 +960,12 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 3. Stagnation (load metrics from SQLite, fallback to JSON)
+    // Scoped: metrics_state is keyed by (key, project), and the unscoped
+    // loader is indeterminate once a second project has written rows — it
+    // would judge stagnation and trigger rollback off another project's runs.
     let mut metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&current_project)).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
