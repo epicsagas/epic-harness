@@ -201,6 +201,25 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
 fn track_agent_spawn(input: &HookInput) {
     use crate::orchestrate;
 
+    // Codex names the lifecycle explicitly instead of routing subagents
+    // through a tool call, so trust the event when it is present rather than
+    // inferring start-vs-stop from whether output happens to be attached.
+    match input.hook_event_name.as_deref() {
+        Some("SubagentStart") => {
+            if let Err(e) = orchestrate::run_pre_checked(input) {
+                eprintln!("[harness] agent track pre error: {e}");
+            }
+            return;
+        }
+        Some("SubagentStop") => {
+            if let Err(e) = orchestrate::run_post_checked(input) {
+                eprintln!("[harness] agent track post error: {e}");
+            }
+            return;
+        }
+        _ => {}
+    }
+
     let has_output =
         input.tool_output.is_some() || input.tool_response.is_some() || input.tool_result.is_some();
 
@@ -427,14 +446,11 @@ pub fn run(input: &HookInput) -> i32 {
         let separated = tr.get("stderr").is_some();
         Some((out, err, separated))
     } else {
-        input
-            .tool_result
-            .as_ref()
-            .map(|tr| {
-                let (out, err) = resolve_json_value(tr);
-                let separated = tr.get("stderr").is_some();
-                (out, err, separated)
-            })
+        input.tool_result.as_ref().map(|tr| {
+            let (out, err) = resolve_json_value(tr);
+            let separated = tr.get("stderr").is_some();
+            (out, err, separated)
+        })
     };
 
     if let Some((output, stderr, streams_separated)) = resolved_output {
@@ -561,8 +577,14 @@ pub fn run(input: &HookInput) -> i32 {
 
     // Agent tracking: record spawn/completion to orchestrator state for
     // dashboard display. Always active — no EPIC_ORCHESTRATION gate.
+    // Codex reports subagents as SubagentStart/SubagentStop events carrying no
+    // "agent" tool name, so gating on the tool name alone dropped them all.
     let tool_name_lower = input.tool_name.as_deref().unwrap_or("").to_lowercase();
-    if tool_name_lower == "agent" {
+    let is_subagent_event = matches!(
+        input.hook_event_name.as_deref(),
+        Some("SubagentStart") | Some("SubagentStop")
+    );
+    if tool_name_lower == "agent" || is_subagent_event {
         track_agent_spawn(input);
 
         // Timeout detection still gated by EPIC_ORCHESTRATION

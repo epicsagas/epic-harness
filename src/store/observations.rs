@@ -611,9 +611,10 @@ mod tests {
             .unwrap();
         assert!(id > 0);
 
-        let results = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02", "test-project")
-            .await
-            .unwrap();
+        let results =
+            query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02", "test-project")
+                .await
+                .unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].tool, "Bash");
         assert_eq!(results[0].score, Some(0.95));
@@ -627,9 +628,10 @@ mod tests {
 
         // A different project must not see these rows — reflect must stay
         // scoped to the invoking project, not the whole shared DB.
-        let other = query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02", "other-project")
-            .await
-            .unwrap();
+        let other =
+            query_obs_for_date_range_pool(&pool, "2026-06-02", "2026-06-02", "other-project")
+                .await
+                .unwrap();
         assert!(other.is_empty(), "query must not leak rows across projects");
     }
 
@@ -712,9 +714,10 @@ mod tests {
             .unwrap();
         assert_eq!(deleted, 1);
 
-        let results = query_obs_for_date_range_pool(&pool, "2026-05-01", "2026-05-31", "test-project")
-            .await
-            .unwrap();
+        let results =
+            query_obs_for_date_range_pool(&pool, "2026-05-01", "2026-05-31", "test-project")
+                .await
+                .unwrap();
         assert!(results.is_empty());
     }
 

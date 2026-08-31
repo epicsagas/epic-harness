@@ -796,6 +796,20 @@ async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
     }
 }
 
+/// Keep only observations newer than the last consumed one.
+///
+/// ISO-8601 timestamps compare correctly as strings, so a lexical `>` is the
+/// whole test. `None` (first ever round) keeps everything.
+fn filter_past_watermark(observations: Vec<ObsRecord>, watermark: Option<&str>) -> Vec<ObsRecord> {
+    match watermark {
+        Some(mark) => observations
+            .into_iter()
+            .filter(|o| o.timestamp.as_str() > mark)
+            .collect(),
+        None => observations,
+    }
+}
+
 pub fn run(_input: &HookInput) -> i32 {
     if !should_run(PROFILE_REFLECT) {
         return 0;
@@ -847,8 +861,25 @@ pub fn run(_input: &HookInput) -> i32 {
         }
         recs
     };
+
+    // 1b. Drop observations an earlier round already consumed.
+    //
+    // Claude Code calls reflect once per session (SessionEnd). Codex's `Stop`
+    // fires every turn, so without this the same day's observations would be
+    // re-scored on each turn — inflating total_sessions, re-running skill
+    // seeding, and feeding stagnation/attribution duplicate samples.
+    let watermark = fs::read_to_string(reflect_watermark_file())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let observations = filter_past_watermark(observations, watermark.as_deref());
     if observations.len() < 3 {
         return 0;
+    }
+    // Advance the watermark before analysis: a crash mid-round must not make
+    // the next turn re-count this batch.
+    if let Some(newest) = observations.iter().map(|o| &o.timestamp).max() {
+        let _ = fs::write(reflect_watermark_file(), newest);
     }
 
     // 2. Analyze
@@ -1451,6 +1482,55 @@ mod tests {
     fn epoch_days_to_ymd_known_date() {
         // 1970-01-01 = day 0
         assert_eq!(epoch_days_to_ymd(0), (1970, 1, 1));
+    }
+
+    fn obs_at(ts: &str) -> ObsRecord {
+        ObsRecord {
+            timestamp: ts.into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: None,
+            result: Some("success".into()),
+            score: Some(1.0),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        }
+    }
+
+    /// Codex fires Stop every turn; a second round must not re-consume the
+    /// observations the first round already scored.
+    #[test]
+    fn watermark_drops_already_consumed_observations() {
+        let obs = vec![
+            obs_at("2026-08-31T10:00:00Z"),
+            obs_at("2026-08-31T11:00:00Z"),
+            obs_at("2026-08-31T12:00:00Z"),
+        ];
+        let kept = filter_past_watermark(obs, Some("2026-08-31T11:00:00Z"));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].timestamp, "2026-08-31T12:00:00Z");
+    }
+
+    /// A turn that produced nothing new yields an empty batch, so reflect
+    /// returns before incrementing total_sessions.
+    #[test]
+    fn watermark_at_newest_yields_nothing() {
+        let obs = vec![obs_at("2026-08-31T10:00:00Z")];
+        assert!(filter_past_watermark(obs, Some("2026-08-31T10:00:00Z")).is_empty());
+    }
+
+    /// First run on a fresh project keeps the whole batch.
+    #[test]
+    fn no_watermark_keeps_everything() {
+        let obs = vec![
+            obs_at("2026-08-31T10:00:00Z"),
+            obs_at("2026-08-31T11:00:00Z"),
+        ];
+        assert_eq!(filter_past_watermark(obs, None).len(), 2);
     }
 
     #[test]

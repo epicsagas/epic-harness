@@ -682,16 +682,15 @@ pub fn agent_md_to_codex_toml(agent_name: &str, content: &str) -> String {
     let org = read_frontmatter_field(content, "org:").unwrap_or_default();
     let team = read_frontmatter_field(content, "team:").unwrap_or_default();
 
-    let body = if content.starts_with("---") {
-        content[3..]
-            .find("\n---")
-            .and_then(|end| content.get(3 + end + 4..))
-            .unwrap_or(content)
-    } else {
-        content
-    }
-    .trim_start_matches('\n')
-    .trim_end();
+    let body = content
+        .strip_prefix("---")
+        .and_then(|rest| {
+            let end = rest.find("\n---")?;
+            rest.get(end + 4..)
+        })
+        .unwrap_or(content)
+        .trim_start_matches('\n')
+        .trim_end();
 
     let mut out = format!(
         "name = \"{}\"\ndescription = \"{}\"\n",

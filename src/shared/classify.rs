@@ -279,7 +279,12 @@ mod tests {
     #[test]
     fn read_only_command_real_stderr_failure_still_counts() {
         assert_eq!(
-            classify_bash_failure("cat missing.txt", "", "cat: missing.txt: No such file or directory", true),
+            classify_bash_failure(
+                "cat missing.txt",
+                "",
+                "cat: missing.txt: No such file or directory",
+                true
+            ),
             Some("not_found")
         );
     }
