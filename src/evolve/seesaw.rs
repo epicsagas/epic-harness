@@ -47,7 +47,13 @@ pub fn load_registry_for(project: Option<&str>) -> SolvedTaskRegistry {
                 .retain(|k, _| !crate::evolve::digester::is_synthetic_label(k));
             if reg.solved.len() != before {
                 reg.total_solved = reg.solved.len() as u32;
-                let _ = save_registry(&reg);
+                // Persist the scrub to the SAME project-scoped file it was
+                // read from. save_registry() hardcodes the CWD project path —
+                // calling it here would overwrite that project's registry
+                // with this project's (scrubbed) subset.
+                if let Ok(json) = serde_json::to_string_pretty(&reg) {
+                    let _ = std::fs::write(&path, json);
+                }
             }
             reg
         }

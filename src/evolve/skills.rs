@@ -159,6 +159,11 @@ pub fn update_meta_field(skills: &[String], epoch: &EpochClass, score: f64) {
         }
         let meta_path = dir.join("meta.json");
         let mut meta: SkillMeta = read_json(&meta_path, SkillMeta::default());
+        // Legacy partial-schema files parse with an empty name — restore it
+        // from the directory so the rewrite self-heals the file.
+        if meta.name.is_empty() {
+            meta.name = skill_name.clone();
+        }
         meta.slow_updates.push(entry.clone());
         // Cap at MAX_SLOW_UPDATES — prune oldest
         if meta.slow_updates.len() > MAX_SLOW_UPDATES {
@@ -845,6 +850,12 @@ pub fn export_to_global(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 // -- Phase 9: Workspace Contract (R13) --
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+// Container-level default: meta.json files written by older binaries as a
+// bare `SkillSlowMeta` (only `slow_updates`) must parse instead of falling
+// back to `SkillMeta::default()` — the fallback used to discard the
+// slow_updates history and launder empty name/origin into the file on the
+// next rewrite.
+#[serde(default)]
 pub struct SkillMeta {
     pub name: String,
     pub origin: String, // "pattern", "weak_tool", "weak_ext", "high_freq_error"
@@ -856,12 +867,10 @@ pub struct SkillMeta {
     /// True once a host agent upgraded the body via `evolve accept-synth`.
     /// Template (un-synthesized) skills are withheld from injection for
     /// frontier-class models — generic advice is noise there.
-    #[serde(default)]
     pub synthesized: bool,
     /// Slow/meta update history (SkillOpt §4), capped at MAX_SLOW_UPDATES.
     /// Lives on SkillMeta so the file has exactly one schema — a second
     /// partial writer here used to erase every other field on rewrite.
-    #[serde(default)]
     pub slow_updates: Vec<SlowUpdateEntry>,
 }
 
@@ -1247,6 +1256,19 @@ mod tests {
         assert!((roundtrip.confidence - 0.75).abs() < f64::EPSILON);
         assert_eq!(roundtrip.project, "my-project");
         assert!(roundtrip.active);
+    }
+
+    #[test]
+    fn skill_meta_parses_legacy_slow_updates_only_schema() {
+        // Older binaries rewrote meta.json as a bare SkillSlowMeta (only the
+        // slow_updates key). Those files must parse as SkillMeta — not fall
+        // back to the default — so their slow_updates history survives the
+        // next rewrite.
+        let legacy = r#"{"slow_updates":[{"epoch_class":"improving","score":0.8,"timestamp":"2026-01-01T00:00:00Z"}]}"#;
+        let meta: SkillMeta = serde_json::from_str(legacy).expect("legacy schema must parse");
+        assert_eq!(meta.slow_updates.len(), 1);
+        assert_eq!(meta.slow_updates[0].epoch_class, "improving");
+        assert!((meta.slow_updates[0].score - 0.8).abs() < f64::EPSILON);
     }
 
     #[test]
