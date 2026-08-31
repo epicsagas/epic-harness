@@ -127,15 +127,25 @@ pub fn run_context(
 
         {
             // A JSONL file is deleted only after every record reaches SQLite,
-            // so the two sets normally disjoint. Guard the backfill-pending
-            // window anyway: same timestamp + tool means the same observation.
-            let seen: std::collections::HashSet<(String, String)> = db_recs
-                .iter()
-                .map(|r| (r.timestamp.clone(), r.tool.clone()))
-                .collect();
+            // so the two sets are normally disjoint. Guard the backfill-pending
+            // window anyway. `timestamp + tool` alone is too weak a key: two
+            // calls to the same tool inside one timestamp tick (ISO seconds)
+            // are a routine burst, and keying on just those two fields drops
+            // the second one as a phantom duplicate. `action` is what actually
+            // differs between them (distinct command / file_path), so it joins
+            // the key.
+            let obs_key = |r: &ObsRecord| {
+                (
+                    r.timestamp.clone(),
+                    r.tool.clone(),
+                    r.action.clone().unwrap_or_default(),
+                )
+            };
+            let seen: std::collections::HashSet<(String, String, String)> =
+                db_recs.iter().map(obs_key).collect();
             let jsonl_recs: Vec<&ObsRecord> = jsonl_recs
                 .iter()
-                .filter(|r| !seen.contains(&(r.timestamp.clone(), r.tool.clone())))
+                .filter(|r| !seen.contains(&obs_key(r)))
                 .collect();
 
             for r in db_recs.iter().chain(jsonl_recs) {
@@ -957,9 +967,21 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
     // Advance the watermark before analysis: a crash mid-round must not make
-    // the next turn re-count this batch.
+    // the next turn re-count this batch. The trade is deliberate: a crash
+    // between here and step 11 loses one batch of observations, which are a
+    // statistical sample, whereas re-counting corrupts total_sessions, skill
+    // seeding and the attribution arms, which are cumulative state.
+    //
+    // A failed write is not silent: it means the next turn re-analyzes this
+    // batch, so it gets reported rather than swallowed.
     if let Some(newest) = observations.iter().map(|o| &o.timestamp).max() {
-        let _ = fs::write(reflect_watermark_file(), newest);
+        if let Err(e) = fs::write(reflect_watermark_file(), newest) {
+            eprintln!(
+                "[reflect] watermark write failed ({e}); the next round will re-analyze \
+                 these {} observations",
+                observations.len()
+            );
+        }
     }
 
     // 2. Analyze

@@ -91,7 +91,8 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
 ///
 /// Deliberately conservative: a pipeline that *also* runs a real build/test
 /// (`rg foo && cargo test`) must not be treated as read-only, so anything
-/// containing a shell chain operator is excluded.
+/// containing a sequencing or substitution operator is excluded. A plain `|`
+/// pipe is decomposed instead: every stage must itself be read-only.
 static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r"(?x)
@@ -110,12 +111,30 @@ static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Shell operators that can append a non-read-only stage to a read-only head.
-static CHAINED_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[;&|]|\$\(|`").unwrap());
+/// Shell operators that can append a non-read-only stage to a read-only head
+/// in ways a per-stage check cannot see: `;` and `&&`/`&` sequence independent
+/// commands, `$()`/`` ` `` splice one command's output into another's argv,
+/// and a bare `&` backgrounds. `|` is deliberately absent: it is handled by
+/// splitting into stages, since a pure-read pipeline (`rg foo | head`) is the
+/// common case and must stay read-only.
+static CHAINED_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[;&]|\$\(|`").unwrap());
+
+/// Redirections write to a file, so a stage carrying one is not read-only even
+/// if its head command is. `2>&1` is a stream merge, not a file write, and is
+/// allowed; `&` is otherwise already rejected by [`CHAINED_CMD`].
+static REDIRECT_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r">|<\(").unwrap());
 
 /// True when `command`'s output should not be keyword-scanned for failures.
+///
+/// A `|` pipeline qualifies only when *every* stage is itself read-only:
+/// `rg foo | head` is quoted material, but `cat a.txt | tee b.txt` writes.
 pub fn is_read_only_command(command: &str) -> bool {
-    !CHAINED_CMD.is_match(command) && READ_ONLY_CMD.is_match(command)
+    if CHAINED_CMD.is_match(command) {
+        return false;
+    }
+    command
+        .split('|')
+        .all(|stage| !REDIRECT_CMD.is_match(stage) && READ_ONLY_CMD.is_match(stage))
 }
 
 /// Files named by a Codex `apply_patch` payload.
@@ -299,6 +318,34 @@ mod tests {
             "nl -ba README.md",
         ] {
             assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+    }
+
+    /// A pipeline whose every stage only reads is still quoted material. The
+    /// blanket "any `|` means not read-only" rule reintroduced exactly the
+    /// false failures the read-only guard exists to prevent.
+    #[test]
+    fn pure_read_pipelines_stay_read_only() {
+        for cmd in [
+            "rg TypeError src/ | head",
+            "cat src/main.rs | wc -l",
+            "git diff HEAD~1 | grep panic",
+            "ls -la | sort | uniq",
+        ] {
+            assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+    }
+
+    /// One writing stage anywhere in the pipe disqualifies the whole command.
+    #[test]
+    fn pipelines_with_a_writing_stage_not_read_only() {
+        for cmd in [
+            "cat a.txt | tee b.txt",
+            "rg foo src/ | xargs sed -i s/a/b/",
+            "cat a.txt > b.txt",
+            "grep foo a.txt | head > out.txt",
+        ] {
+            assert!(!is_read_only_command(cmd), "must not be read-only: {cmd}");
         }
     }
 
