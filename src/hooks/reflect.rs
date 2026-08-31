@@ -94,23 +94,51 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
+        // SQLite is the primary observation store; the JSONL files only hold
+        // records from rounds where the DB write failed. Reading JSONL alone
+        // reported `total: 0` for projects with thousands of stored rows.
+        let db_recs: Vec<ObsRecord> = crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::harness_pool().await?;
+            crate::store::observations::query_obs_for_date_range_pool(
+                &pool, &date_from, &date_to, slug,
+            )
+            .await
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("[reflect] SQLite observations read failed for {slug}: {e}");
+            Vec::new()
+        });
+
         let slug_obs_dir = slug_harness.join("obs");
-        if !slug_obs_dir.is_dir() {
-            continue;
-        }
-        let all_obs = list_files(&slug_obs_dir, ".jsonl");
-        let filtered: Vec<String> = all_obs
-            .into_iter()
-            .filter(|f| {
-                let tag = f.replace("session_", "");
-                tag.get(..8)
-                    .map(|s| s >= cutoff_tag.as_str())
-                    .unwrap_or(true)
-            })
-            .collect();
-        for f in &filtered {
-            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
-            for r in &recs {
+        let jsonl_recs: Vec<ObsRecord> = if slug_obs_dir.is_dir() {
+            list_files(&slug_obs_dir, ".jsonl")
+                .into_iter()
+                .filter(|f| {
+                    let tag = f.replace("session_", "");
+                    tag.get(..8)
+                        .map(|s| s >= cutoff_tag.as_str())
+                        .unwrap_or(true)
+                })
+                .flat_map(|f| read_jsonl_typed(&slug_obs_dir.join(f)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        {
+            // A JSONL file is deleted only after every record reaches SQLite,
+            // so the two sets normally disjoint. Guard the backfill-pending
+            // window anyway: same timestamp + tool means the same observation.
+            let seen: std::collections::HashSet<(String, String)> = db_recs
+                .iter()
+                .map(|r| (r.timestamp.clone(), r.tool.clone()))
+                .collect();
+            let jsonl_recs: Vec<&ObsRecord> = jsonl_recs
+                .iter()
+                .filter(|r| !seen.contains(&(r.timestamp.clone(), r.tool.clone())))
+                .collect();
+
+            for r in db_recs.iter().chain(jsonl_recs) {
                 total_obs += 1;
                 *tool_counts.entry(r.tool.clone()).or_default() += 1;
                 if let Some(ref fc) = r.failure_category {
