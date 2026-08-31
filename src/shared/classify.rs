@@ -279,8 +279,17 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
     (blocked, warned)
 }
 
+/// The file an observation's `action` refers to.
+///
+/// Matches relative paths as well as absolute ones. Requiring a leading `/`
+/// silently truncated every relative path to its last segment, so
+/// `src/util.rs` and `cli/util.rs` both became `/util.rs` and were counted as
+/// one file by same-file streak detection and the per-file weak stats. Both
+/// callers now supply relative paths: `mask_path_action` rewrites project
+/// paths that way, and a Codex `apply_patch` body names its files relative.
 pub fn extract_file(action: &str) -> Option<&str> {
-    static FILE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(/[\w./-]+\.\w+)").unwrap());
+    static FILE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"((?:/|\b)[\w.-]+(?:/[\w.-]+)*\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
 }
 
@@ -319,6 +328,25 @@ mod tests {
         ] {
             assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
         }
+    }
+
+    /// Relative paths must survive intact. Requiring a leading `/` truncated
+    /// them to the last segment, so files sharing a basename across
+    /// directories were counted as one by streak detection and weak stats.
+    #[test]
+    fn extract_file_keeps_relative_paths_whole() {
+        assert_eq!(extract_file("src/b.py"), Some("src/b.py"));
+        assert_eq!(
+            extract_file("crates/core/src/b.py"),
+            Some("crates/core/src/b.py")
+        );
+        assert_eq!(
+            extract_file("/Users/x/proj/src/b.py"),
+            Some("/Users/x/proj/src/b.py")
+        );
+        assert_ne!(extract_file("src/util.rs"), extract_file("cli/util.rs"));
+        // A command with no path in it still yields nothing.
+        assert_eq!(extract_file("cargo test"), None);
     }
 
     /// A pipeline whose every stage only reads is still quoted material. The

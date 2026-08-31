@@ -363,6 +363,35 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
     }
 }
 
+/// The `action` recorded for one tool call.
+///
+/// Order matters, and mirrors `polish::target_files`. Codex's `apply_patch` is
+/// an edit tool that carries no `file_path`: it puts the whole patch body in
+/// `command`. Checking `command` first would store that body as the action,
+/// and everything downstream that reads a file out of the action (same-file
+/// streak detection, per-file weak stats, the reflect dedup key) would be
+/// reading patch text instead of a path.
+fn resolve_action(v: &serde_json::Value) -> String {
+    v.get("file_path")
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .map(|c| mask_path_action(truncate_bytes(c, 500)))
+        .or_else(|| {
+            let cmd = v.get("command").and_then(|c| c.as_str())?;
+            let files = apply_patch_paths(cmd, true);
+            if files.is_empty() {
+                // A real shell command, not a patch payload.
+                return Some(mask_secrets(truncate_bytes(cmd, 500)));
+            }
+            let masked: Vec<String> = files.iter().map(|f| mask_path_action(f)).collect();
+            Some(truncate_bytes(&masked.join(" "), 500).to_string())
+        })
+        .unwrap_or_else(|| {
+            let s = serde_json::to_string(v).unwrap_or_default();
+            mask_secrets(truncate_bytes(&s, 200))
+        })
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_OBSERVE) {
         return 0;
@@ -379,20 +408,7 @@ pub fn run(input: &HookInput) -> i32 {
     let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
-    let action = input.tool_input.as_ref().map(|v| {
-        v.get("command")
-            .and_then(|c| c.as_str())
-            .map(|c| mask_secrets(truncate_bytes(c, 500)))
-            .or_else(|| {
-                v.get("file_path")
-                    .and_then(|c| c.as_str())
-                    .map(|c| mask_path_action(truncate_bytes(c, 500)))
-            })
-            .unwrap_or_else(|| {
-                let s = serde_json::to_string(v).unwrap_or_default();
-                mask_secrets(truncate_bytes(&s, 200))
-            })
-    });
+    let action = input.tool_input.as_ref().map(resolve_action);
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
     let seq_id = if db.is_none() {
@@ -611,6 +627,53 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    // ── resolve_action ──────────────────────────────
+    fn patch_for(file: &str) -> serde_json::Value {
+        serde_json::json!({
+            "command": format!("*** Begin Patch\n*** Update File: {file}\n@@\n-a\n+b\n*** End Patch\n")
+        })
+    }
+
+    /// Codex `apply_patch` must record the file it touched, not the patch
+    /// body, so it matches what Claude's `Edit` records for the same edit.
+    #[test]
+    fn apply_patch_action_is_the_touched_file() {
+        assert_eq!(resolve_action(&patch_for("src/b.py")), "src/b.py");
+        assert_eq!(
+            resolve_action(&serde_json::json!({"file_path": "src/b.py"})),
+            "src/b.py"
+        );
+    }
+
+    #[test]
+    fn apply_patch_action_lists_every_touched_file() {
+        let v = serde_json::json!({
+            "command": "*** Begin Patch\n*** Add File: src/a.ts\n*** Update File: src/b.py\n*** End Patch\n"
+        });
+        assert_eq!(resolve_action(&v), "src/a.ts src/b.py");
+    }
+
+    /// The regression this guards: storing the patch body left every file
+    /// looking alike to `extract_file`, so two distinct files were counted as
+    /// one by streak detection and the per-file weak stats.
+    #[test]
+    fn same_named_files_in_different_dirs_stay_distinct() {
+        let a = resolve_action(&patch_for("src/util.rs"));
+        let b = resolve_action(&patch_for("cli/util.rs"));
+        assert_ne!(a, b);
+        assert_ne!(
+            crate::shared::classify::extract_file(&a),
+            crate::shared::classify::extract_file(&b),
+        );
+    }
+
+    /// A genuine shell command must still be stored as the command.
+    #[test]
+    fn shell_command_action_is_unchanged() {
+        let v = serde_json::json!({"command": "cargo test --lib"});
+        assert_eq!(resolve_action(&v), "cargo test --lib");
+    }
 
     // ── score_bash ──────────────────────────────────
     #[test]

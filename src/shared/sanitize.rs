@@ -50,22 +50,33 @@ pub fn truncate_bytes(s: &str, max: usize) -> &str {
 /// (`long_debug_loop`), per-file weak-spot stats and the observation dedup key
 /// all collapse onto a single value.
 ///
-/// A path under the project is made relative — that drops the part which
-/// actually leaks (home directory, username) while keeping files distinct —
+/// A path under the project is made relative, which drops the part that
+/// actually leaks (home directory, username) while keeping files distinct,
 /// and then gets the secret masks but *not* the path mask, which would
 /// re-collapse `src/a.rs` and `src/b.rs` onto `src<PATH>`. A path outside the
 /// project keeps the full masking, including `<PATH>`.
 pub fn mask_path_action(path: &str) -> String {
-    let root = crate::shared::paths::cwd();
-    match std::path::Path::new(path).strip_prefix(&root) {
-        Ok(rel) => {
-            let rel = rel.to_string_lossy();
-            let s = MASK_BEARER.replace_all(&rel, "Bearer <REDACTED>");
-            let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-            MASK_KV.replace_all(&s, "$1=<REDACTED>").into_owned()
+    let p = std::path::Path::new(path);
+    // Already relative (a Codex `apply_patch` names its files that way, and a
+    // host may send a relative `file_path`): there is no home directory or
+    // username in it to strip, so it only needs the secret masks. Running the
+    // full `mask_secrets` here would apply the path mask and collapse
+    // `src/b.py` to `src<PATH>`, which is the very thing this function exists
+    // to prevent.
+    let rel = if p.is_relative() {
+        std::borrow::Cow::Borrowed(path)
+    } else {
+        match p.strip_prefix(crate::shared::paths::cwd()) {
+            Ok(r) => std::borrow::Cow::Owned(r.to_string_lossy().into_owned()),
+            // Absolute and outside the project: mask it in full, `<PATH>`
+            // included.
+            Err(_) => return mask_secrets(path),
         }
-        Err(_) => mask_secrets(path),
-    }
+    };
+
+    let s = MASK_BEARER.replace_all(&rel, "Bearer <REDACTED>");
+    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
+    MASK_KV.replace_all(&s, "$1=<REDACTED>").into_owned()
 }
 
 /// Mask common secret patterns in a string.
