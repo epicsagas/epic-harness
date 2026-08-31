@@ -33,27 +33,61 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
           }
         ],
-        "description": "Record Bash tool result for evolution loop (Codex PostToolUse only intercepts Bash)"
+        "description": "Record Bash tool result for evolution loop"
+      },
+      {
+        "matcher": "apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+          },
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Codex canonical edit tool — observe for evolution loop + auto-format/typecheck"
       },
       {
         "matcher": "Edit",
         "hooks": [
           {
             "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+          },
+          {
+            "type": "command",
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic not found'"
           }
         ],
-        "description": "Auto-format + typecheck after edits"
+        "description": "Auto-format + typecheck after edits, and record for evolution loop"
       },
       {
         "matcher": "Write",
         "hooks": [
           {
             "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || echo '[harness] epic not found'"
+          },
+          {
+            "type": "command",
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || echo '[harness] epic not found'"
           }
         ],
-        "description": "Auto-format + typecheck after file writes"
+        "description": "Auto-format + typecheck after file writes, and record for evolution loop"
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Snapshot session state before context compaction so resume can restore it"
       }
     ],
     "Stop": [
