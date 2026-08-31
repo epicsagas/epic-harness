@@ -150,14 +150,8 @@ async function install() {
   }
 }
 
-function seed() {
-  const r = spawnSync(BINARY, ["install", "claude"], { stdio: "inherit" });
-  if (r.status !== 0) process.exit(r.status ?? 1);
-}
-
 async function main() {
   const pluginVersion = getPluginVersion();
-  const isPlugin = !!process.env.CLAUDE_PLUGIN_ROOT;
 
   // 1. Binary not found — fresh install
   if (!hasCommand(BINARY)) {
@@ -169,8 +163,6 @@ async function main() {
       log(`Install manually: https://github.com/${REPO}#installation`);
       process.exit(0); // non-fatal — don't break the session
     }
-    // Plugin mode: skills/agents auto-discovered from plugin cache, skip manual seeding
-    if (hasCommand(BINARY) && !isPlugin) seed();
     return;
   }
 
@@ -193,8 +185,8 @@ async function main() {
     }
   }
 
-  // 3. Seed skills/agents/commands/MCP (standalone installs only)
-  if (!isPlugin) seed();
+  // 3. Standalone installs: nothing to seed here. Plugin mode auto-discovers
+  // from the plugin cache; `epic resume` seeds config.toml + HARNESS.md.
 }
 
 main().catch((e) => {

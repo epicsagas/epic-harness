@@ -37,7 +37,26 @@ pub fn load_registry() -> SolvedTaskRegistry {
 pub fn load_registry_for(project: Option<&str>) -> SolvedTaskRegistry {
     let path = crate::shared::paths::project_seesaw_path_for(project);
     match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Ok(s) => {
+            let mut reg: SolvedTaskRegistry = serde_json::from_str(&s).unwrap_or_default();
+            // Scrub legacy synthetic entries: registries written before the
+            // `TaskDigest::synthetic` flag stored "session"/"segment-N" ids,
+            // which converge to 1.0 and would block all seeding forever.
+            let before = reg.solved.len();
+            reg.solved
+                .retain(|k, _| !crate::evolve::digester::is_synthetic_label(k));
+            if reg.solved.len() != before {
+                reg.total_solved = reg.solved.len() as u32;
+                // Persist the scrub to the SAME project-scoped file it was
+                // read from. save_registry() hardcodes the CWD project path —
+                // calling it here would overwrite that project's registry
+                // with this project's (scrubbed) subset.
+                if let Ok(json) = serde_json::to_string_pretty(&reg) {
+                    let _ = std::fs::write(&path, json);
+                }
+            }
+            reg
+        }
         Err(_) => SolvedTaskRegistry::default(),
     }
 }
@@ -52,10 +71,17 @@ pub fn save_registry(reg: &SolvedTaskRegistry) -> io::Result<()> {
     std::fs::write(&path, json)
 }
 
-/// Derive per-task scores from digests: success fraction per task.
-pub fn scores_from_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
+/// Per-task scores from digests (success fraction per task), excluding
+/// synthetic non-orbit task ids. Synthetic ids ("session"/"segment-N") are
+/// reused across days; comparing them against the max-only registry
+/// eventually blocks all seeding (best converges to 1.0, then any ordinary
+/// partial-failure day exceeds the tolerance). The synthetic/exclude
+/// decision is the digester's — read the `synthetic` flag it sets instead of
+/// re-deriving it from the string.
+pub fn scores_from_pipeline_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
     digests
         .iter()
+        .filter(|d| !d.synthetic)
         .map(|d| {
             (
                 d.task_id.clone(),
@@ -68,7 +94,10 @@ pub fn scores_from_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
 /// Check a candidate round's digests against the registry.
 /// Returns the list of regressed task_ids (empty = passes the gate).
 pub fn check(reg: &SolvedTaskRegistry, digests: &[TaskDigest], tolerance: f64) -> Vec<String> {
-    let new_scores = scores_from_digests(digests);
+    let new_scores = scores_from_pipeline_digests(digests);
+    if new_scores.is_empty() {
+        return Vec::new();
+    }
     reg.check_seesaw(&new_scores, tolerance)
 }
 
@@ -103,6 +132,7 @@ mod tests {
     fn digest(id: &str, outcome: TaskOutcome, count: u64) -> TaskDigest {
         TaskDigest {
             task_id: id.into(),
+            synthetic: crate::evolve::digester::is_synthetic_label(id),
             outcome,
             failure_categories: vec![],
             implicated_components: vec![],
@@ -156,6 +186,41 @@ mod tests {
     }
 
     #[test]
+    fn check_skips_synthetic_task_ids() {
+        // Regression: digester reuses "session"/"segment-N" labels across days
+        // for non-orbit sessions, so a converged best (1.0) + an ordinary
+        // partial-failure day used to block ALL seeding permanently.
+        let mut reg = SolvedTaskRegistry::default();
+        reg.update(&HashMap::from([
+            ("session".to_string(), 1.0),
+            ("segment-0".to_string(), 1.0),
+        ]));
+        let digests = vec![
+            digest(
+                "session",
+                TaskOutcome::PartialFailure {
+                    failed_steps: 3,
+                    total_steps: 10,
+                },
+                10,
+            ),
+            digest("segment-0", TaskOutcome::CompleteFailure, 5),
+        ];
+        assert!(check(&reg, &digests, DEFAULT_TOLERANCE).is_empty());
+        // Real pipeline ids are still gated.
+        let pipeline = vec![digest(
+            "PIPELINE-20260830T135758",
+            TaskOutcome::CompleteFailure,
+            5,
+        )];
+        reg.update(&HashMap::from([(
+            "PIPELINE-20260830T135758".to_string(),
+            1.0,
+        )]));
+        assert!(!check(&reg, &pipeline, DEFAULT_TOLERANCE).is_empty());
+    }
+
+    #[test]
     fn check_passes_within_tolerance() {
         let mut reg = SolvedTaskRegistry::default();
         reg.update(&HashMap::from([("A".to_string(), 1.0)]));
@@ -191,12 +256,12 @@ mod tests {
     }
 
     #[test]
-    fn scores_from_digests_maps_each_task() {
+    fn scores_from_pipeline_digests_maps_each_real_task() {
         let digests = vec![
             digest("A", TaskOutcome::Success, 3),
             digest("B", TaskOutcome::CompleteFailure, 2),
         ];
-        let scores = scores_from_digests(&digests);
+        let scores = scores_from_pipeline_digests(&digests);
         assert_eq!(scores.len(), 2);
         assert_eq!(scores.get("A"), Some(&1.0));
         assert_eq!(scores.get("B"), Some(&0.0));

@@ -144,7 +144,13 @@ fn run_accept_synth(args: &[String]) -> i32 {
     }
 
     // 7. Apply, gate, mark consumed, ledger.
-    write_skill_with_meta(&skill, &assembled, &pending.origin, pending.confidence);
+    write_skill_with_meta(
+        &skill,
+        &assembled,
+        &pending.origin,
+        pending.confidence,
+        true,
+    );
     gate_skills();
     mark_consumed(&skill);
     append_jsonl(&manifests_file(), &manifest);

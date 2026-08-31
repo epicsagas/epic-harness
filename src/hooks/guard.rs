@@ -12,10 +12,6 @@ struct BuiltinRule {
 
 const BLOCKED_RULES: &[BuiltinRule] = &[
     BuiltinRule {
-        pattern: r"git\s+push\s+.*--force\s+(origin\s+)?(main|master)\b",
-        msg: "Force push to main/master blocked",
-    },
-    BuiltinRule {
         pattern: r"rm\s+-rf\s+/([^a-zA-Z0-9_]|$)",
         msg: "rm -rf / blocked",
     },
@@ -129,12 +125,52 @@ static COMPILED_WARNED: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| 
 });
 
 fn check_blocked(cmd: &str) -> Option<&'static str> {
+    // Force-push to main/master is checked as code, not as a single regex: the
+    // flag (-f, --force, --force-with-lease) and the target branch can appear in
+    // either order, and the old single-pattern rule missed `git push -f origin main`.
+    if is_force_push_to_protected(cmd) {
+        return Some("Force push to main/master blocked");
+    }
     for (rx, msg) in COMPILED_BLOCKED.iter() {
         if rx.is_match(cmd) {
             return Some(msg);
         }
     }
     None
+}
+
+/// `git push` with a force flag (`-f`, `--force`, `--force-with-lease`, any
+/// position, including short-flag bundles like `-qf` and refspec force syntax
+/// `git push origin +main`) targeting main/master (bare, `origin/`, or any
+/// remote prefix).
+///
+/// The command is first split on shell separators (`&&`, `||`, `;`, `|`, `&`,
+/// newlines) and only the `git push` segments are tested — otherwise a chained
+/// command like `git checkout main && git push -f origin feature/x` (plain
+/// push to a feature branch) borrows "main" from the *checkout* segment, and
+/// `rm -f build.log && git push origin main` borrows `-f` from `rm`.
+/// Over-blocks branches merely containing "main"/"main/master" as a path
+/// segment within the push segment — conservative by design for a safety rule.
+fn is_force_push_to_protected(cmd: &str) -> bool {
+    static SEG_PUSH_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bgit\b.*\spush\b").unwrap());
+    // Short-flag bundles containing f (-f, -qf, -fq, -fu, …) or long force
+    // flags with optional =value (--force-with-lease=main).
+    static FORCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(^|\s)(-[a-z]*f[a-z]*\b|--force(-with-lease)?(=\S+)?\b)").unwrap()
+    });
+    // Refspec force syntax: `+main`, `+main:main`, `+refs/heads/main`, `+origin/main`.
+    static REFSPEC_FORCE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(^|\s)\+(?:[\w./-]+/)?(?:main|master)\b").unwrap());
+    static PROTECTED_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(?:\b[\w-]+/)?(?:main|master)\b").unwrap());
+
+    cmd.split(['&', '|', ';', '\n', '\r']).any(|seg| {
+        if !SEG_PUSH_RE.is_match(seg) {
+            return false;
+        }
+        (FORCE_RE.is_match(seg) || REFSPEC_FORCE_RE.is_match(seg)) && PROTECTED_RE.is_match(seg)
+    })
 }
 
 fn check_warned(cmd: &str) -> Vec<&'static str> {
@@ -443,152 +479,6 @@ pub fn run(input: &HookInput) -> i32 {
 
     0
 }
-
-// ── Guard rule file editor (for HarnessEdit::AddGuardRule) ──────
-
-/// Max pattern length accepted by [`append_guard_rule`] / [`HarnessEdit::validate`].
-/// Guards against pathological regex that would slow every guard run.
-pub const GUARD_PATTERN_MAX_LEN: usize = 256;
-
-/// Severity level for a custom guard rule.
-///
-/// `"block"` (or `"blocked"`) routes the rule into the `blocked:` section;
-/// anything else routes into `warned:`.
-fn normalize_level(level: &str) -> &'static str {
-    match level.trim().to_lowercase().as_str() {
-        "block" | "blocked" => "blocked",
-        _ => "warned",
-    }
-}
-
-/// In-memory representation of a `guard-rules.yaml` file, kept as plain strings
-/// so it round-trips losslessly through the line-based [`parse_guard_rules`]
-/// parser used by the guard hook (which expects `pattern: <re> | msg: <text>`).
-///
-/// We deliberately do NOT use `serde_yaml` for the file body here: the
-/// incumbent parser reads entries shaped `pattern: x | msg: y`, which
-/// serde_yaml would misinterpret (the `|` would fold into the pattern value).
-/// serde_yaml is therefore restricted to validating inputs the caller passes
-/// in; the on-disk format stays parser-compatible.
-#[derive(Debug, Clone, Default)]
-struct GuardRulesFile {
-    blocked: Vec<(String, String)>,
-    warned: Vec<(String, String)>,
-}
-
-impl GuardRulesFile {
-    /// Parse a `guard-rules.yaml` body into typed entries, mirroring the
-    /// incumbent [`parse_guard_rules`] line grammar so the same file can be
-    /// read, mutated, and rewritten without losing entries.
-    ///
-    /// Unknown / malformed lines are silently skipped (parser-tolerant, same
-    /// policy as the regex-compiling incumbent parser).
-    fn parse(content: &str) -> Self {
-        let mut out = GuardRulesFile::default();
-        let mut section: Option<&str> = None;
-        for line in content.lines() {
-            let trimmed = line.trim();
-            if trimmed == "blocked:" {
-                section = Some("blocked");
-                continue;
-            }
-            if trimmed == "warned:" {
-                section = Some("warned");
-                continue;
-            }
-            let Some(sec) = section else {
-                continue;
-            };
-            if !trimmed.starts_with("- ") {
-                continue;
-            }
-            let entry = &trimmed[2..];
-            if let Some((pat_part, msg_part)) = entry.split_once(" | msg: ") {
-                let pat = pat_part.trim_start_matches("pattern:").trim().to_string();
-                let msg = msg_part.trim().to_string();
-                if !pat.is_empty() {
-                    match sec {
-                        "blocked" => out.blocked.push((pat, msg)),
-                        "warned" => out.warned.push((pat, msg)),
-                        _ => {}
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    /// Serialize back to the exact `guard-rules.yaml` grammar the incumbent
-    /// parser consumes. Empty sections are omitted so a fresh single-rule file
-    /// stays minimal.
-    fn render(&self) -> String {
-        let mut out = String::new();
-        let render_section = |out: &mut String, header: &str, entries: &[(String, String)]| {
-            if entries.is_empty() {
-                return;
-            }
-            out.push_str(header);
-            out.push('\n');
-            for (pat, msg) in entries {
-                out.push_str(&format!("  - pattern: {pat} | msg: {msg}\n"));
-            }
-        };
-        render_section(&mut out, "blocked:", &self.blocked);
-        render_section(&mut out, "warned:", &self.warned);
-        out
-    }
-}
-
-/// Append a guard rule to a `guard-rules.yaml` file at `path`.
-///
-/// Read-modify-write: existing entries are preserved verbatim (parsed and
-/// re-rendered through the round-trip-safe grammar), the new rule is appended
-/// to the requested section, and the result is written atomically via a
-/// same-directory temp file + rename so a crash mid-write cannot corrupt or
-/// truncate the existing rules.
-///
-/// Returns `Ok(())` on success. Errors (unreadable file, non-UTF-8 content,
-/// unwritable directory, rename failure) propagate so callers can map them to
-/// [`EditOutcome::Skipped`].
-pub fn append_guard_rule(
-    path: &Path,
-    level: &str,
-    pattern: &str,
-    msg: &str,
-) -> std::io::Result<()> {
-    // Read existing content (empty if missing) — never clobber.
-    let existing = match std::fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => return Err(e),
-    };
-
-    let mut rules = GuardRulesFile::parse(&existing);
-    let entry = (pattern.to_string(), msg.to_string());
-    match normalize_level(level) {
-        "blocked" => rules.blocked.push(entry),
-        _ => rules.warned.push(entry),
-    }
-    let rendered = rules.render();
-
-    // Atomic write: write to a sibling temp file, fsync, then rename over the
-    // target. Same directory guarantees the rename is atomic on POSIX.
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    std::fs::create_dir_all(parent)?;
-    let tmp = parent.join(format!(".guard-rules.yaml.tmp.{}", std::process::id(),));
-    {
-        let mut file = std::fs::File::create(&tmp)?;
-        use std::io::Write;
-        file.write_all(rendered.as_bytes())?;
-        file.sync_all()?;
-    }
-    std::fs::rename(&tmp, path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,6 +493,47 @@ mod tests {
     #[test]
     fn blocks_force_push_master() {
         assert!(check_blocked("git push --force origin master").is_some());
+    }
+
+    #[test]
+    fn blocks_force_push_short_flag_bypass() {
+        // Regression: the old single-pattern rule missed these orderings.
+        assert!(check_blocked("git push -f origin main").is_some());
+        assert!(check_blocked("git push origin main --force").is_some());
+        assert!(check_blocked("git push --force-with-lease origin main").is_some());
+        assert!(check_blocked("git -C repo push -f origin master").is_some());
+    }
+
+    #[test]
+    fn blocks_force_push_refspec_and_bundle_flags() {
+        // Regression: refspec force syntax and short-flag bundles bypassed FORCE_RE.
+        assert!(check_blocked("git push origin +main").is_some());
+        assert!(check_blocked("git push origin +main:main").is_some());
+        assert!(check_blocked("git push origin +refs/heads/main:refs/heads/main").is_some());
+        assert!(check_blocked("git push -qf origin main").is_some());
+        assert!(check_blocked("git push -fq origin master").is_some());
+        assert!(check_blocked("git push --force-with-lease=main origin main").is_some());
+    }
+
+    #[test]
+    fn chained_commands_test_only_the_push_segment() {
+        // Regression: whole-string scanning borrowed tokens across `&&`.
+        // "main" came from the checkout, force targets a feature branch → allowed.
+        assert!(
+            check_blocked("git checkout main && git push -f origin feature/auth-rework").is_none()
+        );
+        // "-f" came from rm, the push itself is plain → allowed.
+        assert!(check_blocked("rm -f build.log && git push origin main").is_none());
+        // Force + protected inside the same push segment → still blocked.
+        assert!(check_blocked("git checkout main && git push -f origin main").is_some());
+        assert!(check_blocked("git checkout dev && git push origin +main").is_some());
+    }
+
+    #[test]
+    fn allows_plain_push_and_force_to_feature_branch() {
+        assert!(check_blocked("git push origin main").is_none());
+        assert!(check_blocked("git push -f origin feature/auth-rework").is_none());
+        assert!(check_blocked("git push origin develop").is_none());
     }
 
     #[test]
@@ -1220,89 +1151,5 @@ mod tests {
         unsafe {
             std::env::remove_var("HARNESS_DIR");
         }
-    }
-
-    // ── append_guard_rule file editor ──────────────────────
-
-    #[test]
-    fn append_guard_rule_creates_new_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("guard-rules.yaml");
-        append_guard_rule(
-            &path,
-            "block",
-            r"kubectl\s+delete",
-            "kubectl delete blocked",
-        )
-        .unwrap();
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("blocked:"));
-        assert!(content.contains(r"pattern: kubectl\s+delete"));
-        assert!(content.contains("msg: kubectl delete blocked"));
-    }
-
-    #[test]
-    fn append_guard_rule_warn_level_routes_to_warned_section() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("guard-rules.yaml");
-        append_guard_rule(&path, "warn", r"docker\s+prune", "check first").unwrap();
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("warned:"));
-        assert!(!content.contains("blocked:"));
-    }
-
-    #[test]
-    fn append_guard_rule_preserves_existing_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("guard-rules.yaml");
-        // Seed an existing file with one blocked + one warned rule.
-        std::fs::write(
-            &path,
-            "blocked:\n  - pattern: kubectl\\s+delete | msg: kubectl delete blocked\n\
-             warned:\n  - pattern: docker\\s+prune | msg: prune warning\n",
-        )
-        .unwrap();
-
-        append_guard_rule(&path, "block", r"terraform\s+destroy", "no destroy").unwrap();
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        // Original entries preserved.
-        assert!(content.contains(r"kubectl\s+delete"));
-        assert!(content.contains("kubectl delete blocked"));
-        assert!(content.contains(r"docker\s+prune"));
-        assert!(content.contains("prune warning"));
-        // New entry appended.
-        assert!(content.contains(r"terraform\s+destroy"));
-        assert!(content.contains("no destroy"));
-    }
-
-    #[test]
-    fn append_guard_rule_round_trips_through_incumbent_parser() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("guard-rules.yaml");
-        append_guard_rule(&path, "block", r"rm\s+-rf\s+/", "nope").unwrap();
-        append_guard_rule(&path, "warn", r"git\s+reset", "careful").unwrap();
-
-        let content = std::fs::read_to_string(&path).unwrap();
-        // The file MUST be re-readable by the incumbent guard parser.
-        let (blocked, warned) = crate::shared::classify::parse_guard_rules(&content);
-        assert_eq!(blocked.len(), 1);
-        assert_eq!(warned.len(), 1);
-        assert_eq!(blocked[0].msg, "nope");
-        assert_eq!(warned[0].msg, "careful");
-        assert!(blocked[0].pattern.is_match("rm -rf /"));
-    }
-
-    #[test]
-    fn append_guard_rule_atomic_no_tmp_residue() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("guard-rules.yaml");
-        append_guard_rule(&path, "block", "foo", "bar").unwrap();
-        // Temp file must be gone after successful atomic rename.
-        let entries = std::fs::read_dir(dir.path()).unwrap();
-        let count = entries.count();
-        assert_eq!(count, 1, "only the target file should remain");
     }
 }

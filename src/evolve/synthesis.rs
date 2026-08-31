@@ -106,12 +106,12 @@ pub fn upgrade_edits(edits: &mut [HarnessEdit], analysis: &SessionAnalysis) -> u
         if emitted >= budget {
             break;
         }
-        if let HarnessEdit::AddSkill {
+        let HarnessEdit::AddSkill {
             name,
             content,
             origin,
             confidence,
-        } = edit
+        } = edit;
         {
             let pending = PendingSynth {
                 schema_version: 1,

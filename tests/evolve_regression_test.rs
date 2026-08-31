@@ -93,7 +93,7 @@ fn scenario_seesaw_catches_regression() {
         matches!(seed_digests[0].outcome, TaskOutcome::Success),
         "seed PIPE-1 should be fully solved"
     );
-    let regressed_score = evolve::scores_from_digests(&regression_digests)
+    let regressed_score = evolve::seesaw::scores_from_pipeline_digests(&regression_digests)
         .get("PIPE-1")
         .copied();
     assert!(
@@ -104,7 +104,7 @@ fn scenario_seesaw_catches_regression() {
     // Build the registry exactly as R5 reflect wiring does: seed with the
     // best-known per-task scores from session N.
     let mut reg = SolvedTaskRegistry::default();
-    reg.update(&evolve::scores_from_digests(&seed_digests));
+    reg.update(&evolve::seesaw::scores_from_pipeline_digests(&seed_digests));
     assert_eq!(reg.solved.get("PIPE-1"), Some(&1.0));
 
     // The regression session must be caught.
@@ -353,8 +353,9 @@ fn scenario_planner_recommends_exploration() {
 #[test]
 fn scenario_outcome_score_bounds() {
     // Success is the ceiling.
-    let s = evolve::scores_from_digests(&[TaskDigest {
+    let s = evolve::seesaw::scores_from_pipeline_digests(&[TaskDigest {
         task_id: "t".into(),
+        synthetic: false,
         outcome: TaskOutcome::Success,
         failure_categories: vec![],
         implicated_components: vec![],
@@ -366,8 +367,9 @@ fn scenario_outcome_score_bounds() {
     }]);
     assert_eq!(s.get("t"), Some(&1.0), "Success must score 1.0");
     assert_eq!(
-        evolve::scores_from_digests(&[TaskDigest {
+        evolve::seesaw::scores_from_pipeline_digests(&[TaskDigest {
             task_id: "t".into(),
+            synthetic: false,
             outcome: TaskOutcome::CompleteFailure,
             failure_categories: vec![],
             implicated_components: vec![],
@@ -383,8 +385,9 @@ fn scenario_outcome_score_bounds() {
     );
 
     // Partial: 1 failed of 4 → 0.75 success fraction, strictly inside (0,1).
-    let partial = evolve::scores_from_digests(&[TaskDigest {
+    let partial = evolve::seesaw::scores_from_pipeline_digests(&[TaskDigest {
         task_id: "t".into(),
+        synthetic: false,
         outcome: TaskOutcome::PartialFailure {
             failed_steps: 1,
             total_steps: 4,
@@ -409,8 +412,9 @@ fn scenario_outcome_score_bounds() {
 
     // Edge: zero total steps in a partial must collapse to 0.0 (defensive),
     // never a divide-by-zero panic. This is a real contract guarantee.
-    let zero_total = evolve::scores_from_digests(&[TaskDigest {
+    let zero_total = evolve::seesaw::scores_from_pipeline_digests(&[TaskDigest {
         task_id: "t".into(),
+        synthetic: false,
         outcome: TaskOutcome::PartialFailure {
             failed_steps: 0,
             total_steps: 0,

@@ -14,10 +14,95 @@ pub struct HarnessConfig {
     pub scoring: ScoringConfig,
     pub evolution: EvolutionConfig,
     pub pattern: PatternConfig,
-    pub instinct: InstinctConfig,
+    pub model: ModelConfig,
     pub context: ContextConfig,
     pub dashboard: DashboardConfig,
     pub db: DbConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ModelConfig {
+    /// Model class driving threshold/injection behavior: "auto" (detect from
+    /// env), "frontier", or "light".
+    pub class: String,
+    /// Pattern thresholds (repeated_error_min, debug_loop_min, thrash_*) are
+    /// multiplied by this for frontier-class models — their lower failure
+    /// rate means the same streak is a stronger signal.
+    pub frontier_threshold_scale: f64,
+    /// Inject template (un-synthesized) skill bodies at session start.
+    /// None = per-class default (light: yes, frontier: no — generic advice
+    /// is noise for frontier models; synthesized skills always inject).
+    pub inject_templates: Option<bool>,
+    /// Max chars injected per evolved skill.
+    pub inject_per_skill_chars: usize,
+    /// Max chars injected across all evolved skills per session.
+    pub inject_total_chars: usize,
+}
+
+impl Default for ModelConfig {
+    fn default() -> Self {
+        Self {
+            class: "auto".into(),
+            frontier_threshold_scale: 2.0,
+            inject_templates: None,
+            inject_per_skill_chars: 1_600,
+            inject_total_chars: 10_000,
+        }
+    }
+}
+
+impl ModelConfig {
+    /// Resolved class: explicit config wins, else detect from env.
+    pub fn resolved_class(&self) -> &'static str {
+        match self.class.as_str() {
+            "light" => return "light",
+            "frontier" => return "frontier",
+            _ => {}
+        }
+        // Light-class markers in common model env vars. Unknown → frontier:
+        // frontier gets LESS injection, so a wrong guess degrades gracefully.
+        for key in [
+            "ANTHROPIC_MODEL",
+            "CLAUDE_MODEL",
+            "CLAUDE_CODE_MODEL",
+            "OPENAI_MODEL",
+        ] {
+            if let Ok(m) = std::env::var(key) {
+                let m = m.to_lowercase();
+                if ["haiku", "flash", "mini", "nano", "small", "lite"]
+                    .iter()
+                    .any(|t| m.contains(t))
+                {
+                    return "light";
+                }
+            }
+        }
+        "frontier"
+    }
+
+    /// Whether template (un-synthesized) skill bodies should be injected.
+    pub fn inject_templates(&self) -> bool {
+        self.inject_templates
+            .unwrap_or_else(|| self.resolved_class() == "light")
+    }
+
+    /// Threshold scaled for the model class — but ONLY when the class is
+    /// explicitly configured (`class = "frontier"`). The default `auto`
+    /// resolution depends on which model env vars happen to reach the
+    /// short-lived hook process, so scaling on it silently halved pattern
+    /// sensitivity for default users and made the same session evolve
+    /// different skills on different machines. Injection behavior
+    /// (`resolved_class`) still degrades gracefully on auto.
+    pub fn scaled_threshold(&self, base: u64) -> u64 {
+        if self.class == "frontier" {
+            ((base as f64) * self.frontier_threshold_scale)
+                .round()
+                .max(1.0) as u64
+        } else {
+            base
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,33 +265,15 @@ pub struct PatternConfig {
     pub graduated_scope_moderate: f64,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct InstinctConfig {
-    /// Minimum confidence for an instinct to be considered for promotion.
-    pub confidence_threshold: f64,
-
-    /// Minimum number of projects where the pattern was observed
-    /// before promoting to global memory.
-    pub promotion_min_projects: usize,
-
-    /// Maximum number of instinct nodes stored globally.
-    pub max_instincts: usize,
-
-    /// Minimum session observations before instinct extraction runs.
-    pub min_observations: usize,
-
-    /// Minimum session avg_score before instinct extraction runs.
-    pub min_avg_score: f64,
-}
-
 // ── Defaults ────────────────────────────────────────
 
 impl Default for HookConfig {
     fn default() -> Self {
         Self {
             profile: "standard".into(),
-            gateguard_hints: true,
+            // Default off: frontier models run their own verification loops;
+            // static post-edit hints only add noise. Opt in via config.toml.
+            gateguard_hints: false,
         }
     }
 }
@@ -290,18 +357,6 @@ impl Default for PatternConfig {
             high_freq_error_min: 5,
             graduated_scope_skip: 0.95,
             graduated_scope_moderate: 0.80,
-        }
-    }
-}
-
-impl Default for InstinctConfig {
-    fn default() -> Self {
-        Self {
-            confidence_threshold: 0.8,
-            promotion_min_projects: 2,
-            max_instincts: 20,
-            min_observations: 10,
-            min_avg_score: 0.5,
         }
     }
 }
@@ -607,12 +662,13 @@ pub fn default_config_template() -> &'static str {
 # Override: EPIC_HOOK_PROFILE env var takes precedence over this value.
 profile = "standard"
 
-# Show file-type-aware investigation hints after Edit/Write.
+# Show file-type-aware investigation hints after Edit/Write (default false).
 # When true, outputs concrete verification questions like:
 #   .rs → "Run cargo check after this change"
 #   .ts → "Verify type compatibility — run tsc --noEmit"
-# Set to false if you find the hints noisy.
-gateguard_hints = true
+# Off by default: models already run their own verification loops, so the
+# static hints mostly add noise. Enable if you want the extra nudges.
+gateguard_hints = false
 
 # ── Scoring weights ─────────────────────────────────
 [scoring]
@@ -706,24 +762,20 @@ gated_promotion_min = 2
 # graduated_scope_skip = 0.95
 # graduated_scope_moderate = 0.80
 
-# ── Instinct learning ───────────────────────────────
-# High-success patterns extracted and promoted across projects.
-[instinct]
-# Minimum confidence for an instinct to be considered for global promotion.
-# confidence_threshold = 0.8
-
-# Number of distinct projects where the pattern must be observed
-# before promoting to global memory.
-# promotion_min_projects = 2
-
-# Maximum number of instinct nodes stored globally.
-# max_instincts = 20
-
-# Minimum session observations before instinct extraction runs.
-# min_observations = 10
-
-# Minimum session avg_score before instinct extraction runs.
-# min_avg_score = 0.5
+# ── Model class ──────────────────────────────────────
+# Scales pattern thresholds and skill injection for the model in use.
+# class: "auto" (detect from ANTHROPIC_MODEL/CLAUDE_MODEL/etc.), "frontier",
+# or "light".
+[model]
+# class = "auto"
+# Frontier failure streaks are stronger signals — raise pattern thresholds.
+# frontier_threshold_scale = 2.0
+# Frontier models get only synthesized skill bodies injected (generic
+# template advice is noise); light models also get templates. Set true/false
+# to override per-class default.
+# inject_templates = true
+# inject_per_skill_chars = 1600
+# inject_total_chars = 10000
 
 # ── Context sources ──────────────────────────────────
 [context]
@@ -790,7 +842,7 @@ mod tests {
     fn default_config_is_valid() {
         let c = HarnessConfig::default();
         assert_eq!(c.hook.profile, "standard");
-        assert!(c.hook.gateguard_hints);
+        assert!(!c.hook.gateguard_hints);
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
         assert_eq!(c.evolution.stagnation_limit, 3);
@@ -805,12 +857,53 @@ mod tests {
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
         assert!((c.pattern.weak_ext_rate - 0.5).abs() < f64::EPSILON);
         assert_eq!(c.pattern.weak_ext_min_obs, 3);
-        assert_eq!(c.instinct.confidence_threshold, 0.8);
         assert_eq!(c.db.driver, "sqlite");
         assert!(c.db.harness_url.is_empty());
         assert!(c.db.memory_url.is_empty());
         assert_eq!(c.db.max_connections, 5);
         assert_eq!(c.db.tls_mode, "prefer");
+        assert_eq!(c.model.class, "auto");
+        assert!((c.model.frontier_threshold_scale - 2.0).abs() < f64::EPSILON);
+        assert!(c.model.inject_templates.is_none());
+        assert_eq!(c.model.inject_per_skill_chars, 1_600);
+        assert_eq!(c.model.inject_total_chars, 10_000);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn model_class_detection_and_scaling() {
+        let mut m = ModelConfig::default();
+        // Explicit class wins over env.
+        m.class = "light".into();
+        assert_eq!(m.resolved_class(), "light");
+        assert!(m.inject_templates(), "light default injects templates");
+        assert_eq!(m.scaled_threshold(3), 3, "light keeps base thresholds");
+
+        m.class = "frontier".into();
+        assert_eq!(m.resolved_class(), "frontier");
+        assert!(!m.inject_templates(), "frontier default skips templates");
+        assert!(m.inject_templates.is_none());
+        assert_eq!(m.scaled_threshold(3), 6, "frontier scales base by 2.0");
+        assert_eq!(m.scaled_threshold(0), 1, "scaled threshold floors at 1");
+
+        // Light marker in env (auto class).
+        m.class = "auto".into();
+        unsafe { std::env::set_var("ANTHROPIC_MODEL", "claude-haiku-4-5") };
+        assert_eq!(m.resolved_class(), "light");
+        unsafe { std::env::set_var("ANTHROPIC_MODEL", "claude-opus-5") };
+        assert_eq!(m.resolved_class(), "frontier");
+        unsafe { std::env::remove_var("ANTHROPIC_MODEL") };
+        assert_eq!(
+            m.resolved_class(),
+            "frontier",
+            "unknown defaults to frontier"
+        );
+
+        // Explicit override still beats env.
+        m.class = "light".into();
+        unsafe { std::env::set_var("ANTHROPIC_MODEL", "claude-opus-5") };
+        assert_eq!(m.resolved_class(), "light");
+        unsafe { std::env::remove_var("ANTHROPIC_MODEL") };
     }
 
     #[test]
@@ -821,7 +914,7 @@ profile = "minimal"
 "#;
         let c: HarnessConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.hook.profile, "minimal");
-        assert!(c.hook.gateguard_hints); // default
+        assert!(!c.hook.gateguard_hints); // default
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]); // default
         assert_eq!(c.evolution.max_skills, 10); // default
     }
@@ -853,10 +946,6 @@ gated_promotion_min = 5
 repeated_error_min = 5
 debug_loop_min = 8
 graduated_scope_skip = 0.95
-
-[instinct]
-confidence_threshold = 0.9
-max_instincts = 10
 "#;
         let c: HarnessConfig = toml::from_str(toml).unwrap();
         assert_eq!(c.hook.profile, "strict");
@@ -868,8 +957,6 @@ max_instincts = 10
         assert_eq!(c.pattern.repeated_error_min, 5);
         assert_eq!(c.pattern.debug_loop_min, 8);
         assert_eq!(c.pattern.graduated_scope_skip, 0.95);
-        assert_eq!(c.instinct.confidence_threshold, 0.9);
-        assert_eq!(c.instinct.max_instincts, 10);
     }
 
     #[test]
@@ -933,7 +1020,7 @@ max_docs = 5
         let template = default_config_template();
         let c: HarnessConfig = toml::from_str(template).unwrap();
         assert_eq!(c.hook.profile, "standard");
-        assert!(c.hook.gateguard_hints);
+        assert!(!c.hook.gateguard_hints);
         assert_eq!(c.scoring.weights, [0.5, 0.3, 0.2]);
         assert_eq!(c.evolution.max_skills, 10);
     }

@@ -100,7 +100,7 @@ codex plugin marketplace add epicsagas/plugins
 agy plugin install .
 ```
 
-27 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` से ऑटो-डिस्कवर होते हैं।
+25 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` से ऑटो-डिस्कवर होते हैं।
 
 ### केवल बाइनरी (प्लगइन होस्ट के बिना)
 
@@ -272,8 +272,6 @@ Curate (Accept/Merge/Skip, solver से feedback masked)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
     ↓ evolved_backup/ (best checkpoint)
-Instinct (high-success patterns → cross-project memory.db nodes)
-    ↓
 Reload (अगला सेशन — resume विकसित स्किल्स लोड करता है)
 ```
 
@@ -307,15 +305,6 @@ Reload (अगला सेशन — resume विकसित स्किल�
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
 
-### इंस्टिंक्ट लर्निंग
-
-उच्च-सफलता पैटर्न निकाले और प्रोजेक्ट्स के पार promote किए जाते हैं:
-
-```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → global में promote जब ≥ 2 प्रोजेक्ट्स में देखा गया
-```
-
 ```bash
 /evolve              # अभी चलाएं
 /evolve status       # डैशबोर्ड: scores, trends, patterns, skills
@@ -338,7 +327,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | Edit के बाद | ऑटो-format (Biome/Prettier/ruff/gofmt) + typecheck |
 | **observe** | हर टूल उपयोग | `~/.harness/projects/{slug}/obs/` में log करें एवोल्यूशन के लिए |
 | **snapshot** | compact से पहले | `~/.harness/projects/{slug}/sessions/` में state save करें |
-| **reflect** | सेशन एंड | विफलताओं का विश्लेषण, evolved skills seed, gate, instincts निकालें |
+| **reflect** | सेशन एंड | विफलताओं का विश्लेषण, evolved skills seed, gate |
 
 Polish observe में फीडबैक देता है: format विफलता → `lint_fail`, TypeScript error → `build_fail`। Edit→Error thrashing तब भी detect होता है जब errors polish से आते हैं।
 
@@ -500,7 +489,6 @@ epic mem export --out ./docs/memory                    # Markdown में expo
 | `resolution` | मैन्युअल / MCP | 0.8 |
 | `concept` | मैन्युअल / MCP | 0.7 |
 | `project` | मैन्युअल / MCP | 0.7 |
-| `instinct` | ऑटो (reflect) | 0.7 |
 | `pattern` | ऑटो (reflect) | 0.5 |
 | `error` | ऑटो (reflect) | 0.4 |
 | `session` | ऑटो (reflect) | 0.2 |
@@ -558,7 +546,8 @@ Lifecycle: 30+ दिन बिना access → 10% importance decay (floor 0.0
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# डिफ़ॉल्ट रूप से बंद — मॉडल अपने सत्यापन लूप चलाते हैं
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -575,12 +564,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

@@ -330,6 +330,7 @@ mod tests {
     fn component_heatmap_from_digests() {
         let d = TaskDigest {
             task_id: "t1".into(),
+            synthetic: false,
             outcome: TaskOutcome::CompleteFailure,
             failure_categories: vec![("type_error".into(), 1)],
             implicated_components: vec!["auth".into(), "db".into()],
@@ -348,6 +349,7 @@ mod tests {
     fn success_digests_excluded_from_heatmap() {
         let d = TaskDigest {
             task_id: "t1".into(),
+            synthetic: false,
             outcome: TaskOutcome::Success,
             failure_categories: vec![],
             implicated_components: vec!["auth".into()],

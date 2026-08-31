@@ -298,8 +298,6 @@ Curate（Accept/Merge/Skip，反馈对 solver 不可见）
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate（格式检查、去重、上限 10、≥ 3 次会话的门控提升）
     ↓ evolved_backup/（最佳检查点）
-Instinct（高成功率模式 → 跨项目 memory.db 节点）
-    ↓
 Reload（下次会话 — resume 加载进化技能）
 ```
 
@@ -315,11 +313,7 @@ Reload（下次会话 — resume 加载进化技能）
 |-----------|-------------|
 | **负反馈缓冲** | 被拒绝的提案带 TTL 过期时间存储；生成新提案前先检查缓冲区 |
 | **小批量反思** | 观测数据分解为固定大小的批次进行结构化模式提取；当主要错误 ≥60% + ≥2 个不同文件时可复用 |
-| **慢速/元更新** | 对最近 5 次会话进行线性回归，将 epoch 分类为 Improving / Regressing / PersistentFailure / StableSuccess；自动淘汰表现不佳的技能 |
-
-### Prompt 自动调优
-
-表现不佳的进化技能会在 `<!-- auto-tuned -->` 分隔符之后追加针对性调优指导。原始内容永远不会被修改。连续 3 次下降会话 → 自动回滚调优，历史记录清除。
+| **慢速/元更新** | 对最近 5 次会话进行线性回归，将 epoch 分类为 Improving / Regressing / PersistentFailure / StableSuccess；归因结论仅在仪表板中报告，从不自动执行 |
 
 ### 技能效果
 
@@ -346,15 +340,6 @@ Reload（下次会话 — resume 加载进化技能）
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Instinct 学习
-
-高成功率模式被提取并跨项目推广：
-
-```
-observe（100% 确认）→ extract_instincts() → instinct 节点（置信度 ≥ 0.8）
-    → 在 ≥ 2 个项目中观察到时提升为全局
-```
 
 ```bash
 /evolve              # 立即运行
@@ -399,7 +384,7 @@ observe（100% 确认）→ extract_instincts() → instinct 节点（置信度 
 | **polish** | Edit 之后 | 自动格式化（Biome/Prettier/ruff/gofmt）+ 类型检查 |
 | **observe** | 每次工具使用 | 记录到 `~/.harness/projects/{slug}/obs/` 用于进化 |
 | **snapshot** | compact 之前 | 保存状态到 `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | 会话结束 | 分析失败、播种进化技能、门控、提取 instincts |
+| **reflect** | 会话结束 | 分析失败、播种进化技能、门控 |
 
 Polish 反馈到 observe：格式化失败 → `lint_fail`，TypeScript 错误 → `build_fail`。编辑→错误交替模式即使在错误来自 polish 时也能被检测到。
 
@@ -464,9 +449,9 @@ epic team delete backend --global      # 从组织存储中永久删除
 
 | 工具 | Ring 0 Hooks | 命令 | 技能 | 智能体 |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 26 个技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 26 | — |
+| **Claude Code** | ✓ 完整 | ✓ 3 条命令（含 /orbit） | ✓ 25 个技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 个提示（含 /orbit） | ✓ 25 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 条命令（含 /orbit） | ✓ 25 | — |
 
 ¹ `plugin_hooks = true` 在 `~/.codex/config.toml` 中 · ² 仅 PreInvocation/PostInvocation — 无 PreToolUse（guard/polish 不可用）
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # 导出为 Markdown
 | `resolution` | 手动 / MCP | 0.8 |
 | `concept` | 手动 / MCP | 0.7 |
 | `project` | 手动 / MCP | 0.7 |
-| `instinct` | 自动（reflect） | 0.7 |
 | `pattern` | 自动（reflect） | 0.5 |
 | `error` | 自动（reflect） | 0.4 |
 | `session` | 自动（reflect） | 0.2 |
@@ -617,7 +601,8 @@ epic mem export --out ./docs/memory                    # 导出为 Markdown
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# 默认关闭 — 模型自带验证循环
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

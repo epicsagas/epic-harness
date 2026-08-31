@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Un arnés de agente de codificación IA autoevolutivo — 3 comandos, 26 skills, 1 pipeline autónomo, aprende de tus fallos.</p></blockquote>
+<blockquote><p align="center">Un arnés de agente de codificación IA autoevolutivo — 3 comandos, 25 skills, 1 pipeline autónomo, aprende de tus fallos.</p></blockquote>
 
 <p align="center"><b>Menos que memorizar. Más inteligencia por tecla pulsada. Se vuelve más inteligente cada sesión.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Un plugin de Claude Code que **consolida más de 30 comandos en 3 comandos + 26 skills de activación automática**, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo.
+Un plugin de Claude Code que **consolida más de 30 comandos en 3 comandos + 25 skills de activación automática**, y **evoluciona nuevas habilidades** a partir de tus propios patrones de fallo.
 
 <p align="center">
   <img src="../../assets/features.png" alt="características de epic harness" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # establece a 0 para desactivar el inicio automático
 auto_open = true  # abrir navegador en la primera sesión
 ```
 
-Pantallas: **Dashboard** · Pipeline de /orbit · Comandos (3) · Skills (26) · Agentes en vivo · Eval & Evolve · Hooks (6) · Integraciones (6) · harness-mem · Configuración
+Pantallas: **Dashboard** · Pipeline de /orbit · Comandos (3) · Skills (25) · Agentes en vivo · Eval & Evolve · Hooks (6) · Integraciones (6) · harness-mem · Configuración
 
 ---
 
@@ -113,7 +113,7 @@ Las skills y agentes están disponibles inmediatamente — no se necesitan pasos
 agy plugin install .
 ```
 
-Las 27 skills, los hooks y el servidor MCP `harness-mem` se descubren automáticamente desde `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` del plugin.
+Las 25 skills, los hooks y el servidor MCP `harness-mem` se descubren automáticamente desde `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` del plugin.
 
 ### Solo binario (sin host de plugin)
 
@@ -254,7 +254,7 @@ Las habilidades se activan automáticamente según el contexto. No las invocas t
 | **reflect** | Bajo demanda: ¿estás usando la IA como amplificador del pensamiento? Autoevaluación fría basada en evidencia |
 | **commit** | Generación de Conventional Commits — creado automáticamente desde git diff |
 
-> **Nota sobre presupuesto de tokens:** Claude Code carga las descripciones de skills en el contexto de cada sesión. Las 26 skills de epic caben dentro del `skillListingBudgetFraction: 0.01` predeterminado (1%). Si instalas skills adicionales (ej. episteme, alcove, obscura), el total combinado puede exceder el presupuesto y provocar una advertencia de "descriptions dropped". Añade esto a `~/.claude/settings.json` para solucionarlo:
+> **Nota sobre presupuesto de tokens:** Claude Code carga las descripciones de skills en el contexto de cada sesión. Las 25 skills de epic caben dentro del `skillListingBudgetFraction: 0.01` predeterminado (1%). Si instalas skills adicionales (ej. episteme, alcove, obscura), el total combinado puede exceder el presupuesto y provocar una advertencia de "descriptions dropped". Añade esto a `~/.claude/settings.json` para solucionarlo:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -298,8 +298,6 @@ Curate (Aceptar/Fusionar/Omitir, retroalimentación enmascarada del solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (verificación de formato, dedup, límite 10, promoción con puerta ≥ 3 sesiones)
     ↓ evolved_backup/ (mejor punto de control)
-Instinct (patrones de alto éxito → nodos cross-project memory.db)
-    ↓
 Reload (siguiente sesión — resume carga habilidades evolucionadas)
 ```
 
@@ -315,11 +313,7 @@ Tres técnicas inspiradas en deep learning adaptadas de [SkillOpt](https://arxiv
 |----------|--------------|
 | **Búfer de Retroalimentación Negativa** | Las propuestas rechazadas se almacenan con expiración basada en TTL; las propuestas futuras se verifican contra el búfer antes de la generación |
 | **Reflexión por Minilotes** | Las observaciones se descomponen en lotes de tamaño fijo para extracción de patrones estructurales; reutilizables cuando el error dominante ≥60% + ≥2 archivos distintos |
-| **Actualización Lenta/Meta** | Regresión lineal sobre las últimas 5 sesiones clasifica las épocas como Improving / Regressing / PersistentFailure / StableSuccess; auto-evicta skills con bajo rendimiento |
-
-### Auto-Ajuste de Prompts
-
-Las habilidades evolucionadas con bajo rendimiento reciben orientación de ajuste dirigida que se añade después del delimitador `<!-- auto-tuned -->`. El contenido original nunca se modifica. 3 sesiones consecutivas en declive → rollback automático del ajuste, historial limpiado.
+| **Actualización Lenta/Meta** | Regresión lineal sobre las últimas 5 sesiones clasifica las épocas como Improving / Regressing / PersistentFailure / StableSuccess; los veredictos de atribución se reportan en dashboards, nunca se aplican automáticamente |
 
 ### Efectividad de Habilidades
 
@@ -346,15 +340,6 @@ En la primera sesión, los presets de habilidades apropiados para el stack se ap
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Aprendizaje de Instintos
-
-Los patrones de alto éxito se extraen y promocionan entre proyectos:
-
-```
-observe (100% confirmado) → extract_instincts() → instinct node (confianza ≥ 0.8)
-    → promover a global cuando se observe en ≥ 2 proyectos
-```
 
 ```bash
 /evolve              # Ejecutar ahora
@@ -399,7 +384,7 @@ Se ejecutan de forma invisible en cada sesión. Binario único de Rust (`epic-ha
 | **polish** | Después de Edit | Autoformatear (Biome/Prettier/ruff/gofmt) + verificación de tipos |
 | **observe** | Cada uso de herramienta | Registrar en `~/.harness/projects/{slug}/obs/` para evolución |
 | **snapshot** | Antes de compactar | Guardar estado en `~/.harness/projects/{slug}/sessions/` |
-| **reflect** | Fin de sesión | Analizar fallos, sembrar habilidades evolucionadas, gate, extraer instintos |
+| **reflect** | Fin de sesión | Analizar fallos, sembrar habilidades evolucionadas, gate |
 
 Polish retroalimenta en observe: fallo de formato → `lint_fail`, error de TypeScript → `build_fail`. El thrashing Edit→Error se detecta incluso cuando los errores provienen de polish.
 
@@ -464,9 +449,9 @@ Todas las herramientas comparten el mismo directorio de datos `~/.harness/projec
 
 | Herramienta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
 |-------------|-------------|----------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 26 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 26 | — |
+| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 25 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 25 | — |
+| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 25 | — |
 
 ¹ `plugin_hooks = true` en `~/.codex/config.toml` · ² Solo PreInvocation/PostInvocation — sin PreToolUse (guard/polish no disponible)
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Exportar a Markdown
 | `resolution` | Manual / MCP | 0.8 |
 | `concept` | Manual / MCP | 0.7 |
 | `project` | Manual / MCP | 0.7 |
-| `instinct` | Auto (reflect) | 0.7 |
 | `pattern` | Auto (reflect) | 0.5 |
 | `error` | Auto (reflect) | 0.4 |
 | `session` | Auto (reflect) | 0.2 |
@@ -617,7 +601,8 @@ Todos los parámetros ajustables en `~/.harness/config.toml`. Ausente = valores 
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# Por defecto desactivado — los modelos ejecutan sus propios bucles de verificación
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

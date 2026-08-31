@@ -48,8 +48,19 @@ pub fn digest_session(
 
     segments
         .into_iter()
-        .map(|(task_id, seg)| build_digest(&task_id, &seg, &prev_seen))
+        .map(|(task_id, seg)| {
+            build_digest(&task_id, is_synthetic_label(&task_id), &seg, &prev_seen)
+        })
         .collect()
+}
+
+/// Whether a segment label is a synthetic non-orbit id. Defined here, beside
+/// the label producers ("session" in `group_by_pipeline`/`segment_by_time_gap`,
+/// "segment-N" in `segment_by_time_gap`), so the rule cannot desync from the
+/// literals. Consumers read `TaskDigest::synthetic` — they must not re-derive
+/// this from the string.
+pub fn is_synthetic_label(task_id: &str) -> bool {
+    task_id == "session" || task_id.starts_with("segment-")
 }
 
 /// Partition observations into ordered (task_id, records) segments.
@@ -116,7 +127,12 @@ fn segment_by_time_gap(observations: &[ObsRecord]) -> Vec<(String, Vec<&ObsRecor
 }
 
 /// Build a single digest from a segment's records.
-fn build_digest(task_id: &str, seg: &[&ObsRecord], prev_seen: &HashMap<&str, u32>) -> TaskDigest {
+fn build_digest(
+    task_id: &str,
+    synthetic: bool,
+    seg: &[&ObsRecord],
+    prev_seen: &HashMap<&str, u32>,
+) -> TaskDigest {
     let total = seg.len() as u32;
     // Success = no failure_category (matches analysis.rs convention). A record
     // with a failure_category counts as a failed step regardless of its score.
@@ -143,6 +159,7 @@ fn build_digest(task_id: &str, seg: &[&ObsRecord], prev_seen: &HashMap<&str, u32
 
     TaskDigest {
         task_id: task_id.to_string(),
+        synthetic,
         outcome,
         failure_categories,
         implicated_components,

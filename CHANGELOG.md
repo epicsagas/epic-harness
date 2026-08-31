@@ -7,6 +7,129 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Green test runs no longer recorded as failures**: the `test_fail`
+  classifier's `test.*fail` pattern matched green cargo summaries
+  ("test result: ok. 5 passed; 0 failed;"), poisoning every Rust project's
+  observation data (success rates, pattern detection, skill attribution).
+  Now matches non-zero failure counts only.
+- **Guard blocks `git push -f origin main`** and every other force-push
+  flag/ordering (`--force` after the ref, `--force-with-lease`, `-C` before
+  `push`) — the old single-pattern rule only caught literal
+  `--force <remote> main`. Also catches refspec force syntax
+  (`git push origin +main`), short-flag bundles (`-qf`/`-fq`), and
+  `--force-with-lease=<ref>`; chained commands (`a && b`) are split on shell
+  separators so a plain `git push origin main` after `rm -f build.log` or
+  `git checkout main` is no longer blocked by tokens borrowed from the other
+  segment.
+- **Orbit lock recovers after a crash**: a `running` pipeline file whose
+  `updated_at` is older than 45 minutes (the SKILL.md crash-recovery
+  threshold) is treated as stale, so a crashed orbit no longer blocks lock
+  reclamation and every future `/orbit` with exit 1.
+- **`test_fail` classifier both directions**: label-then-number summaries are
+  now caught (Maven `Failures: 3, Errors: 0` previously recorded as
+  `tool_success`), label-then-zero green summaries no longer match (dotnet
+  `Passed! - Failed: 0`, mocha `0 failing`), and bare `assertion` in prose no
+  longer classifies (only `AssertionError` / `assert.<fn>`).
+- **Evolved skills re-inject on every compaction**: the resume dedup lock now
+  applies only to plain `startup` — a second compaction in one session
+  previously hit the same `resume.{sid}.compact.lock` and silently skipped
+  injection. Missing `session_id` degrades to the date+pid fallback with a
+  stderr warning instead of silently.
+- **`update_meta_field` no longer wipes meta.json**: it read/wrote a partial
+  `SkillSlowMeta` while every other writer used the full `SkillMeta`, erasing
+  `name`/`active`/`synthesized` on every SessionEnd — silently reverting
+  `evolve accept-synth`. meta.json now has a single schema (slow_updates
+  lives on `SkillMeta`).
+- **JSONL fallback records are backfilled**: reflect ingests today's JSONL
+  fallback session files into SQLite (then removes them) — one later
+  successful SQLite write used to strand fallback records forever.
+- **Landscape history is project-scoped**: the bounded 100-row evolution
+  read now uses the project filter — multi-project users got landscapes
+  computed from other projects' records and lost their own pre-bound edits.
+- **Frontier threshold scaling is opt-in**: `scaled_threshold` only applies
+  when `class = "frontier"` is set explicitly. The default `auto` resolution
+  depends on which env vars reach the short-lived hook process, so scaling
+  on it silently halved pattern sensitivity and made the same session evolve
+  different skills on different machines.
+- **Seesaw synthetic exclusion via flag**: the digester sets
+  `TaskDigest::synthetic` at label creation (single source of truth);
+  consumers read the flag instead of re-deriving it from the string, and
+  registries written before the flag are scrubbed of legacy
+  "session"/"segment-N" entries on load.
+- **Skill counts consistent everywhere**: 25 skills (9 pipeline + 16
+  quality) across AGENTS.md, README (all locales), and docs — the headline
+  claimed 8+17 and locale tables still said 26/27.
+- `epic-harness` hook subcommands share one `HOOK_SUBCMDS` list for the
+  stdin decision, so a newly added hook can no longer silently miss stdin
+  and fall back to `HookInput::default()`.
+- **reflect JSONL fallback actually engages** when the SQLite read fails —
+  it previously returned early and silently dropped the whole evolution round.
+- **Polish feedback reaches reflect**: polish results are written to SQLite
+  (primary) with JSONL fallback, matching observe — the JSONL-only path was
+  never read by reflect, so the documented Polish→Observe feedback loop was
+  dead.
+- **Seesaw gate no longer self-blocks**: digests from non-orbit sessions
+  ("session"/"segment-N" ids, reused across days) are skipped — the max-only
+  registry converged to 1.0 and then blocked all seeding forever.
+- **Evolved skills re-inject after compaction**: the resume lock is keyed by
+  `session_id + SessionStart source`, so `compact`/`clear` re-inject while
+  plain `startup` still runs once per session.
+- **`epic orbit lock|unlock`** — concurrent-orbit guard actually exists now
+  (the previous comment claimed one that didn't). `skills/orbit` Step 0
+  acquires it; stale locks are reclaimable once no pipeline is `running`.
+- **Headless-safe CLI**: only hook subcommands read stdin — `epic orbit
+  lock`, `epic slug` etc. no longer hang when stdin is an open pipe.
+- `registry/scripts/install.js` no longer calls the removed `install`
+  subcommand; seeding happens idempotently in `epic resume`.
+
+### Changed
+- **Model-class awareness**: new `[model]` config section (`class: auto|frontier|light`,
+  auto-detected from `ANTHROPIC_MODEL`/`CLAUDE_MODEL`/…). Frontier-class runs scale
+  pattern thresholds (`frontier_threshold_scale`, default ×2 — a frontier failure
+  streak is a stronger signal), skip template skill-body injection, and tune the
+  injection budget (`inject_per_skill_chars` / `inject_total_chars`).
+- **Synthesis-only injection for frontier models**: seeded skills carry a
+  `synthesized` flag (set by `evolve accept-synth`); template bodies are withheld
+  from SessionStart injection on frontier-class models and announced as
+  "awaiting accept-synth". `resume` also prints the pending-synthesis backlog
+  count to stdout (stderr hints never reached the model — the loop only closed
+  if a host ran `/evolve` on its own).
+- **vuln-scan rewritten reasoning-first**: trust-boundary mapping → data-flow
+  tracing → sink-context encoding judgment; grep demoted to a candidate
+  accelerator (never a finding source); framework-specific raw-escape sinks
+  (Knex/Prisma/SQLAlchemy/Sequelize/Django/Rails) added; findings must cite
+  source→sink chain; clean scans must name traced entry points.
+- **SWE-bench main run unblocked**: `benchmarks/ab/build_manifest.py` samples the
+  preregistered difficulty bands into the `manifest.jsonl` `run_swebench.sh`
+  consumes (deterministic per seed). Note: the current map holds only 3 B4
+  instances, so a 5/band pilot needs `--bands B1,B2,B3`.
+- Skill counts unified at 25 across README, AGENTS.md, plugin.json, and all
+  9 i18n locales (was a 26/27/19 mix); i18n locales synced with the removed
+  features (prompt auto-tuning, instincts) and new wording.
+- **polish tsc runs incremental + debounced** (5 s, per-workspace tsbuildinfo
+  in the temp dir) and resolves the workspace-local `tsc` binary directly —
+  no more blocking full `npx tsc` on every TS edit.
+- **Attribution verdicts are reported, not enforced**: a skill trailing its
+  holdout arm is flagged in dashboards, never auto-deleted (3-vs-2 samples
+  carry less evidence than session-difficulty variance).
+- `gateguard_hints` default off — frontier models run their own verification
+  loops; static post-edit hints were noise.
+- `skills/_dispatch` trimmed: clear-signal-only triggering, dead routing rows
+  and the unwritten psychographic section removed; `skills/context` defers
+  compaction timing to the host; `skills/simplify` trigger raised to
+  500 lines.
+- reflect bounds its landscape history read to the last 100 records.
+- Stale `resume.*.lock` files pruned (7 days) on session start.
+
+### Removed
+- Dead evolution code (~1,300 lines): `auto_tune_skills` and prompt-tuning
+  infrastructure, the instincts extract/promote pipeline (promotion required
+  ≥2 projects but extraction always produced one), unwired
+  `ModifySkill`/`AddGuardRule`/`AddInstinct`/`ModifyConfig` edit types and
+  their guard-rule editor, the `processor` hook wrapper, and the
+  `[instinct]` config section (existing keys are ignored, not an error).
+
 ## [0.8.2] — 2026-07-09
 
 ### Changed

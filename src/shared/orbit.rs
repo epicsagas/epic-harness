@@ -5,12 +5,47 @@ use std::time::Instant;
 
 use super::paths::orbit_dir;
 
+/// A `running` pipeline file not updated within this window belongs to a
+/// crashed orbit and is treated as NOT running. Mirrors the 45-minute
+/// crash-recovery threshold in skills/orbit/SKILL.md — without it, a crash
+/// leaves a `running` file forever and the orbit lock can never be
+/// reacquired (`epic orbit lock` exits 1 for every future orbit).
+const STALE_RUNNING_SECS: u64 = 45 * 60;
+
+/// Parse an ISO-8601 UTC timestamp (`2026-08-30T13:57:58Z`, the `now_iso()`
+/// format) to epoch seconds. Returns None for missing/malformed values.
+/// Day-precision core is the same Howard Hinnant days-from-civil algorithm
+/// used by `evolve::skills::date_to_ordinal`.
+fn epoch_from_iso(s: &str) -> Option<u64> {
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, m, d) = (num(0..4)?, num(5..7)?, num(8..10)?);
+    let (h, mi, sec) = (num(11..13)?, num(14..16)?, num(17..19)?);
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    Some((days * 86400 + h * 3600 + mi * 60 + sec) as u64)
+}
+
+fn now_epoch_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Scan a directory for PIPELINE-*.json files with `"status": "running"`.
 /// Returns the most recent running pipeline (by filename sort order), or None.
 /// Returns None immediately if the directory does not exist (hot path optimization).
 /// Symlinks are skipped to prevent path traversal attacks.
-/// When multiple running files exist (should not happen; concurrent-orbit guard prevents it),
-/// logs a warning and returns the most recently named one deterministically.
+/// A `running` file whose `updated_at` is older than STALE_RUNNING_SECS (or
+/// missing/unparseable) is skipped — crashed orbits must not block lock
+/// reclamation or pollute observe/polish orbit detection.
+/// When multiple running files exist (should not happen; the orbit skill runs
+/// `epic orbit lock` first — see `try_acquire_orbit_lock`), logs a warning and
+/// returns the most recently named one deterministically.
 pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> {
     if !dir.is_dir() {
         return None;
@@ -36,7 +71,18 @@ pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> 
             let content = fs::read_to_string(&path).ok()?;
             match serde_json::from_str::<serde_json::Value>(&content) {
                 Ok(val) if val.get("status").and_then(|v| v.as_str()) == Some("running") => {
-                    Some((name_str.into_owned(), val))
+                    let fresh = val
+                        .get("updated_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(epoch_from_iso)
+                        .is_some_and(|epoch| {
+                            now_epoch_secs().saturating_sub(epoch) <= STALE_RUNNING_SECS
+                        });
+                    if fresh {
+                        Some((name_str.into_owned(), val))
+                    } else {
+                        None
+                    }
                 }
                 Err(_) => {
                     eprintln!("[orbit] WARNING: Failed to parse {}", name_str);
@@ -109,6 +155,51 @@ pub fn detect_active_orbit_id() -> Option<String> {
         .map(normalize_pipeline_id)
 }
 
+// ── Concurrent-orbit guard ────────────────────────────
+//
+// `epic orbit lock` / `epic orbit unlock` (wired in main.rs). The lock must
+// outlive the short-lived CLI process, so it is a lock FILE, not a flock:
+// acquisition fails while any PIPELINE-*.json is still `running` and succeeds
+// otherwise. The running-pipeline scan is the source of truth for staleness —
+// a crashed orbit's leftover lock is reclaimable once its `running` pipeline
+// file goes stale (updated_at older than STALE_RUNNING_SECS, matching the
+// SKILL.md 45-minute crash-recovery protocol).
+
+/// Try to acquire the concurrent-orbit guard in `dir` (the orbit state dir).
+/// Returns true on success (creates `.orbit.lock`), false if another orbit is
+/// running. # ponytail: hole between acquire and the first PIPELINE write
+/// (seconds) — a second start inside that window is not excluded.
+pub fn try_acquire_orbit_lock(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let path = dir.join(".orbit.lock");
+    if path.exists() {
+        // Reclaimable when no pipeline is actually running (crashed orbit
+        // left the lock behind).
+        if scan_running_pipeline_in(dir).is_some() {
+            return false;
+        }
+        let _ = fs::remove_file(&path);
+    }
+    let epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let body = format!("{{\"pid\":{},\"acquired_at\":{epoch}}}", std::process::id());
+    fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, body.as_bytes()))
+        .is_ok()
+}
+
+/// Release the concurrent-orbit guard (best-effort; safe if absent/foreign).
+pub fn release_orbit_lock(dir: &Path) {
+    let _ = fs::remove_file(dir.join(".orbit.lock"));
+}
+
 /// Read the full pipeline state for an active orbit (uncached, authoritative).
 /// Use this when you need the latest state, not a cached snapshot.
 pub fn read_active_orbit_state() -> Option<serde_json::Value> {
@@ -155,4 +246,53 @@ pub fn sanitize_orbit_field(s: &str) -> String {
         })
         .take(256)
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_from_iso_roundtrip() {
+        assert_eq!(epoch_from_iso("1970-01-01T00:00:00Z"), Some(0));
+        assert_eq!(epoch_from_iso("2026-08-30T13:57:58Z"), Some(1788098278));
+        assert_eq!(epoch_from_iso("garbage"), None);
+        assert_eq!(epoch_from_iso(""), None);
+    }
+
+    #[test]
+    fn scan_skips_stale_running_pipeline() {
+        let dir = std::env::temp_dir().join(format!("epic_orbit_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // 2020 is always more than STALE_RUNNING_SECS ago.
+        fs::write(
+            dir.join("PIPELINE-20200101T000000.json"),
+            r#"{"id":"p-old","status":"running","updated_at":"2020-01-01T00:00:00Z"}"#,
+        )
+        .unwrap();
+        assert!(
+            scan_running_pipeline_in(&dir).is_none(),
+            "stale running file must be ignored"
+        );
+
+        // A fresh running file is still detected (now_iso = same format as the writer).
+        let fresh = crate::shared::helpers::now_iso();
+        fs::write(
+            dir.join("PIPELINE-20260202T000000.json"),
+            format!(r#"{{"id":"p-fresh","status":"running","updated_at":"{fresh}"}}"#),
+        )
+        .unwrap();
+        let detected = scan_running_pipeline_in(&dir)
+            .and_then(|v| v.get("id").and_then(|i| i.as_str()).map(String::from));
+        assert_eq!(detected, Some("p-fresh".to_string()));
+
+        // Stale lock + no live pipeline → reclaimable (remove the fresh
+        // pipeline first — while it is running, the lock must NOT be acquirable).
+        fs::remove_file(dir.join("PIPELINE-20260202T000000.json")).unwrap();
+        fs::write(dir.join(".orbit.lock"), "{}").unwrap();
+        assert!(try_acquire_orbit_lock(&dir));
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

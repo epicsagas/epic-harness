@@ -30,6 +30,33 @@ fn acquire_session_lock(lock: &Path) -> bool {
     }
 }
 
+/// Delete `resume.*.lock` files older than 7 days. They otherwise accumulate
+/// one per session start forever. Only touches the `resume.` prefix, so
+/// `dashboard.lock` and other locks are unaffected.
+fn prune_stale_resume_locks() {
+    const MAX_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+    let Ok(entries) = fs::read_dir(harness_dir()) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !name.starts_with("resume.") || !name.ends_with(".lock") {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|m| now.duration_since(m).ok())
+            .is_some_and(|age| age > MAX_AGE);
+        if stale {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 const BANNER: &[&str] = &[
     "",
     "  ┌─┐┌─┐┬┌─┐   ┬ ┬┌─┐┬─┐┌┐┌┌─┐┌─┐┌─┐",
@@ -171,17 +198,42 @@ fn get_cross_project_hints() -> Vec<String> {
     hints
 }
 
-pub fn run(_input: &HookInput) -> i32 {
+pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_RESUME) {
         return 0;
     }
     // Guard: SessionStart fires multiple times per session in Claude Code.
-    // Use a per-session lock file (keyed by date+pid) to run exactly once.
+    // The dedup lock applies ONLY to plain "startup" — Claude Code double-fires
+    // startup for one real session, and re-injecting the same skills twice is
+    // pure context bloat. compact/resume/clear are genuine re-injection
+    // events (the injected bodies were compacted or cleared away), so every
+    // firing must inject: keying a lock per (session, source) blocked the
+    // second compaction of a long session from ever re-injecting.
     // `acquire_session_lock` uses O_CREAT|O_EXCL — atomically prevents the
     // TOCTOU race that the old exists()+write() pattern introduced.
-    let lock = harness_dir().join(format!("resume.{}.lock", session_id()));
-    if !acquire_session_lock(&lock) {
-        return 0;
+    prune_stale_resume_locks();
+    let source = input
+        .source
+        .clone()
+        .unwrap_or_else(|| "startup".to_string());
+    let sid = match input.session_id.clone() {
+        Some(sid) => sid,
+        None => {
+            // No session_id from the host (Codex-style hosts): fall back to
+            // date+pid. Dedup then only works within one process; warn so the
+            // degraded mode is visible instead of silent.
+            let fallback = session_id();
+            eprintln!(
+                "[resume] no session_id in hook input — lock dedup degraded to date+pid fallback"
+            );
+            fallback
+        }
+    };
+    if source == "startup" {
+        let lock = harness_dir().join(format!("resume.{sid}.{source}.lock"));
+        if !acquire_session_lock(&lock) {
+            return 0;
+        }
     }
 
     // Seed ~/.harness/config.toml + HARNESS.md on first run (replaces the
@@ -395,10 +447,14 @@ pub fn run(_input: &HookInput) -> i32 {
     // holdout arm even when this session spans UTC midnight — otherwise an
     // active-injected skill could be scored against the holdout baseline.
     crate::shared::helpers::write_session_start(&today_str);
+    // Frontier-class models skip template (un-synthesized) skill bodies —
+    // generic advice is noise there; synthesized skills always inject.
+    let inject_templates = crate::config::CONFIG.model.inject_templates();
     if !evolved.is_empty() {
         let (active, holdout) = crate::evolve::partition_holdout(&evolved, &metrics, &today_str);
         let bodies: Vec<(String, String)> = active
             .iter()
+            .filter(|name| inject_templates || crate::evolve::is_synthesized(name))
             .filter_map(|name| {
                 let content =
                     std::fs::read_to_string(evolved_dir().join(name).join("SKILL.md")).ok()?;
@@ -412,6 +468,23 @@ pub fn run(_input: &HookInput) -> i32 {
                 &format!("Evolved skills injected: {}", active.join(", ")),
             );
         }
+        let withheld: Vec<&String> = active
+            .iter()
+            .filter(|name| !inject_templates && !crate::evolve::is_synthesized(name))
+            .collect();
+        if !withheld.is_empty() {
+            hint(
+                "resume",
+                &format!(
+                    "Template skills withheld (frontier class, awaiting accept-synth): {}",
+                    withheld
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            );
+        }
         if !holdout.is_empty() {
             hint(
                 "resume",
@@ -421,6 +494,18 @@ pub fn run(_input: &HookInput) -> i32 {
                 ),
             );
         }
+    }
+
+    // Surface the synthesis backlog on stdout so the host agent sees it —
+    // stderr hints don't reach the model, and the loop only closes when a
+    // host runs `evolve accept-synth`.
+    let pending = pending_synth_count();
+    if pending > 0 {
+        println!(
+            "\n## Synthesis backlog: {pending} pending manifest(s)\n\
+             Run `/evolve` (or `epic-harness evolve accept-synth --skill <name>`) \
+             to upgrade the seeded skills with evidence-based bodies."
+        );
     }
 
     // 4. Cold-start presets (#1)
@@ -726,18 +811,42 @@ fn restore_orchestration_state(harness_dir: &Path) -> Option<String> {
 
 /// Per-skill and total character budgets for evolved-skill context injection.
 /// SessionStart stdout lands verbatim in the model's context — keep it lean.
-const INJECT_PER_SKILL_CHARS: usize = 1_600;
-const INJECT_TOTAL_CHARS: usize = 10_000;
+fn inject_per_skill_chars() -> usize {
+    crate::config::CONFIG.model.inject_per_skill_chars
+}
+
+fn inject_total_chars() -> usize {
+    crate::config::CONFIG.model.inject_total_chars
+}
+
+/// Count pending synthesis manifests awaiting host-agent upgrade.
+fn pending_synth_count() -> usize {
+    let path = crate::shared::paths::pending_synth_file();
+    std::fs::read_to_string(path)
+        .map(|s| {
+            s.lines()
+                .filter(|l| {
+                    serde_json::from_str::<serde_json::Value>(l)
+                        .ok()
+                        .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(String::from))
+                        .as_deref()
+                        == Some("pending")
+                })
+                .count()
+        })
+        .unwrap_or(0)
+}
 
 /// Render active evolved skills as a context block for SessionStart stdout.
 /// Frontmatter is stripped (metadata noise), bodies are truncated to budget.
 fn build_evolved_injection(skills: &[(String, String)]) -> String {
+    let (per_skill, total) = (inject_per_skill_chars(), inject_total_chars());
     let mut out = String::from(
         "## Evolved Skills (epic-harness Ring 3)\n\
          Learned from this project's past session failures. Apply when relevant.\n",
     );
     for (name, content) in skills {
-        if out.chars().count() >= INJECT_TOTAL_CHARS {
+        if out.chars().count() >= total {
             break;
         }
         // Strip `---\n...\n---` frontmatter; keep the body only.
@@ -746,10 +855,10 @@ fn build_evolved_injection(skills: &[(String, String)]) -> String {
             .and_then(|rest| rest.split_once("\n---").map(|x| x.1))
             .unwrap_or(content)
             .trim();
-        let truncated: String = body.chars().take(INJECT_PER_SKILL_CHARS).collect();
+        let truncated: String = body.chars().take(per_skill).collect();
         out.push_str(&format!("\n### {name}\n{truncated}\n"));
     }
-    let capped: String = out.chars().take(INJECT_TOTAL_CHARS).collect();
+    let capped: String = out.chars().take(total).collect();
     capped
 }
 
@@ -780,7 +889,7 @@ mod tests {
             "frontmatter must be stripped"
         );
         assert!(
-            out.chars().count() <= INJECT_TOTAL_CHARS,
+            out.chars().count() <= inject_total_chars(),
             "total injection must respect the budget"
         );
     }

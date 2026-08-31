@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 26개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
+<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 25개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
 
 <p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**30개 이상의 명령어를 3개 명령어 + 26개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
+**30개 이상의 명령어를 3개 명령어 + 25개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # 0으로 설정하면 자동 실행 비활성화
 auto_open = true  # 첫 세션에서 브라우저 열기
 ```
 
-화면: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (26) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
+화면: **Dashboard** · /orbit Pipeline · Commands (3) · Skills (25) · Live Agents · Eval & Evolve · Hooks (6) · Integrations (6) · harness-mem · Settings
 
 ---
 
@@ -113,7 +113,7 @@ codex plugin marketplace add epicsagas/plugins
 agy plugin install .
 ```
 
-27개 스킬, 훅, `harness-mem` MCP 서버가 플러그인의 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`에서 자동 발견됩니다.
+25개 스킬, 훅, `harness-mem` MCP 서버가 플러그인의 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`에서 자동 발견됩니다.
 
 ### 바이너리만 (플러그인 호스트 없음)
 
@@ -254,7 +254,7 @@ flowchart TD
 | **reflect** | 온디맨드: AI를 사고 증폭기로 활용하고 있는가? 냉정한 증거 기반 자기 평가 |
 | **commit** | Conventional Commits 생성 — git diff에서 자동 생성 |
 
-> **토큰 예산 참고:** Claude Code는 스킬 설명을 매 세션 컨텍스트에 로드합니다. epic의 26개 스킬은 기본 `skillListingBudgetFraction: 0.01`(1%) 내에 들어갑니다. 추가 스킬(예: episteme, alcove, obscura)을 설치하면 합산이 예산을 초과하여 "descriptions dropped" 경고가 발생할 수 있습니다. 이 경우 `~/.claude/settings.json`에 다음을 추가하세요:
+> **토큰 예산 참고:** Claude Code는 스킬 설명을 매 세션 컨텍스트에 로드합니다. epic의 25개 스킬은 기본 `skillListingBudgetFraction: 0.01`(1%) 내에 들어갑니다. 추가 스킬(예: episteme, alcove, obscura)을 설치하면 합산이 예산을 초과하여 "descriptions dropped" 경고가 발생할 수 있습니다. 이 경우 `~/.claude/settings.json`에 다음을 추가하세요:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -298,8 +298,6 @@ Curate (Accept/Merge/Skip, solver에게 피드백 마스킹)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (포맷 검사, 중복 제거, 10개 상한, 3세션 이상 게이티드 프로모션)
     ↓ evolved_backup/ (최적 체크포인트)
-Instinct (고성공 패턴 → 크로스 프로젝트 memory.db 노드)
-    ↓
 Reload (다음 세션 — resume이 진화 스킬 로드)
 ```
 
@@ -315,11 +313,7 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 |------|----------|
 | **Negative Feedback Buffer** | 거부된 제안을 TTL 기반 만료와 함께 저장; 향후 제안 생성 전 버퍼를 확인 |
 | **Minibatch Reflection** | 관측값을 고정 크기 배치로 분해하여 구조적 패턴 추출; 지배적 에러 ≥60% + ≥2개 이상의 서로 다른 파일일 때 재사용 가능 |
-| **Slow/Meta Update** | 최근 5개 세션에 대한 선형 회귀로 에포크를 Improving / Regressing / PersistentFailure / StableSuccess로 분류; 성과가 낮은 스킬 자동 퇴출 |
-
-### 프롬프트 자동 튜닝
-
-성과가 낮은 진화 스킬은 `<!-- auto-tuned -->` 구분자 뒤에 타겟팅된 튜닝 가이드가 추가됩니다. 원본 콘텐츠는 수정되지 않습니다. 3세션 연속 하락 시 → 튜닝 자동 롤백, 이력 초기화.
+| **Slow/Meta Update** | 최근 5개 세션에 대한 선형 회귀로 에포크를 Improving / Regressing / PersistentFailure / StableSuccess로 분류; attribution 판정은 대시보드에 표시만 될 뿐 자동 적용되지 않음 |
 
 ### 스킬 효과
 
@@ -346,15 +340,6 @@ Reload (다음 세션 — resume이 진화 스킬 로드)
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### Instinct 학습
-
-고성공 패턴이 추출되어 프로젝트 간 공유됩니다:
-
-```
-observe (100% 확인) → extract_instincts() → instinct 노드 (confidence ≥ 0.8)
-    → 2개 이상 프로젝트에서 관측 시 글로벌로 프로모션
-```
 
 ```bash
 /evolve              # 지금 실행
@@ -399,7 +384,7 @@ observe (100% 확인) → extract_instincts() → instinct 노드 (confidence �
 | **polish** | Edit 후 | 자동 포맷 (Biome/Prettier/ruff/gofmt) + 타입체크 |
 | **observe** | 모든 도구 사용 시 | `~/.harness/projects/{slug}/obs/`에 진화용 로깅 |
 | **snapshot** | compact 전 | `~/.harness/projects/{slug}/sessions/`에 상태 저장 |
-| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트, instinct 추출 |
+| **reflect** | 세션 종료 | 실패 분석, 진화 스킬 시드, 게이트 |
 
 polish는 observe로 피드백됩니다: 포맷 실패 → `lint_fail`, TypeScript 에러 → `build_fail`. Edit→Error 쓰래싱은 에러가 polish에서 발생해도 감지됩니다.
 
@@ -464,9 +449,9 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 | 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
 |------|-----------|--------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
-| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
+| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 25개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 25개 | — |
+| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 25개 | — |
 
 ¹ `~/.codex/config.toml`에 `plugin_hooks = true` 필요 · ² PreInvocation/PostInvocation만 — PreToolUse 없음 (guard/polish 불가)
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 | `resolution` | 수동 / MCP | 0.8 |
 | `concept` | 수동 / MCP | 0.7 |
 | `project` | 수동 / MCP | 0.7 |
-| `instinct` | 자동 (reflect) | 0.7 |
 | `pattern` | 자동 (reflect) | 0.5 |
 | `error` | 자동 (reflect) | 0.4 |
 | `session` | 자동 (reflect) | 0.2 |
@@ -617,7 +601,8 @@ epic mem export --out ./docs/memory                    # Markdown 내보내기
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# 기본값 false — 모델은 자체 검증 루프를 수행함
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>

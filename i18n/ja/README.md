@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 3個のコマンド、26個のスキル、1つの自律パイプライン、あなたの失敗から学習します。</p></blockquote>
+<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 3個のコマンド、25個のスキル、1つの自律パイプライン、あなたの失敗から学習します。</p></blockquote>
 
 <p align="center"><b>覚えるべき操作は少なく。キーストローク当たりの知性は高く。セッションを重ねるほどスマートに。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Claude Codeプラグインで、**30以上のコマンドを3個のコマンド + 26個の自動トリガースキルに統合**し、自分の失敗パターンから**新しいスキルを進化**させます。
+Claude Codeプラグインで、**30以上のコマンドを3個のコマンド + 25個の自動トリガースキルに統合**し、自分の失敗パターンから**新しいスキルを進化**させます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # 0 に設定すると自動起動を無効化
 auto_open = true  # 最初のセッションでブラウザを開く
 ```
 
-画面: **ダッシュボード** · /orbit パイプライン · コマンド（3） · スキル（26） · ライブエージェント · Eval & Evolve · フック（6） · インテグレーション（6） · harness-mem · 設定
+画面: **ダッシュボード** · /orbit パイプライン · コマンド（3） · スキル（25） · ライブエージェント · Eval & Evolve · フック（6） · インテグレーション（6） · harness-mem · 設定
 
 ---
 
@@ -298,8 +298,6 @@ Curate (Accept/Merge/Skip, feedback masked from solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
 Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
     ↓ evolved_backup/ (best checkpoint)
-Instinct (high-success patterns → cross-project memory.db nodes)
-    ↓
 Reload (next session — resume loads evolved skills)
 ```
 
@@ -315,11 +313,7 @@ Reload (next session — resume loads evolved skills)
 |------|--------|
 | **ネガティブフィードバックバッファ** | 拒否された提案をTTLベースの有効期限付きで保存; 将来の提案は生成前にバッファと照合 |
 | **ミニバッチリフレクション** | 観測を固定サイズのバッチに分解して構造的パターンを抽出; 優位エラー ≥60% + ≥2の異なるファイルで再利用可能 |
-| **スロー/メタアップデート** | 直近5セッションの線形回帰でエポックを Improving / Regressing / PersistentFailure / StableSuccess に分類; パフォーマンス低下スキルを自動排除 |
-
-### プロンプト自動チューニング
-
-パフォーマンス低下の進化スキルは、`<!-- auto-tuned -->` 区切り文字の後にターゲット調整ガイダンスが追加されます。元のコンテンツは一切変更されません。3回連続でスコアが低下 → 自動ロールバックでチューニングを巻き戻し、履歴をクリア。
+| **スロー/メタアップデート** | 直近5セッションの線形回帰でエポックを Improving / Regressing / PersistentFailure / StableSuccess に分類; 属性判定はダッシュボードに表示されるのみで、自動適用されない |
 
 ### スキル有効性
 
@@ -346,15 +340,6 @@ Reload (next session — resume loads evolved skills)
 | Go | `evo-go-care` |
 | Python | `evo-py-care` |
 | Rust | `evo-rs-care` |
-
-### 本能学習
-
-高成功率のパターンが抽出され、プロジェクト横断で促進されます:
-
-```
-observe (100% confirmed) → extract_instincts() → instinct node (confidence ≥ 0.8)
-    → promote to global when observed in ≥ 2 projects
-```
 
 ```bash
 /evolve              # 今すぐ実行
@@ -399,7 +384,7 @@ observe (100% confirmed) → extract_instincts() → instinct node (confidence �
 | **polish** | 編集後 | 自動フォーマット（Biome/Prettier/ruff/gofmt）+ 型チェック |
 | **observe** | すべてのツール使用時 | `~/.harness/projects/{slug}/obs/` にログを記録（進化用） |
 | **snapshot** | compact前 | `~/.harness/projects/{slug}/sessions/` に状態を保存 |
-| **reflect** | セッション終了 | 失敗を分析、進化スキルをシード、ゲート、本能を抽出 |
+| **reflect** | セッション終了 | 失敗を分析、進化スキルをシード、ゲート |
 
 Polishはobserveにフィードバックします: フォーマット失敗 → `lint_fail`、TypeScriptエラー → `build_fail`。polishからエラーが来る場合でも、Edit→Errorスラッシングが検出されます。
 
@@ -464,9 +449,9 @@ epic team delete backend --global      # orgストアから永久に削除
 
 | ツール | Ring 0 フック | コマンド | スキル | エージェント |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 26スキル | Live |
-| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 26 | — |
+| **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 25スキル | Live |
+| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 25 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 25 | — |
 
 ¹ `~/.codex/config.toml` で `plugin_hooks = true` · ² PreInvocation/PostInvocationのみ — PreToolUseなし（guard/polish利用不可）
 
@@ -561,7 +546,6 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
 | `resolution` | 手動 / MCP | 0.8 |
 | `concept` | 手動 / MCP | 0.7 |
 | `project` | 手動 / MCP | 0.7 |
-| `instinct` | 自動（reflect） | 0.7 |
 | `pattern` | 自動（reflect） | 0.5 |
 | `error` | 自動（reflect） | 0.4 |
 | `session` | 自動（reflect） | 0.2 |
@@ -617,7 +601,8 @@ epic mem export --out ./docs/memory                    # Markdownにエクスポ
 
 [hook]
 profile = "standard"         # "minimal" | "standard" | "strict"
-gateguard_hints = true
+# デフォルトはオフ — モデルは自身の検証ループを実行する
+gateguard_hints = false
 
 [scoring]
 weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
@@ -634,12 +619,6 @@ gated_promotion_min = 3
 # graduated_scope_skip = 0.90
 # graduated_scope_moderate = 0.70
 
-[instinct]
-# confidence_threshold = 0.8
-# promotion_min_projects = 2
-# max_instincts = 20
-# min_observations = 10
-# min_avg_score = 0.5
 ```
 
 </details>
