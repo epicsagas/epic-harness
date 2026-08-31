@@ -165,13 +165,12 @@ fn is_force_push_to_protected(cmd: &str) -> bool {
     static PROTECTED_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)(?:\b[\w-]+/)?(?:main|master)\b").unwrap());
 
-    cmd.split(['&', '|', ';', '\n', '\r'])
-        .any(|seg| {
-            if !SEG_PUSH_RE.is_match(seg) {
-                return false;
-            }
-            (FORCE_RE.is_match(seg) || REFSPEC_FORCE_RE.is_match(seg)) && PROTECTED_RE.is_match(seg)
-        })
+    cmd.split(['&', '|', ';', '\n', '\r']).any(|seg| {
+        if !SEG_PUSH_RE.is_match(seg) {
+            return false;
+        }
+        (FORCE_RE.is_match(seg) || REFSPEC_FORCE_RE.is_match(seg)) && PROTECTED_RE.is_match(seg)
+    })
 }
 
 fn check_warned(cmd: &str) -> Vec<&'static str> {

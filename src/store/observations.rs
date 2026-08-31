@@ -87,7 +87,11 @@ fn expand_day_bounds(from_ts: &str, to_ts: &str) -> (String, String) {
             &ts[6..8],
             if end_of_day { "23:59:59" } else { "00:00:00" }
         ),
-        10 => format!("{}T{}", ts, if end_of_day { "23:59:59" } else { "00:00:00" }),
+        10 => format!(
+            "{}T{}",
+            ts,
+            if end_of_day { "23:59:59" } else { "00:00:00" }
+        ),
         _ => ts.to_string(),
     };
     (expand(from_ts, false), expand(to_ts, true))
