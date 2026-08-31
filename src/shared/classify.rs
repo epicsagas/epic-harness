@@ -71,7 +71,7 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    let sample = &output[..output.len().min(2000)];
+    let sample = crate::shared::sanitize::truncate_bytes(output, 2000);
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(sample) {
             return Some(cat);

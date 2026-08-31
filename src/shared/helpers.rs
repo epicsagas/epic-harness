@@ -339,7 +339,7 @@ pub fn normalize_error(snippet: &str) -> String {
     let s = PATH_RE.replace_all(&s, "/PATH/");
     let s = WS_RE.replace_all(&s, " ");
     let trimmed = s.trim();
-    trimmed[..trimmed.len().min(200)].to_string()
+    crate::shared::sanitize::truncate_bytes(trimmed, 200).to_string()
 }
 
 #[cfg(test)]

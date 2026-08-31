@@ -26,6 +26,22 @@ static MASK_PATH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?:(?:/[A-Za-z][\w./-]*)|(?:[A-Za-z]:\\[^\s"']+)|(?:~[/\w.\\-]+))"#).unwrap()
 });
 
+/// Truncate to at most `max` bytes without splitting a UTF-8 character.
+///
+/// Slicing `&s[..max]` panics when byte `max` lands inside a multi-byte
+/// character, which any non-ASCII command hits (a Korean path, an emoji in a
+/// commit message). Backs up to the nearest character boundary instead.
+pub fn truncate_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Mask common secret patterns in a string.
 /// Covers: Bearer tokens, sk-* API keys, password/token/apikey/secret/private_key
 /// values, and absolute file paths (Unix/Windows/tilde-home).
@@ -108,5 +124,38 @@ mod tests {
             mask_secrets("open ~/repo/z for editing"),
             "open <PATH> for editing"
         );
+    }
+
+    #[test]
+    fn truncate_bytes_shorter_than_max_is_unchanged() {
+        assert_eq!(truncate_bytes("abc", 500), "abc");
+    }
+
+    #[test]
+    fn truncate_bytes_ascii_cuts_exactly() {
+        let s = "a".repeat(600);
+        assert_eq!(truncate_bytes(&s, 500).len(), 500);
+    }
+
+    /// The panic this guards: "가" is 3 bytes, so byte 500 of a run of them
+    /// lands mid-character and `&s[..500]` aborts the hook process.
+    #[test]
+    fn truncate_bytes_does_not_split_multibyte_char() {
+        let s = "가".repeat(300);
+        let out = truncate_bytes(&s, 500);
+        assert!(out.len() <= 500);
+        assert_eq!(out.len() % 3, 0, "must cut on a char boundary");
+        assert!(s.starts_with(out));
+    }
+
+    #[test]
+    fn truncate_bytes_max_zero_is_empty() {
+        assert_eq!(truncate_bytes("가나다", 0), "");
+    }
+
+    /// A cut landing before any complete character yields empty, not a panic.
+    #[test]
+    fn truncate_bytes_below_first_char_width() {
+        assert_eq!(truncate_bytes("가나다", 2), "");
     }
 }

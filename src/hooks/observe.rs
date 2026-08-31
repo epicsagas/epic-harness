@@ -377,7 +377,7 @@ pub fn run(input: &HookInput) -> i32 {
     let action = input.tool_input.as_ref().map(|v| {
         v.get("command")
             .and_then(|c| c.as_str())
-            .map(|c| mask_secrets(&c[..c.len().min(500)]))
+            .map(|c| mask_secrets(truncate_bytes(c, 500)))
             .or_else(|| {
                 v.get("file_path")
                     .and_then(|c| c.as_str())
@@ -385,7 +385,7 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
-                mask_secrets(&s[..s.len().min(200)])
+                mask_secrets(truncate_bytes(&s, 200))
             })
     });
 
@@ -532,7 +532,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(&combined[..combined.len().min(500)]);
+            let masked = mask_secrets(truncate_bytes(&combined, 500));
             record.error_snippet = Some(masked);
         }
     }
