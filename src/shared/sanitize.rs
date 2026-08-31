@@ -42,6 +42,32 @@ pub fn truncate_bytes(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
+/// Sanitize a path that is itself an observation's `action`.
+///
+/// [`mask_secrets`] collapses every absolute path to one `<PATH>` token. That
+/// is right for an error snippet, but destroys the action when the action *is*
+/// a path: every file becomes indistinguishable, so same-file streak detection
+/// (`long_debug_loop`), per-file weak-spot stats and the observation dedup key
+/// all collapse onto a single value.
+///
+/// A path under the project is made relative — that drops the part which
+/// actually leaks (home directory, username) while keeping files distinct —
+/// and then gets the secret masks but *not* the path mask, which would
+/// re-collapse `src/a.rs` and `src/b.rs` onto `src<PATH>`. A path outside the
+/// project keeps the full masking, including `<PATH>`.
+pub fn mask_path_action(path: &str) -> String {
+    let root = crate::shared::paths::cwd();
+    match std::path::Path::new(path).strip_prefix(&root) {
+        Ok(rel) => {
+            let rel = rel.to_string_lossy();
+            let s = MASK_BEARER.replace_all(&rel, "Bearer <REDACTED>");
+            let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
+            MASK_KV.replace_all(&s, "$1=<REDACTED>").into_owned()
+        }
+        Err(_) => mask_secrets(path),
+    }
+}
+
 /// Mask common secret patterns in a string.
 /// Covers: Bearer tokens, sk-* API keys, password/token/apikey/secret/private_key
 /// values, and absolute file paths (Unix/Windows/tilde-home).
@@ -56,6 +82,31 @@ pub fn mask_secrets(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two files in the project must stay distinguishable after sanitizing.
+    /// Masking an absolute path alone turns every one of them into `<PATH>`,
+    /// which silently breaks same-file streak detection and the dedup key.
+    #[test]
+    fn project_paths_stay_distinct_after_masking() {
+        let root = crate::shared::paths::cwd();
+        let a = root.join("src/a.rs");
+        let b = root.join("src/b.rs");
+
+        let sa = mask_path_action(&a.to_string_lossy());
+        let sb = mask_path_action(&b.to_string_lossy());
+
+        assert_eq!(sa, "src/a.rs");
+        assert_eq!(sb, "src/b.rs");
+        assert_ne!(sa, sb);
+    }
+
+    /// A path outside the project keeps the mask: nothing about the user's
+    /// home directory should survive into stored observations.
+    #[test]
+    fn outside_paths_are_still_masked() {
+        let masked = mask_path_action("/home/someone/secret/x.rs");
+        assert!(!masked.contains("someone"), "leaked home dir: {masked}");
+    }
 
     #[test]
     fn mask_bearer_token() {

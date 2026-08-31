@@ -386,7 +386,7 @@ pub fn run(input: &HookInput) -> i32 {
             .or_else(|| {
                 v.get("file_path")
                     .and_then(|c| c.as_str())
-                    .map(|c| mask_secrets(truncate_bytes(c, 500)))
+                    .map(|c| mask_path_action(truncate_bytes(c, 500)))
             })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
