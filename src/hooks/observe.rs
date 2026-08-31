@@ -176,8 +176,13 @@ fn check_and_increment_counter(counter_file: &std::path::Path) -> bool {
 ///
 /// `obs_dir()` is guaranteed to exist at this call site because `run()`
 /// returns early via `harness_exists()` before reaching the telemetry block.
-fn should_sample_tool_error() -> bool {
-    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", session_id()));
+///
+/// Keyed by the resolved session id, not `session_id()`: the latter is
+/// date+PID, and Codex spawns a process per hook, so the 50-event cap got a
+/// fresh counter file almost every call — never capping, and leaving one
+/// one-byte file per tool error behind.
+fn should_sample_tool_error(sid: &str) -> bool {
+    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", sid));
     check_and_increment_counter(&counter_file)
 }
 
@@ -563,7 +568,7 @@ pub fn run(input: &HookInput) -> i32 {
     // Capped at 50 events per session to avoid flooding PostHog during error loops.
     if let Some(failure_cat) = &record.failure_category {
         let tool_cat = &record.tool_category;
-        if should_sample_tool_error() {
+        if should_sample_tool_error(&sid) {
             TELEMETRY.track_tool_error(
                 tool_cat.parse().unwrap_or(ToolCategory::Other),
                 failure_cat.parse().unwrap_or(FailureClass::Unknown),
