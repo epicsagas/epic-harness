@@ -76,6 +76,37 @@ mod tests {
     }
 
     #[test]
+    fn classify_maven_label_then_number_failure() {
+        // Regression: "Failures: 3" (label before number) missed every
+        // number-before pattern → Maven failures recorded as tool_success.
+        let maven_fail = "Tests run: 4, Failures: 3, Errors: 0, Skipped: 0";
+        assert_eq!(classify_failure(maven_fail), Some("test_fail"));
+        let maven_errors = "Tests run: 4, Failures: 0, Errors: 2, Skipped: 0";
+        assert_eq!(classify_failure(maven_errors), Some("test_fail"));
+    }
+
+    #[test]
+    fn classify_label_then_zero_is_green() {
+        // Regression: `FAIL[\s:.]` matched the word regardless of count, so
+        // green dotnet/mocha summaries were recorded as failures.
+        let dotnet_green = "Passed! - Failed: 0, Passed: 10, Skipped: 0";
+        assert_eq!(classify_failure(dotnet_green), None);
+        let mocha_green = "  5 passing\n  0 failing";
+        assert_eq!(classify_failure(mocha_green), None);
+    }
+
+    #[test]
+    fn classify_bare_assertion_word_is_not_failure() {
+        // Regression: `assertion\b` matched prose/docs in successful output.
+        assert_eq!(classify_failure("grep assertion docs/README.md"), None);
+        // Real assert API names still classify.
+        assert_eq!(
+            classify_failure("AssertionError: expected 5 == 4"),
+            Some("test_fail")
+        );
+    }
+
+    #[test]
     fn classify_lint_fail() {
         assert_eq!(
             classify_failure("eslint error: no-unused-vars"),
@@ -508,7 +539,10 @@ warned:
         let file = dir.path().join("PIPELINE-20260507-test.json");
         fs::write(
             &file,
-            r#"{"id":"test-id-001","status":"running","phase":"go","mode":"direct"}"#,
+            format!(
+                r#"{{"id":"test-id-001","status":"running","phase":"go","mode":"direct","updated_at":"{}"}}"#,
+                now_iso()
+            ),
         )
         .unwrap();
 
@@ -590,11 +624,15 @@ warned:
         // Failed pipeline
         let f2 = dir.path().join("PIPELINE-20260507-failed.json");
         fs::write(&f2, r#"{"id":"old-002","status":"failed"}"#).unwrap();
-        // Running pipeline — the one we want
+        // Running pipeline — the one we want (updated_at is required for the
+        // stale-running guard; use the same format the writer emits)
         let f3 = dir.path().join("PIPELINE-20260507-running.json");
         fs::write(
             &f3,
-            r#"{"id":"active-003","status":"running","phase":"audit"}"#,
+            format!(
+                r#"{{"id":"active-003","status":"running","phase":"audit","updated_at":"{}"}}"#,
+                now_iso()
+            ),
         )
         .unwrap();
         // Non-pipeline file (should be ignored)
@@ -614,10 +652,19 @@ warned:
     #[test]
     fn scan_returns_most_recent_when_two_running() {
         let dir = tempfile::tempdir().unwrap();
+        let ts = now_iso();
         let f1 = dir.path().join("PIPELINE-20260507-aaa.json");
-        fs::write(&f1, r#"{"id":"old-running","status":"running"}"#).unwrap();
+        fs::write(
+            &f1,
+            format!(r#"{{"id":"old-running","status":"running","updated_at":"{ts}"}}"#),
+        )
+        .unwrap();
         let f2 = dir.path().join("PIPELINE-20260507-zzz.json");
-        fs::write(&f2, r#"{"id":"new-running","status":"running"}"#).unwrap();
+        fs::write(
+            &f2,
+            format!(r#"{{"id":"new-running","status":"running","updated_at":"{ts}"}}"#),
+        )
+        .unwrap();
 
         let result = scan_running_pipeline_in(dir.path());
         assert!(result.is_some());

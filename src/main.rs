@@ -158,13 +158,18 @@ fn main() {
         }
     }
 
+    // Hook subcommands that receive hook input on stdin. Single source of
+    // truth for the stdin decision — keeping this list in sync by hand with
+    // the dispatch below let a new hook subcommand silently skip stdin
+    // (HookInput::default() → session_id None → degraded resume lock keys).
+    const HOOK_SUBCMDS: &[&str] = &[
+        "resume", "guard", "polish", "observe", "snapshot", "reflect",
+    ];
+
     // Read stdin once, pass to hook subcommands only. Other subcommands
     // (orbit, slug, …) never consume it — reading there hangs headless callers
     // whose stdin is an open pipe with no EOF.
-    let hook_subcmd = matches!(
-        subcmd,
-        "resume" | "guard" | "polish" | "observe" | "snapshot" | "reflect"
-    );
+    let hook_subcmd = HOOK_SUBCMDS.contains(&subcmd);
     let mut stdin_buf = String::new();
     if hook_subcmd && !io::stdin().is_terminal() {
         let _ = io::stdin().read_to_string(&mut stdin_buf);

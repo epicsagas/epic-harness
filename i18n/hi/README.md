@@ -100,7 +100,7 @@ codex plugin marketplace add epicsagas/plugins
 agy plugin install .
 ```
 
-27 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` से ऑटो-डिस्कवर होते हैं।
+25 स्किल्स, hooks और `harness-mem` MCP सर्वर प्लगइन के `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` से ऑटो-डिस्कवर होते हैं।
 
 ### केवल बाइनरी (प्लगइन होस्ट के बिना)
 

@@ -331,6 +331,14 @@ pub fn default_metrics() -> Metrics {
 pub struct TaskDigest {
     /// Task identifier — orbit pipeline ID or session segment hash.
     pub task_id: String,
+    /// True when `task_id` is a synthetic non-orbit label ("session" /
+    /// "segment-N") reused across days. Set by the digester at creation —
+    /// the single source of truth for the synthetic/exclude decision.
+    /// Consumers (seesaw) read this flag instead of re-deriving it from the
+    /// string, which silently desynced from the producer's literals before.
+    /// `#[serde(default)]` keeps pre-flag JSON deserializable.
+    #[serde(default)]
+    pub synthetic: bool,
     /// Binary outcome of this task segment.
     pub outcome: TaskOutcome,
     /// Failure categories ranked by frequency.

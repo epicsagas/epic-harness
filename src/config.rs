@@ -87,9 +87,15 @@ impl ModelConfig {
             .unwrap_or_else(|| self.resolved_class() == "light")
     }
 
-    /// Threshold scaled for the resolved model class.
+    /// Threshold scaled for the model class — but ONLY when the class is
+    /// explicitly configured (`class = "frontier"`). The default `auto`
+    /// resolution depends on which model env vars happen to reach the
+    /// short-lived hook process, so scaling on it silently halved pattern
+    /// sensitivity for default users and made the same session evolve
+    /// different skills on different machines. Injection behavior
+    /// (`resolved_class`) still degrades gracefully on auto.
     pub fn scaled_threshold(&self, base: u64) -> u64 {
-        if self.resolved_class() == "frontier" {
+        if self.class == "frontier" {
             ((base as f64) * self.frontier_threshold_scale)
                 .round()
                 .max(1.0) as u64

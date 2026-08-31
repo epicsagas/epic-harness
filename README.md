@@ -484,8 +484,8 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | Tool | Ring 0 Hooks | Commands | Skills | Agents |
 |------|-------------|----------|--------|--------|
 | **Claude Code** | ✓ Full | ✓ 3 commands (incl. /orbit) | ✓ 25 skills | Live |
-| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 26 | — |
+| **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 25 | — |
+| **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 25 | — |
 
 ¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable)
 

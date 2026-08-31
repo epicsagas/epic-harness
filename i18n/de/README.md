@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">Ein selbstentwickelndes KI-Coding-Agent-Harness — 3 Befehle, 26 Skills, 1 autonome Pipeline, lernt aus Ihren Fehlern.</p></blockquote>
+<blockquote><p align="center">Ein selbstentwickelndes KI-Coding-Agent-Harness — 3 Befehle, 25 Skills, 1 autonome Pipeline, lernt aus Ihren Fehlern.</p></blockquote>
 
 <p align="center"><b>Weniger zu merken. Mehr Intelligenz pro Tastendruck. Wird mit jeder Session intelligenter.</b></p>
 
@@ -113,7 +113,7 @@ Skills und Agents sind sofort verfügbar — keine weiteren Schritte erforderlic
 agy plugin install .
 ```
 
-27 Skills, Hooks und der `harness-mem` MCP-Server werden automatisch aus `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` des Plugins erkannt.
+25 Skills, Hooks und der `harness-mem` MCP-Server werden automatisch aus `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json` des Plugins erkannt.
 
 ### Nur Binary (ohne Plugin-Host)
 
@@ -254,7 +254,7 @@ Skills werden automatisch basierend auf dem Kontext ausgelöst. Sie rufen sie ni
 | **reflect** | Auf Abruf: Nutzen Sie KI als Gedankenverstärker? Kalte, evidenzbasierte Selbsteinschätzung |
 | **commit** | Conventional Commits Generierung — automatisch aus git diff |
 
-> **Hinweis zum Token-Budget:** Claude Code lädt Skill-Beschreibungen in jeden Session-Context. Epics 26 Skills passen in den Standardwert `skillListingBudgetFraction: 0.01` (1%). Wenn Sie zusätzliche Skills installieren (z. B. episteme, alcove, obscura), kann die Gesamtzahl das Budget überschreiten und eine "descriptions dropped"-Warnung auslösen. Fügen Sie dies zu `~/.claude/settings.json` hinzu, um das Problem zu beheben:
+> **Hinweis zum Token-Budget:** Claude Code lädt Skill-Beschreibungen in jeden Session-Context. Epics 25 Skills passen in den Standardwert `skillListingBudgetFraction: 0.01` (1%). Wenn Sie zusätzliche Skills installieren (z. B. episteme, alcove, obscura), kann die Gesamtzahl das Budget überschreiten und eine "descriptions dropped"-Warnung auslösen. Fügen Sie dies zu `~/.claude/settings.json` hinzu, um das Problem zu beheben:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -449,9 +449,9 @@ Alle Tools teilen dasselbe `~/.harness/projects/{slug}/`-Datenverzeichnis.
 
 | Tool | Ring 0 Hooks | Befehle | Skills | Agents |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ Vollständig | ✓ 3 Befehle (inkl. /orbit) | ✓ 26 Skills | Live |
-| **Codex CLI** | ✓ Vollständig¹ | ✓ 3 Prompts (inkl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Teilweise² | ✓ 3 Befehle (inkl. /orbit) | ✓ 26 | — |
+| **Claude Code** | ✓ Vollständig | ✓ 3 Befehle (inkl. /orbit) | ✓ 25 Skills | Live |
+| **Codex CLI** | ✓ Vollständig¹ | ✓ 3 Prompts (inkl. /orbit) | ✓ 25 | — |
+| **Antigravity** | ✓ Teilweise² | ✓ 3 Befehle (inkl. /orbit) | ✓ 25 | — |
 
 ¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² Nur PreInvocation/PostInvocation — kein PreToolUse (guard/polish nicht verfügbar)
 

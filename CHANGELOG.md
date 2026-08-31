@@ -16,7 +16,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Guard blocks `git push -f origin main`** and every other force-push
   flag/ordering (`--force` after the ref, `--force-with-lease`, `-C` before
   `push`) — the old single-pattern rule only caught literal
-  `--force <remote> main`.
+  `--force <remote> main`. Also catches refspec force syntax
+  (`git push origin +main`), short-flag bundles (`-qf`/`-fq`), and
+  `--force-with-lease=<ref>`; chained commands (`a && b`) are split on shell
+  separators so a plain `git push origin main` after `rm -f build.log` or
+  `git checkout main` is no longer blocked by tokens borrowed from the other
+  segment.
+- **Orbit lock recovers after a crash**: a `running` pipeline file whose
+  `updated_at` is older than 45 minutes (the SKILL.md crash-recovery
+  threshold) is treated as stale, so a crashed orbit no longer blocks lock
+  reclamation and every future `/orbit` with exit 1.
+- **`test_fail` classifier both directions**: label-then-number summaries are
+  now caught (Maven `Failures: 3, Errors: 0` previously recorded as
+  `tool_success`), label-then-zero green summaries no longer match (dotnet
+  `Passed! - Failed: 0`, mocha `0 failing`), and bare `assertion` in prose no
+  longer classifies (only `AssertionError` / `assert.<fn>`).
+- **Evolved skills re-inject on every compaction**: the resume dedup lock now
+  applies only to plain `startup` — a second compaction in one session
+  previously hit the same `resume.{sid}.compact.lock` and silently skipped
+  injection. Missing `session_id` degrades to the date+pid fallback with a
+  stderr warning instead of silently.
+- **`update_meta_field` no longer wipes meta.json**: it read/wrote a partial
+  `SkillSlowMeta` while every other writer used the full `SkillMeta`, erasing
+  `name`/`active`/`synthesized` on every SessionEnd — silently reverting
+  `evolve accept-synth`. meta.json now has a single schema (slow_updates
+  lives on `SkillMeta`).
+- **JSONL fallback records are backfilled**: reflect ingests today's JSONL
+  fallback session files into SQLite (then removes them) — one later
+  successful SQLite write used to strand fallback records forever.
+- **Landscape history is project-scoped**: the bounded 100-row evolution
+  read now uses the project filter — multi-project users got landscapes
+  computed from other projects' records and lost their own pre-bound edits.
+- **Frontier threshold scaling is opt-in**: `scaled_threshold` only applies
+  when `class = "frontier"` is set explicitly. The default `auto` resolution
+  depends on which env vars reach the short-lived hook process, so scaling
+  on it silently halved pattern sensitivity and made the same session evolve
+  different skills on different machines.
+- **Seesaw synthetic exclusion via flag**: the digester sets
+  `TaskDigest::synthetic` at label creation (single source of truth);
+  consumers read the flag instead of re-deriving it from the string, and
+  registries written before the flag are scrubbed of legacy
+  "session"/"segment-N" entries on load.
+- **Skill counts consistent everywhere**: 25 skills (9 pipeline + 16
+  quality) across AGENTS.md, README (all locales), and docs — the headline
+  claimed 8+17 and locale tables still said 26/27.
+- `epic-harness` hook subcommands share one `HOOK_SUBCMDS` list for the
+  stdin decision, so a newly added hook can no longer silently miss stdin
+  and fall back to `HookInput::default()`.
 - **reflect JSONL fallback actually engages** when the SQLite read fails —
   it previously returned early and silently dropped the whole evolution round.
 - **Polish feedback reaches reflect**: polish results are written to SQLite

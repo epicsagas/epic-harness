@@ -329,7 +329,7 @@ Security: server binds to `127.0.0.1` only, UUID v4 path validation on all node 
 
 ```
 epic-harness/
-├── skills/            # 27 skills (pipeline + quality gates + _dispatch router + _critic)
+├── skills/            # 25 skills (pipeline + quality gates) + _dispatch router + _critic reviewer
 │   └── */SKILL.md     # one directory per skill
 ├── registry/          # Seeding resources (embedded in the Rust binary at compile time)
 │   ├── presets/       # Cold-start skill templates per stack

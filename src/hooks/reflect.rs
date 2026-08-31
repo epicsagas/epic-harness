@@ -754,6 +754,48 @@ fn is_leap(y: i32) -> bool {
 
 // ── Main Hook ───────────────────────────────────────
 
+/// Ingest today's JSONL fallback session files into SQLite, then remove them.
+///
+/// observe/polish write JSONL only when the SQLite write failed mid-session.
+/// Without this backfill, those records were stranded forever: the old read
+/// path only consulted JSONL when SQLite was empty-or-failing for the day —
+/// one later successful SQLite write and the fallback data went unread.
+/// The file is removed only after every record was inserted, so a partial
+/// backfill leaves the remainder for the next attempt.
+async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
+    if !obs_dir().is_dir() {
+        return;
+    }
+    let project = crate::shared::paths::project_slug();
+    for fname in list_files(&obs_dir(), ".jsonl") {
+        if !fname.contains(today_str) {
+            continue;
+        }
+        let recs = read_jsonl_typed(&obs_dir().join(&fname));
+        if recs.is_empty() {
+            continue;
+        }
+        // session_{sid}.jsonl → recover the session id for attribution.
+        let sid = fname
+            .strip_prefix("session_")
+            .and_then(|s| s.strip_suffix(".jsonl"))
+            .unwrap_or("backfill")
+            .to_string();
+        let mut all_ok = true;
+        for rec in &recs {
+            if crate::store::observations::insert_observation_pool(pool, rec, &sid, &project)
+                .await
+                .is_err()
+            {
+                all_ok = false;
+            }
+        }
+        if all_ok {
+            let _ = std::fs::remove_file(obs_dir().join(&fname));
+        }
+    }
+}
+
 pub fn run(_input: &HookInput) -> i32 {
     if !should_run(PROFILE_REFLECT) {
         return 0;
@@ -766,6 +808,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let today_str = today();
     let observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
+        backfill_jsonl_to_sqlite(&pool, &today_str).await;
         crate::store::observations::query_obs_for_date_range_pool(&pool, &today_str, &today_str)
             .await
     }) {
@@ -780,7 +823,8 @@ pub fn run(_input: &HookInput) -> i32 {
     let observations = if !observations.is_empty() {
         observations
     } else {
-        // Fallback: read from JSONL files
+        // Fallback: read from JSONL files (SQLite unreachable — the records
+        // stay on disk and are backfilled by the next successful run).
         if !obs_dir().is_dir() {
             return 0;
         }
@@ -820,9 +864,13 @@ pub fn run(_input: &HookInput) -> i32 {
     }
     // Bounded read: landscape stats only need recent history; an unbounded
     // full-table scan grew linearly with project age on every SessionEnd.
+    // Project-scoped: without the filter, multi-project users got a landscape
+    // computed from other projects' records, and this project's edits beyond
+    // the 100-row bound fell out of coverage entirely.
     let history: Vec<EvolutionRecord> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::evolution::query_recent_records_pool(&pool, 100).await
+        let slug = crate::shared::paths::project_slug();
+        crate::store::evolution::query_recent_records_scoped_pool(&pool, 100, Some(&slug)).await
     })
     .unwrap_or_default();
     let landscape = evolve::build_landscape(&history, &digests, 2);

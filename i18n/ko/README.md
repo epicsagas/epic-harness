@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 26개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
+<blockquote><p align="center">자기 진화형 AI 코딩 에이전트 하네스 — 3개 명령어, 25개 스킬, 1개 자율 파이프라인, 실패로부터 학습.</p></blockquote>
 
 <p align="center"><b>외울 것은 적게. 키 입력당 지능은 더 높게. 세션이 반복될수록 더 똑똑해집니다.</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-**30개 이상의 명령어를 3개 명령어 + 26개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
+**30개 이상의 명령어를 3개 명령어 + 25개 자동 트리거 스킬로 통합**하고, 실패 패턴으로부터 **새로운 스킬을 스스로 진화**시키는 Claude Code 플러그인입니다.
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness 기능" width="100%" />
@@ -113,7 +113,7 @@ codex plugin marketplace add epicsagas/plugins
 agy plugin install .
 ```
 
-27개 스킬, 훅, `harness-mem` MCP 서버가 플러그인의 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`에서 자동 발견됩니다.
+25개 스킬, 훅, `harness-mem` MCP 서버가 플러그인의 `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`에서 자동 발견됩니다.
 
 ### 바이너리만 (플러그인 호스트 없음)
 
@@ -254,7 +254,7 @@ flowchart TD
 | **reflect** | 온디맨드: AI를 사고 증폭기로 활용하고 있는가? 냉정한 증거 기반 자기 평가 |
 | **commit** | Conventional Commits 생성 — git diff에서 자동 생성 |
 
-> **토큰 예산 참고:** Claude Code는 스킬 설명을 매 세션 컨텍스트에 로드합니다. epic의 26개 스킬은 기본 `skillListingBudgetFraction: 0.01`(1%) 내에 들어갑니다. 추가 스킬(예: episteme, alcove, obscura)을 설치하면 합산이 예산을 초과하여 "descriptions dropped" 경고가 발생할 수 있습니다. 이 경우 `~/.claude/settings.json`에 다음을 추가하세요:
+> **토큰 예산 참고:** Claude Code는 스킬 설명을 매 세션 컨텍스트에 로드합니다. epic의 25개 스킬은 기본 `skillListingBudgetFraction: 0.01`(1%) 내에 들어갑니다. 추가 스킬(예: episteme, alcove, obscura)을 설치하면 합산이 예산을 초과하여 "descriptions dropped" 경고가 발생할 수 있습니다. 이 경우 `~/.claude/settings.json`에 다음을 추가하세요:
 >
 > ```json
 > "skillListingBudgetFraction": 0.02
@@ -449,9 +449,9 @@ epic team delete backend --global      # 조직 저장소에서 영구 삭제
 
 | 도구 | Ring 0 훅 | 명령어 | 스킬 | 에이전트 |
 |------|-----------|--------|------|---------|
-| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 스킬 | Live |
-| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 26개 | — |
-| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 26개 | — |
+| **Claude Code** | ✓ 전체 | ✓ 3개 명령어 (/orbit 포함) | ✓ 25개 스킬 | Live |
+| **Codex CLI** | ✓ 전체¹ | ✓ 3개 프롬프트 (/orbit 포함) | ✓ 25개 | — |
+| **Antigravity** | ✓ 부분² | ✓ 3개 명령어 (/orbit 포함) | ✓ 25개 | — |
 
 ¹ `~/.codex/config.toml`에 `plugin_hooks = true` 필요 · ² PreInvocation/PostInvocation만 — PreToolUse 없음 (guard/polish 불가)
 

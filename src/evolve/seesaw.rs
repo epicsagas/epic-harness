@@ -37,7 +37,20 @@ pub fn load_registry() -> SolvedTaskRegistry {
 pub fn load_registry_for(project: Option<&str>) -> SolvedTaskRegistry {
     let path = crate::shared::paths::project_seesaw_path_for(project);
     match std::fs::read_to_string(&path) {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+        Ok(s) => {
+            let mut reg: SolvedTaskRegistry = serde_json::from_str(&s).unwrap_or_default();
+            // Scrub legacy synthetic entries: registries written before the
+            // `TaskDigest::synthetic` flag stored "session"/"segment-N" ids,
+            // which converge to 1.0 and would block all seeding forever.
+            let before = reg.solved.len();
+            reg.solved
+                .retain(|k, _| !crate::evolve::digester::is_synthetic_label(k));
+            if reg.solved.len() != before {
+                reg.total_solved = reg.solved.len() as u32;
+                let _ = save_registry(&reg);
+            }
+            reg
+        }
         Err(_) => SolvedTaskRegistry::default(),
     }
 }
@@ -52,35 +65,23 @@ pub fn save_registry(reg: &SolvedTaskRegistry) -> io::Result<()> {
     std::fs::write(&path, json)
 }
 
-/// Derive per-task scores from digests: success fraction per task.
-pub fn scores_from_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
+/// Per-task scores from digests (success fraction per task), excluding
+/// synthetic non-orbit task ids. Synthetic ids ("session"/"segment-N") are
+/// reused across days; comparing them against the max-only registry
+/// eventually blocks all seeding (best converges to 1.0, then any ordinary
+/// partial-failure day exceeds the tolerance). The synthetic/exclude
+/// decision is the digester's — read the `synthetic` flag it sets instead of
+/// re-deriving it from the string.
+pub fn scores_from_pipeline_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
     digests
         .iter()
+        .filter(|d| !d.synthetic)
         .map(|d| {
             (
                 d.task_id.clone(),
                 outcome_score(&d.outcome, d.observation_count),
             )
         })
-        .collect()
-}
-
-/// Synthetic task ids are reused across days for non-orbit sessions (the
-/// digester labels them "session" / "segment-N"). Comparing them against the
-/// max-only registry eventually blocks all seeding: the best score converges
-/// to 1.0, then any ordinary partial-failure day exceeds the tolerance. Only
-/// digests from real pipeline runs (unique timestamped pipeline_id) are
-/// seesaw-gated.
-fn is_synthetic_task_id(id: &str) -> bool {
-    id == "session" || id.starts_with("segment-")
-}
-
-/// Per-task scores from digests, excluding synthetic non-orbit task ids
-/// ("session"/"segment-N" — reused across days, meaningless in the registry).
-pub fn scores_from_pipeline_digests(digests: &[TaskDigest]) -> HashMap<String, f64> {
-    scores_from_digests(digests)
-        .into_iter()
-        .filter(|(id, _)| !is_synthetic_task_id(id))
         .collect()
 }
 
@@ -125,6 +126,7 @@ mod tests {
     fn digest(id: &str, outcome: TaskOutcome, count: u64) -> TaskDigest {
         TaskDigest {
             task_id: id.into(),
+            synthetic: crate::evolve::digester::is_synthetic_label(id),
             outcome,
             failure_categories: vec![],
             implicated_components: vec![],
@@ -248,12 +250,12 @@ mod tests {
     }
 
     #[test]
-    fn scores_from_digests_maps_each_task() {
+    fn scores_from_pipeline_digests_maps_each_real_task() {
         let digests = vec![
             digest("A", TaskOutcome::Success, 3),
             digest("B", TaskOutcome::CompleteFailure, 2),
         ];
-        let scores = scores_from_digests(&digests);
+        let scores = scores_from_pipeline_digests(&digests);
         assert_eq!(scores.len(), 2);
         assert_eq!(scores.get("A"), Some(&1.0));
         assert_eq!(scores.get("B"), Some(&0.0));

@@ -77,16 +77,7 @@ fn feedback_to_observe(
     // reads SQLite, so JSONL-only writes here never reached pattern detection
     // (the "Polish → Observe Feedback" path was dead until this).
     let sid = session_id();
-    let stored = crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::harness_pool().await?;
-        crate::store::observations::insert_observation_pool(
-            &pool,
-            &record,
-            &sid,
-            &crate::shared::paths::project_slug(),
-        )
-        .await
-    });
+    let stored = crate::store::observations::insert_observation(&record, &sid);
     if let Err(e) = stored {
         eprintln!("[polish] SQLite write failed, falling back to JSONL: {e}");
         let session_file = obs_dir().join(format!("session_{sid}.jsonl"));

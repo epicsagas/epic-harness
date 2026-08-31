@@ -63,7 +63,6 @@ pub async fn insert_observation_pool(
 }
 
 /// Standalone insert — uses global pool via runtime bridge.
-#[allow(dead_code)]
 pub fn insert_observation(rec: &ObsRecord, session_id: &str) -> io::Result<i64> {
     super::runtime::block_on(async {
         let pool = super::pool::harness_pool().await?;

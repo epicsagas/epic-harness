@@ -19,9 +19,19 @@ const FAILURE_RULES: &[FailureRule] = &[
         category: "syntax_error",
     },
     FailureRule {
-        // Non-zero counts only (`[1-9]\d* failed`): green cargo/jest summaries
-        // ("test result: ok. 5 passed; 0 failed;") must not classify as failures.
-        pattern: r"(?i)\bFAIL(?:ED|ING)?[\s:.]|\btests?\s+failed\b|\b[1-9]\d*\s+failed\b|\b[1-9]\d*\s+failures\b|AssertionError|assertion\b|assert\.\w+",
+        // Count-guarded test failures. Every alternative requires a non-zero
+        // failure count so green summaries never match:
+        //   - cargo:  "test result: ok. 5 passed; 0 failed;"       → no
+        //   - dotnet: "Passed! - Failed: 0, Passed: 10"            → no
+        //   - mocha:  "5 passing, 0 failing"                       → no
+        //   - Maven:  "Tests run: 4, Failures: 3, Errors: 0"       → yes (label-then-number)
+        //   - jest:   "Tests: 3 failed, 5 passed"                  → yes (number-then-label)
+        //   - rust:   "test result: FAILED. 0 passed; 1 failed"    → yes (loud banner)
+        // `\b(?:FAIL|FAILED)\b` is case-sensitive: failure banners are loud
+        // (Go "FAIL", cargo "FAILED"); lowercase "failed" in prose is too
+        // noisy without a count. Bare `assertion` was dropped — it matched the
+        // word in grep/docs success output.
+        pattern: r"\b(?:FAIL|FAILED)\b|(?i:\b[1-9]\d*\s+(?:failed|failures?|failing)\b)|(?i:(?:failures?|errors?|failed|failing)\s*[:=]\s*[1-9]\d*)|(?i:\btests?\s+failed\b)|AssertionError|(?i:assert\.\w+)",
         category: "test_fail",
     },
     FailureRule {

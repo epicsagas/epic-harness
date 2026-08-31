@@ -123,21 +123,21 @@ fn date_to_ordinal(y: i32, m: u32, d: u32) -> i64 {
 // ── Slow/Meta Update (SkillOpt §4) ────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct SlowUpdateEntry {
+pub struct SlowUpdateEntry {
     epoch_class: String,
     score: f64,
     timestamp: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub(crate) struct SkillSlowMeta {
-    slow_updates: Vec<SlowUpdateEntry>,
 }
 
 const MAX_SLOW_UPDATES: usize = 20;
 
 /// Append a slow update entry to each evolved skill's meta.json.
 /// The `slow_updates` array is capped at `MAX_SLOW_UPDATES` entries.
+///
+/// Reads and rewrites the FULL `SkillMeta` — this file has two writers
+/// (seeding writes all fields; this appends slow_updates). Rewriting only a
+/// partial struct used to erase `name`/`active`/`synthesized` on every
+/// SessionEnd, silently reverting `evolve accept-synth` flags.
 pub fn update_meta_field(skills: &[String], epoch: &EpochClass, score: f64) {
     let epoch_str = match epoch {
         EpochClass::Improving => "improving",
@@ -158,7 +158,7 @@ pub fn update_meta_field(skills: &[String], epoch: &EpochClass, score: f64) {
             continue;
         }
         let meta_path = dir.join("meta.json");
-        let mut meta: SkillSlowMeta = read_json(&meta_path, SkillSlowMeta::default());
+        let mut meta: SkillMeta = read_json(&meta_path, SkillMeta::default());
         meta.slow_updates.push(entry.clone());
         // Cap at MAX_SLOW_UPDATES — prune oldest
         if meta.slow_updates.len() > MAX_SLOW_UPDATES {
@@ -586,6 +586,7 @@ pub fn write_skill_with_meta(
         updated: now_iso(),
         active: true,
         synthesized,
+        slow_updates: Vec::new(),
     };
     let json = match serde_json::to_string_pretty(&meta) {
         Ok(j) => j,
@@ -651,6 +652,7 @@ pub fn write_workspace_manifest() {
                 updated: now_iso(),
                 active,
                 synthesized: false,
+                slow_updates: Vec::new(),
             }
         };
         skills.push(SkillMeta { active, ..meta });
@@ -856,6 +858,11 @@ pub struct SkillMeta {
     /// frontier-class models — generic advice is noise there.
     #[serde(default)]
     pub synthesized: bool,
+    /// Slow/meta update history (SkillOpt §4), capped at MAX_SLOW_UPDATES.
+    /// Lives on SkillMeta so the file has exactly one schema — a second
+    /// partial writer here used to erase every other field on rewrite.
+    #[serde(default)]
+    pub slow_updates: Vec<SlowUpdateEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1199,6 +1206,7 @@ mod tests {
                 updated: "2026-01-01T00:00:00Z".into(),
                 active,
                 synthesized: false,
+                slow_updates: Vec::new(),
             });
         }
         let manifest = WorkspaceManifest {
@@ -1229,6 +1237,7 @@ mod tests {
             updated: "2026-01-01T00:00:00Z".into(),
             active: true,
             synthesized: false,
+            slow_updates: Vec::new(),
         };
         let json = serde_json::to_string_pretty(&meta).expect("serialize");
         let roundtrip: SkillMeta = serde_json::from_str(&json).expect("deserialize");
@@ -1260,6 +1269,7 @@ mod tests {
             updated: "2026-01-01T00:00:00Z".into(),
             active: true,
             synthesized: false,
+            slow_updates: Vec::new(),
         };
         let json = serde_json::to_string_pretty(&meta).expect("serialize meta");
         let _ = fs::write(skill_dir.join("meta.json"), &json);

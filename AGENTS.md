@@ -1,6 +1,6 @@
 # epic-harness
 
-25 skills (8 pipeline + 17 quality) + self-evolving agent harness.
+25 skills (9 pipeline + 16 quality) + self-evolving agent harness.
 
 ## Structure
 
@@ -138,9 +138,12 @@ On next session start, weak patterns from other projects shown as hints.
 `[model]` in `config.toml` scales the harness to the model in use
 (`class: auto` detects from `ANTHROPIC_MODEL`/`CLAUDE_MODEL`/etc.):
 
-- **Thresholds**: frontier-class failure streaks are stronger signals —
-  pattern thresholds (`repeated_error_min`, `debug_loop_min`, `thrash_*`)
-  scale by `frontier_threshold_scale` (default ×2).
+- **Thresholds**: only when `class = "frontier"` is set explicitly — pattern
+  thresholds (`repeated_error_min`, `debug_loop_min`, `thrash_*`) scale by
+  `frontier_threshold_scale` (default ×2). The default `auto` resolution
+  depends on which env vars reach the short-lived hook process, so scaling
+  on it made pattern sensitivity machine-dependent; `auto` now always uses
+  base thresholds.
 - **Injection**: frontier-class sessions inject only synthesized skill
   bodies (template bodies are withheld and announced as awaiting
   `accept-synth`); light-class sessions inject templates too.

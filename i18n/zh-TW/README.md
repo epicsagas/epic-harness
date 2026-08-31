@@ -449,9 +449,9 @@ epic team delete backend --global      # 從組織儲存中永久刪除
 
 | 工具 | Ring 0 掛鉤 | 命令 | 技能 | 智能體 |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ 完整 | ✓ 3 條命令（含 /orbit） | ✓ 26 個技能 | Live |
-| **Codex CLI** | ✓ 完整¹ | ✓ 3 條提示詞（含 /orbit） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3 條命令（含 /orbit） | ✓ 26 | — |
+| **Claude Code** | ✓ 完整 | ✓ 3 條命令（含 /orbit） | ✓ 25 個技能 | Live |
+| **Codex CLI** | ✓ 完整¹ | ✓ 3 條提示詞（含 /orbit） | ✓ 25 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3 條命令（含 /orbit） | ✓ 25 | — |
 
 ¹ `plugin_hooks = true` 在 `~/.codex/config.toml` · ² 僅 PreInvocation/PostInvocation — 無 PreToolUse（guard/polish 不可用）
 

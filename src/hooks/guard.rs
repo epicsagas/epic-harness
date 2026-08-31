@@ -140,17 +140,38 @@ fn check_blocked(cmd: &str) -> Option<&'static str> {
 }
 
 /// `git push` with a force flag (`-f`, `--force`, `--force-with-lease`, any
-/// position) targeting main/master (bare, `origin/`, or any remote prefix).
+/// position, including short-flag bundles like `-qf` and refspec force syntax
+/// `git push origin +main`) targeting main/master (bare, `origin/`, or any
+/// remote prefix).
+///
+/// The command is first split on shell separators (`&&`, `||`, `;`, `|`, `&`,
+/// newlines) and only the `git push` segments are tested — otherwise a chained
+/// command like `git checkout main && git push -f origin feature/x` (plain
+/// push to a feature branch) borrows "main" from the *checkout* segment, and
+/// `rm -f build.log && git push origin main` borrows `-f` from `rm`.
 /// Over-blocks branches merely containing "main"/"main/master" as a path
-/// segment — conservative by design for a safety rule.
+/// segment within the push segment — conservative by design for a safety rule.
 fn is_force_push_to_protected(cmd: &str) -> bool {
-    static PUSH_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)\bgit\b.{0,64}\spush\b").unwrap());
-    static FORCE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)(^|\s)(-f\b|--force(-with-lease)?\b)").unwrap());
+    static SEG_PUSH_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)\bgit\b.*\spush\b").unwrap());
+    // Short-flag bundles containing f (-f, -qf, -fq, -fu, …) or long force
+    // flags with optional =value (--force-with-lease=main).
+    static FORCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(^|\s)(-[a-z]*f[a-z]*\b|--force(-with-lease)?(=\S+)?\b)").unwrap()
+    });
+    // Refspec force syntax: `+main`, `+main:main`, `+refs/heads/main`, `+origin/main`.
+    static REFSPEC_FORCE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)(^|\s)\+(?:[\w./-]+/)?(?:main|master)\b").unwrap());
     static PROTECTED_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)(?:\b[\w-]+/)?(?:main|master)\b").unwrap());
-    PUSH_RE.is_match(cmd) && FORCE_RE.is_match(cmd) && PROTECTED_RE.is_match(cmd)
+
+    cmd.split(['&', '|', ';', '\n', '\r'])
+        .any(|seg| {
+            if !SEG_PUSH_RE.is_match(seg) {
+                return false;
+            }
+            (FORCE_RE.is_match(seg) || REFSPEC_FORCE_RE.is_match(seg)) && PROTECTED_RE.is_match(seg)
+        })
 }
 
 fn check_warned(cmd: &str) -> Vec<&'static str> {
@@ -482,6 +503,31 @@ mod tests {
         assert!(check_blocked("git push origin main --force").is_some());
         assert!(check_blocked("git push --force-with-lease origin main").is_some());
         assert!(check_blocked("git -C repo push -f origin master").is_some());
+    }
+
+    #[test]
+    fn blocks_force_push_refspec_and_bundle_flags() {
+        // Regression: refspec force syntax and short-flag bundles bypassed FORCE_RE.
+        assert!(check_blocked("git push origin +main").is_some());
+        assert!(check_blocked("git push origin +main:main").is_some());
+        assert!(check_blocked("git push origin +refs/heads/main:refs/heads/main").is_some());
+        assert!(check_blocked("git push -qf origin main").is_some());
+        assert!(check_blocked("git push -fq origin master").is_some());
+        assert!(check_blocked("git push --force-with-lease=main origin main").is_some());
+    }
+
+    #[test]
+    fn chained_commands_test_only_the_push_segment() {
+        // Regression: whole-string scanning borrowed tokens across `&&`.
+        // "main" came from the checkout, force targets a feature branch → allowed.
+        assert!(
+            check_blocked("git checkout main && git push -f origin feature/auth-rework").is_none()
+        );
+        // "-f" came from rm, the push itself is plain → allowed.
+        assert!(check_blocked("rm -f build.log && git push origin main").is_none());
+        // Force + protected inside the same push segment → still blocked.
+        assert!(check_blocked("git checkout main && git push -f origin main").is_some());
+        assert!(check_blocked("git checkout dev && git push origin +main").is_some());
     }
 
     #[test]

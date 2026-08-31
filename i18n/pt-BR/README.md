@@ -449,9 +449,9 @@ Todas as ferramentas compartilham o mesmo diretório de dados `~/.harness/projec
 
 | Ferramenta | Ring 0 Hooks | Comandos | Habilidades | Agentes |
 |------------|-------------|----------|-------------|---------|
-| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 26 habilidades | Live |
-| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 26 | — |
-| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 26 | — |
+| **Claude Code** | ✓ Completo | ✓ 3 comandos (incl. /orbit) | ✓ 25 habilidades | Live |
+| **Codex CLI** | ✓ Completo¹ | ✓ 3 prompts (incl. /orbit) | ✓ 25 | — |
+| **Antigravity** | ✓ Parcial² | ✓ 3 comandos (incl. /orbit) | ✓ 25 | — |
 
 ¹ `plugin_hooks = true` em `~/.codex/config.toml` · ² Apenas PreInvocation/PostInvocation — sem PreToolUse (guard/polish indisponível)
 

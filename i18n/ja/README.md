@@ -1,6 +1,6 @@
 <h1 align="center">Epic Harness</h1>
 
-<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 3個のコマンド、26個のスキル、1つの自律パイプライン、あなたの失敗から学習します。</p></blockquote>
+<blockquote><p align="center">自己進化するAIコーディングエージェントハーネス — 3個のコマンド、25個のスキル、1つの自律パイプライン、あなたの失敗から学習します。</p></blockquote>
 
 <p align="center"><b>覚えるべき操作は少なく。キーストローク当たりの知性は高く。セッションを重ねるほどスマートに。</b></p>
 
@@ -22,7 +22,7 @@
   <a href="https://buymeacoffee.com/epicsaga"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/buy_me_a_coffee-FFDD00?style=for-the-badge&labelColor=0d1117&logo=buymeacoffee&logoColor=black" /></a>
 </p>
 
-Claude Codeプラグインで、**30以上のコマンドを3個のコマンド + 26個の自動トリガースキルに統合**し、自分の失敗パターンから**新しいスキルを進化**させます。
+Claude Codeプラグインで、**30以上のコマンドを3個のコマンド + 25個の自動トリガースキルに統合**し、自分の失敗パターンから**新しいスキルを進化**させます。
 
 <p align="center">
   <img src="../../assets/features.png" alt="epic harness features" width="100%" />
@@ -49,7 +49,7 @@ port = 7700       # 0 に設定すると自動起動を無効化
 auto_open = true  # 最初のセッションでブラウザを開く
 ```
 
-画面: **ダッシュボード** · /orbit パイプライン · コマンド（3） · スキル（26） · ライブエージェント · Eval & Evolve · フック（6） · インテグレーション（6） · harness-mem · 設定
+画面: **ダッシュボード** · /orbit パイプライン · コマンド（3） · スキル（25） · ライブエージェント · Eval & Evolve · フック（6） · インテグレーション（6） · harness-mem · 設定
 
 ---
 
@@ -449,9 +449,9 @@ epic team delete backend --global      # orgストアから永久に削除
 
 | ツール | Ring 0 フック | コマンド | スキル | エージェント |
 |------|-------------|----------|--------|--------|
-| **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 26スキル | Live |
-| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 26 | — |
-| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 26 | — |
+| **Claude Code** | ✓ フル | ✓ 3コマンド（/orbitを含む） | ✓ 25スキル | Live |
+| **Codex CLI** | ✓ フル¹ | ✓ 3プロンプト（/orbitを含む） | ✓ 25 | — |
+| **Antigravity** | ✓ 部分² | ✓ 3コマンド（/orbitを含む） | ✓ 25 | — |
 
 ¹ `~/.codex/config.toml` で `plugin_hooks = true` · ² PreInvocation/PostInvocationのみ — PreToolUseなし（guard/polish利用不可）
 

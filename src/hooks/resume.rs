@@ -203,9 +203,12 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
     // Guard: SessionStart fires multiple times per session in Claude Code.
-    // Key the lock by the real session_id + SessionStart source so that
-    // compaction (`source: "compact"`) and explicit resume/clear re-inject
-    // evolved skills, while plain "startup" runs exactly once per session.
+    // The dedup lock applies ONLY to plain "startup" — Claude Code double-fires
+    // startup for one real session, and re-injecting the same skills twice is
+    // pure context bloat. compact/resume/clear are genuine re-injection
+    // events (the injected bodies were compacted or cleared away), so every
+    // firing must inject: keying a lock per (session, source) blocked the
+    // second compaction of a long session from ever re-injecting.
     // `acquire_session_lock` uses O_CREAT|O_EXCL — atomically prevents the
     // TOCTOU race that the old exists()+write() pattern introduced.
     prune_stale_resume_locks();
@@ -213,10 +216,24 @@ pub fn run(input: &HookInput) -> i32 {
         .source
         .clone()
         .unwrap_or_else(|| "startup".to_string());
-    let sid = input.session_id.clone().unwrap_or_else(session_id);
-    let lock = harness_dir().join(format!("resume.{sid}.{source}.lock"));
-    if !acquire_session_lock(&lock) {
-        return 0;
+    let sid = match input.session_id.clone() {
+        Some(sid) => sid,
+        None => {
+            // No session_id from the host (Codex-style hosts): fall back to
+            // date+pid. Dedup then only works within one process; warn so the
+            // degraded mode is visible instead of silent.
+            let fallback = session_id();
+            eprintln!(
+                "[resume] no session_id in hook input — lock dedup degraded to date+pid fallback"
+            );
+            fallback
+        }
+    };
+    if source == "startup" {
+        let lock = harness_dir().join(format!("resume.{sid}.{source}.lock"));
+        if !acquire_session_lock(&lock) {
+            return 0;
+        }
     }
 
     // Seed ~/.harness/config.toml + HARNESS.md on first run (replaces the
