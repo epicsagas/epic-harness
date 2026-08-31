@@ -118,6 +118,43 @@ pub fn is_read_only_command(command: &str) -> bool {
     !CHAINED_CMD.is_match(command) && READ_ONLY_CMD.is_match(command)
 }
 
+/// Files named by a Codex `apply_patch` payload.
+///
+/// Codex passes the patch as a command string instead of Claude Code's
+/// `file_path` field, so anything keyed on `file_path` alone sees no files at
+/// all on that host. Each touched file gets its own header line:
+///
+/// ```text
+/// *** Add File: src/a.ts
+/// *** Update File: src/b.py
+/// *** Delete File: src/c.go
+/// ```
+///
+/// `include_deletes` distinguishes the two callers: formatting has nothing to
+/// do on a deleted file, but write-conflict detection still must count it.
+pub fn apply_patch_paths(patch: &str, include_deletes: bool) -> Vec<String> {
+    let verbs: &[&str] = if include_deletes {
+        &["Add File:", "Update File:", "Delete File:"]
+    } else {
+        &["Add File:", "Update File:"]
+    };
+    patch
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("***")?.trim_start();
+            for verb in verbs {
+                if let Some(p) = rest.strip_prefix(verb) {
+                    let p = p.trim();
+                    if !p.is_empty() {
+                        return Some(p.to_string());
+                    }
+                }
+            }
+            None
+        })
+        .collect()
+}
+
 /// Classify a Bash tool result.
 ///
 /// `stderr` — when the host reports it separately — is the command's own
@@ -143,7 +180,9 @@ pub fn classify_bash_failure(
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
         "bash" => "bash",
-        "edit" => "edit",
+        // Codex's canonical edit tool — without this every Codex edit was
+        // categorized as "other" and scored by the generic path.
+        "edit" | "apply_patch" => "edit",
         "write" => "write",
         "read" => "read",
         "glob" => "glob",
@@ -229,6 +268,25 @@ pub fn extract_file(action: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn apply_patch_paths_respect_delete_flag() {
+        let patch = "*** Begin Patch\n                     *** Add File: src/a.ts\n                     *** Update File: src/b.py\n                     *** Delete File: src/c.go\n                     *** End Patch";
+        // polish: nothing to format in a deleted file
+        assert_eq!(
+            apply_patch_paths(patch, false),
+            vec!["src/a.ts".to_string(), "src/b.py".to_string()]
+        );
+        // guard: a delete still races with another agent's write
+        assert_eq!(
+            apply_patch_paths(patch, true),
+            vec![
+                "src/a.ts".to_string(),
+                "src/b.py".to_string(),
+                "src/c.go".to_string()
+            ]
+        );
+    }
 
     #[test]
     fn read_only_commands_recognized() {

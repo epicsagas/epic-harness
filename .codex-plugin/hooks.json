@@ -22,6 +22,16 @@
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+      },
+      {
+        "matcher": "apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found'"
+          }
+        ],
+        "description": "Multi-agent pause directives and concurrent write-conflict warnings"
       }
     ],
     "PostToolUse": [

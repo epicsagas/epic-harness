@@ -211,40 +211,11 @@ fn format_go(file_path: &str, wd: &Path) {
     }
 }
 
-/// Extract touched file paths from a Codex `apply_patch` payload.
-///
-/// Codex passes the whole patch as a command string rather than Claude Code's
-/// `file_path` field, so a `file_path`-only reader is a silent no-op there.
-/// The patch envelope names each file on its own header line:
-///
-/// ```text
-/// *** Add File: src/a.ts
-/// *** Update File: src/b.py
-/// *** Delete File: src/c.go
-/// ```
-///
-/// Deleted files are skipped — there is nothing left to format.
-fn apply_patch_paths(patch: &str) -> Vec<String> {
-    patch
-        .lines()
-        .filter_map(|line| {
-            let rest = line.trim().strip_prefix("***")?.trim_start();
-            for verb in ["Add File:", "Update File:"] {
-                if let Some(p) = rest.strip_prefix(verb) {
-                    let p = p.trim();
-                    if !p.is_empty() {
-                        return Some(p.to_string());
-                    }
-                }
-            }
-            None
-        })
-        .collect()
-}
-
 /// Resolve every file this hook invocation should polish.
+///
 /// Claude Code / Codex `Edit`+`Write` supply `file_path`; Codex `apply_patch`
-/// supplies a patch body in `command`.
+/// supplies a patch body in `command`. Deletes are excluded — there is
+/// nothing left to format.
 fn target_files(input: &HookInput) -> Vec<String> {
     let Some(tool_input) = input.tool_input.as_ref() else {
         return Vec::new();
@@ -259,7 +230,7 @@ fn target_files(input: &HookInput) -> Vec<String> {
     tool_input
         .get("command")
         .and_then(|v| v.as_str())
-        .map(apply_patch_paths)
+        .map(|c| apply_patch_paths(c, false))
         .unwrap_or_default()
 }
 
