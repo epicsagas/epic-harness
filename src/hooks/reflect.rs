@@ -806,11 +806,17 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
+    let current_project = project_slug();
     let observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
         backfill_jsonl_to_sqlite(&pool, &today_str).await;
-        crate::store::observations::query_obs_for_date_range_pool(&pool, &today_str, &today_str)
-            .await
+        crate::store::observations::query_obs_for_date_range_pool(
+            &pool,
+            &today_str,
+            &today_str,
+            &current_project,
+        )
+        .await
     }) {
         Ok(recs) => recs,
         Err(e) => {

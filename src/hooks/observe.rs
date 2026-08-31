@@ -348,7 +348,7 @@ pub fn run(input: &HookInput) -> i32 {
     }
     ensure_dir(&obs_dir());
 
-    let sid = session_id();
+    let sid = resolve_session_id(input.session_id.as_deref());
 
     // Open harness DB pool for SQLite writes (fallback to JSONL if DB unavailable)
     let db = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
@@ -358,7 +358,7 @@ pub fn run(input: &HookInput) -> i32 {
     let action = input.tool_input.as_ref().map(|v| {
         v.get("command")
             .and_then(|c| c.as_str())
-            .map(String::from)
+            .map(|c| mask_secrets(&c[..c.len().min(500)]))
             .or_else(|| {
                 v.get("file_path")
                     .and_then(|c| c.as_str())
@@ -393,31 +393,64 @@ pub fn run(input: &HookInput) -> i32 {
     };
 
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
+    // Keeps stdout and stderr apart: a read-only command's stdout is quoted
+    // material, while its stderr is the command's own diagnostic. Merging them
+    // (as this did) makes the two indistinguishable downstream.
     let resolve_json_value = |v: &serde_json::Value| -> (String, String) {
         match v {
             serde_json::Value::String(s) => (s.clone(), String::new()),
             serde_json::Value::Object(obj) => {
-                let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
-                let err = obj.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
-                (format!("{out}\n{err}"), String::new())
+                let out = obj
+                    .get("output")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let err = obj
+                    .get("stderr")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                (out, err)
             }
             other => (other.to_string(), String::new()),
         }
     };
-    let resolved_output: Option<(String, String)> = if let Some(to) = &input.tool_output {
+    // `streams_separated` tracks whether stderr arrived on its own channel.
+    // Only then can a read-only command's diagnostics be trusted apart from
+    // the file contents it printed; merged-stream hosts (Codex) cannot.
+    let resolved_output: Option<(String, String, bool)> = if let Some(to) = &input.tool_output {
         let out = to.output.as_deref().unwrap_or("").to_string();
         let err = to.stderr.as_deref().unwrap_or("").to_string();
-        Some((out, err))
+        Some((out, err, true))
     } else if let Some(tr) = &input.tool_response {
-        Some(resolve_json_value(tr))
+        let (out, err) = resolve_json_value(tr);
+        let separated = tr.get("stderr").is_some();
+        Some((out, err, separated))
     } else {
-        input.tool_result.as_ref().map(resolve_json_value)
+        input
+            .tool_result
+            .as_ref()
+            .map(|tr| {
+                let (out, err) = resolve_json_value(tr);
+                let separated = tr.get("stderr").is_some();
+                (out, err, separated)
+            })
     };
 
-    if let Some((output, stderr)) = resolved_output {
+    if let Some((output, stderr, streams_separated)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
-        record.failure_category = classify_failure(&combined).map(String::from);
+        record.failure_category = if tool_cat == "bash" {
+            let cmd = input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("command"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            classify_bash_failure(cmd, &output, &stderr, streams_separated).map(String::from)
+        } else {
+            classify_failure(&combined).map(String::from)
+        };
         record.result = Some(
             if record.failure_category.is_none() {
                 "success"

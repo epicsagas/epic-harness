@@ -80,6 +80,66 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     None
 }
 
+/// Commands whose stdout is *quoted material* — file contents, diffs, search
+/// hits — rather than a report on the command's own outcome.
+///
+/// Reading a test file that contains `assert.equal`, or grepping for
+/// `TypeError`, is a successful read; scoring it as a failed tool call
+/// poisons every downstream pattern (repeated-error, thrashing, weak-tool
+/// rates). The keyword rules cannot tell the two apart, because the words are
+/// genuinely in the output either way — so the command has to be the guard.
+///
+/// Deliberately conservative: a pipeline that *also* runs a real build/test
+/// (`rg foo && cargo test`) must not be treated as read-only, so anything
+/// containing a shell chain operator is excluded.
+static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        ^\s*
+        (?:sudo\s+)?
+        (?:
+            cat|bat|head|tail|nl|less|more|
+            rg|grep|egrep|fgrep|ag|ack|
+            find|fd|ls|tree|stat|file|wc|du|
+            sed|awk|cut|sort|uniq|diff|
+            echo|printf|pwd|whoami|date|env
+        )\b
+        |^\s*git\s+(?:diff|log|show|status|blame|branch|remote|describe|rev-parse)\b
+        ",
+    )
+    .unwrap()
+});
+
+/// Shell operators that can append a non-read-only stage to a read-only head.
+static CHAINED_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[;&|]|\$\(|`").unwrap());
+
+/// True when `command`'s output should not be keyword-scanned for failures.
+pub fn is_read_only_command(command: &str) -> bool {
+    !CHAINED_CMD.is_match(command) && READ_ONLY_CMD.is_match(command)
+}
+
+/// Classify a Bash tool result.
+///
+/// `stderr` — when the host reports it separately — is the command's own
+/// diagnostic channel and stays trustworthy even for read-only commands.
+/// `stdout` from a read-only command is quoted material and is not scanned.
+/// Hosts that merge the two streams (Codex exposes one response string) get
+/// the safe answer for read-only commands: no failure claimed.
+pub fn classify_bash_failure(
+    command: &str,
+    stdout: &str,
+    stderr: &str,
+    streams_separated: bool,
+) -> Option<&'static str> {
+    if !is_read_only_command(command) {
+        return classify_failure(&format!("{stdout}\n{stderr}"));
+    }
+    if streams_separated {
+        return classify_failure(stderr);
+    }
+    None
+}
+
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
         "bash" => "bash",
@@ -164,4 +224,72 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
 pub fn extract_file(action: &str) -> Option<&str> {
     static FILE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(/[\w./-]+\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_only_commands_recognized() {
+        for cmd in [
+            "cat src/main.rs",
+            "rg TypeError src/",
+            "sed -n '1,80p' file.ts",
+            "git diff HEAD~1",
+            "  find . -name '*.rs'",
+            "nl -ba README.md",
+        ] {
+            assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+    }
+
+    #[test]
+    fn mutating_and_chained_commands_not_read_only() {
+        for cmd in [
+            "cargo test",
+            "npm run build",
+            "rg foo && cargo test",
+            "cat a.txt | tee b.txt",
+            "git commit -m x",
+            "echo $(cargo test)",
+        ] {
+            assert!(!is_read_only_command(cmd), "must not be read-only: {cmd}");
+        }
+    }
+
+    /// The core of issue #113 finding 10: reading a file that *contains*
+    /// failure words is a successful read, not a failed tool call.
+    #[test]
+    fn reading_file_containing_failure_words_is_not_a_failure() {
+        let contents = "TypeError: expected\nassert.equal(a, b)\nFAILED";
+        assert!(
+            classify_bash_failure("cat tests/fixtures/errors.txt", contents, "", true).is_none(),
+            "quoted file contents must not be scored as a tool failure"
+        );
+        // Same payload from a merged-stream host (Codex) — still not a failure.
+        assert!(
+            classify_bash_failure("rg TypeError src/", contents, "", false).is_none(),
+            "merged-stream hosts must default to no-failure for read-only commands"
+        );
+    }
+
+    /// A read-only command that genuinely fails still counts, when the host
+    /// gives stderr its own channel.
+    #[test]
+    fn read_only_command_real_stderr_failure_still_counts() {
+        assert_eq!(
+            classify_bash_failure("cat missing.txt", "", "cat: missing.txt: No such file or directory", true),
+            Some("not_found")
+        );
+    }
+
+    /// Non-read-only commands keep the previous behavior exactly.
+    #[test]
+    fn build_failure_still_classified() {
+        assert_eq!(
+            classify_bash_failure("cargo build", "error TS2304: cannot find name", "", true),
+            Some("build_fail")
+        );
+    }
 }
