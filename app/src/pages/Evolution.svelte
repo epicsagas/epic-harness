@@ -66,13 +66,22 @@
     return summary || '—';
   }
 
+  // Newest first, regardless of the order the backend happened to return.
+  // Trend compares each row against the chronologically previous one, so the
+  // comparison runs on the ascending copy before the list is reversed.
   const enriched = $derived((): RawRow[] => {
     if (!data) return [];
-    return data.evolution_history.map((r, i) => ({
-      ...r,
-      _trend: deriveTrend(data!.evolution_history as RawRow[], i),
-      _patterns: patternSummary(r as RawRow),
-    }));
+    const asc = (data.evolution_history as RawRow[])
+      .slice()
+      .sort((a, b) =>
+        String(a['timestamp'] ?? '').localeCompare(String(b['timestamp'] ?? '')));
+    return asc
+      .map((r, i) => ({
+        ...r,
+        _trend: deriveTrend(asc, i),
+        _patterns: patternSummary(r),
+      }))
+      .reverse();
   });
 
   // ── filters
