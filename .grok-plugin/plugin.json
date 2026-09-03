@@ -20,5 +20,5 @@
   ],
   "skills": "./skills/",
   "agents": "./agents/",
-  "hooks": "./.grok-plugin/hooks.json"
+  "hooks": "./hooks/hooks.json"
 }
