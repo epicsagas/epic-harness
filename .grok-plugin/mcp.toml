@@ -1,0 +1,8 @@
+# MCP servers for the epic harness plugin (Grok Build).
+# Schema follows Grok's [mcp_servers.<name>] table (stdio transport).
+
+[mcp_servers.harness-mem]
+command = "epic"
+args = ["mem", "mcp"]
+startup_timeout_sec = 30
+tool_timeout_sec = 120
