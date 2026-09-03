@@ -205,6 +205,23 @@ fn extract_file_path_from_tool_input(tool_input: &serde_json::Value) -> Option<S
         .map(String::from)
 }
 
+/// Every file a write-type tool call touches.
+///
+/// Claude Code names one file in `file_path`; Codex's `apply_patch` carries a
+/// whole multi-file patch in `command`, so conflict detection keyed on
+/// `file_path` alone saw nothing to check on that host. Deletes count here —
+/// two agents racing on the same file conflict whether or not one removes it.
+fn extract_written_paths(tool_input: &serde_json::Value) -> Vec<String> {
+    if let Some(p) = extract_file_path_from_tool_input(tool_input) {
+        return vec![p];
+    }
+    tool_input
+        .get("command")
+        .and_then(|v| v.as_str())
+        .map(|c| crate::shared::classify::apply_patch_paths(c, true))
+        .unwrap_or_default()
+}
+
 /// Resolve the orchestrator base directory from `$HARNESS_DIR/orchestrator`.
 fn orchestrator_dir() -> Option<PathBuf> {
     std::env::var("HARNESS_DIR")
@@ -370,12 +387,14 @@ pub fn run(input: &HookInput) -> i32 {
         return 0;
     }
 
-    // ── Orchestration checks (Edit/Write tools only) ────
+    // ── Orchestration checks (write-type tools only) ────
+    // `apply_patch` is Codex's canonical edit tool; omitting it left multi-agent
+    // pause directives and write-conflict warnings inert on that host.
     if is_orchestration_enabled() {
         let tool_name = input.tool_name.as_deref().unwrap_or("");
         let tool_lower = tool_name.to_lowercase();
 
-        if tool_lower == "edit" || tool_lower == "write" {
+        if tool_lower == "edit" || tool_lower == "write" || tool_lower == "apply_patch" {
             let orch_dir = orchestrator_dir();
 
             // control.json pause check — blocks the tool call entirely
@@ -395,19 +414,20 @@ pub fn run(input: &HookInput) -> i32 {
 
             // Concurrent write conflict detection — informational warning only
             if let Some(ref tool_input) = input.tool_input
-                && let Some(file_path) = extract_file_path_from_tool_input(tool_input)
                 && let Some(ref orch) = orch_dir
             {
-                let conflicts =
-                    detect_concurrent_write_conflict(&file_path, agent_id.as_deref(), orch);
-                for other_id in &conflicts {
-                    hint(
-                        "guard",
-                        &format!(
-                            "Concurrent write conflict: agent {} recently modified {}",
-                            other_id, file_path
-                        ),
-                    );
+                for file_path in extract_written_paths(tool_input) {
+                    let conflicts =
+                        detect_concurrent_write_conflict(&file_path, agent_id.as_deref(), orch);
+                    for other_id in &conflicts {
+                        hint(
+                            "guard",
+                            &format!(
+                                "Concurrent write conflict: agent {} recently modified {}",
+                                other_id, file_path
+                            ),
+                        );
+                    }
                 }
             }
         }

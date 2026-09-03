@@ -41,8 +41,7 @@ pub fn run_pre(input: &HookInput) -> i32 {
 
 /// Pre-invocation hook logic (returns Result for callers that want error handling).
 pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
-    let tool = input.tool_name.as_deref().unwrap_or("");
-    if tool.to_lowercase() != "agent" {
+    if !is_agent_event(input) {
         return Ok(0);
     }
 
@@ -156,8 +155,7 @@ pub fn run_post(input: &HookInput) -> i32 {
 
 /// Post-invocation hook logic (returns Result for callers that want error handling).
 pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
-    let tool = input.tool_name.as_deref().unwrap_or("");
-    if tool.to_lowercase() != "agent" {
+    if !is_agent_event(input) {
         return Ok(0);
     }
 
@@ -247,9 +245,34 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
 
 /// Extract the agent ID from hook input.
 /// Agent tool input typically has a "prompt" or "id" field.
+/// True when this hook invocation concerns a subagent.
+///
+/// Claude Code routes subagents through the `Agent` tool; Codex reports them
+/// as dedicated `SubagentStart` / `SubagentStop` events with no such tool
+/// name, so a tool-name-only gate silently ignored every Codex subagent.
+pub(crate) fn is_agent_event(input: &HookInput) -> bool {
+    if input
+        .tool_name
+        .as_deref()
+        .map(|t| t.to_lowercase() == "agent")
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    matches!(
+        input.hook_event_name.as_deref(),
+        Some("SubagentStart") | Some("SubagentStop")
+    )
+}
+
 fn extract_agent_id(input: &HookInput) -> Option<String> {
-    let tool = input.tool_name.as_deref()?;
-    if tool.to_lowercase() != "agent" {
+    // Codex supplies a stable id; prefer it over the prompt hash.
+    if let Some(id) = input.agent_id.as_deref()
+        && !id.trim().is_empty()
+    {
+        return Some(id.trim().to_string());
+    }
+    if !is_agent_event(input) {
         return None;
     }
     input
@@ -299,13 +322,22 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         .chars()
         .take(120)
         .collect();
+    // Codex reports the kind as a top-level `agent_type`; Claude nests
+    // `subagent_type` inside the Agent tool input.
     let sub_type = input
-        .tool_input
-        .as_ref()
-        .and_then(|v| v.get("subagent_type"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("general-purpose")
-        .to_string();
+        .agent_type
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("subagent_type"))
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "general-purpose".to_string());
     (desc, sub_type)
 }
 
@@ -404,6 +436,47 @@ mod tests {
         }
         let input = HookInput::default();
         assert_eq!(run_post(&input), 0);
+    }
+
+    /// Codex has no `Agent` tool — subagents arrive as lifecycle events.
+    #[test]
+    fn codex_subagent_events_count_as_agent_events() {
+        for ev in ["SubagentStart", "SubagentStop"] {
+            let input = HookInput {
+                hook_event_name: Some(ev.to_string()),
+                agent_id: Some("agent-7f3a".to_string()),
+                ..Default::default()
+            };
+            assert!(is_agent_event(&input), "{ev} must be tracked");
+            assert_eq!(extract_agent_id(&input).as_deref(), Some("agent-7f3a"));
+        }
+    }
+
+    /// The host-supplied id wins over the prompt hash, and agent_type maps to
+    /// the Claude subagent_type slot.
+    #[test]
+    fn codex_identity_fields_preferred() {
+        let input = HookInput {
+            hook_event_name: Some("SubagentStart".to_string()),
+            agent_id: Some("codex-abc123".to_string()),
+            agent_type: Some("reviewer".to_string()),
+            tool_input: Some(serde_json::json!({"prompt": "Review the diff"})),
+            ..Default::default()
+        };
+        assert_eq!(extract_agent_id(&input).as_deref(), Some("codex-abc123"));
+        let (_desc, sub_type) = extract_agent_meta(&input);
+        assert_eq!(sub_type, "reviewer");
+    }
+
+    /// Unrelated events must stay ignored.
+    #[test]
+    fn non_agent_events_ignored() {
+        let input = HookInput {
+            hook_event_name: Some("PostToolUse".to_string()),
+            tool_name: Some("Bash".to_string()),
+            ..Default::default()
+        };
+        assert!(!is_agent_event(&input));
     }
 
     #[test]

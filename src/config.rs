@@ -428,6 +428,14 @@ pub struct DbConfig {
     /// - "require": TLS required, connection fails without it
     /// - "disable": no TLS
     pub tls_mode: String,
+
+    /// Delete observations older than this many days, swept once per day at
+    /// the end of `reflect`. `0` disables retention and keeps every row.
+    ///
+    /// Observations accumulate at roughly 20 MB per active week per project
+    /// and nothing older than the analysis window is read, so the default
+    /// bounds the store without touching any data reflection still consults.
+    pub obs_retention_days: u64,
 }
 
 impl Default for DbConfig {
@@ -438,6 +446,7 @@ impl Default for DbConfig {
             memory_url: String::new(),
             max_connections: 5,
             tls_mode: "prefer".into(),
+            obs_retention_days: 90,
         }
     }
 }

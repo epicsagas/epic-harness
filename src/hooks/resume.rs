@@ -320,7 +320,7 @@ pub fn run(input: &HookInput) -> i32 {
     // 1. Latest session snapshot (SQLite first, fallback to JSON file)
     if let Ok(Some(snap)) = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::sessions::get_latest_snapshot_pool(&pool).await
+        crate::store::sessions::get_latest_snapshot_pool(&pool, &project_slug()).await
     }) {
         if !snap.summary.is_empty() {
             hint("resume", &format!("Previous: {}", snap.summary));

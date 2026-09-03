@@ -205,6 +205,24 @@ pub fn pending_synth_file() -> PathBuf {
     harness_dir().join("pending_synth.jsonl")
 }
 
+/// Timestamp of the newest observation the last `reflect` round consumed.
+///
+/// Claude Code fires reflect once per session (SessionEnd), but Codex's `Stop`
+/// is turn-scoped: without a watermark every turn re-analyzes the whole day,
+/// re-counting the same observations as a fresh session and re-running
+/// seeding, stagnation and attribution against data already scored.
+pub fn reflect_watermark_file() -> PathBuf {
+    harness_dir().join("reflect_watermark.txt")
+}
+
+/// Date of the last observation-retention sweep (`YYYYMMDD`).
+///
+/// Keeps the sweep to once a day: Codex's `Stop` is turn-scoped, so an
+/// unguarded sweep would issue a DELETE on every turn.
+pub fn retention_marker_file() -> PathBuf {
+    harness_dir().join("retention_last_sweep.txt")
+}
+
 /// Resolve the per-project harness dir for a request. Falls back to the
 /// CWD-derived dir when `project` is `None`/empty (preserves existing callers
 /// that don't pass a project). Used by the dashboard read-path to scope

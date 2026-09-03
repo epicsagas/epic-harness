@@ -281,6 +281,9 @@ pub(crate) const DDL_SQLITE: &str = r#"
     CREATE INDEX IF NOT EXISTS idx_obs_session    ON observations(session_id);
     CREATE INDEX IF NOT EXISTS idx_obs_tool       ON observations(tool_category);
     CREATE INDEX IF NOT EXISTS idx_obs_sess_ts    ON observations(session_id, timestamp);
+    -- Reflection's primary query is `WHERE project = ? AND timestamp BETWEEN ? AND ?`.
+    -- Leading column must be `project` for the range scan to use this index.
+    CREATE INDEX IF NOT EXISTS idx_obs_proj_ts    ON observations(project, timestamp);
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,

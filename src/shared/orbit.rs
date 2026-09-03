@@ -206,6 +206,88 @@ pub fn read_active_orbit_state() -> Option<serde_json::Value> {
     scan_running_pipeline()
 }
 
+/// Check the completion invariants `skills/orbit/SKILL.md` states as prose.
+///
+/// The skill documents `max_retries` and the evidence a `complete` pipeline
+/// must carry, but nothing executable checked them, so pipelines reached
+/// `complete` with no PR and with more audit failures than the retry budget
+/// allowed. Returns one message per violation.
+///
+/// Advisory by design: `unlock` also runs on the abort path and after a
+/// crash, where an incomplete pipeline is the expected state, so refusing to
+/// unlock would strand the lock and block every later orbit.
+pub fn check_completion_invariants(pl: &serde_json::Value) -> Vec<String> {
+    let mut violations = Vec::new();
+    let status = pl["status"].as_str().unwrap_or("");
+    if status != "complete" {
+        return violations;
+    }
+
+    let fails = pl["audit_fail_count"].as_u64().unwrap_or(0);
+    // Absent max_retries falls back to the skill's documented default.
+    let max_retries = pl["max_retries"].as_u64().unwrap_or(3);
+    if fails > max_retries {
+        violations.push(format!(
+            "audit_fail_count ({fails}) exceeds max_retries ({max_retries}) — \
+             the pipeline should have paused for user input"
+        ));
+    }
+
+    // A pipeline that reached `complete` went through Ship, which creates the
+    // PR. Missing PR evidence means the phase was recorded but not performed.
+    let has_pr = pl["pr_url"].as_str().is_some_and(|s| !s.is_empty());
+    if !has_pr {
+        violations.push("marked complete without a PR url".to_string());
+    }
+
+    let phase = pl["phase"].as_str().unwrap_or("");
+    if phase != "evolve" {
+        violations.push(format!(
+            "marked complete at phase '{phase}', expected 'evolve'"
+        ));
+    }
+
+    violations
+}
+
+/// Scan the orbit dir for the pipeline being closed and warn on any violated
+/// completion invariant. Returns the number of violations reported.
+pub fn warn_on_invalid_completion(dir: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut newest: Option<(String, serde_json::Value)> = None;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("PIPELINE-") || !name.ends_with(".json") {
+            continue;
+        }
+        // Symlinks are skipped for the same reason as scan_running_pipeline_in.
+        if entry.file_type().is_ok_and(|t| t.is_symlink()) {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content) else {
+            continue;
+        };
+        // PIPELINE-{timestamp} makes lexicographic order equal creation order.
+        if newest.as_ref().is_none_or(|(n, _)| name > *n) {
+            newest = Some((name, pl));
+        }
+    }
+
+    let Some((name, pl)) = newest else {
+        return 0;
+    };
+    let violations = check_completion_invariants(&pl);
+    for v in &violations {
+        eprintln!("[orbit] warning: {name}: {v}");
+    }
+    violations.len()
+}
+
 /// Normalize a raw pipeline ID for safe use in filenames and observation records.
 /// Keeps only `a-z`, `0-9`, `-`, `_`; replaces all other characters with `-`.
 /// Truncates to 128 characters.
@@ -294,5 +376,125 @@ mod tests {
         fs::write(dir.join(".orbit.lock"), "{}").unwrap();
         assert!(try_acquire_orbit_lock(&dir));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── completion invariants ──────────────────────────
+
+    fn complete_pipeline() -> serde_json::Value {
+        serde_json::json!({
+            "id": "p1",
+            "status": "complete",
+            "phase": "evolve",
+            "audit_fail_count": 1,
+            "max_retries": 3,
+            "pr_url": "https://example.invalid/pr/1"
+        })
+    }
+
+    #[test]
+    fn valid_completion_has_no_violations() {
+        assert!(check_completion_invariants(&complete_pipeline()).is_empty());
+    }
+
+    /// The reported defect: pipelines reached `complete` with no PR created.
+    #[test]
+    fn completion_without_pr_is_flagged() {
+        let mut pl = complete_pipeline();
+        pl["pr_url"] = serde_json::Value::Null;
+        let v = check_completion_invariants(&pl);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].contains("without a PR"));
+    }
+
+    /// An empty string is as absent as null — `gh pr create` failing yields "".
+    #[test]
+    fn completion_with_empty_pr_is_flagged() {
+        let mut pl = complete_pipeline();
+        pl["pr_url"] = serde_json::json!("");
+        assert_eq!(check_completion_invariants(&pl).len(), 1);
+    }
+
+    /// The skill must pause at max_retries; completing past it means it did not.
+    #[test]
+    fn completion_past_max_retries_is_flagged() {
+        let mut pl = complete_pipeline();
+        pl["audit_fail_count"] = serde_json::json!(5);
+        let v = check_completion_invariants(&pl);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].contains("exceeds max_retries"));
+    }
+
+    /// Exactly at the budget is allowed — 3 failures with max_retries 3 pauses,
+    /// and the user may legitimately choose to continue.
+    #[test]
+    fn completion_at_max_retries_is_allowed() {
+        let mut pl = complete_pipeline();
+        pl["audit_fail_count"] = serde_json::json!(3);
+        assert!(check_completion_invariants(&pl).is_empty());
+    }
+
+    #[test]
+    fn completion_at_wrong_phase_is_flagged() {
+        let mut pl = complete_pipeline();
+        pl["phase"] = serde_json::json!("ship");
+        let v = check_completion_invariants(&pl);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(v[0].contains("phase 'ship'"));
+    }
+
+    /// A missing max_retries falls back to the skill's documented default of 3.
+    #[test]
+    fn missing_max_retries_uses_documented_default() {
+        let mut pl = complete_pipeline();
+        pl["max_retries"] = serde_json::Value::Null;
+        pl["audit_fail_count"] = serde_json::json!(4);
+        assert_eq!(check_completion_invariants(&pl).len(), 1);
+    }
+
+    /// Aborted and running pipelines are not held to completion invariants —
+    /// unlock runs on those paths too.
+    #[test]
+    fn non_complete_status_is_never_flagged() {
+        for status in ["running", "aborted"] {
+            let mut pl = complete_pipeline();
+            pl["status"] = serde_json::json!(status);
+            pl["pr_url"] = serde_json::Value::Null;
+            pl["audit_fail_count"] = serde_json::json!(99);
+            assert!(
+                check_completion_invariants(&pl).is_empty(),
+                "{status} must not be checked"
+            );
+        }
+    }
+
+    #[test]
+    fn warn_on_invalid_completion_reads_newest_pipeline() {
+        let dir = std::env::temp_dir().join(format!("epic_orbit_inv_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        // Older pipeline is clean; the newest one is the broken one.
+        fs::write(
+            dir.join("PIPELINE-20260101T000000.json"),
+            serde_json::to_string(&complete_pipeline()).unwrap(),
+        )
+        .unwrap();
+        let mut bad = complete_pipeline();
+        bad["pr_url"] = serde_json::Value::Null;
+        fs::write(
+            dir.join("PIPELINE-20260202T000000.json"),
+            serde_json::to_string(&bad).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(warn_on_invalid_completion(&dir), 1);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn warn_on_missing_dir_is_silent() {
+        let dir = std::env::temp_dir().join("epic_orbit_inv_absent_dir");
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(warn_on_invalid_completion(&dir), 0);
     }
 }

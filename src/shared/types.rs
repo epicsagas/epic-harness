@@ -24,6 +24,12 @@ pub struct HookInput {
     pub session_id: Option<String>,
     /// Claude Code SessionStart source: "startup" | "resume" | "clear" | "compact".
     pub source: Option<String>,
+    /// Codex subagent identity, supplied on `SubagentStart` / `SubagentStop`.
+    /// Preferred over the prompt-hash id derived for Claude's `Agent` tool,
+    /// since the host guarantees it is stable across the subagent's lifetime.
+    pub agent_id: Option<String>,
+    /// Codex subagent kind, the analogue of Claude's `subagent_type`.
+    pub agent_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

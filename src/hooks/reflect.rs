@@ -94,23 +94,61 @@ pub fn run_context(
             eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
             return 1;
         }
+        // SQLite is the primary observation store; the JSONL files only hold
+        // records from rounds where the DB write failed. Reading JSONL alone
+        // reported `total: 0` for projects with thousands of stored rows.
+        let db_recs: Vec<ObsRecord> = crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::harness_pool().await?;
+            crate::store::observations::query_obs_for_date_range_pool(
+                &pool, &date_from, &date_to, slug,
+            )
+            .await
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("[reflect] SQLite observations read failed for {slug}: {e}");
+            Vec::new()
+        });
+
         let slug_obs_dir = slug_harness.join("obs");
-        if !slug_obs_dir.is_dir() {
-            continue;
-        }
-        let all_obs = list_files(&slug_obs_dir, ".jsonl");
-        let filtered: Vec<String> = all_obs
-            .into_iter()
-            .filter(|f| {
-                let tag = f.replace("session_", "");
-                tag.get(..8)
-                    .map(|s| s >= cutoff_tag.as_str())
-                    .unwrap_or(true)
-            })
-            .collect();
-        for f in &filtered {
-            let recs: Vec<ObsRecord> = read_jsonl_typed(&slug_obs_dir.join(f));
-            for r in &recs {
+        let jsonl_recs: Vec<ObsRecord> = if slug_obs_dir.is_dir() {
+            list_files(&slug_obs_dir, ".jsonl")
+                .into_iter()
+                .filter(|f| {
+                    let tag = f.replace("session_", "");
+                    tag.get(..8)
+                        .map(|s| s >= cutoff_tag.as_str())
+                        .unwrap_or(true)
+                })
+                .flat_map(|f| read_jsonl_typed(&slug_obs_dir.join(f)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        {
+            // A JSONL file is deleted only after every record reaches SQLite,
+            // so the two sets are normally disjoint. Guard the backfill-pending
+            // window anyway. `timestamp + tool` alone is too weak a key: two
+            // calls to the same tool inside one timestamp tick (ISO seconds)
+            // are a routine burst, and keying on just those two fields drops
+            // the second one as a phantom duplicate. `action` is what actually
+            // differs between them (distinct command / file_path), so it joins
+            // the key.
+            let obs_key = |r: &ObsRecord| {
+                (
+                    r.timestamp.clone(),
+                    r.tool.clone(),
+                    r.action.clone().unwrap_or_default(),
+                )
+            };
+            let seen: std::collections::HashSet<(String, String, String)> =
+                db_recs.iter().map(obs_key).collect();
+            let jsonl_recs: Vec<&ObsRecord> = jsonl_recs
+                .iter()
+                .filter(|r| !seen.contains(&obs_key(r)))
+                .collect();
+
+            for r in db_recs.iter().chain(jsonl_recs) {
                 total_obs += 1;
                 *tool_counts.entry(r.tool.clone()).or_default() += 1;
                 if let Some(ref fc) = r.failure_category {
@@ -313,9 +351,17 @@ pub fn run_context(
     });
 
     // 3. Metrics summary (SQLite first, fallback to JSON)
+    // Scoped to the invoking project unless --all-projects asked for the
+    // cross-project aggregate; the unscoped loader is indeterminate when
+    // several projects share the harness DB.
+    let metrics_scope: Option<String> = if all_projects {
+        None
+    } else {
+        project_slugs.first().cloned()
+    };
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, metrics_scope.as_deref()).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
@@ -796,6 +842,64 @@ async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
     }
 }
 
+/// Keep only observations newer than the last consumed one.
+///
+/// ISO-8601 timestamps compare correctly as strings, so a lexical `>` is the
+/// whole test. `None` (first ever round) keeps everything.
+fn filter_past_watermark(observations: Vec<ObsRecord>, watermark: Option<&str>) -> Vec<ObsRecord> {
+    match watermark {
+        Some(mark) => observations
+            .into_iter()
+            .filter(|o| o.timestamp.as_str() > mark)
+            .collect(),
+        None => observations,
+    }
+}
+
+/// Cutoff timestamp for retention: `days` before `now`, as an ISO-8601 date.
+///
+/// Day-precision is enough — the sweep compares against `timestamp`, whose
+/// ISO form sorts lexically, so a bare `YYYY-MM-DD` cuts at that day's start.
+fn retention_cutoff(now_secs: u64, days: u64) -> String {
+    let cutoff_days = (now_secs / 86_400).saturating_sub(days) as i32;
+    let (y, m, d) = epoch_days_to_ymd(cutoff_days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Delete observations older than `db.obs_retention_days`, at most once a day.
+///
+/// The store grows ~20 MB per active week and nothing older than the analysis
+/// window is ever read, but `delete_obs_older_than_pool` had no caller, so it
+/// grew without bound. Guarded by a date-stamped marker file rather than run
+/// every round: Codex's `Stop` is turn-scoped, so an unguarded sweep would
+/// issue a DELETE on every turn.
+///
+/// Returns the number of rows deleted, or `None` when the sweep did not run.
+fn sweep_old_observations() -> Option<u64> {
+    let days = CONFIG.db.obs_retention_days;
+    if days == 0 {
+        return None;
+    }
+    let marker = retention_marker_file();
+    let today_str = today();
+    if fs::read_to_string(&marker).is_ok_and(|s| s.trim() == today_str) {
+        return None;
+    }
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    let cutoff = retention_cutoff(now_secs, days);
+    let deleted = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::observations::delete_obs_older_than_pool(&pool, &cutoff).await
+    })
+    .ok()?;
+    // Stamp only after a successful sweep, so a DB error retries next round.
+    let _ = fs::write(&marker, &today_str);
+    Some(deleted)
+}
+
 pub fn run(_input: &HookInput) -> i32 {
     if !should_run(PROFILE_REFLECT) {
         return 0;
@@ -806,11 +910,17 @@ pub fn run(_input: &HookInput) -> i32 {
 
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
+    let current_project = project_slug();
     let observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
         backfill_jsonl_to_sqlite(&pool, &today_str).await;
-        crate::store::observations::query_obs_for_date_range_pool(&pool, &today_str, &today_str)
-            .await
+        crate::store::observations::query_obs_for_date_range_pool(
+            &pool,
+            &today_str,
+            &today_str,
+            &current_project,
+        )
+        .await
     }) {
         Ok(recs) => recs,
         Err(e) => {
@@ -841,8 +951,37 @@ pub fn run(_input: &HookInput) -> i32 {
         }
         recs
     };
+
+    // 1b. Drop observations an earlier round already consumed.
+    //
+    // Claude Code calls reflect once per session (SessionEnd). Codex's `Stop`
+    // fires every turn, so without this the same day's observations would be
+    // re-scored on each turn — inflating total_sessions, re-running skill
+    // seeding, and feeding stagnation/attribution duplicate samples.
+    let watermark = fs::read_to_string(reflect_watermark_file())
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let observations = filter_past_watermark(observations, watermark.as_deref());
     if observations.len() < 3 {
         return 0;
+    }
+    // Advance the watermark before analysis: a crash mid-round must not make
+    // the next turn re-count this batch. The trade is deliberate: a crash
+    // between here and step 11 loses one batch of observations, which are a
+    // statistical sample, whereas re-counting corrupts total_sessions, skill
+    // seeding and the attribution arms, which are cumulative state.
+    //
+    // A failed write is not silent: it means the next turn re-analyzes this
+    // batch, so it gets reported rather than swallowed.
+    if let Some(newest) = observations.iter().map(|o| &o.timestamp).max() {
+        if let Err(e) = fs::write(reflect_watermark_file(), newest) {
+            eprintln!(
+                "[reflect] watermark write failed ({e}); the next round will re-analyze \
+                 these {} observations",
+                observations.len()
+            );
+        }
     }
 
     // 2. Analyze
@@ -887,9 +1026,12 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 3. Stagnation (load metrics from SQLite, fallback to JSON)
+    // Scoped: metrics_state is keyed by (key, project), and the unscoped
+    // loader is indeterminate once a second project has written rows — it
+    // would judge stagnation and trigger rollback off another project's runs.
     let mut metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_pool(&pool).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&current_project)).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics load failed, falling back to JSON: {e}");
@@ -1075,7 +1217,7 @@ pub fn run(_input: &HookInput) -> i32 {
                 .error_snippet
                 .as_deref()
                 .unwrap_or(o.action.as_deref().unwrap_or(""));
-            format!("{cat}: {}", &snippet[..snippet.len().min(100)])
+            format!("{cat}: {}", truncate_bytes(snippet, 100))
         })
         .collect();
     if !last_errors.is_empty() {
@@ -1189,7 +1331,20 @@ pub fn run(_input: &HookInput) -> i32 {
         );
     }
 
-    // 11.7. Workspace manifest
+    // 11.7. Observation retention sweep (once per day)
+    if let Some(deleted) = sweep_old_observations() {
+        if deleted > 0 {
+            hint(
+                "reflect",
+                &format!(
+                    "Pruned {deleted} observation(s) older than {} days",
+                    CONFIG.db.obs_retention_days
+                ),
+            );
+        }
+    }
+
+    // 11.8. Workspace manifest
     evolve::write_workspace_manifest();
 
     // 12. Report
@@ -1445,6 +1600,83 @@ mod tests {
     fn epoch_days_to_ymd_known_date() {
         // 1970-01-01 = day 0
         assert_eq!(epoch_days_to_ymd(0), (1970, 1, 1));
+    }
+
+    fn obs_at(ts: &str) -> ObsRecord {
+        ObsRecord {
+            timestamp: ts.into(),
+            tool: "Bash".into(),
+            tool_category: "bash".into(),
+            action: None,
+            result: Some("success".into()),
+            score: Some(1.0),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        }
+    }
+
+    /// Codex fires Stop every turn; a second round must not re-consume the
+    /// observations the first round already scored.
+    #[test]
+    fn watermark_drops_already_consumed_observations() {
+        let obs = vec![
+            obs_at("2026-08-31T10:00:00Z"),
+            obs_at("2026-08-31T11:00:00Z"),
+            obs_at("2026-08-31T12:00:00Z"),
+        ];
+        let kept = filter_past_watermark(obs, Some("2026-08-31T11:00:00Z"));
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].timestamp, "2026-08-31T12:00:00Z");
+    }
+
+    /// A turn that produced nothing new yields an empty batch, so reflect
+    /// returns before incrementing total_sessions.
+    #[test]
+    fn watermark_at_newest_yields_nothing() {
+        let obs = vec![obs_at("2026-08-31T10:00:00Z")];
+        assert!(filter_past_watermark(obs, Some("2026-08-31T10:00:00Z")).is_empty());
+    }
+
+    /// First run on a fresh project keeps the whole batch.
+    #[test]
+    fn no_watermark_keeps_everything() {
+        let obs = vec![
+            obs_at("2026-08-31T10:00:00Z"),
+            obs_at("2026-08-31T11:00:00Z"),
+        ];
+        assert_eq!(filter_past_watermark(obs, None).len(), 2);
+    }
+
+    // ── retention cutoff ───────────────────────────────
+
+    /// 2026-08-31T00:00:00Z is epoch day 20696.
+    const DAY_2026_08_31: u64 = 20_696 * 86_400;
+
+    #[test]
+    fn retention_cutoff_subtracts_whole_days() {
+        assert_eq!(retention_cutoff(DAY_2026_08_31, 1), "2026-08-30");
+        assert_eq!(retention_cutoff(DAY_2026_08_31, 31), "2026-07-31");
+    }
+
+    /// The cutoff must sort lexically below the ISO timestamps it filters,
+    /// which is the whole basis for the `timestamp < cutoff` comparison.
+    #[test]
+    fn retention_cutoff_sorts_below_same_day_timestamps() {
+        let cutoff = retention_cutoff(DAY_2026_08_31, 0);
+        assert_eq!(cutoff, "2026-08-31");
+        assert!(cutoff.as_str() < "2026-08-31T00:00:00Z");
+        assert!(cutoff.as_str() > "2026-08-30T23:59:59Z");
+    }
+
+    /// A retention window wider than the epoch must not underflow.
+    #[test]
+    fn retention_cutoff_saturates_at_epoch() {
+        let out = retention_cutoff(DAY_2026_08_31, 10_000_000);
+        assert_eq!(out, "1970-01-01");
     }
 
     #[test]

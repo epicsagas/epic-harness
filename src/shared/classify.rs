@@ -71,7 +71,7 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    let sample = &output[..output.len().min(2000)];
+    let sample = crate::shared::sanitize::truncate_bytes(output, 2000);
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(sample) {
             return Some(cat);
@@ -80,10 +80,128 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     None
 }
 
+/// Commands whose stdout is *quoted material* — file contents, diffs, search
+/// hits — rather than a report on the command's own outcome.
+///
+/// Reading a test file that contains `assert.equal`, or grepping for
+/// `TypeError`, is a successful read; scoring it as a failed tool call
+/// poisons every downstream pattern (repeated-error, thrashing, weak-tool
+/// rates). The keyword rules cannot tell the two apart, because the words are
+/// genuinely in the output either way — so the command has to be the guard.
+///
+/// Deliberately conservative: a pipeline that *also* runs a real build/test
+/// (`rg foo && cargo test`) must not be treated as read-only, so anything
+/// containing a sequencing or substitution operator is excluded. A plain `|`
+/// pipe is decomposed instead: every stage must itself be read-only.
+static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?x)
+        ^\s*
+        (?:sudo\s+)?
+        (?:
+            cat|bat|head|tail|nl|less|more|
+            rg|grep|egrep|fgrep|ag|ack|
+            find|fd|ls|tree|stat|file|wc|du|
+            sed|awk|cut|sort|uniq|diff|
+            echo|printf|pwd|whoami|date|env
+        )\b
+        |^\s*git\s+(?:diff|log|show|status|blame|branch|remote|describe|rev-parse)\b
+        ",
+    )
+    .unwrap()
+});
+
+/// Shell operators that can append a non-read-only stage to a read-only head
+/// in ways a per-stage check cannot see: `;` and `&&`/`&` sequence independent
+/// commands, `$()`/`` ` `` splice one command's output into another's argv,
+/// and a bare `&` backgrounds. `|` is deliberately absent: it is handled by
+/// splitting into stages, since a pure-read pipeline (`rg foo | head`) is the
+/// common case and must stay read-only.
+static CHAINED_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[;&]|\$\(|`").unwrap());
+
+/// Redirections write to a file, so a stage carrying one is not read-only even
+/// if its head command is. `2>&1` is a stream merge, not a file write, and is
+/// allowed; `&` is otherwise already rejected by [`CHAINED_CMD`].
+static REDIRECT_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r">|<\(").unwrap());
+
+/// True when `command`'s output should not be keyword-scanned for failures.
+///
+/// A `|` pipeline qualifies only when *every* stage is itself read-only:
+/// `rg foo | head` is quoted material, but `cat a.txt | tee b.txt` writes.
+pub fn is_read_only_command(command: &str) -> bool {
+    if CHAINED_CMD.is_match(command) {
+        return false;
+    }
+    command
+        .split('|')
+        .all(|stage| !REDIRECT_CMD.is_match(stage) && READ_ONLY_CMD.is_match(stage))
+}
+
+/// Files named by a Codex `apply_patch` payload.
+///
+/// Codex passes the patch as a command string instead of Claude Code's
+/// `file_path` field, so anything keyed on `file_path` alone sees no files at
+/// all on that host. Each touched file gets its own header line:
+///
+/// ```text
+/// *** Add File: src/a.ts
+/// *** Update File: src/b.py
+/// *** Delete File: src/c.go
+/// ```
+///
+/// `include_deletes` distinguishes the two callers: formatting has nothing to
+/// do on a deleted file, but write-conflict detection still must count it.
+pub fn apply_patch_paths(patch: &str, include_deletes: bool) -> Vec<String> {
+    let verbs: &[&str] = if include_deletes {
+        &["Add File:", "Update File:", "Delete File:"]
+    } else {
+        &["Add File:", "Update File:"]
+    };
+    patch
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim().strip_prefix("***")?.trim_start();
+            for verb in verbs {
+                if let Some(p) = rest.strip_prefix(verb) {
+                    let p = p.trim();
+                    if !p.is_empty() {
+                        return Some(p.to_string());
+                    }
+                }
+            }
+            None
+        })
+        .collect()
+}
+
+/// Classify a Bash tool result.
+///
+/// `stderr` — when the host reports it separately — is the command's own
+/// diagnostic channel and stays trustworthy even for read-only commands.
+/// `stdout` from a read-only command is quoted material and is not scanned.
+/// Hosts that merge the two streams (Codex exposes one response string) get
+/// the safe answer for read-only commands: no failure claimed.
+pub fn classify_bash_failure(
+    command: &str,
+    stdout: &str,
+    stderr: &str,
+    streams_separated: bool,
+) -> Option<&'static str> {
+    if !is_read_only_command(command) {
+        return classify_failure(&format!("{stdout}\n{stderr}"));
+    }
+    if streams_separated {
+        return classify_failure(stderr);
+    }
+    None
+}
+
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
         "bash" => "bash",
-        "edit" => "edit",
+        // Codex's canonical edit tool — without this every Codex edit was
+        // categorized as "other" and scored by the generic path.
+        "edit" | "apply_patch" => "edit",
         "write" => "write",
         "read" => "read",
         "glob" => "glob",
@@ -161,7 +279,155 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
     (blocked, warned)
 }
 
+/// The file an observation's `action` refers to.
+///
+/// Matches relative paths as well as absolute ones. Requiring a leading `/`
+/// silently truncated every relative path to its last segment, so
+/// `src/util.rs` and `cli/util.rs` both became `/util.rs` and were counted as
+/// one file by same-file streak detection and the per-file weak stats. Both
+/// callers now supply relative paths: `mask_path_action` rewrites project
+/// paths that way, and a Codex `apply_patch` body names its files relative.
 pub fn extract_file(action: &str) -> Option<&str> {
-    static FILE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(/[\w./-]+\.\w+)").unwrap());
+    static FILE_RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"((?:/|\b)[\w.-]+(?:/[\w.-]+)*\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_patch_paths_respect_delete_flag() {
+        let patch = "*** Begin Patch\n                     *** Add File: src/a.ts\n                     *** Update File: src/b.py\n                     *** Delete File: src/c.go\n                     *** End Patch";
+        // polish: nothing to format in a deleted file
+        assert_eq!(
+            apply_patch_paths(patch, false),
+            vec!["src/a.ts".to_string(), "src/b.py".to_string()]
+        );
+        // guard: a delete still races with another agent's write
+        assert_eq!(
+            apply_patch_paths(patch, true),
+            vec![
+                "src/a.ts".to_string(),
+                "src/b.py".to_string(),
+                "src/c.go".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn read_only_commands_recognized() {
+        for cmd in [
+            "cat src/main.rs",
+            "rg TypeError src/",
+            "sed -n '1,80p' file.ts",
+            "git diff HEAD~1",
+            "  find . -name '*.rs'",
+            "nl -ba README.md",
+        ] {
+            assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+    }
+
+    /// Relative paths must survive intact. Requiring a leading `/` truncated
+    /// them to the last segment, so files sharing a basename across
+    /// directories were counted as one by streak detection and weak stats.
+    #[test]
+    fn extract_file_keeps_relative_paths_whole() {
+        assert_eq!(extract_file("src/b.py"), Some("src/b.py"));
+        assert_eq!(
+            extract_file("crates/core/src/b.py"),
+            Some("crates/core/src/b.py")
+        );
+        assert_eq!(
+            extract_file("/Users/x/proj/src/b.py"),
+            Some("/Users/x/proj/src/b.py")
+        );
+        assert_ne!(extract_file("src/util.rs"), extract_file("cli/util.rs"));
+        // A command with no path in it still yields nothing.
+        assert_eq!(extract_file("cargo test"), None);
+    }
+
+    /// A pipeline whose every stage only reads is still quoted material. The
+    /// blanket "any `|` means not read-only" rule reintroduced exactly the
+    /// false failures the read-only guard exists to prevent.
+    #[test]
+    fn pure_read_pipelines_stay_read_only() {
+        for cmd in [
+            "rg TypeError src/ | head",
+            "cat src/main.rs | wc -l",
+            "git diff HEAD~1 | grep panic",
+            "ls -la | sort | uniq",
+        ] {
+            assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+    }
+
+    /// One writing stage anywhere in the pipe disqualifies the whole command.
+    #[test]
+    fn pipelines_with_a_writing_stage_not_read_only() {
+        for cmd in [
+            "cat a.txt | tee b.txt",
+            "rg foo src/ | xargs sed -i s/a/b/",
+            "cat a.txt > b.txt",
+            "grep foo a.txt | head > out.txt",
+        ] {
+            assert!(!is_read_only_command(cmd), "must not be read-only: {cmd}");
+        }
+    }
+
+    #[test]
+    fn mutating_and_chained_commands_not_read_only() {
+        for cmd in [
+            "cargo test",
+            "npm run build",
+            "rg foo && cargo test",
+            "cat a.txt | tee b.txt",
+            "git commit -m x",
+            "echo $(cargo test)",
+        ] {
+            assert!(!is_read_only_command(cmd), "must not be read-only: {cmd}");
+        }
+    }
+
+    /// The core of issue #113 finding 10: reading a file that *contains*
+    /// failure words is a successful read, not a failed tool call.
+    #[test]
+    fn reading_file_containing_failure_words_is_not_a_failure() {
+        let contents = "TypeError: expected\nassert.equal(a, b)\nFAILED";
+        assert!(
+            classify_bash_failure("cat tests/fixtures/errors.txt", contents, "", true).is_none(),
+            "quoted file contents must not be scored as a tool failure"
+        );
+        // Same payload from a merged-stream host (Codex) — still not a failure.
+        assert!(
+            classify_bash_failure("rg TypeError src/", contents, "", false).is_none(),
+            "merged-stream hosts must default to no-failure for read-only commands"
+        );
+    }
+
+    /// A read-only command that genuinely fails still counts, when the host
+    /// gives stderr its own channel.
+    #[test]
+    fn read_only_command_real_stderr_failure_still_counts() {
+        assert_eq!(
+            classify_bash_failure(
+                "cat missing.txt",
+                "",
+                "cat: missing.txt: No such file or directory",
+                true
+            ),
+            Some("not_found")
+        );
+    }
+
+    /// Non-read-only commands keep the previous behavior exactly.
+    #[test]
+    fn build_failure_still_classified() {
+        assert_eq!(
+            classify_bash_failure("cargo build", "error TS2304: cannot find name", "", true),
+            Some("build_fail")
+        );
+    }
 }

@@ -56,9 +56,27 @@
     return 'stable';
   }
 
+  // failure_patterns entries are DetectedPattern objects, not strings — join()
+  // on them renders "[object Object]". Older rows may still hold plain strings,
+  // and the scoring_bias variant carries no involved_files, so read defensively.
+  function patternLabel(p: unknown): string {
+    if (typeof p === 'string') return p;
+    if (p && typeof p === 'object') {
+      const o = p as Record<string, unknown>;
+      const type = typeof o['pattern_type'] === 'string' ? o['pattern_type'] as string : '';
+      const desc = typeof o['description'] === 'string' ? o['description'] as string : '';
+      if (type && desc) return `${type}: ${desc}`;
+      if (type || desc) return type || desc;
+    }
+    return '';
+  }
+
   function patternSummary(row: RawRow): string {
     const fp = row['failure_patterns'];
-    if (Array.isArray(fp) && fp.length > 0) return fp.join(', ');
+    if (Array.isArray(fp) && fp.length > 0) {
+      const labels = fp.map(patternLabel).filter(Boolean);
+      if (labels.length > 0) return labels.join(', ');
+    }
     const ep = row['error_patterns'];
     if (ep && typeof ep === 'object' && Object.keys(ep).length > 0)
       return Object.keys(ep).join(', ');
@@ -66,13 +84,22 @@
     return summary || '—';
   }
 
+  // Newest first, regardless of the order the backend happened to return.
+  // Trend compares each row against the chronologically previous one, so the
+  // comparison runs on the ascending copy before the list is reversed.
   const enriched = $derived((): RawRow[] => {
     if (!data) return [];
-    return data.evolution_history.map((r, i) => ({
-      ...r,
-      _trend: deriveTrend(data!.evolution_history as RawRow[], i),
-      _patterns: patternSummary(r as RawRow),
-    }));
+    const asc = (data.evolution_history as RawRow[])
+      .slice()
+      .sort((a, b) =>
+        String(a['timestamp'] ?? '').localeCompare(String(b['timestamp'] ?? '')));
+    return asc
+      .map((r, i) => ({
+        ...r,
+        _trend: deriveTrend(asc, i),
+        _patterns: patternSummary(r),
+      }))
+      .reverse();
   });
 
   // ── filters
