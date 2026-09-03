@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic resume",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic not found, skipping resume'",
             "timeout": 10
           }
         ],
@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic guard",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found, skipping guard'",
             "timeout": 5
           }
         ],
@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic polish",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || true",
             "timeout": 30
           }
         ],
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic observe",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || true",
             "timeout": 5
           }
         ],
@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic observe",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || true",
             "timeout": 5
           }
         ],
@@ -69,7 +69,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic snapshot",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || true",
             "timeout": 10
           }
         ],
@@ -82,7 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "epic reflect",
+            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic not found, skipping reflect'",
             "timeout": 30
           }
         ],

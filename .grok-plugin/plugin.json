@@ -18,10 +18,7 @@
     "code-review",
     "automation"
   ],
-  "components": {
-    "skills": "./skills",
-    "agents": "./agents",
-    "hooks": "./hooks/hooks.json",
-    "mcp": "./mcp.toml"
-  }
+  "skills": "./skills/",
+  "agents": "./agents/",
+  "hooks": "./hooks/hooks.json"
 }
