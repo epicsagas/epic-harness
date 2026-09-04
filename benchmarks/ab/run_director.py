@@ -174,11 +174,19 @@ def run_arm(
         "--permission-mode", "bypassPermissions",
     ])
     
+    # Bind CLAUDE_CONFIG_DIR to respective mode home
+    env = os.environ.copy()
+    if arm == "bare":
+        env["CLAUDE_CONFIG_DIR"] = os.path.expanduser("~/.claudy/modes/bare")
+    else:
+        env["CLAUDE_CONFIG_DIR"] = os.path.expanduser("~/.claudy/modes/epic-harness")
+
     start_time = time.time()
     try:
         proc = subprocess.run(
             cmd,
             cwd=temp_dir,
+            env=env,
             capture_output=True,
             text=True,
             timeout=timeout_s,
