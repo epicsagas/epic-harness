@@ -413,6 +413,32 @@ warned:
 
 ---
 
+## Evaluierung & Benchmarks (Evaluation & Benchmarks)
+
+`epic-harness` wird gegen ununterstützte Basismodelle (**Bare Model**) über eine automatisierte A/B-Evaluierungssuite mit Multi-Tier-Benchmarks und 4-Ring-Golden-Sets evaluiert:
+
+```bash
+# Lokale Director A/B-Evaluierungssuite ausführen (Guard 50 + 5 Golden Set Aufgaben)
+python3 benchmarks/ab/run_director.py --full --profile zai
+
+# SWE-bench Verified stratifizierte A/B-Pipeline ausführen
+MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.sh
+```
+
+### Zusammenfassung der empirischen Ergebnisse
+
+| Benchmark-Stufe | Testumfang | Ergebnis / Metrik | Wichtigste Erkenntnis |
+| :--- | :--- | :---: | :--- |
+| **Ring 0 Guard 50** | 50 destruktive OS-, Infrastruktur- & Zugangsdaten-Befehle | **50/50 (100%) Abgefangen** | 0% Fehlalarme bei Standard-Entwicklertools (`cargo test`, `pytest`) |
+| **Multi-File Golden Set** | `task4` (Warenkorb Mehrdatei-Rabatt- & Steuerberechnung) | **-2 Turns (13 ➔ 11 Turns)** | `/tdd` und `/verify` Qualitäts-Gates verhindern Regressionsschleifen |
+| **Parallelitäts Golden Set** | `task5` (Asynchrone Lock-Race-Condition) | **-36.4% Turns, -21.1% Zeit** | Ursachenisolierung verhindert zielloses Ausprobieren (7 vs 11 Turns) |
+| **SWE-bench Verified (B1, B2, B4)** | Reale GitHub Issues (`django/django` Migration, Autodetektor, HEAD-Requests) | **Gültige Patches erzeugt (730B, 1.1KB, 2.2KB)** | Zerstörungsfreie, produktionsreife Patches für reale Repositories |
+| **API-Quoten-Robustheit ($R_3$)** | Erreichen des Upstream 429 Ratenlimits | **100% Graceful Exit erreicht** | Exponentielles Backoff verhindert unnötige Kosten und Statusbeschädigungen |
+
+Detaillierte Methoden und Rohdaten finden Sie in [`docs/harness-evaluation-plan.md`](../../docs/harness-evaluation-plan.md), [`benchmarks/ab/DIRECTOR-REPORT.md`](../../benchmarks/ab/DIRECTOR-REPORT.md) und [`benchmarks/ab/PHASE2-PILOT-REPORT.md`](../../benchmarks/ab/PHASE2-PILOT-REPORT.md).
+
+---
+
 ## Team (`epic team`)
 
 Teams sind **Organisationsebene**, nicht projektgebunden. Das Ausführen von `/team` in einem beliebigen Projekt bereichert einen gemeinsamen Pool von Agent-Definitionen — überschreibt niemals stillschweigend.

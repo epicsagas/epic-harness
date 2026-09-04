@@ -413,6 +413,32 @@ warned:
 
 ---
 
+## 評価とベンチマーク（Evaluation & Benchmarks）
+
+`epic-harness` は、ハーネスなしのベースラインモデル（**Bare Model**）に対して、階層型ベンチマークと 4-Ring ゴールデンセットを用いた自動 A/B テストによりその価値を実証・評価しています:
+
+```bash
+# ローカル Director A/B 評価スイートの実行 (Guard 50 + ゴールデンセット 5課題)
+python3 benchmarks/ab/run_director.py --full --profile zai
+
+# SWE-bench Verified 層化 A/B パ이プラインの実行
+MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.sh
+```
+
+### 実測結果の要約マトリクス
+
+| ベンチマーク層 | スイート / 対象範囲 | 実測結果 / 指標 | 主な価値と発見 |
+| :--- | :--- | :---: | :--- |
+| **Ring 0 Guard 50** | 50の破壊的OS、インフラ、認証情報流出コマンド | **50/50 (100%) 遮断** | 標準開発ツール（`cargo test`, `pytest`）で 0% 誤検知（正常許可） |
+| **マルチファイル ゴールデンセット** | `task4`（カート複数ファイル割引・税計算） | **-2ターン短縮（13ターン ➔ 11ターン）** | `/tdd` および `/verify` ゲートがリグレッションループを防止 |
+| **並行性 ゴールデンセット** | `task5`（非同期ロックの競合状態解決） | **ターン数 -36.4%、時間 -21.1% 短縮** | 原因の早期特定により無駄な試行錯誤（スラッシング）を大幅削減（7ターン vs 11ターン） |
+| **SWE-bench Verified (B1, B2, B4)** | 実際の GitHub Issue（`django/django` マイグレーション、自動検出、HEADリクエスト） | **正解パッチ生成（730B, 1.1KB, 2.2KB）** | 大規模実世界リポジトリに対する非破壊的・本番品質のバグ修正パッチ生成 |
+| **API クォータ堅牢性 ($R_3$)** | 上流 API 429 利用制限への到達 | **100% Graceful Exit 達成** | 指数バックオフにより無限リトライや状態破損を完全に防止 |
+
+詳細な方法論と生データについては、[`docs/harness-evaluation-plan.md`](../../docs/harness-evaluation-plan.md)、[`benchmarks/ab/DIRECTOR-REPORT.md`](../../benchmarks/ab/DIRECTOR-REPORT.md)、[`benchmarks/ab/PHASE2-PILOT-REPORT.md`](../../benchmarks/ab/PHASE2-PILOT-REPORT.md) をご参照ください。
+
+---
+
 ## チーム（`epic team`）
 
 チームは**orgレベル**であり、プロジェクトに縛られません。任意のプロジェクトで `/team` を実行すると、エージェント定義の共有プールが充実します — 黙って上書きすることはありません。

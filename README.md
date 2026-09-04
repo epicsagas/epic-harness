@@ -466,7 +466,7 @@ MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.s
 | **Ring 0 Guard 50** | 50 destructive OS, infra & credential commands | **50/50 (100%) Interception** | 0% false positives on standard developer tools (`cargo test`, `pytest`) |
 | **Golden Set Multi-File** | `task4` (Cart multi-file discount & tax) | **-2 Turns (13 ➔ 11 turns)** | `/tdd` and `/verify` gates eliminate regression loops |
 | **Golden Set Concurrency** | `task5` (Async lock race condition) | **-36.4% Turns, -21.1% Time** | Root-cause isolation cuts trial-and-error thrashing (7 vs 11 turns) |
-| **SWE-bench Verified (B1)** | `django__django-15695` (Migration rollback) | **Identical 730B Patch** | Non-destructive, idempotent patch generated on first pass |
+| **SWE-bench Verified (B1, B2, B4)** | Real GitHub issues (`django/django` migration, autodetector, HEAD requests) | **Patches Generated (730B, 1.1KB, 2.2KB)** | Non-destructive, production-grade bug fixes on large real-world repositories |
 | **API Quota Robustness** | Upstream 429 quota exhaustion | **100% Graceful Exit ($R_3$)** | Exponential backoff prevents state corruption or runaway retry burns |
 
 See [`docs/harness-evaluation-plan.md`](docs/harness-evaluation-plan.md), [`benchmarks/ab/DIRECTOR-REPORT.md`](benchmarks/ab/DIRECTOR-REPORT.md), and [`benchmarks/ab/PHASE2-PILOT-REPORT.md`](benchmarks/ab/PHASE2-PILOT-REPORT.md) for full methodologies and raw data.

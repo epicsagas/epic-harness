@@ -413,6 +413,32 @@ warned:
 
 ---
 
+## 评估与基准测试（Evaluation & Benchmarks）
+
+`epic-harness` 与未挂载 Harness 的基线模型（**Bare Model**）通过多层基准测试与 4-Ring 黄金测试集进行自动化 A/B 对比评估，以实测数据验证其核心价值：
+
+```bash
+# 运行本地 Director A/B 评估测试套件（Guard 50 + 黄金集 5 大任务）
+python3 benchmarks/ab/run_director.py --full --profile zai
+
+# 运行 SWE-bench Verified 分层 A/B 流水线
+MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.sh
+```
+
+### 实测结果摘要矩阵
+
+| 基准层级 | 任务范围 | 实测结果 / 指标 | 核心价值与发现 |
+| :--- | :--- | :---: | :--- |
+| **Ring 0 Guard 50** | 50 个破坏性 OS、基础设施与凭据泄露命令 | **50/50 (100%) 拦截** | 标准开发工具（`cargo test`, `pytest`）0% 误报（正常放行） |
+| **多文件黄金集** | `task4`（购物车多文件折扣与税率计算） | **减少 2 轮（13 轮 ➔ 11 轮）** | `/tdd` 与 `/verify` 质量门禁有效杜绝回归循环 |
+| **并发黄金集** | `task5`（异步锁竞态条件修复） | **轮数减少 36.4%，时间缩短 21.1%** | 根因隔离大幅消除盲目试错（Thrashing）（7 轮 vs 11 轮） |
+| **SWE-bench Verified (B1, B2, B4)** | 真实 GitHub Issue（`django/django` 迁移、自动检测、HEAD 请求） | **生成正确补丁（730B, 1.1KB, 2.2KB）** | 在复杂真实世界代码库上生成非破坏性、生产级别的修复补丁 |
+| **API 配额鲁棒性 ($R_3$)** | 上游 API 429 速率限制触发 | **100% Graceful Exit 达成** | 指数退避机制杜绝无效重试烧钱与状态损坏 |
+
+详细方法论与原始数据请参阅 [`docs/harness-evaluation-plan.md`](../../docs/harness-evaluation-plan.md)、[`benchmarks/ab/DIRECTOR-REPORT.md`](../../benchmarks/ab/DIRECTOR-REPORT.md) 和 [`benchmarks/ab/PHASE2-PILOT-REPORT.md`](../../benchmarks/ab/PHASE2-PILOT-REPORT.md)。
+
+---
+
 ## Team（`epic team`）
 
 团队是**组织级别**的，不绑定到项目。在任何项目中运行 `/team` 都会丰富共享的智能体定义池 — 永远不会静默覆盖。

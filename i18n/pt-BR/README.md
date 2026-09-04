@@ -413,6 +413,32 @@ warned:
 
 ---
 
+## Avaliação e Benchmarks (Evaluation & Benchmarks)
+
+O `epic-harness` é avaliado contra modelos base não assistidos (**Bare Model**) por meio de uma suíte automatizada de testes A/B que abrange benchmarks de vários níveis e conjuntos de teste (golden sets) de 4 anéis:
+
+```bash
+# Executar a suíte de avaliação local Director A/B (Guard 50 + 5 tarefas Golden Set)
+python3 benchmarks/ab/run_director.py --full --profile zai
+
+# Executar o pipeline A/B estratificado SWE-bench Verified
+MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.sh
+```
+
+### Resumo dos resultados empíricos
+
+| Nível de Benchmark | Escopo dos testes | Resultado / Métrica | Principal descoberta de valor |
+| :--- | :--- | :---: | :--- |
+| **Ring 0 Guard 50** | 50 comandos destrutivos de SO, infraestrutura e vazamento de credenciais | **50/50 (100%) Interceptados** | 0% de falsos positivos em ferramentas de desenvolvimento padrão (`cargo test`, `pytest`) |
+| **Golden Set Multi-Arquivo** | `task4` (Cálculo de descontos e impostos em múltiplos arquivos) | **-2 Turnos (13 ➔ 11 turnos)** | Os gates `/tdd` e `/verify` eliminam loops de regressão |
+| **Golden Set Concorrência** | `task5` (Resolução de condição de corrida de lock assíncrono) | **-36.4% de turnos, -21.1% de tempo** | O isolamento da causa raiz reduz tentativas e erros aleatórios (7 vs 11 turnos) |
+| **SWE-bench Verified (B1, B2, B4)** | Problemas reais do GitHub (`django/django` migração, autodetector, requisições HEAD) | **Patches válidos gerados (730B, 1.1KB, 2.2KB)** | Correções de bugs não destrutivas e prontas para produção em repositórios reais |
+| **Robustez de Cota de API ($R_3$)** | Limite de taxa 429 atingido no provedor upstream | **100% Graceful Exit alcançado** | Backoff exponencial previne custos desnecessários e corrupção de estado |
+
+Para a metodologia completa e dados brutos, consulte [`docs/harness-evaluation-plan.md`](../../docs/harness-evaluation-plan.md), [`benchmarks/ab/DIRECTOR-REPORT.md`](../../benchmarks/ab/DIRECTOR-REPORT.md) e [`benchmarks/ab/PHASE2-PILOT-REPORT.md`](../../benchmarks/ab/PHASE2-PILOT-REPORT.md).
+
+---
+
 ## Equipe (`epic team`)
 
 As equipes são de **nível organizacional**, não vinculadas ao projeto. Executar `/team` em qualquer projeto enriquece um pool compartilhado de definições de agentes — nunca sobrescreve silenciosamente.

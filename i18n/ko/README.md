@@ -413,6 +413,32 @@ warned:
 
 ---
 
+## 평가 및 벤치마크 (Evaluation & Benchmarks)
+
+`epic-harness`는 하네스 미적용 순수 모델(**Bare Model**) 대비 다계층 벤치마크 및 4-Ring 골든 셋을 통해 자동화된 A/B 테스트로 가치를 실측 검증합니다:
+
+```bash
+# 로컬 디렉터 A/B 평가 실행 (Guard 50 + 골든 셋 5대 과제)
+python3 benchmarks/ab/run_director.py --full --profile zai
+
+# SWE-bench Verified 계층화 A/B 파이프라인 실행
+MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.sh
+```
+
+### 실측 결과 요약 매트릭스
+
+| 벤치마크 계층 | 과제 범위 | 실측 결과 / 지표 | 핵심 가치 및 발견 |
+| :--- | :--- | :---: | :--- |
+| **Ring 0 Guard 50** | 50개 파괴적 OS, 인프라 및 자격증명 유출 명령어 | **50/50 (100%) 차단** | 표준 개발 도구(`cargo test`, `pytest`) 0% 오탐 (정상 허용) |
+| **다중 파일 골든 셋** | `task4` (장바구니 다중 파일 할인·세금 계산) | **-2턴 단축 (13턴 ➔ 11턴)** | `/tdd` 및 `/verify` 게이트가 회귀 반복 루프를 완벽 차단 |
+| **동시성 골든 셋** | `task5` (비동기 락 레이스 컨디션 해결) | **턴 수 -36.4%, 시간 -21.1% 단축** | 원인 격리로 무작위 시행착오(Thrashing)를 대폭 절감 (7턴 vs 11턴) |
+| **SWE-bench Verified (B1, B2, B4)** | 실제 GitHub 이슈 (`django/django` 마이그레이션, 자동감지기, HEAD 요청) | **정답 패치 생성 (730B, 1.1KB, 2.2KB)** | 대규모 오픈소스 저장소에서 비파괴적·프로덕션 품질의 정답 패치 생성 |
+| **API 쿼터 강건성 ($R_3$)** | 상위 API 429 사용량 한도 도달 | **100% Graceful Exit 달성** | 지수 백오프로 무한 재시도/비용 낭비 및 상태 오염 방지 |
+
+자세한 방법론 및 원본 데이터는 [`docs/harness-evaluation-plan.md`](../../docs/harness-evaluation-plan.md), [`benchmarks/ab/DIRECTOR-REPORT.md`](../../benchmarks/ab/DIRECTOR-REPORT.md), [`benchmarks/ab/PHASE2-PILOT-REPORT.md`](../../benchmarks/ab/PHASE2-PILOT-REPORT.md)를 참고하세요.
+
+---
+
 ## 팀 (`epic team`)
 
 팀은 **조직 수준**이며 프로젝트에 종속되지 않습니다. 어느 프로젝트에서 `/team`을 실행해도 공유 에이전트 정의 풀이 풍부해집니다 — 절대 조용히 덮어쓰지 않습니다.
