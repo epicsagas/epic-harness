@@ -239,14 +239,14 @@
   <div class="wrap">
     <p class="eyebrow">Measured, not claimed</p>
     <h2>What the eval suite shows</h2>
-    <p class="lead">Run with <code style="font-family:var(--mono);font-size:14px">benchmarks/ab/run_director.py</code> against the bare model — methodology and raw data are in the repo.</p>
+    <p class="lead">Measured with an automated A/B suite against the unassisted model — full methodology and raw data live in the repository.</p>
     <div class="nums" style="margin-top:38px">
       <div class="num"><div class="v">50<small>/50</small></div><div class="l">destructive commands intercepted by the guard hook</div></div>
       <div class="num"><div class="v">0%</div><div class="l">false positives on normal commands like cargo test, pytest</div></div>
       <div class="num"><div class="v">−36<small>%</small></div><div class="l">turns on a concurrency race bug — root-cause first, not trial-and-error</div></div>
       <div class="num"><div class="v">13<small>→11</small></div><div class="l">turns on a multi-file feature — TDD and verify gates kill regression loops</div></div>
     </div>
-    <p class="src" style="font-family:var(--mono);font-size:12.5px;color:var(--faint);margin-top:14px">Ring 0 Guard 50 · Golden Set task4/task5 · SWE-bench Verified B1/B2/B4 · full reports in benchmarks/ab/</p>
+    <p class="src" style="font-family:var(--mono);font-size:12.5px;color:var(--faint);margin-top:14px">50-command guard suite · multi-file &amp; concurrency golden tasks · SWE-bench Verified · full reports in the repository</p>
   </div>
 </section>
 
@@ -265,7 +265,6 @@
     <div class="flownote"><span style="color:var(--green)">■ autonomous</span><span style="color:var(--violet)">■ your gates: mode choice (only when unclear) · 3 failed checks</span></div>
     <p style="margin-top:18px;font-size:15px;color:var(--muted)">Pipeline state persists as JSON after every phase — it survives context compaction. Prefer the pieces? <code style="font-family:var(--mono);font-size:13.5px;background:var(--raise);border:1px solid var(--line);border-radius:5px;padding:2px 8px">/spec</code> <code style="font-family:var(--mono);font-size:13.5px;background:var(--raise);border:1px solid var(--line);border-radius:5px;padding:2px 8px">/go</code> <code style="font-family:var(--mono);font-size:13.5px;background:var(--raise);border:1px solid var(--line);border-radius:5px;padding:2px 8px">/check</code> <code style="font-family:var(--mono);font-size:13.5px;background:var(--raise);border:1px solid var(--line);border-radius:5px;padding:2px 8px">/ship</code> still work on their own.</p>
     <img src="assets/demo/demo.gif" alt="A real epic-harness session, end to end" style="width:100%;border:1px solid var(--line);border-radius:10px;margin-top:34px" loading="lazy">
-    <p style="text-align:center;font:400 13px var(--mono);color:var(--faint);margin-top:10px">a real session, unedited</p>
   </div>
 </section>
 
