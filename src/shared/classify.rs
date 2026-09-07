@@ -124,6 +124,32 @@ static CHAINED_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[;&]|\$\(|`"
 /// allowed; `&` is otherwise already rejected by [`CHAINED_CMD`].
 static REDIRECT_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r">|<\(").unwrap());
 
+/// True for the `sed` flags that request an in-place edit: `-i`, the GNU
+/// bundled forms (`-i.bak`, `-Ein`) and `--in-place[=SUFFIX]`. No documented
+/// sed short flag other than `-i` contains an `i`, so "short token containing
+/// i" is exact for the flag set.
+fn is_in_place_sed_flag(token: &str) -> bool {
+    token.starts_with("--in-place")
+        || (token.starts_with('-') && !token.starts_with("--") && token.contains('i'))
+}
+
+/// A stage that survives [`READ_ONLY_CMD`] but can still write: an in-place
+/// `sed` rewrites its input file, so `sed -i s/a/b/ f.txt` is not read-only.
+/// Head-classifying it as read-only meant a merged-stream host (Codex)
+/// recorded its failures as successful reads. `awk` needs no equivalent
+/// guard — an in-script write requires `>` or `>>`, which [`REDIRECT_CMD`]
+/// already rejects.
+fn stage_is_read_only(stage: &str) -> bool {
+    if REDIRECT_CMD.is_match(stage) || !READ_ONLY_CMD.is_match(stage) {
+        return false;
+    }
+    let mut tokens = stage
+        .trim_start()
+        .trim_start_matches("sudo ")
+        .split_whitespace();
+    !(tokens.next() == Some("sed") && tokens.any(is_in_place_sed_flag))
+}
+
 /// True when `command`'s output should not be keyword-scanned for failures.
 ///
 /// A `|` pipeline qualifies only when *every* stage is itself read-only:
@@ -132,9 +158,7 @@ pub fn is_read_only_command(command: &str) -> bool {
     if CHAINED_CMD.is_match(command) {
         return false;
     }
-    command
-        .split('|')
-        .all(|stage| !REDIRECT_CMD.is_match(stage) && READ_ONLY_CMD.is_match(stage))
+    command.split('|').all(stage_is_read_only)
 }
 
 /// Files named by a Codex `apply_patch` payload.
@@ -362,6 +386,48 @@ mod tests {
         ] {
             assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
         }
+    }
+
+    /// `sed -i` rewrites its input in place: head-classifying it as read-only
+    /// meant a merged-stream host (Codex) never scanned its output, recording
+    /// a failed in-place edit as a successful read.
+    #[test]
+    fn in_place_sed_is_not_read_only() {
+        for cmd in [
+            "sed -i s/a/b/ file.txt",
+            "sed -i.bak s/a/b/ file.txt",
+            "sed -Ein s/a/b/ file.txt",
+            "sed --in-place s/a/b/ file.txt",
+            "sed --in-place=.bak s/a/b/ file.txt",
+            "sudo sed -i s/a/b/ file.txt",
+            "cat a.txt | sed -i s/a/b/",
+        ] {
+            assert!(!is_read_only_command(cmd), "must not be read-only: {cmd}");
+        }
+        // The `i` in a substitution script is not a flag; plain sed stays
+        // read-only.
+        for cmd in [
+            "sed -n '1,80p' file.ts",
+            "sed s/a/b/ file.txt",
+            "sed 's/a/i/' file.txt",
+        ] {
+            assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+    }
+
+    /// The regression this guards: a failing in-place sed on a merged-stream
+    /// host must reach the failure rules instead of defaulting to success.
+    #[test]
+    fn in_place_sed_failure_counts_on_merged_stream() {
+        assert_eq!(
+            classify_bash_failure(
+                "sed -i s/a/b/ missing.txt",
+                "",
+                "sed: can't read missing.txt: No such file or directory",
+                false
+            ),
+            Some("not_found")
+        );
     }
 
     /// One writing stage anywhere in the pipe disqualifies the whole command.
