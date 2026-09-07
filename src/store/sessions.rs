@@ -50,16 +50,21 @@ pub async fn insert_snapshot_pool(
 /// Get the most recent session snapshot for `project`.
 ///
 /// Rows written before snapshots were attributed carry an empty project and
-/// stay visible to every project — dropping them would silently discard the
-/// existing history on upgrade.
+/// stay visible as a fallback — dropping them would silently discard the
+/// existing history on upgrade. They are ordered *after* this project's own
+/// rows: under a plain `ORDER BY id DESC`, a leftover unattributed row from
+/// another project with a higher id would win and resume this project into a
+/// foreign session.
 pub async fn get_latest_snapshot_pool(
     pool: &AnyPool,
     project: &str,
 ) -> io::Result<Option<SessionSnapshot>> {
     let row = sqlx::query(
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
-         FROM sessions WHERE project = ? OR project = '' ORDER BY id DESC LIMIT 1",
+         FROM sessions WHERE project = ? OR project = ''
+         ORDER BY CASE WHEN project = ? THEN 0 ELSE 1 END, id DESC LIMIT 1",
     )
+    .bind(project)
     .bind(project)
     .fetch_optional(pool)
     .await
@@ -214,6 +219,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(found.unwrap().summary, "legacy row");
+    }
+
+    /// A legacy unattributed row with a higher id must not shadow this
+    /// project's own latest snapshot — under a plain `ORDER BY id DESC` the
+    /// resume landed in a foreign project's session.
+    #[tokio::test]
+    async fn legacy_row_does_not_shadow_project_snapshot() {
+        let pool = test_pool().await;
+        let mk = |summary: &str| SessionSnapshot {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            snap_type: "pre-compact".into(),
+            summary: summary.into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        };
+
+        insert_snapshot_pool(&pool, &mk("proj-a real"), 1000, "proj-a")
+            .await
+            .unwrap();
+        insert_snapshot_pool(&pool, &mk("legacy from proj-b"), 9999, "")
+            .await
+            .unwrap();
+
+        let a = get_latest_snapshot_pool(&pool, "proj-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.summary, "proj-a real", "legacy row must not shadow");
+        // The fallback survives: a project with no rows of its own still
+        // reads the unattributed history.
+        let legacy = get_latest_snapshot_pool(&pool, "proj-c")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(legacy.summary, "legacy from proj-b");
     }
 
     #[tokio::test]
