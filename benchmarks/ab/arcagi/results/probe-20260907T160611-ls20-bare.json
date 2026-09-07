@@ -1,0 +1,95 @@
+{
+  "game": "ls20-9607627b",
+  "steps_used": 6,
+  "final": {
+    "card_id": "db2ed24f-446a-4fdd-9054-98bf9836ddff",
+    "score": 0.0,
+    "runs": [
+      {
+        "guid": "d5ff90c0-22b7-41e6-a391-e71e96443bd0",
+        "score": 0.0,
+        "levels_completed": 0,
+        "actions": 0,
+        "resets": 0,
+        "state": "GameState.NOT_FINISHED",
+        "level_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "guid": "5037491f-c653-4d78-8e45-f466fe8b9c6d",
+        "score": 0.0,
+        "levels_completed": 0,
+        "actions": 0,
+        "resets": 0,
+        "state": "GameState.NOT_FINISHED",
+        "level_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "guid": "5037491f-c653-4d78-8e45-f466fe8b9c6d",
+        "score": 0.0,
+        "levels_completed": 0,
+        "actions": 0,
+        "resets": 0,
+        "state": "GameState.NOT_FINISHED",
+        "level_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "guid": "868732c6-07c3-48fb-98a9-e0782960f839",
+        "score": 0.0,
+        "levels_completed": 0,
+        "actions": 0,
+        "resets": 0,
+        "state": "GameState.NOT_FINISHED",
+        "level_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      {
+        "guid": "868732c6-07c3-48fb-98a9-e0782960f839",
+        "score": 0.0,
+        "levels_completed": 0,
+        "actions": 7,
+        "resets": 1,
+        "state": "GameState.NOT_FINISHED",
+        "level_scores": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    ]
+  }
+}
