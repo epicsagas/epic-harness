@@ -330,11 +330,26 @@ When creating a new release tag, update ALL of the following to the same version
 | `Cargo.lock` | `epic-harness` package version | `0.4.3` |
 | `package.json` | `"version": "x.y.z"` | `0.4.3` |
 | `app/package.json` | `"version": "x.y.z"` | `0.4.3` |
+| `plugin.json` (root) | `"version": "x.y.z"` | `0.4.3` |
 | `.claude-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | `.codex-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
+| `.grok-plugin/plugin.json` | `"version": "x.y.z"` | `0.4.3` |
 | Git tag | `vx.y.z` | `v0.4.3` |
 
-All seven must match before tagging. Update `Cargo.lock` with
+All nine must match before tagging.
+
+Root `plugin.json` is agy's manifest, but **grok reads it first** and only
+falls back to `.grok-plugin/plugin.json` when the root is absent (measured on
+grok 1.0.13). Bumping only `.grok-plugin` leaves grok serving the old version
+with no error, so the two must never diverge.
+
+After pushing, re-pin the hub catalog in `epicsagas/plugins`: the grok entry
+in `.grok-plugin/marketplace.json` (and `.grok-plugin/plugin-index.json`, if
+present) carries a 40-char `source.sha` plus `version`, and `.hermes/epic/plugin.yaml`
+carries a `version`. While that sha points at an old commit, `grok plugin update`
+keeps installing the pinned commit no matter how many times this repo is pushed.
+The claude and codex hub entries track remote HEAD and need no edit.
+`forge.py publish --marketplace epicsagas/plugins` does the grok and hermes updates. Update `Cargo.lock` with
 `cargo update -p epic-harness --precise x.y.z` after editing `Cargo.toml` — the
 `cargo publish` step of `release.yml` runs without `--allow-dirty`, so a stale
 lock fails the crates.io publish.
