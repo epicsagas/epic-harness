@@ -6,11 +6,16 @@ use std::io;
 
 use crate::shared::types::SessionSnapshot;
 
-/// Insert a session snapshot.
+/// Insert a session snapshot attributed to `project`.
+///
+/// The `project` column existed but was never written, so every snapshot
+/// landed with the default empty slug and `get_latest_snapshot_pool` could
+/// restore another project's session into this one.
 pub async fn insert_snapshot_pool(
     pool: &AnyPool,
     snap: &SessionSnapshot,
     created_at_millis: i64,
+    project: &str,
 ) -> io::Result<i64> {
     let pending_json = serde_json::to_string(&snap.pending_tasks).unwrap_or_else(|_| "[]".into());
     let pipeline_json = snap
@@ -20,8 +25,8 @@ pub async fn insert_snapshot_pool(
 
     sqlx::query(
         "INSERT INTO sessions
-         (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis)
-         VALUES (?,?,?,?,?,?,?)",
+         (timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state, created_at_millis, project)
+         VALUES (?,?,?,?,?,?,?,?)",
     )
     .bind(&snap.timestamp)
     .bind(&snap.snap_type)
@@ -30,6 +35,7 @@ pub async fn insert_snapshot_pool(
     .bind(snap.context_usage)
     .bind(&pipeline_json)
     .bind(created_at_millis)
+    .bind(project)
     .execute(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -41,12 +47,25 @@ pub async fn insert_snapshot_pool(
     Ok(id)
 }
 
-/// Get the most recent session snapshot.
-pub async fn get_latest_snapshot_pool(pool: &AnyPool) -> io::Result<Option<SessionSnapshot>> {
+/// Get the most recent session snapshot for `project`.
+///
+/// Rows written before snapshots were attributed carry an empty project and
+/// stay visible as a fallback — dropping them would silently discard the
+/// existing history on upgrade. They are ordered *after* this project's own
+/// rows: under a plain `ORDER BY id DESC`, a leftover unattributed row from
+/// another project with a higher id would win and resume this project into a
+/// foreign session.
+pub async fn get_latest_snapshot_pool(
+    pool: &AnyPool,
+    project: &str,
+) -> io::Result<Option<SessionSnapshot>> {
     let row = sqlx::query(
         "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
-         FROM sessions ORDER BY id DESC LIMIT 1",
+         FROM sessions WHERE project = ? OR project = ''
+         ORDER BY CASE WHEN project = ? THEN 0 ELSE 1 END, id DESC LIMIT 1",
     )
+    .bind(project)
+    .bind(project)
     .fetch_optional(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -138,19 +157,112 @@ mod tests {
             pipeline_state: None,
         };
 
-        insert_snapshot_pool(&pool, &snap, 1000).await.unwrap();
+        insert_snapshot_pool(&pool, &snap, 1000, "test-project")
+            .await
+            .unwrap();
 
-        let latest = get_latest_snapshot_pool(&pool).await.unwrap();
+        let latest = get_latest_snapshot_pool(&pool, "test-project")
+            .await
+            .unwrap();
         assert!(latest.is_some());
         let s = latest.unwrap();
         assert_eq!(s.summary, "Test summary");
         assert_eq!(s.pending_tasks.len(), 2);
     }
 
+    /// A snapshot must not resume into a different project's session.
+    #[tokio::test]
+    async fn latest_snapshot_is_project_scoped() {
+        let pool = test_pool().await;
+        let mk = |summary: &str| SessionSnapshot {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            snap_type: "pre-compact".into(),
+            summary: summary.into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        };
+
+        insert_snapshot_pool(&pool, &mk("project A work"), 1000, "proj-a")
+            .await
+            .unwrap();
+        insert_snapshot_pool(&pool, &mk("project B work"), 2000, "proj-b")
+            .await
+            .unwrap();
+
+        let a = get_latest_snapshot_pool(&pool, "proj-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            a.summary, "project A work",
+            "must not see proj-b's snapshot"
+        );
+    }
+
+    /// Snapshots written before attribution carry an empty project and must
+    /// stay readable rather than vanishing on upgrade.
+    #[tokio::test]
+    async fn legacy_unattributed_snapshot_still_visible() {
+        let pool = test_pool().await;
+        let snap = SessionSnapshot {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            snap_type: "pre-compact".into(),
+            summary: "legacy row".into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        };
+        insert_snapshot_pool(&pool, &snap, 1000, "").await.unwrap();
+
+        let found = get_latest_snapshot_pool(&pool, "any-project")
+            .await
+            .unwrap();
+        assert_eq!(found.unwrap().summary, "legacy row");
+    }
+
+    /// A legacy unattributed row with a higher id must not shadow this
+    /// project's own latest snapshot — under a plain `ORDER BY id DESC` the
+    /// resume landed in a foreign project's session.
+    #[tokio::test]
+    async fn legacy_row_does_not_shadow_project_snapshot() {
+        let pool = test_pool().await;
+        let mk = |summary: &str| SessionSnapshot {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            snap_type: "pre-compact".into(),
+            summary: summary.into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        };
+
+        insert_snapshot_pool(&pool, &mk("proj-a real"), 1000, "proj-a")
+            .await
+            .unwrap();
+        insert_snapshot_pool(&pool, &mk("legacy from proj-b"), 9999, "")
+            .await
+            .unwrap();
+
+        let a = get_latest_snapshot_pool(&pool, "proj-a")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(a.summary, "proj-a real", "legacy row must not shadow");
+        // The fallback survives: a project with no rows of its own still
+        // reads the unattributed history.
+        let legacy = get_latest_snapshot_pool(&pool, "proj-c")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(legacy.summary, "legacy from proj-b");
+    }
+
     #[tokio::test]
     async fn get_latest_when_empty() {
         let pool = test_pool().await;
-        let result = get_latest_snapshot_pool(&pool).await.unwrap();
+        let result = get_latest_snapshot_pool(&pool, "test-project")
+            .await
+            .unwrap();
         assert!(result.is_none());
     }
 
@@ -167,7 +279,7 @@ mod tests {
                 context_usage: None,
                 pipeline_state: None,
             };
-            insert_snapshot_pool(&pool, &snap, 1000 + i as i64)
+            insert_snapshot_pool(&pool, &snap, 1000 + i as i64, "test-project")
                 .await
                 .unwrap();
         }

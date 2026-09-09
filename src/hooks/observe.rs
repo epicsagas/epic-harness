@@ -176,8 +176,13 @@ fn check_and_increment_counter(counter_file: &std::path::Path) -> bool {
 ///
 /// `obs_dir()` is guaranteed to exist at this call site because `run()`
 /// returns early via `harness_exists()` before reaching the telemetry block.
-fn should_sample_tool_error() -> bool {
-    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", session_id()));
+///
+/// Keyed by the resolved session id, not `session_id()`: the latter is
+/// date+PID, and Codex spawns a process per hook, so the 50-event cap got a
+/// fresh counter file almost every call — never capping, and leaving one
+/// one-byte file per tool error behind.
+fn should_sample_tool_error(sid: &str) -> bool {
+    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", sid));
     check_and_increment_counter(&counter_file)
 }
 
@@ -200,6 +205,25 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
 /// - PostToolUse: `tool_output` exists → parse output and record final state
 fn track_agent_spawn(input: &HookInput) {
     use crate::orchestrate;
+
+    // Codex names the lifecycle explicitly instead of routing subagents
+    // through a tool call, so trust the event when it is present rather than
+    // inferring start-vs-stop from whether output happens to be attached.
+    match input.hook_event_name.as_deref() {
+        Some("SubagentStart") => {
+            if let Err(e) = orchestrate::run_pre_checked(input) {
+                eprintln!("[harness] agent track pre error: {e}");
+            }
+            return;
+        }
+        Some("SubagentStop") => {
+            if let Err(e) = orchestrate::run_post_checked(input) {
+                eprintln!("[harness] agent track post error: {e}");
+            }
+            return;
+        }
+        _ => {}
+    }
 
     let has_output =
         input.tool_output.is_some() || input.tool_response.is_some() || input.tool_result.is_some();
@@ -339,6 +363,35 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
     }
 }
 
+/// The `action` recorded for one tool call.
+///
+/// Order matters, and mirrors `polish::target_files`. Codex's `apply_patch` is
+/// an edit tool that carries no `file_path`: it puts the whole patch body in
+/// `command`. Checking `command` first would store that body as the action,
+/// and everything downstream that reads a file out of the action (same-file
+/// streak detection, per-file weak stats, the reflect dedup key) would be
+/// reading patch text instead of a path.
+fn resolve_action(v: &serde_json::Value) -> String {
+    v.get("file_path")
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .map(|c| mask_path_action(truncate_bytes(c, 500)))
+        .or_else(|| {
+            let cmd = v.get("command").and_then(|c| c.as_str())?;
+            let files = apply_patch_paths(cmd, true);
+            if files.is_empty() {
+                // A real shell command, not a patch payload.
+                return Some(mask_secrets(truncate_bytes(cmd, 500)));
+            }
+            let masked: Vec<String> = files.iter().map(|f| mask_path_action(f)).collect();
+            Some(truncate_bytes(&masked.join(" "), 500).to_string())
+        })
+        .unwrap_or_else(|| {
+            let s = serde_json::to_string(v).unwrap_or_default();
+            mask_secrets(truncate_bytes(&s, 200))
+        })
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_OBSERVE) {
         return 0;
@@ -348,27 +401,14 @@ pub fn run(input: &HookInput) -> i32 {
     }
     ensure_dir(&obs_dir());
 
-    let sid = session_id();
+    let sid = resolve_session_id(input.session_id.as_deref());
 
     // Open harness DB pool for SQLite writes (fallback to JSONL if DB unavailable)
     let db = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
     let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
-    let action = input.tool_input.as_ref().map(|v| {
-        v.get("command")
-            .and_then(|c| c.as_str())
-            .map(String::from)
-            .or_else(|| {
-                v.get("file_path")
-                    .and_then(|c| c.as_str())
-                    .map(String::from)
-            })
-            .unwrap_or_else(|| {
-                let s = serde_json::to_string(v).unwrap_or_default();
-                mask_secrets(&s[..s.len().min(200)])
-            })
-    });
+    let action = input.tool_input.as_ref().map(resolve_action);
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
     let seq_id = if db.is_none() {
@@ -393,31 +433,61 @@ pub fn run(input: &HookInput) -> i32 {
     };
 
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
+    // Keeps stdout and stderr apart: a read-only command's stdout is quoted
+    // material, while its stderr is the command's own diagnostic. Merging them
+    // (as this did) makes the two indistinguishable downstream.
     let resolve_json_value = |v: &serde_json::Value| -> (String, String) {
         match v {
             serde_json::Value::String(s) => (s.clone(), String::new()),
             serde_json::Value::Object(obj) => {
-                let out = obj.get("output").and_then(|v| v.as_str()).unwrap_or("");
-                let err = obj.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
-                (format!("{out}\n{err}"), String::new())
+                let out = obj
+                    .get("output")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let err = obj
+                    .get("stderr")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                (out, err)
             }
             other => (other.to_string(), String::new()),
         }
     };
-    let resolved_output: Option<(String, String)> = if let Some(to) = &input.tool_output {
+    // `streams_separated` tracks whether stderr arrived on its own channel.
+    // Only then can a read-only command's diagnostics be trusted apart from
+    // the file contents it printed; merged-stream hosts (Codex) cannot.
+    let resolved_output: Option<(String, String, bool)> = if let Some(to) = &input.tool_output {
         let out = to.output.as_deref().unwrap_or("").to_string();
         let err = to.stderr.as_deref().unwrap_or("").to_string();
-        Some((out, err))
+        Some((out, err, true))
     } else if let Some(tr) = &input.tool_response {
-        Some(resolve_json_value(tr))
+        let (out, err) = resolve_json_value(tr);
+        let separated = tr.get("stderr").is_some();
+        Some((out, err, separated))
     } else {
-        input.tool_result.as_ref().map(resolve_json_value)
+        input.tool_result.as_ref().map(|tr| {
+            let (out, err) = resolve_json_value(tr);
+            let separated = tr.get("stderr").is_some();
+            (out, err, separated)
+        })
     };
 
-    if let Some((output, stderr)) = resolved_output {
+    if let Some((output, stderr, streams_separated)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
-        record.failure_category = classify_failure(&combined).map(String::from);
+        record.failure_category = if tool_cat == "bash" {
+            let cmd = input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("command"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            classify_bash_failure(cmd, &output, &stderr, streams_separated).map(String::from)
+        } else {
+            classify_failure(&combined).map(String::from)
+        };
         record.result = Some(
             if record.failure_category.is_none() {
                 "success"
@@ -483,7 +553,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(&combined[..combined.len().min(500)]);
+            let masked = mask_secrets(truncate_bytes(&combined, 500));
             record.error_snippet = Some(masked);
         }
     }
@@ -514,7 +584,7 @@ pub fn run(input: &HookInput) -> i32 {
     // Capped at 50 events per session to avoid flooding PostHog during error loops.
     if let Some(failure_cat) = &record.failure_category {
         let tool_cat = &record.tool_category;
-        if should_sample_tool_error() {
+        if should_sample_tool_error(&sid) {
             TELEMETRY.track_tool_error(
                 tool_cat.parse().unwrap_or(ToolCategory::Other),
                 failure_cat.parse().unwrap_or(FailureClass::Unknown),
@@ -528,8 +598,14 @@ pub fn run(input: &HookInput) -> i32 {
 
     // Agent tracking: record spawn/completion to orchestrator state for
     // dashboard display. Always active — no EPIC_ORCHESTRATION gate.
+    // Codex reports subagents as SubagentStart/SubagentStop events carrying no
+    // "agent" tool name, so gating on the tool name alone dropped them all.
     let tool_name_lower = input.tool_name.as_deref().unwrap_or("").to_lowercase();
-    if tool_name_lower == "agent" {
+    let is_subagent_event = matches!(
+        input.hook_event_name.as_deref(),
+        Some("SubagentStart") | Some("SubagentStop")
+    );
+    if tool_name_lower == "agent" || is_subagent_event {
         track_agent_spawn(input);
 
         // Timeout detection still gated by EPIC_ORCHESTRATION
@@ -551,6 +627,53 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    // ── resolve_action ──────────────────────────────
+    fn patch_for(file: &str) -> serde_json::Value {
+        serde_json::json!({
+            "command": format!("*** Begin Patch\n*** Update File: {file}\n@@\n-a\n+b\n*** End Patch\n")
+        })
+    }
+
+    /// Codex `apply_patch` must record the file it touched, not the patch
+    /// body, so it matches what Claude's `Edit` records for the same edit.
+    #[test]
+    fn apply_patch_action_is_the_touched_file() {
+        assert_eq!(resolve_action(&patch_for("src/b.py")), "src/b.py");
+        assert_eq!(
+            resolve_action(&serde_json::json!({"file_path": "src/b.py"})),
+            "src/b.py"
+        );
+    }
+
+    #[test]
+    fn apply_patch_action_lists_every_touched_file() {
+        let v = serde_json::json!({
+            "command": "*** Begin Patch\n*** Add File: src/a.ts\n*** Update File: src/b.py\n*** End Patch\n"
+        });
+        assert_eq!(resolve_action(&v), "src/a.ts src/b.py");
+    }
+
+    /// The regression this guards: storing the patch body left every file
+    /// looking alike to `extract_file`, so two distinct files were counted as
+    /// one by streak detection and the per-file weak stats.
+    #[test]
+    fn same_named_files_in_different_dirs_stay_distinct() {
+        let a = resolve_action(&patch_for("src/util.rs"));
+        let b = resolve_action(&patch_for("cli/util.rs"));
+        assert_ne!(a, b);
+        assert_ne!(
+            crate::shared::classify::extract_file(&a),
+            crate::shared::classify::extract_file(&b),
+        );
+    }
+
+    /// A genuine shell command must still be stored as the command.
+    #[test]
+    fn shell_command_action_is_unchanged() {
+        let v = serde_json::json!({"command": "cargo test --lib"});
+        assert_eq!(resolve_action(&v), "cargo test --lib");
+    }
 
     // ── score_bash ──────────────────────────────────
     #[test]

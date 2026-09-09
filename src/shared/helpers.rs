@@ -2,7 +2,7 @@ use regex::Regex;
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
-use std::sync::LazyLock;
+use std::sync::{LazyLock, Mutex};
 
 use super::paths::harness_dir;
 
@@ -109,12 +109,41 @@ pub fn now_iso() -> String {
     )
 }
 
+/// Mirror of everything passed to [`hint`] / [`raw`], for hosts that read
+/// model context from stdout rather than stderr.
+///
+/// Claude Code surfaces hook stderr in the transcript, so `hint` writing to
+/// stderr is the whole delivery mechanism there. Codex only feeds a
+/// successful hook's *stdout* to the model, so the same calls vanished — the
+/// advertised resume context (snapshots, pending work, metrics, memory,
+/// guard warnings) never reached it. The buffer lets the host adapter in
+/// `main` replay these lines on the right channel without every call site
+/// having to know which host it is running under.
+static HINT_MIRROR: LazyLock<Mutex<Vec<String>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+fn mirror_push(line: String) {
+    if let Ok(mut buf) = HINT_MIRROR.lock() {
+        buf.push(line);
+    }
+}
+
+/// Drain the mirrored hint lines (see [`HINT_MIRROR`]).
+pub fn take_hint_mirror() -> Vec<String> {
+    HINT_MIRROR
+        .lock()
+        .map(|mut b| std::mem::take(&mut *b))
+        .unwrap_or_default()
+}
+
 pub fn hint(tag: &str, msg: &str) {
-    eprintln!("[{tag}] {msg}");
+    let line = format!("[{tag}] {msg}");
+    eprintln!("{line}");
+    mirror_push(line);
 }
 
 pub fn raw(line: &str) {
     eprintln!("{line}");
+    mirror_push(line.to_string());
 }
 
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T {
@@ -269,6 +298,18 @@ pub fn session_id() -> String {
     format!("{}_{}", today(), std::process::id())
 }
 
+/// Session id for observation grouping — prefers the host-supplied stable id
+/// (Claude Code / Codex `session_id` field) over the date+PID fallback.
+/// Codex spawns a fresh process per hook invocation, so `session_id()` alone
+/// turns almost every tool call into its own "session"; the host id is the
+/// same across a whole conversation.
+pub fn resolve_session_id(host_session_id: Option<&str>) -> String {
+    match host_session_id {
+        Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+        _ => session_id(),
+    }
+}
+
 /// Returns true when EPIC_ORCHESTRATION=enabled env var is set.
 #[allow(dead_code)]
 pub fn is_orchestration_enabled() -> bool {
@@ -298,7 +339,7 @@ pub fn normalize_error(snippet: &str) -> String {
     let s = PATH_RE.replace_all(&s, "/PATH/");
     let s = WS_RE.replace_all(&s, " ");
     let trimmed = s.trim();
-    trimmed[..trimmed.len().min(200)].to_string()
+    crate::shared::sanitize::truncate_bytes(trimmed, 200).to_string()
 }
 
 #[cfg(test)]

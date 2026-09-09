@@ -228,6 +228,11 @@ fn main() {
                     }
                 }
                 Some("unlock") => {
+                    // Advisory: the skill sets `status: complete` before
+                    // unlocking, so this is where the documented completion
+                    // invariants can finally be checked against real state.
+                    // Warn only — unlock also runs on abort and after a crash.
+                    shared::orbit::warn_on_invalid_completion(&dir);
                     shared::orbit::release_orbit_lock(&dir);
                     0
                 }
@@ -339,11 +344,23 @@ fn main() {
                 );
             }
             "guard" | "observe" | "polish" => {
-                // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
+                // PostToolUse feedback (guard warnings, polish diagnostics) is
+                // only visible to Codex on stdout — stderr is dropped.
+                let mirrored = shared::helpers::take_hint_mirror();
+                if !mirrored.is_empty() {
+                    println!("{}", mirrored.join("\n"));
+                }
             }
             "resume" => {
                 // SessionStart: plain text on stdout = developer context.
-                // hint() already writes to stderr; no extra stdout needed.
+                // hint() writes to stderr, which Codex does NOT feed to the
+                // model, so replay the mirrored lines here. Without this the
+                // whole advertised resume context (snapshots, pending work,
+                // metrics, memory, team/orchestration state) is invisible.
+                let mirrored = shared::helpers::take_hint_mirror();
+                if !mirrored.is_empty() {
+                    println!("{}", mirrored.join("\n"));
+                }
             }
             "reflect" => {
                 // Stop: MUST output JSON — plain text is invalid for this event.
