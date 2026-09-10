@@ -1,6 +1,6 @@
 {
   "name": "epic",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "3 commands + 25 auto-trigger skills + self-evolving agent harness. Less to remember, more automation.",
   "author": {
     "name": "epicsagas",
@@ -19,5 +19,6 @@
     "automation"
   ],
   "skills": "./skills/",
-  "mcpServers": "./mcp_config.json"
+  "mcpServers": "./mcp_config.json",
+  "hooks": "./.claude-plugin/hooks.json"
 }
