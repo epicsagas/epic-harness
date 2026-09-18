@@ -286,6 +286,21 @@ pub fn hash_string(s: &str) -> String {
     format!("{:08x}", hash)
 }
 
+/// Truncate `s` to at most `max` bytes, backing off to the nearest char
+/// boundary so multi-byte UTF-8 input (e.g. Korean, emoji) never panics.
+/// Approximate snippets only — the result may be a few bytes shorter than
+/// `max`, never longer.
+pub fn truncate_str(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 pub fn normalize_error(snippet: &str) -> String {
     static TS_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[.\dZ]*").unwrap());
@@ -298,7 +313,7 @@ pub fn normalize_error(snippet: &str) -> String {
     let s = PATH_RE.replace_all(&s, "/PATH/");
     let s = WS_RE.replace_all(&s, " ");
     let trimmed = s.trim();
-    trimmed[..trimmed.len().min(200)].to_string()
+    truncate_str(trimmed, 200).to_string()
 }
 
 #[cfg(test)]
@@ -311,5 +326,48 @@ mod tests {
         let rec: SessionStartRec = serde_json::from_str(&payload).unwrap();
         assert_eq!(rec.date, "20260703");
         assert!(payload.contains("written_at"));
+    }
+
+    // ── truncate_str ────────────────────────────────
+    #[test]
+    fn truncate_str_korean_char_boundary() {
+        // 100 × 3-byte chars = 300 bytes. max 200/199/198 land inside the
+        // 67th/66th char — must back off to a boundary, never panic.
+        let s = "가".repeat(100);
+        for max in [200usize, 199, 198] {
+            let t = truncate_str(&s, max);
+            assert!(t.len() <= max);
+            assert!(s.is_char_boundary(t.len()), "end not a char boundary");
+            assert!(t.chars().all(|c| c == '가'));
+        }
+    }
+
+    #[test]
+    fn truncate_str_emoji_boundary() {
+        // 4-byte emoji: max 3 cuts inside the first char.
+        let s = "🦀".repeat(10);
+        let t = truncate_str(&s, 3);
+        assert_eq!(t.len(), 0);
+        let t = truncate_str(&s, 7);
+        assert_eq!(t.len(), 4);
+    }
+
+    #[test]
+    fn truncate_str_short_and_edge_inputs() {
+        // Shorter than max: returned as-is.
+        assert_eq!(truncate_str("abc", 10), "abc");
+        // len == max: no truncation.
+        assert_eq!(truncate_str("abc", 3), "abc");
+        // max == 0: empty.
+        assert_eq!(truncate_str("abc", 0), "");
+    }
+
+    #[test]
+    fn normalize_error_korean_snippet_no_panic() {
+        // Regression: byte-slice truncation panicked mid-3-byte-char
+        // (helpers.rs:301, "end byte index 200 is not a char boundary").
+        let input = "세션 트레이스 오류 2026-07-08T12:00:00Z 경로 /Users/x/y.rs 참조";
+        let out = normalize_error(input);
+        assert!(out.contains("세션"));
     }
 }

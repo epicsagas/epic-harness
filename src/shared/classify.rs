@@ -2,6 +2,8 @@ use regex::Regex;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use super::helpers::truncate_str;
+
 // ── Failure Classification ──────────────────────────
 
 struct FailureRule {
@@ -71,7 +73,7 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    let sample = &output[..output.len().min(2000)];
+    let sample = truncate_str(output, 2000);
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(sample) {
             return Some(cat);

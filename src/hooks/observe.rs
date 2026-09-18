@@ -366,7 +366,7 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .unwrap_or_else(|| {
                 let s = serde_json::to_string(v).unwrap_or_default();
-                mask_secrets(&s[..s.len().min(200)])
+                mask_secrets(truncate_str(&s, 200))
             })
     });
 
@@ -483,7 +483,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(&combined[..combined.len().min(500)]);
+            let masked = mask_secrets(truncate_str(&combined, 500));
             record.error_snippet = Some(masked);
         }
     }
