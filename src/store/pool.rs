@@ -96,11 +96,13 @@ fn mask_url(url: &str) -> String {
 
 fn default_memory_db_path() -> PathBuf {
     // Must check env var on every call — integration tests change HARNESS_ROOT
-    // between tests within the same process.
+    // between tests within the same process. HARNESS_DIR (via harness_root())
+    // relocates the store wholesale; HARNESS_ROOT stays as the legacy parent-
+    // dir override.
     if let Ok(root) = std::env::var("HARNESS_ROOT") {
         PathBuf::from(root).join(".harness").join("memory.db")
     } else {
-        paths::dirs_home().join(".harness").join("memory.db")
+        paths::harness_root().join("memory.db")
     }
 }
 
