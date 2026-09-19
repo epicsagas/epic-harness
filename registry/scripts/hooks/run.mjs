@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// Generic cross-platform hook launcher for the epic Codex plugin.
+// Generic cross-platform hook launcher for the epic Codex and Grok plugins.
 //
-// Every hook in .codex-plugin/hooks.json routes through this script so the
-// command strings stay shell-free: `node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>`.
-// Codex pipes hook JSON on stdin and expects the hook's stdout + exit code
-// back, so we spawn `epic` with inherited stdio and propagate its exit code.
-// When `epic` is not installed we degrade to a notice on stdout and exit 0 —
-// a missing harness must never block the host session.
+// Every hook in .codex-plugin/hooks.json and .grok-plugin/hooks.json routes
+// through this script so the command strings stay shell-free:
+// `node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>` (Codex) or the
+// same with `${GROK_PLUGIN_ROOT}` (Grok). The host pipes hook JSON on stdin
+// and expects the hook's stdout + exit code back, so we spawn `epic` with
+// inherited stdio and propagate its exit code. When `epic` is not installed
+// we degrade to a notice on stdout and exit 0 — a missing harness must never
+// block the host session.
 //
 // `session-start` is the SessionStart special case: run the install.js
 // bootstrap best-effort first, then `epic resume` — on every OS, without
@@ -48,12 +50,15 @@ if (args.length === 0) {
     process.exitCode = 0;
   } else {
     if (args[0] === "session-start") {
-      // Best-effort bootstrap; its failure must not block resume.
+      // Best-effort bootstrap; its failure must not block resume. Stdout is
+      // ignored (SessionStart stdout reaches the model context — bootstrap
+      // noise must not be injected), but stderr is inherited so a failing
+      // install.js is visible instead of silently skipped.
       await new Promise((resolve) => {
         const bootstrap = spawn(
           process.execPath,
           [path.join(PLUGIN_ROOT, "registry", "scripts", "install.js")],
-          { stdio: "ignore" },
+          { stdio: ["ignore", "ignore", "inherit"] },
         );
         bootstrap.on("error", () => resolve());
         bootstrap.on("close", () => resolve());
@@ -80,11 +85,16 @@ if (args.length === 0) {
       // write flush — a piped notice must not be truncated mid-write.
       spawnFailed = true;
       if (err.code === "ENOENT") {
+        // Missing harness: degrade on stdout, exit 0.
         console.log("[harness] epic not found");
+        process.exitCode = 0;
       } else {
-        console.log(`[harness] ${err.message}`);
+        // Present-but-broken install (EACCES, ...): surface on stderr and
+        // fail the hook (exit 1 is a hook error, not a block) instead of
+        // masquerading as "not installed".
+        console.error(`[harness] ${err.message}`);
+        process.exitCode = 1;
       }
-      process.exitCode = 0;
     });
 
     child.on("close", (code, signal) => {

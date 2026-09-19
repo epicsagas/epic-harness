@@ -32,21 +32,18 @@ fn commands_for(m: &Value, event: &str, matcher: &str) -> Vec<String> {
         .collect()
 }
 
-/// True when `cmd` invokes `epic <sub>`. The Codex manifest resolves the
-/// binary first (`EH=$(command -v epic); "$EH" observe`), so a literal
-/// "epic observe" match would miss every Codex registration.
-/// Codex commands are launcher calls (`node ... run.mjs <sub>`); the older
-/// inline POSIX forms are kept here for compatibility with manifests that
-/// predate the launcher.
+/// True when `cmd` invokes `epic <sub>`. The Claude manifest calls the binary
+/// directly (`epic observe`); the Codex and Grok manifests route through the
+/// launcher (`node ${...}/registry/scripts/hooks/run.mjs <sub>`).
 fn invokes(cmd: &str, sub: &str) -> bool {
     cmd.contains(&format!("epic {sub}"))
-        || cmd.contains(&format!("\"$EH\" {sub}"))
-        // launcher form: `node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>`
+        // launcher form: `node ${PLUGIN_ROOT|GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>`
         || cmd.ends_with(&format!("run.mjs {sub}"))
 }
 
 const CLAUDE: &str = ".claude-plugin/hooks.json";
 const CODEX: &str = ".codex-plugin/hooks.json";
+const GROK: &str = ".grok-plugin/hooks.json";
 
 /// The reported defect: `observe` ran only on PostToolUse, which carries the
 /// agent's output, so `track_agent_spawn` always took the completion branch.
@@ -132,14 +129,46 @@ fn codex_observes_edits_not_just_bash() {
     }
 }
 
-/// Both hosts support PreCompact, and snapshots are what `resume` restores.
+/// All three hosts support PreCompact, and snapshots are what `resume`
+/// restores.
 #[test]
-fn both_hosts_snapshot_before_compaction() {
-    for path in [CLAUDE, CODEX] {
+fn all_hosts_snapshot_before_compaction() {
+    for path in [CLAUDE, CODEX, GROK] {
         let cmds = commands_for(&manifest(path), "PreCompact", "*");
         assert!(
             cmds.iter().any(|c| invokes(c, "snapshot")),
             "{path}: PreCompact must invoke snapshot; got {cmds:?}"
         );
     }
+}
+
+/// The Grok manifest rides the same launcher as Codex: guard stays scoped to
+/// Bash, observe covers the PostToolUse wildcard, SessionStart resumes.
+#[test]
+fn grok_registers_guard_observe_and_resume() {
+    let m = manifest(GROK);
+    assert!(
+        commands_for(&m, "PreToolUse", "Bash")
+            .iter()
+            .any(|c| invokes(c, "guard")),
+        "guard must stay registered for Bash"
+    );
+    assert!(
+        !commands_for(&m, "PreToolUse", "Bash")
+            .iter()
+            .any(|c| invokes(c, "observe")),
+        "observe must not run pre-Bash (PostToolUse owns it)"
+    );
+    assert!(
+        commands_for(&m, "PostToolUse", "*")
+            .iter()
+            .any(|c| invokes(c, "observe")),
+        "PostToolUse/* must invoke observe"
+    );
+    assert!(
+        commands_for(&m, "SessionStart", "*")
+            .iter()
+            .any(|c| invokes(c, "resume")),
+        "SessionStart must invoke resume"
+    );
 }

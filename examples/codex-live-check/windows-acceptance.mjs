@@ -99,7 +99,7 @@ if (mode === "degrade") {
   });
   check(
     "harness-mem mcp initialize",
-    r.stdout.includes('"serverInfo"'),
+    r.status === 0 && r.stdout.includes('"serverInfo"'),
     `status=${r.status} stdout=${r.stdout.trim().slice(0, 160)} stderr=${(r.stderr ?? "").trim().slice(0, 160)}`,
   );
 } else {

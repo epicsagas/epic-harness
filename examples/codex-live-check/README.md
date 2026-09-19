@@ -41,9 +41,9 @@ flowchart LR
   of whether this codex version loads plugin hooks on its own. If case 1
   shows doubled observations, the plugin path fires too; drop the seeded
   file then.
-- **D3: Binary from PATH, pinned by `.envrc`.** Hooks call `command -v epic`,
-  so the harness binary under test is whatever `epic` resolves to when `codex`
-  launches. `.envrc` prepends `~/.cargo/bin` so a `cargo install`ed branch
+- **D3: Binary from PATH, pinned by `.envrc`.** Hooks launch `epic` through
+  `run.mjs`, which resolves it from PATH, so the harness binary under test is
+  whatever `epic` resolves to when `codex` launches. `.envrc` prepends `~/.cargo/bin` so a `cargo install`ed branch
   build deterministically wins over a Homebrew install (`brew unlink
   epic-harness` is the belt-and-suspenders alternative). `setup.sh` prints
   the resolved binary and version so the record shows what ran.
@@ -131,17 +131,22 @@ is exactly the result worth reporting on the PR.
 - direnv must be installed for automatic loading; otherwise `source .envrc`
   before every session.
 
+## MCP server prerequisite (all hosts, all platforms)
+
+`mcp_config.json` — shared by the Claude and Codex plugin manifests — launches
+`epic mem mcp` directly via PATH. Source checkouts must `cargo install --path .`
+first; the old `target/release/epic` fallback was removed because plugin MCP
+configs don't expand `${PLUGIN_ROOT}` (openai/codex#35762) and `sh` is not
+available on Windows. Hooks have the same PATH requirement and degrade to
+`[harness] epic not found` when it is unmet.
+
 ## Windows prerequisites
 
-All hook handlers route through
+All Codex hook handlers route through
 `registry/scripts/hooks/run.mjs`, so the only prerequisites are `node` (the
 plugin bootstrap already required it) and `epic` on PATH — no `sh`, Git Bash,
-or WSL. Two known limits:
+or WSL. One known limit:
 
-- `mcp_config.json` launches `epic mem mcp` via PATH. Source checkouts must
-  `cargo install --path .` first; the old `target/release/epic` fallback was
-  removed because plugin MCP configs don't expand `${PLUGIN_ROOT}`
-  (openai/codex#35762) and `sh` is not a Windows artifact.
 - Codex runs Windows hook commands via `cmd.exe /C`, and an install path
   containing spaces breaks unquoted commands (openai/codex#32402). Until
   that upstream bug is fixed, install the plugin (and Node) under

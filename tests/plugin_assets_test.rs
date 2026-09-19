@@ -1,5 +1,5 @@
 //! Static sanity checks for the shipped plugin assets (issue #131): every
-//! Codex hook handler must route through the shell-free
+//! Codex and Grok hook handler must route through the shell-free
 //! `registry/scripts/hooks/run.mjs` launcher, and the MCP config must launch
 //! `epic` directly instead of going through `sh -c`. The files are embedded
 //! from their real paths, so a regression fails the build instead of a user
@@ -8,10 +8,12 @@
 use serde_json::Value;
 
 const CODEX_HOOKS: &str = include_str!("../.codex-plugin/hooks.json");
+const GROK_HOOKS: &str = include_str!("../.grok-plugin/hooks.json");
 const MCP_CONFIG: &str = include_str!("../mcp_config.json");
 const RUN_MJS: &str = include_str!("../registry/scripts/hooks/run.mjs");
 
 const LAUNCHER: &str = "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
+const GROK_LAUNCHER: &str = "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 
 /// Command handlers, in manifest order: events, matcher groups, handlers.
 fn command_handlers(value: &Value) -> Vec<&str> {
@@ -43,28 +45,20 @@ const FORBIDDEN: &[&str] = &[
     "|",
 ];
 
-#[test]
-fn codex_hook_commands_all_use_launcher() {
-    let hooks: Value = serde_json::from_str(CODEX_HOOKS).expect("valid JSON");
-    let handlers = command_handlers(&hooks);
-    assert_eq!(handlers.len(), 10, "expected 10 command handlers");
+/// Shared manifest contract: every handler is exactly `<launcher> <sub>` (one
+/// trailing word) and carries no shell syntax.
+fn assert_launcher_form(handlers: &[&str], launcher: &str) {
+    assert!(!handlers.is_empty(), "no command handlers found");
     for (i, cmd) in handlers.iter().enumerate() {
         assert!(
-            cmd.starts_with(LAUNCHER),
+            cmd.starts_with(launcher),
             "handler {i} does not use the launcher: {cmd}"
         );
         assert_eq!(
-            cmd.split(LAUNCHER).nth(1).map(str::trim),
+            cmd.split(launcher).nth(1).map(str::trim),
             Some(cmd.rsplit(' ').next().unwrap()),
             "handler {i}: launcher takes exactly one subcommand word: {cmd}"
         );
-    }
-}
-
-#[test]
-fn codex_hook_commands_are_shell_free() {
-    let hooks: Value = serde_json::from_str(CODEX_HOOKS).expect("valid JSON");
-    for cmd in command_handlers(&hooks) {
         for token in FORBIDDEN {
             assert!(
                 !cmd.contains(token),
@@ -72,6 +66,25 @@ fn codex_hook_commands_are_shell_free() {
             );
         }
     }
+}
+
+#[test]
+fn codex_hook_commands_all_use_launcher() {
+    let hooks: Value = serde_json::from_str(CODEX_HOOKS).expect("valid JSON");
+    let handlers = command_handlers(&hooks);
+    assert_eq!(handlers.len(), 10, "expected 10 command handlers");
+    assert_launcher_form(&handlers, LAUNCHER);
+}
+
+/// The Grok manifest shares the launcher (grok injects `GROK_PLUGIN_ROOT` and
+/// expands `${VAR}` in hook commands), so no POSIX inline form survives
+/// anywhere and the guard exit code reaches grok unswallowed.
+#[test]
+fn grok_hook_commands_all_use_launcher() {
+    let hooks: Value = serde_json::from_str(GROK_HOOKS).expect("valid JSON");
+    let handlers = command_handlers(&hooks);
+    assert_eq!(handlers.len(), 7, "expected 7 command handlers");
+    assert_launcher_form(&handlers, GROK_LAUNCHER);
 }
 
 #[test]
