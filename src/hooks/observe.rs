@@ -7,8 +7,7 @@ use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
-// mask_secrets is now in shared/sanitize.rs — re-exported via common
-use crate::hooks::common::mask_secrets;
+use crate::shared::sanitize::{mask_path_action, mask_secrets};
 
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
@@ -375,20 +374,20 @@ fn resolve_action(v: &serde_json::Value) -> String {
     v.get("file_path")
         .and_then(|c| c.as_str())
         .filter(|c| !c.is_empty())
-        .map(|c| mask_path_action(truncate_bytes(c, 500)))
+        .map(|c| mask_path_action(truncate_str(c, 500)))
         .or_else(|| {
             let cmd = v.get("command").and_then(|c| c.as_str())?;
             let files = apply_patch_paths(cmd, true);
             if files.is_empty() {
                 // A real shell command, not a patch payload.
-                return Some(mask_secrets(truncate_bytes(cmd, 500)));
+                return Some(mask_secrets(truncate_str(cmd, 500)));
             }
             let masked: Vec<String> = files.iter().map(|f| mask_path_action(f)).collect();
-            Some(truncate_bytes(&masked.join(" "), 500).to_string())
+            Some(truncate_str(&masked.join(" "), 500).to_string())
         })
         .unwrap_or_else(|| {
             let s = serde_json::to_string(v).unwrap_or_default();
-            mask_secrets(truncate_bytes(&s, 200))
+            mask_secrets(truncate_str(&s, 200))
         })
 }
 

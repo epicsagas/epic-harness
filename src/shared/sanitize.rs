@@ -176,12 +176,4 @@ mod tests {
         );
     }
 
-    #[test]
-    #[test]
-    /// The panic this guards: "가" is 3 bytes, so byte 500 of a run of them
-    /// lands mid-character and `&s[..500]` aborts the hook process.
-    #[test]
-    #[test]
-    /// A cut landing before any complete character yields empty, not a panic.
-    #[test]
 }
