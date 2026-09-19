@@ -35,6 +35,9 @@ fn commands_for(m: &Value, event: &str, matcher: &str) -> Vec<String> {
 /// True when `cmd` invokes `epic <sub>`. The Codex manifest resolves the
 /// binary first (`EH=$(command -v epic); "$EH" observe`), so a literal
 /// "epic observe" match would miss every Codex registration.
+/// Codex commands are launcher calls (`node ... run.mjs <sub>`); the older
+/// inline POSIX forms are kept here for compatibility with manifests that
+/// predate the launcher.
 fn invokes(cmd: &str, sub: &str) -> bool {
     cmd.contains(&format!("epic {sub}"))
         || cmd.contains(&format!("\"$EH\" {sub}"))

@@ -52,13 +52,35 @@ const child = spawn("epic", args, {
   shell: process.platform === "win32",
 });
 
+let spawnFailed = false;
+
 child.on("error", (err) => {
+  // On spawn failure Node emits both `error` and `close` (close carries a
+  // garbage exit code like -2 on some platforms), so this handler owns the
+  // outcome and close must not override it. No child is pending here, so
+  // setting exitCode (instead of process.exit) lets the pending stdout
+  // write flush — a piped notice must not be truncated mid-write.
+  spawnFailed = true;
   if (err.code === "ENOENT") {
+    console.log("[harness] epic not found");
+  } else {
+    console.log(`[harness] ${err.message}`);
+  }
+  process.exitCode = 0;
+});
+
+child.on("close", (code, signal) => {
+  if (spawnFailed) return;
+  if (signal) {
+    // Guard killed by a signal must not read as a pass.
+    process.exit(1);
+  }
+  // On win32 spawn(shell:true) a missing `epic` never reaches our error
+  // handler: cmd.exe itself fails with "not recognized" (code 9009).
+  // Normalize that to the same degrade contract as POSIX ENOENT.
+  if (process.platform === "win32" && code === 9009) {
     console.log("[harness] epic not found");
     process.exit(0);
   }
-  console.log(`[harness] ${err.message}`);
-  process.exit(0);
+  process.exit(code ?? 0);
 });
-
-child.on("close", (code) => process.exit(code ?? 0));

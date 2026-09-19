@@ -105,6 +105,9 @@ fn run_mjs_static_sanity() {
         "stdio: \"inherit\"",
         "process.exit(code ?? 0)",
         "install.js",
+        // win32 shell:true degrades through cmd.exe's 9009, not ENOENT.
+        "9009",
+        "signal",
     ] {
         assert!(RUN_MJS.contains(needle), "run.mjs missing {needle:?}");
     }
