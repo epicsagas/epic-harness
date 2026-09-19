@@ -5,6 +5,7 @@ pub mod digester;
 pub mod edits;
 pub mod ingest;
 pub mod metrics;
+pub mod outcomes;
 pub mod planner;
 pub mod seesaw;
 pub mod skills;

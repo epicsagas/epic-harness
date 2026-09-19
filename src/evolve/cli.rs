@@ -32,15 +32,16 @@ pub fn run(args: &[String]) -> i32 {
     let sub = args.get(1).map(|s| s.as_str()).unwrap_or("");
     match sub {
         "accept-synth" => run_accept_synth(&args[2..]),
+        "reconcile" => super::outcomes::run_reconcile(&args[2..]),
+        "record-pr" => super::outcomes::run_record_pr(&args[2..]),
+        "status" => super::outcomes::run_status(),
         "" => {
-            eprintln!(
-                "usage: epic-harness evolve accept-synth --skill <name> [--file <path> | --stdin]"
-            );
+            eprintln!("usage: epic-harness evolve <accept-synth | reconcile | record-pr | status>");
             EXIT_USAGE
         }
         other => {
             eprintln!("unknown evolve subcommand: '{other}'");
-            eprintln!("available: accept-synth");
+            eprintln!("available: accept-synth, reconcile, record-pr, status");
             EXIT_USAGE
         }
     }

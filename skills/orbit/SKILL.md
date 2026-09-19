@@ -176,7 +176,16 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 4. **Create PR** via `gh pr create` with spec + audit report in body
    - Record the URL in pipeline state as `pr_url`. `epic orbit unlock` warns
      when a pipeline reaches `complete` without it.
-5. **CI watch** via `gh pr checks --watch`, auto-fix failures
+5. **CI watch** — probe first, then watch:
+   ```bash
+   gh pr checks <PR_NUMBER> --json name,state
+   ```
+   - Checks exist → run `gh pr checks <PR_NUMBER> --watch`, auto-fix failures.
+   - Empty result (no CI configured on the repo) → **skip the watch**. Log
+     "No CI configured, skipping CI watch", append a `phase_history` entry
+     recording `"ci_watch": "skipped"`, and proceed to Step 7 (evolve runs
+     regardless of CI outcome, so the pipeline must never wait on checks
+     that will never appear).
 6. **Exit worktree**: Return to original directory and keep the worktree
 
 ## Step 7: Evolve
