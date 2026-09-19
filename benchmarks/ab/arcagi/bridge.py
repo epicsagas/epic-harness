@@ -120,6 +120,10 @@ def main() -> None:
         try:
             fd = holder["game"].step(GameAction[f"ACTION{n}"], data=body.get("data"))
         except Exception as ex:  # toolkit/API validation errors -> agent-readable
+            # localhost-only bridge (127.0.0.1): this text IS the probe agent's
+            # error feedback channel (see module docstring); the API key never
+            # flows into an exception here.
+            # codeql:disable py/stack-trace-exposure
             return jsonify({"error": f"{type(ex).__name__}: {ex}"[:300]}), 200
         if fd is None:
             return jsonify({"error": "step failed (see bridge stderr)"}), 200
@@ -137,6 +141,8 @@ def main() -> None:
         try:
             fd = holder["game"].reset()
         except Exception as ex:
+            # localhost-only bridge: same rationale as the /act handler above.
+            # codeql:disable py/stack-trace-exposure
             return jsonify({"error": f"{type(ex).__name__}: {ex}"[:300]}), 200
         return jsonify({"level_reset": True, **render_frame(fd)})
 
