@@ -16,17 +16,18 @@
 #      COST_CAP (5.0)  CLONE_CACHE  RUNS_DIR  PREDS_DIR  VERDICTS  KEEP_WORKDIR (0)
 set -uo pipefail
 
-MANIFEST="${MANIFEST:-manifest.jsonl}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MANIFEST="${MANIFEST:-$SCRIPT_DIR/manifest.jsonl}"
 ARMS="${ARMS:-bare,epic}"
 SEEDS="${SEEDS:-1}"
 PROFILE="${PROFILE:-zai}"
 MAX_TURNS="${MAX_TURNS:-50}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-1800}"
 COST_CAP="${COST_CAP:-5.0}"
-CLONE_CACHE="${CLONE_CACHE:-./clone-cache}"
-RUNS_DIR="${RUNS_DIR:-./runs}"
-PREDS_DIR="${PREDS_DIR:-./predictions}"
-VERDICTS="${VERDICTS:-./verdicts.jsonl}"
+CLONE_CACHE="${CLONE_CACHE:-$SCRIPT_DIR/clone-cache}"
+RUNS_DIR="${RUNS_DIR:-$SCRIPT_DIR/runs}"
+PREDS_DIR="${PREDS_DIR:-$SCRIPT_DIR/predictions}"
+VERDICTS="${VERDICTS:-$SCRIPT_DIR/verdicts.jsonl}"
 DRY_RUN="${DRY_RUN:-0}"
 KEEP_WORKDIR="${KEEP_WORKDIR:-0}"
 HOST_ARCH="$(uname -m)"
@@ -73,7 +74,7 @@ ensure_clone() {  # $1 = repo (org/name)
 }
 
 emit_verdict() {  # many fields via globals; failure_mode via $1
-  jq -n \
+  jq -n -c \
     --arg instance_id "$IID" --arg repo "$REPO" --arg band "$BAND" --arg host_arch "$HOST_ARCH" \
     --arg arm "$ARM" --arg seed "$SEED" --arg failure_mode "$1" \
     --argjson cost "${COST:-0}" --argjson turns "${TURNS:-0}" --argjson is_error "${IS_ERR:-false}" \
@@ -93,6 +94,7 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
   BAND=$(echo "$ij" | jq -r '.band')
   local ps; ps=$(echo "$ij" | jq -r '.problem_statement')
   local safe="${REPO//\//_}"
+  mkdir -p "$RUNS_DIR/$ARM"
   NDJSON="$RUNS_DIR/$ARM/${IID}_${SEED}.ndjson"
   WORK="$(mktemp -d -t "swb-${ARM}-${IID}-${SEED}.XXXX")"
   echo "[$IID/$ARM/seed$SEED] workdir=$WORK" >&2
@@ -104,19 +106,27 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
   if ! git -C "$CLONE_CACHE/$safe.git" worktree add --detach --quiet "$WORK" "$base"; then
     RC=1; emit_verdict "checkout_failed"; return; fi
 
+  local config_dir
+  if [ "$ARM" = "bare" ]; then
+    config_dir="${HOME}/.claudy/modes/bare"
+    rm -rf "$WORK/.harness" "$WORK/.claude" "$WORK/.agents" "$WORK/CLAUDE.md" "$WORK/AGENTS.md" 2>/dev/null || true
+  else
+    config_dir="${HOME}/.claudy/modes/epic-harness"
+  fi
+
   local settings; settings=$(settings_for "$ARM") || return
   local prompt; prompt=$(build_prompt "$ps")
   local start end
   # shellcheck disable=SC2086  # settings is a single --settings arg
   if [ "$DRY_RUN" = "1" ]; then
-    echo "[dry-run] would run: claudy $PROFILE --settings $settings --output-format stream-json -p <prompt> --max-turns $MAX_TURNS --permission-mode bypassPermissions" >&2
+    echo "[dry-run] would run: CLAUDE_CONFIG_DIR=$config_dir claudy $PROFILE --settings $settings --verbose --output-format stream-json -p <prompt> --max-turns $MAX_TURNS --permission-mode bypassPermissions < /dev/null" >&2
     RC=0; COST=0; TURNS=0; IS_ERR=false; PATCH_BYTES=0; emit_verdict "dry_run"
   else
     start=$(date +%s)
-    ( cd "$WORK" && timeout "$RUN_TIMEOUT" \
-        claudy "$PROFILE" --settings "$settings" --output-format stream-json \
+    ( cd "$WORK" && CLAUDE_CONFIG_DIR="$config_dir" timeout "$RUN_TIMEOUT" \
+        claudy "$PROFILE" --settings "$settings" --verbose --output-format stream-json \
         -p "$prompt" --max-turns "$MAX_TURNS" --permission-mode bypassPermissions \
-        > "$NDJSON" 2>/dev/null )
+        < /dev/null > "$NDJSON" 2>&1 )
     RC=$?
     end=$(date +%s)
     local res; res=$(grep '"type":"result"' "$NDJSON" | tail -1 || true)
@@ -126,7 +136,7 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
     local patch; patch=$(git -C "$WORK" --no-pager diff 2>/dev/null || true)
     PATCH_BYTES=${#patch}
     # prediction for swebench grading
-    jq -n --arg iid "$IID" --arg arm "$ARM" --arg patch "$patch" \
+    jq -n -c --arg iid "$IID" --arg arm "$ARM" --arg patch "$patch" \
       '{instance_id:$iid, model_name_or_path:$arm, model_patch:$patch}' \
       >> "$PREDS_DIR/$ARM/predictions.jsonl"
     local fmode="ok"

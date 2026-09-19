@@ -9,8 +9,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic not found, skipping resume'",
             "timeout": 10
           }
-        ],
-        "description": "Restore session context and load memory"
+        ]
       }
     ],
     "PreToolUse": [
@@ -22,8 +21,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found, skipping guard'",
             "timeout": 5
           }
-        ],
-        "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
+        ]
       }
     ],
     "PostToolUse": [
@@ -35,8 +33,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || true",
             "timeout": 30
           }
-        ],
-        "description": "Auto-format + typecheck + lint warning after edits"
+        ]
       },
       {
         "matcher": "*",
@@ -46,8 +43,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || true",
             "timeout": 5
           }
-        ],
-        "description": "Record tool result for evolution loop"
+        ]
       }
     ],
     "SubagentStart": [
@@ -59,8 +55,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || true",
             "timeout": 5
           }
-        ],
-        "description": "Mark subagent running — PostToolUse alone only ever sees completion"
+        ]
       }
     ],
     "PreCompact": [
@@ -72,8 +67,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || true",
             "timeout": 10
           }
-        ],
-        "description": "Save working state before context compaction"
+        ]
       }
     ],
     "SessionEnd": [
@@ -85,8 +79,7 @@
             "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic not found, skipping reflect'",
             "timeout": 30
           }
-        ],
-        "description": "Analyze session observations, evolve skills, gate mutations"
+        ]
       }
     ]
   }

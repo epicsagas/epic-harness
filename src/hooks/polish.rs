@@ -80,7 +80,7 @@ fn feedback_to_observe(
                 .into(),
             )
         },
-        error_snippet: error_snippet.map(|s| truncate_bytes(s, 500).to_string()),
+        error_snippet: error_snippet.map(|s| truncate_str(s, 500).to_string()),
         file_ext: ext,
         sequence_id: None,
     };
@@ -183,7 +183,7 @@ fn check_ts(file_path: &str, wd: &Path) {
         let stderr = String::from_utf8_lossy(&o.stderr);
         let combined = format!("{stdout}{stderr}");
         if !o.status.success() || combined.contains("error TS") {
-            let snippet = truncate_bytes(&combined, 500);
+            let snippet = truncate_str(&combined, 500);
             hint("polish", &format!("TS errors:\n{snippet}"));
             feedback_to_observe(file_path, "tsc", false, Some(snippet));
             Telemetry::init().track_polish_failed(FormatterKind::Tsc);

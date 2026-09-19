@@ -1217,7 +1217,7 @@ pub fn run(_input: &HookInput) -> i32 {
                 .error_snippet
                 .as_deref()
                 .unwrap_or(o.action.as_deref().unwrap_or(""));
-            format!("{cat}: {}", truncate_bytes(snippet, 100))
+            format!("{cat}: {}", truncate_str(snippet, 100))
         })
         .collect();
     if !last_errors.is_empty() {

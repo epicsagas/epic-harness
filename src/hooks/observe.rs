@@ -553,7 +553,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(truncate_bytes(&combined, 500));
+            let masked = mask_secrets(truncate_str(&combined, 500));
             record.error_snippet = Some(masked);
         }
     }

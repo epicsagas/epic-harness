@@ -5,6 +5,8 @@ use sqlx::AnyPool;
 use sqlx::Row;
 use std::io;
 
+use crate::shared::truncate_str;
+
 /// Insert a global pattern record.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_pattern_pool(
@@ -114,7 +116,7 @@ fn parse_json_field(raw: &str, fallback: serde_json::Value) -> serde_json::Value
             eprintln!(
                 "[store/global] JSON parse failed ({}): '{}' — using fallback",
                 e,
-                crate::shared::sanitize::truncate_bytes(raw, 100)
+                truncate_str(raw, 100)
             );
             fallback
         }
