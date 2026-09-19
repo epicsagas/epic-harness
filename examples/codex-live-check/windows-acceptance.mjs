@@ -43,14 +43,19 @@ const check = (name, ok, extra = "") => {
   if (!ok) failures++;
 };
 
-// The exact way Codex invokes hook commands: cmd.exe /C on Windows.
-const runHook = (cmd) =>
-  spawnSync(isWin ? "cmd.exe" : "/bin/sh", isWin ? ["/C", cmd] : ["-c", cmd], {
+// The exact way Codex invokes hook commands: it substitutes ${PLUGIN_ROOT}
+// inline BEFORE handing the string to the shell (cmd.exe /C on Windows), so
+// the driver must do the same — POSIX shells would otherwise expand it by
+// accident and mask a real Windows failure (measured in CI).
+const runHook = (raw) => {
+  const cmd = raw.replaceAll("${PLUGIN_ROOT}", root);
+  return spawnSync(isWin ? "cmd.exe" : "/bin/sh", isWin ? ["/C", cmd] : ["-c", cmd], {
     input: "{}",
     encoding: "utf8",
     timeout: 60_000,
     env: { ...process.env, PLUGIN_ROOT: root },
   });
+};
 
 if (mode === "degrade") {
   for (const cmd of commands) {
