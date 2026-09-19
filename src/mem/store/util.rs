@@ -66,8 +66,7 @@ pub fn db_path() -> PathBuf {
     if let Ok(root) = std::env::var("HARNESS_ROOT") {
         return PathBuf::from(root).join(".harness").join("memory.db");
     }
-    crate::shared::paths::harness_root()
-        .join("memory.db")
+    crate::shared::paths::harness_root().join("memory.db")
 }
 
 /// Compatibility: returns the .harness directory (parent of db_path).

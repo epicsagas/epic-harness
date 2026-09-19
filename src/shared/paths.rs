@@ -105,11 +105,8 @@ pub fn harness_root() -> PathBuf {
 /// Per-project data lives in `~/.harness/projects/{slug}/` — outside the
 /// project tree so it never pollutes git and survives project deletion.
 pub fn harness_dir() -> PathBuf {
-    static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-        harness_root()
-            .join("projects")
-            .join(project_slug())
-    });
+    static DIR: LazyLock<PathBuf> =
+        LazyLock::new(|| harness_root().join("projects").join(project_slug()));
     DIR.clone()
 }
 

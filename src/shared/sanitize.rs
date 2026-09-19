@@ -175,5 +175,4 @@ mod tests {
             "open <PATH> for editing"
         );
     }
-
 }
