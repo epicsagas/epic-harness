@@ -15,7 +15,7 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::helpers::{append_jsonl, now_iso, read_jsonl_typed};
+use crate::shared::helpers::{append_jsonl, ensure_dir, now_iso, read_jsonl_typed};
 use crate::shared::paths::orbit_dir;
 
 const EXIT_OK: i32 = 0;
@@ -50,7 +50,7 @@ pub struct Outcome {
 
 /// GitHub-side facts about a PR, as far as the ledger cares.
 struct GhPr {
-    /// gh's uppercase state: OPEN | MERGED | CLOSED | REOPENED(?)
+    /// gh's uppercase state: OPEN | MERGED | CLOSED
     state: String,
     created_at: Option<String>,
     checks: u32,
@@ -65,7 +65,12 @@ pub fn parse_pr_url(url: &str) -> Option<(String, u64)> {
     let rest = url.strip_prefix("https://github.com/")?;
     let rest = rest.strip_suffix('/').unwrap_or(rest);
     let (repo, num) = rest.rsplit_once("/pull/")?;
-    if repo.is_empty() || repo.split('/').count() != 2 {
+    // Two non-empty `owner/repo` segments — rejects "", "/r" and "o/" alike.
+    if repo.is_empty()
+        || repo.starts_with('/')
+        || repo.ends_with('/')
+        || repo.split('/').count() != 2
+    {
         return None;
     }
     num.parse::<u64>().ok().map(|n| (repo.to_string(), n))
@@ -80,6 +85,11 @@ pub fn iso_to_epoch(s: &str) -> Option<i64> {
     let (y, mo, d) = scan_ints(date, '-')?;
     let (h, mi, sec) = scan_ints(time, ':')?;
     if !(1..=12).contains(&mo) || !(1..=31).contains(&d) || h > 23 || mi > 59 || sec > 60 {
+        return None;
+    }
+    // Bound the year before days_from_civil: an absurd year would overflow
+    // the i64 epoch math (panic under debug overflow checks).
+    if !(1..=9999).contains(&y) {
         return None;
     }
     Some(days_from_civil(y, mo, d) * 86400 + h * 3600 + mi * 60 + sec)
@@ -293,9 +303,16 @@ fn gh_pr_view(url: &str) -> Result<GhPr, String> {
 
 pub fn run_reconcile(args: &[String]) -> i32 {
     let force = args.iter().any(|a| a == "--all");
-    let stale_days = flag_value(args, "--stale-days")
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(DEFAULT_STALE_DAYS);
+    let stale_days = match flag_value(args, "--stale-days") {
+        Some(v) => match v.parse::<i64>() {
+            Ok(n) if n >= 0 => n,
+            _ => {
+                eprintln!("invalid --stale-days: '{v}' (must be a non-negative integer)");
+                return EXIT_USAGE;
+            }
+        },
+        None => DEFAULT_STALE_DAYS,
+    };
 
     let ledger_path = orbit_dir().join("outcomes.jsonl");
     let ledger = read_jsonl_typed::<Outcome>(&ledger_path);
@@ -332,6 +349,12 @@ pub fn run_reconcile(args: &[String]) -> i32 {
     let now = iso_to_epoch(&now_iso()).unwrap_or(0);
     let mut transitions: Vec<Outcome> = Vec::new();
     for (url, baseline) in &candidates {
+        // Re-vet ledger-sourced URLs: outcomes.jsonl is locally writable, so
+        // a hand-edited entry must never reach gh's argv.
+        if parse_pr_url(url).is_none() {
+            eprintln!("reconcile: skipping malformed ledger URL: {url}");
+            continue;
+        }
         let current = latest.get(url).map(|o| o.state.as_str()).unwrap_or("");
         if !force && is_terminal(current) {
             continue;
@@ -350,17 +373,28 @@ pub fn run_reconcile(args: &[String]) -> i32 {
             .or_else(|| iso_to_epoch(&baseline.recorded_at))
             .unwrap_or(now);
         let age_days = (now - anchor).max(0) / 86400;
-        if let Some(next) = reconcile_decision(current, &gh.state, age_days, stale_days) {
+        let is_new = current.is_empty();
+        let next = reconcile_decision(current, &gh.state, age_days, stale_days);
+        if let Some(next) = next {
             let mut rec = baseline.clone();
             rec.recorded_at = now_iso();
             rec.state = next.clone();
             rec.state_changed_at = Some(now_iso());
             rec.checks = gh.checks;
             transitions.push(rec);
+        } else if is_new {
+            // First sight of a PR whose state already matches the ledger's
+            // implicit "pending": still append the baseline, or the PR stays
+            // invisible to status/aggregate forever.
+            let mut rec = baseline.clone();
+            rec.state = "pending".to_string();
+            rec.checks = gh.checks;
+            transitions.push(rec);
         }
     }
 
     // Write phase.
+    ensure_dir(&orbit_dir());
     if transitions.is_empty() {
         println!("reconcile: no state changes");
     } else {
@@ -414,6 +448,7 @@ pub fn run_record_pr(args: &[String]) -> i32 {
         state_changed_at: None,
         checks: 0,
     };
+    ensure_dir(&orbit_dir());
     append_jsonl(&ledger_path, &rec);
     println!("record-pr: registered as pending: {}", rec.pr_url);
     EXIT_OK
@@ -513,6 +548,14 @@ mod tests {
         assert!(parse_pr_url("not a url").is_none());
     }
 
+    #[test]
+    fn parse_pr_url_rejects_empty_repo_segments() {
+        // An empty owner segment used to slip through the count check.
+        assert!(parse_pr_url("https://github.com//r/pull/4").is_none());
+        assert!(parse_pr_url("https://github.com/o//pull/4").is_none());
+        assert!(parse_pr_url("https://github.com///pull/4").is_none());
+    }
+
     // ── iso_to_epoch ──────────────────────────────────────────────
 
     #[test]
@@ -540,6 +583,23 @@ mod tests {
         assert!(iso_to_epoch("").is_none());
         assert!(iso_to_epoch("yesterday").is_none());
         assert!(iso_to_epoch("2026-13-40T99:00:00Z").is_none());
+    }
+
+    #[test]
+    fn iso_to_epoch_bounds_year_to_avoid_overflow() {
+        // i64::MAX as a year once overflowed days_from_civil (audit F1).
+        assert!(iso_to_epoch("9223372036854775807-01-01T00:00:00Z").is_none());
+        assert!(iso_to_epoch("0000-01-01T00:00:00Z").is_none());
+        assert!(iso_to_epoch("9999-12-31T23:59:59Z").is_some());
+    }
+
+    #[test]
+    fn is_terminal_flags_all_three_terminal_states() {
+        assert!(!is_terminal("pending"));
+        assert!(!is_terminal(""));
+        assert!(is_terminal("merged"));
+        assert!(is_terminal("closed"));
+        assert!(is_terminal("stale"));
     }
 
     // ── latest_by_pr / aggregate / status_line ────────────────────
@@ -601,6 +661,20 @@ mod tests {
         assert_eq!(
             status_line(&aggregate(&latest)),
             "merge_rate: 71% (5/7 terminal, 3 pending)"
+        );
+    }
+
+    #[test]
+    fn merge_rate_rounds_instead_of_truncating() {
+        // 2/3 = 66.67% — rounding gives 67, truncation would give 66.
+        let latest = latest_by_pr(vec![
+            outcome("a", "merged"),
+            outcome("b", "merged"),
+            outcome("c", "closed"),
+        ]);
+        assert_eq!(
+            status_line(&aggregate(&latest)),
+            "merge_rate: 67% (2/3 terminal, 0 pending)"
         );
     }
 
