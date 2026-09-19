@@ -23,7 +23,7 @@
     "typescript": "^5.7",
     "vite": "^6",
     "vite-plugin-singlefile": "^2.3.3",
-    "vitest": "^4.1.6"
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0"
