@@ -189,7 +189,7 @@ Run the evolution engine to analyze this session and generate/improve skills.
    ```
    This triggers the Ring 3 loop: observe → analyze → seed evolved skills → update metrics.
 
-   If `$HARNESS_DIR/pending_synth.jsonl` has records with `status: "pending"`,
+   If `$HARNESS_DIR/projects/{slug}/pending_synth.jsonl` has records with `status: "pending"`,
    synthesize each — launch one subagent per manifest (use your host's subagent
    mechanism; do NOT name a model or CLI), then apply the body it produced:
    ```bash
