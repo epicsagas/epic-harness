@@ -735,7 +735,7 @@ mod tests {
             .iter()
             .find(|p| p.pattern_type == "long_debug_loop")
             .unwrap();
-        assert_eq!(loop_pat.count, runs as u64);
+        assert_eq!(loop_pat.count, runs);
     }
 
     #[test]

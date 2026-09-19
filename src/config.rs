@@ -879,9 +879,11 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn model_class_detection_and_scaling() {
-        let mut m = ModelConfig::default();
+        let mut m = ModelConfig {
+            class: "light".into(),
+            ..Default::default()
+        };
         // Explicit class wins over env.
-        m.class = "light".into();
         assert_eq!(m.resolved_class(), "light");
         assert!(m.inject_templates(), "light default injects templates");
         assert_eq!(m.scaled_threshold(3), 3, "light keeps base thresholds");
