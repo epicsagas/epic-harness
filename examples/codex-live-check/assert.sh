@@ -34,12 +34,15 @@ case1() {
 
 case2() {
   echo "[case 2] resume injection / holdout stderr"
-  local log="$DIR/stderr.log"
+  local log="${2:-$DIR/stderr.log}"
   [ -f "$log" ] || { note "no stderr.log; launch codex with: codex 2> $DIR/stderr.log"; return; }
-  if grep -q "HARNESS-CHECK" "$log"; then
-    bad "markers leaked on stderr: injection should be stdout-only"
+  # Scope to hook-emitted lines: codex echoes the prompt and the model's own
+  # answer (which quotes a marker by design) to its stderr, so a bare
+  # HARNESS-CHECK grep false-positives on the success case itself.
+  if grep -qE "^\[(resume|polish|guard)\].*HARNESS-CHECK" "$log"; then
+    bad "hook-emitted markers leaked on stderr: injection should be stdout-only"
   else
-    ok "no marker text on stderr"
+    ok "no hook-emitted marker text on stderr"
   fi
   grep -qi "holdout" "$log" \
     && note "holdout announcement present on stderr (expected if a seed landed holdout)" \
@@ -49,17 +52,24 @@ case2() {
 
 case3() {
   echo "[case 3] subagent events + orchestrator state"
-  local run subs
+  local run subs done
   run=$(find "$PROJ" -name run.json -path "*orchestrator*" 2>/dev/null | head -1)
   if [ -z "$run" ]; then
     note "no orchestrator run.json (did the team turn run? epic team link first?)"
-  else
-    ok "run.json at $run"
-    jq -r '.. | objects | select(has("agent_id")) | .agent_id' "$run" 2>/dev/null | sort -u | head -3
+    return
   fi
+  ok "run.json at $run"
+  jq -r '.. | objects | select(has("agent_id")) | .agent_id' "$run" 2>/dev/null | sort -u | head -3
+  # The load-bearing claim (#14/#15): codex subagents reach Running keyed by
+  # the host agent_id and complete. Lifecycle lives in run.json; observe
+  # handles Subagent* for orchestration without recording observations, so
+  # their count is informational only.
+  done=$(jq -r '[.. | objects | select(.status? == "done" and .started_at? != null and .completed_at? != null)] | length' "$run" 2>/dev/null)
+  [ "${done:-0}" -gt 0 ] && ok "$done agent(s) went running->done with host agent ids" \
+    || bad "no agent completed a running->done lifecycle in run.json"
   subs=$(q "select count(*) from observations where tool like 'Subagent%';")
-  [ "${subs:-0}" -gt 0 ] && ok "$subs SubagentStart/Stop observation(s) (host emits the events)" \
-    || bad "no Subagent* observations: this Codex CLI version may not emit them (report on the PR)"
+  [ "${subs:-0}" -gt 0 ] && note "$subs Subagent* observation(s) also recorded" \
+    || note "no Subagent* observations (observe consumes these for orchestration only)"
 }
 
 case4() {
@@ -72,14 +82,15 @@ case4() {
     || note "no metrics.json yet"
 }
 
-for c in ${1:-all}; do
-  case "$c" in
-    1|all) case1 ;;
-    2|all) case2 ;;
-    3|all) case3 ;;
-    4|all) case4 ;;
-  esac
-done
+# `all` must run every case — a `for c in all` loop stops after `1|all`
+# matches, silently skipping cases 2-4 (measured on the first live run).
+case "${1:-all}" in
+  all) case1; case2; case3; case4 ;;
+  1) case1 ;;
+  2) case2 ;;
+  3) case3 ;;
+  4) case4 ;;
+esac
 
 echo
 if [ "$FAILS" -gt 0 ]; then echo "RESULT: $FAILS FAIL"; exit 1; fi

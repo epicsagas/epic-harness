@@ -146,6 +146,12 @@ pub fn raw(line: &str) {
     mirror_push(line.to_string());
 }
 
+/// Mirror without the stderr write — for content that reaches the model via
+/// the Codex `additionalContext` JSON and must not also leak to stderr.
+pub fn mirror_line(line: &str) {
+    mirror_push(line.to_string());
+}
+
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T {
     fs::read_to_string(path)
         .ok()

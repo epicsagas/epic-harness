@@ -462,7 +462,18 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .collect();
         if !bodies.is_empty() {
-            println!("{}", build_evolved_injection(&bodies));
+            let injection = build_evolved_injection(&bodies);
+            if input.hook_event_name.is_some() {
+                // Codex: stdout must stay a single JSON document — any raw
+                // text before it makes the host parse the whole stream as
+                // JSON-looking output and fail the hook. Route through the
+                // hint mirror (stderr stays clean — codex drops it, and the
+                // live-check asserts injection never leaks there) so main()
+                // emits it as additionalContext.
+                crate::shared::helpers::mirror_line(&injection);
+            } else {
+                println!("{injection}");
+            }
             hint(
                 "resume",
                 &format!("Evolved skills injected: {}", active.join(", ")),
@@ -501,11 +512,17 @@ pub fn run(input: &HookInput) -> i32 {
     // host runs `evolve accept-synth`.
     let pending = pending_synth_count();
     if pending > 0 {
-        println!(
+        let backlog = format!(
             "\n## Synthesis backlog: {pending} pending manifest(s)\n\
              Run `/evolve` (or `epic-harness evolve accept-synth --skill <name>`) \
              to upgrade the seeded skills with evidence-based bodies."
         );
+        if input.hook_event_name.is_some() {
+            // Same constraint as the evolved-skill injection above.
+            crate::shared::helpers::mirror_line(&backlog);
+        } else {
+            println!("{backlog}");
+        }
     }
 
     // 4. Cold-start presets (#1)

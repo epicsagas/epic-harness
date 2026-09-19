@@ -100,15 +100,28 @@ fn codex_registers_subagent_lifecycle() {
 }
 
 /// Edits are the other half of the evolution loop's input. Codex delivers them
-/// as `apply_patch`; observing only Bash left them out entirely.
+/// as `apply_patch`, whose hook identity carries `Write`/`Edit` as matcher
+/// aliases (codex-rs core/src/tools/hook_names.rs), so the three names must
+/// share one matcher group — separate groups fire the same hooks once per
+/// alias per patch event (measured: observe ran 6x for one edit on codex-cli
+/// 0.155.0).
 #[test]
 fn codex_observes_edits_not_just_bash() {
     let m = manifest(CODEX);
-    for matcher in ["Bash", "apply_patch", "Edit", "Write"] {
+    let cmds = commands_for(&m, "PostToolUse", "apply_patch|Edit|Write");
+    assert!(
+        cmds.iter().any(|c| invokes(c, "observe")),
+        "PostToolUse edit matcher must invoke observe; got {cmds:?}"
+    );
+    assert!(
+        cmds.iter().any(|c| invokes(c, "polish")),
+        "PostToolUse edit matcher must invoke polish; got {cmds:?}"
+    );
+    for matcher in ["apply_patch", "Edit", "Write"] {
         let cmds = commands_for(&m, "PostToolUse", matcher);
         assert!(
-            cmds.iter().any(|c| invokes(c, "observe")),
-            "PostToolUse/{matcher} must invoke observe; got {cmds:?}"
+            cmds.is_empty(),
+            "PostToolUse/{matcher} must be merged into the combined edit matcher; got {cmds:?}"
         );
     }
 }

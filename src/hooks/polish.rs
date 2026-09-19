@@ -1,8 +1,12 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use super::common::*;
 use crate::telemetry::{FormatterKind, Telemetry};
+
+/// Host-supplied session id captured at hook entry (None → date+PID fallback).
+static HOST_SESSION_ID: OnceLock<String> = OnceLock::new();
 
 /// Execute a program with discrete arguments — no shell involved.
 /// This is the safe replacement for `try_exec` when `file_path` is part of
@@ -31,6 +35,14 @@ fn feedback_to_observe(
         return;
     }
     ensure_dir(&obs_dir());
+    // Host-supplied session id (see resolve_session_id): the date+PID fallback
+    // makes every codex hook process its own "session", which both splits the
+    // per-session stats and defeats the store-level dedup — codex fires this
+    // hook twice per tool call as two processes.
+    let sid = match HOST_SESSION_ID.get() {
+        Some(s) => s.clone(),
+        None => session_id(),
+    };
 
     let dims = ScoreDimensions {
         tool_success: if success { 1.0 } else { 0.0 },
@@ -76,7 +88,6 @@ fn feedback_to_observe(
     // Storage policy: SQLite primary, JSONL fallback — same as observe. reflect
     // reads SQLite, so JSONL-only writes here never reached pattern detection
     // (the "Polish → Observe Feedback" path was dead until this).
-    let sid = session_id();
     let stored = crate::store::observations::insert_observation(&record, &sid);
     if let Err(e) = stored {
         eprintln!("[polish] SQLite write failed, falling back to JSONL: {e}");
@@ -257,6 +268,12 @@ pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_POLISH) {
         return 0;
     }
+
+    // Captured once per hook process so every observation this process writes
+    // shares one session id (feedback_to_observe runs per file, deep below).
+    let _ = HOST_SESSION_ID.set(crate::shared::helpers::resolve_session_id(
+        input.session_id.as_deref(),
+    ));
 
     let files = target_files(input);
     if files.is_empty() {

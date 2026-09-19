@@ -284,6 +284,15 @@ pub(crate) const DDL_SQLITE: &str = r#"
     -- Reflection's primary query is `WHERE project = ? AND timestamp BETWEEN ? AND ?`.
     -- Leading column must be `project` for the range scan to use this index.
     CREATE INDEX IF NOT EXISTS idx_obs_proj_ts    ON observations(project, timestamp);
+    -- Cross-process dedup (see insert_observation_pool): codex 0.155.x fires
+    -- each matched hook command twice per tool call, and hooks are separate
+    -- processes, so the in-batch key never sees the duplicate. Collapse
+    -- historical rows first — the unique index cannot be created over them.
+    DELETE FROM observations
+     WHERE id NOT IN (SELECT MIN(id) FROM observations
+                       GROUP BY session_id, timestamp, tool, action);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_dedup
+        ON observations(session_id, timestamp, tool, action);
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,

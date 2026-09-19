@@ -28,8 +28,14 @@ pub async fn insert_observation_pool(
         ),
         None => (None, None, None),
     };
-    sqlx::query(
-        "INSERT INTO observations
+    // Cross-process dedup: Codex fires each matched hook command twice per
+    // tool call (measured on codex-cli 0.155.0), and each hook runs as its
+    // own process, so the in-batch dedup key can never see the duplicate.
+    // The unique index on (session_id, timestamp, tool, action) absorbs the
+    // race atomically — a WHERE NOT EXISTS pre-check lost it once two hook
+    // processes SELECTed between each other's INSERTs.
+    let res = sqlx::query(
+        "INSERT OR IGNORE INTO observations
          (timestamp, session_id, tool, tool_category, action, result, score,
           dim_success, dim_quality, dim_cost, failure_category, error_snippet,
           file_ext, sequence_id, pipeline_id, project)
@@ -54,6 +60,24 @@ pub async fn insert_observation_pool(
     .execute(pool)
     .await
     .map_err(super::sqlx_err)?;
+
+    if res.rows_affected() == 0 {
+        // Duplicate of an existing row — surface its id so callers linking
+        // on the observation still resolve.
+        let existing: Option<i64> = sqlx::query_scalar(
+            "SELECT id FROM observations
+             WHERE session_id = ? AND timestamp = ? AND tool = ? AND action IS ?
+             ORDER BY id DESC LIMIT 1",
+        )
+        .bind(session_id)
+        .bind(&rec.timestamp)
+        .bind(&rec.tool)
+        .bind(&rec.action)
+        .fetch_optional(pool)
+        .await
+        .map_err(super::sqlx_err)?;
+        return Ok(existing.unwrap_or(0));
+    }
 
     let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
         .fetch_one(pool)

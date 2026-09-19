@@ -48,6 +48,13 @@ fi
 sed "s|\${PLUGIN_ROOT}|$HARNESS_SRC|g" "$HARNESS_SRC/.codex-plugin/hooks.json" \
   > "$CODEX_HOME/hooks.json"
 
+# Frontier-class sessions withhold template (un-synthesized) skill bodies —
+# the case-2 injection probes ARE templates, so opt them in regardless of the
+# class the codex hook environment resolves to.
+touch "$HARNESS_DIR/config.toml"
+grep -q "inject_templates" "$HARNESS_DIR/config.toml" 2>/dev/null || \
+  printf '\n[model]\ninject_templates = true\n' >> "$HARNESS_DIR/config.toml"
+
 # Register HARNESS_SRC as a local marketplace and install the plugin so codex
 # serves the skills/prompts the autonomous (/orbit) flow needs. Local path:
 # no network, tracks the checkout as-is.

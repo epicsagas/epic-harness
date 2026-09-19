@@ -3,8 +3,6 @@ use std::sync::LazyLock;
 
 use serde::Deserialize;
 
-use crate::hooks::common;
-
 // ── Config Types ────────────────────────────────────
 
 #[derive(Debug, Default, Deserialize)]
@@ -456,7 +454,7 @@ impl Default for DbConfig {
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
 
 fn harness_dir() -> PathBuf {
-    common::dirs_home().join(".harness")
+    crate::shared::paths::harness_root()
 }
 
 /// Load config from `~/.harness/config.toml`.
