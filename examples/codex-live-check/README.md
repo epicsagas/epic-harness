@@ -146,3 +146,24 @@ or WSL. Two known limits:
   containing spaces breaks unquoted commands (openai/codex#32402). Until
   that upstream bug is fixed, install the plugin (and Node) under
   space-free paths.
+
+### Windows acceptance: automated (CI) vs manual
+
+The ci.yml `Windows hook portability` job proves, on real `windows-latest`
+`cmd.exe`: every hook command degrades to `[harness] epic not found` +
+exit 0 without the harness, every hook (including the session-start
+installer) exits 0 with it, and `epic mem mcp` answers a JSON-RPC
+initialize — with `epic` installed from the **latest release artifact**
+(sha256-verified), not a source build. Driver:
+`windows-acceptance.mjs` (modes: `degrade` / `live` / `mcp`), runnable
+locally on any Windows box with `PLUGIN_ROOT` pointing at a checkout.
+
+What CI cannot prove — ChatGPT auth has no place in CI — is the last leg of
+the install path. Manual runbook on a native Windows box (no Git Bash/WSL):
+
+1. `npm install -g @openai/codex` (or the official installer), `codex login`.
+2. `codex plugin add epic@epicsagas` from the released marketplace.
+3. `codex` → run one prompt that triggers Bash and one edit; then `/hooks`
+   — the epic hooks must be listed as trusted plugin sources (no
+   hand-seeded `CODEX_HOME/hooks.json` anywhere).
+4. Check `%USERPROFILE%\.harness\` received observations after the session.
