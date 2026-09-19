@@ -1,8 +1,12 @@
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use super::common::*;
 use crate::telemetry::{FormatterKind, Telemetry};
+
+/// Host-supplied session id captured at hook entry (None → date+PID fallback).
+static HOST_SESSION_ID: OnceLock<String> = OnceLock::new();
 
 /// Execute a program with discrete arguments — no shell involved.
 /// This is the safe replacement for `try_exec` when `file_path` is part of
@@ -31,6 +35,14 @@ fn feedback_to_observe(
         return;
     }
     ensure_dir(&obs_dir());
+    // Host-supplied session id (see resolve_session_id): the date+PID fallback
+    // makes every codex hook process its own "session", which both splits the
+    // per-session stats and defeats the store-level dedup — codex fires this
+    // hook twice per tool call as two processes.
+    let sid = match HOST_SESSION_ID.get() {
+        Some(s) => s.clone(),
+        None => session_id(),
+    };
 
     let dims = ScoreDimensions {
         tool_success: if success { 1.0 } else { 0.0 },
@@ -76,7 +88,6 @@ fn feedback_to_observe(
     // Storage policy: SQLite primary, JSONL fallback — same as observe. reflect
     // reads SQLite, so JSONL-only writes here never reached pattern detection
     // (the "Polish → Observe Feedback" path was dead until this).
-    let sid = session_id();
     let stored = crate::store::observations::insert_observation(&record, &sid);
     if let Err(e) = stored {
         eprintln!("[polish] SQLite write failed, falling back to JSONL: {e}");
@@ -211,39 +222,67 @@ fn format_go(file_path: &str, wd: &Path) {
     }
 }
 
-pub fn run(input: &HookInput) -> i32 {
-    if !should_run(PROFILE_POLISH) {
-        return 0;
+/// Resolve every file this hook invocation should polish.
+///
+/// Claude Code / Codex `Edit`+`Write` supply `file_path`; Codex `apply_patch`
+/// supplies a patch body in `command`. Deletes are excluded — there is
+/// nothing left to format.
+fn target_files(input: &HookInput) -> Vec<String> {
+    let Some(tool_input) = input.tool_input.as_ref() else {
+        return Vec::new();
+    };
+
+    if let Some(fp) = tool_input.get("file_path").and_then(|v| v.as_str())
+        && !fp.is_empty()
+    {
+        return vec![fp.to_string()];
     }
 
-    let file_path = input
-        .tool_input
-        .as_ref()
-        .and_then(|v| v.get("file_path"))
+    tool_input
+        .get("command")
         .and_then(|v| v.as_str())
-        .unwrap_or("");
+        .map(|c| apply_patch_paths(c, false))
+        .unwrap_or_default()
+}
 
-    if file_path.is_empty() {
-        return 0;
-    }
-
+fn polish_one(file_path: &str, wd: &Path) {
     let ext = Path::new(file_path)
         .extension()
         .and_then(|e| e.to_str())
         .unwrap_or("");
 
-    let wd = cwd();
-
     match ext {
         "js" | "jsx" | "ts" | "tsx" => {
-            format_js(file_path, &wd);
+            format_js(file_path, wd);
             if ext == "ts" || ext == "tsx" {
-                check_ts(file_path, &wd);
+                check_ts(file_path, wd);
             }
         }
-        "py" => format_python(file_path, &wd),
-        "go" => format_go(file_path, &wd),
+        "py" => format_python(file_path, wd),
+        "go" => format_go(file_path, wd),
         _ => {}
+    }
+}
+
+pub fn run(input: &HookInput) -> i32 {
+    if !should_run(PROFILE_POLISH) {
+        return 0;
+    }
+
+    // Captured once per hook process so every observation this process writes
+    // shares one session id (feedback_to_observe runs per file, deep below).
+    let _ = HOST_SESSION_ID.set(crate::shared::helpers::resolve_session_id(
+        input.session_id.as_deref(),
+    ));
+
+    let files = target_files(input);
+    if files.is_empty() {
+        return 0;
+    }
+
+    let wd = cwd();
+    for file_path in &files {
+        polish_one(file_path, &wd);
     }
 
     0
@@ -253,6 +292,49 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// Codex sends the patch body in `command`; a `file_path`-only reader made
+    /// polish a silent no-op on that host.
+    #[test]
+    fn apply_patch_payload_yields_touched_files() {
+        let input = HookInput {
+            tool_input: Some(serde_json::json!({
+                "command": "*** Begin Patch\n\
+                            *** Update File: src/a.ts\n\
+                            @@\n-old\n+new\n\
+                            *** Add File: src/b.py\n\
+                            +print(1)\n\
+                            *** Delete File: src/gone.go\n\
+                            *** End Patch"
+            })),
+            ..Default::default()
+        };
+        let files = target_files(&input);
+        assert_eq!(
+            files,
+            vec!["src/a.ts".to_string(), "src/b.py".to_string()],
+            "Add/Update files polish; Delete has nothing left to format"
+        );
+    }
+
+    /// The Claude Code / Codex Edit+Write contract must keep working unchanged.
+    #[test]
+    fn file_path_payload_still_wins() {
+        let input = HookInput {
+            tool_input: Some(serde_json::json!({"file_path": "src/only.rs"})),
+            ..Default::default()
+        };
+        assert_eq!(target_files(&input), vec!["src/only.rs".to_string()]);
+    }
+
+    #[test]
+    fn unrelated_bash_command_yields_no_files() {
+        let input = HookInput {
+            tool_input: Some(serde_json::json!({"command": "cargo build --lib"})),
+            ..Default::default()
+        };
+        assert!(target_files(&input).is_empty());
+    }
 
     /// Verify that `try_exec_args` does NOT interpret shell metacharacters in
     /// the path argument.  A path containing `; touch INJECTED` would create

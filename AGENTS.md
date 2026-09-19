@@ -177,7 +177,7 @@ and is gone.
 ## Skill Synthesis (host-agnostic)
 
 Seeded skills start from static templates. `reflect` then emits a
-**pending-synthesis manifest** (`$HARNESS_DIR/pending_synth.jsonl`) for each
+**pending-synthesis manifest** (`$HARNESS_DIR/projects/{slug}/pending_synth.jsonl`) for each
 seeded skill — failure evidence (masked error snippets per category, counts,
 detected patterns) plus the template body. A host agent (claude/codex/agy,
 using its own subagent mechanism with no model specified) reads the manifest,

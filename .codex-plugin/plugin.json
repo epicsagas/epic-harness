@@ -1,6 +1,12 @@
 {
   "name": "epic",
+<<<<<<< HEAD
+  "version": "0.8.2+pr118",
+||||||| 734b399
+  "version": "0.8.2",
+=======
   "version": "0.8.6",
+>>>>>>> origin/main
   "description": "Auto-trigger skills + self-evolving agent harness. Includes orbit, evolve, team, tdd, audit, ship and more.",
   "author": {
     "name": "epicsagas",

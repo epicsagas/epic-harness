@@ -27,15 +27,8 @@ impl InstallMethod {
 
 // ── paths ────────────────────────────────────────────────────────────
 
-fn dirs_home() -> PathBuf {
-    std::env::var_os("HOME")
-        .or_else(|| std::env::var_os("USERPROFILE"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/"))
-}
-
 fn harness_dir() -> PathBuf {
-    dirs_home().join(".harness")
+    crate::shared::paths::harness_root()
 }
 
 fn sync_marker() -> PathBuf {

@@ -91,20 +91,27 @@ pub(crate) fn sanitize_slug_name(name: &str) -> String {
         .collect()
 }
 
+/// Data root: `~/.harness`, or `HARNESS_DIR` when set (isolated test
+/// environments relocate the whole store without touching the real one).
+pub fn harness_root() -> PathBuf {
+    if let Ok(d) = std::env::var("HARNESS_DIR") {
+        if !d.trim().is_empty() {
+            return PathBuf::from(d);
+        }
+    }
+    dirs_home().join(".harness")
+}
+
 /// Per-project data lives in `~/.harness/projects/{slug}/` — outside the
 /// project tree so it never pollutes git and survives project deletion.
 pub fn harness_dir() -> PathBuf {
-    static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-        dirs_home()
-            .join(".harness")
-            .join("projects")
-            .join(project_slug())
-    });
+    static DIR: LazyLock<PathBuf> =
+        LazyLock::new(|| harness_root().join("projects").join(project_slug()));
     DIR.clone()
 }
 
 pub fn harness_projects_root() -> PathBuf {
-    dirs_home().join(".harness").join("projects")
+    harness_root().join("projects")
 }
 
 /// Lists all project slugs that have harness data directories.
@@ -205,6 +212,24 @@ pub fn pending_synth_file() -> PathBuf {
     harness_dir().join("pending_synth.jsonl")
 }
 
+/// Timestamp of the newest observation the last `reflect` round consumed.
+///
+/// Claude Code fires reflect once per session (SessionEnd), but Codex's `Stop`
+/// is turn-scoped: without a watermark every turn re-analyzes the whole day,
+/// re-counting the same observations as a fresh session and re-running
+/// seeding, stagnation and attribution against data already scored.
+pub fn reflect_watermark_file() -> PathBuf {
+    harness_dir().join("reflect_watermark.txt")
+}
+
+/// Date of the last observation-retention sweep (`YYYYMMDD`).
+///
+/// Keeps the sweep to once a day: Codex's `Stop` is turn-scoped, so an
+/// unguarded sweep would issue a DELETE on every turn.
+pub fn retention_marker_file() -> PathBuf {
+    harness_dir().join("retention_last_sweep.txt")
+}
+
 /// Resolve the per-project harness dir for a request. Falls back to the
 /// CWD-derived dir when `project` is `None`/empty (preserves existing callers
 /// that don't pass a project). Used by the dashboard read-path to scope
@@ -243,7 +268,7 @@ pub fn guard_rules_file() -> PathBuf {
 }
 
 pub fn global_harness_dir() -> PathBuf {
-    dirs_home().join(".harness").join("global")
+    harness_root().join("global")
 }
 pub fn global_patterns_file() -> PathBuf {
     global_harness_dir().join("patterns.jsonl")
@@ -252,7 +277,7 @@ pub fn global_patterns_file() -> PathBuf {
 /// Path to the global operational database: `~/.harness/harness.db`
 /// Shared across all projects, alongside `memory.db`.
 pub fn global_harness_db_path() -> PathBuf {
-    dirs_home().join(".harness").join("harness.db")
+    harness_root().join("harness.db")
 }
 
 /// Opt-in marker lives in the global dir (not per-project).

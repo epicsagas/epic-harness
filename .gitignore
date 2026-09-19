@@ -266,6 +266,8 @@ $RECYCLE.BIN/
 
 .env*
 !.env.example
+# fixture entry point, holds no secrets
+!examples/codex-live-check/.envrc
 *local.json
 *.log
 *.pem

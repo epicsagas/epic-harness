@@ -6,11 +6,12 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use super::store::{
-    TeamConfig, append_playbook, build_agent_file, build_playbook_section, default_agents_for_type,
-    default_org, home_dir, inject_team_context, list_agents, list_history, list_orgs, list_teams,
-    load_agent, load_mission, load_playbook, load_team_config, read_org_from_agent_file,
-    sanitize_mission, save_agent, save_mission, save_team_config, team_agents_dir, team_exists,
-    team_store_dir, today_str, yaml_unescape_display,
+    TeamConfig, agent_md_to_codex_toml, append_playbook, build_agent_file, build_playbook_section,
+    default_agents_for_type, default_org, home_dir, inject_team_context, list_agents, list_history,
+    list_orgs, list_teams, load_agent, load_mission, load_playbook, load_team_config,
+    read_org_from_agent_file, read_org_from_codex_agent_toml, sanitize_mission, save_agent,
+    save_mission, save_team_config, team_agents_dir, team_exists, team_store_dir, today_str,
+    yaml_unescape_display,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -19,7 +20,7 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
     ("status", "Show teams linked to the current project"),
     (
         "sync",
-        "Sync team agents to .claude/agents/ (--global for ~/.claude/agents/)",
+        "Sync team agents to the host agent dir (--global for the home one)",
     ),
     ("link", "Link a team to the current project"),
     ("unlink", "Remove team agents from current project"),
@@ -409,6 +410,55 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
         }
     }
 
+    // Project-local Codex mirror. The canonical local destination above is
+    // .claude/agents/, which Codex never reads — a Codex user linking a team
+    // to a project got nothing usable. Mirrored only when the project already
+    // has a .codex/ directory, so Claude-only projects are untouched.
+    if !global {
+        if let Ok(cwd) = std::env::current_dir() {
+            let codex_root = cwd.join(".codex");
+            if codex_root.is_dir() {
+                let codex_team_dir = codex_root.join("agents").join(team);
+                match fs::create_dir_all(&codex_team_dir) {
+                    Ok(()) => {
+                        for agent_name in &agents {
+                            if let Some(content) = load_agent(org, team, agent_name) {
+                                let injected = inject_team_context(
+                                    &content,
+                                    org,
+                                    team,
+                                    &config.team_type,
+                                    &mission,
+                                );
+                                let rendered = agent_md_to_codex_toml(agent_name, &injected);
+                                let dest_path = codex_team_dir.join(format!("{}.toml", agent_name));
+                                let existing = fs::read_to_string(&dest_path).unwrap_or_default();
+                                if existing != rendered
+                                    && let Err(e) = fs::write(&dest_path, &rendered)
+                                {
+                                    eprintln!(
+                                        "[harness] warn: could not write {}: {}",
+                                        dest_path.display(),
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        eprintln!(
+                            "[harness] synced team '{team}' to {}",
+                            codex_team_dir.display()
+                        );
+                    }
+                    Err(e) => eprintln!(
+                        "[harness] warn: could not create {}: {}",
+                        codex_team_dir.display(),
+                        e
+                    ),
+                }
+            }
+        }
+    }
+
     // Also sync to other installed tools with tool-specific transforms.
     // This writes agent files to ~/.codex/agents/, ~/.gemini/config/plugins/epic/agents/, etc.
     // when those directories exist.  Print a notice for each tool synced so
@@ -453,13 +503,28 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
             );
             for agent_name in &agents {
                 if let Some(content) = load_agent(org, team, agent_name) {
-                    // No tool-specific agent transforms needed — agents use their defaults.
                     let injected =
                         inject_team_context(&content, org, team, &config.team_type, &mission);
-                    let dest_path = tool_team_dir.join(format!("{}.md", agent_name));
+                    // Codex reads standalone TOML agents; the other tools take
+                    // the frontmatter Markdown as-is. Writing .md into
+                    // ~/.codex/agents/ produced files Codex never loaded.
+                    let (dest_path, rendered) = if *tool == "codex" {
+                        // Drop the .md left by earlier versions so Codex is not
+                        // left with a stale file it cannot parse.
+                        let legacy = tool_team_dir.join(format!("{}.md", agent_name));
+                        if legacy.is_file() {
+                            let _ = fs::remove_file(&legacy);
+                        }
+                        (
+                            tool_team_dir.join(format!("{}.toml", agent_name)),
+                            agent_md_to_codex_toml(agent_name, &injected),
+                        )
+                    } else {
+                        (tool_team_dir.join(format!("{}.md", agent_name)), injected)
+                    };
                     let existing = fs::read_to_string(&dest_path).unwrap_or_default();
-                    if existing != injected {
-                        fs::write(&dest_path, &injected).unwrap_or_else(|e| {
+                    if existing != rendered {
+                        fs::write(&dest_path, &rendered).unwrap_or_else(|e| {
                             eprintln!(
                                 "[harness] warn: could not write {}: {}",
                                 dest_path.display(),
@@ -1199,6 +1264,9 @@ fn cmd_delete(args: &[String]) -> i32 {
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let local_agents_dir = cwd.join(".claude").join("agents").join(&team);
+    // Mirror written by sync_to_dest for Codex projects — unlink must clear it
+    // too, or the team stays live in Codex after being unlinked.
+    let local_codex_dir = cwd.join(".codex").join("agents").join(&team);
 
     // Resolve org: --org flag > frontmatter in any local agent file > "epic"
     let org = flags.get("org").cloned().unwrap_or_else(|| {
@@ -1263,43 +1331,53 @@ fn cmd_delete(args: &[String]) -> i32 {
                 Err(e) => eprintln!("warning: could not remove local agents: {}", e),
             }
         }
+        if local_codex_dir.exists() {
+            match fs::remove_dir_all(&local_codex_dir) {
+                Ok(_) => println!("✓ Removed local agents: .codex/agents/{}/", team),
+                Err(e) => eprintln!("warning: could not remove local Codex agents: {}", e),
+            }
+        }
         println!();
         println!("Team '{}' permanently deleted from org '{}'.", team, org);
     } else {
-        // default: remove from current project only (.claude/agents/{team}/)
-        if !local_agents_dir.exists() {
+        // default: remove from current project only (.claude/ and .codex/)
+        if !local_agents_dir.exists() && !local_codex_dir.exists() {
             println!(
-                "Team '{}' is not linked to this project (.claude/agents/{}/ not found).",
-                team, team
+                "Team '{}' is not linked to this project (no .claude/agents/{}/ or .codex/agents/{}/).",
+                team, team, team
             );
             return 0;
         }
-        match fs::remove_dir_all(&local_agents_dir) {
-            Ok(_) => {
-                println!("✓ Removed .claude/agents/{}/", team);
-                println!(
-                    "  (Global store untouched. Use 'epic team link {}' to re-attach.)",
-                    team
-                );
-                // Deregister project: remove current cwd path from projects list, also purge stale entries.
-                let cwd_path = std::env::current_dir()
-                    .ok()
-                    .and_then(|p| p.canonicalize().ok().or(Some(p)))
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                if !cwd_path.is_empty()
-                    && let Some(mut config) = load_team_config(&org, &team)
-                {
-                    retain_live_projects(&mut config.projects);
-                    config.projects.retain(|p| p != &cwd_path);
-                    config.updated = crate::hooks::common::now_iso();
-                    let _ = save_team_config(&config);
-                }
+        if local_codex_dir.exists() {
+            match fs::remove_dir_all(&local_codex_dir) {
+                Ok(_) => println!("✓ Removed .codex/agents/{}/", team),
+                Err(e) => eprintln!("warning: could not remove local Codex agents: {}", e),
             }
-            Err(e) => {
+        }
+        if local_agents_dir.exists() {
+            if let Err(e) = fs::remove_dir_all(&local_agents_dir) {
                 eprintln!("error: {}", e);
                 return 1;
             }
+            println!("✓ Removed .claude/agents/{}/", team);
+        }
+        println!(
+            "  (Global store untouched. Use 'epic team link {}' to re-attach.)",
+            team
+        );
+        // Deregister project: remove current cwd path from projects list, also purge stale entries.
+        let cwd_path = std::env::current_dir()
+            .ok()
+            .and_then(|p| p.canonicalize().ok().or(Some(p)))
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !cwd_path.is_empty()
+            && let Some(mut config) = load_team_config(&org, &team)
+        {
+            retain_live_projects(&mut config.projects);
+            config.projects.retain(|p| p != &cwd_path);
+            config.updated = crate::hooks::common::now_iso();
+            let _ = save_team_config(&config);
         }
     }
 
@@ -1374,27 +1452,35 @@ fn cmd_status(args: &[String]) -> i32 {
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
         .to_string();
-    let agents_base = cwd.join(".claude").join("agents");
+    // Scan both host destinations: sync writes .claude/agents/ for Claude Code
+    // and .codex/agents/ for Codex projects. Scanning only the former reported
+    // "No teams linked" in every Codex-only project.
+    let agent_bases = [
+        cwd.join(".claude").join("agents"),
+        cwd.join(".codex").join("agents"),
+    ];
 
-    if !agents_base.is_dir() {
+    if !agent_bases.iter().any(|b| b.is_dir()) {
         println!("Project: {}", project_name);
         println!("No teams linked to this project.");
         println!("Run 'epic org list' to browse available teams.");
         return 0;
     }
 
-    // Collect team subdirs
-    let mut team_dirs: Vec<String> = fs::read_dir(&agents_base)
-        .ok()
-        .map(|entries| {
+    // Collect team subdirs across both bases (a team synced to both appears once)
+    let mut team_dirs: Vec<String> = agent_bases
+        .iter()
+        .filter_map(|base| fs::read_dir(base).ok())
+        .flat_map(|entries| {
             entries
                 .filter_map(|e| e.ok())
                 .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
                 .filter_map(|e| e.file_name().into_string().ok())
-                .collect()
+                .collect::<Vec<_>>()
         })
-        .unwrap_or_default();
+        .collect();
     team_dirs.sort();
+    team_dirs.dedup();
 
     if team_dirs.is_empty() {
         println!("Project: {}", project_name);
@@ -1407,28 +1493,35 @@ fn cmd_status(args: &[String]) -> i32 {
     println!("Linked teams ({}):", team_dirs.len());
 
     for team in &team_dirs {
-        let team_dir = agents_base.join(team);
-
-        // Single pass: collect all .md entries, read first for org, list all for agents
+        // A team may be synced to either host dir (or both) — collect from all.
+        // Claude agents are .md, Codex agents .toml.
         let (org, agents) = {
-            let entries: Vec<_> = fs::read_dir(&team_dir)
-                .ok()
-                .map(|e| {
+            let entries: Vec<_> = agent_bases
+                .iter()
+                .filter_map(|base| fs::read_dir(base.join(team)).ok())
+                .flat_map(|e| {
                     e.filter_map(|x| x.ok())
                         .filter(|x| {
                             x.file_type().map(|t| t.is_file()).unwrap_or(false)
-                                && x.path().extension().and_then(|ext| ext.to_str()) == Some("md")
+                                && matches!(
+                                    x.path().extension().and_then(|ext| ext.to_str()),
+                                    Some("md") | Some("toml")
+                                )
                         })
-                        .collect()
+                        .collect::<Vec<_>>()
                 })
-                .unwrap_or_default();
+                .collect();
 
-            // Try each .md file until one yields a valid org field
+            // Markdown carries `org:` in frontmatter, Codex TOML as a key.
             let org = entries
                 .iter()
                 .find_map(|e| {
                     let content = fs::read_to_string(e.path()).ok()?;
-                    let o = read_org_from_agent_file(&content)?;
+                    let o = if e.path().extension().and_then(|x| x.to_str()) == Some("toml") {
+                        read_org_from_codex_agent_toml(&content)?
+                    } else {
+                        read_org_from_agent_file(&content)?
+                    };
                     validate_org_name(&o).ok().map(|_| o)
                 })
                 .unwrap_or_else(|| "(unknown)".to_string());
@@ -1436,9 +1529,14 @@ fn cmd_status(args: &[String]) -> i32 {
             let mut names: Vec<String> = entries
                 .iter()
                 .filter_map(|e| e.file_name().into_string().ok())
-                .map(|n| n.trim_end_matches(".md").to_string())
+                .map(|n| {
+                    n.trim_end_matches(".md")
+                        .trim_end_matches(".toml")
+                        .to_string()
+                })
                 .collect();
             names.sort();
+            names.dedup();
 
             (org, names)
         };

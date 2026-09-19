@@ -228,6 +228,11 @@ fn main() {
                     }
                 }
                 Some("unlock") => {
+                    // Advisory: the skill sets `status: complete` before
+                    // unlocking, so this is where the documented completion
+                    // invariants can finally be checked against real state.
+                    // Warn only — unlock also runs on abort and after a crash.
+                    shared::orbit::warn_on_invalid_completion(&dir);
                     shared::orbit::release_orbit_lock(&dir);
                     0
                 }
@@ -338,12 +343,35 @@ fn main() {
                     r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#
                 );
             }
-            "guard" | "observe" | "polish" => {
-                // PreToolUse pass or PostToolUse: plain text ignored, no stdout needed
-            }
-            "resume" => {
-                // SessionStart: plain text on stdout = developer context.
-                // hint() already writes to stderr; no extra stdout needed.
+            "guard" | "observe" | "polish" | "resume" => {
+                // hint() writes to stderr, which Codex does NOT feed to the
+                // model, so replay the mirrored lines on stdout. Raw text is
+                // not safe: Codex parses stdout that starts with `{` or `[`
+                // as JSON and fails the hook when it does not parse ("hook
+                // returned invalid ... JSON output") — the `[resume]` and
+                // `[polish]` prefixes hit exactly that. Non-JSON stdout is
+                // accepted too, but JSON is deterministic. Verified wire
+                // shapes (codex-rs/hooks/src/schema.rs, deny_unknown_fields):
+                // SessionStart/SubagentStart/PreToolUse/PostToolUse carry
+                // `hookSpecificOutput.additionalContext`; SubagentStop and
+                // PreCompact accept only universal fields, so mirrored text
+                // rides `systemMessage` there.
+                let mirrored = shared::helpers::take_hint_mirror();
+                if !mirrored.is_empty() {
+                    let event = input.hook_event_name.as_deref().unwrap_or("");
+                    let payload = serde_json::to_string(&mirrored.join("\n"))
+                        .unwrap_or_else(|_| "\"\"".to_string());
+                    match event {
+                        "SessionStart" | "SubagentStart" | "PreToolUse" | "PostToolUse" => {
+                            println!(
+                                r#"{{"hookSpecificOutput":{{"hookEventName":"{event}","additionalContext":{payload}}}}}"#
+                            );
+                        }
+                        _ => {
+                            println!(r#"{{"systemMessage":{payload}}}"#);
+                        }
+                    }
+                }
             }
             "reflect" => {
                 // Stop: MUST output JSON — plain text is invalid for this event.

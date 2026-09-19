@@ -1,0 +1,19 @@
+# codex-live-check TUI prompts (run from examples/codex-live-check/scratch/)
+# One prompt per codex turn. Keep answers short; verdicts are offline.
+
+# Case 1: apply_patch payload shape (repeat with nested/multi-file targets
+# for the full matrix)
+Add a function div(a, b) to src/a.py that returns a/b.
+
+# Case 2: resume injection (NEW codex session; stderr redirected to
+# ../stderr.log). PASS only if a HARNESS-CHECK marker is quoted verbatim;
+# NONE means resume stdout is not reaching the model.
+If your context contains a sentence starting with HARNESS-CHECK, quote that
+sentence exactly on one line. Otherwise reply with exactly: NONE
+
+# Case 3: team agent + subagent events (run `epic team link` offline first)
+Ask the reviewer agent from my team to greet me.
+
+# Case 4: watermark/reflect (two short turns, then assert offline)
+Append a comment "# reviewed" to src/b.py.
+Now print the current git diff stat.

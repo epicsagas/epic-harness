@@ -59,12 +59,14 @@ pub(crate) fn row_to_node(row: &sqlx::any::AnyRow) -> Node {
 
 /// Returns the path to the SQLite database file (~/.harness/memory.db).
 pub fn db_path() -> PathBuf {
+    // Legacy override (parent of the .harness dir) keeps working; otherwise
+    // follow harness_root() so HARNESS_DIR-relocated stores relocate the
+    // knowledge graph too — otherwise an isolated test env reads the real
+    // graph (measured: `epic mem recall` returned the developer's memories).
     if let Ok(root) = std::env::var("HARNESS_ROOT") {
         return PathBuf::from(root).join(".harness").join("memory.db");
     }
-    crate::shared::paths::dirs_home()
-        .join(".harness")
-        .join("memory.db")
+    crate::shared::paths::harness_root().join("memory.db")
 }
 
 /// Compatibility: returns the .harness directory (parent of db_path).

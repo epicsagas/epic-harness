@@ -21,6 +21,17 @@
             "command": "epic guard"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "epic observe",
+            "async": true,
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PostToolUse": [
