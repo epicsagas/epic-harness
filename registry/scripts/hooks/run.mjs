@@ -15,7 +15,7 @@
 // Node.js built-ins only, matching registry/scripts/install.js. The .mjs
 // extension pins ESM semantics regardless of any package.json "type".
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -29,58 +29,76 @@ if (args.length === 0) {
   process.exit(0);
 }
 
-if (args[0] === "session-start") {
-  // Best-effort bootstrap; its failure must not block resume.
-  await new Promise((resolve) => {
-    const bootstrap = spawn(
-      process.execPath,
-      [path.join(PLUGIN_ROOT, "registry", "scripts", "install.js")],
-      { stdio: "ignore" },
-    );
-    bootstrap.on("error", () => resolve());
-    bootstrap.on("close", () => resolve());
-  });
-  args[0] = "resume";
+// Windows: probe for `epic` BEFORE spawning. spawn(shell:true) on a missing
+// command reports failure inconsistently across Node versions (cmd.exe 9009,
+// exit 1, or an error event) and leaks "'epic' is not recognized" to the
+// hook's stderr — measured on windows-latest, Node 22. `where.exe` ships
+// with every Windows and gives a deterministic answer.
+let epicMissing = false;
+if (process.platform === "win32") {
+  const probe = spawnSync("where.exe", ["epic"], { encoding: "utf8" });
+  epicMissing = probe.status !== 0;
 }
 
-// On Windows `epic` may be a .cmd shim (npm install); spawning .cmd files
-// without a shell throws EINVAL since the Node 18.20/20.12 security fix.
-// The args are static words (no user input), so a shell is safe there.
-// On POSIX spawn(3) resolves `epic` via PATH directly.
-const child = spawn("epic", args, {
-  stdio: "inherit",
-  shell: process.platform === "win32",
-});
-
-let spawnFailed = false;
-
-child.on("error", (err) => {
-  // On spawn failure Node emits both `error` and `close` (close carries a
-  // garbage exit code like -2 on some platforms), so this handler owns the
-  // outcome and close must not override it. No child is pending here, so
-  // setting exitCode (instead of process.exit) lets the pending stdout
-  // write flush — a piped notice must not be truncated mid-write.
-  spawnFailed = true;
-  if (err.code === "ENOENT") {
-    console.log("[harness] epic not found");
-  } else {
-    console.log(`[harness] ${err.message}`);
-  }
+if (epicMissing) {
+  // No child is pending, so exitCode (not process.exit) lets the piped
+  // notice flush before the event loop drains.
+  console.log("[harness] epic not found");
   process.exitCode = 0;
-});
+} else {
+  if (args[0] === "session-start") {
+    // Best-effort bootstrap; its failure must not block resume.
+    await new Promise((resolve) => {
+      const bootstrap = spawn(
+        process.execPath,
+        [path.join(PLUGIN_ROOT, "registry", "scripts", "install.js")],
+        { stdio: "ignore" },
+      );
+      bootstrap.on("error", () => resolve());
+      bootstrap.on("close", () => resolve());
+    });
+    args[0] = "resume";
+  }
 
-child.on("close", (code, signal) => {
-  if (spawnFailed) return;
-  if (signal) {
-    // Guard killed by a signal must not read as a pass.
-    process.exit(1);
-  }
-  // On win32 spawn(shell:true) a missing `epic` never reaches our error
-  // handler: cmd.exe itself fails with "not recognized" (code 9009).
-  // Normalize that to the same degrade contract as POSIX ENOENT.
-  if (process.platform === "win32" && code === 9009) {
-    console.log("[harness] epic not found");
-    process.exit(0);
-  }
-  process.exit(code ?? 0);
-});
+  // On Windows `epic` may be a .cmd shim (npm install); spawning .cmd files
+  // without a shell throws EINVAL since the Node 18.20/20.12 security fix.
+  // The args are static words (no user input), so a shell is safe there.
+  // On POSIX spawn(3) resolves `epic` via PATH directly.
+  const child = spawn("epic", args, {
+    stdio: "inherit",
+    shell: process.platform === "win32",
+  });
+
+  let spawnFailed = false;
+
+  child.on("error", (err) => {
+    // On spawn failure Node emits both `error` and `close` (close carries a
+    // garbage exit code like -2 on some platforms), so this handler owns the
+    // outcome and close must not override it. No child is pending here, so
+    // setting exitCode (instead of process.exit) lets the pending stdout
+    // write flush — a piped notice must not be truncated mid-write.
+    spawnFailed = true;
+    if (err.code === "ENOENT") {
+      console.log("[harness] epic not found");
+    } else {
+      console.log(`[harness] ${err.message}`);
+    }
+    process.exitCode = 0;
+  });
+
+  child.on("close", (code, signal) => {
+    if (spawnFailed) return;
+    if (signal) {
+      // Guard killed by a signal must not read as a pass.
+      process.exit(1);
+    }
+    // Belt-and-suspenders for the win32 shell:true 9009 path (the where.exe
+    // probe above should normally catch it first).
+    if (process.platform === "win32" && code === 9009) {
+      console.log("[harness] epic not found");
+      process.exitCode = 0;
+      return;
+    }
+    process.exit(code ?? 0);
+  });
+}
