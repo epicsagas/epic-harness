@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "epic-harness"
-version = "0.8.7"
+version = "0.8.8"
 dependencies = [
  "axum",
  "axum-test",
