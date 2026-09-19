@@ -47,6 +47,51 @@ jobs:
       - name: Test
         run: cargo test
 
+  windows-hooks:
+    name: Windows hook portability
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Phase A — no epic on a fresh windows-latest: every hook must degrade
+      # to "[harness] epic not found" + exit 0 through real cmd.exe /C.
+      - name: Hook degrade contract (no harness installed)
+        shell: pwsh
+        env:
+          PLUGIN_ROOT: ${{ github.workspace }}
+        run: node examples/codex-live-check/windows-acceptance.mjs degrade
+      # Install epic from the released artifact — the same bytes users get,
+      # not a source build (issue #132: acceptance must exercise the release path).
+      - name: Install epic from latest release artifact
+        shell: pwsh
+        run: |
+          $base = "https://github.com/epicsagas/epic-harness/releases/latest/download"
+          Invoke-WebRequest "$base/epic-harness-x86_64-pc-windows-msvc.zip" -OutFile epic.zip
+          Invoke-WebRequest "$base/epic-harness-x86_64-pc-windows-msvc.zip.sha256" -OutFile epic.zip.sha256
+          $expected = (Get-Content epic.zip.sha256).Trim().Split()[0]
+          $actual = (Get-FileHash epic.zip -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "sha256 mismatch: $expected != $actual" }
+          Expand-Archive epic.zip -DestinationPath epic-bin
+          $epic = Get-ChildItem epic-bin -Recurse -Filter epic.exe | Select-Object -First 1
+          if (-not $epic) { throw "epic.exe not found in archive" }
+          Add-Content $env:GITHUB_PATH $epic.DirectoryName
+      # Phase B — every hook (including the session-start installer) runs
+      # clean with the harness present.
+      - name: Hook live pass (harness on PATH)
+        shell: pwsh
+        env:
+          PLUGIN_ROOT: ${{ github.workspace }}
+        run: node examples/codex-live-check/windows-acceptance.mjs live
+      # harness-mem must start via plain PATH argv — what mcp_config.json
+      # launches. Proves no `sh` anywhere in the MCP path.
+      - name: harness-mem MCP handshake
+        shell: pwsh
+        env:
+          PLUGIN_ROOT: ${{ github.workspace }}
+        run: node examples/codex-live-check/windows-acceptance.mjs mcp
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest

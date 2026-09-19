@@ -41,9 +41,9 @@ flowchart LR
   of whether this codex version loads plugin hooks on its own. If case 1
   shows doubled observations, the plugin path fires too; drop the seeded
   file then.
-- **D3: Binary from PATH, pinned by `.envrc`.** Hooks call `command -v epic`,
-  so the harness binary under test is whatever `epic` resolves to when `codex`
-  launches. `.envrc` prepends `~/.cargo/bin` so a `cargo install`ed branch
+- **D3: Binary from PATH, pinned by `.envrc`.** Hooks launch `epic` through
+  `run.mjs`, which resolves it from PATH, so the harness binary under test is
+  whatever `epic` resolves to when `codex` launches. `.envrc` prepends `~/.cargo/bin` so a `cargo install`ed branch
   build deterministically wins over a Homebrew install (`brew unlink
   epic-harness` is the belt-and-suspenders alternative). `setup.sh` prints
   the resolved binary and version so the record shows what ran.
@@ -130,3 +130,45 @@ is exactly the result worth reporting on the PR.
   keep that checkout alive for the lifetime of the test env.
 - direnv must be installed for automatic loading; otherwise `source .envrc`
   before every session.
+
+## MCP server prerequisite (all hosts, all platforms)
+
+`mcp_config.json` — shared by the Claude and Codex plugin manifests — launches
+`epic mem mcp` directly via PATH. Source checkouts must `cargo install --path .`
+first; the old `target/release/epic` fallback was removed because plugin MCP
+configs don't expand `${PLUGIN_ROOT}` (openai/codex#35762) and `sh` is not
+available on Windows. Hooks have the same PATH requirement and degrade to
+`[harness] epic not found` when it is unmet.
+
+## Windows prerequisites
+
+All Codex hook handlers route through
+`registry/scripts/hooks/run.mjs`, so the only prerequisites are `node` (the
+plugin bootstrap already required it) and `epic` on PATH — no `sh`, Git Bash,
+or WSL. One known limit:
+
+- Codex runs Windows hook commands via `cmd.exe /C`, and an install path
+  containing spaces breaks unquoted commands (openai/codex#32402). Until
+  that upstream bug is fixed, install the plugin (and Node) under
+  space-free paths.
+
+### Windows acceptance: automated (CI) vs manual
+
+The ci.yml `Windows hook portability` job proves, on real `windows-latest`
+`cmd.exe`: every hook command degrades to `[harness] epic not found` +
+exit 0 without the harness, every hook (including the session-start
+installer) exits 0 with it, and `epic mem mcp` answers a JSON-RPC
+initialize — with `epic` installed from the **latest release artifact**
+(sha256-verified), not a source build. Driver:
+`windows-acceptance.mjs` (modes: `degrade` / `live` / `mcp`), runnable
+locally on any Windows box with `PLUGIN_ROOT` pointing at a checkout.
+
+What CI cannot prove — ChatGPT auth has no place in CI — is the last leg of
+the install path. Manual runbook on a native Windows box (no Git Bash/WSL):
+
+1. `npm install -g @openai/codex` (or the official installer), `codex login`.
+2. `codex plugin add epic@epicsagas` from the released marketplace.
+3. `codex` → run one prompt that triggers Bash and one edit; then `/hooks`
+   — the epic hooks must be listed as trusted plugin sources (no
+   hand-seeded `CODEX_HOME/hooks.json` anywhere).
+4. Check `%USERPROFILE%\.harness\` received observations after the session.
