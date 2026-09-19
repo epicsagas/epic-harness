@@ -130,3 +130,19 @@ is exactly the result worth reporting on the PR.
   keep that checkout alive for the lifetime of the test env.
 - direnv must be installed for automatic loading; otherwise `source .envrc`
   before every session.
+
+## Windows prerequisites
+
+All hook handlers route through
+`registry/scripts/hooks/run.mjs`, so the only prerequisites are `node` (the
+plugin bootstrap already required it) and `epic` on PATH — no `sh`, Git Bash,
+or WSL. Two known limits:
+
+- `mcp_config.json` launches `epic mem mcp` via PATH. Source checkouts must
+  `cargo install --path .` first; the old `target/release/epic` fallback was
+  removed because plugin MCP configs don't expand `${PLUGIN_ROOT}`
+  (openai/codex#35762) and `sh` is not a Windows artifact.
+- Codex runs Windows hook commands via `cmd.exe /C`, and an install path
+  containing spaces breaks unquoted commands (openai/codex#32402). Until
+  that upstream bug is fixed, install the plugin (and Node) under
+  space-free paths.

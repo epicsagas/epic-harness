@@ -36,7 +36,10 @@ fn commands_for(m: &Value, event: &str, matcher: &str) -> Vec<String> {
 /// binary first (`EH=$(command -v epic); "$EH" observe`), so a literal
 /// "epic observe" match would miss every Codex registration.
 fn invokes(cmd: &str, sub: &str) -> bool {
-    cmd.contains(&format!("epic {sub}")) || cmd.contains(&format!("\"$EH\" {sub}"))
+    cmd.contains(&format!("epic {sub}"))
+        || cmd.contains(&format!("\"$EH\" {sub}"))
+        // launcher form: `node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>`
+        || cmd.ends_with(&format!("run.mjs {sub}"))
 }
 
 const CLAUDE: &str = ".claude-plugin/hooks.json";
