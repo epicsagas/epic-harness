@@ -1,5 +1,5 @@
 //! Static sanity checks for the shipped plugin assets (issue #131): every
-//! Codex and Grok hook handler must route through the shell-free
+//! Claude, Codex, and Grok hook handler must route through the shell-free
 //! `registry/scripts/hooks/run.mjs` launcher, and the MCP config must launch
 //! `epic` directly instead of going through `sh -c`. The files are embedded
 //! from their real paths, so a regression fails the build instead of a user
@@ -7,12 +7,14 @@
 
 use serde_json::Value;
 
+const CLAUDE_HOOKS: &str = include_str!("../.claude-plugin/hooks.json");
 const CODEX_HOOKS: &str = include_str!("../.codex-plugin/hooks.json");
 const GROK_HOOKS: &str = include_str!("../.grok-plugin/hooks.json");
 const MCP_CONFIG: &str = include_str!("../mcp_config.json");
 const RUN_MJS: &str = include_str!("../registry/scripts/hooks/run.mjs");
 
 const LAUNCHER: &str = "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
+const CLAUDE_LAUNCHER: &str = "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 const GROK_LAUNCHER: &str = "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 
 /// Command handlers, in manifest order: events, matcher groups, handlers.
@@ -74,6 +76,17 @@ fn codex_hook_commands_all_use_launcher() {
     let handlers = command_handlers(&hooks);
     assert_eq!(handlers.len(), 10, "expected 10 command handlers");
     assert_launcher_form(&handlers, LAUNCHER);
+}
+
+/// The Claude manifest shares the launcher (claude expands `${CLAUDE_PLUGIN_ROOT}`
+/// in hook commands), so all three hosts run one shell-free code path and the
+/// SessionStart bootstrap no longer injects install.js stdout into context.
+#[test]
+fn claude_hook_commands_all_use_launcher() {
+    let hooks: Value = serde_json::from_str(CLAUDE_HOOKS).expect("valid JSON");
+    let handlers = command_handlers(&hooks);
+    assert_eq!(handlers.len(), 7, "expected 7 command handlers");
+    assert_launcher_form(&handlers, CLAUDE_LAUNCHER);
 }
 
 /// The Grok manifest shares the launcher (grok injects `GROK_PLUGIN_ROOT` and

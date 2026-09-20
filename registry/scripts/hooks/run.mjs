@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// Generic cross-platform hook launcher for the epic Codex and Grok plugins.
+// Generic cross-platform hook launcher for the epic Claude, Codex, and Grok
+// plugins.
 //
-// Every hook in .codex-plugin/hooks.json and .grok-plugin/hooks.json routes
-// through this script so the command strings stay shell-free:
-// `node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>` (Codex) or the
-// same with `${GROK_PLUGIN_ROOT}` (Grok). The host pipes hook JSON on stdin
-// and expects the hook's stdout + exit code back, so we spawn `epic` with
-// inherited stdio and propagate its exit code. When `epic` is not installed
-// we degrade to a notice on stdout and exit 0 — a missing harness must never
-// block the host session.
+// Every hook in .claude-plugin/hooks.json, .codex-plugin/hooks.json, and
+// .grok-plugin/hooks.json routes through this script so the command strings
+// stay shell-free: `node ${<host root>}/registry/scripts/hooks/run.mjs <sub>`
+// (PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT / GROK_PLUGIN_ROOT per host). The host
+// pipes hook JSON on stdin and expects the hook's stdout + exit code back, so
+// we spawn `epic` with inherited stdio and propagate its exit code. When
+// `epic` is not installed we degrade to a notice on stdout and exit 0 — a
+// missing harness must never block the host session.
 //
 // `session-start` is the SessionStart special case: run the install.js
 // bootstrap best-effort first, then `epic resume` — on every OS, without

@@ -32,13 +32,11 @@ fn commands_for(m: &Value, event: &str, matcher: &str) -> Vec<String> {
         .collect()
 }
 
-/// True when `cmd` invokes `epic <sub>`. The Claude manifest calls the binary
-/// directly (`epic observe`); the Codex and Grok manifests route through the
-/// launcher (`node ${...}/registry/scripts/hooks/run.mjs <sub>`).
+/// True when `cmd` invokes `epic <sub>`. All three host manifests route
+/// through the launcher (`node ${...}/registry/scripts/hooks/run.mjs <sub>`,
+/// with the host's own root variable).
 fn invokes(cmd: &str, sub: &str) -> bool {
-    cmd.contains(&format!("epic {sub}"))
-        // launcher form: `node ${PLUGIN_ROOT|GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs <sub>`
-        || cmd.ends_with(&format!("run.mjs {sub}"))
+    cmd.ends_with(&format!("run.mjs {sub}"))
 }
 
 const CLAUDE: &str = ".claude-plugin/hooks.json";
