@@ -80,7 +80,7 @@ fn codex_hook_commands_all_use_launcher() {
 
 /// The Claude manifest shares the launcher (claude expands `${CLAUDE_PLUGIN_ROOT}`
 /// in hook commands), so all three hosts run one shell-free code path and the
-/// SessionStart bootstrap no longer injects install.js stdout into context.
+/// SessionStart bootstrap no longer injects install.cjs stdout into context.
 #[test]
 fn claude_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CLAUDE_HOOKS).expect("valid JSON");
@@ -123,14 +123,14 @@ fn mcp_config_launches_epic_without_sh() {
 fn run_mjs_static_sanity() {
     // The behaviors the hooks depend on, pinned by source text: graceful
     // degradation when `epic` is missing, faithful exit-code propagation, and
-    // the SessionStart special case (install.js best-effort, then resume).
+    // the SessionStart special case (install.cjs best-effort, then resume).
     for needle in [
         "session-start",
         "ENOENT",
         "epic not found",
         "stdio: \"inherit\"",
         "process.exit(code ?? 0)",
-        "install.js",
+        "install.cjs",
         // win32 shell:true degrades through cmd.exe's 9009, not ENOENT.
         "9009",
         "signal",

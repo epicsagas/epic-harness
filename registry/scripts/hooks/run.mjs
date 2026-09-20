@@ -11,12 +11,14 @@
 // `epic` is not installed we degrade to a notice on stdout and exit 0 — a
 // missing harness must never block the host session.
 //
-// `session-start` is the SessionStart special case: run the install.js
+// `session-start` is the SessionStart special case: run the install.cjs
 // bootstrap best-effort first, then `epic resume` — on every OS, without
 // shell sequencing (`;` vs `&`).
 //
-// Node.js built-ins only, matching registry/scripts/install.js. The .mjs
-// extension pins ESM semantics regardless of any package.json "type".
+// Node.js built-ins only, matching registry/scripts/install.cjs. The .mjs
+// extension pins ESM semantics regardless of any package.json "type"; the
+// bootstrap is .cjs for the same reason in mirror image — CommonJS regardless
+// of "type" (require() inside an ESM-treated .js file throws ReferenceError).
 
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
@@ -54,11 +56,11 @@ if (args.length === 0) {
       // Best-effort bootstrap; its failure must not block resume. Stdout is
       // ignored (SessionStart stdout reaches the model context — bootstrap
       // noise must not be injected), but stderr is inherited so a failing
-      // install.js is visible instead of silently skipped.
+      // install.cjs is visible instead of silently skipped.
       await new Promise((resolve) => {
         const bootstrap = spawn(
           process.execPath,
-          [path.join(PLUGIN_ROOT, "registry", "scripts", "install.js")],
+          [path.join(PLUGIN_ROOT, "registry", "scripts", "install.cjs")],
           { stdio: ["ignore", "ignore", "inherit"] },
         );
         bootstrap.on("error", () => resolve());

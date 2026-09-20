@@ -126,7 +126,7 @@ is exactly the result worth reporting on the PR.
 - The TUI plugin screen lists OpenAI's remote catalog and needs the
   `.plugin-appserver` payload; `setup.sh` symlinks it from the real home. The
   test never uses plugins, so a plugin-install failure there is ignorable.
-- The SessionStart hook runs `registry/scripts/install.js` from `HARNESS_SRC`;
+- The SessionStart hook runs `registry/scripts/install.cjs` from `HARNESS_SRC`;
   keep that checkout alive for the lifetime of the test env.
 - direnv must be installed for automatic loading; otherwise `source .envrc`
   before every session.
