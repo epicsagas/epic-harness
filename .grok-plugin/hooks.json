@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" resume || echo '[harness] epic not found, skipping resume'",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs resume",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" guard || echo '[harness] epic not found, skipping guard'",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs guard",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" polish || true",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs polish",
             "timeout": 30
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || true",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
             "timeout": 5
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" observe || true",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
             "timeout": 5
           }
         ]
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" snapshot || true",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs snapshot",
             "timeout": 10
           }
         ]
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "EH=$(command -v epic 2>/dev/null); test -n \"$EH\" && \"$EH\" reflect || echo '[harness] epic not found, skipping reflect'",
+            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs reflect",
             "timeout": 30
           }
         ]
