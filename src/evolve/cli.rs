@@ -9,14 +9,14 @@
 //! consumed. Host-agnostic: this code never names a CLI or model.
 
 use std::fs;
-use std::io::{IsTerminal, Read};
+use std::io::IsTerminal;
 
 use crate::evolve::critic::{Critic, CriticVerdict};
 use crate::evolve::edits::EditManifest;
 use crate::evolve::skills::{gate_skills, write_skill_with_meta};
 use crate::evolve::synthesis::{assemble_skill, find_pending, mark_consumed, validate_body};
 use crate::shared::evolution::{EditType, Metrics};
-use crate::shared::helpers::{append_jsonl, hint, read_json};
+use crate::shared::helpers::{append_jsonl, hint, read_json, read_stdin_bounded};
 use crate::shared::paths::{evolved_dir, manifests_file, metrics_file};
 
 const EXIT_OK: i32 = 0;
@@ -73,12 +73,22 @@ fn run_accept_synth(args: &[String]) -> i32 {
             }
         }
     } else if stdin_flag || !std::io::stdin().is_terminal() {
-        let mut s = String::new();
-        if std::io::stdin().read_to_string(&mut s).is_err() {
-            eprintln!("cannot read body from stdin");
-            return EXIT_IO;
+        // Bounded read: headless callers hold stdin open with no EOF, and a
+        // bare read_to_string hung here forever (same class as the hook
+        // stdin hang fixed in main.rs).
+        match read_stdin_bounded() {
+            Some(s) => s,
+            None if stdin_flag => {
+                eprintln!("cannot read body from stdin (timed out waiting for input)");
+                return EXIT_IO;
+            }
+            None => {
+                // No explicit --stdin and no payload arrived — the caller
+                // almost certainly forgot --file/--stdin, not hung stdin.
+                eprintln!("provide the synthesized body via --file <path> or --stdin");
+                return EXIT_USAGE;
+            }
         }
-        s
     } else {
         eprintln!("provide the synthesized body via --file <path> or --stdin");
         return EXIT_USAGE;

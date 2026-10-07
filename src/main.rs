@@ -13,7 +13,7 @@ mod telemetry;
 mod update;
 
 use std::env;
-use std::io::{self, IsTerminal, Read};
+use std::io::{self, IsTerminal};
 
 /// Parse `--flag <value>` or `--flag=<value>` → Option<u32>
 fn parse_flag_u32(args: &[String], flag: &str) -> Option<u32> {
@@ -172,7 +172,16 @@ fn main() {
     let hook_subcmd = HOOK_SUBCMDS.contains(&subcmd);
     let mut stdin_buf = String::new();
     if hook_subcmd && !io::stdin().is_terminal() {
-        let _ = io::stdin().read_to_string(&mut stdin_buf);
+        match shared::helpers::read_stdin_bounded() {
+            Some(buf) => stdin_buf = buf,
+            None => {
+                // Headless caller with no payload (e.g. manual Bash-tool run).
+                // Session_id will be absent — degraded keys, same as empty stdin.
+                eprintln!(
+                    "[harness] stdin payload timeout after 5s — proceeding without hook input"
+                );
+            }
+        }
     }
 
     let input: hooks::common::HookInput = if stdin_buf.is_empty() {
