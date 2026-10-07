@@ -172,7 +172,25 @@ fn main() {
     let hook_subcmd = HOOK_SUBCMDS.contains(&subcmd);
     let mut stdin_buf = String::new();
     if hook_subcmd && !io::stdin().is_terminal() {
-        let _ = io::stdin().read_to_string(&mut stdin_buf);
+        // Hook hosts pipe the payload and close stdin (EOF), but headless
+        // callers (Bash tool, unix socket) hold stdin open forever — plain
+        // read_to_string hung there for 15+ min in an orbit run. Bound the
+        // wait: payloads are written at spawn time, so a quiet stdin means
+        // no payload. The reader thread leaks on timeout; process exit
+        // reaps it.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = io::stdin().read_to_string(&mut buf);
+            let _ = tx.send(buf);
+        });
+        if let Ok(buf) = rx.recv_timeout(std::time::Duration::from_secs(2)) {
+            stdin_buf = buf;
+        } else {
+            // Headless caller with no payload (e.g. manual Bash-tool run).
+            // Session_id will be absent — degraded keys, same as empty stdin.
+            eprintln!("[harness] stdin payload timeout after 2s — proceeding without hook input");
+        }
     }
 
     let input: hooks::common::HookInput = if stdin_buf.is_empty() {
