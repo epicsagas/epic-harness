@@ -22,6 +22,29 @@ pub fn ensure_dir(path: &Path) {
     let _ = fs::create_dir_all(path);
 }
 
+/// Bound for reading hook payloads from non-TTY stdin.
+pub const STDIN_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Read stdin with a bounded wait, for headless callers.
+///
+/// Hook hosts pipe the payload and close stdin (EOF), but headless callers
+/// (Bash tool, unix socket) hold stdin open forever — a plain
+/// `read_to_string` hung there for 15+ minutes in an orbit run. Payloads
+/// are written at spawn time, so a quiet stdin past the bound means no
+/// payload. The reader thread leaks on timeout; process exit reaps it.
+///
+/// Returns `None` when nothing arrived within `STDIN_READ_TIMEOUT`.
+pub fn read_stdin_bounded() -> Option<String> {
+    use std::io::Read;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = String::new();
+        let _ = std::io::stdin().read_to_string(&mut buf);
+        let _ = tx.send(buf);
+    });
+    rx.recv_timeout(STDIN_READ_TIMEOUT).ok()
+}
+
 pub fn today() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
