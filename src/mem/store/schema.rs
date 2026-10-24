@@ -187,13 +187,13 @@ async fn migrate_legacy_files(pool: &AnyPool) {
 
     // Import edges.jsonl
     let edges_path = harness_dir.join("memory").join("edges.jsonl");
-    if edges_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&edges_path) {
-            for line in content.lines() {
-                if let Ok(edge) = serde_json::from_str::<super::types::Edge>(line) {
-                    let ge = super::types::edge_to_graph(&edge);
-                    let _ = append_graph_edge(pool, &ge).await;
-                }
+    if edges_path.exists()
+        && let Ok(content) = std::fs::read_to_string(&edges_path)
+    {
+        for line in content.lines() {
+            if let Ok(edge) = serde_json::from_str::<super::types::Edge>(line) {
+                let ge = super::types::edge_to_graph(&edge);
+                let _ = append_graph_edge(pool, &ge).await;
             }
         }
     }

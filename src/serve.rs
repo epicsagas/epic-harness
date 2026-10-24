@@ -172,10 +172,10 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let mut slugs: Vec<String> = Vec::new();
                 if let Ok(rd) = std::fs::read_dir(&root) {
                     for entry in rd.filter_map(|e| e.ok()) {
-                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                            if let Some(name) = entry.file_name().to_str() {
-                                slugs.push(name.to_string());
-                            }
+                        if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                            && let Some(name) = entry.file_name().to_str()
+                        {
+                            slugs.push(name.to_string());
                         }
                     }
                 }
@@ -574,56 +574,59 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                     project,
                 )
                 .await
-            }) {
-                if stats.total > 0 {
-                    let tool_stats: Vec<serde_json::Value> = {
-                        let mut v: Vec<_> = stats.tool_stats.iter().map(|t| {
-                                serde_json::json!({
-                                    "tool": t.tool,
-                                    "calls": t.calls,
-                                    "success_rate": if t.calls > 0 {
-                                        (t.successes as f64 / t.calls as f64 * 1000.0).round() / 1000.0
-                                    } else { 0.0 },
-                                    "avg_score": (t.avg_score * 1000.0).round() / 1000.0
-                                })
-                            }).collect();
-                        v.sort_by(|a, b| {
-                            b["calls"]
-                                .as_i64()
-                                .unwrap_or(0)
-                                .cmp(&a["calls"].as_i64().unwrap_or(0))
-                        });
-                        v
-                    };
-                    let recent_sessions: Vec<serde_json::Value> = stats
-                        .session_stats
+            }) && stats.total > 0
+            {
+                let tool_stats: Vec<serde_json::Value> = {
+                    let mut v: Vec<_> = stats
+                        .tool_stats
                         .iter()
-                        .take(10)
-                        .map(|s| {
-                            let date = s
-                                .session_id
-                                .split('_')
-                                .next()
-                                .unwrap_or("unknown")
-                                .to_string();
+                        .map(|t| {
                             serde_json::json!({
-                                "session_id": s.session_id,
-                                "date": date,
-                                "tool_calls": s.calls,
-                                "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
-                                "failures": s.failures
+                                "tool": t.tool,
+                                "calls": t.calls,
+                                "success_rate": if t.calls > 0 {
+                                    (t.successes as f64 / t.calls as f64 * 1000.0).round() / 1000.0
+                                } else { 0.0 },
+                                "avg_score": (t.avg_score * 1000.0).round() / 1000.0
                             })
                         })
                         .collect();
-                    return serde_json::json!({
-                        "recent_sessions": recent_sessions,
-                        "tool_stats": tool_stats,
-                        "total_tool_calls": stats.total,
-                        "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
-                        "active_agents": []
+                    v.sort_by(|a, b| {
+                        b["calls"]
+                            .as_i64()
+                            .unwrap_or(0)
+                            .cmp(&a["calls"].as_i64().unwrap_or(0))
+                    });
+                    v
+                };
+                let recent_sessions: Vec<serde_json::Value> = stats
+                    .session_stats
+                    .iter()
+                    .take(10)
+                    .map(|s| {
+                        let date = s
+                            .session_id
+                            .split('_')
+                            .next()
+                            .unwrap_or("unknown")
+                            .to_string();
+                        serde_json::json!({
+                            "session_id": s.session_id,
+                            "date": date,
+                            "tool_calls": s.calls,
+                            "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
+                            "failures": s.failures
+                        })
                     })
-                    .to_string();
-                }
+                    .collect();
+                return serde_json::json!({
+                    "recent_sessions": recent_sessions,
+                    "tool_stats": tool_stats,
+                    "total_tool_calls": stats.total,
+                    "avg_score": (stats.avg_score * 1000.0).round() / 1000.0,
+                    "active_agents": []
+                })
+                .to_string();
             }
 
             // Fallback: JSONL file parsing (for legacy data)
@@ -752,16 +755,15 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             if let Ok(pipelines) = crate::store::runtime::block_on(async {
                 let pool = crate::store::pool::harness_pool().await?;
                 crate::store::orbit_store::list_all_pipelines_pool(&pool).await
-            }) {
-                if !pipelines.is_empty() {
-                    let mut sorted = pipelines;
-                    sorted.sort_by(|a, b| {
-                        let ta = a["started_at"].as_str().unwrap_or("");
-                        let tb = b["started_at"].as_str().unwrap_or("");
-                        tb.cmp(ta)
-                    });
-                    return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
-                }
+            }) && !pipelines.is_empty()
+            {
+                let mut sorted = pipelines;
+                sorted.sort_by(|a, b| {
+                    let ta = a["started_at"].as_str().unwrap_or("");
+                    let tb = b["started_at"].as_str().unwrap_or("");
+                    tb.cmp(ta)
+                });
+                return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
             }
             // Fallback: scan PIPELINE-*.json files
             let projects_root = harness_dir.parent().unwrap_or(harness_dir);
@@ -906,10 +908,10 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             let mut snaps: Vec<String> = Vec::new();
             if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
                 for e in rd.flatten() {
-                    if let Some(n) = e.file_name().to_str() {
-                        if n.ends_with(".json") {
-                            snaps.push(n.to_string());
-                        }
+                    if let Some(n) = e.file_name().to_str()
+                        && n.ends_with(".json")
+                    {
+                        snaps.push(n.to_string());
                     }
                 }
             }

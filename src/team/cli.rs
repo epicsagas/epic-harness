@@ -414,47 +414,45 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
     // .claude/agents/, which Codex never reads — a Codex user linking a team
     // to a project got nothing usable. Mirrored only when the project already
     // has a .codex/ directory, so Claude-only projects are untouched.
-    if !global {
-        if let Ok(cwd) = std::env::current_dir() {
-            let codex_root = cwd.join(".codex");
-            if codex_root.is_dir() {
-                let codex_team_dir = codex_root.join("agents").join(team);
-                match fs::create_dir_all(&codex_team_dir) {
-                    Ok(()) => {
-                        for agent_name in &agents {
-                            if let Some(content) = load_agent(org, team, agent_name) {
-                                let injected = inject_team_context(
-                                    &content,
-                                    org,
-                                    team,
-                                    &config.team_type,
-                                    &mission,
+    if !global && let Ok(cwd) = std::env::current_dir() {
+        let codex_root = cwd.join(".codex");
+        if codex_root.is_dir() {
+            let codex_team_dir = codex_root.join("agents").join(team);
+            match fs::create_dir_all(&codex_team_dir) {
+                Ok(()) => {
+                    for agent_name in &agents {
+                        if let Some(content) = load_agent(org, team, agent_name) {
+                            let injected = inject_team_context(
+                                &content,
+                                org,
+                                team,
+                                &config.team_type,
+                                &mission,
+                            );
+                            let rendered = agent_md_to_codex_toml(agent_name, &injected);
+                            let dest_path = codex_team_dir.join(format!("{}.toml", agent_name));
+                            let existing = fs::read_to_string(&dest_path).unwrap_or_default();
+                            if existing != rendered
+                                && let Err(e) = fs::write(&dest_path, &rendered)
+                            {
+                                eprintln!(
+                                    "[harness] warn: could not write {}: {}",
+                                    dest_path.display(),
+                                    e
                                 );
-                                let rendered = agent_md_to_codex_toml(agent_name, &injected);
-                                let dest_path = codex_team_dir.join(format!("{}.toml", agent_name));
-                                let existing = fs::read_to_string(&dest_path).unwrap_or_default();
-                                if existing != rendered
-                                    && let Err(e) = fs::write(&dest_path, &rendered)
-                                {
-                                    eprintln!(
-                                        "[harness] warn: could not write {}: {}",
-                                        dest_path.display(),
-                                        e
-                                    );
-                                }
                             }
                         }
-                        eprintln!(
-                            "[harness] synced team '{team}' to {}",
-                            codex_team_dir.display()
-                        );
                     }
-                    Err(e) => eprintln!(
-                        "[harness] warn: could not create {}: {}",
-                        codex_team_dir.display(),
-                        e
-                    ),
+                    eprintln!(
+                        "[harness] synced team '{team}' to {}",
+                        codex_team_dir.display()
+                    );
                 }
+                Err(e) => eprintln!(
+                    "[harness] warn: could not create {}: {}",
+                    codex_team_dir.display(),
+                    e
+                ),
             }
         }
     }

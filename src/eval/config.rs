@@ -326,31 +326,29 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
     }
 
     // Makefile `eval` target
-    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile")) {
-        if content
+    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile"))
+        && content
             .lines()
             .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-        {
-            found.push(Benchmark {
-                name: "make_eval".into(),
-                command: "make eval".into(),
-                result_type: "exit_code".into(),
-            });
-        }
+    {
+        found.push(Benchmark {
+            name: "make_eval".into(),
+            command: "make eval".into(),
+            result_type: "exit_code".into(),
+        });
     }
 
     // justfile `eval` recipe
-    if let Ok(content) = std::fs::read_to_string(cwd.join("justfile")) {
-        if content
+    if let Ok(content) = std::fs::read_to_string(cwd.join("justfile"))
+        && content
             .lines()
             .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-        {
-            found.push(Benchmark {
-                name: "just_eval".into(),
-                command: "just eval".into(),
-                result_type: "exit_code".into(),
-            });
-        }
+    {
+        found.push(Benchmark {
+            name: "just_eval".into(),
+            command: "just eval".into(),
+            result_type: "exit_code".into(),
+        });
     }
 
     found

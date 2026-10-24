@@ -211,10 +211,10 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         project,
     )
     .await?;
-    if let Some(ref epoch) = m.epoch_class {
-        if let Ok(s) = serde_json::to_string(epoch) {
-            upsert(&mut tx, "epoch_class", &s, project).await?;
-        }
+    if let Some(ref epoch) = m.epoch_class
+        && let Ok(s) = serde_json::to_string(epoch)
+    {
+        upsert(&mut tx, "epoch_class", &s, project).await?;
     }
 
     // Score history — project-scoped: delete only this project's rows, then
@@ -353,10 +353,10 @@ pub async fn save_metrics_direct(
         project,
     )
     .await?;
-    if let Some(ref epoch) = m.epoch_class {
-        if let Ok(s) = serde_json::to_string(epoch) {
-            upsert(tx, "epoch_class", &s, project).await?;
-        }
+    if let Some(ref epoch) = m.epoch_class
+        && let Ok(s) = serde_json::to_string(epoch)
+    {
+        upsert(tx, "epoch_class", &s, project).await?;
     }
 
     // Score history — project-scoped.

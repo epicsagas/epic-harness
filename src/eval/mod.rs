@@ -242,15 +242,14 @@ fn check_unconfigured_benchmarks(cwd: &std::path::Path, cfg: &config::EvalConfig
         }
     }
     // Also check Makefile/justfile for eval target
-    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile")) {
-        if content
+    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile"))
+        && content
             .lines()
             .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-        {
-            eprintln!(
-                "warning: Makefile has an `eval` target but no benchmarks are configured in eval.yaml"
-            );
-        }
+    {
+        eprintln!(
+            "warning: Makefile has an `eval` target but no benchmarks are configured in eval.yaml"
+        );
     }
 }
 

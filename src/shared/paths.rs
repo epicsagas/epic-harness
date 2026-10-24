@@ -24,20 +24,19 @@ pub fn project_slug() -> String {
         if let Ok(out) = std::process::Command::new("git")
             .args(["rev-parse", "--git-common-dir"])
             .output()
+            && out.status.success()
         {
-            if out.status.success() {
-                let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                // Absolute path → linked worktree; derive project root from common .git dir.
-                if raw.starts_with('/') {
-                    let common_git = PathBuf::from(&raw);
-                    // common_git = /main/repo/.git  →  parent = /main/repo
-                    if let Some(repo_root) = common_git.parent() {
-                        let name = repo_root
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| "project".into());
-                        return sanitize_slug_name(&name);
-                    }
+            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // Absolute path → linked worktree; derive project root from common .git dir.
+            if raw.starts_with('/') {
+                let common_git = PathBuf::from(&raw);
+                // common_git = /main/repo/.git  →  parent = /main/repo
+                if let Some(repo_root) = common_git.parent() {
+                    let name = repo_root
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "project".into());
+                    return sanitize_slug_name(&name);
                 }
             }
         }
@@ -46,17 +45,16 @@ pub fn project_slug() -> String {
         if let Ok(git_root) = std::process::Command::new("git")
             .args(["rev-parse", "--show-toplevel"])
             .output()
+            && git_root.status.success()
         {
-            if git_root.status.success() {
-                let root = String::from_utf8_lossy(&git_root.stdout).trim().to_string();
-                if !root.is_empty() {
-                    let root_path = PathBuf::from(&root);
-                    let name = root_path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "project".into());
-                    return sanitize_slug_name(&name);
-                }
+            let root = String::from_utf8_lossy(&git_root.stdout).trim().to_string();
+            if !root.is_empty() {
+                let root_path = PathBuf::from(&root);
+                let name = root_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "project".into());
+                return sanitize_slug_name(&name);
             }
         }
 
@@ -94,10 +92,10 @@ pub(crate) fn sanitize_slug_name(name: &str) -> String {
 /// Data root: `~/.harness`, or `HARNESS_DIR` when set (isolated test
 /// environments relocate the whole store without touching the real one).
 pub fn harness_root() -> PathBuf {
-    if let Ok(d) = std::env::var("HARNESS_DIR") {
-        if !d.trim().is_empty() {
-            return PathBuf::from(d);
-        }
+    if let Ok(d) = std::env::var("HARNESS_DIR")
+        && !d.trim().is_empty()
+    {
+        return PathBuf::from(d);
     }
     dirs_home().join(".harness")
 }

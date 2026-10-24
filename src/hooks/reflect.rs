@@ -974,14 +974,14 @@ pub fn run(_input: &HookInput) -> i32 {
     //
     // A failed write is not silent: it means the next turn re-analyzes this
     // batch, so it gets reported rather than swallowed.
-    if let Some(newest) = observations.iter().map(|o| &o.timestamp).max() {
-        if let Err(e) = fs::write(reflect_watermark_file(), newest) {
-            eprintln!(
-                "[reflect] watermark write failed ({e}); the next round will re-analyze \
+    if let Some(newest) = observations.iter().map(|o| &o.timestamp).max()
+        && let Err(e) = fs::write(reflect_watermark_file(), newest)
+    {
+        eprintln!(
+            "[reflect] watermark write failed ({e}); the next round will re-analyze \
                  these {} observations",
-                observations.len()
-            );
-        }
+            observations.len()
+        );
     }
 
     // 2. Analyze
@@ -1292,27 +1292,27 @@ pub fn run(_input: &HookInput) -> i32 {
                 if !name.starts_with("PIPELINE-") || !name.ends_with(".json") {
                     continue;
                 }
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content) {
-                        let id = pl["id"].as_str().unwrap_or(name.trim_end_matches(".json"));
-                        let status = pl["status"].as_str().unwrap_or("unknown");
-                        let phase = pl["phase"].as_str();
-                        let mode = pl["mode"].as_str();
-                        if crate::store::runtime::block_on(
-                            crate::store::orbit_store::upsert_pipeline_pool(
-                                &pool,
-                                id,
-                                &project_slug(),
-                                status,
-                                phase,
-                                mode,
-                                &content,
-                            ),
-                        )
-                        .is_ok()
-                        {
-                            synced += 1;
-                        }
+                if let Ok(content) = fs::read_to_string(&path)
+                    && let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content)
+                {
+                    let id = pl["id"].as_str().unwrap_or(name.trim_end_matches(".json"));
+                    let status = pl["status"].as_str().unwrap_or("unknown");
+                    let phase = pl["phase"].as_str();
+                    let mode = pl["mode"].as_str();
+                    if crate::store::runtime::block_on(
+                        crate::store::orbit_store::upsert_pipeline_pool(
+                            &pool,
+                            id,
+                            &project_slug(),
+                            status,
+                            phase,
+                            mode,
+                            &content,
+                        ),
+                    )
+                    .is_ok()
+                    {
+                        synced += 1;
                     }
                 }
             }
@@ -1332,16 +1332,16 @@ pub fn run(_input: &HookInput) -> i32 {
     }
 
     // 11.7. Observation retention sweep (once per day)
-    if let Some(deleted) = sweep_old_observations() {
-        if deleted > 0 {
-            hint(
-                "reflect",
-                &format!(
-                    "Pruned {deleted} observation(s) older than {} days",
-                    CONFIG.db.obs_retention_days
-                ),
-            );
-        }
+    if let Some(deleted) = sweep_old_observations()
+        && deleted > 0
+    {
+        hint(
+            "reflect",
+            &format!(
+                "Pruned {deleted} observation(s) older than {} days",
+                CONFIG.db.obs_retention_days
+            ),
+        );
     }
 
     // 11.8. Workspace manifest

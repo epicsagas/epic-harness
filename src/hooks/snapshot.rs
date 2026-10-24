@@ -7,29 +7,28 @@ fn get_obs_summary() -> Option<String> {
     if let Ok(stats) = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
         crate::store::observations::query_obs_stats_pool(&pool, &today_str, &today_str).await
-    }) {
-        if stats.total > 0 {
-            let success_rate = if stats.total > 0 {
-                ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
-            } else {
-                100
-            };
-            let error_str = if !stats.error_stats.is_empty() {
-                let parts: Vec<String> = stats
-                    .error_stats
-                    .iter()
-                    .take(3)
-                    .map(|(c, n)| format!("{}:{}", c, n))
-                    .collect();
-                format!(", errors=[{}]", parts.join(","))
-            } else {
-                String::new()
-            };
-            return Some(format!(
-                "{} obs, {success_rate}% success, avg={:.2}{error_str}",
-                stats.total, stats.avg_score
-            ));
-        }
+    }) && stats.total > 0
+    {
+        let success_rate = if stats.total > 0 {
+            ((stats.successes as f64 / stats.total as f64) * 100.0) as u32
+        } else {
+            100
+        };
+        let error_str = if !stats.error_stats.is_empty() {
+            let parts: Vec<String> = stats
+                .error_stats
+                .iter()
+                .take(3)
+                .map(|(c, n)| format!("{}:{}", c, n))
+                .collect();
+            format!(", errors=[{}]", parts.join(","))
+        } else {
+            String::new()
+        };
+        return Some(format!(
+            "{} obs, {success_rate}% success, avg={:.2}{error_str}",
+            stats.total, stats.avg_score
+        ));
     }
 
     // Fallback: read from JSONL files

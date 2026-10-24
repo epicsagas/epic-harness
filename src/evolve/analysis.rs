@@ -209,10 +209,10 @@ pub fn analyze_minibatches(scored: &[&ObsRecord]) -> Vec<MinibatchInsight> {
         // File cluster (top 3 files)
         let mut file_counts: HashMap<String, u64> = HashMap::new();
         for o in chunk {
-            if let Some(action) = o.action.as_deref() {
-                if let Some(f) = crate::shared::classify::extract_file(action) {
-                    *file_counts.entry(f.to_string()).or_default() += 1;
-                }
+            if let Some(action) = o.action.as_deref()
+                && let Some(f) = crate::shared::classify::extract_file(action)
+            {
+                *file_counts.entry(f.to_string()).or_default() += 1;
             }
         }
         let mut files: Vec<_> = file_counts.into_iter().collect();
