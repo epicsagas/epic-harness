@@ -11,6 +11,7 @@ description: "Spec phase. Converts user requirements into a numbered Requirement
 
 1. **Understand the request**
    - Read any existing context (CLAUDE.md, README, codebase structure)
+   - If `.epic/team.md` (or `.epic/team.local.md`) has a `## spec` section, each of its bullets is required spec content, not advice. Missing one is a `GAP:` in the readiness gate.
    - If the request is vague, ask focused questions (max 3 at a time)
    - Never assume — clarify ambiguity before proceeding
 
