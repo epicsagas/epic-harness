@@ -18,7 +18,10 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MANIFEST="${MANIFEST:-$SCRIPT_DIR/manifest.jsonl}"
-ARMS="${ARMS:-bare,epic}"
+ARMS="${ARMS:-bare,epic}"        # add bmad for the BMAD Method arm (ADR-003 / 008 §7)
+BMAD_PKG="${BMAD_PKG:-bmad-method@6}"
+BARE_MODE_DIR="${BARE_MODE_DIR:-$HOME/.claudy/modes/bare}"   # claudy mode with no epic plugin
+EPIC_MODE_DIR="${EPIC_MODE_DIR:-$HOME/.claudy/modes/epic}"   # claudy mode with epic@epicsagas installed
 SEEDS="${SEEDS:-1}"
 PROFILE="${PROFILE:-zai}"
 MAX_TURNS="${MAX_TURNS:-50}"
@@ -33,14 +36,16 @@ KEEP_WORKDIR="${KEEP_WORKDIR:-0}"
 HOST_ARCH="$(uname -m)"
 
 [ -f "$MANIFEST" ] || { echo "ERR: manifest not found: $MANIFEST" >&2; exit 2; }
+[ -d "$BARE_MODE_DIR" ] || { echo "ERR: BARE_MODE_DIR missing: $BARE_MODE_DIR" >&2; exit 2; }
+[ -d "$EPIC_MODE_DIR" ] || { echo "ERR: EPIC_MODE_DIR missing: $EPIC_MODE_DIR (create with: claudy mode)" >&2; exit 2; }
 command -v jq >/dev/null || { echo "ERR: jq required" >&2; exit 2; }
-mkdir -p "$CLONE_CACHE" "$RUNS_DIR" "$PREDS_DIR/bare" "$PREDS_DIR/epic"
+mkdir -p "$CLONE_CACHE" "$RUNS_DIR" "$PREDS_DIR/bare" "$PREDS_DIR/epic" "$PREDS_DIR/bmad"
 : > "$VERDICTS"
 
 # --- per-plugin toggle: only epic@epicsagas varies; LSP/mcp/hooks stay in BOTH arms ---
 settings_for() {
   case "$1" in
-    bare) printf '%s' '{"enabledPlugins":{"epic@epicsagas":false}}' ;;
+    bare|bmad) printf '%s' '{"enabledPlugins":{"epic@epicsagas":false}}' ;;
     epic) printf '%s' '{"enabledPlugins":{"epic@epicsagas":true}}'  ;;
     *) echo "ERR: unknown arm $1" >&2; return 1 ;;
   esac
@@ -107,15 +112,27 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
     RC=1; emit_verdict "checkout_failed"; return; fi
 
   local config_dir
-  if [ "$ARM" = "bare" ]; then
-    config_dir="${HOME}/.claudy/modes/bare"
+  if [ "$ARM" = "bare" ] || [ "$ARM" = "bmad" ]; then
+    config_dir="$BARE_MODE_DIR"
     rm -rf "$WORK/.harness" "$WORK/.claude" "$WORK/.agents" "$WORK/CLAUDE.md" "$WORK/AGENTS.md" 2>/dev/null || true
   else
-    config_dir="${HOME}/.claudy/modes/epic-harness"
+    config_dir="$EPIC_MODE_DIR"
   fi
 
   local settings; settings=$(settings_for "$ARM") || return
   local prompt; prompt=$(build_prompt "$ps")
+  # bmad arm: BMAD Method installed into the isolated worktree as project-local
+  # .claude/skills/bmad-*; epic plugin disabled like bare. Only BMAD differs from bare.
+  if [ "$ARM" = "bmad" ]; then
+    if [ "$DRY_RUN" != "1" ]; then
+      ( cd "$WORK" && timeout 300 npx -y "$BMAD_PKG" install --directory "$WORK" \
+          --modules bmm --tools claude-code --yes </dev/null >"$RUNS_DIR/bmad/${IID}_${SEED}.install.log" 2>&1 ) \
+        || echo "[$IID/$ARM/seed$SEED] WARN: bmad install failed (see install.log)" >&2
+    fi
+    prompt="Use the bmad-build skill (/bmad-build) to make this change, following its workflow end to end.
+
+$prompt"
+  fi
   local start end
   # shellcheck disable=SC2086  # settings is a single --settings arg
   if [ "$DRY_RUN" = "1" ]; then
