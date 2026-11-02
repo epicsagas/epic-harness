@@ -24,6 +24,18 @@ pytest grading) before committing to ~$100+ of SWE-bench instances:
 2. The bare/epic toggle works (observable via the `input_tokens` overhead delta).
 3. pass@1, cost, turns, and latency are all capturable from claude's JSON output.
 
+### Third arm: BMAD Method (ADR-003, 008 §7)
+
+`ARMS="bare epic bmad"` adds a cell that installs BMAD Method (`BMAD_PKG`, default
+`bmad-method@6`) into the isolated workdir as project-local `.claude/skills/bmad-*`
+and launches `claudy <profile> --bare` with the prompt prefixed to invoke
+`bmad-build`. Bare strips the epic plugin, so BMAD skills are the only delta
+against the bare arm. Install output lands in `<workdir>/bmad-install.log`.
+
+```bash
+ARMS="bare epic bmad" ./benchmarks/ab/run_smoke.sh benchmarks/ab/tasks/task3-security-auth-token 15 zai
+```
+
 ## Layout
 
 ```

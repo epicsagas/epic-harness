@@ -32,6 +32,8 @@ MAX_TURNS="${2:-15}"
 COST_CAP="${COST_CAP:-5.0}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-600}"
 DRY_RUN="${DRY_RUN:-0}"
+ARMS="${ARMS:-bare epic}"   # add "bmad" for the BMAD Method arm (ADR-003 / 008 §7)
+BMAD_PKG="${BMAD_PKG:-bmad-method@6}"
 
 TASK_NAME="$(basename "$TASK_DIR")"
 PROMPT_FILE="$TASK_DIR/task.md"
@@ -94,6 +96,21 @@ run_arm() {  # $1=arm  $2=extra_flag  $3=profile
   chmod -R u+w "$work"
   echo "[$TASK_NAME/$profile/$arm] workdir=$work" >&2
 
+  # bmad arm: install BMAD Method into the isolated workdir (project-local
+  # .claude/skills/bmad-*), then run with --bare so the epic plugin is NOT
+  # loaded. Only the BMAD skills differ from the bare arm.
+  local prompt="$PROMPT"
+  if [ "$arm" = "bmad" ]; then
+    if [ "$DRY_RUN" != "1" ]; then
+      ( cd "$work" && timeout 300 npx -y "$BMAD_PKG" install --directory "$work" \
+          --modules bmm --tools claude-code --yes </dev/null >"$work/bmad-install.log" 2>&1 ) \
+        || { echo "[$TASK_NAME/$profile/$arm] ERR: bmad install failed (see $work/bmad-install.log)" >&2; }
+    fi
+    prompt="Use the bmad-build skill (/bmad-build) to make this change, following its workflow end to end.
+
+$PROMPT"
+  fi
+
   # sanity: tests must FAIL before the agent runs (validates the fixture)
   if (cd "$work" && python3 -m pytest -q >/dev/null 2>&1); then
     echo "[$TASK_NAME/$profile/$arm] WARN: tests pass pre-run — fixture is not failing" >&2
@@ -121,7 +138,7 @@ run_arm() {  # $1=arm  $2=extra_flag  $3=profile
   # Launch inside the per-arm workdir so the agent edits the isolated copy,
   # not the shared template. ($out/$err are absolute, stay valid after cd.)
   # shellcheck disable=SC2086  # $extra_flag intentional: "" must vanish, "--bare" must be one arg
-  ( cd "$work" && timeout "$RUN_TIMEOUT" claudy "$profile" $extra_flag -p "$PROMPT" \
+  ( cd "$work" && timeout "$RUN_TIMEOUT" claudy "$profile" $extra_flag -p "$prompt" \
       --output-format json --max-turns "$MAX_TURNS" \
       --permission-mode bypassPermissions \
       >"$out" 2>"$err" )
@@ -170,7 +187,7 @@ run_arm() {  # $1=arm  $2=extra_flag  $3=profile
       profile:$profile, model:$model, family:$family, workdir:$work}'
 }
 
-echo "=== A/B smoke: $TASK_NAME (models=[${MODELS_LIST[*]}] max_turns=$MAX_TURNS cost_cap=\$$COST_CAP dry=$DRY_RUN) ===" >&2
+echo "=== A/B smoke: $TASK_NAME (models=[${MODELS_LIST[*]}] arms=[$ARMS] max_turns=$MAX_TURNS cost_cap=\$$COST_CAP dry=$DRY_RUN) ===" >&2
 
 # --- main loop: profiles × arms. profile outer, arm inner (log adjacency, abort-safe). ---
 RESULTS=()
@@ -182,8 +199,8 @@ for profile in "${MODELS_LIST[@]}"; do
   fi
   resolve_profile "$profile"
   RAN_PROFILES+=( "$profile" )
-  for arm in bare epic; do
-    if [ "$arm" = "bare" ]; then extra="--bare"; else extra=""; fi
+  for arm in $ARMS; do
+    case "$arm" in bare|bmad) extra="--bare" ;; epic) extra="" ;; *) echo "ERR: unknown arm $arm" >&2; exit 2 ;; esac
     result="$(run_arm "$arm" "$extra" "$profile")"
     echo "$result" > "$TASK_DIR/result-${profile}-${arm}.json"
     RESULTS+=( "$result" )
@@ -202,7 +219,7 @@ fi
 # --- combined comparison table (all ran profiles × arms) ---
 NMODELS=${#RAN_PROFILES[@]}
 {
-  echo "## $TASK_NAME — bare vs epic ($NMODELS model$([ "$NMODELS" = "1" ] || echo s))"
+  echo "## $TASK_NAME — ${ARMS// / vs } ($NMODELS model$([ "$NMODELS" = "1" ] || echo s))"
   echo ""
   echo "| family | model | profile | arm | pass@1 | cost(\$) | turns | dur(ms) | input_tok | wall(s) | capped |"
   echo "|--------|-------|---------|-----|--------|---------|-------|---------|-----------|---------|--------|"
