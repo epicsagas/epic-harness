@@ -127,6 +127,10 @@ warned:
   - pattern: docker\s+system\s+prune | msg: Docker prune — check first
 ```
 
+## Project Overrides
+
+Teams commit `.epic/team.md` (and gitignored `.epic/team.local.md`) beside the code; `_dispatch` loads them before every pipeline skill. See `docs/project-overrides.md`.
+
 ## Cross-Project Learning
 
 Opt-in by creating `~/.harness/projects/{slug}/.cross-project-enabled`.
