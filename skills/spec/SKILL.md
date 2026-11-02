@@ -22,6 +22,7 @@ description: "Spec phase. Converts user requirements into a numbered Requirement
    - **Requirements**: Numbered list (`R1`, `R2`, ...) of concrete, testable behaviors
    - **Acceptance criteria**: Numbered list (`AC1`, `AC2`, ...) — observable outcomes that prove each requirement is met
    - **Technical notes**: Constraints, dependencies, edge cases
+   - **Right-size**: for a one-shot change (1–2 requirements) keep Scope and Technical Notes to one line each. Never skip the file, the gate, or the two record sections below; a small change with no record is how decisions get invented twice.
 
 3. **Readiness gate** (adversarial, one pass, before approval)
    Ask one question of the draft: *could a different engineer implement this spec without inventing a decision that nothing records?*
@@ -63,6 +64,13 @@ goal_slug: {kebab-case-goal-summary}
 
 ## Technical Notes
 {Constraints, dependencies, edge cases}
+
+## Readiness Gate
+{One line per gap found in step 3, each with how it was settled, or `none`:}
+- GAP: R{n} — {decision the spec did not settle} → settled: {answer, and who decided: user | assumption}
+
+## Implementation Notes
+<!-- Agent-owned. Append-only during /go: decisions the spec left open, files touched beyond the plan, surprises. Empty at approval. Sections above this line are frozen after approval. -->
 ```
 
 After saving:
@@ -84,7 +92,8 @@ After saving:
 - [ ] Spec file exists at `$HARNESS_DIR/specs/SPEC-{timestamp}.md`
 - [ ] Frontmatter has `status: approved`
 - [ ] Every Requirement has at least one Acceptance Criterion
-- [ ] Readiness gate run once; `GAP:` list is empty or every gap was resolved into the spec
+- [ ] Readiness gate run once; every gap and its resolution is recorded under `## Readiness Gate` (or `none`)
+- [ ] `## Implementation Notes` present and empty
 - [ ] ACs are observable (can be tested or verified)
 
 ## Red Flags
