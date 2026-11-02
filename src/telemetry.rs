@@ -3,7 +3,7 @@
 
 /// epic-harness telemetry — PostHog (product analytics) + Sentry (error monitoring)
 ///
-/// Architecture decision: epiccounty/reports/telemetry_sentry_posthog_architecture_2026-04-29.md
+/// Architecture decision: internal ADR, telemetry architecture (2026-04-29)
 ///   - PostHog: single project, `product` property for per-product breakdown
 ///   - Sentry:  per-product project (SENTRY_DSN_EPIC_HARNESS)
 ///   - Consent: opt-out (on by default), on/off only
