@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`--version` prints to stdout**: `epic-harness --version`, `-v` and the
+  `version` subcommand wrote to stderr, so `$(epic-harness --version)` was
+  empty. Now stdout, with an integration test pinning stdout/stderr/exit code.
 - **Green test runs no longer recorded as failures**: the `test_fail`
   classifier's `test.*fail` pattern matched green cargo summaries
   ("test result: ok. 5 passed; 0 failed;"), poisoning every Rust project's

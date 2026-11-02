@@ -68,7 +68,7 @@ fn main() {
     let subcmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     if subcmd == "--version" || subcmd == "-v" {
-        eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
+        println!("epic-harness {}", env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
     }
 
@@ -264,7 +264,7 @@ fn main() {
             0
         }
         "version" => {
-            eprintln!("epic-harness {}", env!("CARGO_PKG_VERSION"));
+            println!("epic-harness {}", env!("CARGO_PKG_VERSION"));
             0
         }
         _ => {
