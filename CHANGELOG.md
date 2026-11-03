@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **polish no longer reformats Python projects that never adopted a
+  formatter**: the PostToolUse polish hook ran `ruff format` (or `black`) on
+  every edited `.py` file regardless of project config, turning a 1.8 KB fix
+  into a 61 KB whole-file rewrite in the SWE-bench pilot. It now runs only the
+  formatter the project opts into (`ruff.toml`, `.ruff.toml`,
+  `[tool.ruff]`, or `[tool.black]` in `pyproject.toml`), matching the JS gate.
+- **audit flags over-edits**: Step 1 adds `git diff --numstat` with an
+  over-edit threshold, and audit:code adds a Diff minimality dimension that
+  marks formatting-only hunks as WARN.
 - **`--version` prints to stdout**: `epic-harness --version`, `-v` and the
   `version` subcommand wrote to stderr, so `$(epic-harness --version)` was
   empty. Now stdout, with an integration test pinning stdout/stderr/exit code.

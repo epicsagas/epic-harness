@@ -193,13 +193,30 @@ fn check_ts(file_path: &str, wd: &Path) {
     }
 }
 
-fn format_python(file_path: &str, wd: &Path) {
-    let formatter = if try_exec_args("ruff", &["format", file_path], wd).is_some() {
+/// The Python formatter the project has opted into, if any.
+///
+/// Mirrors the JS gate (biome/prettier config required): running a formatter
+/// the project never adopted rewrites the whole file and buries a small fix in
+/// unrelated churn (a 1.8 KB fix shipped as a 61 KB diff in the SWE-bench pilot).
+fn python_formatter(wd: &Path) -> Option<&'static str> {
+    if wd.join("ruff.toml").is_file() || wd.join(".ruff.toml").is_file() {
+        return Some("ruff");
+    }
+    let pyproject = std::fs::read_to_string(wd.join("pyproject.toml")).ok()?;
+    if pyproject.contains("[tool.ruff.format]") || pyproject.contains("[tool.ruff]") {
         Some("ruff")
-    } else if try_exec_args("black", &[file_path], wd).is_some() {
+    } else if pyproject.contains("[tool.black]") {
         Some("black")
     } else {
         None
+    }
+}
+
+fn format_python(file_path: &str, wd: &Path) {
+    let formatter = match python_formatter(wd) {
+        Some("ruff") => try_exec_args("ruff", &["format", file_path], wd).map(|_| "ruff"),
+        Some("black") => try_exec_args("black", &[file_path], wd).map(|_| "black"),
+        _ => None,
     };
     if let Some(name) = formatter {
         let fname = Path::new(file_path)
@@ -339,6 +356,49 @@ mod tests {
     /// Verify that `try_exec_args` does NOT interpret shell metacharacters in
     /// the path argument.  A path containing `; touch INJECTED` would create
     /// a sentinel file if passed through `sh -c`; it must not happen here.
+    #[test]
+    fn python_formatter_requires_project_opt_in() {
+        let dir = tempdir().unwrap();
+        assert_eq!(
+            python_formatter(dir.path()),
+            None,
+            "no config: never format"
+        );
+
+        std::fs::write(
+            dir.path().join("pyproject.toml"),
+            "[project]\nname = \"x\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            python_formatter(dir.path()),
+            None,
+            "pyproject without formatter section"
+        );
+
+        std::fs::write(
+            dir.path().join("pyproject.toml"),
+            "[tool.black]\nline-length = 88\n",
+        )
+        .unwrap();
+        assert_eq!(python_formatter(dir.path()), Some("black"));
+
+        std::fs::write(
+            dir.path().join("pyproject.toml"),
+            "[tool.ruff]\n[tool.black]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            python_formatter(dir.path()),
+            Some("ruff"),
+            "ruff wins when both present"
+        );
+
+        std::fs::remove_file(dir.path().join("pyproject.toml")).unwrap();
+        std::fs::write(dir.path().join("ruff.toml"), "").unwrap();
+        assert_eq!(python_formatter(dir.path()), Some("ruff"));
+    }
+
     #[test]
     fn try_exec_args_no_shell_injection() {
         let dir = tempdir().unwrap();
