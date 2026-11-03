@@ -121,7 +121,9 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
   local config_dir
   if [ "$ARM" = "bare" ] || [ "$ARM" = "bmad" ]; then
     config_dir="$BARE_MODE_DIR"
-    rm -rf "$WORK/.harness" "$WORK/.claude" "$WORK/.agents" "$WORK/CLAUDE.md" "$WORK/AGENTS.md" 2>/dev/null || true
+    # strip harness artifacts only; the repo's own AGENTS.md/CLAUDE.md stay in both
+    # arms (deleting them in bare alone made epic carry ~6k extra prefix tokens)
+    rm -rf "$WORK/.harness" "$WORK/.claude" "$WORK/.agents" 2>/dev/null || true
   else
     config_dir="$EPIC_MODE_DIR"
   fi

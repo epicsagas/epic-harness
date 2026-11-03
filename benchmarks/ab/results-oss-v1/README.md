@@ -10,7 +10,19 @@
 - Unresolved by both: epic-harness 691e9dbd, b387ff80; llm-transpile ca68e21f; llm-kernel ddb35602.
 - Discordant, one each way: AgentGlance bd0564e9 (epic only; bare missed the environment-variable fallback path) and llm-kernel 1d221fc8 (bare only; epic's span fix still split an escape pair). Exact McNemar p = 1.0.
 - Unlike the SWE-bench Verified run, cells explore before editing (typically 4 to 14 turns, 1 to 8 minutes), consistent with the tasks not being recalled.
-- epic cost 27% more for the same resolve rate.
+- epic cost 27% more for the same resolve rate. See the cost breakdown below: most of it is a runner confound, not epic.
+
+## Cost breakdown
+
+Output tokens are about equal (30.2k bare, 31.7k epic) and epic made fewer tool calls (63 versus 76). The gap is the per-turn context prefix, re-read from cache every turn: the first-turn prefix median is 23.6k tokens for bare and 33.7k for epic. From the session transcripts, the extra ~10k tokens per cell split as:
+
+| Source | Tokens per cell | Share | Attributable to |
+|---|---|---|---|
+| The repo's own `AGENTS.md` / `CLAUDE.md` | ~6.4k | ~2/3 | the runner: `run_swebench.sh` deletes these files only in the bare arm |
+| epic plugin skill listing | ~2.7k | ~1/4 | epic |
+| `resume` hook additional context | ~0.6k | small | epic |
+
+epic's own overhead is therefore about 3.3k tokens of prefix per session, roughly 9% of cost on these tasks. The runner confound did not exist on SWE-bench (those repos have no agent instruction files). Future runs should keep the repo's instruction files in both arms and strip only harness artifacts (`.harness`, `.claude`, `.agents`).
 
 ## Conclusion
 
