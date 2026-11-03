@@ -12,7 +12,7 @@
 # Usage:
 #   MANIFEST=manifest.jsonl ./run_swebench.sh                 # real run
 #   MANIFEST=manifest.jsonl DRY_RUN=1 ./run_swebench.sh       # validate mechanics, no model call
-# Env: ARMS (bare,epic)  SEEDS (1)  PROFILE (zai)  MAX_TURNS (50)  RUN_TIMEOUT (1800)
+# Env: ARMS (bare,epic)  SEEDS (1)  PROFILE (zai)  MODEL (profile default)  MAX_TURNS (50)  RUN_TIMEOUT (1800)
 #      COST_CAP (5.0)  CLONE_CACHE  RUNS_DIR  PREDS_DIR  VERDICTS  KEEP_WORKDIR (0)
 set -uo pipefail
 
@@ -24,6 +24,7 @@ BARE_MODE_DIR="${BARE_MODE_DIR:-$HOME/.claudy/modes/bare}"   # claudy mode with 
 EPIC_MODE_DIR="${EPIC_MODE_DIR:-$HOME/.claudy/modes/epic}"   # claudy mode with epic@epicsagas installed
 SEEDS="${SEEDS:-1}"
 PROFILE="${PROFILE:-zai}"
+MODEL="${MODEL:-}"                # e.g. sonnet; empty = the profile's default model
 MAX_TURNS="${MAX_TURNS:-50}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-1800}"
 COST_CAP="${COST_CAP:-5.0}"
@@ -84,9 +85,9 @@ emit_verdict() {  # many fields via globals; failure_mode via $1
     --arg arm "$ARM" --arg seed "$SEED" --arg failure_mode "$1" \
     --argjson cost "${COST:-0}" --argjson turns "${TURNS:-0}" --argjson is_error "${IS_ERR:-false}" \
     --argjson rc "${RC:-0}" --argjson patch_bytes "${PATCH_BYTES:-0}" \
-    --arg ndjson "$NDJSON" --arg workdir "$WORK" --arg profile "$PROFILE" \
+    --arg ndjson "$NDJSON" --arg workdir "$WORK" --arg profile "$PROFILE" --arg model "$MODEL" \
     '{instance_id:$instance_id, repo:$repo, band:$band, host_arch:$host_arch,
-      arm:$arm, seed:$seed, profile:$profile, failure_mode:$failure_mode,
+      arm:$arm, seed:$seed, profile:$profile, model:$model, failure_mode:$failure_mode,
       cost_usd:$cost, num_turns:$turns, is_error:$is_error, rc:$rc,
       patch_bytes:$patch_bytes, ndjson_path:$ndjson, workdir:$workdir}' >> "$VERDICTS"
 }
@@ -141,7 +142,7 @@ $prompt"
   else
     start=$(date +%s)
     ( cd "$WORK" && CLAUDE_CONFIG_DIR="$config_dir" timeout "$RUN_TIMEOUT" \
-        claudy "$PROFILE" --settings "$settings" --verbose --output-format stream-json \
+        claudy "$PROFILE" ${MODEL:+--model "$MODEL"} --settings "$settings" --verbose --output-format stream-json \
         -p "$prompt" --max-turns "$MAX_TURNS" --permission-mode bypassPermissions \
         < /dev/null > "$NDJSON" 2>&1 )
     RC=$?
@@ -169,7 +170,7 @@ $prompt"
   fi
 }
 
-echo "=== run_swebench: manifest=$MANIFEST arms=$ARMS seeds=$SEEDS profile=$PROFILE max_turns=$MAX_TURNS arch=$HOST_ARCH dry=$DRY_RUN ===" >&2
+echo "=== run_swebench: manifest=$MANIFEST arms=$ARMS seeds=$SEEDS profile=$PROFILE model=${MODEL:-default} max_turns=$MAX_TURNS arch=$HOST_ARCH dry=$DRY_RUN ===" >&2
 while IFS= read -r line; do
   [ -z "$line" ] && continue
   for arm in ${ARMS//,/ }; do
