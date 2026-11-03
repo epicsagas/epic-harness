@@ -13,7 +13,7 @@
 #   MANIFEST=manifest.jsonl ./run_swebench.sh                 # real run
 #   MANIFEST=manifest.jsonl DRY_RUN=1 ./run_swebench.sh       # validate mechanics, no model call
 # Env: ARMS (bare,epic)  SEEDS (1)  PROFILE (zai)  MODEL (profile default)  MAX_TURNS (50)  RUN_TIMEOUT (1800)
-#      COST_CAP (5.0)  CLONE_CACHE  RUNS_DIR  PREDS_DIR  VERDICTS  KEEP_WORKDIR (0)
+#      SNAPSHOT (0)  COST_CAP (5.0)  CLONE_CACHE  RUNS_DIR  PREDS_DIR  VERDICTS  KEEP_WORKDIR (0)
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,6 +25,7 @@ EPIC_MODE_DIR="${EPIC_MODE_DIR:-$HOME/.claudy/modes/epic}"   # claudy mode with 
 SEEDS="${SEEDS:-1}"
 PROFILE="${PROFILE:-zai}"
 MODEL="${MODEL:-}"                # e.g. sonnet; empty = the profile's default model
+SNAPSHOT="${SNAPSHOT:-0}"          # 1 = history-free snapshot of base_commit (no git history to leak the fix)
 MAX_TURNS="${MAX_TURNS:-50}"
 RUN_TIMEOUT="${RUN_TIMEOUT:-1800}"
 COST_CAP="${COST_CAP:-5.0}"
@@ -107,9 +108,14 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
 
   if ! ensure_clone "$REPO"; then
     RC=1; emit_verdict "clone_failed"; return; fi
+  if [ "$SNAPSHOT" = "1" ]; then
+    # history-free snapshot: the base tree as a single commit, so `git log --all`
+    # cannot reveal the fix commit (the mirror holds the repo's later history).
+    if ! git -C "$CLONE_CACHE/$safe.git" archive "$base" | tar -x -C "$WORK"; then
+      RC=1; emit_verdict "checkout_failed"; return; fi
   # linked worktree at base_commit: shares the mirror's objects (no hardlink/copy),
   # cross-device safe, fresh isolated working tree per cell.
-  if ! git -C "$CLONE_CACHE/$safe.git" worktree add --detach --quiet "$WORK" "$base"; then
+  elif ! git -C "$CLONE_CACHE/$safe.git" worktree add --detach --quiet "$WORK" "$base"; then
     RC=1; emit_verdict "checkout_failed"; return; fi
 
   local config_dir
@@ -118,6 +124,11 @@ run_cell() {  # $1=arm  $2=instance-json-line  $3=seed
     rm -rf "$WORK/.harness" "$WORK/.claude" "$WORK/.agents" "$WORK/CLAUDE.md" "$WORK/AGENTS.md" 2>/dev/null || true
   else
     config_dir="$EPIC_MODE_DIR"
+  fi
+  if [ "$SNAPSHOT" = "1" ]; then
+    # commit after the bare-arm removals so they never show up in the captured diff
+    ( cd "$WORK" && git init -q && git add -A && git -c user.name=bench -c user.email=bench@localhost commit -qm base ) \
+      || { RC=1; emit_verdict "checkout_failed"; return; }
   fi
 
   local settings; settings=$(settings_for "$ARM") || return
