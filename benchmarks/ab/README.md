@@ -126,6 +126,12 @@ configured (fail-soft) and real failures surface per-cell.
   podman socket). One gotcha: a `~/.docker/config.json` with `credsStore: "desktop"` breaks
   pulls/builds (`docker-credential-desktop not installed`); use a clean `DOCKER_CONFIG`.
   These smoke tasks use plain `pytest` so no container is needed here.
+- Grading on an arm64 host works with the prebuilt x86_64 images under Rosetta
+  (OrbStack verified). The SDK pull inside `swebench` does not pass a platform and
+  fails with 404, so pre-pull each image with
+  `docker pull --platform linux/amd64 swebench/sweb.eval.x86_64.<repo>_1776_<id>:latest`,
+  then run `run_evaluation` per arm per instance with `--cache_level instance`. Images are
+  about 4.5 GB each; remove each after its arms are graded. Results: `graded-3arm.jsonl`.
 - `pass@1` from a single run is a feasibility signal, not a statistic.
 - Cross-model rows are **observational**: different models have different token
   pricing and capabilities, so epic's cost/latency overhead is not comparable
