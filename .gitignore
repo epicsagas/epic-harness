@@ -299,3 +299,7 @@ benchmarks/baselines/
 !benchmarks/baselines/latest.json
 # Smoke task run results (model-specific, generated at benchmark time)
 benchmarks/ab/tasks/**/result-*-*.json
+# 3-arm SWE-bench pilot transcripts (33MB NDJSON) and legacy smoke symlinks
+benchmarks/ab/runs-3arm/
+benchmarks/ab/tasks/**/result-bare.json
+benchmarks/ab/tasks/**/result-epic.json
