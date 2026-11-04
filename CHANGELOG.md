@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Spec readiness gate**: `/spec` step 3 and the orbit auto-spec run one
+  adversarial pass before approval and refuse approval while any `GAP:` line
+  is open. Every gap and its resolution is recorded under `## Readiness Gate`
+  in the spec file, with implementation notes added during `/go`.
+- **`.epic/` team overrides**: `_dispatch` loads `.epic/team.md` (committed)
+  and `.epic/team.local.md` (gitignored, wins) on top of the shipped skill
+  defaults. Bullets under a `## <skill>` heading apply to that skill only, and
+  `## spec` bullets are enforced as required spec content by the readiness
+  gate. See `docs/project-overrides.md`.
+
 ### Fixed
 - **polish no longer reformats Python projects that never adopted a
   formatter**: the PostToolUse polish hook ran `ruff format` (or `black`) on

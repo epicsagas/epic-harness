@@ -87,6 +87,8 @@ After the session ends, the **evolve loop** analyzes what broke, generates targe
 ## Installation
 
 > **First time?** Read the [Quick Start Guide (5 min)](docs/quickstart.md).
+>
+> **Team conventions?** Commit `.epic/team.md` beside the code and every engineer and host inherits it. See [Project Overrides](docs/project-overrides.md).
 
 epic-harness ships as a **plugin** — skills, hooks, and the `harness-mem` MCP server are loaded directly from the plugin layout (`skills/`, `hooks.json`, `mcp_config.json`). There is no `install` subcommand; each tool reads the plugin from disk.
 
@@ -415,7 +417,7 @@ Run invisibly on every session. Single Rust binary (`epic-harness`) with subcomm
 |------|------|------|
 | **resume** | Session start | Restore context, load memory, detect stack |
 | **guard** | Before Bash | Block force-push-to-main, `rm -rf /`, DROP prod |
-| **polish** | After Edit | Auto-format (Biome/Prettier/ruff/gofmt) + typecheck |
+| **polish** | After Edit | Auto-format with the formatter the project configures (Biome/Prettier, ruff/black via `ruff.toml` or `pyproject.toml`; gofmt always) + typecheck |
 | **observe** | Every tool use | Log to `~/.harness/projects/{slug}/obs/` for evolution |
 | **snapshot** | Before compact | Save state to `~/.harness/projects/{slug}/sessions/` |
 | **reflect** | Session end | Analyze failures, seed evolved skills, gate |
