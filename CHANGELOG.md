@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Dashboard English labels**: 27 translation keys used by the Topbar,
+  Dashboard, Memory, and Settings pages were missing from `en.ts`, so
+  English (and the fallback for every other locale) rendered raw key names
+  such as `selectProject`. `svelte-check` now reports 0 errors.
+- **Agents page status flash**: the change detector read a nonexistent
+  `state` field, so agent status changes never flashed. It now reads `status`.
+
+### Security
+- Dashboard dev dependencies bumped to patched versions (vite 6.4.5,
+  vitest 5.1.0, undici 7.30.1, source-map-js 1.2.2), clearing 13 Dependabot
+  alerts. No shipped code changes: the dashboard ships as a prebuilt file.
+
+### Changed
+- Dependency bumps: tokio 1.54.1, tauri-plugin-shell 2.6.0, serial_test 4,
+  libc 0.2.191, serde_json 1.0.154, svelte 5.57.3, svelte-check 4.7.8,
+  @vitest/ui 5, @testing-library/jest-dom 7, vite-plugin-singlefile 2.3.4.
+- CI runs the dashboard typecheck (`svelte-check`) and tests, and
+  Dependabot now watches the `/app` npm dependencies.
+
+## [0.8.13] — 2026-11-03
+
+Per-version sections were not cut between 0.8.3 and 0.8.13; the entries
+below cover that whole range.
+
 ### Added
 - **Spec readiness gate**: `/spec` step 3 and the orbit auto-spec run one
   adversarial pass before approval and refuse approval while any `GAP:` line
