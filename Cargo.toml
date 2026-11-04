@@ -47,7 +47,7 @@ tower-http = { version = "0.7", features = ["cors"] }
 
 [dev-dependencies]
 tempfile = "3"
-serial_test = "3"
+serial_test = "4"
 axum-test = "20"
 
 [package.metadata.binstall]
