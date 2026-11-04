@@ -36,6 +36,12 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Dashboard typecheck and tests
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec svelte-check --tsconfig ./tsconfig.json
+          pnpm exec vitest run
 
   test:
     name: Test
