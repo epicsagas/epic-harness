@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Linked worktrees on Windows now share the main checkout's harness identity,
+  using native absolute-path detection for Git's common directory.
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names
