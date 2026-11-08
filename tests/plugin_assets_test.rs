@@ -34,17 +34,7 @@ fn command_handlers(value: &Value) -> Vec<&str> {
 /// Strings that must never appear in a hook command: they either require a
 /// POSIX shell, break under `cmd.exe /C` argv re-escaping (openai/codex#32402),
 /// or reintroduce shell sequencing the launcher exists to remove.
-const FORBIDDEN: &[&str] = &[
-    "$(",
-    "test ",
-    "command -v",
-    ";",
-    "&&",
-    "||",
-    ">",
-    "<",
-    "|",
-];
+const FORBIDDEN: &[&str] = &["$(", "test ", "command -v", ";", "&&", "||", ">", "<", "|"];
 
 /// Shared manifest contract: every handler is exactly `<launcher> <sub>` (one
 /// trailing word) and carries no shell syntax.
