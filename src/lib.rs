@@ -2,6 +2,7 @@ pub mod config;
 pub mod eval;
 pub mod evolve;
 pub mod hooks;
+pub mod live;
 pub mod mem;
 pub mod orchestrate;
 pub mod serve;

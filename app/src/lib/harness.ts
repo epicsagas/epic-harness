@@ -114,6 +114,38 @@ export interface SessionSummary {
   failures: number;
 }
 
+export interface ActivitySession extends SessionSummary {
+  project: string;
+  last_seen: string;
+}
+
+export interface ActivityRun extends OrchestrationRun {
+  project: string;
+  agent_statuses: Record<string, OrchAgentStatus>;
+}
+
+export interface LiveActivity {
+  runs: ActivityRun[];
+  sessions: ActivitySession[];
+  recent_sessions: ActivitySession[];
+  activity_window_seconds: number;
+}
+
+/** Live state never falls back to fabricated development examples. */
+export async function getLiveActivity(project = get(selectedProject)): Promise<LiveActivity> {
+  if (isTauriRuntime()) {
+    return invoke<LiveActivity>('get_live_activity', project && project !== '__all__' ? { project } : undefined);
+  }
+  const query = new URLSearchParams({ cmd: 'get_live_activity' });
+  if (project && project !== '__all__') query.set('project', project);
+  const response = await fetch(`/api/harness?${query}`);
+  if (!response.ok) throw new Error('Live activity unavailable');
+  const data = await response.json();
+  if (!data || data.error || !Array.isArray(data.runs) || !Array.isArray(data.sessions)
+      || !Array.isArray(data.recent_sessions)) throw new Error('Live activity unavailable');
+  return data as LiveActivity;
+}
+
 export interface ToolStat {
   tool: string;
   calls: number;
