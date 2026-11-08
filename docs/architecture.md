@@ -364,8 +364,9 @@ epic-harness/
 ### Tool outcome classification
 
 Observation hooks accept optional `is_error` (boolean) and `exit_code` (integer)
-at the payload root or in `tool_response` / `tool_result` objects. Explicit
-failure wins conflicting signals; explicit success prevents printed source or
+at the payload root or in `tool_response` / `tool_result` objects. All supplied
+outcome fields participate, even when canonical and legacy responses coexist.
+Any explicit failure wins conflicting signals; explicit success prevents printed source or
 logs from becoming a failure. Without metadata, legacy keyword classification
 remains available. PowerShell/pwsh commands share the shell classifier, whose
 read-only guard recognizes common inspection cmdlets and Git object readers.

@@ -393,16 +393,26 @@ fn resolve_action(v: &serde_json::Value) -> String {
 
 /// Prefer host outcome metadata over words printed by a successful tool.
 fn explicit_success(input: &HookInput) -> Option<bool> {
-    let response = input.tool_response.as_ref().or(input.tool_result.as_ref());
-    let is_error = input
-        .is_error
-        .or_else(|| response?.get("is_error")?.as_bool());
-    let exit_code = input
-        .exit_code
-        .or_else(|| response?.get("exit_code")?.as_i64());
-    if is_error == Some(true) || exit_code.is_some_and(|code| code != 0) {
+    let response_outcome = |response: Option<&serde_json::Value>| {
+        (
+            response.and_then(|value| value.get("is_error")?.as_bool()),
+            response.and_then(|value| value.get("exit_code")?.as_i64()),
+        )
+    };
+    let signals = [
+        (input.is_error, input.exit_code),
+        response_outcome(input.tool_response.as_ref()),
+        response_outcome(input.tool_result.as_ref()),
+    ];
+    if signals
+        .iter()
+        .any(|(is_error, code)| *is_error == Some(true) || code.is_some_and(|code| code != 0))
+    {
         Some(false)
-    } else if is_error == Some(false) || exit_code == Some(0) {
+    } else if signals
+        .iter()
+        .any(|(is_error, code)| *is_error == Some(false) || *code == Some(0))
+    {
         Some(true)
     } else {
         None
@@ -683,6 +693,29 @@ mod tests {
         .unwrap();
         assert_eq!(super::explicit_success(&silent_failure), Some(false));
         assert_eq!(super::explicit_success(&super::HookInput::default()), None);
+    }
+
+    #[test]
+    fn explicit_failure_wins_across_all_metadata_sources() {
+        for payload in [
+            serde_json::json!({"is_error": false, "tool_response": {"is_error": true}}),
+            serde_json::json!({"exit_code": 0, "tool_response": {"exit_code": 7}}),
+            serde_json::json!({"is_error": true, "tool_response": {"is_error": false}}),
+            serde_json::json!({"exit_code": 7, "tool_response": {"exit_code": 0}}),
+            serde_json::json!({"tool_response": {"exit_code": 0}, "tool_result": {"is_error": true}}),
+            serde_json::json!({"tool_response": {"is_error": true}, "tool_result": {"exit_code": 0}}),
+        ] {
+            let input = serde_json::from_value(payload).unwrap();
+            assert_eq!(super::explicit_success(&input), Some(false));
+        }
+        let successful = serde_json::from_value(serde_json::json!({
+            "is_error": false,
+            "exit_code": 0,
+            "tool_response": {"is_error": false, "exit_code": 0},
+            "tool_result": {"is_error": false, "exit_code": 0}
+        }))
+        .unwrap();
+        assert_eq!(super::explicit_success(&successful), Some(true));
     }
     use super::*;
     use serial_test::serial;

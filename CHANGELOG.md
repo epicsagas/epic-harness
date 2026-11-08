@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Explicit failure wins conflicting success metadata across top-level,
+  canonical `tool_response`, and legacy `tool_result` outcome fields.
 - Observation classification honors explicit tool outcome metadata, recognizes
   PowerShell reads, and avoids false failures from quoted source and zero
   timeout counts. Stored result and success dimensions remain consistent (#144).
