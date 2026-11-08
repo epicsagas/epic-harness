@@ -33,7 +33,7 @@ fn project_directory_link_cannot_escape_root() {
     let outside = temp.path().join("outside");
     std::fs::create_dir_all(root.join("projects/valid")).unwrap();
     std::fs::create_dir(&outside).unwrap();
-    let link = root.join("projects/escape");
+    let link = root.join("projects").join("escape");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside, &link).unwrap();
     #[cfg(windows)]
