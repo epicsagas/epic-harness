@@ -47,14 +47,14 @@ pub fn mask_path_action(path: &str) -> String {
     // full `mask_secrets` here would apply the path mask and collapse
     // `src/b.py` to `src<PATH>`, which is the very thing this function exists
     // to prevent.
-    let rel = if p.is_relative() {
+    let rel = if p.is_relative() && !p.has_root() {
         std::borrow::Cow::Borrowed(path)
     } else {
         match p.strip_prefix(crate::shared::paths::cwd()) {
             Ok(r) => std::borrow::Cow::Owned(r.to_string_lossy().into_owned()),
-            // Absolute and outside the project: mask it in full, `<PATH>`
-            // included.
-            Err(_) => return mask_secrets(path),
+            // This field is already one complete outside path. Mask it in
+            // full instead of parsing fragments with the free-text regex.
+            Err(_) => return "<PATH>".to_string(),
         }
     };
 
@@ -77,6 +77,34 @@ pub fn mask_secrets(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn rooted_windows_actions_are_masked() {
+        let path = "/home/example/private/file.rs";
+        assert!(std::path::Path::new(path).is_relative());
+        assert!(std::path::Path::new(path).has_root());
+        assert_eq!(mask_path_action(path), "<PATH>");
+        assert_eq!(mask_path_action("src/file.rs"), "src/file.rs");
+        for path in [
+            r"\\example-server\private-share\example-user\file.txt",
+            r"\Users\example-user\private\file.txt",
+            r"\\?\UNC\example-server\private-share\example-user\file.txt",
+        ] {
+            assert_eq!(mask_path_action(path), "<PATH>");
+        }
+    }
+
+    #[test]
+    fn outside_native_actions_are_masked_in_full() {
+        let outside = tempfile::tempdir().unwrap();
+        let path = outside
+            .path()
+            .join("private directory with spaces/file.txt");
+        assert_eq!(mask_path_action(&path.to_string_lossy()), "<PATH>");
+        assert_eq!(mask_path_action("src/a.rs"), "src/a.rs");
+        assert_eq!(mask_path_action("src/b.rs"), "src/b.rs");
+    }
 
     /// Two files in the project must stay distinguishable after sanitizing.
     /// Masking an absolute path alone turns every one of them into `<PATH>`,

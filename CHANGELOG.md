@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Outside file-path actions are masked in full, including Windows UNC/rooted
+  paths and paths containing spaces; project-relative actions remain distinct.
+- On Windows, rooted paths without a drive (such as `/home/user/file`) no
+  longer bypass observation action masking as ordinary relative paths.
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names
