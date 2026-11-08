@@ -47,7 +47,7 @@ pub fn mask_path_action(path: &str) -> String {
     // full `mask_secrets` here would apply the path mask and collapse
     // `src/b.py` to `src<PATH>`, which is the very thing this function exists
     // to prevent.
-    let rel = if p.is_relative() {
+    let rel = if p.is_relative() && !p.has_root() {
         std::borrow::Cow::Borrowed(path)
     } else {
         match p.strip_prefix(crate::shared::paths::cwd()) {

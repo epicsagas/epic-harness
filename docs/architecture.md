@@ -360,3 +360,11 @@ epic-harness/
 ├── src-tauri/         # Desktop dashboard shell
 └── AGENTS.md          # Project context
 ```
+
+### Windows action path masking
+
+Observation actions keep ordinary project-relative filenames distinct. A rooted
+path without a drive, such as `/home/example/file.rs`, is not an ordinary
+relative filename on Windows and is sent through the outside-path mask. The
+cross-platform `outside_paths_are_still_masked` regression also runs in Windows
+source verification.
