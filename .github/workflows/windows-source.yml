@@ -32,7 +32,7 @@ jobs:
               if ($LASTEXITCODE) { exit $LASTEXITCODE }
             }
           }
-          foreach ($filter in @('powershell_reads_do_not_classify_quoted_failures', 'authoritative_outcomes_override_printed_keywords', 'rooted_windows_actions_are_masked')) {
+          foreach ($filter in @('powershell_reads_do_not_classify_quoted_failures', 'authoritative_outcomes_override_printed_keywords', 'rooted_windows_actions_are_masked', 'outside_native_actions_are_masked_in_full', 'explicit_failure_wins_across_all_metadata_sources')) {
             cargo test -p epic-harness $filter
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }
