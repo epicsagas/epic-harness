@@ -2,24 +2,16 @@
   "epic": {
     "PreInvocation": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "epic resume"
-          }
-        ],
-        "description": "Restore session context and load memory"
+        "type": "command",
+        "command": "node registry/scripts/hooks/antigravity.mjs resume",
+        "timeout": 30
       }
     ],
     "PostInvocation": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "epic reflect"
-          }
-        ],
-        "description": "Analyze session observations and evolve skills"
+        "type": "command",
+        "command": "node registry/scripts/hooks/antigravity.mjs reflect",
+        "timeout": 30
       }
     ]
   }

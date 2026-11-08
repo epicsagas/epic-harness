@@ -118,6 +118,9 @@ agy plugin enable epic
 
 Skills (25), hooks, and the `harness-mem` MCP server are auto-discovered from the plugin's `plugin.json` + `skills/` + `hooks.json` + `mcp_config.json`.
 
+See [Antigravity integration](docs/antigravity.md) for payload contracts and
+migrating an existing global hook workaround without duplicate invocations.
+
 ### Binary-only (no plugin host)
 
 ```bash
