@@ -28,8 +28,8 @@ pub fn project_slug() -> String {
         {
             let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
             // Absolute path → linked worktree; derive project root from common .git dir.
-            if raw.starts_with('/') {
-                let common_git = PathBuf::from(&raw);
+            let common_git = PathBuf::from(&raw);
+            if common_git.is_absolute() {
                 // common_git = /main/repo/.git  →  parent = /main/repo
                 if let Some(repo_root) = common_git.parent() {
                     let name = repo_root
