@@ -98,7 +98,9 @@ mod tests {
     #[test]
     fn outside_native_actions_are_masked_in_full() {
         let outside = tempfile::tempdir().unwrap();
-        let path = outside.path().join("private directory with spaces/file.txt");
+        let path = outside
+            .path()
+            .join("private directory with spaces/file.txt");
         assert_eq!(mask_path_action(&path.to_string_lossy()), "<PATH>");
         assert_eq!(mask_path_action("src/a.rs"), "src/a.rs");
         assert_eq!(mask_path_action("src/b.rs"), "src/b.rs");
