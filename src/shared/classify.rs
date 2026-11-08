@@ -73,9 +73,8 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    static ZERO_TIMEOUT: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(?i)\btimeout["']?\s*[:=]\s*["']?0\b"#).unwrap()
-    });
+    static ZERO_TIMEOUT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"(?i)\btimeout["']?\s*[:=]\s*["']?0\b"#).unwrap());
     let sample = ZERO_TIMEOUT.replace_all(truncate_str(output, 2000), "");
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(&sample) {
@@ -338,12 +337,21 @@ mod tests {
             "git ls-tree HEAD",
         ] {
             assert!(super::is_read_only_command(command), "{command}");
-            assert_eq!(super::classify_bash_failure(command, "Assert.Equal(1, 1); timeout", "", true), None);
+            assert_eq!(
+                super::classify_bash_failure(command, "Assert.Equal(1, 1); timeout", "", true),
+                None
+            );
         }
         assert!(!super::is_read_only_command("Get-Content a; cargo test"));
-        assert_eq!(super::classify_failure("LegacyCompleteTimeoutMilliseconds"), None);
+        assert_eq!(
+            super::classify_failure("LegacyCompleteTimeoutMilliseconds"),
+            None
+        );
         assert_eq!(super::classify_failure("timeout: 0"), None);
-        assert_eq!(super::classify_failure("request timed out"), Some("timeout"));
+        assert_eq!(
+            super::classify_failure("request timed out"),
+            Some("timeout")
+        );
     }
     use super::*;
 

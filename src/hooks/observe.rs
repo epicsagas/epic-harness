@@ -394,8 +394,12 @@ fn resolve_action(v: &serde_json::Value) -> String {
 /// Prefer host outcome metadata over words printed by a successful tool.
 fn explicit_success(input: &HookInput) -> Option<bool> {
     let response = input.tool_response.as_ref().or(input.tool_result.as_ref());
-    let is_error = input.is_error.or_else(|| response?.get("is_error")?.as_bool());
-    let exit_code = input.exit_code.or_else(|| response?.get("exit_code")?.as_i64());
+    let is_error = input
+        .is_error
+        .or_else(|| response?.get("is_error")?.as_bool());
+    let exit_code = input
+        .exit_code
+        .or_else(|| response?.get("exit_code")?.as_i64());
     if is_error == Some(true) || exit_code.is_some_and(|code| code != 0) {
         Some(false)
     } else if is_error == Some(false) || exit_code == Some(0) {
@@ -494,7 +498,11 @@ pub fn run(input: &HookInput) -> i32 {
         record.failure_category = if outcome == Some(true) {
             None
         } else if outcome == Some(false) {
-            Some(classify_failure(&combined).unwrap_or("runtime_error").to_string())
+            Some(
+                classify_failure(&combined)
+                    .unwrap_or("runtime_error")
+                    .to_string(),
+            )
         } else if tool_cat == "bash" {
             let cmd = input
                 .tool_input
@@ -576,7 +584,11 @@ pub fn run(input: &HookInput) -> i32 {
         } else if record.failure_category.is_some() && dims.tool_success == 1.0 {
             dims.output_quality = failure_quality(record.failure_category.as_deref());
         }
-        dims.tool_success = if record.failure_category.is_none() { 1.0 } else { 0.0 };
+        dims.tool_success = if record.failure_category.is_none() {
+            1.0
+        } else {
+            0.0
+        };
         record.dimensions = Some(dims);
         record.score = Some(compute_score(&dims));
 
@@ -657,15 +669,18 @@ mod tests {
     fn authoritative_outcomes_override_printed_keywords() {
         let successful: super::HookInput = serde_json::from_value(serde_json::json!({
             "tool_response": {"output": "TypeError: quoted source", "exit_code": 0}
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(super::explicit_success(&successful), Some(true));
         let failed: super::HookInput = serde_json::from_value(serde_json::json!({
             "is_error": true, "tool_response": {"exit_code": 0}
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(super::explicit_success(&failed), Some(false));
         let silent_failure: super::HookInput = serde_json::from_value(serde_json::json!({
             "exit_code": 7
-        })).unwrap();
+        }))
+        .unwrap();
         assert_eq!(super::explicit_success(&silent_failure), Some(false));
         assert_eq!(super::explicit_success(&super::HookInput::default()), None);
     }
