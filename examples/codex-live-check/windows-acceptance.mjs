@@ -40,7 +40,7 @@ const hooks = Object.values(manifest.hooks)
   .filter((handler) => handler.type === "command")
   .map((handler) => {
     const m = handler.command.match(
-      /^node\s+\$\{PLUGIN_ROOT\}\/(\S+)\s+(\S+)$/,
+      /^node\s+"\$\{PLUGIN_ROOT\}\/([^"\r\n]+)"\s+(\S+)$/,
     );
     if (!m) throw new Error(`unrecognized hook command: ${handler.command}`);
     return { raw: handler.command, script: m[1], sub: m[2] };

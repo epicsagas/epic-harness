@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs session-start",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" session-start",
             "async": false
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs guard"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" guard"
           }
         ]
       },
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" observe",
             "async": true,
             "timeout": 5
           }
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs polish"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" polish"
           }
         ]
       },
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" observe",
             "async": true,
             "timeout": 5
           }
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs snapshot"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" snapshot"
           }
         ]
       }
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs reflect"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" reflect"
           }
         ]
       }

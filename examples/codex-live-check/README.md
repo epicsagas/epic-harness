@@ -172,3 +172,10 @@ the install path. Manual runbook on a native Windows box (no Git Bash/WSL):
    — the epic hooks must be listed as trusted plugin sources (no
    hand-seeded `CODEX_HOME/hooks.json` anywhere).
 4. Check `%USERPROFILE%\.harness\` received observations after the session.
+
+### Plugin paths containing spaces
+
+Hook manifests quote the Node script path after host root-variable expansion.
+Run `node --test registry/scripts/hooks/launcher-spaces.test.mjs` to execute every
+shipped handler through the actual platform shell in a temporary plugin path
+containing spaces. The existing released-artifact checks remain in place.
