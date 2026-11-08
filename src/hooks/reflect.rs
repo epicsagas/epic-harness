@@ -82,11 +82,13 @@ pub fn run_context(
         // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
         let safe = if slug_harness.exists() {
-            slug_harness
-                .canonicalize()
-                .ok()
-                .map(|p| p.starts_with(harness_projects_root()))
-                .unwrap_or(false)
+            match (
+                slug_harness.canonicalize(),
+                harness_projects_root().canonicalize(),
+            ) {
+                (Ok(project), Ok(root)) => project.starts_with(root),
+                _ => false,
+            }
         } else {
             slug_harness.starts_with(harness_projects_root())
         };
@@ -688,7 +690,9 @@ fn collect_alcove(cfg: &crate::config::AlcoveConfig) -> serde_json::Value {
     };
     // Fix 2: Canonicalize vault path and verify it stays within home directory
     let vault = if let Ok(canonical) = vault.canonicalize() {
-        let home = dirs_home();
+        let Ok(home) = dirs_home().canonicalize() else {
+            return serde_json::json!({"error": "home directory cannot be resolved"});
+        };
         if !canonical.starts_with(&home) {
             return serde_json::json!({
                 "error": format!("vault_path escapes home directory: {}", canonical.display())
