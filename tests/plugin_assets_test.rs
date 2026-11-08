@@ -13,9 +13,9 @@ const GROK_HOOKS: &str = include_str!("../.grok-plugin/hooks.json");
 const MCP_CONFIG: &str = include_str!("../mcp_config.json");
 const RUN_MJS: &str = include_str!("../registry/scripts/hooks/run.mjs");
 
-const LAUNCHER: &str = "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
-const CLAUDE_LAUNCHER: &str = "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
-const GROK_LAUNCHER: &str = "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
+const LAUNCHER: &str = "node \"${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\"";
+const CLAUDE_LAUNCHER: &str = "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\"";
+const GROK_LAUNCHER: &str = "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\"";
 
 /// Command handlers, in manifest order: events, matcher groups, handlers.
 fn command_handlers(value: &Value) -> Vec<&str> {
@@ -34,18 +34,7 @@ fn command_handlers(value: &Value) -> Vec<&str> {
 /// Strings that must never appear in a hook command: they either require a
 /// POSIX shell, break under `cmd.exe /C` argv re-escaping (openai/codex#32402),
 /// or reintroduce shell sequencing the launcher exists to remove.
-const FORBIDDEN: &[&str] = &[
-    "\"",
-    "$(",
-    "test ",
-    "command -v",
-    ";",
-    "&&",
-    "||",
-    ">",
-    "<",
-    "|",
-];
+const FORBIDDEN: &[&str] = &["$(", "test ", "command -v", ";", "&&", "||", ">", "<", "|"];
 
 /// Shared manifest contract: every handler is exactly `<launcher> <sub>` (one
 /// trailing word) and carries no shell syntax.

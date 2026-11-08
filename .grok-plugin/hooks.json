@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs resume",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" resume",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs guard",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" guard",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs polish",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" polish",
             "timeout": 30
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" observe",
             "timeout": 5
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" observe",
             "timeout": 5
           }
         ]
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs snapshot",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" snapshot",
             "timeout": 10
           }
         ]
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs reflect",
+            "command": "node \"${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" reflect",
             "timeout": 30
           }
         ]
