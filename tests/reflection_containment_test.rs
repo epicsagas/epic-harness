@@ -72,7 +72,7 @@ fn alcove_vault_uses_canonical_home_and_rejects_escape() {
             "[context.alcove]\nvault_path = {}\n",
             serde_json::to_string(path).unwrap()
         );
-        std::fs::write(project.join("config.toml"), config).unwrap();
+        std::fs::write(root.join("config.toml"), config).unwrap();
         let result = Command::new(env!("CARGO_BIN_EXE_epic-harness"))
             .args(["reflect", "--context", "--source", "alcove"])
             .current_dir(&project)
