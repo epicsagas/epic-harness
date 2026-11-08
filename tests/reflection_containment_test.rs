@@ -16,7 +16,11 @@ fn existing_project_passes_and_traversal_is_rejected() {
     let root = temp.path().join("harness with spaces");
     std::fs::create_dir_all(root.join("projects/valid")).unwrap();
     let valid = context(&root, "valid");
-    assert!(valid.status.success(), "{}", String::from_utf8_lossy(&valid.stderr));
+    assert!(
+        valid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
     assert!(serde_json::from_slice::<serde_json::Value>(&valid.stdout).is_ok());
     assert!(!context(&root, "../outside").status.success());
     assert!(!context(&root, "..\\outside").status.success());
@@ -40,7 +44,11 @@ fn project_directory_link_cannot_escape_root() {
             .arg(&outside)
             .output()
             .unwrap();
-        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     }
     let result = context(&root, "escape");
     assert!(!result.status.success());

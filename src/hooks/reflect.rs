@@ -82,7 +82,10 @@ pub fn run_context(
         // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
         let safe = if slug_harness.exists() {
-            match (slug_harness.canonicalize(), harness_projects_root().canonicalize()) {
+            match (
+                slug_harness.canonicalize(),
+                harness_projects_root().canonicalize(),
+            ) {
                 (Ok(project), Ok(root)) => project.starts_with(root),
                 _ => false,
             }
