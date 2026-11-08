@@ -454,17 +454,25 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
 fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<&str>) -> String {
     use std::fs;
     match cmd {
-        "get_live_activity" => {
-            crate::store::runtime::block_on(async {
-                let pool = crate::store::pool::harness_pool().await?;
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
-                crate::live::snapshot(&pool, &crate::shared::paths::harness_projects_root(), project, now).await
-            }).unwrap_or_else(|error| {
-                eprintln!("[dashboard] live activity: {error}");
-                serde_json::json!({"error": "Unable to load live activity"})
-            }).to_string()
-        }
+        "get_live_activity" => crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::harness_pool().await?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            crate::live::snapshot(
+                &pool,
+                &crate::shared::paths::harness_projects_root(),
+                project,
+                now,
+            )
+            .await
+        })
+        .unwrap_or_else(|error| {
+            eprintln!("[dashboard] live activity: {error}");
+            serde_json::json!({"error": "Unable to load live activity"})
+        })
+        .to_string(),
         "get_harness_metrics" => {
             // Project-scoped load: a specific slug, or cross-project aggregate
             // when `project` is None. Uses the (key, project)-keyed

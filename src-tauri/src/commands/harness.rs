@@ -14,13 +14,19 @@ pub async fn get_live_activity(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs();
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
     epic_harness::live::snapshot(
         &state.harness_db,
         &epic_harness::shared::paths::harness_projects_root(),
-        project.as_deref().filter(|name| !name.is_empty() && *name != "__all__"),
+        project
+            .as_deref()
+            .filter(|name| !name.is_empty() && *name != "__all__"),
         now,
-    ).await.map_err(|_| "Unable to load live activity".to_string())
+    )
+    .await
+    .map_err(|_| "Unable to load live activity".to_string())
 }
 
 // ── Metrics ──────────────────────────────────────────────────────────────────

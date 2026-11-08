@@ -25,10 +25,16 @@ async fn sessions_use_activity_timestamps_and_expire_without_orbit() {
     assert_eq!(all["sessions"].as_array().unwrap().len(), 2);
     assert_eq!(all["sessions"][0]["date"], "2026-11-08");
     assert!(all["runs"].as_array().unwrap().is_empty());
-    let scoped = snapshot(&pool, temp.path(), Some("one"), NOW).await.unwrap();
+    let scoped = snapshot(&pool, temp.path(), Some("one"), NOW)
+        .await
+        .unwrap();
     assert_eq!(scoped["sessions"].as_array().unwrap().len(), 1);
     assert_eq!(scoped["sessions"][0]["session_id"], "uuid-session-one");
-    assert!(snapshot(&pool, temp.path(), Some("../outside"), NOW).await.is_err());
+    assert!(
+        snapshot(&pool, temp.path(), Some("../outside"), NOW)
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -39,8 +45,13 @@ async fn lifecycle_file_runs_are_discovered_across_projects_with_same_agent_ids(
         let base = temp.path().join(project);
         std::fs::create_dir(&base).unwrap();
         crate::orchestrate::state::upsert_agent_to_run(
-            &base, "same-id", "test task", "tester", crate::orchestrate::state::AgentStatus::Running,
-        ).unwrap();
+            &base,
+            "same-id",
+            "test task",
+            "tester",
+            crate::orchestrate::state::AgentStatus::Running,
+        )
+        .unwrap();
     }
     let all = snapshot(&pool, temp.path(), None, NOW).await.unwrap();
     assert_eq!(all["runs"].as_array().unwrap().len(), 2);
@@ -48,7 +59,9 @@ async fn lifecycle_file_runs_are_discovered_across_projects_with_same_agent_ids(
         assert_eq!(run["agents"][0]["id"], "same-id");
         assert_eq!(run["agent_statuses"]["same-id"]["status"], "running");
     }
-    let scoped = snapshot(&pool, temp.path(), Some("two"), NOW).await.unwrap();
+    let scoped = snapshot(&pool, temp.path(), Some("two"), NOW)
+        .await
+        .unwrap();
     assert_eq!(scoped["runs"].as_array().unwrap().len(), 1);
     assert_eq!(scoped["runs"][0]["project"], "two");
 }
@@ -63,13 +76,21 @@ async fn sqlite_run_and_agent_rows_have_the_same_dashboard_shape() {
     let temp = tempfile::tempdir().unwrap();
     let all = snapshot(&pool, temp.path(), None, NOW).await.unwrap();
     assert_eq!(all["runs"][0]["agents"][0]["id"], "db-agent");
-    assert_eq!(all["runs"][0]["agent_statuses"]["db-agent"]["progress"], 0.5);
+    assert_eq!(
+        all["runs"][0]["agent_statuses"]["db-agent"]["progress"],
+        0.5
+    );
     assert!(all["runs"][0]["agents_json"].is_null());
 }
 
 #[test]
 fn malformed_timestamps_are_not_live() {
-    for timestamp in ["", "not-a-timestamp", "2026-00-00T12:00:00Z", "invalid Unicode 🦀 timestamp"] {
+    for timestamp in [
+        "",
+        "not-a-timestamp",
+        "2026-00-00T12:00:00Z",
+        "invalid Unicode 🦀 timestamp",
+    ] {
         assert!(!recent(timestamp, NOW, SESSION_WINDOW));
     }
 }
@@ -83,15 +104,24 @@ async fn project_directory_links_cannot_expose_outside_runs() {
     std::fs::create_dir(&root).unwrap();
     std::fs::create_dir(&outside).unwrap();
     crate::orchestrate::state::upsert_agent_to_run(
-        &outside, "outside-agent", "outside task", "tester", crate::orchestrate::state::AgentStatus::Running,
-    ).unwrap();
+        &outside,
+        "outside-agent",
+        "outside task",
+        "tester",
+        crate::orchestrate::state::AgentStatus::Running,
+    )
+    .unwrap();
     let link = root.join("escape");
     #[cfg(unix)]
     std::os::unix::fs::symlink(&outside, &link).unwrap();
     #[cfg(windows)]
     {
         let result = std::process::Command::new("cmd.exe")
-            .args(["/D", "/C", "mklink", "/J"]).arg(&link).arg(&outside).output().unwrap();
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&outside)
+            .output()
+            .unwrap();
         assert!(result.status.success());
     }
     let result = snapshot(&pool, &root, None, NOW).await.unwrap();
