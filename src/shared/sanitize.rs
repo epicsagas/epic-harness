@@ -78,6 +78,16 @@ pub fn mask_secrets(s: &str) -> String {
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn rooted_windows_actions_are_masked() {
+        let path = "/home/example/private/file.rs";
+        assert!(std::path::Path::new(path).is_relative());
+        assert!(std::path::Path::new(path).has_root());
+        assert_eq!(mask_path_action(path), "<PATH>");
+        assert_eq!(mask_path_action("src/file.rs"), "src/file.rs");
+    }
+
     /// Two files in the project must stay distinguishable after sanitizing.
     /// Masking an absolute path alone turns every one of them into `<PATH>`,
     /// which silently breaks same-file streak detection and the dedup key.
