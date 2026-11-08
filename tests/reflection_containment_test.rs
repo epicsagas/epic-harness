@@ -81,7 +81,11 @@ fn alcove_vault_uses_canonical_home_and_rejects_escape() {
             .env("USERPROFILE", &home)
             .output()
             .unwrap();
-        assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
         let output: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
         let alcove = &output["extra_sources"]["alcove"];
         if allowed {
