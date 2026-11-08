@@ -77,4 +77,3 @@ test('migration is repeatable and preserves Orca hooks and unrelated MCP servers
     assert.equal(readFileSync(path.join(temp, 'mcp_config.json'), 'utf8'), mcp);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });
-
