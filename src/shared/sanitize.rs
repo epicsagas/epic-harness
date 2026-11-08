@@ -52,9 +52,9 @@ pub fn mask_path_action(path: &str) -> String {
     } else {
         match p.strip_prefix(crate::shared::paths::cwd()) {
             Ok(r) => std::borrow::Cow::Owned(r.to_string_lossy().into_owned()),
-            // Absolute and outside the project: mask it in full, `<PATH>`
-            // included.
-            Err(_) => return mask_secrets(path),
+            // This field is already one complete outside path. Mask it in
+            // full instead of parsing fragments with the free-text regex.
+            Err(_) => return "<PATH>".to_string(),
         }
     };
 
@@ -86,6 +86,22 @@ mod tests {
         assert!(std::path::Path::new(path).has_root());
         assert_eq!(mask_path_action(path), "<PATH>");
         assert_eq!(mask_path_action("src/file.rs"), "src/file.rs");
+        for path in [
+            r"\\example-server\private-share\example-user\file.txt",
+            r"\Users\example-user\private\file.txt",
+            r"\\?\UNC\example-server\private-share\example-user\file.txt",
+        ] {
+            assert_eq!(mask_path_action(path), "<PATH>");
+        }
+    }
+
+    #[test]
+    fn outside_native_actions_are_masked_in_full() {
+        let outside = tempfile::tempdir().unwrap();
+        let path = outside.path().join("private directory with spaces/file.txt");
+        assert_eq!(mask_path_action(&path.to_string_lossy()), "<PATH>");
+        assert_eq!(mask_path_action("src/a.rs"), "src/a.rs");
+        assert_eq!(mask_path_action("src/b.rs"), "src/b.rs");
     }
 
     /// Two files in the project must stay distinguishable after sanitizing.

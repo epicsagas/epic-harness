@@ -363,6 +363,11 @@ epic-harness/
 
 ### Windows action path masking
 
+Outside file-path actions are replaced in full with `<PATH>` without parsing
+them as free text. This covers Windows UNC and extended paths, rooted backslash
+paths, and native paths containing spaces. Project-relative filenames remain
+distinct. This does not rewrite existing observations.
+
 Observation actions keep ordinary project-relative filenames distinct. A rooted
 path without a drive, such as `/home/example/file.rs`, is not an ordinary
 relative filename on Windows and is sent through the outside-path mask. The
