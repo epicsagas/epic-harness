@@ -269,7 +269,15 @@ pub fn global_harness_dir() -> PathBuf {
     harness_root().join("global")
 }
 pub fn global_patterns_file() -> PathBuf {
-    global_harness_dir().join("patterns.jsonl")
+    let documented = harness_root().join("global_patterns.jsonl");
+    let legacy = global_harness_dir().join("patterns.jsonl");
+    // Continue an explicitly existing legacy store instead of losing its
+    // fallback history. New installations use the documented root-level file.
+    if documented.is_file() || !legacy.is_file() {
+        documented
+    } else {
+        legacy
+    }
 }
 
 /// Path to the global operational database: `~/.harness/harness.db`
@@ -278,9 +286,15 @@ pub fn global_harness_db_path() -> PathBuf {
     harness_root().join("harness.db")
 }
 
-/// Opt-in marker lives in the global dir (not per-project).
+/// Project-scoped consent is the default. An existing global marker remains
+/// an explicit legacy opt-in; missing project consent never creates it.
 pub fn cross_project_file() -> PathBuf {
-    global_harness_dir().join(".cross-project-enabled")
+    let project = harness_dir().join(".cross-project-enabled");
+    if project.is_file() {
+        project
+    } else {
+        global_harness_dir().join(".cross-project-enabled")
+    }
 }
 
 pub(crate) fn dirs_home() -> PathBuf {
