@@ -842,20 +842,6 @@ async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
     }
 }
 
-/// Keep only observations newer than the last consumed one.
-///
-/// ISO-8601 timestamps compare correctly as strings, so a lexical `>` is the
-/// whole test. `None` (first ever round) keeps everything.
-fn filter_past_watermark(observations: Vec<ObsRecord>, watermark: Option<&str>) -> Vec<ObsRecord> {
-    match watermark {
-        Some(mark) => observations
-            .into_iter()
-            .filter(|o| o.timestamp.as_str() > mark)
-            .collect(),
-        None => observations,
-    }
-}
-
 /// Cutoff timestamp for retention: `days` before `now`, as an ISO-8601 date.
 ///
 /// Day-precision is enough — the sweep compares against `timestamp`, whose
@@ -908,81 +894,73 @@ pub fn run(_input: &HookInput) -> i32 {
         return 0;
     }
 
-    // 1. Collect today's observations from SQLite (fallback to JSONL)
+    // Cumulative reflection state needs one project writer and a durable row
+    // cursor. Equal timestamps and late arrivals are not duplicate identities.
+    let Ok(reflect_lock) = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(harness_dir().join(".reflect.lock"))
+    else {
+        return 0;
+    };
+    if reflect_lock.try_lock().is_err() {
+        return 0;
+    }
     let today_str = today();
     let current_project = project_slug();
-    let observations = match crate::store::runtime::block_on(async {
+    let pending = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
+        let stored: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM metrics_state WHERE key = 'reflection_cursor' AND project = ?",
+        )
+        .bind(&current_project)
+        .fetch_optional(&pool)
+        .await
+        .map_err(std::io::Error::other)?;
+        let cursor = if let Some(stored) = stored {
+            stored.parse::<i64>().map_err(std::io::Error::other)?
+        } else if let Ok(mark) = fs::read_to_string(reflect_watermark_file()) {
+            // One-time boundary for already analyzed legacy history. Future
+            // arrivals are selected by their database IDs, not their date.
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COALESCE(MAX(id),0) FROM observations WHERE project = ? AND timestamp <= ?",
+            )
+            .bind(&current_project)
+            .bind(mark.trim())
+            .fetch_one(&pool)
+            .await
+            .map_err(std::io::Error::other)?
+        } else {
+            0
+        };
+        // Establish the legacy boundary before importing delayed fallback
+        // rows. Their old timestamps do not mean they were already analyzed.
+        sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor',?,?) ON CONFLICT(key,project) DO NOTHING")
+            .bind(cursor.to_string()).bind(&current_project).execute(&pool).await.map_err(std::io::Error::other)?;
         backfill_jsonl_to_sqlite(&pool, &today_str).await;
-        crate::store::observations::query_obs_for_date_range_pool(
+        crate::store::observations::query_observations_after_id_pool(
             &pool,
-            &today_str,
-            &today_str,
             &current_project,
+            cursor,
         )
         .await
     }) {
-        Ok(recs) => recs,
-        Err(e) => {
-            // Proceed with an empty set so the JSONL fallback below actually runs —
-            // an early `return 0` here silently dropped the whole evolution round.
-            eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-            Vec::new()
-        }
-    };
-    let observations = if !observations.is_empty() {
-        observations
-    } else {
-        // Fallback: read from JSONL files (SQLite unreachable — the records
-        // stay on disk and are backfilled by the next successful run).
-        if !obs_dir().is_dir() {
+        Ok(records) => records,
+        Err(error) => {
+            eprintln!("[reflect] deferred analysis; pending observations retained: {error}");
             return 0;
         }
-        let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
-            .into_iter()
-            .filter(|f| f.contains(&today_str))
-            .collect();
-        if obs_files.is_empty() {
-            return 0;
-        }
-        let mut recs: Vec<ObsRecord> = vec![];
-        for f in &obs_files {
-            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
-        }
-        recs
     };
-
-    // 1b. Drop observations an earlier round already consumed.
-    //
-    // Claude Code calls reflect once per session (SessionEnd). Codex's `Stop`
-    // fires every turn, so without this the same day's observations would be
-    // re-scored on each turn — inflating total_sessions, re-running skill
-    // seeding, and feeding stagnation/attribution duplicate samples.
-    let watermark = fs::read_to_string(reflect_watermark_file())
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let observations = filter_past_watermark(observations, watermark.as_deref());
+    let observations: Vec<ObsRecord> = pending
+        .iter()
+        .map(|(_, _, record)| record.clone())
+        .collect();
     if observations.len() < 3 {
         return 0;
     }
-    // Advance the watermark before analysis: a crash mid-round must not make
-    // the next turn re-count this batch. The trade is deliberate: a crash
-    // between here and step 11 loses one batch of observations, which are a
-    // statistical sample, whereas re-counting corrupts total_sessions, skill
-    // seeding and the attribution arms, which are cumulative state.
-    //
-    // A failed write is not silent: it means the next turn re-analyzes this
-    // batch, so it gets reported rather than swallowed.
-    if let Some(newest) = observations.iter().map(|o| &o.timestamp).max()
-        && let Err(e) = fs::write(reflect_watermark_file(), newest)
-    {
-        eprintln!(
-            "[reflect] watermark write failed ({e}); the next round will re-analyze \
-                 these {} observations",
-            observations.len()
-        );
-    }
+    let newest_id = pending.last().map(|row| row.0).unwrap_or(0);
 
     // 2. Analyze
     let mut analysis = evolve::analyze_session(&observations);
@@ -1186,13 +1164,7 @@ pub fn run(_input: &HookInput) -> i32 {
         edit_type: EditType::AddSkill,
         manifests: manifests.clone(),
     };
-    // Write evolution record to SQLite (primary) + JSONL (fallback)
-    let _ = crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::harness_pool().await?;
-        let slug = crate::shared::paths::project_slug();
-        crate::store::evolution::insert_record_pool(&pool, &record, &slug).await
-    });
-    append_jsonl(&evolution_file(), &record);
+    // Record, metrics and consumption identity are committed together below.
 
     // 9b. HarnessX falsifiability ledger (Table 9): append each shipped edit's
     // manifest to a sidecar JSONL the next round's Critic reads to check
@@ -1270,12 +1242,24 @@ pub fn run(_input: &HookInput) -> i32 {
         evolve::update_meta_field(&evolved_dirs, epoch, analysis.avg_score);
     }
 
-    // Save metrics to SQLite (primary) + JSON file (fallback)
-    let _ = crate::store::runtime::block_on(async {
+    // Commit analysis and the consumption cursor atomically. A failed save
+    // leaves all rows eligible for a later reflection rather than losing them.
+    let saved = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        let slug = crate::shared::paths::project_slug();
-        crate::store::metrics::save_metrics_pool(&pool, &metrics, &slug).await
+        let mut tx = pool.begin().await.map_err(std::io::Error::other)?;
+        crate::store::evolution::insert_record_direct(&mut tx, &record, &current_project).await?;
+        crate::store::metrics::save_metrics_direct(&mut tx, &metrics, &current_project).await?;
+        sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor',?,?) ON CONFLICT(key,project) DO UPDATE SET value=excluded.value")
+            .bind(newest_id.to_string()).bind(&current_project).execute(&mut *tx).await.map_err(std::io::Error::other)?;
+        tx.commit().await.map_err(std::io::Error::other)
     });
+    if let Err(error) = saved {
+        eprintln!(
+            "[reflect] analysis state was not committed; observations remain pending: {error}"
+        );
+        return 0;
+    }
+    append_jsonl(&evolution_file(), &record);
     if let Ok(json) = serde_json::to_string_pretty(&metrics) {
         let _ = fs::write(metrics_file(), json);
     }
@@ -1618,40 +1602,6 @@ mod tests {
             pipeline_id: None,
         }
     }
-
-    /// Codex fires Stop every turn; a second round must not re-consume the
-    /// observations the first round already scored.
-    #[test]
-    fn watermark_drops_already_consumed_observations() {
-        let obs = vec![
-            obs_at("2026-08-31T10:00:00Z"),
-            obs_at("2026-08-31T11:00:00Z"),
-            obs_at("2026-08-31T12:00:00Z"),
-        ];
-        let kept = filter_past_watermark(obs, Some("2026-08-31T11:00:00Z"));
-        assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].timestamp, "2026-08-31T12:00:00Z");
-    }
-
-    /// A turn that produced nothing new yields an empty batch, so reflect
-    /// returns before incrementing total_sessions.
-    #[test]
-    fn watermark_at_newest_yields_nothing() {
-        let obs = vec![obs_at("2026-08-31T10:00:00Z")];
-        assert!(filter_past_watermark(obs, Some("2026-08-31T10:00:00Z")).is_empty());
-    }
-
-    /// First run on a fresh project keeps the whole batch.
-    #[test]
-    fn no_watermark_keeps_everything() {
-        let obs = vec![
-            obs_at("2026-08-31T10:00:00Z"),
-            obs_at("2026-08-31T11:00:00Z"),
-        ];
-        assert_eq!(filter_past_watermark(obs, None).len(), 2);
-    }
-
-    // ── retention cutoff ───────────────────────────────
 
     /// 2026-08-31T00:00:00Z is epoch day 20696.
     const DAY_2026_08_31: u64 = 20_696 * 86_400;

@@ -150,61 +150,91 @@ pub async fn query_obs_for_date_range_pool(
     .await
     .map_err(super::sqlx_err)?;
 
-    let mut records = Vec::with_capacity(rows.len());
-    for row in rows {
-        let dim_s: Option<f64> = row.try_get(6).ok();
-        let dim_q: Option<f64> = row.try_get(7).ok();
-        let dim_c: Option<f64> = row.try_get(8).ok();
+    rows.iter().map(decode_observation_row).collect()
+}
 
-        let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
-        let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
-        if any_some && !all_some {
-            eprintln!(
-                "[store] observations: partial dimensions (s={}, q={}, c={}) — \
+/// Pending rows retain durable database identity and host session attribution.
+/// Timestamps may be equal or arrive out of order and are not consumption IDs.
+pub async fn query_observations_after_id_pool(
+    pool: &AnyPool,
+    project: &str,
+    cursor: i64,
+) -> io::Result<Vec<(i64, String, ObsRecord)>> {
+    let rows = sqlx::query(
+        "SELECT timestamp, tool, tool_category, action, result, score,
+                dim_success, dim_quality, dim_cost,
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id,
+                id, session_id
+         FROM observations WHERE project = ? AND id > ? ORDER BY id",
+    )
+    .bind(project)
+    .bind(cursor)
+    .fetch_all(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+    rows.iter()
+        .map(|row| {
+            Ok((
+                row.try_get(14).map_err(super::sqlx_err)?,
+                row.try_get(15).map_err(super::sqlx_err)?,
+                decode_observation_row(row)?,
+            ))
+        })
+        .collect()
+}
+
+fn decode_observation_row(row: &sqlx::any::AnyRow) -> io::Result<ObsRecord> {
+    let dim_s: Option<f64> = row.try_get(6).ok();
+    let dim_q: Option<f64> = row.try_get(7).ok();
+    let dim_c: Option<f64> = row.try_get(8).ok();
+
+    let any_some = dim_s.is_some() || dim_q.is_some() || dim_c.is_some();
+    let all_some = dim_s.is_some() && dim_q.is_some() && dim_c.is_some();
+    if any_some && !all_some {
+        eprintln!(
+            "[store] observations: partial dimensions (s={}, q={}, c={}) — \
                  defaulting missing fields to 0.0",
-                dim_s.is_some(),
-                dim_q.is_some(),
-                dim_c.is_some()
-            );
-        }
-
-        let seq_id: Option<i64> = row.try_get(12).ok();
-        records.push(ObsRecord {
-            timestamp: row.try_get::<String, _>(0).map_err(super::sqlx_err)?,
-            tool: row.try_get::<String, _>(1).map_err(super::sqlx_err)?,
-            tool_category: row.try_get::<String, _>(2).map_err(super::sqlx_err)?,
-            action: row
-                .try_get::<Option<String>, _>(3)
-                .map_err(super::sqlx_err)?,
-            result: row
-                .try_get::<Option<String>, _>(4)
-                .map_err(super::sqlx_err)?,
-            score: row.try_get::<Option<f64>, _>(5).map_err(super::sqlx_err)?,
-            dimensions: if any_some {
-                Some(ScoreDimensions {
-                    tool_success: dim_s.unwrap_or(0.0),
-                    output_quality: dim_q.unwrap_or(0.0),
-                    execution_cost: dim_c.unwrap_or(0.0),
-                })
-            } else {
-                None
-            },
-            failure_category: row
-                .try_get::<Option<String>, _>(9)
-                .map_err(super::sqlx_err)?,
-            error_snippet: row
-                .try_get::<Option<String>, _>(10)
-                .map_err(super::sqlx_err)?,
-            file_ext: row
-                .try_get::<Option<String>, _>(11)
-                .map_err(super::sqlx_err)?,
-            sequence_id: seq_id.map(|v| v as u64),
-            pipeline_id: row
-                .try_get::<Option<String>, _>(13)
-                .map_err(super::sqlx_err)?,
-        });
+            dim_s.is_some(),
+            dim_q.is_some(),
+            dim_c.is_some()
+        );
     }
-    Ok(records)
+
+    let seq_id: Option<i64> = row.try_get(12).ok();
+    Ok(ObsRecord {
+        timestamp: row.try_get::<String, _>(0).map_err(super::sqlx_err)?,
+        tool: row.try_get::<String, _>(1).map_err(super::sqlx_err)?,
+        tool_category: row.try_get::<String, _>(2).map_err(super::sqlx_err)?,
+        action: row
+            .try_get::<Option<String>, _>(3)
+            .map_err(super::sqlx_err)?,
+        result: row
+            .try_get::<Option<String>, _>(4)
+            .map_err(super::sqlx_err)?,
+        score: row.try_get::<Option<f64>, _>(5).map_err(super::sqlx_err)?,
+        dimensions: if any_some {
+            Some(ScoreDimensions {
+                tool_success: dim_s.unwrap_or(0.0),
+                output_quality: dim_q.unwrap_or(0.0),
+                execution_cost: dim_c.unwrap_or(0.0),
+            })
+        } else {
+            None
+        },
+        failure_category: row
+            .try_get::<Option<String>, _>(9)
+            .map_err(super::sqlx_err)?,
+        error_snippet: row
+            .try_get::<Option<String>, _>(10)
+            .map_err(super::sqlx_err)?,
+        file_ext: row
+            .try_get::<Option<String>, _>(11)
+            .map_err(super::sqlx_err)?,
+        sequence_id: seq_id.map(|v| v as u64),
+        pipeline_id: row
+            .try_get::<Option<String>, _>(13)
+            .map_err(super::sqlx_err)?,
+    })
 }
 
 /// Aggregate observation stats via SQL.
