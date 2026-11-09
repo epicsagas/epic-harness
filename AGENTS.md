@@ -25,14 +25,16 @@
 
 ## /orbit — Autonomous Pipeline
 
-Single-command spec-to-PR execution with three entry modes.
+Single-command spec-to-PR execution with three entry modes. Orbit selects Council
+for a vague request or an existing PRD, and Direct for a specific actionable
+request. Interactive mode requires an explicit user request.
 
 ```mermaid
 flowchart TD
-    START["/orbit"] --> MODE{"requirement?"}
-    MODE -->|"unclear"| WAIT["Interactive\nUser runs /discover → /spec"]
-    MODE -->|"clear + complex"| COUNCIL["Council\n4-Voice Auto-spec"]
-    MODE -->|"clear + simple"| DIRECT["Direct\nAuto-spec"]
+    START["/orbit"] --> MODE{"entry request?"}
+    MODE -->|"explicit interactive request"| WAIT["Interactive\nUser runs /discover → /spec"]
+    MODE -->|"vague request or PRD"| COUNCIL["Council\n4-Voice Auto-spec"]
+    MODE -->|"specific actionable request"| DIRECT["Direct\nAuto-spec"]
     WAIT --> SPEC["Load Approved Spec"]
     COUNCIL --> SPEC
     DIRECT --> SPEC
@@ -52,9 +54,12 @@ flowchart TD
 
 **State tracking**: `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — updated after every phase transition, survives context compaction.
 
-**Human checkpoints**: mode selection (interactive only when unclear), 3 failed audits (pause).
+**Human checkpoints**: explicit interactive mode waits for an approved spec;
+3 failed audits pause for the user to choose whether to continue or abort.
 
-**Evolve**: runs automatically after PR created + CI green. Skipped on abort.
+**Evolve**: after PR creation, reflection runs regardless of CI outcome, including
+when no checks are configured. Green CI additionally triggers reflection context
+and a successful-pattern memory record. Skipped on abort.
 
 ## Eval System (Ring 3 Core)
 
