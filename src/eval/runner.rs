@@ -323,6 +323,23 @@ fn shell_words(s: &str) -> Vec<String> {
     let mut chars = s.chars().peekable();
 
     while let Some(ch) = chars.next() {
+        // A native Windows UNC/device root begins with two literal separators.
+        // Keep that spelling while also accepting the escaped four-slash form.
+        let native_unc_root = cfg!(windows)
+            && current.is_empty()
+            && !in_single
+            && ch == '\\'
+            && chars.peek() == Some(&'\\')
+            && chars
+                .clone()
+                .nth(1)
+                .is_some_and(|next| !next.is_whitespace() && !matches!(next, '\\' | '"' | '\''));
+        if native_unc_root {
+            current.push(ch);
+            current.push(chars.next().expect("peeked separator"));
+            started = true;
+            continue;
+        }
         if ch == '\\' && !in_single {
             let escaped = chars.peek().is_some_and(|next| {
                 if in_double {
@@ -473,6 +490,26 @@ mod command_tests {
         assert!(
             shell_words("tool \"unfinished").is_empty(),
             "malformed quotes must not execute"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_words_preserve_native_unc_and_extended_windows_roots() {
+        assert_eq!(
+            shell_words(
+                r#""\\server\share\tool.exe" "\\server\share\file name" "\\?\C:\long path\file" "\\.\pipe\epic""#,
+            ),
+            [
+                r"\\server\share\tool.exe",
+                r"\\server\share\file name",
+                r"\\?\C:\long path\file",
+                r"\\.\pipe\epic",
+            ]
+        );
+        assert_eq!(
+            shell_words(r#"tool "\\\\server\\share" "\\""#),
+            ["tool", r"\\server\share", r"\"]
         );
     }
 }
