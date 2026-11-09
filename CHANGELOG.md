@@ -664,3 +664,5 @@ Original files are **not deleted** after import. New users are automatically on 
 - Register native evolution dashboard handlers with project-scoped canonical path validation and read-only sidecar access (#239).
 
 - Serialize orchestration updates with portable interprocess file locks and independent atomic-write files (#243).
+
+- Reject empty or ambiguous Orbit deletion IDs and match exact project-scoped sidecars (#221).
