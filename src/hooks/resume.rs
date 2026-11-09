@@ -230,7 +230,10 @@ pub fn run(input: &HookInput) -> i32 {
         }
     };
     if source == "startup" {
-        let lock = harness_dir().join(format!("resume.{sid}.{source}.lock"));
+        use std::hash::{Hash, Hasher};
+        let mut identity = std::collections::hash_map::DefaultHasher::new();
+        sid.hash(&mut identity);
+        let lock = harness_dir().join(format!("resume.{:016x}.{source}.lock", identity.finish()));
         if !acquire_session_lock(&lock) {
             return 0;
         }
