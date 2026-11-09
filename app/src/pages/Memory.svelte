@@ -229,7 +229,11 @@
           <tbody>
             {#each displayNodes.slice(0, nodeDisplayLimit) as node}
               <tr style="cursor:pointer;" onclick={() => showDetail(node.id)}>
-                <td style="color:var(--fg);">{node.title}</td>
+                <td style="color:var(--fg);"><button
+                  type="button"
+                  onclick={(event) => { event.stopPropagation(); showDetail(node.id); }}
+                  style="background:none;border:none;padding:0;color:inherit;font:inherit;text-align:left;cursor:pointer;"
+                >{node.title}</button></td>
                 <td><span class="pill info" style="font-size:10px;">{node.type}</span></td>
                 <td style="font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                   {#if node.tags.length > 0}{node.tags.join(', ')}{/if}
