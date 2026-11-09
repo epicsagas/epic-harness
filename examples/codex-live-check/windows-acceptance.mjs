@@ -14,7 +14,8 @@
 //             harness-mem server starts (this is what mcp_config.json
 //             launches).
 
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
@@ -26,24 +27,17 @@ const manifest = JSON.parse(
   readFileSync(path.join(root, ".codex-plugin", "hooks.json"), "utf8"),
 );
 
-// Codex substitutes ${PLUGIN_ROOT} inline and hands the command to a shell
-// (cmd.exe /C on Windows, openai/codex#32402). The manifest commands are
-// pinned shell-free (`node ${PLUGIN_ROOT}/... <sub>`, enforced by
-// tests/plugin_assets_test.rs), so the driver resolves them to argv and
-// spawns directly — no shell string, so a PLUGIN_ROOT with spaces or
-// metacharacters cannot break or inject into the command (CodeQL
-// js/shell-command-injection-from-environment). An unrecognized shape is a
-// hard error: the driver must never silently skip a manifest command.
+// Exercise the real host shell; argv bypass would hide command-expansion bugs.
 const hooks = Object.values(manifest.hooks)
   .flat()
   .flatMap((group) => group.hooks)
   .filter((handler) => handler.type === "command")
   .map((handler) => {
     const m = handler.command.match(
-      /^node\s+\$\{PLUGIN_ROOT\}\/(\S+)\s+(\S+)$/,
+      /^node\s+(?:"\$\{PLUGIN_ROOT\}\/([^"\r\n]+)"|\$\{PLUGIN_ROOT\}\/(\S+))\s+(\S+)$/,
     );
     if (!m) throw new Error(`unrecognized hook command: ${handler.command}`);
-    return { raw: handler.command, script: m[1], sub: m[2] };
+    return { raw: handler.command, script: m[1] ?? m[2], sub: m[3] };
   });
 
 let failures = 0;
@@ -52,15 +46,27 @@ const check = (name, ok, extra = "") => {
   if (!ok) failures++;
 };
 
-// Same effective command Codex runs, resolved as argv instead of a shell
-// string (see above).
-const runHook = (hook) =>
-  spawnSync("node", [path.join(root, hook.script), hook.sub], {
-    input: "{}",
-    encoding: "utf8",
-    timeout: 60_000,
-    env: { ...process.env, PLUGIN_ROOT: root },
-  });
+// Each acceptance invocation owns an isolated data/home root.
+const fixture = mkdtempSync(path.join(tmpdir(), "epic-release-acceptance-"));
+const home = path.join(fixture, "home"), data = path.join(fixture, "data");
+mkdirSync(path.join(home, ".config/epic-harness"), { recursive: true });
+mkdirSync(data);
+writeFileSync(path.join(home, ".config/epic-harness/telemetry-consent"), "off");
+writeFileSync(path.join(data, "config.toml"), "[dashboard]\nport=0\nauto_open=false\n");
+const childEnv = { ...process.env, HOME: home, USERPROFILE: home, HARNESS_DIR: data, HARNESS_ROOT: fixture, PLUGIN_ROOT: root };
+Object.assign(childEnv, { XDG_CONFIG_HOME: path.join(home, '.config'), APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local') });
+for (const variable of ["HARNESS_DB_URL", "HARNESS_MEM_URL", "DATABASE_URL"]) delete childEnv[variable];
+process.on("exit", () => {
+  if (!path.resolve(fixture).startsWith(path.resolve(tmpdir()) + path.sep)) throw new Error("invalid acceptance cleanup root");
+  rmSync(fixture, { recursive: true, force: true });
+});
+const runHook = (hook) => {
+  const command = hook.raw.replaceAll("\u0024{PLUGIN_ROOT}", root);
+  const options = { input: "{}", encoding: "utf8", timeout: 60000, env: childEnv, windowsHide: true };
+  return process.platform === "win32"
+    ? spawnSync("cmd.exe", ["/D", "/S", "/C", command], { ...options, windowsVerbatimArguments: true })
+    : spawnSync("/bin/sh", ["-c", command], options);
+};
 
 if (mode === "degrade") {
   for (const hook of hooks) {
@@ -87,7 +93,7 @@ if (mode === "degrade") {
     id: 1,
     method: "initialize",
     params: {
-      protocolVersion: "<PHONE_NUMBER>",
+      protocolVersion: "2024-11-05",
       capabilities: {},
       clientInfo: { name: "windows-acceptance", version: "0.0.0" },
     },
@@ -96,6 +102,8 @@ if (mode === "degrade") {
     input: initialize + "\n",
     encoding: "utf8",
     timeout: 30_000,
+    env: childEnv,
+    windowsHide: true,
   });
   check(
     "harness-mem mcp initialize",

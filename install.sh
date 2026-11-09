@@ -50,13 +50,28 @@ curl -fsSL "${sha_url}" -o "${tmpdir}/${archive}.sha256"
 tar -xJf "${tmpdir}/${archive}" -C "${tmpdir}"
 
 mkdir -p "${INSTALL_DIR}"
-mv "${tmpdir}/epic-harness-${target}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-chmod +x "${INSTALL_DIR}/${BINARY}"
+# Stage both interfaces before replacing either public name. Older archives
+# containing only one name remain usable because both names run the same CLI.
+payload="${tmpdir}/epic-harness-${target}"
+for binary in epic epic-harness; do
+    source="${payload}/${binary}"
+    if [ ! -f "${source}" ]; then
+        if [ -f "${payload}/epic-harness" ]; then source="${payload}/epic-harness"
+        elif [ -f "${payload}/epic" ]; then source="${payload}/epic"
+        else echo "Error: no executable payload in archive" >&2; exit 1
+        fi
+    fi
+    cp "${source}" "${INSTALL_DIR}/.${binary}.$$"
+    chmod +x "${INSTALL_DIR}/.${binary}.$$"
+done
+for binary in epic epic-harness; do
+    mv -f "${INSTALL_DIR}/.${binary}.$$" "${INSTALL_DIR}/${binary}"
+done
 
 # ── Verify ────────────────────────────────────────────────────────────────────
-if command -v "${BINARY}" >/dev/null 2>&1; then
-    echo "Installed: $(${BINARY} --version 2>&1 || echo "v${version}")"
-else
+installed_version="$("${INSTALL_DIR}/${BINARY}" --version 2>&1)"
+echo "Installed: ${installed_version}"
+if ! command -v "${BINARY}" >/dev/null 2>&1; then
     echo ""
     echo "Add ${INSTALL_DIR} to your PATH:"
     echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
