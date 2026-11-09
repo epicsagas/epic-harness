@@ -17,8 +17,7 @@ use serde_json::Value;
 
 use crate::config::CONFIG;
 use crate::shared::evolution::{ConfigSummary, HarnessSnapshot, MetricsSummary};
-use crate::shared::helpers::list_dirs;
-use crate::shared::paths::{evolved_dir_for, guard_rules_file, project_slug};
+use crate::shared::paths::{checked_harness_path_for_slug, guard_rules_file, project_slug};
 use crate::shared::types::current_hook_profile;
 
 /// Recursively collect every leaf value in a JSON tree as dotted "path=value"
@@ -164,19 +163,40 @@ pub fn build_snapshot() -> HarnessSnapshot {
     build_snapshot_for(None)
 }
 
+fn contained_evolved_skills(project: Option<&str>) -> Vec<String> {
+    let slug = project
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(project_slug);
+    checked_harness_path_for_slug(&slug, "evolved")
+        .ok()
+        .and_then(|directory| fs::read_dir(directory).ok())
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            checked_harness_path_for_slug(&slug, std::path::Path::new("evolved").join(&name))
+                .ok()?;
+            entry.file_type().ok()?.is_dir().then_some(name)
+        })
+        .collect()
+}
+
 /// Project-scoped snapshot: reads the evolved dir + metrics for the requested
 /// project (None/empty = CWD project, the pre-existing behavior).
+/// Missing, invalid or escaping skill paths are omitted. CLI and native callers
+/// retain a successful read-only snapshot with the remaining contained state.
 ///
 /// Scope note: only `evolved_dir` and `metrics_summary` vary by project.
 /// `guard_rules` (project-tree/global file) and `config_summary` (global
 /// CONFIG) are intentionally project-independent.
 pub fn build_snapshot_for(project: Option<&str>) -> HarnessSnapshot {
-    let evolved = evolved_dir_for(project);
     // `evolved_dir` holds auto-evolved skills; treat those as both the active
     // and evolved skill sets (static skills ship in the binary and are not
     // per-project state). Listing the same dir for both is intentional — it
     // mirrors how reflect/gate reason about "current skill set".
-    let mut skills = list_dirs(&evolved);
+    let mut skills = contained_evolved_skills(project);
     skills.sort();
     skills.dedup();
 

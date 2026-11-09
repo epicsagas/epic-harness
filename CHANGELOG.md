@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Project/reflection readers validate canonical project and child paths before
+  reading or deleting fallback data; snapshots omit escaping skill paths (#252).
+- Reflection compares canonical project/root and vault/home paths consistently
+  on Windows, while continuing to reject directory links outside those roots.
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names
@@ -654,3 +658,15 @@ Original files are **not deleted** after import. New users are automatically on 
 - Hook dispatch now checks `PATH` before falling back to Node.js scripts
 - Homebrew tap path shortened to `epicsagas/tap` across all i18n READMEs
 - Broken CI badge removed from all READMEs
+
+- Fix native dashboard project scoping and aggregate metrics, filtering history and snapshots before limits (#237).
+
+- Register native evolution dashboard handlers with project-scoped canonical path validation and read-only sidecar access (#239).
+
+- Serialize orchestration updates with portable interprocess file locks and independent atomic-write files (#243).
+
+- Reject empty or ambiguous Orbit deletion IDs and match exact project-scoped sidecars (#221).
+
+- Dismiss exact Orbit records in primary SQLite and sidecar state, preserving project scope and reporting failures (#264).
+
+- Route native memory and orchestration reads and dismissals through registered scoped IPC, retaining agent history and dependency semantics (#238).

@@ -103,3 +103,10 @@ If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is 
 - Read [README.md](README.md) for the full architecture
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup
 - Report issues: [GitHub Issues](https://github.com/epicsagas/epic-harness/issues)
+
+### Reflection path containment
+
+`epic reflect --context` resolves both existing project directories and the
+projects root before checking containment. Alcove vaults and the home directory
+use the same canonical comparison, including Windows extended path prefixes.
+Directory links that resolve outside the allowed root remain rejected.

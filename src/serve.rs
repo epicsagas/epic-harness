@@ -198,10 +198,33 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Orbit Pipeline Dismiss ───────────────────────
             (Method::Delete, url) if url.starts_with("/api/orbit/") => {
-                let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
-                let harness_dir = common::harness_dir();
-                let body = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
-                json_response(&body)
+                let resource = url.split('?').next().unwrap_or(url);
+                let pipeline_id = percent_decode(
+                    resource
+                        .trim_start_matches("/api/orbit/")
+                        .trim_end_matches('/'),
+                );
+                let project =
+                    parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
+                match dismiss_orbit_pipeline_for(&pipeline_id, project.as_deref()) {
+                    Ok(true) => json_response(
+                        &serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string(),
+                    ),
+                    Ok(false) => json_response("{\"ok\":false,\"error\":\"pipeline not found\"}")
+                        .with_status_code(404),
+                    Err(error) => {
+                        let status = if error.kind() == std::io::ErrorKind::InvalidInput {
+                            400
+                        } else {
+                            500
+                        };
+                        json_response(
+                            &serde_json::json!({"ok": false, "error": error.to_string()})
+                                .to_string(),
+                        )
+                        .with_status_code(status)
+                    }
+                }
             }
 
             // ── Memory API (Nodes) ───────────────────────────
@@ -406,38 +429,120 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-/// Dismiss (delete) an orbit pipeline file across all projects.
-fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
-    let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-    let mut deleted = false;
-
-    if let Ok(rd) = std::fs::read_dir(projects_root) {
-        for proj_entry in rd.filter_map(|e| e.ok()) {
-            let orbit_dir = proj_entry.path().join("orbit");
-            if !orbit_dir.exists() {
-                continue;
-            }
-            // Match by ID — pipeline_id is the timestamp part (e.g. "20260523105350")
-            if let Ok(files) = std::fs::read_dir(&orbit_dir) {
-                for f in files.filter_map(|e| e.ok()) {
-                    let fname = f.file_name().to_string_lossy().to_string();
-                    if fname.starts_with("PIPELINE-")
-                        && fname.ends_with(".json")
-                        && fname.contains(pipeline_id)
-                        && std::fs::remove_file(f.path()).is_ok()
-                    {
-                        deleted = true;
-                    }
-                }
-            }
+/// Dismiss one exact Orbit sidecar, optionally scoped to a selected project.
+/// Legacy callers may omit the project, but an ambiguous ID is never a bulk delete.
+pub fn dismiss_orbit_pipeline_for(
+    pipeline_id: &str,
+    project: Option<&str>,
+) -> std::io::Result<bool> {
+    use std::io::{Error, ErrorKind};
+    if pipeline_id.is_empty()
+        || pipeline_id.len() > 256
+        || !pipeline_id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(Error::new(ErrorKind::InvalidInput, "invalid pipeline id"));
+    }
+    let file_name = if pipeline_id.starts_with("PIPELINE-") {
+        format!("{pipeline_id}.json")
+    } else {
+        format!("PIPELINE-{pipeline_id}.json")
+    };
+    let mut candidates = Vec::new();
+    for (slug, dir) in selected_project_dirs(project)? {
+        crate::shared::paths::checked_harness_path_for_slug(
+            &slug,
+            std::path::Path::new("orbit").join(&file_name),
+        )
+        .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        // Validate the resolved target, but remove the selected directory
+        // entry itself, never a different in-project file a symlink targets.
+        let file = dir.join("orbit").join(&file_name);
+        if file.is_file() {
+            candidates.push((slug, file));
         }
     }
-
-    if deleted {
-        serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string()
-    } else {
-        serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string()
+    if candidates.len() > 1 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "pipeline id requires a project",
+        ));
     }
+    crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        let database_project: Option<String> =
+            sqlx::query_scalar("SELECT project FROM orbit_pipelines WHERE id = ?")
+                .bind(pipeline_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(Error::other)?;
+        if project.is_none()
+            && let Some(database_project) = database_project
+            && candidates.iter().any(|(slug, _)| slug != &database_project)
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "pipeline id requires a project",
+            ));
+        }
+        let mut transaction = pool.begin().await.map_err(Error::other)?;
+        let result = match project {
+            Some(slug) => {
+                sqlx::query("DELETE FROM orbit_pipelines WHERE id = ? AND project = ?")
+                    .bind(pipeline_id)
+                    .bind(slug)
+                    .execute(&mut *transaction)
+                    .await
+            }
+            None => {
+                sqlx::query("DELETE FROM orbit_pipelines WHERE id = ?")
+                    .bind(pipeline_id)
+                    .execute(&mut *transaction)
+                    .await
+            }
+        }
+        .map_err(Error::other)?;
+        let mut removed_sidecar = false;
+        for (_, file) in candidates {
+            // A filesystem failure drops/rolls back the transaction. Do not
+            // announce success with the primary row still visible.
+            std::fs::remove_file(file)?;
+            removed_sidecar = true;
+        }
+        transaction.commit().await.map_err(Error::other)?;
+        Ok(result.rows_affected() > 0 || removed_sidecar)
+    })
+}
+
+fn selected_project_dirs(
+    project: Option<&str>,
+) -> std::io::Result<Vec<(String, std::path::PathBuf)>> {
+    use std::io::{Error, ErrorKind};
+    if let Some(slug) = project {
+        let dir = crate::shared::paths::checked_harness_dir_for_slug(slug)
+            .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        return Ok(vec![(slug.to_string(), dir)]);
+    }
+    let entries = match std::fs::read_dir(crate::shared::paths::harness_projects_root()) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut projects = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Some(slug) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        // Exclude escaping project junctions from aggregate access.
+        if let Ok(dir) = crate::shared::paths::checked_harness_dir_for_slug(&slug)
+            && dir.is_dir()
+        {
+            projects.push((slug, dir));
+        }
+    }
+    Ok(projects)
 }
 
 fn parse_query_param(url: &str, key: &str) -> Option<String> {

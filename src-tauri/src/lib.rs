@@ -65,6 +65,17 @@ pub fn run() {
             commands::harness::get_session_snapshots,
             commands::harness::get_global_patterns,
             commands::harness::list_projects,
+            commands::harness::get_seesaw_registry,
+            commands::harness::get_variant_pool,
+            commands::harness::get_harness_snapshot,
+            commands::harness::get_adaptation_landscape,
+            commands::harness::get_manifests,
+            commands::harness::get_orchestrator_run,
+            commands::harness::get_orchestrator_agent_status,
+            commands::harness::get_agent_events,
+            commands::harness::get_agent_inbox,
+            commands::harness::dismiss_agent,
+            commands::harness::dismiss_orbit_pipeline,
         ])
         .run(tauri::generate_context!())
     {

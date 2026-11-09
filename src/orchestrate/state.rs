@@ -149,15 +149,25 @@ pub fn agent_inbox_file(base: &Path, agent_id: &str) -> PathBuf {
 /// Atomic write: write to `.tmp` then rename. Sets 0o600 permissions on Unix.
 pub fn atomic_write_json(path: &Path, data: &impl Serialize) -> io::Result<()> {
     let content = serde_json::to_string(data).map_err(io::Error::other)?;
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, &content)?;
+    let tmp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let mut file = fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&tmp)?;
+    use std::io::Write;
+    file.write_all(content.as_bytes())?;
+    file.sync_all()?;
+    drop(file);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600));
     }
-    fs::rename(&tmp, path)?;
-    Ok(())
+    let result = fs::rename(&tmp, path);
+    if result.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    result
 }
 
 /// Read a JSON file, returning None if missing or unparseable.
@@ -268,6 +278,49 @@ pub fn write_run(base: &Path, run: &OrchestrationRun) -> io::Result<()> {
     atomic_write_json(&run_file(base), run)
 }
 
+/// Hide one tracked agent without inventing completion or deleting its history.
+/// The archived definition/status, stream and inbox remain in its directory.
+pub fn dismiss_agent(base: &Path, agent_id: &str) -> io::Result<bool> {
+    if !validate_agent_id(agent_id) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid agent id",
+        ));
+    }
+    let dir = orchestrator_dir(base);
+    fs::create_dir_all(&dir)?;
+    let _lock = acquire_lock(&dir.join("run.json.lock"))?;
+    let mut run = read_run(base);
+    let agent = run
+        .as_ref()
+        .and_then(|r| r.agents.iter().find(|a| a.id == agent_id))
+        .cloned();
+    let status = read_agent_status(base, agent_id);
+    if agent.is_none() && status.is_none() {
+        return Ok(false);
+    }
+    let archive_dir = agent_dir(base, agent_id);
+    fs::create_dir_all(&archive_dir)?;
+    atomic_write_json(
+        &archive_dir.join(format!("dismissed-{}.json", uuid::Uuid::new_v4())),
+        &serde_json::json!({"agent": agent, "status": status}),
+    )?;
+    if let Err(error) = fs::remove_file(agent_status_file(base, agent_id))
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        return Err(error);
+    }
+    if let Some(run) = &mut run {
+        run.agents.retain(|agent| agent.id != agent_id);
+        run.dependency_graph.remove(agent_id);
+        // Other agents' dependency references remain unresolved: dismissal is
+        // neither a completion event nor permission to start downstream work.
+        run.updated_at = crate::shared::helpers::now_iso();
+        write_run(base, run)?;
+    }
+    Ok(true)
+}
+
 /// Evaluate the dependency graph: given an agent that just completed,
 /// return the IDs of agents that are now unblocked (all their deps are done/failed).
 pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -> Vec<String> {
@@ -312,42 +365,31 @@ pub fn is_run_complete(run: &OrchestrationRun) -> bool {
 
 /// Acquire an exclusive advisory file lock on `path`.
 /// Returns the locked file handle (holds the lock until dropped).
-#[cfg(unix)]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
     let file = fs::OpenOptions::new()
         .create(true)
         .truncate(false)
-        .mode(0o600)
         .read(true)
         .write(true)
         .open(lock_path)?;
-    // Non-blocking exclusive lock — if contended, fall back to blocking
-    // (hooks are sequential within a session, contention is cross-session)
-    use std::os::unix::io::AsRawFd;
-    let fd = file.as_raw_fd();
-    let result = unsafe { libc::flock(fd, libc::LOCK_EX) };
-    if result != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    file.lock()?;
     Ok(file)
 }
 
-#[cfg(not(unix))]
-fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    use std::sync::OnceLock;
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        eprintln!(
-            "[harness] warning: file locking unavailable on this platform — \
-             concurrent agent spawns may race"
-        );
-    });
-    fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(lock_path)
-        .or_else(|_| fs::File::open(lock_path))
+/// Update an existing run under the same cross-process lock used by starts.
+pub fn update_run(
+    base: &Path,
+    update: impl FnOnce(&mut OrchestrationRun) -> io::Result<()>,
+) -> io::Result<()> {
+    let dir = orchestrator_dir(base);
+    fs::create_dir_all(&dir)?;
+    let _lock = acquire_lock(&dir.join("run.json.lock"))?;
+    if let Some(mut run) = read_run(base) {
+        update(&mut run)?;
+        run.updated_at = crate::shared::helpers::now_iso();
+        write_run(base, &run)?;
+    }
+    Ok(())
 }
 
 /// Upsert an agent into an auto-created run.json.
@@ -465,7 +507,9 @@ pub fn upsert_agent_to_run(
 pub fn auto_cleanup_stale_runs(base: &Path) {
     let orch_dir = orchestrator_dir(base);
     let lock_path = orch_dir.join("run.json.lock");
-    let _lock = acquire_lock(&lock_path);
+    let Ok(_lock) = acquire_lock(&lock_path) else {
+        return;
+    };
 
     let Some(mut run) = read_run(base) else {
         return;
