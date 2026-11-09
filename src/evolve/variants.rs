@@ -138,6 +138,10 @@ impl VariantPool {
         if !would_regress {
             return target_id.to_string();
         }
+        // Capture the parent before retirement: it can itself be the lowest
+        // scoring entry. Pool cardinality is not a unique identity allocator.
+        let parent = self.variants.iter().find(|v| v.id == target_id).cloned();
+        let new_id = format!("{target_id}-fork-{}", uuid::Uuid::new_v4());
         if self.variants.len() >= MAX_VARIANTS {
             // Pool full: retire the lowest-scoring variant to make room.
             if let Some(idx) = self.lowest_scoring_index() {
@@ -147,8 +151,6 @@ impl VariantPool {
         }
         // Clone the target's shape (tags + skills) so the sibling starts where
         // the parent left off, then it diverges as the edit is applied.
-        let parent = self.variants.iter().find(|v| v.id == target_id).cloned();
-        let new_id = format!("{target_id}-fork-{}", self.variants.len() + 1);
         let sibling = match parent {
             Some(p) => SkillVariant {
                 id: new_id.clone(),
@@ -335,6 +337,24 @@ mod tests {
         assert_eq!(pool.variants.len(), 3);
         assert!(!pool.variants.iter().any(|v| v.id == "v2"));
         assert!(id.starts_with("v1-fork-"));
+    }
+
+    #[test]
+    fn issue_209_full_pool_fork_preserves_parent_and_unique_ids() {
+        let mut pool = VariantPool {
+            variants: vec![
+                variant("base", &["rust"], 0.1),
+                variant("base-fork-3", &["rust"], 0.9),
+                variant("other", &["python"], 0.8),
+            ],
+            routing_stats: HashMap::new(),
+        };
+        let id = pool.fork_if_needed("base", true);
+        let ids: std::collections::HashSet<_> = pool.variants.iter().map(|v| &v.id).collect();
+        assert_eq!(ids.len(), pool.variants.len());
+        let child = pool.variants.iter().find(|v| v.id == id).unwrap();
+        assert_eq!(child.domain_tags, vec!["rust"]);
+        assert_eq!(child.avg_score, 0.1);
     }
 
     #[test]
