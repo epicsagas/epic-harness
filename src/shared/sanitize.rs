@@ -17,8 +17,51 @@ static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
 static MASK_SK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
 static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret|private_key)[=:]\s*\S+").unwrap()
+    Regex::new(r#"(?i)(?P<key>"[^"]*(?:password|passwd|token|api_key|apikey|secret|private_key)[^"]*"|'[^']*(?:password|passwd|token|api_key|apikey|secret|private_key)[^']*'|password|passwd|token|api_key|apikey|secret|private_key)\s*[=:]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,}\]]+)"#).unwrap()
 });
+
+fn mask_key_values(s: &str) -> String {
+    MASK_KV
+        .replace_all(s, |caps: &regex::Captures<'_>| {
+            let key = &caps["key"];
+            if key.starts_with('"') {
+                format!("{key}:\"<REDACTED>\"")
+            } else if key.starts_with('\'') {
+                format!("{key}:'<REDACTED>'")
+            } else {
+                format!("{key}=<REDACTED>")
+            }
+        })
+        .into_owned()
+}
+
+/// Redact sensitive structured fields before serialization or truncation.
+pub(crate) fn mask_json_secrets(value: &serde_json::Value) -> serde_json::Value {
+    static SENSITIVE_KEY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)password|passwd|token|api_key|apikey|secret|private_key").unwrap()
+    });
+    match value {
+        serde_json::Value::Object(fields) => serde_json::Value::Object(
+            fields
+                .iter()
+                .map(|(key, value)| {
+                    (
+                        key.clone(),
+                        if SENSITIVE_KEY.is_match(key) {
+                            serde_json::Value::String("<REDACTED>".into())
+                        } else {
+                            mask_json_secrets(value)
+                        },
+                    )
+                })
+                .collect(),
+        ),
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(mask_json_secrets).collect())
+        }
+        other => other.clone(),
+    }
+}
 /// Absolute file paths — Unix (`/home/u/p/x.rs`), Windows (`C:\Users\me\y`),
 /// and tilde-home (`~/repo/z`). Error snippets reach an external LLM via
 /// skill synthesis and may land in generated SKILL.md, so paths are masked.
@@ -60,7 +103,7 @@ pub fn mask_path_action(path: &str) -> String {
 
     let s = MASK_BEARER.replace_all(&rel, "Bearer <REDACTED>");
     let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-    MASK_KV.replace_all(&s, "$1=<REDACTED>").into_owned()
+    mask_key_values(&s)
 }
 
 /// Mask common secret patterns in a string.
@@ -69,7 +112,7 @@ pub fn mask_path_action(path: &str) -> String {
 pub fn mask_secrets(s: &str) -> String {
     let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
     let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-    let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
+    let s = mask_key_values(&s);
     let s = MASK_PATH.replace_all(&s, "<PATH>");
     s.into_owned()
 }
@@ -77,6 +120,25 @@ pub fn mask_secrets(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue_177_json_and_complete_quoted_values_are_redacted() {
+        let output = mask_secrets(
+            r#"{"token":"SYNTHETIC_TOKEN", "password": "SYNTHETIC SECRET WITH SPACES", "nested":{"api_key":"escaped\\\"secret"}}"#,
+        );
+        let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["token"], "<REDACTED>");
+        assert_eq!(value["password"], "<REDACTED>");
+        assert_eq!(value["nested"]["api_key"], "<REDACTED>");
+        assert_eq!(
+            mask_secrets("password=\"SYNTHETIC SECRET WITH SPACES\""),
+            "password=<REDACTED>"
+        );
+        assert_eq!(
+            mask_secrets("password='SYNTHETIC SECRET WITH SPACES'"),
+            "password=<REDACTED>"
+        );
+    }
 
     /// Two files in the project must stay distinguishable after sanitizing.
     /// Masking an absolute path alone turns every one of them into `<PATH>`,

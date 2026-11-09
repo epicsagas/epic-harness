@@ -53,6 +53,21 @@ jobs:
       - name: Test
         run: cargo test
 
+  windows-source-redaction:
+    name: Windows source redaction regression
+    runs-on: windows-latest
+    env:
+      SKIP_DASHBOARD_BUILD: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test credential redaction from changed source
+        shell: pwsh
+        run: |
+          cargo test -p epic-harness --locked --lib issue_177
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   windows-hooks:
     name: Windows hook portability
     runs-on: windows-latest
