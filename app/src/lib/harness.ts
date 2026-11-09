@@ -446,7 +446,13 @@ export async function getGraphStats(): Promise<GraphStats | null> {
     const res = await fetch('/api/stats');
     if (!res.ok) return null;
     const data = await res.json();
-    return data && Object.keys(data).length > 0 ? data as GraphStats : null;
+    if (!data || data.error) return null;
+    return {
+      total_nodes: data.total_nodes ?? data.nodes,
+      total_edges: data.total_edges ?? data.edges,
+      avg_importance: data.avg_importance,
+      by_type: data.by_type ?? data.types ?? {},
+    };
   } catch {
     return null;
   }
