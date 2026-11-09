@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- respect explicit agent failure outcomes (#245).
+- Explicit failure wins conflicting success metadata across top-level,
+  canonical `tool_response`, and legacy `tool_result` outcome fields.
+- Observation classification honors explicit tool outcome metadata, recognizes
+  PowerShell reads, and avoids false failures from quoted source and zero
+  timeout counts. Stored result and success dimensions remain consistent (#144).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names

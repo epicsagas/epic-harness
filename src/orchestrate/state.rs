@@ -363,6 +363,7 @@ pub fn upsert_agent_to_run(
     subagent_type: &str,
     status: AgentStatus,
 ) -> io::Result<String> {
+    let terminal = matches!(&status, AgentStatus::Done | AgentStatus::Failed);
     let orch_dir = orchestrator_dir(base);
     fs::create_dir_all(&orch_dir)?;
 
@@ -394,7 +395,7 @@ pub fn upsert_agent_to_run(
 
     if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
         existing.status = status.clone();
-        if status == AgentStatus::Done {
+        if terminal {
             existing.completed_at = Some(now.clone());
         }
         if status == AgentStatus::Running && existing.started_at.is_none() {
@@ -412,11 +413,7 @@ pub fn upsert_agent_to_run(
             } else {
                 None
             },
-            completed_at: if status == AgentStatus::Done {
-                Some(now.clone())
-            } else {
-                None
-            },
+            completed_at: if terminal { Some(now.clone()) } else { None },
         });
     }
 
@@ -440,6 +437,8 @@ pub fn upsert_agent_to_run(
                 "complete".to_string()
             } else if status == AgentStatus::Running {
                 "running".to_string()
+            } else if status == AgentStatus::Failed {
+                "failed".to_string()
             } else {
                 "pending".to_string()
             },
