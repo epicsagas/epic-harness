@@ -198,8 +198,107 @@ fn get_cross_project_hints() -> Vec<String> {
     hints
 }
 
+fn migrate_legacy_project(local: &Path) {
+    let destination = harness_dir();
+    let complete = destination.join("legacy_migration.complete");
+    if fs::read_to_string(&complete)
+        .is_ok_and(|value| value == "complete; legacy original retained\n")
+    {
+        return;
+    }
+    let Ok(metadata) = local.symlink_metadata() else {
+        return;
+    };
+    if !metadata.is_dir() || is_link_or_reparse_point(&metadata) {
+        return;
+    }
+    let entries =
+        match fs::read_dir(local).and_then(|entries| entries.collect::<Result<Vec<_>, _>>()) {
+            Ok(entries) => entries
+                .into_iter()
+                .filter(|entry| {
+                    !matches!(
+                        entry.file_name().to_str(),
+                        Some(
+                            "worktrees"
+                                | "guard-rules.yaml"
+                                | "engagement.md"
+                                | "legacy_migration.complete"
+                                | "legacy_migration.pending"
+                        )
+                    )
+                })
+                .collect::<Vec<_>>(),
+            Err(_) => {
+                hint(
+                    "resume",
+                    "Migration partial: unable to inspect legacy data; original preserved",
+                );
+                return;
+            }
+        };
+    if entries.is_empty() {
+        return;
+    }
+    let pending = destination.join("legacy_migration.pending");
+    if fs::create_dir_all(&destination)
+        .and_then(|_| fs::write(&pending, "incomplete\n"))
+        .is_err()
+    {
+        hint(
+            "resume",
+            "Migration partial: unable to record migration state; original preserved",
+        );
+        return;
+    }
+    let mut copied = CopyResult { ok: 0, errors: 0 };
+    for entry in entries {
+        let source = entry.path();
+        let target = destination.join(entry.file_name());
+        match source.symlink_metadata() {
+            Ok(metadata) if metadata.is_dir() && !is_link_or_reparse_point(&metadata) => {
+                let result = copy_dir_counted(&source, &target);
+                copied.ok += result.ok;
+                copied.errors += result.errors;
+            }
+            Ok(_) => match copy_file_preserving_existing(&source, &target) {
+                Ok(()) => copied.ok += 1,
+                Err(_) => copied.errors += 1,
+            },
+            Err(_) => copied.errors += 1,
+        }
+    }
+    if copied.errors > 0 || fs::write(&complete, "complete; legacy original retained\n").is_err() {
+        hint(
+            "resume",
+            &format!(
+                "Migration partial: {}/{} files copied; conflicts and original retained for retry",
+                copied.ok,
+                copied.ok + copied.errors
+            ),
+        );
+    } else {
+        let _ = fs::remove_file(pending);
+        hint(
+            "resume",
+            &format!(
+                "Migrated .harness/ → {} ({} files). Original retained as a safety backup.",
+                destination.display(),
+                copied.ok
+            ),
+        );
+    }
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_RESUME) {
+        return 0;
+    }
+    if checked_harness_dir_for_slug(&project_slug()).is_err() {
+        hint(
+            "resume",
+            "Project data path escapes harness root; startup skipped",
+        );
         return 0;
     }
     // Guard: SessionStart fires multiple times per session in Claude Code.
@@ -244,48 +343,7 @@ pub fn run(input: &HookInput) -> i32 {
     let wd = cwd();
 
     // Migrate legacy .harness/ from project dir to ~/.harness/projects/{slug}/
-    let local = local_harness_dir();
-    let is_real_dir = local
-        .symlink_metadata()
-        .map(|m| m.file_type().is_dir())
-        .unwrap_or(false);
-    if is_real_dir && !harness_exists() {
-        ensure_dir(&harness_dir());
-        let copied = copy_dir_counted(&local, &harness_dir());
-        if copied.errors > 0 {
-            hint(
-                "resume",
-                &format!(
-                    "Migration partial: {}/{} files copied — check {}",
-                    copied.ok,
-                    copied.ok + copied.errors,
-                    harness_dir().display()
-                ),
-            );
-        } else {
-            // Remove migrated local dir; guard-rules.yaml lives at project root
-            // (.harness/guard-rules.yaml) — move it up before deleting the dir.
-            let guard_src = local.join("guard-rules.yaml");
-            let guard_dst = cwd().join(".harness").join("guard-rules.yaml");
-            if guard_src.exists() && !guard_dst.exists() {
-                // guard-rules is *inside* local — it will be deleted with the dir.
-                // Copy it to a standalone location the user can check into git.
-                let root_guard = cwd().join("guard-rules.yaml");
-                if !root_guard.exists() {
-                    let _ = std::fs::copy(&guard_src, &root_guard);
-                }
-            }
-            let _ = std::fs::remove_dir_all(&local);
-            hint(
-                "resume",
-                &format!(
-                    "Migrated .harness/ → {} ({} files). Removed project-local .harness/.",
-                    harness_dir().display(),
-                    copied.ok
-                ),
-            );
-        }
-    }
+    migrate_legacy_project(&local_harness_dir());
 
     // Auto-init ~/.harness/projects/{slug}/
     if !harness_exists() {
