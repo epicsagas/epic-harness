@@ -249,6 +249,9 @@ fn performance_delta(current: &DimResult, previous: &Value) -> Value {
     let previous_value = if previous["details"]["metric"].as_str() == Some(metric) {
         previous["details"]["metric_value"].as_f64()
     } else {
+        if previous["details"].get("metric").is_some() {
+            return invalid();
+        }
         previous["details"]["stdout_tail"]
             .as_str()
             .and_then(parse_last_json_object)
