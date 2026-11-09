@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "src-tauri"]
+exclude = ["vendor/libsqlite3-sys-0.30.1"]
 
 [package]
 name = "epic-harness"
@@ -81,3 +82,7 @@ lto = "thin"
 [profile.release.package."*"]
 opt-level = 3
 codegen-units = 4
+
+# Preserve SQLx 0.9 binding compatibility while updating the bundled engine.
+[patch.crates-io]
+libsqlite3-sys = { path = "vendor/libsqlite3-sys-0.30.1" }
