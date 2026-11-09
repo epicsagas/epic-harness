@@ -43,11 +43,14 @@ pub(super) async fn merge(
             "invalid attached schema name",
         ));
     }
+    let source_id = source_identity(conn, source).await?;
     begin_immediate(conn).await?;
     let transfer = async {
+        sqlx::query("CREATE TABLE IF NOT EXISTS main._harness_import_rows (source_id TEXT NOT NULL, table_name TEXT NOT NULL, source_rowid INTEGER NOT NULL, PRIMARY KEY(source_id, table_name, source_rowid))")
+            .execute(&mut *conn).await.map_err(sqlx_err)?;
         let mut stats = GlobalMergeStats::default();
         for table in TABLES {
-            let count = copy_table(conn, slug, source, table).await?;
+            let count = copy_table(conn, slug, source, &source_id, table).await?;
             match *table {
                 "observations" => stats.obs += count,
                 "sessions" => stats.sessions += count,
@@ -85,6 +88,45 @@ pub(super) async fn merge(
     }
 }
 
+/// Preserve source identity across file moves without requiring writes to read-only legacy sources.
+async fn source_identity(conn: &mut SqliteConnection, source: &str) -> io::Result<String> {
+    let schema = quoted(source);
+    let attempted: Result<String, sqlx::Error> = async {
+        sqlx::query(sqlx::AssertSqlSafe(format!("CREATE TABLE IF NOT EXISTS {schema}._harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")))
+            .execute(&mut *conn).await?;
+        let sql = format!("SELECT value FROM {schema}._harness_meta WHERE key='merge_source_id'");
+        if let Some(value) = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql.clone())).fetch_optional(&mut *conn).await? { return Ok(value); }
+        sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO {schema}._harness_meta(key,value) VALUES('merge_source_id',?)")))
+            .bind(uuid::Uuid::new_v4().to_string()).execute(&mut *conn).await?;
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql)).fetch_one(&mut *conn).await
+    }.await;
+    match attempted {
+        Ok(value) => Ok(format!("uuid:{value}")),
+        Err(sqlx::Error::Database(error))
+            if error
+                .code()
+                .and_then(|c| c.parse::<i32>().ok())
+                .is_some_and(|c| c & 255 == 8) =>
+        {
+            let file: String =
+                sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name=?")
+                    .bind(source)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(sqlx_err)?;
+            if file.is_empty() {
+                return Err(io::Error::other(
+                    "read-only source has no stable file identity",
+                ));
+            }
+            let file =
+                std::fs::canonicalize(&file).unwrap_or_else(|_| std::path::PathBuf::from(file));
+            Ok(format!("file:{}", file.display()))
+        }
+        Err(error) => Err(sqlx_err(error)),
+    }
+}
+
 async fn columns(
     conn: &mut SqliteConnection,
     schema: &str,
@@ -104,6 +146,7 @@ async fn copy_table(
     conn: &mut SqliteConnection,
     slug: &str,
     source: &str,
+    source_id: &str,
     table: &str,
 ) -> io::Result<usize> {
     let source_columns = columns(conn, source, table).await?;
@@ -166,7 +209,7 @@ async fn copy_table(
     let dest = dest.join(", ");
     let select = select.join(", ");
     let sql = format!(
-        "INSERT OR IGNORE INTO main.{} ({dest}) SELECT {select} FROM {}.{} AS s",
+        "INSERT OR IGNORE INTO main.{} ({dest}) SELECT {select} FROM {}.{} AS s WHERE NOT EXISTS (SELECT 1 FROM main._harness_import_rows imported WHERE imported.source_id=? AND imported.table_name=? AND imported.source_rowid=s.rowid)",
         quoted(table),
         quoted(source),
         quoted(table)
@@ -175,6 +218,7 @@ async fn copy_table(
     if project {
         query = query.bind(slug);
     }
+    query = query.bind(source_id).bind(table);
     let count = query
         .execute(&mut *conn)
         .await
@@ -201,5 +245,7 @@ async fn copy_table(
             ),
         ));
     }
+    sqlx::query(sqlx::AssertSqlSafe(format!("INSERT OR IGNORE INTO main._harness_import_rows(source_id,table_name,source_rowid) SELECT ?,?,s.rowid FROM {}.{} s",quoted(source),quoted(table))))
+        .bind(source_id).bind(table).execute(&mut *conn).await.map_err(sqlx_err)?;
     Ok(count)
 }

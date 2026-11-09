@@ -1462,3 +1462,7 @@ mod tests {
         assert_eq!(sess_count, 1);
     }
 }
+
+#[cfg(test)]
+#[path = "regression_256.rs"]
+mod regression_256;
