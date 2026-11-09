@@ -30,34 +30,36 @@ $shaUrl  = "$baseUrl/$archive.sha256"
 # ── Download, verify, and install ────────────────────────────────────────────
 Write-Host "Installing $Binary v$version for $target..."
 
-$tmpdir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "epic-install-$pid") -Force
-$zip    = Join-Path $tmpdir $archive
-$shaFile = Join-Path $tmpdir "$archive.sha256"
-
-Invoke-WebRequest -Uri $url    -OutFile $zip     -UseBasicParsing
-Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing
-
-# SHA-256 verification
-$expected = (Get-Content $shaFile -Raw).Split(" ")[0].Trim()
-$actual   = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
-if ($actual -ne $expected) {
-    Write-Error "Error: SHA-256 verification failed (expected $expected, got $actual)"; exit 1
-}
-
-Expand-Archive -Path $zip -DestinationPath $tmpdir -Force
-
-if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-}
-
-Copy-Item -Path (Join-Path $tmpdir "$Binary.exe") -Destination (Join-Path $InstallDir "$Binary.exe") -Force
-Remove-Item -Path $tmpdir -Recurse -Force
-
-# ── Verify ────────────────────────────────────────────────────────────────────
-if (Get-Command $Binary -ErrorAction SilentlyContinue) {
-    Write-Host "Installed: $Binary v$version"
-} else {
-    Write-Host ""
-    Write-Host "Add $InstallDir to your PATH:"
-    Write-Host "  `$env:PATH = `"$InstallDir;`$env:PATH`""
+$tmpdir = New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) ("epic-install-" + [Guid]::NewGuid().ToString("N"))) -ErrorAction Stop
+try {
+    $zip = Join-Path $tmpdir $archive
+    $shaFile = Join-Path $tmpdir "$archive.sha256"
+    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction Stop
+    Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing -ErrorAction Stop
+    $expected = (Get-Content -LiteralPath $shaFile -Raw -ErrorAction Stop).Trim().Split()[0].ToLower()
+    $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256 -ErrorAction Stop).Hash.ToLower()
+    if ($actual -ne $expected) { throw "SHA-256 verification failed" }
+    Expand-Archive -LiteralPath $zip -DestinationPath $tmpdir -Force -ErrorAction Stop
+    New-Item -ItemType Directory -Path $InstallDir -Force -ErrorAction Stop | Out-Null
+    $source = Join-Path $tmpdir "$Binary.exe"
+    $destination = Join-Path $InstallDir "$Binary.exe"
+    Copy-Item -LiteralPath $source -Destination $destination -Force -ErrorAction Stop
+    $sourceHash = (Get-FileHash -LiteralPath $source -Algorithm SHA256 -ErrorAction Stop).Hash
+    $installedHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash
+    if ($installedHash -ne $sourceHash) { throw "Installed executable does not match the verified payload" }
+    Write-Host "Installed: $Binary v$version at $destination"
+    if (-not (Get-Command $Binary -ErrorAction SilentlyContinue)) {
+        Write-Host "Add $InstallDir to your PATH."
+    }
+} catch {
+    Write-Error ("Installation failed: " + $_.Exception.Message) -ErrorAction Continue
+    exit 1
+} finally {
+    # Delete only the unique temporary directory created by this invocation.
+    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    $resolvedTemporary = [IO.Path]::GetFullPath($tmpdir.FullName)
+    if ($resolvedTemporary.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase) -and
+        [IO.Path]::GetFileName($resolvedTemporary).StartsWith("epic-install-")) {
+        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
