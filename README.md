@@ -299,14 +299,14 @@ Propose (Solver — graduated by score: ≥0.90 skip, ≥0.70 moderate, <0.70 fu
     ↓ SkillProposal[] with confidence
 Curate (Accept/Merge/Skip, feedback masked from solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
-Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
+Gate (format check, dedup, cap 10, gated promotion after 2 eligible reflection rounds by default)
     ↓ evolved_backup/ (best checkpoint)
 Reload (next session — resume loads evolved skills)
 ```
 
 Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences).
 
-Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
+Stagnation: after 3 reflection rounds without improvement, restore the best checkpoint when rollback conditions are met. The default improvement threshold is an absolute score increase of 0.02; the separate rollback degradation threshold is 0.05.
 
 ### SkillOpt-Inspired Optimization
 
@@ -690,8 +690,8 @@ weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
 [evolution]
 max_skills = 10
 stagnation_limit = 3
-improvement_threshold = 0.05
-gated_promotion_min = 3
+improvement_threshold = 0.02
+gated_promotion_min = 2
 
 [pattern]
 # repeated_error_min = 3

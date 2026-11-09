@@ -88,7 +88,7 @@ Error message hash-based dedup for improved precision (`hashString` + `normalize
 
 ### Stagnation Gating
 - `STAGNATION_LIMIT`(3) sessions without improvement → auto-rollback evolved skills to best checkpoint
-- `IMPROVEMENT_THRESHOLD`: 5%
+- `improvement_threshold`: absolute score increase of 0.02 by default; the separate `rollback_degradation` default is 0.05.
 - Trend tracking: improving / stable / declining
 
 ### Evolved Skill Validation
