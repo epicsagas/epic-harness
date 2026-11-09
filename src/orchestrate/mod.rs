@@ -56,14 +56,29 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
         return Ok(0);
     }
 
-    // Always: record agent as running (agent tracking — no EPIC_ORCHESTRATION gate)
+    // Apply controls before recording the lifecycle. Observational lifecycle
+    // hooks cannot stop an already-started host agent, but must not report it
+    // as running while the orchestration directive says paused/cancelled.
+    let directive = is_full_orchestration()
+        .then(|| orch_state::read_control(&base))
+        .flatten()
+        .filter(|directive| {
+            directive.target.as_deref() == Some(&agent_id)
+                || directive.target.as_deref() == Some("all")
+                || directive.target.is_none()
+        });
+    let initial_status = match directive.as_ref().map(|directive| &directive.action) {
+        Some(ControlAction::Pause) => AgentStatus::Blocked,
+        Some(ControlAction::Cancel) => AgentStatus::Failed,
+        _ => AgentStatus::Running,
+    };
     let (description, subagent_type) = extract_agent_meta(input);
     orch_state::upsert_agent_to_run(
         &base,
         &agent_id,
         &description,
         &subagent_type,
-        orch_state::AgentStatus::Running,
+        initial_status,
     )?;
 
     // Full orchestration: control, inbox, heartbeat
@@ -72,44 +87,38 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     }
 
     // Check control directive
-    if let Some(directive) = orch_state::read_control(&base) {
-        let matches_target = directive.target.as_deref() == Some(&agent_id)
-            || directive.target.as_deref() == Some("all")
-            || directive.target.is_none();
-
-        if matches_target {
-            match directive.action {
-                ControlAction::Pause => {
-                    hint(
-                        "orchestrator",
-                        &format!(
-                            "Agent {} is paused by user directive (gen {})",
-                            agent_id, directive.generation
-                        ),
-                    );
-                    if let Some(msg) = &directive.message {
-                        hint("orchestrator", &format!("Reason: {}", msg));
-                    }
-                    return Ok(2); // block the tool call
+    if let Some(directive) = directive {
+        match directive.action {
+            ControlAction::Pause => {
+                hint(
+                    "orchestrator",
+                    &format!(
+                        "Agent {} is paused by user directive (gen {})",
+                        agent_id, directive.generation
+                    ),
+                );
+                if let Some(msg) = &directive.message {
+                    hint("orchestrator", &format!("Reason: {}", msg));
                 }
-                ControlAction::Cancel => {
-                    hint(
-                        "orchestrator",
-                        &format!(
-                            "Agent {} cancelled by user directive (gen {})",
-                            agent_id, directive.generation
-                        ),
-                    );
-                    return Ok(2);
+                return Ok(2); // block the tool call
+            }
+            ControlAction::Cancel => {
+                hint(
+                    "orchestrator",
+                    &format!(
+                        "Agent {} cancelled by user directive (gen {})",
+                        agent_id, directive.generation
+                    ),
+                );
+                return Ok(2);
+            }
+            ControlAction::Redirect => {
+                if let Some(msg) = &directive.message {
+                    hint("orchestrator", &format!("Redirect notice: {}", msg));
                 }
-                ControlAction::Redirect => {
-                    if let Some(msg) = &directive.message {
-                        hint("orchestrator", &format!("Redirect notice: {}", msg));
-                    }
-                }
-                ControlAction::Resume => {
-                    // Resume clears any prior pause; no action needed at pre-invocation
-                }
+            }
+            ControlAction::Resume => {
+                // Resume clears any prior pause; no action needed at pre-invocation
             }
         }
     }

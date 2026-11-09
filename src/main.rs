@@ -346,7 +346,11 @@ fn main() {
     if input.hook_event_name.is_some() {
         // Codex / Antigravity protocol
         match subcmd {
-            "guard" if exit_code == 2 => {
+            "guard" | "observe"
+                if exit_code == 2
+                    && (subcmd == "guard"
+                        || input.hook_event_name.as_deref() == Some("PreToolUse")) =>
+            {
                 // PreToolUse block: explicit deny JSON so Codex never ignores the block
                 println!(
                     r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#
