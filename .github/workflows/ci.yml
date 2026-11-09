@@ -25,6 +25,11 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Verify bundled SQLite source and WAL initialization
+        run: |
+          node scripts/check-sqlite-backport.mjs
+          cc -O2 scripts/sqlite-wal-initialization-test.c -o "$RUNNER_TEMP/epic-sqlite-wal-test" -ldl -lpthread -lm
+          "$RUNNER_TEMP/epic-sqlite-wal-test"
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
