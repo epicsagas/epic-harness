@@ -780,13 +780,16 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                             if fname.starts_with("PIPELINE-")
                                 && fname.ends_with(".json")
                                 && let Ok(content) = fs::read_to_string(f.path())
-                                && let Ok(mut v) =
+                                && let Ok(serde_json::Value::Object(mut map)) =
                                     serde_json::from_str::<serde_json::Value>(&content)
                             {
-                                v["_project"] = serde_json::Value::String(
-                                    proj_entry.file_name().to_string_lossy().to_string(),
+                                map.insert(
+                                    "_project".into(),
+                                    serde_json::Value::String(
+                                        proj_entry.file_name().to_string_lossy().to_string(),
+                                    ),
                                 );
-                                all.push(v);
+                                all.push(serde_json::Value::Object(map));
                             }
                         }
                     }
