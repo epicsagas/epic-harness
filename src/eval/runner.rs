@@ -50,24 +50,26 @@ pub fn run_correctness(cmds: &ResolvedCommands) -> DimResult {
         0.0
     };
 
-    let verdict = if score >= 1.0 {
-        "PASS"
-    } else if score >= 0.8 {
-        "WARN"
-    } else {
+    let passed = exit_ok && score >= cmds.min_pass_rate;
+    let verdict = if !passed {
         "FAIL"
+    } else if score >= 1.0 {
+        "PASS"
+    } else {
+        "WARN"
     };
 
     DimResult {
         dimension: "correctness".into(),
         score,
-        passed: exit_ok,
+        passed,
         verdict: verdict.into(),
         details: json!({
             "command": test_cmd,
             "exit_code": output.exit_code,
             "tests_passed": tests_passed,
             "tests_total": tests_total,
+            "min_pass_rate": cmds.min_pass_rate,
             "stdout_tail": truncate(&output.stdout, 500),
             "stderr_tail": truncate(&output.stderr, 500),
         }),

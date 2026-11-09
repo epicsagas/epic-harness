@@ -95,6 +95,7 @@ pub struct ResolvedCommands {
     #[expect(dead_code)]
     pub mutation_command: Option<String>,
     pub stack: String,
+    pub min_pass_rate: f64,
 }
 
 // ── Defaults ────────────────────────────────────────────────────────
@@ -359,6 +360,11 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 /// eval delegates build/test/lint to `verify`. Only explicitly configured
 /// dimension commands are returned; stack is informational.
 pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
+    if !cfg.dimensions.correctness.extra.min_pass_rate.is_finite()
+        || !(0.0..=1.0).contains(&cfg.dimensions.correctness.extra.min_pass_rate)
+    {
+        return Err("correctness min_pass_rate must be between 0 and 1".into());
+    }
     let stack = if cfg.stack == "auto" {
         detect_stack(&std::env::current_dir().unwrap_or_default())
     } else {
@@ -384,5 +390,6 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         bench_command: cfg.dimensions.performance.command.clone(),
         mutation_command: mutation_cmd,
         stack,
+        min_pass_rate: cfg.dimensions.correctness.extra.min_pass_rate,
     })
 }
