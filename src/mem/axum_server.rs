@@ -14,8 +14,9 @@
 use axum::{
     Router,
     body::Body,
-    extract::{Path, Query, State},
-    http::{HeaderValue, Method, StatusCode, header},
+    extract::{Path, Query, Request, State},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Json, Response},
     routing::{delete, get, post, put},
 };
@@ -300,11 +301,20 @@ pub async fn compute_centrality_pool(pool: &AnyPool, limit: usize) -> Vec<serde_
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
+/// Build the local memory API. Mutation bodies require application/json;
+/// browser mutations must originate at this server's loopback origin.
+/// Non-browser JSON clients without an Origin header remain supported.
 pub fn build_router(state: AppState, port: u16) -> Router {
-    // Allow only localhost origin
-    let origin = format!("http://localhost:{port}");
+    let origins = [
+        format!("http://localhost:{port}")
+            .parse::<HeaderValue>()
+            .unwrap(),
+        format!("http://127.0.0.1:{port}")
+            .parse::<HeaderValue>()
+            .unwrap(),
+    ];
     let cors = CorsLayer::new()
-        .allow_origin(origin.parse::<HeaderValue>().unwrap())
+        .allow_origin(origins.clone())
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -334,8 +344,67 @@ pub fn build_router(state: AppState, port: u16) -> Router {
         .route("/api/edges/{id}", delete(handle_delete_edge))
         // Search
         .route("/api/search", get(handle_search))
+        .layer(middleware::from_fn(move |request: Request, next: Next| {
+            let origins = origins.clone();
+            async move {
+                if let Some(rejection) =
+                    reject_unsafe_mutation_headers(request.method(), request.headers(), &origins)
+                {
+                    return rejection;
+                }
+                next.run(request).await
+            }
+        }))
+        // CORS handles preflight and response visibility; the inner layer
+        // separately rejects mutation requests before any handler can run.
         .layer(cors)
         .with_state(state)
+}
+
+fn reject_unsafe_mutation_headers(
+    method: &Method,
+    headers: &HeaderMap,
+    allowed_origins: &[HeaderValue],
+) -> Option<Response> {
+    let has_json_body = method == Method::POST || method == Method::PUT || method == Method::PATCH;
+    if !has_json_body && method != Method::DELETE {
+        return None;
+    }
+
+    let origins: Vec<_> = headers.get_all(header::ORIGIN).iter().collect();
+    let foreign_origin = origins.len() > 1
+        || origins
+            .iter()
+            .any(|origin| !allowed_origins.contains(origin));
+    let cross_site = headers
+        .get("sec-fetch-site")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.eq_ignore_ascii_case("cross-site"));
+    if foreign_origin || cross_site {
+        return Some(
+            (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "foreign-origin memory mutation is not allowed"})),
+            )
+                .into_response(),
+        );
+    }
+
+    let is_json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("application/json"));
+    if has_json_body && !is_json {
+        return Some(
+            (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                Json(json!({"error": "Content-Type must be application/json"})),
+            )
+                .into_response(),
+        );
+    }
+    None
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -696,5 +765,115 @@ mod tests {
             nodes.as_array().unwrap().is_empty(),
             "limit=0 should return empty array"
         );
+    }
+
+    #[tokio::test]
+    async fn mutations_reject_foreign_origins_before_creating_nodes() {
+        let state = make_state().await;
+        let server = TestServer::new(build_router(state.clone(), 7700));
+        let payload =
+            json!({"type":"concept", "title":"synthetic foreign write", "body":"fixture"});
+        for origin in [
+            "https://synthetic.invalid",
+            "http://localhost:7701",
+            "http://localhost:7700.synthetic.invalid",
+            "null",
+        ] {
+            server
+                .post("/api/nodes")
+                .json(&payload)
+                .add_header(header::ORIGIN, origin)
+                .await
+                .assert_status(StatusCode::FORBIDDEN);
+        }
+        server
+            .post("/api/nodes")
+            .text(payload.to_string())
+            .add_header(header::ORIGIN, "https://synthetic.invalid")
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        server
+            .post("/api/nodes")
+            .json(&payload)
+            .add_header("sec-fetch-site", "cross-site")
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM nodes")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0, "rejected requests must not mutate memory");
+    }
+
+    #[tokio::test]
+    async fn mutations_require_json_but_preserve_loopback_and_cli_clients() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let payload = json!({"type":"concept", "title":"synthetic local write", "body":"fixture"});
+        server
+            .post("/api/nodes")
+            .text(payload.to_string())
+            .await
+            .assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        server
+            .post("/api/nodes")
+            .text(payload.to_string())
+            .add_header(header::ORIGIN, "http://localhost:7700")
+            .await
+            .assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        server
+            .post("/api/nodes")
+            .json(&payload)
+            .content_type("application/json; charset=utf-8")
+            .add_header(header::ORIGIN, "http://localhost:7700")
+            .await
+            .assert_status(StatusCode::CREATED);
+        server
+            .post("/api/nodes")
+            .json(&payload)
+            .add_header(header::ORIGIN, "http://127.0.0.1:7700")
+            .await
+            .assert_status(StatusCode::CREATED);
+        server
+            .post("/api/nodes")
+            .json(&payload)
+            .await
+            .assert_status(StatusCode::CREATED);
+        server
+            .get("/api/nodes")
+            .add_header(header::ORIGIN, "https://synthetic.invalid")
+            .await
+            .assert_status_ok();
+        server
+            .method(Method::OPTIONS, "/api/nodes")
+            .add_header(header::ORIGIN, "http://localhost:7700")
+            .add_header(header::ACCESS_CONTROL_REQUEST_METHOD, "POST")
+            .add_header(header::ACCESS_CONTROL_REQUEST_HEADERS, "content-type")
+            .await
+            .assert_status_ok();
+    }
+
+    #[tokio::test]
+    async fn foreign_origin_updates_and_deletes_leave_existing_node_unchanged() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let created: Value = server
+            .post("/api/nodes")
+            .json(&json!({"type":"concept", "title":"preserved", "body":"original"}))
+            .await
+            .json();
+        let path = format!("/api/nodes/{}", created["id"].as_str().unwrap());
+        server
+            .put(&path)
+            .json(&json!({"title":"unwanted", "body":"changed"}))
+            .add_header(header::ORIGIN, "https://synthetic.invalid")
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        server
+            .delete(&path)
+            .add_header(header::ORIGIN, "https://synthetic.invalid")
+            .await
+            .assert_status(StatusCode::FORBIDDEN);
+        let node: Value = server.get(&path).await.json();
+        assert_eq!(node["title"], "preserved");
+        assert_eq!(node["body"], "original");
     }
 }

@@ -654,3 +654,5 @@ Original files are **not deleted** after import. New users are automatically on 
 - Hook dispatch now checks `PATH` before falling back to Node.js scripts
 - Homebrew tap path shortened to `epicsagas/tap` across all i18n READMEs
 - Broken CI badge removed from all READMEs
+
+- Reject foreign-origin and browser-simple memory mutation requests before storage changes (#234).
