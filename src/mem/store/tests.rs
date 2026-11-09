@@ -150,3 +150,15 @@ fn test_session_importance_lower_than_pattern() {
         "session importance should be lower than pattern"
     );
 }
+
+#[test]
+fn issue_233_malformed_unicode_timestamp_is_rejected_without_panicking() {
+    for value in [
+        "202é-01-01T00:00:00Z",
+        "2024-99-99T00:00:00Z",
+        "0000-01-01T00:00:00Z",
+    ] {
+        assert_eq!(parse_iso_to_secs(value), 0, "malformed timestamp {value}");
+    }
+    assert_eq!(parse_iso_to_secs("2024-01-01T00:00:00Z"), 1_704_067_200);
+}
