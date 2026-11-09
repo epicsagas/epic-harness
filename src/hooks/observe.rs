@@ -371,10 +371,8 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
 /// streak detection, per-file weak stats, the reflect dedup key) would be
 /// reading patch text instead of a path.
 fn resolve_action(v: &serde_json::Value) -> String {
-    v.get("file_path")
-        .and_then(|c| c.as_str())
-        .filter(|c| !c.is_empty())
-        .map(|c| mask_path_action(truncate_str(c, 500)))
+    tool_file_path(v)
+        .map(|c| truncate_str(&mask_path_action(c), 500).to_string())
         .or_else(|| {
             let cmd = v.get("command").and_then(|c| c.as_str())?;
             let files = apply_patch_paths(cmd, true);

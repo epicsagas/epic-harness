@@ -236,12 +236,16 @@ pub fn classify_tool(name: &str) -> &'static str {
     }
 }
 
+/// The first nonempty supported file-path field, shared by action and extension resolution.
+pub fn tool_file_path(input: &serde_json::Value) -> Option<&str> {
+    ["file_path", "path"]
+        .into_iter()
+        .filter_map(|key| input.get(key)?.as_str())
+        .find(|path| !path.is_empty())
+}
+
 pub fn extract_file_ext(input: &serde_json::Value) -> Option<String> {
-    let file_path = input
-        .get("file_path")
-        .or_else(|| input.get("path"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let file_path = tool_file_path(input).unwrap_or("");
 
     if !file_path.is_empty() {
         return Path::new(file_path)
