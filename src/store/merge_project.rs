@@ -14,6 +14,9 @@ use std::path::Path;
 use std::str::FromStr;
 
 use super::sqlx_err;
+
+#[path = "global_transfer.rs"]
+mod global_transfer;
 use crate::shared::paths::{global_harness_db_path, harness_projects_root};
 
 // ── Public entry point ───────────────────────────────────────────────────────
@@ -89,16 +92,35 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
 
     // ── 3. File-based data ───────────────────────────────────────────────────
-    let obs_files = copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run);
-    let session_files = copy_dir_files(
-        &from_dir.join("sessions"),
-        &to_dir.join("sessions"),
-        dry_run,
+    let obs_files = merge_file_count(
+        copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run),
+        "observations",
+        &mut exit,
     );
-    let orbit_files = copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run);
-    let evolved_dirs =
-        copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run);
-    let evo_lines = append_evolution_jsonl(&from_dir, &to_dir, dry_run).unwrap_or(0);
+    let session_files = merge_file_count(
+        copy_dir_files(
+            &from_dir.join("sessions"),
+            &to_dir.join("sessions"),
+            dry_run,
+        ),
+        "sessions",
+        &mut exit,
+    );
+    let orbit_files = merge_file_count(
+        copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run),
+        "orbit",
+        &mut exit,
+    );
+    let evolved_dirs = merge_file_count(
+        copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run),
+        "evolved skills",
+        &mut exit,
+    );
+    let evo_lines = merge_file_count(
+        append_evolution_jsonl(&from_dir, &to_dir, dry_run),
+        "evolution history",
+        &mut exit,
+    );
 
     // ── Summary ──────────────────────────────────────────────────────────────
     println!("\n[merge-project] ─── summary ───────────────────────────");
@@ -110,7 +132,9 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     println!("  evolution.jsonl lines    : {evo_lines}");
     println!("  orbit files copied       : {orbit_files}");
 
-    if delete_source {
+    if delete_source && exit != 0 {
+        eprintln!("[merge-project] source retained because at least one transfer failed");
+    } else if delete_source {
         if dry_run {
             println!("  [dry-run] would delete   : {}", from_dir.display());
         } else {
@@ -132,6 +156,17 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
 
     exit
+}
+
+fn merge_file_count(result: io::Result<usize>, label: &str, exit: &mut i32) -> usize {
+    match result {
+        Ok(count) => count,
+        Err(error) => {
+            eprintln!("[merge-project] {label} transfer failed: {error}");
+            *exit = 1;
+            0
+        }
+    }
 }
 
 // ── Global DB: UPDATE project column ────────────────────────────────────────
@@ -190,89 +225,7 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
         return Ok(total);
     }
 
-    conn.execute("BEGIN IMMEDIATE").await.map_err(sqlx_err)?;
-
-    for table in SIMPLE {
-        match sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE {table} SET project = ? WHERE project = ?"
-        )))
-        .bind(to)
-        .bind(from)
-        .execute(&mut conn)
-        .await
-        {
-            Ok(r) => total += r.rows_affected() as usize,
-            Err(e) if e.to_string().contains("no such") => {}
-            Err(e) => eprintln!("[merge-project] update {table}: {e}"),
-        }
-    }
-
-    // metrics_state: composite PK (key, project) — drop conflicting source rows, then rename.
-    let _ = sqlx::query(
-        "DELETE FROM metrics_state WHERE project = ? \
-         AND key IN (SELECT key FROM metrics_state WHERE project = ?)",
-    )
-    .bind(from)
-    .bind(to)
-    .execute(&mut conn)
-    .await;
-    if let Ok(r) = sqlx::query("UPDATE metrics_state SET project = ? WHERE project = ?")
-        .bind(to)
-        .bind(from)
-        .execute(&mut conn)
-        .await
-    {
-        total += r.rows_affected() as usize;
-    }
-
-    // skill_attribution: composite PK (skill_name, project) — keep target rows on conflict.
-    let _ = sqlx::query(
-        "DELETE FROM skill_attribution WHERE project = ? \
-         AND skill_name IN (SELECT skill_name FROM skill_attribution WHERE project = ?)",
-    )
-    .bind(from)
-    .bind(to)
-    .execute(&mut conn)
-    .await;
-    if let Ok(r) = sqlx::query("UPDATE skill_attribution SET project = ? WHERE project = ?")
-        .bind(to)
-        .bind(from)
-        .execute(&mut conn)
-        .await
-    {
-        total += r.rows_affected() as usize;
-    }
-
-    // promotion_counters: composite PK (pattern_key, project) — sum counts on conflict.
-    let _ = sqlx::query(
-        "UPDATE promotion_counters \
-         SET count = count + (
-             SELECT count FROM promotion_counters AS src
-             WHERE src.project = ? AND src.pattern_key = promotion_counters.pattern_key
-         ) \
-         WHERE project = ? \
-         AND pattern_key IN (SELECT pattern_key FROM promotion_counters WHERE project = ?)",
-    )
-    .bind(from)
-    .bind(to)
-    .bind(from)
-    .execute(&mut conn)
-    .await;
-    let _ = sqlx::query("DELETE FROM promotion_counters WHERE project = ?")
-        .bind(from)
-        .execute(&mut conn)
-        .await;
-    if let Ok(r) = sqlx::query("UPDATE promotion_counters SET project = ? WHERE project = ?")
-        .bind(to)
-        .bind(from)
-        .execute(&mut conn)
-        .await
-    {
-        total += r.rows_affected() as usize;
-    }
-
-    conn.execute("COMMIT").await.map_err(sqlx_err)?;
-    Ok(total)
+    global_transfer::transfer(&mut conn, from, to).await
 }
 
 // ── Per-project harness.db: ATTACH + INSERT OR IGNORE ───────────────────────
@@ -353,12 +306,14 @@ async fn merge_per_project_dbs(
 
 /// Copy files from `src_dir` to `dst_dir`, skipping files that already exist.
 /// Returns the number of files copied (or would copy in dry-run).
-fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> usize {
-    let Ok(entries) = std::fs::read_dir(src_dir) else {
-        return 0;
-    };
+fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> io::Result<usize> {
+    if !src_dir.exists() {
+        return Ok(0);
+    }
+    let entries = std::fs::read_dir(src_dir)?;
     let mut count = 0;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let src = entry.path();
         if !src.is_file() {
             continue;
@@ -372,23 +327,24 @@ fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> usize {
             count += 1;
         } else {
             if let Some(parent) = dst.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                std::fs::create_dir_all(parent)?;
             }
-            if std::fs::copy(&src, &dst).is_ok() {
-                count += 1;
-            }
+            std::fs::copy(&src, &dst)?;
+            count += 1;
         }
     }
-    count
+    Ok(count)
 }
 
 /// Copy evolved skill subdirectories that don't already exist in target.
-fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> usize {
-    let Ok(entries) = std::fs::read_dir(src_evolved) else {
-        return 0;
-    };
+fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> io::Result<usize> {
+    if !src_evolved.exists() {
+        return Ok(0);
+    }
+    let entries = std::fs::read_dir(src_evolved)?;
     let mut count = 0;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let src = entry.path();
         if !src.is_dir() {
             continue;
@@ -398,17 +354,18 @@ fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> us
         if dst.exists() {
             continue;
         }
-        if !dry_run && copy_dir_recursive(&src, &dst).is_err() {
-            continue;
+        if !dry_run {
+            copy_dir_recursive(&src, &dst)?;
         }
         count += 1;
     }
-    count
+    Ok(count)
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)?.flatten() {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
         let s = entry.path();
         let d = dst.join(entry.file_name());
         if s.is_dir() {
@@ -470,3 +427,11 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
 
     Ok(new_lines.len())
 }
+
+#[cfg(test)]
+#[path = "regression_183.rs"]
+mod regression_183;
+
+#[cfg(test)]
+#[path = "regression_global_merge.rs"]
+mod regression_global_merge;
