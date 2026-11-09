@@ -501,6 +501,9 @@ pub fn run(input: &HookInput) -> i32 {
         })
     };
 
+    let resolved_output = resolved_output
+        .or_else(|| explicit_success(input).map(|_| (String::new(), String::new(), false)));
+
     if let Some((output, stderr, streams_separated)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
