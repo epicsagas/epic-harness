@@ -374,7 +374,13 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
     trend,
   };
 }
-export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
+export async function getOrbitPipelines(): Promise<OrbitPipeline[]> {
+  const pipelines = await invoke<(OrbitPipeline & { audit_fail_count?: number })[]>('get_orbit_pipelines');
+  return pipelines.map(pipeline => ({
+    ...pipeline,
+    check_fail_count: pipeline.audit_fail_count ?? pipeline.check_fail_count ?? 0,
+  }));
+}
 export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();

@@ -366,7 +366,7 @@
           <tr><td style="color:var(--muted)">mode</td><td style="color:var(--fg)">interactive | council | direct</td></tr>
           <tr><td style="color:var(--muted)">phase</td><td style="color:var(--accent)">spec → go → check → ship</td></tr>
           <tr><td style="color:var(--muted)">status</td><td style="color:var(--fg)">running | complete | failed | timeout | aborted</td></tr>
-          <tr><td style="color:var(--muted)">check_fail_count</td><td style="color:var(--fg)">0..3</td></tr>
+          <tr><td style="color:var(--muted)">audit_fail_count</td><td style="color:var(--fg)">0..3</td></tr>
           <tr><td style="color:var(--muted)">deadline</td><td style="color:var(--fg)">now + 30min</td></tr>
           <tr><td style="color:var(--muted)">worktree_name</td><td style="color:var(--fg)">isolated build env</td></tr>
         </tbody>
