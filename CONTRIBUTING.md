@@ -15,8 +15,16 @@ Thanks for your interest in contributing!
 cargo build                              # Build the binary
 cargo test                               # Run all tests (314+ unit + 18 integration)
 cargo clippy                             # Lint
+node scripts/lint-skills.mjs              # Validate published skill frontmatter
+node --test scripts/lint-skills.test.mjs  # Test the validator itself
 cp target/debug/epic-harness hooks/bin/  # Test as plugin
 ```
+
+`make lint-skills`, `make gen-skills`, and `make gen-skills-dry` use the same
+cross-platform validator for the published `skills/` directory. Missing or empty
+skill roots, missing skill files, invalid required frontmatter, and name/directory
+mismatches fail validation. Description wording warnings are advisory and inspect
+only the description field. Optional YAML metadata is not schema-validated.
 
 ## Commit Convention
 

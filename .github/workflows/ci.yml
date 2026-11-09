@@ -25,6 +25,10 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Validate published skills and validator regressions
+        run: |
+          node --test scripts/lint-skills.test.mjs
+          node scripts/lint-skills.mjs
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
