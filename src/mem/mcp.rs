@@ -102,7 +102,7 @@ fn tool_definitions() -> Value {
                 "properties": {
                     "hint":    { "type": "string", "description": "Describe what you're working on (e.g. 'authentication refactor', 'database migration', 'CI pipeline fix'). Used for semantic matching." },
                     "project": { "type": "string", "description": "Project slug to scope results" },
-                    "limit":   { "type": "number", "default": 10, "description": "Max nodes to return" },
+                    "limit":   { "type": "integer", "default": 10, "minimum": 0, "maximum": 200, "description": "Max total nodes, including graph neighbors" },
                     "include_neighbors": { "type": "boolean", "default": true, "description": "Also return 1-hop graph neighbors of top results" }
                 },
                 "required": ["hint"]
@@ -308,7 +308,7 @@ fn tool_mem_recall(pool: &AnyPool, args: &Value) -> Value {
         _ => return json!({ "error": "mem_recall requires hint" }),
     };
     let project = args["project"].as_str();
-    let limit = args["limit"].as_u64().unwrap_or(10) as usize;
+    let limit = args["limit"].as_u64().unwrap_or(10).min(200) as usize;
     let include_neighbors = args["include_neighbors"].as_bool().unwrap_or(true);
 
     // Phase 1: Smart recall with composite scoring
@@ -333,14 +333,15 @@ fn tool_mem_recall(pool: &AnyPool, args: &Value) -> Value {
         .collect();
 
     // Phase 2: Graph-augmented — include 1-hop neighbors of top results
-    if include_neighbors && !scored.is_empty() {
+    let graph_limit = limit.saturating_sub(results.len()).min(5);
+    if include_neighbors && graph_limit > 0 && !scored.is_empty() {
         let seed_ids: Vec<String> = scored
             .iter()
             .map(|sn| sn.node.frontmatter.id.clone())
             .collect();
         let neighbors = runtime::block_on(graph_neighbors_pool(pool, &seed_ids));
 
-        // Add up to 5 graph neighbors not already in results — batch-read in one query.
+        // Consider neighbors not already returned; scope and budget checks follow.
         let existing_ids: std::collections::HashSet<&str> = scored
             .iter()
             .map(|sn| sn.node.frontmatter.id.as_str())
@@ -350,39 +351,47 @@ fn tool_mem_recall(pool: &AnyPool, args: &Value) -> Value {
         let candidates: Vec<(&str, f64)> = neighbors
             .iter()
             .filter(|(nid, _)| !existing_ids.contains(nid.as_str()))
-            .take(5)
             .map(|(nid, w)| (nid.as_str(), *w))
             .collect();
 
-        if !candidates.is_empty() {
-            let candidate_ids: Vec<&str> = candidates.iter().map(|(id, _)| *id).collect();
+        let mut added = 0;
+        // Filter node membership before applying the remaining result budget.
+        // Chunking bounds SQL bindings without one database call per edge.
+        for batch in candidates.chunks(200) {
+            let candidate_ids: Vec<&str> = batch.iter().map(|(id, _)| *id).collect();
             let weight_by_id: std::collections::HashMap<&str, f64> =
-                candidates.iter().cloned().collect();
-
-            let neighbor_results: Vec<Value> =
-                runtime::block_on(read_nodes_pool(pool, &candidate_ids))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|node| {
-                        let edge_weight = weight_by_id
-                            .get(node.frontmatter.id.as_str())
-                            .copied()
-                            .unwrap_or(0.0);
-                        json!({
-                            "id":          node.frontmatter.id,
-                            "title":       node.frontmatter.title,
-                            "type":        node.frontmatter.node_type,
-                            "tags":        node.frontmatter.tags,
-                            "importance":  node.frontmatter.importance,
-                            "score":       (edge_weight * 100.0).round() / 100.0,
-                            "body":        node.body.chars().take(200).collect::<String>(),
-                            "via_graph":   true,
-                            "connections": (edge_weight * 100.0).round() / 100.0
-                        })
-                    })
-                    .collect();
-
-            results.extend(neighbor_results);
+                batch.iter().cloned().collect();
+            for node in runtime::block_on(read_nodes_pool(pool, &candidate_ids)).unwrap_or_default()
+            {
+                if project
+                    .is_some_and(|project| !node.frontmatter.projects.iter().any(|p| p == project))
+                    || node.frontmatter.tags.iter().any(|tag| tag == "stale")
+                {
+                    continue;
+                }
+                let edge_weight = weight_by_id
+                    .get(node.frontmatter.id.as_str())
+                    .copied()
+                    .unwrap_or(0.0);
+                results.push(json!({
+                    "id":          node.frontmatter.id,
+                    "title":       node.frontmatter.title,
+                    "type":        node.frontmatter.node_type,
+                    "tags":        node.frontmatter.tags,
+                    "importance":  node.frontmatter.importance,
+                    "score":       (edge_weight * 100.0).round() / 100.0,
+                    "body":        node.body.chars().take(200).collect::<String>(),
+                    "via_graph":   true,
+                    "connections": (edge_weight * 100.0).round() / 100.0
+                }));
+                added += 1;
+                if added == graph_limit {
+                    break;
+                }
+            }
+            if added == graph_limit {
+                break;
+            }
         }
     }
 
@@ -514,4 +523,110 @@ pub fn run_mcp_server() -> i32 {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mem::store::{Edge, append_edge_pool, init_schema_pool, write_node_pool};
+
+    fn recall_graph_fixture() -> (AnyPool, Vec<String>) {
+        runtime::block_on(async {
+            let pool = crate::store::pool::test_memory_pool().await;
+            init_schema_pool(&pool).await.unwrap();
+            let ids: Vec<String> = (0..4).map(|_| new_uuid()).collect();
+            for (index, id) in ids.iter().enumerate() {
+                let node = Node {
+                    frontmatter: NodeFrontmatter {
+                        id: id.clone(),
+                        title: if index == 0 {
+                            "issue229seed"
+                        } else {
+                            "neighbor"
+                        }
+                        .into(),
+                        node_type: "concept".into(),
+                        projects: vec![if index == 2 { "alpha-extra" } else { "alpha" }.into()],
+                        tags: if index == 3 {
+                            vec!["stale".into()]
+                        } else {
+                            vec![]
+                        },
+                        created: now_iso(),
+                        updated: now_iso(),
+                        importance: 0.7,
+                        ..Default::default()
+                    },
+                    body: if index == 0 {
+                        "issue229seed"
+                    } else {
+                        "related context"
+                    }
+                    .into(),
+                };
+                write_node_pool(&pool, &node).await.unwrap();
+            }
+            for id in &ids[1..] {
+                append_edge_pool(
+                    &pool,
+                    &Edge {
+                        id: new_uuid(),
+                        source: ids[0].clone(),
+                        target: id.clone(),
+                        relation: "related".into(),
+                        weight: 1.0,
+                        ts: now_iso(),
+                    },
+                )
+                .await
+                .unwrap();
+            }
+            (pool, ids)
+        })
+    }
+
+    #[test]
+    fn issue_229_graph_recall_preserves_project_and_stale_scope() {
+        let (pool, ids) = recall_graph_fixture();
+        let response = tool_mem_recall(
+            &pool,
+            &json!({
+                "hint": "issue229seed", "project": "alpha", "limit": 10
+            }),
+        );
+        let nodes = response["nodes"].as_array().unwrap();
+        assert!(
+            nodes.iter().all(|n| n["id"] == ids[0] || n["id"] == ids[1]),
+            "graph augmentation must not add foreign-project or stale neighbors: {response}"
+        );
+        assert_eq!(
+            nodes.len(),
+            2,
+            "eligible same-project neighbor remains available"
+        );
+    }
+
+    #[test]
+    fn issue_229_graph_recall_respects_total_result_limit() {
+        let (pool, _) = recall_graph_fixture();
+        for limit in [0, 1, 2] {
+            let response = tool_mem_recall(
+                &pool,
+                &json!({
+                    "hint": "issue229seed", "project": "alpha", "limit": limit
+                }),
+            );
+            assert!(
+                response["nodes"].as_array().unwrap().len() <= limit,
+                "limit={limit} bounds base and graph results together: {response}"
+            );
+        }
+        let direct = tool_mem_recall(
+            &pool,
+            &json!({
+                "hint":"issue229seed", "project":"alpha", "limit":10, "include_neighbors":false
+            }),
+        );
+        assert_eq!(direct["count"], 1);
+    }
 }
