@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "src-tauri"]
+exclude = ["vendor/glib-0.18.5"]
 
 [package]
 name = "epic-harness"
@@ -81,3 +82,8 @@ lto = "thin"
 [profile.release.package."*"]
 opt-level = 3
 codegen-units = 4
+
+# Tauri 2's GTK generation requires glib 0.18; keep its API and backport the
+# upstream VariantStrIter safety fix until that family can move together.
+[patch.crates-io]
+glib = { path = "vendor/glib-0.18.5" }
