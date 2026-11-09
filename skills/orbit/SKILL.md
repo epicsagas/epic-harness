@@ -176,16 +176,43 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
 4. **Create PR** via `gh pr create` with spec + audit report in body
    - Record the URL in pipeline state as `pr_url`. `epic orbit unlock` warns
      when a pipeline reaches `complete` without it.
-5. **CI watch** — probe first, then watch:
+5. **CI verification** — inspect the current PR head before deciding to watch.
+   Use the base repository from the PR URL, not an assumed fork remote:
    ```bash
-   gh pr checks <PR_NUMBER> --json name,state
+   gh pr view <PR_NUMBER> --repo <BASE_OWNER/BASE_REPO> --json headRefOid,statusCheckRollup,url
+   gh api "repos/<BASE_OWNER>/<BASE_REPO>/actions/runs?head_sha=<HEAD_SHA>&per_page=100"
+   gh api "repos/<BASE_OWNER>/<BASE_REPO>/commits/<HEAD_SHA>/check-suites?per_page=100"
    ```
-   - Checks exist → run `gh pr checks <PR_NUMBER> --watch`, auto-fix failures.
-   - Empty result (no CI configured on the repo) → **skip the watch**. Log
-     "No CI configured, skipping CI watch", append a `phase_history` entry
-     recording `"ci_watch": "skipped"`, and proceed to Step 7 (evolve runs
-     regardless of CI outcome, so the pipeline must never wait on checks
-     that will never appear).
+   Follow pagination when needed and consider only evidence for that exact head.
+   An empty check rollup does **not** establish that CI is absent or passing.
+   - Same-head runs or suites report `action_required` → record
+     `ci_status: "approval_required"`, the head SHA and run links. Skip the
+     impossible check watch with `ci_watch: "skipped"` and reason
+     `maintainer_approval`; report that upstream approval is still required.
+   - Same-head runs/suites exist without check contexts → inspect the actual runs:
+     `gh run view <RUN_ID> --repo <BASE_OWNER/BASE_REPO> --json headSha,status,conclusion,url,jobs`.
+     Poll queued/in-progress runs only within a declared deadline, then report
+     pending if unfinished; never use an empty `gh pr checks --watch` instead.
+     Preserve completed failure or infrastructure-error evidence and job links.
+     A completed success counts only after verifying its current head, required
+     workflow and successful required jobs; missing/skipped jobs are not proof.
+   - Current-head check contexts exist and are executable → run
+     `gh pr checks <PR_NUMBER> --repo <BASE_OWNER/BASE_REPO> --watch`.
+     Diagnose actual failed jobs; distinguish source failures from infrastructure
+     startup errors. Approval blockers do not justify source changes.
+   - No contexts, runs or suites are reported by successful requests → record
+     `ci_status: "not_observed"` and `ci_watch: "skipped"`, rather than claiming
+     "No CI configured". At most one bounded re-probe may check delayed
+     registration; never watch an empty set indefinitely. Claim absent CI only
+     after separately verifying that no applicable provider is configured.
+   - Authentication, permission, rate-limit or network errors → record
+     `ci_status: "unknown"` and the error; do not convert an API failure to an
+     empty list or a passing result.
+   Preserve the classification, `ci_head_sha`, run links and watch reason in
+   `phase_history`. Re-read the PR head before accepting results; discard stale
+   evidence if it changed. Only verified passing current-head CI is green.
+   Continue to Step 7 with approval-blocked, unobserved or unknown CI recorded
+   accurately: reflection still runs, but those states are not successful CI.
 6. **Exit worktree**: Return to original directory and keep the worktree
 
 ## Step 7: Evolve
@@ -206,7 +233,7 @@ Run the evolution engine to analyze this session and generate/improve skills.
    ```
    Unconsumed manifests leave the template skill body in place.
 
-2. **If CI green** (all checks passed): additionally run
+2. **If CI green** (verified passing checks/workflows for the current PR head): additionally run
    ```bash
    epic-harness reflect --context --days 1
    ```
