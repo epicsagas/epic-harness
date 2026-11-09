@@ -108,6 +108,14 @@ pub fn run_context(
             eprintln!("[reflect] SQLite observations read failed for {slug}: {e}");
             Vec::new()
         });
+        let imported = crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::harness_pool().await?;
+            crate::store::observations::jsonl_import_identities_pool(&pool, slug).await
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("[reflect] SQLite import identities read failed for {slug}: {e}");
+            Default::default()
+        });
 
         let slug_obs_dir = slug_harness.join("obs");
         let jsonl_recs: Vec<ObsRecord> = if slug_obs_dir.is_dir() {
@@ -119,36 +127,30 @@ pub fn run_context(
                         .map(|s| s >= cutoff_tag.as_str())
                         .unwrap_or(true)
                 })
-                .flat_map(|f| read_jsonl_typed(&slug_obs_dir.join(f)))
+                .flat_map(|filename| {
+                    fs::read_to_string(slug_obs_dir.join(&filename))
+                        .unwrap_or_default()
+                        .lines()
+                        .enumerate()
+                        .filter_map(|(index, line)| {
+                            let rec: ObsRecord = serde_json::from_str(line).ok()?;
+                            let id = crate::store::observations::jsonl_import_identity(
+                                &filename, index, &rec,
+                            )
+                            .ok()?;
+                            (!imported.contains(&id)).then_some(rec)
+                        })
+                        .collect::<Vec<_>>()
+                })
                 .collect()
         } else {
             Vec::new()
         };
 
         {
-            // A JSONL file is deleted only after every record reaches SQLite,
-            // so the two sets are normally disjoint. Guard the backfill-pending
-            // window anyway. `timestamp + tool` alone is too weak a key: two
-            // calls to the same tool inside one timestamp tick (ISO seconds)
-            // are a routine burst, and keying on just those two fields drops
-            // the second one as a phantom duplicate. `action` is what actually
-            // differs between them (distinct command / file_path), so it joins
-            // the key.
-            let obs_key = |r: &ObsRecord| {
-                (
-                    r.timestamp.clone(),
-                    r.tool.clone(),
-                    r.action.clone().unwrap_or_default(),
-                )
-            };
-            let seen: std::collections::HashSet<(String, String, String)> =
-                db_recs.iter().map(obs_key).collect();
-            let jsonl_recs: Vec<&ObsRecord> = jsonl_recs
-                .iter()
-                .filter(|r| !seen.contains(&obs_key(r)))
-                .collect();
-
-            for r in db_recs.iter().chain(jsonl_recs) {
+            // Only a proven import identity can suppress a fallback record.
+            // Equal timestamps/actions/content do not identify anonymous calls.
+            for r in db_recs.iter().chain(jsonl_recs.iter()) {
                 total_obs += 1;
                 *tool_counts.entry(r.tool.clone()).or_default() += 1;
                 if let Some(ref fc) = r.failure_category {

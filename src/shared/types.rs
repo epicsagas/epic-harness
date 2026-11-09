@@ -5,6 +5,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HookInput {
     pub tool_name: Option<String>,
+    /// Explicit host invocation identity; actions/timestamps are not IDs.
+    pub tool_use_id: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub call_id: Option<String>,
+    pub invocation_id: Option<String>,
     pub tool_input: Option<serde_json::Value>,
     /// Legacy structured output (kept for forward compat)
     pub tool_output: Option<ToolOutput>,

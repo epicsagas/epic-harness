@@ -51,6 +51,10 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     )
     .await?;
 
+    ensure_column(pool, "observations", "invocation_id", "TEXT").await?;
+    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_invocation ON observations(project, session_id, tool, invocation_id) WHERE invocation_id IS NOT NULL")
+        .execute(pool).await.map_err(super::sqlx_err)?;
+
     Ok(())
 }
 
@@ -284,15 +288,8 @@ pub(crate) const DDL_SQLITE: &str = r#"
     -- Reflection's primary query is `WHERE project = ? AND timestamp BETWEEN ? AND ?`.
     -- Leading column must be `project` for the range scan to use this index.
     CREATE INDEX IF NOT EXISTS idx_obs_proj_ts    ON observations(project, timestamp);
-    -- Cross-process dedup (see insert_observation_pool): codex 0.155.x fires
-    -- each matched hook command twice per tool call, and hooks are separate
-    -- processes, so the in-batch key never sees the duplicate. Collapse
-    -- historical rows first — the unique index cannot be created over them.
-    DELETE FROM observations
-     WHERE id NOT IN (SELECT MIN(id) FROM observations
-                       GROUP BY session_id, timestamp, tool, action);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_dedup
-        ON observations(session_id, timestamp, tool, action);
+    -- Retire the unsafe second/action identity without deleting history.
+    DROP INDEX IF EXISTS idx_obs_dedup;
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
