@@ -19,6 +19,10 @@ const MAX_SCORE_HISTORY: usize = 50;
 
 // ── Load ─────────────────────────────────────────────
 
+#[cfg(test)]
+#[path = "regression_259.rs"]
+mod regression_259;
+
 /// Load the full Metrics struct from SQLite.
 pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
     // Scalar state helper
@@ -454,8 +458,17 @@ pub async fn load_metrics_scoped_pool(
         row.parse().ok()
     }
     async fn get_str(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<String> {
-        let v = get_sum(pool, key, project).await?;
-        Some(v.to_string())
+        let query = if let Some(project) = project {
+            sqlx::query_scalar::<_, String>(
+                "SELECT value FROM metrics_state WHERE key = ? AND project = ? LIMIT 1",
+            )
+            .bind(key)
+            .bind(project)
+        } else {
+            sqlx::query_scalar::<_, String>("SELECT value FROM metrics_state WHERE key = ? LIMIT 1")
+                .bind(key)
+        };
+        query.fetch_optional(pool).await.ok().flatten()
     }
 
     // Aggregate scalar metrics across projects for the "all" view, or take
@@ -571,20 +584,19 @@ pub async fn load_metrics_scoped_pool(
         None
     };
     let reward_hacking_suspected: bool = if let Some(p) = project {
-        get_sum(pool, "reward_hacking_suspected", Some(p))
+        get_str(pool, "reward_hacking_suspected", Some(p))
             .await
-            .map(|v| v != 0.0)
+            .map(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
             .unwrap_or(false)
     } else {
-        sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT CASE WHEN MAX(CAST(value AS REAL)) > 0 THEN 1 ELSE 0 END
-             FROM metrics_state WHERE key = 'reward_hacking_suspected'",
+        sqlx::query_scalar::<_, String>(
+            "SELECT value FROM metrics_state WHERE key = 'reward_hacking_suspected'",
         )
-        .fetch_one(pool)
+        .fetch_all(pool)
         .await
-        .unwrap_or(None)
-        .map(|v| v != 0)
-        .unwrap_or(false)
+        .unwrap_or_default()
+        .iter()
+        .any(|v| v.trim().eq_ignore_ascii_case("true") || v.trim() == "1")
     };
     let epoch_class: Option<crate::shared::evolution::EpochClass> = if let Some(p) = project {
         get_str(pool, "epoch_class", Some(p))
