@@ -168,15 +168,25 @@ pub(crate) fn is_leap(y: u64) -> bool {
 /// Parse ISO 8601 timestamp to seconds since epoch (best-effort).
 pub fn parse_iso_to_secs(ts: &str) -> u64 {
     // Expected format: YYYY-MM-DDThh:mm:ssZ
-    if ts.len() < 19 {
+    let number = |range| ts.get(range).and_then(|s: &str| s.parse::<u64>().ok());
+    let (Some(year), Some(month), Some(day), Some(hour), Some(min), Some(sec)) = (
+        number(0..4),
+        number(5..7),
+        number(8..10),
+        number(11..13),
+        number(14..16),
+        number(17..19),
+    ) else {
+        return 0;
+    };
+    if year < 1970 || !(1..=12).contains(&month) || hour > 23 || min > 59 || sec > 59 {
         return 0;
     }
-    let year: u64 = ts[0..4].parse().unwrap_or(0);
-    let month: u64 = ts[5..7].parse().unwrap_or(1);
-    let day: u64 = ts[8..10].parse().unwrap_or(1);
-    let hour: u64 = ts[11..13].parse().unwrap_or(0);
-    let min: u64 = ts[14..16].parse().unwrap_or(0);
-    let sec: u64 = ts[17..19].parse().unwrap_or(0);
+    const MONTH_DAYS: [u64; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let max_day = MONTH_DAYS[month as usize - 1] + u64::from(month == 2 && is_leap(year));
+    if day == 0 || day > max_day {
+        return 0;
+    }
 
     let total_days = days_since_epoch(year, month, day);
     total_days * 86400 + hour * 3600 + min * 60 + sec
