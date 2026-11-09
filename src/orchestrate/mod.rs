@@ -230,6 +230,17 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
                     agent.status = AgentStatus::Pending;
                 }
             }
+            orch_state::write_agent_status(
+                &base,
+                ub_id,
+                &AgentStatusFile {
+                    agent_id: ub_id.clone(),
+                    phase: "pending".to_string(),
+                    progress: 0.0,
+                    last_heartbeat: now_iso(),
+                    status: AgentStatus::Pending,
+                },
+            )?;
         }
 
         // Check if run is complete
