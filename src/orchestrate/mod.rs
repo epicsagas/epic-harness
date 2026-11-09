@@ -203,41 +203,40 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
     let _ = orch_state::append_event(&base, &agent_id, &event);
 
     // Evaluate dependency graph if agent is done
-    if final_status == AgentStatus::Done
-        && let Some(mut run) = orch_state::read_run(&base)
-    {
-        // Update agent status in run
-        for agent in &mut run.agents {
-            if agent.id == agent_id {
-                agent.status = AgentStatus::Done;
-                agent.completed_at = Some(now_iso());
-            }
-        }
-
-        // Evaluate deps
-        let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
-        for ub_id in &unblocked {
-            let msg = InboxMessage {
-                from: "orchestrator".to_string(),
-                timestamp: now_iso(),
-                message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
-            };
-            let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
-
-            // Update run agent status
+    if final_status == AgentStatus::Done {
+        orch_state::update_run(&base, |run| {
+            // Update agent status in run
             for agent in &mut run.agents {
-                if agent.id == *ub_id {
-                    agent.status = AgentStatus::Pending;
+                if agent.id == agent_id {
+                    agent.status = AgentStatus::Done;
+                    agent.completed_at = Some(now_iso());
                 }
             }
-        }
 
-        // Check if run is complete
-        if orch_state::is_run_complete(&run) {
-            run.status = orch_state::RunStatus::Complete;
-        }
-        run.updated_at = now_iso();
-        let _ = orch_state::write_run(&base, &run);
+            // Evaluate deps
+            let unblocked = orch_state::evaluate_dependencies(run, &agent_id);
+            for ub_id in &unblocked {
+                let msg = InboxMessage {
+                    from: "orchestrator".to_string(),
+                    timestamp: now_iso(),
+                    message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
+                };
+                let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
+
+                // Update run agent status
+                for agent in &mut run.agents {
+                    if agent.id == *ub_id {
+                        agent.status = AgentStatus::Pending;
+                    }
+                }
+            }
+
+            // Check if run is complete
+            if orch_state::is_run_complete(run) {
+                run.status = orch_state::RunStatus::Complete;
+            }
+            Ok(())
+        })?;
     }
 
     Ok(0)
