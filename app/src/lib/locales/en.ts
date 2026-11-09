@@ -67,6 +67,7 @@ export default {
   cmdOrbitDesc: 'Autonomous spec→ship pipeline',
   pageSkills: 'Auto Skills',
   pageSkillsDesc19: '19 skills (15 auto + 4 pipeline) + _dispatch core router · click any card to copy',
+  pageSkillsRegistryDesc: (count: number) => `${count} shipped skills · click any card to copy its command`,
   skillSpecDesc: 'Define requirements and acceptance criteria before coding',
   skillGoDesc: 'Build with auto-plan + TDD, execute spec to implementation',
   skillCheckDesc: 'Parallel review + security audit + test verification',

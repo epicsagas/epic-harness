@@ -1,4 +1,5 @@
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { svelteTesting } from '@testing-library/svelte/vite';
 import { defineConfig } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 import path from 'path';
@@ -285,7 +286,7 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts'],
   },
-  plugins: [svelte(), viteSingleFile(), harnessApiPlugin()],
+  plugins: [svelte(), svelteTesting(), viteSingleFile(), harnessApiPlugin()],
   appType: 'spa',
   base: '/',
   define: {
@@ -298,6 +299,7 @@ export default defineConfig({
   },
   clearScreen: false,
   server: {
+    fs: { allow: [path.resolve(__dirname), path.resolve(__dirname, '../skills')] },
     port: 5173,
     strictPort: true,
     host: host || false,
