@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use super::native_files;
+use super::native_store;
 use crate::state::AppState;
 
 const MAX_SCORE_HISTORY: usize = 200;
@@ -29,12 +31,12 @@ pub struct HarnessMetrics {
 
 #[tauri::command]
 pub async fn get_harness_metrics(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<HarnessMetrics, String> {
     let pool = state.harness_db.clone();
 
-    let m = epic_harness::store::metrics::load_metrics_pool(&pool)
+    let m = native_store::metrics(&pool, project.as_deref())
         .await
         .map_err(|e| format!("load metrics: {e}"))?;
 
@@ -159,7 +161,7 @@ pub async fn get_evolved_skills(
         .map_err(|e| format!("list evolved skills: {e}"))?;
     let evolved_skills: Vec<EvolvedSkill> = skills
         .into_iter()
-        .filter(|s| project.as_ref().is_none_or(|p| s.project == *p))
+        .filter(|s| native_store::project_scope(project.as_deref()).is_none_or(|p| s.project == p))
         .map(|s| EvolvedSkill {
             name: s.name,
             origin: s.origin,
@@ -177,10 +179,9 @@ pub async fn get_evolved_skills(
         .collect();
 
     // Evolution history
-    let records =
-        epic_harness::store::evolution::query_recent_records_pool(&pool, MAX_EVOLUTION_ENTRIES)
-            .await
-            .map_err(|e| format!("query evolution records: {e}"))?;
+    let records = native_store::history(&pool, MAX_EVOLUTION_ENTRIES, project.as_deref())
+        .await
+        .map_err(|e| format!("query evolution records: {e}"))?;
 
     let total_sessions = records.len() as u32;
     let patterns_detected: u32 = records
@@ -249,16 +250,15 @@ pub struct FailureCategory {
 
 #[tauri::command]
 pub async fn get_obs_summary(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ObsSummary, String> {
     let pool = state.harness_db.clone();
 
     // Use a wide date range to cover all stored data.
-    let stats =
-        epic_harness::store::observations::query_obs_stats_pool(&pool, "2000-01-01", "2099-12-31")
-            .await
-            .map_err(|e| format!("query obs stats: {e}"))?;
+    let stats = native_store::observations(&pool, project.as_deref())
+        .await
+        .map_err(|e| format!("query obs stats: {e}"))?;
 
     // Session summaries from aggregate stats
     let session_summaries: Vec<SessionSummary> = stats
@@ -329,11 +329,11 @@ pub struct SessionSnapshotResponse {
 
 #[tauri::command]
 pub async fn get_session_snapshots(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SessionSnapshotResponse>, String> {
     let pool = state.harness_db.clone();
-    let snaps = epic_harness::store::sessions::list_recent_snapshots_pool(&pool, 50)
+    let snaps = native_store::snapshots(&pool, 50, project.as_deref())
         .await
         .map_err(|e| format!("query session snapshots: {e}"))?;
 
@@ -431,4 +431,69 @@ pub async fn get_integration_status() -> Result<Vec<IntegrationStatus>, String> 
         .collect();
 
     Ok(results)
+}
+
+fn selected_project_dir(project: Option<&str>) -> Result<std::path::PathBuf, String> {
+    let slug = native_store::project_scope(project)
+        .map(str::to_string)
+        .unwrap_or_else(epic_harness::shared::paths::project_slug);
+    epic_harness::shared::paths::checked_harness_dir_for_slug(&slug)
+}
+
+/// Read the selected project's solved-task registry without running migration writes.
+#[tauri::command]
+pub async fn get_seesaw_registry(project: Option<String>) -> Result<serde_json::Value, String> {
+    let directory = selected_project_dir(project.as_deref())?;
+    let raw = native_files::read_json(
+        &directory,
+        "seesaw.json",
+        serde_json::json!({"solved":{},"total_solved":0}),
+    )?;
+    let typed: epic_harness::shared::evolution::SolvedTaskRegistry =
+        serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    serde_json::to_value(typed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_variant_pool(project: Option<String>) -> Result<serde_json::Value, String> {
+    let directory = selected_project_dir(project.as_deref())?;
+    let raw = native_files::read_json(
+        &directory,
+        "variants.json",
+        serde_json::json!({"variants":[],"routing_stats":{}}),
+    )?;
+    let typed: epic_harness::evolve::variants::VariantPool =
+        serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    serde_json::to_value(typed).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_harness_snapshot(project: Option<String>) -> Result<serde_json::Value, String> {
+    selected_project_dir(project.as_deref())?;
+    let snapshot = epic_harness::evolve::snapshot::build_snapshot_for(native_store::project_scope(
+        project.as_deref(),
+    ));
+    serde_json::to_value(snapshot).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_adaptation_landscape(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    selected_project_dir(project.as_deref())?;
+    let history = native_store::history(&state.harness_db, i64::MAX, project.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::to_value(epic_harness::evolve::planner::build_landscape(
+        &history,
+        &[],
+        2,
+    ))
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn get_manifests(project: Option<String>) -> Result<Vec<serde_json::Value>, String> {
+    native_files::manifests(&selected_project_dir(project.as_deref())?, 50)
 }
