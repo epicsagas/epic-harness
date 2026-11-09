@@ -441,6 +441,25 @@ pub fn run(input: &HookInput) -> i32 {
     // Skills on holdout rotation today (A/B counterfactual, see
     // evolve::partition_holdout) are deliberately NOT injected; reflect
     // credits this session's score to their `without` arm at session end.
+    // Seed before enumerating/injecting: a first session must receive the
+    // presets it just created, subject to model policy and holdout below.
+    let stacks: Vec<&str> = STACK_FILES
+        .iter()
+        .filter(|(f, _)| wd.join(f).is_file())
+        .map(|(_, s)| *s)
+        .collect();
+    if list_dirs(&evolved_dir()).is_empty() && metrics.total_sessions == 0 && !stacks.is_empty() {
+        let applied = apply_cold_start_presets(&stacks);
+        if applied > 0 {
+            hint(
+                "resume",
+                &format!(
+                    "Cold-start: applied {applied} preset skill(s) for {}",
+                    stacks.join(", ")
+                ),
+            );
+        }
+    }
     let evolved = list_dirs(&evolved_dir());
     let today_str = today();
     // Record the partition date so reflect (SessionEnd) reproduces the same
@@ -522,26 +541,6 @@ pub fn run(input: &HookInput) -> i32 {
             crate::shared::helpers::mirror_line(&backlog);
         } else {
             println!("{backlog}");
-        }
-    }
-
-    // 4. Cold-start presets (#1)
-    let stacks: Vec<&str> = STACK_FILES
-        .iter()
-        .filter(|(f, _)| wd.join(f).is_file())
-        .map(|(_, s)| *s)
-        .collect();
-
-    if evolved.is_empty() && metrics.total_sessions == 0 && !stacks.is_empty() {
-        let applied = apply_cold_start_presets(&stacks);
-        if applied > 0 {
-            hint(
-                "resume",
-                &format!(
-                    "Cold-start: applied {applied} preset skill(s) for {}",
-                    stacks.join(", ")
-                ),
-            );
         }
     }
 
