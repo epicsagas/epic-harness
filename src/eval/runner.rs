@@ -225,31 +225,26 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
     let duration = start.elapsed().as_millis() as u64;
     let exit_ok = output.exit_code == 0;
 
-    let score = match bench.result_type.as_str() {
-        "composite" => {
-            parse_composite_score(&output.stdout).unwrap_or(if exit_ok { 1.0 } else { 0.0 })
-        }
-        _ => {
-            if exit_ok {
-                1.0
-            } else {
-                0.0
-            }
-        }
+    let parsed_score = match bench.result_type.as_str() {
+        "composite" => parse_composite_score(&output.stdout),
+        "exit_code" => Some(if exit_ok { 1.0 } else { 0.0 }),
+        _ => None,
     };
-
-    let verdict = if exit_ok { "PASS" } else { "FAIL" };
+    let score = parsed_score.unwrap_or(0.0);
+    let passed = exit_ok && parsed_score.is_some();
+    let verdict = if passed { "PASS" } else { "FAIL" };
 
     DimResult {
         dimension: format!("benchmark:{}", bench.name),
         score,
-        passed: exit_ok,
+        passed,
         verdict: verdict.into(),
         details: json!({
             "command": bench.command,
             "result_type": bench.result_type,
             "exit_code": output.exit_code,
             "score": score,
+            "invalid_result": parsed_score.is_none(),
             "stdout_tail": truncate(&output.stdout, 500),
             "stderr_tail": truncate(&output.stderr, 200),
         }),
@@ -257,21 +252,36 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
     }
 }
 
-/// Try to extract a composite/score float from JSON stdout (last JSON line wins).
+/// Parse a full JSON object or the last complete JSON object in logged stdout.
+/// Invalid/missing scores never become fabricated perfect results.
 fn parse_composite_score(stdout: &str) -> Option<f64> {
-    for line in stdout.lines().rev() {
-        let line = line.trim();
-        if line.starts_with('{')
-            && let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
-            && let Some(s) = v
-                .get("composite")
-                .or_else(|| v.get("score"))
-                .and_then(|v| v.as_f64())
-        {
-            return Some(s.clamp(0.0, 1.0));
+    fn score(value: &Value) -> Option<f64> {
+        value
+            .get("composite")
+            .or_else(|| value.get("score"))
+            .and_then(Value::as_f64)
+            .filter(|s| s.is_finite() && (0.0..=1.0).contains(s))
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(stdout) {
+        return score(&value);
+    }
+    let mut offset = 0;
+    let mut consumed_until = 0;
+    let mut last = None;
+    for line in stdout.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let start = offset + line.len() - trimmed.len();
+        offset += line.len();
+        if start < consumed_until || !trimmed.starts_with('{') {
+            continue;
+        }
+        let mut stream = serde_json::Deserializer::from_str(&stdout[start..]).into_iter::<Value>();
+        if let Some(Ok(value)) = stream.next() {
+            consumed_until = start + stream.byte_offset();
+            last = Some(value);
         }
     }
-    None
+    last.as_ref().and_then(score)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
