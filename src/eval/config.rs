@@ -359,6 +359,7 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 /// eval delegates build/test/lint to `verify`. Only explicitly configured
 /// dimension commands are returned; stack is informational.
 pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
+    validate_numeric_thresholds(cfg)?;
     let stack = if cfg.stack == "auto" {
         detect_stack(&std::env::current_dir().unwrap_or_default())
     } else {
@@ -385,4 +386,90 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         mutation_command: mutation_cmd,
         stack,
     })
+}
+
+fn validate_numeric_thresholds(cfg: &EvalConfig) -> Result<(), String> {
+    let minimum = cfg.dimensions.correctness.extra.min_pass_rate;
+    if !minimum.is_finite() || !(0.0..=1.0).contains(&minimum) {
+        return Err("correctness min_pass_rate must be finite and between 0 and 1".into());
+    }
+    let performance = cfg.dimensions.performance.extra.max_regression_pct;
+    if !performance.is_finite() || performance < 0.0 {
+        return Err("performance max_regression_pct must be finite and non-negative".into());
+    }
+    let regression = cfg.dimensions.regression.extra.threshold;
+    if !regression.is_finite() || regression < 0.0 {
+        return Err("regression threshold must be finite and non-negative".into());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod numeric_threshold_tests {
+    use super::*;
+
+    fn config(section: &str, key: &str, value: &str) -> EvalConfig {
+        serde_yaml::from_str(&format!(
+            "dimensions:\n  {section}:\n    extra:\n      {key}: {value}\n"
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn invalid_numeric_settings_fail_command_resolution() {
+        for (section, key, invalid) in [
+            (
+                "regression",
+                "threshold",
+                vec![".nan", ".inf", "-.inf", "-0.1"],
+            ),
+            (
+                "correctness",
+                "min_pass_rate",
+                vec![".nan", ".inf", "-.inf", "-0.1", "1.1"],
+            ),
+            (
+                "performance",
+                "max_regression_pct",
+                vec![".nan", ".inf", "-.inf", "-0.1"],
+            ),
+        ] {
+            for value in invalid {
+                let resolution = resolve_commands(&config(section, key, value));
+                let error = match resolution {
+                    Err(error) => error,
+                    Ok(_) => panic!("accepted {section}.{key}={value}"),
+                };
+                assert!(error.contains(key), "field-specific diagnostic: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn valid_boundaries_and_generous_finite_allowances_remain_supported() {
+        for (section, key, valid) in [
+            ("correctness", "min_pass_rate", vec!["0", "0.5", "1"]),
+            ("performance", "max_regression_pct", vec!["0", "10", "1000"]),
+            ("regression", "threshold", vec!["0", "0.02", "2"]),
+        ] {
+            for value in valid {
+                assert!(
+                    resolve_commands(&config(section, key, value)).is_ok(),
+                    "rejected valid {section}.{key}={value}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn legacy_configs_with_omitted_numeric_settings_keep_defaults() {
+        for yaml in [
+            "{}",
+            "stack: rust",
+            "dimensions:\n  regression:\n    enabled: false\n",
+        ] {
+            let cfg: EvalConfig = serde_yaml::from_str(yaml).unwrap();
+            assert!(resolve_commands(&cfg).is_ok());
+        }
+    }
 }
