@@ -47,6 +47,38 @@ pub async fn insert_record_pool(
 }
 
 /// Standalone insert.
+pub async fn insert_record_direct(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    rec: &EvolutionRecord,
+    project: &str,
+) -> io::Result<()> {
+    let errors = serde_json::to_string(&rec.error_patterns).map_err(io::Error::other)?;
+    let failures = serde_json::to_string(&rec.failure_patterns).map_err(io::Error::other)?;
+    sqlx::query(
+        "INSERT INTO evolution_records
+         (timestamp, observations, success_rate, avg_score, error_patterns,
+          failure_patterns, skills_seeded, skills_rolled_back, total_evolved,
+          analysis_summary, edit_type, project) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+    )
+    .bind(&rec.timestamp)
+    .bind(super::u64_to_i64(rec.observations))
+    .bind(rec.success_rate)
+    .bind(rec.avg_score)
+    .bind(errors)
+    .bind(failures)
+    .bind(super::u64_to_i64(rec.skills_seeded))
+    .bind(super::u64_to_i64(rec.skills_rolled_back))
+    .bind(super::u64_to_i64(rec.total_evolved))
+    .bind(&rec.analysis_summary)
+    .bind(rec.edit_type.as_str())
+    .bind(project)
+    .execute(&mut **tx)
+    .await
+    .map_err(super::sqlx_err)?;
+    Ok(())
+}
+
+/// Standalone insert.
 pub fn insert_record(rec: &EvolutionRecord) -> io::Result<i64> {
     let project = crate::shared::paths::project_slug().to_string();
     super::runtime::block_on(async {

@@ -826,6 +826,17 @@ pub async fn merge_attached_db_async(
         .await;
     }
 
+    // Imported rows receive destination IDs. Independent project cutoffs
+    // cannot be combined safely: reset derived progress, preserving all data.
+    if stats.obs > 0 || stats.metrics > 0 {
+        sqlx::query(
+            "INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','0',?) ON CONFLICT(key,project) DO UPDATE SET value='0'",
+        )
+        .bind(slug)
+        .execute(&mut *conn)
+        .await
+        .map_err(super::sqlx_err)?;
+    }
     Ok(stats)
 }
 
@@ -1585,5 +1596,77 @@ mod tests {
             .try_get(0)
             .unwrap();
         assert_eq!(sess_count, 1);
+    }
+}
+
+#[cfg(test)]
+mod reflection_cursor_tests {
+    use super::*;
+    use sqlx::{ConnectOptions, Connection};
+
+    #[tokio::test]
+    async fn issue_218_attached_migration_resets_derived_cursor() {
+        for (with_observation, with_cursor) in [(false, true), (true, true), (true, false)] {
+            let temp = tempfile::tempdir().unwrap();
+            let source = temp.path().join("source.db");
+            let mut source_conn = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&source)
+                .create_if_missing(true)
+                .connect()
+                .await
+                .unwrap();
+            sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+                .execute(&mut source_conn)
+                .await
+                .unwrap();
+            if with_cursor {
+                sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source')")
+                    .execute(&mut source_conn).await.unwrap();
+            }
+            if with_observation {
+                sqlx::query("INSERT INTO observations(id,timestamp,session_id,tool,tool_category,action,project) VALUES(999,'2024-01-01T00:00:00Z','source','Read','read','source-pending','source')")
+                    .execute(&mut source_conn).await.unwrap();
+            }
+            source_conn.close().await.unwrap();
+            let mut destination = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(temp.path().join("destination.db"))
+                .create_if_missing(true)
+                .connect()
+                .await
+                .unwrap();
+            sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+                .execute(&mut destination)
+                .await
+                .unwrap();
+            if with_observation {
+                if with_cursor {
+                    sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','555','target')")
+                        .execute(&mut destination).await.unwrap();
+                }
+                sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2024-01-01T00:00:00Z','target','Read','read','target-pending','target')")
+                    .execute(&mut destination).await.unwrap();
+            }
+            sqlx::query("ATTACH DATABASE ? AS src")
+                .bind(source.to_string_lossy().as_ref())
+                .execute(&mut destination)
+                .await
+                .unwrap();
+            merge_attached_db_async(&mut destination, "target", "src")
+                .await
+                .unwrap();
+            let cursor: Option<String> = sqlx::query_scalar("SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'")
+                .fetch_optional(&mut destination).await.unwrap();
+            assert_eq!(
+                cursor.as_deref(),
+                Some("0"),
+                "Copied histories must invalidate existing AND absent legacy cursor state"
+            );
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")
+                    .fetch_one(&mut destination)
+                    .await
+                    .unwrap();
+            assert_eq!(count, if with_observation { 2 } else { 0 });
+        }
     }
 }
