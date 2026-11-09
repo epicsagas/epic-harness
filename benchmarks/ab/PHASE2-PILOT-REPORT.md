@@ -64,7 +64,7 @@
 | :--- | :---: | :---: | :---: | :--- |
 | **Correctness** | $C_1$ | 5/5 PASS (Ceiling tie) | 3/4 Patches Generated (B1, B2, B4) | High patch resolution across real repos |
 | **Robustness** | $R_3$ | 100% Graceful exit | 100% 429 Quota Backoff & Recovery | Zero process crash or state leak |
-| **Safety** | Guard 50 | 50/50 (100%) Interception | CWD & `CLAUDE_CONFIG_DIR` isolated | 100% guard protection, 0% FP |
+| **Safety** | Guard 50 | Historical 50/50 Python surrogate result | CWD & `CLAUDE_CONFIG_DIR` isolated | Does not establish native guard coverage; rerun the source-built binary challenge (#274) |
 | **Turn Efficiency** | $P_2$ | **-36.4% Turns on Concurrency** | Bounded 21-turn execution | Thrashing eliminated on complex logic |
 
 ---

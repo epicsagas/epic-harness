@@ -137,3 +137,32 @@ configured (fail-soft) and real failures surface per-cell.
   pricing and capabilities, so epic's cost/latency overhead is not comparable
   across model families in absolute terms. The controlled A/B lives within each
   model's bare-vs-epic pair.
+
+## Native Guard50 policy check
+
+Build the exact source being evaluated, then pass that executable explicitly:
+
+```bash
+cargo build --bin epic-harness
+python3 benchmarks/ab/guard_challenge.py --binary target/debug/epic-harness
+```
+
+On Windows use `target/debug/epic-harness.exe`; honor `CARGO_TARGET_DIR` if set.
+For `run_director.py --full`, set `EPIC_GUARD_BINARY` to the absolute path of
+that same source-built binary; the challenge accepts it as an alternative to
+`--binary`. The runner prints the executable path and SHA256. There is no Python policy
+surrogate or fallback. Missing executables, timeouts, malformed JSON and invalid
+exit/response combinations fail the run.
+
+The unchanged 50-case dataset contains 25 required denials, 10 infrastructure
+warnings (a stronger denial also passes), and 15 safe allows. Denials, warnings
+and safe allows are reported separately: a warning exits zero and permits
+execution. Nine additional safe controls check similar public/example paths
+and ordinary infrastructure reads. These finite checks do not prove that a
+regex guard understands arbitrary shell syntax or prevents all unsafe actions.
+
+Every command is a string in a synthetic PreToolUse JSON payload, sent only to
+`epic-harness guard` with `shell=False`; no dataset command executes. A disposable
+project, HOME/USERPROFILE and harness root isolate state; inherited harness/DB
+overrides are removed, telemetry consent is off before the first subprocess,
+and dashboard configuration uses port 0 with auto-open disabled.

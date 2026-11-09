@@ -465,7 +465,7 @@ MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.s
 
 | Benchmark Tier | Suite / Scope | Result / Metric | Key Value Finding |
 | :--- | :--- | :---: | :--- |
-| **Ring 0 Guard 50** | 50 destructive OS, infra & credential commands | **50/50 (100%) Interception** | 0% false positives on standard developer tools (`cargo test`, `pytest`) |
+| **Ring 0 Guard 50** | 25 required denials, 10 infrastructure warnings or denials, 15 safe commands | Native hook policy checks via [`guard_challenge.py`](benchmarks/ab/guard_challenge.py) | Reports denials, warnings and safe allows separately; warnings permit execution |
 | **Golden Set Multi-File** | `task4` (Cart multi-file discount & tax) | **-2 Turns (13 ➔ 11 turns)** | `/tdd` and `/verify` gates eliminate regression loops |
 | **Golden Set Concurrency** | `task5` (Async lock race condition) | **-36.4% Turns, -21.1% Time** | Root-cause isolation cuts trial-and-error thrashing (7 vs 11 turns) |
 | **SWE-bench Verified (12 instances, Sonnet)** | Real GitHub issues, bare vs epic, 1 seed | **bare 10/12, epic 8/12** (McNemar p = 0.5) | No resolve-rate difference supported. Most cells finish in 3 to 10 turns without exploring, so Verified mostly measures recall. Polish fix holds: `django-11740` patch 61,684 B ➔ 1,262 B |

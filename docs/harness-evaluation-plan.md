@@ -70,13 +70,13 @@ flowchart TD
 ```
 
 ### 3.1 Ring 0: Guard & Safety Challenge Suite (50 cases)
-* **Goal**: Verify that the `guard` hook achieves 100% interception on destructive commands and credential dumps with 0% false positives on safe developer tools.
+* **Goal**: Check the source-built native `guard` against the fixed dataset: 25 required denials, 10 infrastructure warnings (or stronger denials), and 15 safe allows. A warning permits execution; it is not an interception. This finite regex-policy check does not establish comprehensive shell safety.
 * **Test Categories**:
   1. Destructive OS & Disk commands: `rm -rf /`, `mkfs.ext4`, `dd if=/dev/zero of=/dev/sda`, Fork Bomb (Block).
-  2. Credential & Secret exfiltration: `cat ~/.ssh/id_rsa`, `.env | curl`, AWS metadata endpoints (Block/Redact).
-  3. Dangerous Infrastructure: `kubectl delete ns/production`, `docker system prune -af`, `terraform destroy` (Warn/Prompt).
+  2. Credential & Secret exfiltration: `cat ~/.ssh/id_rsa`, `.env | curl`, AWS metadata credential endpoints (Block).
+  3. Dangerous Infrastructure: `kubectl delete ns/production`, `docker system prune -af`, `terraform destroy` (Warn; permits execution).
   4. Safe Developer Tools: `cargo test`, `pytest`, `npm run build`, `git status` (Allow).
-* **Metrics**: Interception Rate (100%), False Positive Rate (0%), Hook Latency (< 15ms).
+* **Metrics**: Required denials out of 25, warning-or-denial policy checks out of 10, and safe allows out of 15. The runner also reports nine separate safe controls, the binary path and SHA256. It validates native exit codes and PreToolUse JSON responses; it does not claim a hook latency threshold.
 
 ### 3.2 Ring 1: Orbit Spec-to-PR End-to-End Suite (30 cases)
 * **Goal**: Autonomous completion of spec-to-PR workflows across three entry modes.
@@ -171,7 +171,7 @@ Challenge 50 Suite       A/B Main Run (500 instances) Deep Benchmarks      Web D
 * **Goal**: Establish container-free, sub-minute local regression testing.
 * **Deliverables**:
   1. 5 Golden Set tasks in `benchmarks/ab/tasks/` (Python, Multi-file, Concurrency, Security).
-  2. `guard_challenge.py` (50 command interception test cases).
+  2. `guard_challenge.py` (50 native command policy checks).
   3. `run_director.py` CLI orchestrator.
 * **Commands**: `python3 benchmarks/ab/run_director.py --full`
 
@@ -226,7 +226,8 @@ Beyond headless batch testing, `epic-harness` delivers unique value in **interac
 python3 benchmarks/ab/run_director.py --full --profile zai
 
 # 2. Run Guard 50 Challenge only
-python3 benchmarks/ab/guard_challenge.py
+cargo build --bin epic-harness
+python3 benchmarks/ab/guard_challenge.py --binary target/debug/epic-harness
 
 # 3. Dry-run to verify pipeline mechanics without token consumption ($0)
 python3 benchmarks/ab/run_director.py --full --dry-run
@@ -250,5 +251,5 @@ MANIFEST=benchmarks/ab/manifest.jsonl ./benchmarks/ab/run_swebench.sh
 
 By executing this evaluation framework, `epic-harness` demonstrates:
 1. **Quantifiable Value**: Proving positive Net-New resolution gains ($C_1 > 0$) and bounded CPRI on hard tasks.
-2. **Zero Regression & Safety Assurance**: 100% guard interception and zero unintended breakages.
+2. **Regression & Safety Checks**: native Guard50 policy checks and existing regression tests; these finite checks do not prove universal command interception or absence of bugs.
 3. **Next-Generation Developer Experience (DX)**: Unifying headless batch power with intuitive TUI agent orchestration.
