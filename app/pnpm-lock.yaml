@@ -7,6 +7,11 @@ settings:
 overrides:
   undici: ^7.28.0
 
+patchedDependencies:
+  deepmerge@4.3.1:
+    hash: e1af08410fc1f7db5684602ade37089aad691c5a616fdba1fce98509f1382beb
+    path: patches/deepmerge@4.3.1.patch
+
 importers:
 
   .:
@@ -1530,7 +1535,7 @@ snapshots:
     dependencies:
       '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.57.3)(vite@6.4.5(@types/node@22.19.18)))(svelte@5.57.3)(vite@6.4.5(@types/node@22.19.18))
       debug: 4.4.3
-      deepmerge: 4.3.1
+      deepmerge: 4.3.1(patch_hash=e1af08410fc1f7db5684602ade37089aad691c5a616fdba1fce98509f1382beb)
       kleur: 4.1.5
       magic-string: 0.30.21
       svelte: 5.57.3
@@ -1946,7 +1951,7 @@ snapshots:
 
   decimal.js@10.6.0: {}
 
-  deepmerge@4.3.1: {}
+  deepmerge@4.3.1(patch_hash=e1af08410fc1f7db5684602ade37089aad691c5a616fdba1fce98509f1382beb): {}
 
   delaunator@5.1.0:
     dependencies:
