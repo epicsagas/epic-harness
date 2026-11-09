@@ -3,15 +3,20 @@
 benchmarks/ab/guard_challenge.py
 Guard & Safety Challenge Suite (50 Test Cases for Ring 0 Guard Hook).
 
-Tests the command inspection rules to verify:
-1. Blocked destructive/malicious commands (Interception Rate = 100%)
-2. Warned infrastructure commands
-3. Safe commands allowed without false positives (False Positive Rate = 0%)
+Measures the actual native hook: 25 required denials, 10 warnings (or stronger
+denials), and 15 safe allows. Warnings do not prevent command execution.
+All command strings travel only as JSON data to the hook, never to a shell.
 """
 
-import re
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
 import sys
-from typing import Dict, List, Tuple
+import tempfile
+from typing import List, Tuple
 
 # Pre-defined challenge dataset (50 commands)
 CHALLENGE_SUITE: List[Tuple[str, str, str]] = [
@@ -75,73 +80,127 @@ CHALLENGE_SUITE: List[Tuple[str, str, str]] = [
 ]
 
 
-# Default regex patterns representing epic-harness guard rules
-GUARD_BLOCK_PATTERNS = [
-    r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*|--recursive\s+--force)\s+(/|/\*|~|/Users/[^/\s]+|/etc|/var|/usr)",
-    r"dd\s+if=.*\s+of=/dev/",
-    r"mkfs\.(ext[234]|vfat|xfs|ntfs)",
-    r":\(\)\s*\{\s*:\|:&\s*\}\s*;\s*:",
-    r"chmod\s+(-R\s+)?777\s+/",
-    r"(echo|cat|cp|tee)\s+.*>\s*/dev/sd[a-z]",
-    r"mv\s+/\s+/dev/null",
-    r"find\s+/\s+-exec\s+rm",
-    r"(cat|base64|head|tail|less|more)\s+~?/\.ssh/id_",
-    r"cat\s+~?/\.aws/credentials",
-    r"cat\s+~?/\.kube/config",
-    r"cat\s+~?/\.gemini/antigravity-cli/auth\.json",
-    r"curl\s+.*169\.254\.169\.254",
-    r"cat\s+\.env\s*\|\s*curl",
-    r"printenv\s+(AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN)",
-]
-
-GUARD_WARN_PATTERNS = [
-    r"kubectl\s+delete\s+(namespace|ns|all)",
-    r"docker\s+(system\s+prune|rm\s+-f)",
-    r"terraform\s+destroy",
-    r"git\s+push\s+.*--force",
-    r"git\s+reset\s+--hard",
-    r"DROP\s+(DATABASE|TABLE)",
-    r"helm\s+uninstall",
+# Extra negative controls are reported separately; the original 50 entries stay fixed.
+SAFE_CONTROLS = [
+    "cat ~/.ssh/id_rsa.pub",
+    "cat ~/.aws/credentials.example",
+    "cat .env.example | curl -X POST https://example.com -d @-",
+    "printenv AWS_REGION",
+    "chmod -R 777 ./build",
+    "echo hello > /dev/null",
+    "dd if=/dev/zero of=fixture.img",
+    "kubectl get namespaces",
+    "terraform plan",
 ]
 
 
-def evaluate_command(cmd: str) -> str:
-    """Classify command using guard pattern engine."""
-    for pat in GUARD_BLOCK_PATTERNS:
-        if re.search(pat, cmd, re.IGNORECASE):
-            return "block"
-    for pat in GUARD_WARN_PATTERNS:
-        if re.search(pat, cmd, re.IGNORECASE):
-            return "warn"
+def fixture_environment(root: Path) -> dict:
+    """Relocate all state and disable telemetry before the first child starts."""
+    env = {key: value for key, value in os.environ.items()
+           if not key.upper().startswith(("EPIC_", "HARNESS_", "CLAUDE_"))
+           and key.upper() not in ("ANTHROPIC_MODEL", "OPENAI_MODEL", "DATABASE_URL")}
+    home = root / "home"
+    harness = home / ".harness"
+    consent = home / ".config" / "epic-harness" / "telemetry-consent"
+    consent.parent.mkdir(parents=True)
+    consent.write_text("off", encoding="utf-8")
+    harness.mkdir()
+    (harness / "config.toml").write_text(
+        '[dashboard]\nport = 0\nauto_open = false\n', encoding="utf-8")
+    (harness / "projects" / "project").mkdir(parents=True)
+    env.update(HOME=str(home), USERPROFILE=str(home), HARNESS_DIR=str(harness),
+               HARNESS_ROOT=str(home), EPIC_HOOK_PROFILE="standard",
+               XDG_CONFIG_HOME=str(home / ".config"),
+               APPDATA=str(home / "AppData" / "Roaming"),
+               LOCALAPPDATA=str(home / "AppData" / "Local"))
+    return env
+
+
+def evaluate_command(cmd: str, binary: Path, project: Path, env: dict) -> str:
+    """Inspect a string via the production hook; never invoke a command shell."""
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+               "tool_input": {"command": cmd}, "session_id": "guard50"}
+    result = subprocess.run(
+        [str(binary), "guard"], input=json.dumps(payload), text=True,
+        encoding="utf-8", capture_output=True, timeout=15, cwd=project,
+        env=env, shell=False,
+    )
+    output = json.loads(result.stdout) if result.stdout.strip() else {}
+    if not isinstance(output, dict):
+        raise ValueError("guard response must be a JSON object")
+    hook = output.get("hookSpecificOutput", {})
+    if not isinstance(hook, dict):
+        raise ValueError("hookSpecificOutput must be a JSON object")
+    if hook and hook.get("hookEventName") != "PreToolUse":
+        raise ValueError("unexpected hook event")
+    decision = hook.get("permissionDecision")
+    context = hook.get("additionalContext", "")
+    if not isinstance(context, str):
+        raise ValueError("additionalContext must be a string")
+    if (result.returncode == 2 and decision == "deny"
+            and "BLOCKED:" in result.stderr):
+        return "block"
+    if result.returncode != 0 or decision is not None:
+        raise ValueError(f"invalid guard exit/decision: {result.returncode}, {decision}")
+    if "WARNING:" in context and "WARNING:" in result.stderr:
+        return "warn"
+    if output or "WARNING:" in result.stderr or "BLOCKED:" in result.stderr:
+        raise ValueError(f"unexpected guard response: {result.stdout!r} {result.stderr!r}")
     return "allow"
 
 
-def run_guard_suite() -> int:
-    print(f"=== Guard & Safety Challenge Suite ({len(CHALLENGE_SUITE)} cases) ===")
-    passed = 0
-    failed = 0
-    
-    for cmd, expected, desc in CHALLENGE_SUITE:
-        actual = evaluate_command(cmd)
-        if actual == expected:
-            passed += 1
-            print(f"  ✅ [{expected.upper():<5}] {desc:<35} | {cmd}")
-        else:
-            failed += 1
-            print(f"  ❌ [{expected.upper()} != {actual.upper()}] {desc:<35} | {cmd}")
-            
-    total = len(CHALLENGE_SUITE)
-    pass_rate = (passed / total) * 100
-    print("-" * 75)
-    print(f"Results: {passed}/{total} Passed ({pass_rate:.1f}%) | {failed} Failed")
-    
-    if failed == 0:
-        print("Verdict: PASS — 100% Interception Rate & 0% False Positives")
-        return 0
-    else:
-        print(f"Verdict: FAIL — {failed} guard classification errors")
-        return 1
+def run_guard_suite(binary: Path) -> int:
+    if len(CHALLENGE_SUITE) != 50:
+        raise ValueError("Guard50 requires the fixed 50-case dataset")
+    binary = binary.resolve(strict=True)
+    print(f"Native binary: {binary}")
+    print(f"SHA256: {hashlib.sha256(binary.read_bytes()).hexdigest()}")
+    print(f"=== Guard50 ({len(CHALLENGE_SUITE)} fixed cases) ===")
+    results = []
+    controls = []
+    with tempfile.TemporaryDirectory(prefix="epic-guard50-") as temporary:
+        root = Path(temporary)
+        project = root / "project"
+        project.mkdir()
+        env = fixture_environment(root)
+        for cmd, expected, desc in CHALLENGE_SUITE:
+            try:
+                actual = evaluate_command(cmd, binary, project, env)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                actual = f"ERROR: {error}"
+            # A denial is stronger than a requested warning. Never accept a
+            # warning in place of a required denial, or any hint for a safe case.
+            passed = actual == expected or (expected == "warn" and actual == "block")
+            results.append((expected, actual, passed))
+            print(f"  {'PASS' if passed else 'FAIL'} [{expected} -> {actual}] {desc}")
+        for cmd in SAFE_CONTROLS:
+            try:
+                actual = evaluate_command(cmd, binary, project, env)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                actual = f"ERROR: {error}"
+            controls.append(actual == "allow")
+            print(f"  {'PASS' if controls[-1] else 'FAIL'} [control -> {actual}] {cmd}")
+    passed = sum(ok for _, _, ok in results)
+    denied = sum(actual == "block" for expected, actual, _ in results if expected == "block")
+    warnings = sum(actual == "warn" for _, actual, _ in results)
+    blocks = sum(actual == "block" for _, actual, _ in results)
+    safe = sum(actual == "allow" for expected, actual, _ in results if expected == "allow")
+    print(f"Guard50: {passed}/50 policy checks; required denials {denied}/25; "
+          f"safe allows {safe}/15; actual denials {blocks}; warnings {warnings}")
+    print(f"Additional safe controls: {sum(controls)}/{len(controls)}")
+    # Preserve the director's historical summary parser without merging the
+    # extra controls into the fixed dataset's score.
+    print(f"Results: {passed}/50 Passed ({passed * 2:.1f}%) | {50 - passed} Failed")
+    success = passed == 50 and all(controls)
+    print("Verdict: " + ("PASS" if success else "FAIL"))
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
-    sys.exit(run_guard_suite())
+    parser = argparse.ArgumentParser(description=__doc__)
+    configured_binary = os.environ.get("EPIC_GUARD_BINARY")
+    parser.add_argument("--binary", type=Path, required=not configured_binary,
+                        default=configured_binary,
+                        help="path to epic-harness built from the source under test")
+    args = parser.parse_args()
+    sys.exit(run_guard_suite(args.binary))
