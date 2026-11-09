@@ -1,41 +1,8 @@
 <script lang="ts">
   import { tStore } from '$lib/i18n.js';
 
-  type SkillDescKey =
-    | 'skillDispatchDesc' | 'skillTddDesc' | 'skillDebugDesc' | 'skillSecureDesc'
-    | 'skillVerifyDesc' | 'skillSimplifyDesc' | 'skillPerfDesc' | 'skillReviewDesc'
-    | 'skillRefactorDesc' | 'skillMigrateDesc' | 'skillApiDesignDesc' | 'skillDocDesc'
-    | 'skillTestGenDesc' | 'skillCiDesc' | 'skillDeployDesc'
-    | 'skillSpecDesc' | 'skillGoDesc' | 'skillCheckDesc' | 'skillShipDesc';
-
-  interface Skill {
-    name: string;
-    descKey: SkillDescKey;
-    special?: boolean;
-    pipeline?: boolean;
-  }
-
-  const skills: Skill[] = [
-    { name: '_dispatch', descKey: 'skillDispatchDesc', special: true },
-    { name: 'spec',      descKey: 'skillSpecDesc',     pipeline: true },
-    { name: 'go',        descKey: 'skillGoDesc',       pipeline: true },
-    { name: 'check',     descKey: 'skillCheckDesc',    pipeline: true },
-    { name: 'ship',      descKey: 'skillShipDesc',     pipeline: true },
-    { name: 'tdd',       descKey: 'skillTddDesc' },
-    { name: 'debug',     descKey: 'skillDebugDesc' },
-    { name: 'secure',    descKey: 'skillSecureDesc' },
-    { name: 'verify',    descKey: 'skillVerifyDesc' },
-    { name: 'simplify',  descKey: 'skillSimplifyDesc' },
-    { name: 'perf',      descKey: 'skillPerfDesc' },
-    { name: 'review',    descKey: 'skillReviewDesc' },
-    { name: 'refactor',  descKey: 'skillRefactorDesc' },
-    { name: 'migrate',   descKey: 'skillMigrateDesc' },
-    { name: 'api-design',descKey: 'skillApiDesignDesc' },
-    { name: 'doc',       descKey: 'skillDocDesc' },
-    { name: 'test-gen',  descKey: 'skillTestGenDesc' },
-    { name: 'ci',        descKey: 'skillCiDesc' },
-    { name: 'deploy',    descKey: 'skillDeployDesc' },
-  ];
+  import { skillCatalog as skills } from '../lib/skills.js';
+  type Skill = typeof skills[number];
 
   let copiedSkill = $state<string | null>(null);
 
@@ -64,13 +31,14 @@
 
 <div class="screen-header">
   <h2>{$tStore('pageSkills')} <span class="subtitle-tag">Ring 2</span></h2>
-  <p>{$tStore('pageSkillsDesc19')}</p>
+  <p>{$tStore('pageSkillsRegistryDesc', skills.length)}</p>
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
   {#each skills as skill}
     <div
       class="skill-card"
+      data-skill={skill.name}
       role="button"
       tabindex="0"
       style={cardStyle(skill)}
@@ -91,7 +59,7 @@
           <span style="font-size:11px;color:var(--success);font-family:var(--font-mono);font-weight:600;">{$tStore('copied')}</span>
         {/if}
       </div>
-      <div class="skill-desc">{$tStore(skill.descKey)}</div>
+      <div class="skill-desc">{skill.description}</div>
     </div>
   {/each}
 </div>
