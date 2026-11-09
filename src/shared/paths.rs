@@ -135,6 +135,126 @@ pub fn harness_dir_for_slug(slug: &str) -> PathBuf {
     harness_projects_root().join(slug)
 }
 
+/// Resolve a selected project without accepting path syntax or escaping links.
+/// Missing projects remain valid empty read-state; existing ancestors are still
+/// resolved so an intermediate junction cannot redirect later file reads.
+pub fn checked_harness_dir_for_slug(slug: &str) -> Result<PathBuf, String> {
+    if slug.is_empty()
+        || !slug
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err("invalid project slug".into());
+    }
+    checked_path_beneath(&harness_projects_root(), std::path::Path::new(slug))
+}
+
+/// Resolve a relative file/directory beneath a validated selected project.
+pub fn checked_harness_path_for_slug(
+    slug: &str,
+    relative: impl AsRef<std::path::Path>,
+) -> Result<PathBuf, String> {
+    checked_path_beneath(&checked_harness_dir_for_slug(slug)?, relative.as_ref())
+}
+
+fn checked_path_beneath(
+    root: &std::path::Path,
+    relative: &std::path::Path,
+) -> Result<PathBuf, String> {
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+    {
+        return Err("invalid relative project path".into());
+    }
+    let root = resolve_existing_ancestors(root)?;
+    let candidate = resolve_existing_ancestors(&root.join(relative))?;
+    if candidate == root || !candidate.starts_with(&root) {
+        return Err("path escapes harness root".into());
+    }
+    Ok(candidate)
+}
+
+fn resolve_existing_ancestors(path: &std::path::Path) -> Result<PathBuf, String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd().join(path)
+    };
+    let mut ancestor = absolute.as_path();
+    let mut missing = Vec::new();
+    loop {
+        match ancestor.symlink_metadata() {
+            Ok(_) => {
+                let mut resolved = ancestor
+                    .canonicalize()
+                    .map_err(|_| "unable to resolve project path")?;
+                for component in missing.iter().rev() {
+                    resolved.push(component);
+                }
+                return Ok(resolved);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(
+                    ancestor
+                        .file_name()
+                        .ok_or("invalid project path")?
+                        .to_os_string(),
+                );
+                ancestor = ancestor.parent().ok_or("invalid project path")?;
+            }
+            Err(_) => return Err("unable to inspect project path".into()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod checked_path_tests {
+    use super::*;
+
+    #[test]
+    fn missing_project_and_child_are_safe_empty_read_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("projects");
+        let result =
+            checked_path_beneath(&root, std::path::Path::new("sample/sessions/latest.json"))
+                .unwrap();
+        assert!(result.ends_with("projects/sample/sessions/latest.json"));
+        assert!(checked_path_beneath(&root, std::path::Path::new("../outside")).is_err());
+        assert!(checked_path_beneath(&root, temp.path()).is_err());
+    }
+
+    #[test]
+    fn existing_link_ancestor_cannot_escape_even_when_leaf_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("project");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let link = root.join("sessions");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        #[cfg(windows)]
+        {
+            let out = std::process::Command::new("cmd.exe")
+                .args(["/D", "/C", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        assert!(
+            checked_path_beneath(&root, std::path::Path::new("sessions/missing.json")).is_err()
+        );
+    }
+}
+
 /// Legacy project-local path used for migration detection only.
 pub(crate) fn local_harness_dir() -> PathBuf {
     cwd().join(".harness")
@@ -245,9 +365,6 @@ pub fn project_seesaw_path_for(project: Option<&str>) -> PathBuf {
 }
 pub fn variant_pool_path_for(project: Option<&str>) -> PathBuf {
     resolve_harness_dir(project).join("variants.json")
-}
-pub fn evolved_dir_for(project: Option<&str>) -> PathBuf {
-    resolve_harness_dir(project).join("evolved")
 }
 pub fn manifests_file_for(project: Option<&str>) -> PathBuf {
     resolve_harness_dir(project).join("manifests.jsonl")
