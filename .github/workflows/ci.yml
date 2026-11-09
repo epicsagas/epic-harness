@@ -42,6 +42,10 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm exec svelte-check --tsconfig ./tsconfig.json
           pnpm exec vitest run
+      - name: Verify deepmerge backport and dashboard audit
+        run: |
+          node --test scripts/deepmerge-security.test.mjs scripts/dependency-audit-policy.test.mjs
+          node scripts/audit-dashboard-dependencies.mjs
 
   test:
     name: Test
