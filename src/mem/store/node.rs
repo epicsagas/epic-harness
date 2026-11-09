@@ -90,7 +90,11 @@ pub fn serialize_node(node: &Node) -> String {
 pub fn parse_node(content: &str) -> Option<Node> {
     let content = content.strip_prefix("---\n").unwrap_or(content);
     let (fm_str, body) = content.split_once("\n---\n")?;
-    let frontmatter: NodeFrontmatter = serde_yaml::from_str(fm_str).ok()?;
+    let mut frontmatter: NodeFrontmatter = serde_yaml::from_str(fm_str).ok()?;
+    let fields: serde_yaml::Value = serde_yaml::from_str(fm_str).ok()?;
+    if fields.get("importance").is_none() {
+        frontmatter.importance = super::types::importance_for_type(&frontmatter.node_type);
+    }
     Some(Node {
         frontmatter,
         body: body.to_string(),
