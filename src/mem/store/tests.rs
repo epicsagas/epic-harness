@@ -150,3 +150,45 @@ fn test_session_importance_lower_than_pattern() {
         "session importance should be lower than pattern"
     );
 }
+
+#[tokio::test]
+async fn issue_232_reopening_preserves_explicit_importance() {
+    let pool = crate::store::pool::test_memory_pool().await;
+    init_schema_pool(&pool).await.unwrap();
+    for (id, kind, importance) in [
+        ("explicit-concept", "concept", 0.5),
+        ("explicit-session", "session", 0.7),
+    ] {
+        write_node_pool(&pool, &make_node(id, id, kind, &[], Some(importance)))
+            .await
+            .unwrap();
+    }
+    init_schema_pool(&pool).await.unwrap();
+    assert_eq!(
+        read_node_pool(&pool, "explicit-concept")
+            .await
+            .unwrap()
+            .frontmatter
+            .importance,
+        0.5
+    );
+    assert_eq!(
+        read_node_pool(&pool, "explicit-session")
+            .await
+            .unwrap()
+            .frontmatter
+            .importance,
+        0.7
+    );
+}
+
+#[test]
+fn issue_232_legacy_import_defaults_only_missing_importance() {
+    let legacy = "---\nid: legacy-decision\ntype: decision\ntitle: Legacy choice\ncreated: 2024-01-01\nupdated: 2024-01-01\n---\nbody";
+    assert_eq!(parse_node(legacy).unwrap().frontmatter.importance, 0.9);
+    let explicit = legacy.replace(
+        "title: Legacy choice",
+        "title: Legacy choice\nimportance: 0.5",
+    );
+    assert_eq!(parse_node(&explicit).unwrap().frontmatter.importance, 0.5);
+}

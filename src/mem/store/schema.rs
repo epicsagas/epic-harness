@@ -65,18 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_nodes_accessed ON nodes(accessed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_nodes_imp_upd ON nodes(importance DESC, updated DESC);
 ";
 
-/// SQL to backfill importance for existing nodes based on type.
-const IMPORTANCE_BACKFILL_SQL: &str = "
-UPDATE nodes SET importance = 0.9 WHERE importance = 0.5 AND type = 'decision';
-UPDATE nodes SET importance = 0.8 WHERE importance = 0.5 AND type = 'resolution';
-UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'concept';
-UPDATE nodes SET importance = 0.7 WHERE importance = 0.5 AND type = 'project';
-UPDATE nodes SET importance = 0.4 WHERE importance = 0.5 AND type = 'error';
-UPDATE nodes SET importance = 0.05 WHERE importance = 0.5 AND type = 'session';
-UPDATE nodes SET importance = 0.05 WHERE type = 'session' AND importance > 0.05;
-";
-
-/// Initialize the graph schema + indexes + importance backfill.
+/// Initialize the graph schema and indexes without rewriting user importance.
 ///
 /// Called by `pool::memory_pool()` after pool creation. Idempotent (IF NOT EXISTS).
 pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
@@ -92,8 +81,8 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         .await
         .map_err(io::Error::other)?;
 
-    // Importance backfill (ignore errors — best-effort)
-    let _ = sqlx::query(IMPORTANCE_BACKFILL_SQL).execute(pool).await;
+    // Existing values (including 0.5 and session overrides) are user data.
+    // Defaults belong at creation/import, never at every database open.
 
     // Migrate FTS schema if it lacks the 'id' and 'projects' columns added in v2.
     migrate_fts_schema(pool).await;
@@ -161,7 +150,6 @@ async fn migrate_legacy_files(pool: &AnyPool) {
     }
 
     use super::node::parse_node;
-    use super::types::importance_for_type;
     use super::types::node_to_graph;
 
     let mut count = 0usize;
@@ -177,9 +165,7 @@ async fn migrate_legacy_files(pool: &AnyPool) {
             let Some(node) = parse_node(&content) else {
                 continue;
             };
-            let node_type = node.frontmatter.node_type.clone();
-            let mut gn = node_to_graph(node);
-            gn.importance = importance_for_type(&node_type);
+            let gn = node_to_graph(node);
             let _ = upsert_graph_node(pool, &gn).await;
             count += 1;
         }
