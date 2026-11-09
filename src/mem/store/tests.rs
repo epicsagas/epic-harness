@@ -150,3 +150,16 @@ fn test_session_importance_lower_than_pattern() {
         "session importance should be lower than pattern"
     );
 }
+
+#[tokio::test]
+async fn issue_231_recall_keeps_operator_substrings_in_words() {
+    let pool = crate::store::pool::test_memory_pool().await;
+    init_schema_pool(&pool).await.unwrap();
+    let node = make_node("algorithm", "ALGORITHM", "concept", &[], None);
+    write_node_pool(&pool, &node).await.unwrap();
+    let recalled = smart_recall_pool(&pool, None, Some("ALGORITHM"), 5)
+        .await
+        .unwrap();
+    assert_eq!(recalled.len(), 1);
+    assert_eq!(recalled[0].node.frontmatter.id, "algorithm");
+}

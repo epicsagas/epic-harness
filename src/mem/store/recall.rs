@@ -169,9 +169,6 @@ fn escape_fts(s: &str) -> String {
     let sanitized: String = s
         .replace(['"', '*'], "")
         .replace(':', " ")
-        .replace("AND", "")
-        .replace("OR", "")
-        .replace("NOT", "")
         .replace(['^', '{', '}', '(', ')'], "")
         .trim()
         .to_string();
