@@ -21,6 +21,8 @@
   let searchResults = $state<MemoryNode[]>([]);
   let detailNode = $state<MemoryNode | null>(null);
   let searching = $state(false);
+  let searchActive = $state(false);
+  let searchGeneration = 0;
   let nodeDisplayLimit = $state(50);
 
   // node type → color
@@ -53,15 +55,19 @@
   });
 
   async function doSearch() {
-    if (!searchQuery.trim()) { searchResults = []; nodeDisplayLimit = 50; return; }
+    const query = searchQuery.trim();
+    const generation = ++searchGeneration;
+    searchActive = !!query;
+    if (!query) { searchResults = []; searching = false; nodeDisplayLimit = 50; return; }
     searching = true;
     nodeDisplayLimit = 50;
     try {
-      searchResults = await searchMemory(searchQuery.trim());
+      const results = await searchMemory(query);
+      if (generation === searchGeneration) searchResults = results;
     } catch {
-      searchResults = [];
+      if (generation === searchGeneration) searchResults = [];
     } finally {
-      searching = false;
+      if (generation === searchGeneration) searching = false;
     }
   }
 
@@ -73,7 +79,7 @@
     }
   }
 
-  const displayNodes = $derived(searchResults.length > 0 ? searchResults : nodes);
+  const displayNodes = $derived(searchActive && searchQuery.trim() ? searchResults : nodes);
 
   type SimNode = GraphNode & d3.SimulationNodeDatum;
 
