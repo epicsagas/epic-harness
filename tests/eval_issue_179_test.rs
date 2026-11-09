@@ -144,3 +144,33 @@ fn regression_selection_runs_measurements_and_rejects_empty_comparisons() {
         "no measurement must not be a successful check"
     );
 }
+
+#[test]
+fn skipped_results_are_not_comparable_measurements() {
+    for previous in [
+        serde_json::json!({"quality":{"score":0,"verdict":"SKIPPED"}}),
+        serde_json::json!({"quality":{"score":0,"verdict":"PASS"}}),
+        serde_json::json!({"benchmark:fixture":{"score":0,"verdict":"SKIPPED"}}),
+    ] {
+        let f = Fixture::new();
+        f.config(&format!("benchmarks:\n  - name: fixture\n    command: {}\n    result_type: composite\ndimensions:\n  quality:\n    enabled: true\n  regression:\n    enabled: true\n", serde_json::to_string(&f.command()).unwrap()));
+        let baselines = f.eval_dir().join("baselines");
+        fs::create_dir_all(&baselines).unwrap();
+        fs::write(
+            baselines.join("latest.json"),
+            serde_json::to_vec(&serde_json::json!({"dimensions":previous})).unwrap(),
+        )
+        .unwrap();
+        let output = f.run("composite-high", &["eval", "--json"]);
+        let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(report["dimensions"]["quality"]["verdict"], "SKIPPED");
+        assert!(
+            !output.status.success(),
+            "skipped inputs are not measurement evidence: {report}"
+        );
+        assert_eq!(
+            report["dimensions"]["regression"]["details"]["deltas"],
+            serde_json::json!({})
+        );
+    }
+}
