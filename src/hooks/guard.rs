@@ -222,14 +222,12 @@ fn extract_written_paths(tool_input: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolve the orchestrator base directory from `$HARNESS_DIR/orchestrator`.
+/// Resolve the same project store used by lifecycle tracking and interventions.
 fn orchestrator_dir() -> Option<PathBuf> {
-    std::env::var("HARNESS_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .map(|p| p.join("orchestrator"))
-        .filter(|p| p.is_dir())
+    let dir = crate::shared::paths::harness_projects_root()
+        .join(common::project_slug())
+        .join("orchestrator");
+    dir.is_dir().then_some(dir)
 }
 
 /// Return agent IDs whose `status.json` reports `"running"`.
@@ -1031,7 +1029,11 @@ mod tests {
     #[serial]
     fn run_orchestration_pause_blocks_edit() {
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = dir
+            .path()
+            .join("projects")
+            .join(common::project_slug())
+            .join("orchestrator");
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-x\"}").unwrap();
 
@@ -1063,7 +1065,11 @@ mod tests {
     #[serial]
     fn run_orchestration_pause_not_targeting_passes() {
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = dir
+            .path()
+            .join("projects")
+            .join(common::project_slug())
+            .join("orchestrator");
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-other\"}").unwrap();
 
@@ -1112,7 +1118,11 @@ mod tests {
     #[serial]
     fn run_orchestration_concurrent_warning_does_not_block() {
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = dir
+            .path()
+            .join("projects")
+            .join(common::project_slug())
+            .join("orchestrator");
         let agents_dir = orch_dir.join("agents");
 
         // agent-1 running, modified /src/shared.rs
@@ -1153,7 +1163,11 @@ mod tests {
     fn run_orchestration_bash_tool_skipped() {
         // Bash tool should not trigger orchestration checks
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = dir
+            .path()
+            .join("projects")
+            .join(common::project_slug())
+            .join("orchestrator");
         std::fs::create_dir_all(&orch_dir).unwrap();
 
         // SAFETY: env mutation scoped to this test
