@@ -182,3 +182,86 @@ async fn issue_185_preserves_invocation_identity_and_resets_remapped_reflection_
     .unwrap();
     assert_eq!(cursor, "0");
 }
+
+async fn legacy_observation_source(path: &std::path::Path) {
+    let mut source = database(path).await;
+    sqlx::raw_sql("INSERT INTO observations(id,timestamp,session_id,tool,tool_category,action,result,score,project) VALUES(900,'2024-01-01T00:00:00Z','fresh-import','Read','read','fresh-a','success',1,'source'),(901,'2024-01-01T00:00:00Z','fresh-import','Read','read','fresh-b','success',1,'source');").execute(&mut source).await.unwrap();
+    let metrics: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM metrics_state")
+        .fetch_one(&mut source)
+        .await
+        .unwrap();
+    assert_eq!(metrics, 0, "fresh source has no reflection provenance");
+    source.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn issue_218_consolidation_initializes_absent_cursor_without_changing_legacy_dates() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.db");
+    legacy_observation_source(&source).await;
+    let mut target = database(&temp.path().join("target.db")).await;
+    sqlx::query("ATTACH DATABASE ? AS src")
+        .bind(source.to_string_lossy().as_ref())
+        .execute(&mut target)
+        .await
+        .unwrap();
+    let stats = merge_attached_db_async(&mut target, "target", "src")
+        .await
+        .unwrap();
+    assert_eq!(stats.obs, 2);
+    let cursor: Option<String> = sqlx::query_scalar(
+        "SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'",
+    )
+    .fetch_optional(&mut target)
+    .await
+    .unwrap();
+    assert_eq!(
+        cursor.as_deref(),
+        Some("0"),
+        "an absent cursor must not invoke a legacy timestamp cutoff for fresh imports"
+    );
+    let timestamps: Vec<String> =
+        sqlx::query_scalar("SELECT timestamp FROM observations WHERE project='target' ORDER BY id")
+            .fetch_all(&mut target)
+            .await
+            .unwrap();
+    assert_eq!(timestamps, vec!["2024-01-01T00:00:00Z"; 2]);
+    let source_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM src.observations")
+        .fetch_one(&mut target)
+        .await
+        .unwrap();
+    assert_eq!(source_rows, 2, "source history remains intact");
+}
+
+#[tokio::test]
+async fn issue_218_consolidation_cursor_creation_failure_rolls_back_import() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.db");
+    legacy_observation_source(&source).await;
+    let mut target = database(&temp.path().join("target.db")).await;
+    sqlx::raw_sql("CREATE TRIGGER reject_cursor BEFORE INSERT ON metrics_state WHEN NEW.key='reflection_cursor' BEGIN SELECT RAISE(ABORT,'synthetic cursor creation failure'); END;").execute(&mut target).await.unwrap();
+    sqlx::query("ATTACH DATABASE ? AS src")
+        .bind(source.to_string_lossy().as_ref())
+        .execute(&mut target)
+        .await
+        .unwrap();
+    assert!(
+        merge_attached_db_async(&mut target, "target", "src")
+            .await
+            .is_err(),
+        "a failed cursor creation cannot report successful import"
+    );
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+        .fetch_one(&mut target)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows, 0,
+        "observation transfer rolls back with cursor creation"
+    );
+    let source_rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM src.observations")
+        .fetch_one(&mut target)
+        .await
+        .unwrap();
+    assert_eq!(source_rows, 2);
+}
