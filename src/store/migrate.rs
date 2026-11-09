@@ -829,6 +829,48 @@ pub async fn merge_attached_db_async(
     Ok(stats)
 }
 
+#[cfg(test)]
+mod reflection_cursor_tests {
+    use super::*;
+    use sqlx::{ConnectOptions, Connection};
+
+    #[tokio::test]
+    async fn issue_218_attached_migration_resets_derived_cursor() {
+        for with_observation in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let source = temp.path().join("source.db");
+            let mut source_conn = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&source).create_if_missing(true).connect().await.unwrap();
+            sqlx::raw_sql(crate::store::schema::DDL_SQLITE).execute(&mut source_conn).await.unwrap();
+            sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source')")
+                .execute(&mut source_conn).await.unwrap();
+            if with_observation {
+                sqlx::query("INSERT INTO observations(id,timestamp,session_id,tool,tool_category,action,project) VALUES(999,'2026-11-09T00:00:00Z','source','Read','read','source-pending','source')")
+                    .execute(&mut source_conn).await.unwrap();
+            }
+            source_conn.close().await.unwrap();
+            let mut destination = sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(temp.path().join("destination.db")).create_if_missing(true).connect().await.unwrap();
+            sqlx::raw_sql(crate::store::schema::DDL_SQLITE).execute(&mut destination).await.unwrap();
+            if with_observation {
+                sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','555','target')")
+                    .execute(&mut destination).await.unwrap();
+                sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2026-11-09T00:00:00Z','target','Read','read','target-pending','target')")
+                    .execute(&mut destination).await.unwrap();
+            }
+            sqlx::query("ATTACH DATABASE ? AS src").bind(source.to_string_lossy().as_ref())
+                .execute(&mut destination).await.unwrap();
+            merge_attached_db_async(&mut destination, "target", "src").await.unwrap();
+            let cursor: String = sqlx::query_scalar("SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'")
+                .fetch_one(&mut destination).await.unwrap();
+            assert_eq!(cursor, "0", "Copied row identities cannot reuse a source or destination cutoff");
+            let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")
+                .fetch_one(&mut destination).await.unwrap();
+            assert_eq!(count, if with_observation { 2 } else { 0 });
+        }
+    }
+}
+
 /// Entry point for `epic-harness migrate --to-global [--dry-run]`.
 ///
 /// Scans `~/.harness/projects/*/harness.db` and merges each into the global DB.

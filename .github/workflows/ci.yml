@@ -140,3 +140,5 @@ jobs:
         run: cargo build -p epic-harness --bins --locked
       - name: Run issue 218 native regressions
         run: cargo test -p epic-harness --locked --test issue_218_cursor_test
+      - name: Run issue 218 migration compatibility regressions
+        run: cargo test -p epic-harness --locked --lib issue_218_
