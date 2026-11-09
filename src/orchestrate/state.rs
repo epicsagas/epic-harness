@@ -393,12 +393,16 @@ pub fn upsert_agent_to_run(
     fs::create_dir_all(&a_dir)?;
 
     if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
+        let restarting = matches!(existing.status, AgentStatus::Done | AgentStatus::Failed);
         existing.status = status.clone();
         if status == AgentStatus::Done {
             existing.completed_at = Some(now.clone());
         }
-        if status == AgentStatus::Running && existing.started_at.is_none() {
-            existing.started_at = Some(now.clone());
+        if status == AgentStatus::Running {
+            existing.completed_at = None;
+            if restarting || existing.started_at.is_none() {
+                existing.started_at = Some(now.clone());
+            }
         }
     } else {
         run.agents.push(AgentDef {
@@ -423,6 +427,8 @@ pub fn upsert_agent_to_run(
     // Check if all agents are done
     if is_run_complete(&run) {
         run.status = RunStatus::Complete;
+    } else if status == AgentStatus::Running {
+        run.status = RunStatus::Running;
     }
     run.updated_at = now.clone();
     write_run(base, &run)?;
@@ -581,6 +587,34 @@ pub fn parse_agent_state(output: &str) -> Option<AgentStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue242_new_work_reopens_completed_run_and_clears_completion() {
+        let tmp = tempfile::tempdir().unwrap();
+        upsert_agent_to_run(tmp.path(), "first", "first", "tester", AgentStatus::Running).unwrap();
+        upsert_agent_to_run(tmp.path(), "first", "first", "tester", AgentStatus::Done).unwrap();
+        assert_eq!(read_run(tmp.path()).unwrap().status, RunStatus::Complete);
+        upsert_agent_to_run(
+            tmp.path(),
+            "second",
+            "second",
+            "tester",
+            AgentStatus::Running,
+        )
+        .unwrap();
+        assert_eq!(read_run(tmp.path()).unwrap().status, RunStatus::Running);
+        upsert_agent_to_run(tmp.path(), "first", "first", "tester", AgentStatus::Running).unwrap();
+        let reopened = read_run(tmp.path()).unwrap();
+        assert!(
+            reopened
+                .agents
+                .iter()
+                .find(|a| a.id == "first")
+                .unwrap()
+                .completed_at
+                .is_none()
+        );
+    }
 
     /// Helper to create a test OrchestrationRun with given agents and deps.
     fn make_run(
