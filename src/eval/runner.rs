@@ -96,17 +96,31 @@ pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
 
     let output = exec_command(bench_cmd);
     let duration = start.elapsed().as_millis() as u64;
-
     let exit_ok = output.exit_code == 0;
+    let parsed = parse_last_json_object(&output.stdout);
+    let metric = ["latency_ms", "throughput", "duration_ms"]
+        .into_iter()
+        .find(|name| parsed.as_ref().and_then(|v| v.get(*name)).is_some())
+        .unwrap_or("duration_ms");
+    let value = if let Some(raw) = parsed.as_ref().and_then(|v| v.get(metric)) {
+        raw.as_f64().filter(|v| v.is_finite() && *v >= 0.0)
+    } else {
+        Some(duration as f64)
+    };
+    let passed = exit_ok && value.is_some();
 
     DimResult {
         dimension: "performance".into(),
-        score: if exit_ok { 1.0 } else { 0.0 },
-        passed: exit_ok,
-        verdict: if exit_ok { "PASS" } else { "FAIL" }.into(),
+        score: if passed { 1.0 } else { 0.0 },
+        passed,
+        verdict: if passed { "PASS" } else { "FAIL" }.into(),
         details: json!({
             "command": bench_cmd,
             "exit_code": output.exit_code,
+            "metric": metric,
+            "metric_value": value,
+            "higher_is_better": metric == "throughput",
+            "max_regression_pct": cmds.max_regression_pct,
             "stdout_tail": truncate(&output.stdout, 500),
         }),
         duration_ms: duration,
@@ -180,9 +194,17 @@ pub fn compute_regression(
 
     let mut deltas = serde_json::Map::new();
     let mut any_regression = false;
+    let mut comparison_error = false;
 
     for r in results {
         if let Some(prev_dim) = prev.get(&r.dimension) {
+            if r.dimension == "performance" {
+                let delta = performance_delta(r, prev_dim);
+                any_regression |= delta["regressed"].as_bool().unwrap_or(true);
+                comparison_error |= delta["comparison_error"].as_bool().unwrap_or(false);
+                deltas.insert(r.dimension.clone(), delta);
+                continue;
+            }
             let prev_score = prev_dim
                 .get("score")
                 .and_then(|v| v.as_f64())
@@ -211,9 +233,80 @@ pub fn compute_regression(
         score,
         passed: !any_regression,
         verdict: if any_regression { "FAIL" } else { "PASS" }.into(),
-        details: json!({ "deltas": deltas, "threshold": threshold }),
+        details: json!({ "deltas": deltas, "threshold": threshold, "comparison_error": comparison_error }),
         duration_ms: start.elapsed().as_millis() as u64,
     }
+}
+
+fn performance_delta(current: &DimResult, previous: &Value) -> Value {
+    let invalid = || {
+        json!({"regressed": true, "comparison_error": true,
+        "reason": "performance baseline and current measurement are not comparable"})
+    };
+    let Some(metric) = current.details["metric"].as_str() else {
+        return invalid();
+    };
+    let previous_value = if previous["details"]["metric"].as_str() == Some(metric) {
+        previous["details"]["metric_value"].as_f64()
+    } else {
+        previous["details"]["stdout_tail"]
+            .as_str()
+            .and_then(parse_last_json_object)
+            .and_then(|v| v.get(metric).and_then(Value::as_f64))
+            .or_else(|| {
+                (metric == "duration_ms")
+                    .then(|| previous["duration_ms"].as_f64())
+                    .flatten()
+            })
+    };
+    let Some((before, after)) = previous_value
+        .zip(current.details["metric_value"].as_f64())
+        .filter(|(a, b)| a.is_finite() && b.is_finite() && *a >= 0.0 && *b >= 0.0)
+    else {
+        return invalid();
+    };
+    let higher_is_better = current.details["higher_is_better"]
+        .as_bool()
+        .unwrap_or(false);
+    let limit = current.details["max_regression_pct"]
+        .as_f64()
+        .unwrap_or(10.0);
+    let deterioration_pct = (before > 0.0).then(|| {
+        (if higher_is_better {
+            before - after
+        } else {
+            after - before
+        }) / before
+            * 100.0
+    });
+    let regressed = deterioration_pct.map_or(!higher_is_better && after > 0.0, |p| p > limit);
+    json!({"metric": metric, "baseline": before, "current": after,
+        "delta": format!("{:+.4}", after-before), "deterioration_pct": deterioration_pct,
+        "max_regression_pct": limit, "higher_is_better": higher_is_better,
+        "regressed": regressed, "comparison_error": false})
+}
+
+fn parse_last_json_object(stdout: &str) -> Option<Value> {
+    if let Ok(value) = serde_json::from_str::<Value>(stdout) {
+        return Some(value);
+    }
+    let mut offset = 0;
+    let mut consumed_until = 0;
+    let mut last = None;
+    for line in stdout.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let start = offset + line.len() - trimmed.len();
+        offset += line.len();
+        if start < consumed_until || !trimmed.starts_with('{') {
+            continue;
+        }
+        let mut stream = serde_json::Deserializer::from_str(&stdout[start..]).into_iter::<Value>();
+        if let Some(Ok(value)) = stream.next() {
+            consumed_until = start + stream.byte_offset();
+            last = Some(value);
+        }
+    }
+    last
 }
 
 // ── Benchmark ───────────────────────────────────────────────────────
