@@ -59,6 +59,7 @@ async fn read_edges_pool_async(pool: &sqlx::AnyPool, limit: usize) -> Vec<Edge> 
         .unwrap_or_default()
 }
 
+#[allow(dead_code)] // Public sync compatibility API; async transports use the pool variant.
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
     let pool = memory_pool_sync()?;
     runtime::block_on(delete_edge_by_id_async(&pool, edge_id))
