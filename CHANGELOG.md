@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Primary checkouts with separate Git metadata retain the checkout identity;
+  linked worktrees continue to share the primary project's harness (#253).
 - Linked worktrees on Windows now share the main checkout's harness identity,
   using native absolute-path detection for Git's common directory.
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
