@@ -113,6 +113,10 @@ epic team history backend reviewer   # list .history/ backups for an agent
 | `--playbook` | `show` only: print full accumulated playbook |
 | `--global` | `sync` only: install agents to `~/.claude/agents/` instead of project-local `.claude/agents/` |
 
+Project sync also writes a local Codex mirror when the project has `.codex/`.
+Home-wide mirrors for Codex, Antigravity, Cursor and OpenCode require `sync --global`;
+a normal project sync or link does not install agents into other projects.
+
 ---
 
 ## Team Types
