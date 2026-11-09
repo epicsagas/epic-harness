@@ -25,6 +25,10 @@ fn try_exec_args(prog: &str, args: &[&str], cwd: &Path) -> Option<String> {
     }
 }
 
+fn npx_program() -> &'static str {
+    if cfg!(windows) { "npx.cmd" } else { "npx" }
+}
+
 fn feedback_to_observe(
     file_path: &str,
     formatter: &str,
@@ -100,24 +104,40 @@ fn format_js(file_path: &str, wd: &Path) {
     let has_biome = wd.join("biome.json").is_file() || wd.join("biome.jsonc").is_file();
     let has_prettier = wd.join(".prettierrc").is_file() || wd.join(".prettierrc.json").is_file();
 
-    if has_biome {
-        if try_exec_args("npx", &["biome", "format", "--write", file_path], wd).is_some() {
-            let name = Path::new(file_path)
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy();
-            hint("polish", &format!("Biome: {name}"));
-            feedback_to_observe(file_path, "biome", true, None);
-        }
-    } else if has_prettier
-        && try_exec_args("npx", &["prettier", "--write", file_path], wd).is_some()
-    {
+    let (formatter, arguments): (&str, Vec<&str>) = if has_biome {
+        ("biome", vec!["biome", "format", "--write", file_path])
+    } else if has_prettier {
+        ("prettier", vec!["prettier", "--write", file_path])
+    } else {
+        return;
+    };
+    // Command supplies platform-aware .cmd argument quoting; payload text is
+    // never assembled into an interpreter command string.
+    let Ok(output) = Command::new(npx_program())
+        .args(arguments)
+        .current_dir(wd)
+        .output()
+    else {
+        return;
+    };
+    if output.status.success() {
         let name = Path::new(file_path)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-        hint("polish", &format!("Prettier: {name}"));
-        feedback_to_observe(file_path, "prettier", true, None);
+        hint("polish", &format!("{formatter}: {name}"));
+        feedback_to_observe(file_path, formatter, true, None);
+    } else {
+        let diagnostic = mask_secrets(&format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+        hint(
+            "polish",
+            &format!("{formatter} failed: {}", truncate_str(&diagnostic, 500)),
+        );
+        feedback_to_observe(file_path, formatter, false, Some(&diagnostic));
     }
 }
 
@@ -165,7 +185,7 @@ fn check_ts(file_path: &str, wd: &Path) {
     let (prog, base_args): (String, Vec<&str>) = if local_tsc.exists() {
         (local_tsc.to_string_lossy().into_owned(), vec![])
     } else {
-        ("npx".into(), vec!["tsc"])
+        (npx_program().into(), vec!["tsc"])
     };
 
     let mut args = base_args;
