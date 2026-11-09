@@ -143,3 +143,15 @@ jobs:
         with:
           name: sbom
           path: "*.cdx.json"
+
+  issue-203-windows:
+    runs-on: windows-latest
+    env:
+      SKIP_DASHBOARD_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build both source executables
+        run: cargo build -p epic-harness --bins --locked
+      - name: Run issue 203 native regressions
+        run: cargo test -p epic-harness --locked --test issue_203_fallback_test --test issue_203_context_test

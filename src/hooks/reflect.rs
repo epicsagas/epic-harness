@@ -53,8 +53,8 @@ pub fn run_context(
     }
 
     // 1. Obs stats — compute date range
-    let (cutoff_tag, date_from) = if let Some(ref s) = since {
-        (s.clone(), s.clone())
+    let date_from = if let Some(ref s) = since {
+        s.clone()
     } else {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -63,8 +63,7 @@ pub fn run_context(
         let cutoff_ts = now.saturating_sub((days as u64) * 86400);
         let days_since_epoch = cutoff_ts / 86400;
         let (y, m, d) = epoch_days_to_ymd(days_since_epoch as i32);
-        let tag = format!("{y:04}{m:02}{d:02}");
-        (tag.clone(), tag)
+        format!("{y:04}{m:02}{d:02}")
     };
     let date_to = today();
 
@@ -121,12 +120,6 @@ pub fn run_context(
         let jsonl_recs: Vec<ObsRecord> = if slug_obs_dir.is_dir() {
             list_files(&slug_obs_dir, ".jsonl")
                 .into_iter()
-                .filter(|f| {
-                    let tag = f.replace("session_", "");
-                    tag.get(..8)
-                        .map(|s| s >= cutoff_tag.as_str())
-                        .unwrap_or(true)
-                })
                 .flat_map(|filename| {
                     fs::read_to_string(slug_obs_dir.join(&filename))
                         .unwrap_or_default()
@@ -134,6 +127,22 @@ pub fn run_context(
                         .enumerate()
                         .filter_map(|(index, line)| {
                             let rec: ObsRecord = serde_json::from_str(line).ok()?;
+                            // Session IDs need not contain dates. Select by the
+                            // record's ISO day, with checked Unicode boundaries.
+                            let day = rec.timestamp.get(..10)?;
+                            if !day.bytes().enumerate().all(|(index, b)| {
+                                if index == 4 || index == 7 {
+                                    b == b'-'
+                                } else {
+                                    b.is_ascii_digit()
+                                }
+                            }) {
+                                return None;
+                            }
+                            let day_tag = day.replace('-', "");
+                            if day_tag < date_from || day_tag > date_to {
+                                return None;
+                            }
                             let id = crate::store::observations::jsonl_import_identity(
                                 &filename, index, &rec,
                             )
@@ -802,7 +811,8 @@ fn is_leap(y: i32) -> bool {
 
 // ── Main Hook ───────────────────────────────────────
 
-/// Ingest today's JSONL fallback session files into SQLite, then remove them.
+/// Ingest pending JSONL fallback session files into SQLite, then remove them.
+/// Host session IDs need not contain a date; observation timestamps carry it.
 ///
 /// observe/polish write JSONL only when the SQLite write failed mid-session.
 /// Without this backfill, those records were stranded forever: the old read
@@ -810,19 +820,15 @@ fn is_leap(y: i32) -> bool {
 /// one later successful SQLite write and the fallback data went unread.
 /// The file is removed only after every record was inserted, so a partial
 /// backfill leaves the remainder for the next attempt.
-async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
+async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, _today_str: &str) {
     if !obs_dir().is_dir() {
         return;
     }
     let project = crate::shared::paths::project_slug();
     for fname in list_files(&obs_dir(), ".jsonl") {
-        if !fname.contains(today_str) {
+        let Ok(content) = fs::read_to_string(obs_dir().join(&fname)) else {
             continue;
-        }
-        let recs = read_jsonl_typed(&obs_dir().join(&fname));
-        if recs.is_empty() {
-            continue;
-        }
+        };
         // session_{sid}.jsonl → recover the session id for attribution.
         let sid = fname
             .strip_prefix("session_")
@@ -830,10 +836,31 @@ async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
             .unwrap_or("backfill")
             .to_string();
         let mut all_ok = true;
-        for rec in &recs {
-            if crate::store::observations::insert_observation_pool(pool, rec, &sid, &project)
-                .await
-                .is_err()
+        for (index, line) in content.lines().enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let Ok(rec) = serde_json::from_str::<ObsRecord>(line) else {
+                all_ok = false;
+                continue;
+            };
+            // Stable, content-qualified import identity makes a partially
+            // completed backfill retryable without conflating real calls.
+            let Ok(identity) =
+                crate::store::observations::jsonl_import_identity(&fname, index, &rec)
+            else {
+                all_ok = false;
+                continue;
+            };
+            if crate::store::observations::insert_observation_with_identity_pool(
+                pool,
+                &rec,
+                &sid,
+                &project,
+                Some(&identity),
+            )
+            .await
+            .is_err()
             {
                 all_ok = false;
             }

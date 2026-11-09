@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Recover UUID fallback observations by record date and stable physical-line import identity, retaining malformed source and partial retries (#203).
 - Preserve distinct observations and historical data; deduplicate only explicit project/session/tool-scoped invocation IDs. Reflection preserves anonymous fallback calls and skips only records with persisted import identities (#188).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
