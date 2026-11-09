@@ -280,8 +280,14 @@ fn diff_values(parent_path: &str, a: &Value, b: &Value, out: &mut Vec<SnapshotDi
                 diff_values(&child_path, av, bv, out);
             }
         }
-        (Value::Array(aa), Value::Array(bb)) => {
-            // Compare as sets: additions and removals.
+        (Value::Array(aa), Value::Array(bb))
+            if matches!(
+                parent_path,
+                "active_skills" | "evolved_skills" | "guard_rules"
+            ) =>
+        {
+            // These named collections are unordered. Other arrays (notably
+            // scoring weights) have positional semantics and compare below.
             let set_a: std::collections::BTreeSet<String> = aa.iter().map(canonical_json).collect();
             let set_b: std::collections::BTreeSet<String> = bb.iter().map(canonical_json).collect();
             let added: Vec<&String> = set_b.difference(&set_a).collect();
