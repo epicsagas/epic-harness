@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Session snapshot APIs return recent project-scoped objects from SQLite and legacy JSON, preserving fields and deduplicating same-project copies (#214).
+- Project/reflection readers validate canonical project and child paths before
+  reading or deleting fallback data; snapshots omit escaping skill paths (#252).
+- Reflection compares canonical project/root and vault/home paths consistently
+  on Windows, while continuing to reject directory links outside those roots.
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names
