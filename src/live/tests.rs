@@ -12,13 +12,21 @@ async fn invocation_activity_needs_no_tool_observation_and_expires() {
     let activity = snapshot(&pool, temp.path(), None, NOW).await.unwrap();
     assert_eq!(activity["sessions"][0]["session_id"], "conversation-id");
     assert_eq!(activity["sessions"][0]["tool_calls"], 0);
+    assert!(activity["sessions"][0].get("avg_score").is_none());
+    assert!(activity["sessions"][0].get("avg_score").is_none());
     assert!(activity["recent_sessions"].as_array().unwrap().is_empty());
     record_invocation(&project, "conversation-id", "2026-11-08T12:00:00Z").unwrap();
     let refreshed = snapshot(&pool, temp.path(), None, NOW).await.unwrap();
-    assert_eq!(refreshed["sessions"][0]["last_seen"], "2026-11-08T12:00:00Z");
+    assert_eq!(
+        refreshed["sessions"][0]["last_seen"],
+        "2026-11-08T12:00:00Z"
+    );
     let expired = snapshot(&pool, temp.path(), None, NOW + 301).await.unwrap();
     assert!(expired["sessions"].as_array().unwrap().is_empty());
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations").fetch_one(&pool).await.unwrap();
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(count, 0);
 }
 

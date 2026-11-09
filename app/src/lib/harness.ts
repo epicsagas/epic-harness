@@ -114,7 +114,9 @@ export interface SessionSummary {
   failures: number;
 }
 
-export interface ActivitySession extends SessionSummary {
+export interface ActivitySession {
+  session_id: string;
+  tool_calls: number;
   project: string;
   last_seen: string;
 }
@@ -127,7 +129,7 @@ export interface ActivityRun extends OrchestrationRun {
 export interface LiveActivity {
   runs: ActivityRun[];
   sessions: ActivitySession[];
-  recent_sessions: ActivitySession[];
+  recent_sessions: (ActivitySession & SessionSummary)[];
   activity_window_seconds: number;
 }
 

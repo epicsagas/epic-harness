@@ -224,13 +224,17 @@ pub async fn snapshot(
         }
     }
     for invocation in invocation_sessions {
-        let existing = sessions.iter_mut().find(|session| session["project"] == invocation["project"]
-            && session["session_id"] == invocation["session_id"]);
+        let existing = sessions.iter_mut().find(|session| {
+            session["project"] == invocation["project"]
+                && session["session_id"] == invocation["session_id"]
+        });
         if let Some(existing) = existing {
             if invocation["last_seen"].as_str() > existing["last_seen"].as_str() {
                 existing["last_seen"] = invocation["last_seen"].clone();
             }
-        } else { sessions.push(invocation); }
+        } else {
+            sessions.push(invocation);
+        }
     }
     sessions.sort_by(|a, b| b["last_seen"].as_str().cmp(&a["last_seen"].as_str()));
     Ok(
