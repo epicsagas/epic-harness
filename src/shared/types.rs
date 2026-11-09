@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HookInput {
+    /// Authoritative host outcome, when supplied. Absent on legacy hosts.
+    pub is_error: Option<bool>,
+    pub exit_code: Option<i64>,
     pub tool_name: Option<String>,
     pub tool_input: Option<serde_json::Value>,
     /// Legacy structured output (kept for forward compat)
