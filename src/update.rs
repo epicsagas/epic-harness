@@ -38,6 +38,12 @@ fn sync_marker() -> PathBuf {
 // ── resolve binary ──────────────────────────────────────────────────
 
 fn resolve_binary() -> Option<PathBuf> {
+    // The invoked executable is authoritative and needs no platform PATH tool.
+    if let Ok(exe) = std::env::current_exe()
+        && exe.is_file()
+    {
+        return Some(exe);
+    }
     // Plugin-bundled binary first
     if let Ok(root) = std::env::var("CLAUDE_PLUGIN_ROOT") {
         let bundled = Path::new(&root).join("hooks/bin/epic-harness");
@@ -322,6 +328,22 @@ pub fn run(args: &[String]) -> i32 {
     let check_only = args.iter().any(|a| a == "--check");
     let force = args.iter().any(|a| a == "--force");
 
+    // --check: report version status only, skip side effects
+    if check_only {
+        if let Some(cur) = current_version() {
+            eprintln!("Current: {cur}");
+            if let Some(latest) = latest_github_version() {
+                eprintln!("Latest:  {latest}");
+                if semver_gt(&latest, &cur) {
+                    eprintln!("[epic] Update available: {cur} → {latest}");
+                    return 1;
+                }
+                eprintln!("[epic] Already up to date.");
+            }
+        }
+        return 0;
+    }
+
     // ── resolve or install binary ────────────────────────────────
     let eh = resolve_binary().or_else(install_binary);
     let eh = match eh {
@@ -355,22 +377,6 @@ pub fn run(args: &[String]) -> i32 {
     } else {
         eh
     };
-
-    // --check: report version status only, skip side effects
-    if check_only {
-        if let Some(cur) = current_version() {
-            eprintln!("Current: {cur}");
-            if let Some(latest) = latest_github_version() {
-                eprintln!("Latest:  {latest}");
-                if semver_gt(&latest, &cur) {
-                    eprintln!("[epic] Update available: {cur} → {latest}");
-                    return 1;
-                }
-                eprintln!("[epic] Already up to date.");
-            }
-        }
-        return 0;
-    }
 
     // ── MCP registration (idempotent) ───────────────────────────
     let _ = Command::new(&eh).args(["mem", "mcp-install"]).output();
