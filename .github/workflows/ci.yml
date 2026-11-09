@@ -98,6 +98,21 @@ jobs:
           PLUGIN_ROOT: ${{ github.workspace }}
         run: node examples/codex-live-check/windows-acceptance.mjs mcp
 
+  windows-observation-identity:
+    name: Windows observation identity regression
+    runs-on: windows-latest
+    env:
+      SKIP_DASHBOARD_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test changed observation source
+        shell: pwsh
+        run: |
+          cargo test --locked --test issue_188_test --test issue_188_context_test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
