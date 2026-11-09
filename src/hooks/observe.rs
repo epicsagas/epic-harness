@@ -133,20 +133,15 @@ fn score_write(output: &str) -> ScoreDimensions {
 }
 
 fn score_read_search(output: &str) -> ScoreDimensions {
-    let failure = classify_failure(output);
     static NO_MATCH_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
-    let has_results =
-        failure.is_none() && !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
+    let has_results = !output.trim().is_empty() && !NO_MATCH_RE.is_match(output);
     ScoreDimensions {
-        tool_success: if has_results { 1.0 } else { 0.0 },
-        output_quality: if has_results {
-            1.0
-        } else if failure.is_some() {
-            failure_quality(failure)
-        } else {
-            0.5
-        },
+        // Execution success and usefulness are separate dimensions. Outcome
+        // reconciliation below applies actual stderr/host failures, whereas
+        // an empty successful search keeps its intentional usefulness penalty.
+        tool_success: 1.0,
+        output_quality: if has_results { 1.0 } else { 0.5 },
         execution_cost: 1.0,
     }
 }
@@ -872,14 +867,14 @@ mod tests {
     #[test]
     fn read_no_results() {
         let dims = score_read_search("0 results found");
-        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.tool_success, 1.0);
         assert_eq!(dims.output_quality, 0.5);
     }
 
     #[test]
     fn read_empty_output() {
         let dims = score_read_search("");
-        assert_eq!(dims.tool_success, 0.0);
+        assert_eq!(dims.tool_success, 1.0);
     }
 
     // ── get_next_sequence_id ────────────────────────

@@ -26,7 +26,7 @@ jobs:
       - name: Source regressions
         shell: pwsh
         run: |
-          foreach ($target in @('worktree_identity_test', 'reflection_containment_test')) {
+          foreach ($target in @('worktree_identity_test', 'reflection_containment_test', 'issue_260_test')) {
             if (Test-Path "tests/$target.rs") {
               cargo test -p epic-harness --test $target
               if ($LASTEXITCODE) { exit $LASTEXITCODE }
