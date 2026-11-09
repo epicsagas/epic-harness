@@ -8,6 +8,46 @@ use crate::config::CONFIG;
 use crate::mem::store;
 use crate::telemetry::Telemetry;
 
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SkillExposure {
+    session_id: String,
+    pub active: Vec<String>,
+    pub holdout: Vec<String>,
+}
+
+fn exposure_path(session: &str) -> std::path::PathBuf {
+    // Stable filename without allowing host-controlled session IDs to become paths.
+    let hash = session
+        .as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325u64, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        });
+    harness_dir()
+        .join("exposures")
+        .join(format!("{hash:016x}.json"))
+}
+
+pub(crate) fn read_skill_exposure(session: &str) -> Option<SkillExposure> {
+    let exposure: SkillExposure =
+        serde_json::from_str(&fs::read_to_string(exposure_path(session)).ok()?).ok()?;
+    (exposure.session_id == session).then_some(exposure)
+}
+
+fn record_skill_exposure(session: &str, active: Vec<String>, holdout: Vec<String>) {
+    let path = exposure_path(session);
+    let exposure = SkillExposure {
+        session_id: session.into(),
+        active,
+        holdout,
+    };
+    if let Ok(json) = serde_json::to_vec(&exposure) {
+        let _ = fs::create_dir_all(path.parent().unwrap());
+        // A partial write is ignored by the reader; never invent an exposure.
+        let _ = fs::write(path, json);
+    }
+}
+
 /// Atomically acquire a session lock file.
 ///
 /// Returns `true` when this call created the file (this process owns the lock).
@@ -443,13 +483,11 @@ pub fn run(input: &HookInput) -> i32 {
     // credits this session's score to their `without` arm at session end.
     let evolved = list_dirs(&evolved_dir());
     let today_str = today();
-    // Record the partition date so reflect (SessionEnd) reproduces the same
-    // holdout arm even when this session spans UTC midnight — otherwise an
-    // active-injected skill could be scored against the holdout baseline.
-    crate::shared::helpers::write_session_start(&today_str);
     // Frontier-class models skip template (un-synthesized) skill bodies —
     // generic advice is noise there; synthesized skills always inject.
     let inject_templates = crate::config::CONFIG.model.inject_templates();
+    let mut exposed = Vec::new();
+    let mut eligible_holdout = Vec::new();
     if !evolved.is_empty() {
         let (active, holdout) = crate::evolve::partition_holdout(&evolved, &metrics, &today_str);
         let bodies: Vec<(String, String)> = active
@@ -463,6 +501,13 @@ pub fn run(input: &HookInput) -> i32 {
             .collect();
         if !bodies.is_empty() {
             let injection = build_evolved_injection(&bodies);
+            // Credit a skill only when its complete header and body content
+            // survived the total context budget.
+            exposed = bodies
+                .iter()
+                .filter(|(name, _)| skill_was_rendered(&injection, name))
+                .map(|(name, _)| name.clone())
+                .collect();
             if input.hook_event_name.is_some() {
                 // Codex: stdout must stay a single JSON document — any raw
                 // text before it makes the host parse the whole stream as
@@ -476,7 +521,7 @@ pub fn run(input: &HookInput) -> i32 {
             }
             hint(
                 "resume",
-                &format!("Evolved skills injected: {}", active.join(", ")),
+                &format!("Evolved skills injected: {}", exposed.join(", ")),
             );
         }
         let withheld: Vec<&String> = active
@@ -505,7 +550,31 @@ pub fn run(input: &HookInput) -> i32 {
                 ),
             );
         }
+        eligible_holdout = holdout
+            .into_iter()
+            .filter(|name| {
+                if !inject_templates && !crate::evolve::is_synthesized(name) {
+                    return false;
+                }
+                // A control is eligible only if its body would reach context in
+                // the same position with this skill removed from holdout.
+                let counterfactual: Vec<(String, String)> = evolved
+                    .iter()
+                    .filter(|candidate| active.contains(candidate) || *candidate == name)
+                    .filter(|candidate| {
+                        inject_templates || crate::evolve::is_synthesized(candidate)
+                    })
+                    .filter_map(|candidate| {
+                        fs::read_to_string(evolved_dir().join(candidate).join("SKILL.md"))
+                            .ok()
+                            .map(|body| (candidate.clone(), body))
+                    })
+                    .collect();
+                skill_was_rendered(&build_evolved_injection(&counterfactual), name)
+            })
+            .collect();
     }
+    record_skill_exposure(&sid, exposed, eligible_holdout);
 
     // Surface the synthesis backlog on stdout so the host agent sees it —
     // stderr hints don't reach the model, and the loop only closes when a
@@ -856,6 +925,12 @@ fn pending_synth_count() -> usize {
 
 /// Render active evolved skills as a context block for SessionStart stdout.
 /// Frontmatter is stripped (metadata noise), bodies are truncated to budget.
+fn skill_was_rendered(injection: &str, name: &str) -> bool {
+    injection
+        .split_once(&format!("\n### {name}\n"))
+        .is_some_and(|(_, tail)| !tail.split("\n### ").next().unwrap_or("").trim().is_empty())
+}
+
 fn build_evolved_injection(skills: &[(String, String)]) -> String {
     let (per_skill, total) = (inject_per_skill_chars(), inject_total_chars());
     let mut out = String::from(

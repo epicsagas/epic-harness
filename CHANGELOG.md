@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Attribute each host session only to its actual injected skills and eligible controls, respecting policy and context budgets (#208).
 - Consume observations by durable row identity and commit reflection metrics, history, and cursor atomically; reset derived progress when histories merge (#218).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so

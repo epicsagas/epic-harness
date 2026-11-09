@@ -1127,18 +1127,29 @@ pub fn run(_input: &HookInput) -> i32 {
     // 5. Gate
     evolve::gate_skills();
 
-    // 6. Skill attribution — score only what the session actually saw.
-    // `existing` is the pre-seed listing: skills seeded THIS round were not
-    // in context during the session and must not be credited with its score.
-    // The partition uses the date `resume` recorded at session start
-    // (session_start.json) so the arm matches what was actually injected —
-    // even when the session spans UTC midnight. Falls back to today on a
-    // cold start (no prior resume this session).
+    // 6. Attribute each host session only to its recorded exposure. Recreating
+    // a partition from today's files invents treatment for withheld templates,
+    // newly created skills, and sessions that never received SessionStart.
     let evolved_dirs = list_dirs(&evolved_dir());
-    let partition_date = crate::shared::helpers::read_session_start_date().unwrap_or_else(today);
-    let (active_skills, holdout_skills) =
-        evolve::partition_holdout(&existing, &metrics, &partition_date);
-    evolve::update_skill_attribution(&mut metrics, &analysis, &active_skills, &holdout_skills);
+    let mut sessions: std::collections::BTreeMap<&str, Vec<ObsRecord>> =
+        std::collections::BTreeMap::new();
+    for (_, session, record) in &pending {
+        sessions.entry(session).or_default().push(record.clone());
+    }
+    for (session, records) in sessions {
+        if let Some(exposure) = super::resume::read_skill_exposure(session) {
+            let session_analysis = evolve::analyze_session(&records);
+            evolve::update_skill_attribution(
+                &mut metrics,
+                &session_analysis,
+                &exposure.active,
+                &exposure.holdout,
+            );
+        }
+    }
+    metrics
+        .skill_attribution
+        .retain(|name, _| evolved_dirs.contains(name));
 
     // 7. Cross-project export
     evolve::export_to_global(&analysis, &analysis.failure_patterns);
