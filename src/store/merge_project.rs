@@ -434,11 +434,11 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
         return Ok(0);
     }
 
-    // Build set of existing lines (by first 80 chars as a cheap dedup key).
-    let existing: std::collections::HashSet<String> = if dst.exists() {
+    // Only complete equal records are duplicates. Shared metadata prefixes are common.
+    let mut existing: std::collections::HashSet<String> = if dst.exists() {
         std::fs::read_to_string(&dst)?
             .lines()
-            .map(|l| l.chars().take(80).collect())
+            .map(String::from)
             .collect()
     } else {
         std::collections::HashSet::new()
@@ -446,10 +446,7 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
 
     let new_lines: Vec<&str> = src_lines
         .iter()
-        .filter(|l| {
-            let key: String = l.chars().take(80).collect();
-            !existing.contains(&key)
-        })
+        .filter(|l| existing.insert((**l).to_string()))
         .copied()
         .collect();
 
@@ -469,4 +466,38 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
     }
 
     Ok(new_lines.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issue_255_preserves_full_records_and_deduplicates_retries() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let target = temp.path().join("target");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        let prefix = "x".repeat(100);
+        // Keep the differing field after a shared prefix, as ordinary records do.
+        let first = format!("{{\"prefix\":\"{prefix}\",\"analysis_summary\":\"first\"}}");
+        let second = format!("{{\"prefix\":\"{prefix}\",\"analysis_summary\":\"second\"}}");
+        assert_ne!(first, second);
+        std::fs::write(target.join("evolution.jsonl"), format!("{first}\n")).unwrap();
+        std::fs::write(
+            source.join("evolution.jsonl"),
+            format!("{second}\n{second}\n"),
+        )
+        .unwrap();
+        assert_eq!(append_evolution_jsonl(&source, &target, false).unwrap(), 1);
+        assert_eq!(append_evolution_jsonl(&source, &target, false).unwrap(), 0);
+        assert_eq!(
+            std::fs::read_to_string(target.join("evolution.jsonl"))
+                .unwrap()
+                .lines()
+                .count(),
+            2
+        );
+    }
 }
