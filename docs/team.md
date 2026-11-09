@@ -113,6 +113,10 @@ epic team history backend reviewer   # list .history/ backups for an agent
 | `--playbook` | `show` only: print full accumulated playbook |
 | `--global` | `sync` only: install agents to `~/.claude/agents/` instead of project-local `.claude/agents/` |
 
+Unlink and delete check the owning org in every local Claude/Codex mirror before
+removing anything. A mismatched `--org` or conflicting mirror ownership is rejected;
+when `--org` is omitted, Codex-only projects can infer it from the agent TOML.
+
 ---
 
 ## Team Types
