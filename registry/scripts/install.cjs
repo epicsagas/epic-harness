@@ -15,7 +15,7 @@ const {
   existsSync,
   readFileSync,
 } = require("fs");
-const { join } = require("path");
+const { join, resolve } = require("path");
 const https = require("https");
 const os = require("os");
 
@@ -46,15 +46,20 @@ function getBinaryVersion() {
 }
 
 function getPluginVersion() {
-  try {
-    const manifestPath = join(
-      process.env.CLAUDE_PLUGIN_ROOT || "",
-      ".claude-plugin",
-      "plugin.json",
-    );
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-    return manifest.version || null;
-  } catch (_) {}
+  const roots = [
+    process.env.CLAUDE_PLUGIN_ROOT,
+    process.env.PLUGIN_ROOT,
+    process.env.GROK_PLUGIN_ROOT,
+    resolve(__dirname, "..", ".."),
+  ].filter(Boolean);
+  for (const root of new Set(roots)) {
+    for (const relative of ["plugin.json", ".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".grok-plugin/plugin.json"]) {
+      try {
+        const manifest = JSON.parse(readFileSync(join(root, relative), "utf8"));
+        if (typeof manifest.version === "string" && manifest.version) return manifest.version;
+      } catch (_) {}
+    }
+  }
   return null;
 }
 
