@@ -800,6 +800,7 @@ fn cmd_default_write(
         println!("+ Playbook updated");
 
         if let Some(mut config) = load_team_config(org, team_name) {
+            config.team_type = team_type.to_string();
             let cwd_path = std::env::current_dir()
                 .ok()
                 .and_then(|p| p.canonicalize().ok().or(Some(p)))
