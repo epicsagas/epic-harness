@@ -19,7 +19,7 @@ pub struct DimResult {
 
 // ── Correctness ─────────────────────────────────────────────────────
 
-pub fn run_correctness(cmds: &ResolvedCommands) -> DimResult {
+pub fn run_correctness(cmds: &ResolvedCommands, child_environment: &str) -> DimResult {
     let start = Instant::now();
 
     let test_cmd = match &cmds.test_command {
@@ -36,7 +36,7 @@ pub fn run_correctness(cmds: &ResolvedCommands) -> DimResult {
         }
     };
 
-    let output = exec_command(test_cmd);
+    let output = exec_command(test_cmd, child_environment);
     let duration = start.elapsed().as_millis() as u64;
 
     let (tests_passed, tests_total) = parse_test_output(&output.stdout, &cmds.stack);
@@ -77,7 +77,7 @@ pub fn run_correctness(cmds: &ResolvedCommands) -> DimResult {
 
 // ── Performance ─────────────────────────────────────────────────────
 
-pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
+pub fn run_performance(cmds: &ResolvedCommands, child_environment: &str) -> DimResult {
     let start = Instant::now();
 
     let bench_cmd = match &cmds.bench_command {
@@ -94,7 +94,7 @@ pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
         }
     };
 
-    let output = exec_command(bench_cmd);
+    let output = exec_command(bench_cmd, child_environment);
     let duration = start.elapsed().as_millis() as u64;
 
     let exit_ok = output.exit_code == 0;
@@ -115,7 +115,7 @@ pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
 
 // ── Quality ─────────────────────────────────────────────────────────
 
-pub fn run_quality(cmds: &ResolvedCommands) -> DimResult {
+pub fn run_quality(cmds: &ResolvedCommands, child_environment: &str) -> DimResult {
     let start = Instant::now();
 
     let lint_cmd = match &cmds.lint_command {
@@ -132,7 +132,7 @@ pub fn run_quality(cmds: &ResolvedCommands) -> DimResult {
         }
     };
 
-    let output = exec_command(lint_cmd);
+    let output = exec_command(lint_cmd, child_environment);
     let duration = start.elapsed().as_millis() as u64;
 
     let exit_ok = output.exit_code == 0;
@@ -219,9 +219,9 @@ pub fn compute_regression(
 // ── Benchmark ───────────────────────────────────────────────────────
 
 /// Run a single configured benchmark command and return its result.
-pub fn run_benchmark(bench: &Benchmark) -> DimResult {
+pub fn run_benchmark(bench: &Benchmark, child_environment: &str) -> DimResult {
     let start = Instant::now();
-    let output = exec_command(&bench.command);
+    let output = exec_command(&bench.command, child_environment);
     let duration = start.elapsed().as_millis() as u64;
     let exit_ok = output.exit_code == 0;
 
@@ -282,7 +282,7 @@ struct CmdOutput {
     stderr: String,
 }
 
-fn exec_command(cmd: &str) -> CmdOutput {
+fn exec_command(cmd: &str, child_environment: &str) -> CmdOutput {
     // Split command into program + args for safe execution
     let parts = shell_words(cmd);
     let (program, args) = match parts.split_first() {
@@ -296,7 +296,10 @@ fn exec_command(cmd: &str) -> CmdOutput {
         }
     };
 
-    let output = std::process::Command::new(program).args(&args).output();
+    let output = std::process::Command::new(program)
+        .args(&args)
+        .env(super::context::CHAIN_ENV, child_environment)
+        .output();
 
     match output {
         Ok(o) => CmdOutput {
@@ -313,7 +316,7 @@ fn exec_command(cmd: &str) -> CmdOutput {
 }
 
 /// Simple shell word splitting (handles quoted strings).
-fn shell_words(s: &str) -> Vec<String> {
+pub(super) fn shell_words(s: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut in_single = false;

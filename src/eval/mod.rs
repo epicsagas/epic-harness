@@ -2,6 +2,7 @@
 
 mod baseline;
 mod config;
+mod context;
 mod report;
 mod runner;
 mod scaffold;
@@ -99,6 +100,14 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
+    let child_environment = match context::child_environment(&cwd, &eval_dir.join("eval.yaml")) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 1;
+        }
+    };
+
     // Warn if benchmark files exist but none are configured
     check_unconfigured_benchmarks(&cwd, &cfg);
 
@@ -118,19 +127,19 @@ pub fn run(args: &[String]) -> i32 {
     let run_all = dimension_filter.is_none();
 
     if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled {
-        results.push(runner::run_correctness(&effective));
+        results.push(runner::run_correctness(&effective, &child_environment));
     }
     if (run_all || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled {
-        results.push(runner::run_performance(&effective));
+        results.push(runner::run_performance(&effective, &child_environment));
     }
     if (run_all || dimension_filter.as_deref() == Some("quality")) && dims.quality.enabled {
-        results.push(runner::run_quality(&effective));
+        results.push(runner::run_quality(&effective, &child_environment));
     }
 
     // Run configured project benchmarks
     if run_all || dimension_filter.as_deref() == Some("benchmarks") {
         for bench in &cfg.benchmarks {
-            results.push(runner::run_benchmark(bench));
+            results.push(runner::run_benchmark(bench, &child_environment));
         }
     }
 

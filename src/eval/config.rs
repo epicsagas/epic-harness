@@ -327,9 +327,7 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 
     // Makefile `eval` target
     if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile"))
-        && content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
+        && has_domain_eval_target(&content)
     {
         found.push(Benchmark {
             name: "make_eval".into(),
@@ -340,9 +338,7 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 
     // justfile `eval` recipe
     if let Ok(content) = std::fs::read_to_string(cwd.join("justfile"))
-        && content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
+        && has_domain_eval_target(&content)
     {
         found.push(Benchmark {
             name: "just_eval".into(),
@@ -352,6 +348,91 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
     }
 
     found
+}
+
+/// Inspect only the eval recipe. Mentions in comments/echoes or other targets
+/// must not hide real benchmarks; indirect wrappers are checked at runtime.
+fn has_domain_eval_target(content: &str) -> bool {
+    let mut found = false;
+    let mut in_eval = false;
+    let mut recipes = Vec::new();
+    let opaque_context = content.lines().any(|line| {
+        let line = line.trim_start();
+        line.starts_with(".ONESHELL:")
+            || line.starts_with("set working-directory")
+            || line.starts_with("[script")
+            || line.starts_with("[working-directory")
+            || line.starts_with("export HARNESS_DIR")
+    });
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || (trimmed.starts_with('#') && !trimmed.starts_with("#!")) {
+            continue;
+        }
+        if !line.starts_with([' ', '\t']) {
+            in_eval = line
+                .strip_prefix("eval")
+                .and_then(|tail| tail.trim_start().strip_prefix(':'))
+                .is_some_and(|tail| !tail.starts_with('='));
+            if in_eval {
+                found = true;
+                if let Some((_, recipe)) = line.split_once(';') {
+                    recipes.push(recipe);
+                }
+            }
+        } else if in_eval {
+            recipes.push(trimmed);
+        }
+    }
+    let effects: Vec<_> = recipes.into_iter().map(recipe_effect).collect();
+    found
+        && (opaque_context
+            || !effects.contains(&RecipeEffect::EvalWrapper)
+            || effects.contains(&RecipeEffect::Other))
+}
+
+#[derive(PartialEq)]
+enum RecipeEffect {
+    EvalWrapper,
+    Harmless,
+    Other,
+}
+
+fn recipe_effect(recipe: &str) -> RecipeEffect {
+    let recipe = recipe.trim_start_matches([' ', '\t', '@', '-', '+']);
+    if recipe.starts_with("#!")
+        || ["&&", "||", ";", "|"]
+            .iter()
+            .any(|part| recipe.contains(part))
+    {
+        return RecipeEffect::Other;
+    }
+    let words = super::runner::shell_words(recipe);
+    let Some(program) = words.first() else {
+        return RecipeEffect::Harmless;
+    };
+    let name = program
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(program)
+        .to_ascii_lowercase();
+    let name = name
+        .strip_suffix(".exe")
+        .or_else(|| name.strip_suffix(".cmd"))
+        .unwrap_or(&name);
+    if matches!(name, "epic" | "epic-harness")
+        && words.get(1).is_some_and(|word| word == "eval")
+        && !words
+            .iter()
+            .skip(2)
+            .any(|word| matches!(word.as_str(), "--init" | "--scaffold" | "--help" | "-h"))
+    {
+        RecipeEffect::EvalWrapper
+    } else if matches!(name, "echo" | ":" | "true") {
+        RecipeEffect::Harmless
+    } else {
+        RecipeEffect::Other
+    }
 }
 
 /// Resolve commands from explicit config only — no stack-based defaults.
