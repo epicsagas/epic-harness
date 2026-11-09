@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Apply project scope before the full-text candidate cap so recall retains in-project matches (#230).
 - Redact complete JSON and quoted credential values before observation truncation (#177).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
