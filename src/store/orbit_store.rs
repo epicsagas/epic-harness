@@ -94,9 +94,11 @@ pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_jso
         let created_at: String = r.try_get(6).map_err(super::sqlx_err)?;
         let updated_at: String = r.try_get(7).map_err(super::sqlx_err)?;
 
-        let mut val: serde_json::Value = serde_json::from_str(&state_json)
-            .unwrap_or(serde_json::Value::Object(Default::default()));
-        let map = val.as_object_mut().unwrap();
+        // A syntactically valid JSON scalar/array is still corrupt pipeline
+        // state. Skip that record instead of panicking the dashboard server.
+        let Ok(serde_json::Value::Object(mut map)) = serde_json::from_str(&state_json) else {
+            continue;
+        };
         map.insert("id".into(), serde_json::Value::String(id));
         map.insert("project".into(), serde_json::Value::String(project));
         map.insert("status".into(), serde_json::Value::String(status));
@@ -108,7 +110,7 @@ pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_jso
         }
         map.insert("started_at".into(), serde_json::Value::String(created_at));
         map.insert("updated_at".into(), serde_json::Value::String(updated_at));
-        pipelines.push(val);
+        pipelines.push(serde_json::Value::Object(map));
     }
     Ok(pipelines)
 }
