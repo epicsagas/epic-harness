@@ -461,26 +461,16 @@ fn harness_dir() -> PathBuf {
 /// Returns defaults if file is missing or malformed.
 fn load_config() -> HarnessConfig {
     let path = harness_dir().join("config.toml");
-    if !path.is_file() {
-        return HarnessConfig::default();
-    }
-    match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            let mut cfg = toml::from_str(&content).unwrap_or_else(|e| {
-                eprintln!(
-                    "[epic-harness] warning: failed to parse {}: {} — using defaults",
-                    path.display(),
-                    e
-                );
-                HarnessConfig::default()
-            });
-            validate_config(&mut cfg);
-
-            apply_env_overrides(&mut cfg);
-            auto_correct_driver_from_url(&mut cfg);
-
-            cfg
-        }
+    let mut cfg = match std::fs::read_to_string(&path) {
+        Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
+            eprintln!(
+                "[epic-harness] warning: failed to parse {}: {} — using defaults",
+                path.display(),
+                e
+            );
+            HarnessConfig::default()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => HarnessConfig::default(),
         Err(e) => {
             eprintln!(
                 "[epic-harness] warning: failed to read {}: {} — using defaults",
@@ -489,7 +479,11 @@ fn load_config() -> HarnessConfig {
             );
             HarnessConfig::default()
         }
-    }
+    };
+    validate_config(&mut cfg);
+    apply_env_overrides(&mut cfg);
+    auto_correct_driver_from_url(&mut cfg);
+    cfg
 }
 
 /// Apply environment variable overrides to database URLs.
