@@ -1242,6 +1242,36 @@ fn cmd_unlink(args: &[String]) -> i32 {
 
 // ── cmd_delete ────────────────────────────────────────
 
+/// Read every known local owner before removing either host's mirror. Older
+/// mirrors without org metadata retain their legacy fallback behavior.
+fn local_team_orgs(agent_dirs: &[PathBuf]) -> io::Result<Vec<String>> {
+    let mut owners = Vec::new();
+    for dir in agent_dirs {
+        if !dir.exists() {
+            continue;
+        }
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let owner = match path.extension().and_then(|ext| ext.to_str()) {
+                Some("md") => read_org_from_agent_file(&fs::read_to_string(&path)?),
+                Some("toml") => read_org_from_codex_agent_toml(&fs::read_to_string(&path)?),
+                _ => continue,
+            };
+            if let Some(owner) = owner
+                && !owners.contains(&owner)
+            {
+                owners.push(owner);
+            }
+        }
+    }
+    owners.sort();
+    Ok(owners)
+}
+
 fn cmd_delete(args: &[String]) -> i32 {
     let (pos, flags) = parse_flags(args);
     let team = match pos.first() {
@@ -1266,28 +1296,30 @@ fn cmd_delete(args: &[String]) -> i32 {
     // too, or the team stays live in Codex after being unlinked.
     let local_codex_dir = cwd.join(".codex").join("agents").join(&team);
 
-    // Resolve org: --org flag > frontmatter in any local agent file > "epic"
-    let org = flags.get("org").cloned().unwrap_or_else(|| {
-        // Try reading org from frontmatter of any synced agent file
-        if local_agents_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&local_agents_dir)
-        {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
-                    && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
-                    && let Ok(content) = fs::read_to_string(entry.path())
-                    && let Some(org) = read_org_from_agent_file(&content)
-                    && validate_org_name(&org).is_ok()
-                {
-                    return org;
-                }
-            }
+    let owners = match local_team_orgs(&[local_agents_dir.clone(), local_codex_dir.clone()]) {
+        Ok(owners) => owners,
+        Err(error) => {
+            eprintln!("error reading local team ownership: {error}");
+            return 1;
         }
-        default_org()
-    });
+    };
+    // Resolve --org before the discovered owner, then validate that explicit
+    // selection against *both* host mirrors before any destructive operation.
+    let org = flags
+        .get("org")
+        .cloned()
+        .or_else(|| owners.first().cloned())
+        .unwrap_or_else(default_org);
 
     if let Err(e) = validate_org_name(&org) {
         eprintln!("error: {}", e);
+        return 1;
+    }
+
+    if let Some(owner) = owners.iter().find(|owner| *owner != &org) {
+        eprintln!(
+            "error: local team '{team}' belongs to org '{owner}', not '{org}'; no files removed"
+        );
         return 1;
     }
 
