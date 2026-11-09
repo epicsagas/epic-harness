@@ -391,6 +391,34 @@ fn resolve_action(v: &serde_json::Value) -> String {
         })
 }
 
+/// Prefer host outcome metadata over words printed by a successful tool.
+fn explicit_success(input: &HookInput) -> Option<bool> {
+    let response_outcome = |response: Option<&serde_json::Value>| {
+        (
+            response.and_then(|value| value.get("is_error")?.as_bool()),
+            response.and_then(|value| value.get("exit_code")?.as_i64()),
+        )
+    };
+    let signals = [
+        (input.is_error, input.exit_code),
+        response_outcome(input.tool_response.as_ref()),
+        response_outcome(input.tool_result.as_ref()),
+    ];
+    if signals
+        .iter()
+        .any(|(is_error, code)| *is_error == Some(true) || code.is_some_and(|code| code != 0))
+    {
+        Some(false)
+    } else if signals
+        .iter()
+        .any(|(is_error, code)| *is_error == Some(false) || *code == Some(0))
+    {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_OBSERVE) {
         return 0;
@@ -474,9 +502,19 @@ pub fn run(input: &HookInput) -> i32 {
     };
 
     if let Some((output, stderr, streams_separated)) = resolved_output {
-        let combined = format!("{output}\n{stderr}");
+        let combined = format!("{stderr}\n{output}");
 
-        record.failure_category = if tool_cat == "bash" {
+        let outcome = explicit_success(input);
+        record.failure_category = if outcome == Some(true) {
+            None
+        } else if outcome == Some(false) {
+            Some(
+                classify_failure(&stderr)
+                    .or_else(|| classify_failure(&output))
+                    .unwrap_or("runtime_error")
+                    .to_string(),
+            )
+        } else if tool_cat == "bash" {
             let cmd = input
                 .tool_input
                 .as_ref()
@@ -484,8 +522,12 @@ pub fn run(input: &HookInput) -> i32 {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             classify_bash_failure(cmd, &output, &stderr, streams_separated).map(String::from)
+        } else if matches!(tool_cat, "read" | "glob" | "grep") {
+            classify_failure(&stderr).map(String::from)
         } else {
-            classify_failure(&combined).map(String::from)
+            classify_failure(&stderr)
+                .or_else(|| classify_failure(&output))
+                .map(String::from)
         };
         record.result = Some(
             if record.failure_category.is_none() {
@@ -496,7 +538,7 @@ pub fn run(input: &HookInput) -> i32 {
             .into(),
         );
 
-        let dims = match tool_cat {
+        let mut dims = match tool_cat {
             "bash" => {
                 let cmd = input
                     .tool_input
@@ -548,12 +590,23 @@ pub fn run(input: &HookInput) -> i32 {
             }
         };
 
+        // Scoring helpers also scan output. Keep them consistent with the
+        // authoritative outcome and the quoted-material guard above.
+        if record.failure_category.is_none() && dims.tool_success == 0.0 {
+            dims.output_quality = 1.0;
+        } else if record.failure_category.is_some() && dims.tool_success == 1.0 {
+            dims.output_quality = failure_quality(record.failure_category.as_deref());
+        }
+        dims.tool_success = if record.failure_category.is_none() {
+            1.0
+        } else {
+            0.0
+        };
         record.dimensions = Some(dims);
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(truncate_str(&combined, 500));
-            record.error_snippet = Some(masked);
+            record.error_snippet = Some(failure_excerpt(&mask_secrets(&combined)));
         }
     }
 
@@ -624,6 +677,48 @@ pub fn run(input: &HookInput) -> i32 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn authoritative_outcomes_override_printed_keywords() {
+        let successful: super::HookInput = serde_json::from_value(serde_json::json!({
+            "tool_response": {"output": "TypeError: quoted source", "exit_code": 0}
+        }))
+        .unwrap();
+        assert_eq!(super::explicit_success(&successful), Some(true));
+        let failed: super::HookInput = serde_json::from_value(serde_json::json!({
+            "is_error": true, "tool_response": {"exit_code": 0}
+        }))
+        .unwrap();
+        assert_eq!(super::explicit_success(&failed), Some(false));
+        let silent_failure: super::HookInput = serde_json::from_value(serde_json::json!({
+            "exit_code": 7
+        }))
+        .unwrap();
+        assert_eq!(super::explicit_success(&silent_failure), Some(false));
+        assert_eq!(super::explicit_success(&super::HookInput::default()), None);
+    }
+
+    #[test]
+    fn explicit_failure_wins_across_all_metadata_sources() {
+        for payload in [
+            serde_json::json!({"is_error": false, "tool_response": {"is_error": true}}),
+            serde_json::json!({"exit_code": 0, "tool_response": {"exit_code": 7}}),
+            serde_json::json!({"is_error": true, "tool_response": {"is_error": false}}),
+            serde_json::json!({"exit_code": 7, "tool_response": {"exit_code": 0}}),
+            serde_json::json!({"tool_response": {"exit_code": 0}, "tool_result": {"is_error": true}}),
+            serde_json::json!({"tool_response": {"is_error": true}, "tool_result": {"exit_code": 0}}),
+        ] {
+            let input = serde_json::from_value(payload).unwrap();
+            assert_eq!(super::explicit_success(&input), Some(false));
+        }
+        let successful = serde_json::from_value(serde_json::json!({
+            "is_error": false,
+            "exit_code": 0,
+            "tool_response": {"is_error": false, "exit_code": 0},
+            "tool_result": {"is_error": false, "exit_code": 0}
+        }))
+        .unwrap();
+        assert_eq!(super::explicit_success(&successful), Some(true));
+    }
     use super::*;
     use serial_test::serial;
 

@@ -49,7 +49,7 @@ const FAILURE_RULES: &[FailureRule] = &[
         category: "permission_denied",
     },
     FailureRule {
-        pattern: r"(?i)timeout|ETIMEDOUT|timed out",
+        pattern: r"(?i)\btimeout\b|\bETIMEDOUT\b|\btimed?\s+out\b",
         category: "timeout",
     },
     FailureRule {
@@ -73,13 +73,44 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    let sample = truncate_str(output, 2000);
+    static ZERO_TIMEOUT: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"(?i)\btimeout["']?\s*[:=]\s*["']?0\b"#).unwrap());
+    let bounded = diagnostic_sample(output);
+    let sample = ZERO_TIMEOUT.replace_all(&bounded, "");
     for (rx, cat) in COMPILED_RULES.iter() {
-        if rx.is_match(sample) {
+        if rx.is_match(&sample) {
             return Some(cat);
         }
     }
     None
+}
+
+fn diagnostic_sample(output: &str) -> String {
+    if output.len() <= 4000 {
+        return output.to_string();
+    }
+    let mut tail = output.len().saturating_sub(2000);
+    while !output.is_char_boundary(tail) {
+        tail += 1;
+    }
+    format!("{}\n{}", truncate_str(output, 2000), &output[tail..])
+}
+
+/// Keep the matched diagnostic in a bounded snippet instead of a verbose
+/// stdout prefix. Callers must mask secrets before selecting the excerpt.
+pub fn failure_excerpt(output: &str) -> String {
+    let sample = diagnostic_sample(output);
+    for (rule, _) in COMPILED_RULES.iter() {
+        if let Some(found) = rule.find(&sample) {
+            let line_start = sample[..found.start()].rfind('\n').map_or(0, |p| p + 1);
+            let mut start = line_start.max(found.start().saturating_sub(120));
+            while !sample.is_char_boundary(start) {
+                start += 1;
+            }
+            return truncate_str(&sample[start..], 500).to_string();
+        }
+    }
+    truncate_str(&sample, 500).to_string()
 }
 
 /// Commands whose stdout is *quoted material* — file contents, diffs, search
@@ -97,7 +128,7 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
 /// pipe is decomposed instead: every stage must itself be read-only.
 static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?x)
+        r"(?ix)
         ^\s*
         (?:sudo\s+)?
         (?:
@@ -105,9 +136,11 @@ static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
             rg|grep|egrep|fgrep|ag|ack|
             find|fd|ls|tree|stat|file|wc|du|
             sed|awk|cut|sort|uniq|diff|
-            echo|printf|pwd|whoami|date|env
+            echo|printf|pwd|whoami|date|env|
+            Get-Content|Select-String|Get-ChildItem|Get-Item|Get-FileHash|
+            Test-Path|Resolve-Path|ConvertFrom-Json|Select-Object|Format-Table
         )\b
-        |^\s*git\s+(?:diff|log|show|status|blame|branch|remote|describe|rev-parse)\b
+        |^\s*git\s+(?:diff|log|show|status|blame|branch|remote|describe|rev-parse|ls-tree|ls-files|cat-file)\b
         ",
     )
     .unwrap()
@@ -214,7 +247,7 @@ pub fn classify_bash_failure(
     streams_separated: bool,
 ) -> Option<&'static str> {
     if !is_read_only_command(command) {
-        return classify_failure(&format!("{stdout}\n{stderr}"));
+        return classify_failure(stderr).or_else(|| classify_failure(stdout));
     }
     if streams_separated {
         return classify_failure(stderr);
@@ -224,7 +257,7 @@ pub fn classify_bash_failure(
 
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
-        "bash" => "bash",
+        "bash" | "powershell" | "powershell.exe" | "pwsh" | "pwsh.exe" => "bash",
         // Codex's canonical edit tool — without this every Codex edit was
         // categorized as "other" and scored by the generic path.
         "edit" | "apply_patch" => "edit",
@@ -321,6 +354,34 @@ pub fn extract_file(action: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn powershell_reads_do_not_classify_quoted_failures() {
+        for tool in ["PowerShell", "pwsh", "powershell.exe"] {
+            assert_eq!(super::classify_tool(tool), "bash");
+        }
+        for command in [
+            "Get-Content example.cs",
+            "get-content example.cs | Select-String Assert",
+            "Get-ChildItem | Select-Object Name",
+            "git ls-tree HEAD",
+        ] {
+            assert!(super::is_read_only_command(command), "{command}");
+            assert_eq!(
+                super::classify_bash_failure(command, "Assert.Equal(1, 1); timeout", "", true),
+                None
+            );
+        }
+        assert!(!super::is_read_only_command("Get-Content a; cargo test"));
+        assert_eq!(
+            super::classify_failure("LegacyCompleteTimeoutMilliseconds"),
+            None
+        );
+        assert_eq!(super::classify_failure("timeout: 0"), None);
+        assert_eq!(
+            super::classify_failure("request timed out"),
+            Some("timeout")
+        );
+    }
     use super::*;
 
     #[test]
