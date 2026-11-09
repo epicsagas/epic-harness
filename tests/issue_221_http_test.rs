@@ -91,7 +91,6 @@ impl Dashboard {
         fs::write(&file, serde_json::to_vec(value).unwrap()).unwrap();
         file
     }
-
 }
 
 impl Drop for Dashboard {
@@ -139,4 +138,3 @@ fn issue_221_pipeline_id_matches_exactly_and_honors_selected_project() {
     assert!(!selected.exists());
     assert!(prefix.exists() && other_project.exists());
 }
-
