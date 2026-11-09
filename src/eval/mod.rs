@@ -138,7 +138,13 @@ pub fn run(args: &[String]) -> i32 {
     let baseline_path = resolve_baseline_dir(&cwd, &harness, dims);
 
     let prev = if dims.regression.enabled {
-        baseline::load_latest(&baseline_path).ok()
+        match baseline::load_latest(&baseline_path) {
+            Ok(previous) => previous,
+            Err(error) => {
+                eprintln!("error: {error}");
+                return 1;
+            }
+        }
     } else {
         None
     };

@@ -5,23 +5,45 @@ use std::path::Path;
 /// Load the latest baseline from the baselines directory.
 ///
 /// Looks for `latest.json` symlink/copy in the given directory.
-pub fn load_latest(baseline_dir: &Path) -> Result<serde_json::Value, String> {
+pub fn load_latest(baseline_dir: &Path) -> Result<Option<serde_json::Value>, String> {
     let latest = baseline_dir.join("latest.json");
     if !latest.exists() {
         // Try to find any BASELINE-*.json if latest.json missing
         let fallback = find_newest_baseline(baseline_dir)?;
         if let Some(path) = fallback {
-            return load_json(&path);
+            return load_json(&path).map(Some);
         }
-        return Err("no baseline found".to_string());
+        return Ok(None);
     }
-    load_json(&latest)
+    load_json(&latest).map(Some)
 }
 
 fn load_json(path: &Path) -> Result<serde_json::Value, String> {
     let contents =
         std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    serde_json::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))
+    let value: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|e| format!("parse baseline {}: {e}", path.display()))?;
+    let dimensions = value
+        .get("dimensions")
+        .and_then(serde_json::Value::as_object)
+        .filter(|m| !m.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "invalid baseline {}: expected nonempty dimensions",
+                path.display()
+            )
+        })?;
+    if dimensions.values().any(|d| {
+        d.get("score")
+            .and_then(serde_json::Value::as_f64)
+            .is_none_or(|s| !s.is_finite() || !(0.0..=1.0).contains(&s))
+    }) {
+        return Err(format!(
+            "invalid baseline {}: scores must be numbers between 0 and 1",
+            path.display()
+        ));
+    }
+    Ok(value)
 }
 
 /// Find the most recent BASELINE-*.json file in a directory.
