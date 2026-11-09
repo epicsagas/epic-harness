@@ -80,22 +80,13 @@ pub fn run_context(
     // Collect obs from all target project slugs
     for slug in &project_slugs {
         // Fix 1: Verify resolved path stays within harness projects root
-        let slug_harness = harness_dir_for_slug(slug);
-        let safe = if slug_harness.exists() {
-            match (
-                slug_harness.canonicalize(),
-                harness_projects_root().canonicalize(),
-            ) {
-                (Ok(project), Ok(root)) => project.starts_with(root),
-                _ => false,
+        let _slug_harness = match checked_harness_dir_for_slug(slug) {
+            Ok(path) => path,
+            Err(_) => {
+                eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
+                return 1;
             }
-        } else {
-            slug_harness.starts_with(harness_projects_root())
         };
-        if !safe {
-            eprintln!("{{\"error\":\"slug escapes harness root: {slug}\"}}");
-            return 1;
-        }
         // SQLite is the primary observation store; the JSONL files only hold
         // records from rounds where the DB write failed. Reading JSONL alone
         // reported `total: 0` for projects with thousands of stored rows.
@@ -111,7 +102,13 @@ pub fn run_context(
             Vec::new()
         });
 
-        let slug_obs_dir = slug_harness.join("obs");
+        let slug_obs_dir = match checked_harness_path_for_slug(slug, "obs") {
+            Ok(path) => path,
+            Err(_) => {
+                eprintln!("{{\"error\":\"observation directory escapes project root\"}}");
+                return 1;
+            }
+        };
         let jsonl_recs: Vec<ObsRecord> = if slug_obs_dir.is_dir() {
             list_files(&slug_obs_dir, ".jsonl")
                 .into_iter()
@@ -121,7 +118,10 @@ pub fn run_context(
                         .map(|s| s >= cutoff_tag.as_str())
                         .unwrap_or(true)
                 })
-                .flat_map(|f| read_jsonl_typed(&slug_obs_dir.join(f)))
+                .filter_map(|f| {
+                    checked_harness_path_for_slug(slug, std::path::Path::new("obs").join(f)).ok()
+                })
+                .flat_map(|path| read_jsonl_typed(&path))
                 .collect()
         } else {
             Vec::new()
@@ -813,15 +813,23 @@ fn is_leap(y: i32) -> bool {
 /// The file is removed only after every record was inserted, so a partial
 /// backfill leaves the remainder for the next attempt.
 async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
-    if !obs_dir().is_dir() {
+    let project = project_slug();
+    let Ok(directory) = checked_harness_path_for_slug(&project, "obs") else {
+        return;
+    };
+    if !directory.is_dir() {
         return;
     }
-    let project = crate::shared::paths::project_slug();
-    for fname in list_files(&obs_dir(), ".jsonl") {
+    for fname in list_files(&directory, ".jsonl") {
         if !fname.contains(today_str) {
             continue;
         }
-        let recs = read_jsonl_typed(&obs_dir().join(&fname));
+        let Ok(source) =
+            checked_harness_path_for_slug(&project, std::path::Path::new("obs").join(&fname))
+        else {
+            continue;
+        };
+        let recs = read_jsonl_typed(&source);
         if recs.is_empty() {
             continue;
         }
@@ -841,7 +849,7 @@ async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
             }
         }
         if all_ok {
-            let _ = std::fs::remove_file(obs_dir().join(&fname));
+            let _ = std::fs::remove_file(&source);
         }
     }
 }
@@ -911,10 +919,17 @@ pub fn run(_input: &HookInput) -> i32 {
     if !harness_exists() {
         return 0;
     }
+    let current_project = project_slug();
+    let Ok(observations_directory) = checked_harness_path_for_slug(&current_project, "obs") else {
+        hint(
+            "reflect",
+            "Project or observation path escapes harness root; analysis skipped",
+        );
+        return 0;
+    };
 
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
-    let current_project = project_slug();
     let observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
         backfill_jsonl_to_sqlite(&pool, &today_str).await;
@@ -939,10 +954,10 @@ pub fn run(_input: &HookInput) -> i32 {
     } else {
         // Fallback: read from JSONL files (SQLite unreachable — the records
         // stay on disk and are backfilled by the next successful run).
-        if !obs_dir().is_dir() {
+        if !observations_directory.is_dir() {
             return 0;
         }
-        let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
+        let obs_files: Vec<String> = list_files(&observations_directory, ".jsonl")
             .into_iter()
             .filter(|f| f.contains(&today_str))
             .collect();
@@ -951,7 +966,11 @@ pub fn run(_input: &HookInput) -> i32 {
         }
         let mut recs: Vec<ObsRecord> = vec![];
         for f in &obs_files {
-            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
+            if let Ok(source) =
+                checked_harness_path_for_slug(&current_project, std::path::Path::new("obs").join(f))
+            {
+                recs.extend(read_jsonl_typed(&source));
+            }
         }
         recs
     };
