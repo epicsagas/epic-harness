@@ -89,16 +89,35 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
 
     // ── 3. File-based data ───────────────────────────────────────────────────
-    let obs_files = copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run);
-    let session_files = copy_dir_files(
-        &from_dir.join("sessions"),
-        &to_dir.join("sessions"),
-        dry_run,
+    let obs_files = merge_file_count(
+        copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run),
+        "observations",
+        &mut exit,
     );
-    let orbit_files = copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run);
-    let evolved_dirs =
-        copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run);
-    let evo_lines = append_evolution_jsonl(&from_dir, &to_dir, dry_run).unwrap_or(0);
+    let session_files = merge_file_count(
+        copy_dir_files(
+            &from_dir.join("sessions"),
+            &to_dir.join("sessions"),
+            dry_run,
+        ),
+        "sessions",
+        &mut exit,
+    );
+    let orbit_files = merge_file_count(
+        copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run),
+        "orbit",
+        &mut exit,
+    );
+    let evolved_dirs = merge_file_count(
+        copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run),
+        "evolved skills",
+        &mut exit,
+    );
+    let evo_lines = merge_file_count(
+        append_evolution_jsonl(&from_dir, &to_dir, dry_run),
+        "evolution history",
+        &mut exit,
+    );
 
     // ── Summary ──────────────────────────────────────────────────────────────
     println!("\n[merge-project] ─── summary ───────────────────────────");
@@ -110,7 +129,9 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     println!("  evolution.jsonl lines    : {evo_lines}");
     println!("  orbit files copied       : {orbit_files}");
 
-    if delete_source {
+    if delete_source && exit != 0 {
+        eprintln!("[merge-project] source retained because at least one transfer failed");
+    } else if delete_source {
         if dry_run {
             println!("  [dry-run] would delete   : {}", from_dir.display());
         } else {
@@ -132,6 +153,17 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
 
     exit
+}
+
+fn merge_file_count(result: io::Result<usize>, label: &str, exit: &mut i32) -> usize {
+    match result {
+        Ok(count) => count,
+        Err(error) => {
+            eprintln!("[merge-project] {label} transfer failed: {error}");
+            *exit = 1;
+            0
+        }
+    }
 }
 
 // ── Global DB: UPDATE project column ────────────────────────────────────────
@@ -353,12 +385,14 @@ async fn merge_per_project_dbs(
 
 /// Copy files from `src_dir` to `dst_dir`, skipping files that already exist.
 /// Returns the number of files copied (or would copy in dry-run).
-fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> usize {
-    let Ok(entries) = std::fs::read_dir(src_dir) else {
-        return 0;
-    };
+fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> io::Result<usize> {
+    if !src_dir.exists() {
+        return Ok(0);
+    }
+    let entries = std::fs::read_dir(src_dir)?;
     let mut count = 0;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let src = entry.path();
         if !src.is_file() {
             continue;
@@ -366,29 +400,36 @@ fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> usize {
         let name = entry.file_name();
         let dst = dst_dir.join(&name);
         if dst.exists() {
-            continue;
+            if std::fs::read(&src)? == std::fs::read(&dst)? {
+                continue;
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("distinct source file conflicts with {}", dst.display()),
+            ));
         }
         if dry_run {
             count += 1;
         } else {
             if let Some(parent) = dst.parent() {
-                let _ = std::fs::create_dir_all(parent);
+                std::fs::create_dir_all(parent)?;
             }
-            if std::fs::copy(&src, &dst).is_ok() {
-                count += 1;
-            }
+            std::fs::copy(&src, &dst)?;
+            count += 1;
         }
     }
-    count
+    Ok(count)
 }
 
 /// Copy evolved skill subdirectories that don't already exist in target.
-fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> usize {
-    let Ok(entries) = std::fs::read_dir(src_evolved) else {
-        return 0;
-    };
+fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> io::Result<usize> {
+    if !src_evolved.exists() {
+        return Ok(0);
+    }
+    let entries = std::fs::read_dir(src_evolved)?;
     let mut count = 0;
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry?;
         let src = entry.path();
         if !src.is_dir() {
             continue;
@@ -396,19 +437,60 @@ fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> us
         let name = entry.file_name();
         let dst = dst_evolved.join(&name);
         if dst.exists() {
-            continue;
+            if same_directory_contents(&src, &dst)? {
+                continue;
+            }
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                format!("distinct source skill conflicts with {}", dst.display()),
+            ));
         }
-        if !dry_run && copy_dir_recursive(&src, &dst).is_err() {
-            continue;
+        if !dry_run {
+            copy_dir_recursive(&src, &dst)?;
         }
         count += 1;
     }
-    count
+    Ok(count)
+}
+
+fn same_directory_contents(left: &Path, right: &Path) -> io::Result<bool> {
+    let mut left_entries = std::fs::read_dir(left)?.collect::<io::Result<Vec<_>>>()?;
+    let mut right_entries = std::fs::read_dir(right)?.collect::<io::Result<Vec<_>>>()?;
+    left_entries.sort_by_key(|entry| entry.file_name());
+    right_entries.sort_by_key(|entry| entry.file_name());
+    if left_entries.len() != right_entries.len() {
+        return Ok(false);
+    }
+    for (a, b) in left_entries.iter().zip(&right_entries) {
+        if a.file_name() != b.file_name() {
+            return Ok(false);
+        }
+        let (a_type, b_type) = (a.file_type()?, b.file_type()?);
+        if a_type.is_symlink() || b_type.is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "links in evolved skills require explicit resolution",
+            ));
+        }
+        if a_type.is_dir() && b_type.is_dir() {
+            if !same_directory_contents(&a.path(), &b.path())? {
+                return Ok(false);
+            }
+        } else if a_type.is_file() && b_type.is_file() {
+            if std::fs::read(a.path())? != std::fs::read(b.path())? {
+                return Ok(false);
+            }
+        } else {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)?.flatten() {
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
         let s = entry.path();
         let d = dst.join(entry.file_name());
         if s.is_dir() {
@@ -470,3 +552,7 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
 
     Ok(new_lines.len())
 }
+
+#[cfg(test)]
+#[path = "regression_184.rs"]
+mod regression_184;
