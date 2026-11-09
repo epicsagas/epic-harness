@@ -267,12 +267,12 @@ fn parse_flag_str(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn chrono_now() -> String {
-    let output = std::process::Command::new("date")
-        .args(["+%Y%m%dT%H%M%S"])
-        .output()
-        .ok();
-    output
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+    let utc = crate::shared::helpers::now_iso().replace(['-', ':'], "");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    // Portable UTC plus a uniqueness suffix: no executable dependency and no
+    // same-second overwrite, including files created by concurrent processes.
+    format!("{utc}_{nanos:09}_{}", uuid::Uuid::new_v4().simple())
 }
