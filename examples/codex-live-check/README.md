@@ -172,3 +172,14 @@ the install path. Manual runbook on a native Windows box (no Git Bash/WSL):
    — the epic hooks must be listed as trusted plugin sources (no
    hand-seeded `CODEX_HOME/hooks.json` anywhere).
 4. Check `%USERPROFILE%\.harness\` received observations after the session.
+
+
+### Release installer acceptance (#132)
+
+Windows CI invokes the shipped `install.ps1`, validates the published archive
+layout and both executable names, and runs each manifest command through the
+actual host shell. The acceptance driver uses an isolated HOME/harness root.
+The released-artifact checks are separate from candidate source-build checks;
+a released binary cannot certify unreleased source changes. Installer fixtures
+exercise repeated installation, nested archives, locked aliases, checksum failure,
+and preservation of unrelated files.

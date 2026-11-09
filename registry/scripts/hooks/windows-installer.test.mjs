@@ -25,11 +25,12 @@ function zip(entries) {
 
 test('Windows installer reports locked replacement and hash errors without claiming success', { skip: process.platform !== 'win32' }, () => {
   const source = fs.readFileSync(new URL('../../../install.ps1', import.meta.url), 'utf8').replace(/param\([\s\S]*?\r?\n\)/, '');
-  for (const scenario of ['fresh', 'repeat', 'locked', 'bad-hash']) {
+  for (const scenario of ['fresh', 'repeat', 'nested', 'locked', 'locked-secondary', 'bad-hash']) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-installer-'));
     try {
       const script = path.join(root, 'fixture.ps1');
-      fs.writeFileSync(path.join(root, 'fixture.zip'), zip(['epic.exe', 'epic-harness.exe'].map(name => [name, 'SYNTHETIC NEW BINARY'])));
+      const prefixName = scenario === 'nested' ? 'epic-harness-x86_64-pc-windows-msvc/' : '';
+      fs.writeFileSync(path.join(root, 'fixture.zip'), zip(['epic.exe', 'epic-harness.exe'].map(name => [prefixName + name, 'SYNTHETIC NEW BINARY'])));
       const prefix = String.raw`
 $fixtureRoot = $env:EPIC_INSTALL_FIXTURE
 $scenario = $env:EPIC_INSTALL_SCENARIO
@@ -40,13 +41,16 @@ $fixtureHash = (Get-FileHash -LiteralPath $fixtureZip -Algorithm SHA256).Hash.To
 function Invoke-RestMethod { return @{ tag_name='v9.9.9' } }
 function Invoke-WebRequest {
  param([string]$Uri,[string]$OutFile,[switch]$UseBasicParsing)
+ Add-Content -LiteralPath (Join-Path $fixtureRoot requests.txt) -Value $Uri
  if ($Uri.EndsWith('.sha256')) {
    if ($scenario -eq 'bad-hash') { Set-Content -LiteralPath $OutFile -Value ('0'*64 + ' fixture.zip') }
    else { Set-Content -LiteralPath $OutFile -Value ($fixtureHash + ' fixture.zip') }
  } else { Copy-Item -LiteralPath $fixtureZip -Destination $OutFile }
 }
 if ($scenario -ne 'fresh') { Set-Content -LiteralPath (Join-Path $InstallDir epic.exe) -Value 'SYNTHETIC OLD BINARY' -NoNewline }
+if ($scenario -ne 'fresh') { Set-Content -LiteralPath (Join-Path $InstallDir epic-harness.exe) -Value 'SYNTHETIC OLD BINARY' -NoNewline }
 if ($scenario -eq 'locked') { $ownedLock = [IO.File]::Open((Join-Path $InstallDir epic.exe),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) }
+if ($scenario -eq 'locked-secondary') { $ownedLock = [IO.File]::Open((Join-Path $InstallDir epic-harness.exe),[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None) }
 `;
       fs.writeFileSync(script, prefix + '\n' + source);
       const home = path.join(root, 'home'), data = path.join(root, 'data');
@@ -57,14 +61,20 @@ if ($scenario -eq 'locked') { $ownedLock = [IO.File]::Open((Join-Path $InstallDi
       for (const k of Object.keys(env)) if (k.toLowerCase() === 'path') delete env[k];
       env.PATH = path.join(root, 'install') + path.delimiter + path.join(process.env.SystemRoot, 'System32');
       const result = spawnSync(path.join(process.env.SystemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { env, cwd: root, windowsHide: true, encoding: 'utf8', timeout: 45000 });
+      assert.equal(result.error, undefined, `${scenario}: ${result.error?.message}\n${result.stderr}`);
       const contents = fs.existsSync(path.join(root, 'install/epic.exe')) ? fs.readFileSync(path.join(root, 'install/epic.exe'), 'utf8') : null;
-      if (scenario === 'locked' || scenario === 'bad-hash') {
+      const requests = fs.readFileSync(path.join(root, 'requests.txt'), 'utf8');
+      const target = process.arch === 'arm64' ? 'aarch64-pc-windows-msvc' : 'x86_64-pc-windows-msvc';
+      assert.ok(requests.includes(`/epic-harness-${target}.zip`), 'installer must request the published archive name');
+      if (scenario === 'locked' || scenario === 'locked-secondary' || scenario === 'bad-hash') {
         assert.notEqual(result.status, 0, `${scenario}: ${result.stdout}\n${result.stderr}`);
         assert.doesNotMatch(result.stdout, /Installed:/, 'a failed copy/hash check must never claim installation');
         assert.equal(contents, 'SYNTHETIC OLD BINARY');
+        assert.equal(fs.readFileSync(path.join(root, 'install/epic-harness.exe'), 'utf8'), 'SYNTHETIC OLD BINARY');
       } else {
         assert.equal(result.status, 0, `${scenario}: ${result.stderr}`);
         assert.equal(contents, 'SYNTHETIC NEW BINARY');
+        assert.equal(fs.readFileSync(path.join(root, 'install/epic-harness.exe'), 'utf8'), 'SYNTHETIC NEW BINARY');
         assert.match(result.stdout, /Installed:/);
       }
     } finally {
