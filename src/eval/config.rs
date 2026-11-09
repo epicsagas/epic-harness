@@ -74,7 +74,7 @@ pub struct RegressionExtra {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct Benchmark {
     pub name: String,
-    /// Shell command to execute.
+    /// Program and quoted arguments to execute without shell expansion.
     pub command: String,
     /// How to interpret the result:
     /// - `"exit_code"` (default): 0 = PASS, non-zero = FAIL, score 1.0 / 0.0

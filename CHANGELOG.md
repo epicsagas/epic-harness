@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Preserve native Windows UNC and device-root arguments alongside escaped forms in evaluation commands (#201).
+- Preserve empty quoted arguments, escaped quotes and native path separators when invoking evaluation commands (#201).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names

@@ -312,26 +312,73 @@ fn exec_command(cmd: &str) -> CmdOutput {
     }
 }
 
-/// Simple shell word splitting (handles quoted strings).
+/// Split program/argv without shell expansion. Preserve empty quoted arguments,
+/// escaped quote characters and ordinary native path backslashes.
 fn shell_words(s: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut in_single = false;
     let mut in_double = false;
+    let mut started = false;
+    let mut chars = s.chars().peekable();
 
-    for ch in s.chars() {
+    while let Some(ch) = chars.next() {
+        // A native Windows UNC/device root begins with two literal separators.
+        // Keep that spelling while also accepting the escaped four-slash form.
+        let native_unc_root = cfg!(windows)
+            && current.is_empty()
+            && !in_single
+            && ch == '\\'
+            && chars.peek() == Some(&'\\')
+            && chars
+                .clone()
+                .nth(1)
+                .is_some_and(|next| !next.is_whitespace() && !matches!(next, '\\' | '"' | '\''));
+        if native_unc_root {
+            current.push(ch);
+            current.push(chars.next().expect("peeked separator"));
+            started = true;
+            continue;
+        }
+        if ch == '\\' && !in_single {
+            let escaped = chars.peek().is_some_and(|next| {
+                if in_double {
+                    matches!(next, '"' | '\\')
+                } else {
+                    matches!(next, '"' | '\'' | '\\' | ' ' | '\t' | '\n')
+                }
+            });
+            if escaped {
+                current.push(chars.next().expect("peeked character"));
+                started = true;
+                continue;
+            }
+        }
         match ch {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            ' ' | '\t' if !in_single && !in_double => {
-                if !current.is_empty() {
+            '\'' if !in_double => {
+                in_single = !in_single;
+                started = true;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+                started = true;
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if started {
                     words.push(std::mem::take(&mut current));
+                    started = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                current.push(ch);
+                started = true;
+            }
         }
     }
-    if !current.is_empty() {
+    if in_single || in_double {
+        return Vec::new();
+    }
+    if started {
         words.push(current);
     }
     words
@@ -422,4 +469,47 @@ fn truncate(s: &str, max: usize) -> String {
         .find(|&i| s.is_char_boundary(i))
         .unwrap_or(0);
     format!("...{}", &s[end..])
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[test]
+    fn command_words_preserve_empty_arguments_escaped_quotes_and_native_paths() {
+        assert_eq!(
+            shell_words(r##"tool "" "alpha \"beta\"" 'literal\path' "C:\space path\file""##),
+            [
+                "tool",
+                "",
+                "alpha \"beta\"",
+                r"literal\path",
+                r"C:\space path\file"
+            ]
+        );
+        assert!(
+            shell_words("tool \"unfinished").is_empty(),
+            "malformed quotes must not execute"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_words_preserve_native_unc_and_extended_windows_roots() {
+        assert_eq!(
+            shell_words(
+                r#""\\server\share\tool.exe" "\\server\share\file name" "\\?\C:\long path\file" "\\.\pipe\epic""#,
+            ),
+            [
+                r"\\server\share\tool.exe",
+                r"\\server\share\file name",
+                r"\\?\C:\long path\file",
+                r"\\.\pipe\epic",
+            ]
+        );
+        assert_eq!(
+            shell_words(r#"tool "\\\\server\\share" "\\""#),
+            ["tool", r"\\server\share", r"\"]
+        );
+    }
 }
