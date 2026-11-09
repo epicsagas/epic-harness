@@ -91,7 +91,6 @@ impl Dashboard {
         fs::write(&file, serde_json::to_vec(value).unwrap()).unwrap();
         file
     }
-
 }
 
 impl Drop for Dashboard {
