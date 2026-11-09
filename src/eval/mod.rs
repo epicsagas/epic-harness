@@ -26,23 +26,27 @@ pub fn run(args: &[String]) -> i32 {
         eprintln!("[eval] detected stack: {stack}");
         return match scaffold::scaffold_benchmarks(&cwd, &stack) {
             Ok(result) => {
-                for path in &result.created {
-                    println!("created: {}", path.display());
-                }
-                for path in &result.skipped {
-                    println!("skipped (exists): {}", path.display());
-                }
-                if result.created.is_empty() {
-                    println!("nothing to create — all benchmark files already exist");
-                } else {
-                    println!(
-                        "\n{} file(s) created for stack '{}'",
-                        result.created.len(),
-                        result.stack
-                    );
-                    println!("Next: review the generated files, fill in TODO sections, then run:");
-                    println!("  epic eval --init   # scaffold eval.yaml if not yet done");
-                    println!("  epic eval          # run evaluation");
+                if !json_mode {
+                    for path in &result.created {
+                        println!("created: {}", path.display());
+                    }
+                    for path in &result.skipped {
+                        println!("skipped (exists): {}", path.display());
+                    }
+                    if result.created.is_empty() {
+                        println!("nothing to create — all benchmark files already exist");
+                    } else {
+                        println!(
+                            "\n{} file(s) created for stack '{}'",
+                            result.created.len(),
+                            result.stack
+                        );
+                        println!(
+                            "Next: review the generated files, fill in TODO sections, then run:"
+                        );
+                        println!("  epic eval --init   # scaffold eval.yaml if not yet done");
+                        println!("  epic eval          # run evaluation");
+                    }
                 }
                 if json_mode {
                     let created: Vec<_> = result
@@ -77,9 +81,13 @@ pub fn run(args: &[String]) -> i32 {
     if init_mode {
         return match config::scaffold(&eval_dir) {
             Ok(path) => {
-                println!("Scaffolded: {}", path.display());
                 if json_mode {
-                    println!(r#"{{"action":"init","path":"{}"}}"#, path.display());
+                    println!(
+                        "{}",
+                        serde_json::json!({"action": "init", "path": path.display().to_string()})
+                    );
+                } else {
+                    println!("Scaffolded: {}", path.display());
                 }
                 0
             }
