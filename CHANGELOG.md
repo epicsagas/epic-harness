@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Orbit dismissal rejects empty IDs and deletes only exact resources in the selected project (#221).
 - Project/reflection readers validate canonical project and child paths before
   reading or deleting fallback data; snapshots omit escaping skill paths (#252).
 - Reflection compares canonical project/root and vault/home paths consistently
