@@ -291,28 +291,146 @@ pub struct CopyResult {
     pub errors: u64,
 }
 
+/// Reparse points (including Windows junctions) are not ordinary directories.
+/// A contained migration must report them instead of following their targets.
+pub fn is_link_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
+/// Copy one regular file without replacing distinct destination contents.
+/// Identical files are an already-completed transfer, allowing safe retries.
+pub fn copy_file_preserving_existing(src: &Path, dest: &Path) -> std::io::Result<()> {
+    fn same_contents(left: &Path, right: &Path) -> std::io::Result<bool> {
+        use std::io::Read;
+        if fs::metadata(left)?.len() != fs::metadata(right)?.len() {
+            return Ok(false);
+        }
+        let mut left = fs::File::open(left)?;
+        let mut right = fs::File::open(right)?;
+        let mut a = [0_u8; 8192];
+        let mut b = [0_u8; 8192];
+        loop {
+            let count = left.read(&mut a)?;
+            if count == 0 {
+                return Ok(right.read(&mut b[..1])? == 0);
+            }
+            right.read_exact(&mut b[..count])?;
+            if a[..count] != b[..count] {
+                return Ok(false);
+            }
+        }
+    }
+    let source = src.symlink_metadata()?;
+    let permissions = source.permissions();
+    if !source.is_file() || is_link_or_reparse_point(&source) {
+        return Err(std::io::Error::other("unsupported migration source"));
+    }
+    match dest.symlink_metadata() {
+        Ok(target) => {
+            if !target.is_file()
+                || is_link_or_reparse_point(&target)
+                || target.permissions() != permissions
+                || !same_contents(src, dest)?
+            {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    "distinct migration destination",
+                ));
+            }
+            return Ok(());
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let temporary = dest
+        .parent()
+        .ok_or_else(|| std::io::Error::other("missing migration parent"))?
+        .join(format!(".epic-migration-{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut target = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        let mut source = fs::File::open(src)?;
+        std::io::copy(&mut source, &mut target)?;
+        target.sync_all()?;
+        drop(target);
+        if !same_contents(src, &temporary)? {
+            return Err(std::io::Error::other(
+                "migration source changed during copy",
+            ));
+        }
+        // Creating a link is atomic and cannot overwrite a concurrent writer.
+        // A failed copy never leaves a partial destination blocking every retry.
+        fs::hard_link(&temporary, dest)
+    })();
+    let _ = fs::remove_file(temporary);
+    result?;
+    fs::set_permissions(dest, permissions)
+}
+
 /// Like `copy_dir` but counts successes and errors instead of silently ignoring failures.
 pub fn copy_dir_counted(src: &Path, dest: &Path) -> CopyResult {
     let mut result = CopyResult { ok: 0, errors: 0 };
-    if !src.is_dir() {
+    let metadata = match src.symlink_metadata() {
+        Ok(metadata) if !is_link_or_reparse_point(&metadata) => metadata,
+        _ => {
+            result.errors += 1;
+            return result;
+        }
+    };
+    if !metadata.is_dir() {
+        result.errors += 1;
         return result;
     }
-    ensure_dir(dest);
-    if let Ok(entries) = fs::read_dir(src) {
-        for entry in entries.flatten() {
-            let src_path = entry.path();
-            let dest_path = dest.join(entry.file_name());
-            if src_path.is_dir() {
-                let sub = copy_dir_counted(&src_path, &dest_path);
-                result.ok += sub.ok;
-                result.errors += sub.errors;
-            } else {
-                match fs::copy(&src_path, &dest_path) {
-                    Ok(_) => result.ok += 1,
-                    Err(_) => result.errors += 1,
+    if dest
+        .symlink_metadata()
+        .is_ok_and(|m| is_link_or_reparse_point(&m))
+        || fs::create_dir_all(dest).is_err()
+    {
+        result.errors += 1;
+        return result;
+    }
+    match fs::read_dir(src) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => {
+                        result.errors += 1;
+                        continue;
+                    }
+                };
+                let src_path = entry.path();
+                let dest_path = dest.join(entry.file_name());
+                let metadata = match src_path.symlink_metadata() {
+                    Ok(metadata) if !is_link_or_reparse_point(&metadata) => metadata,
+                    _ => {
+                        result.errors += 1;
+                        continue;
+                    }
+                };
+                if metadata.is_dir() {
+                    let sub = copy_dir_counted(&src_path, &dest_path);
+                    result.ok += sub.ok;
+                    result.errors += sub.errors;
+                } else {
+                    match copy_file_preserving_existing(&src_path, &dest_path) {
+                        Ok(_) => result.ok += 1,
+                        Err(_) => result.errors += 1,
+                    }
                 }
             }
         }
+        Err(_) => result.errors += 1,
     }
     result
 }
