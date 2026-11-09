@@ -161,28 +161,13 @@ pub fn run(args: &[String]) -> i32 {
     } else {
         eval_dir.join("results")
     };
-    let _ = std::fs::create_dir_all(&results_dir);
-
-    // --baseline-update: save current as new baseline
-    if baseline_update {
-        let ts = chrono_now();
-        if let Err(e) = std::fs::create_dir_all(&baseline_path) {
-            eprintln!("warning: could not create baseline dir: {e}");
-        }
-        let file = baseline_path.join(format!("BASELINE-{ts}.json"));
-        let latest = baseline_path.join("latest.json");
-        if let Ok(json) = serde_json::to_string_pretty(&rpt) {
-            let _ = std::fs::write(&file, &json);
-            let _ = std::fs::write(&latest, &json);
-            eprintln!("baseline saved: {}", file.display());
-        }
-    }
-
-    // Save result
-    let ts = chrono_now();
-    let result_file = results_dir.join(format!("EVAL-{ts}.json"));
-    if let Ok(json) = serde_json::to_string_pretty(&rpt) {
-        let _ = std::fs::write(&result_file, &json);
+    if let Err(error) = persist_report(
+        &rpt,
+        &results_dir,
+        baseline_update.then_some(&baseline_path),
+    ) {
+        eprintln!("error: could not save evaluation: {error}");
+        return 1;
     }
 
     // Output
@@ -195,6 +180,51 @@ pub fn run(args: &[String]) -> i32 {
     }
 
     if rpt.overall_verdict == "FAIL" { 1 } else { 0 }
+}
+
+fn persist_report(
+    report: &report::Report,
+    results_dir: &std::path::Path,
+    baseline_dir: Option<&std::path::PathBuf>,
+) -> Result<(), String> {
+    use std::io::Write;
+    let json = serde_json::to_vec_pretty(report).map_err(|e| format!("serialize report: {e}"))?;
+    let archive = |path: &std::path::Path| -> Result<(), String> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| format!("create {}: {e}", path.display()))?;
+        file.write_all(&json)
+            .and_then(|()| file.sync_all())
+            .map_err(|e| format!("write {}: {e}", path.display()))
+    };
+    std::fs::create_dir_all(results_dir).map_err(|e| format!("results directory: {e}"))?;
+    archive(&results_dir.join(format!("EVAL-{}.json", report.timestamp)))?;
+    if let Some(dir) = baseline_dir {
+        std::fs::create_dir_all(dir).map_err(|e| format!("baseline directory: {e}"))?;
+        let file = dir.join(format!("BASELINE-{}.json", report.timestamp));
+        archive(&file)?;
+        // Publish latest only after a complete durable archive. A failed
+        // replacement leaves the previous latest baseline intact.
+        let temp = dir.join(format!(".latest-{}.tmp", uuid::Uuid::new_v4().simple()));
+        let result = (|| -> std::io::Result<()> {
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&temp)?;
+            f.write_all(&json)?;
+            f.sync_all()?;
+            drop(f);
+            std::fs::rename(&temp, dir.join("latest.json"))
+        })();
+        if let Err(error) = result {
+            let _ = std::fs::remove_file(&temp);
+            return Err(format!("publish latest baseline: {error}"));
+        }
+        eprintln!("baseline saved: {}", file.display());
+    }
+    Ok(())
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
