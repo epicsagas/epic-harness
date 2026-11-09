@@ -315,7 +315,7 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
 /// paths that way, and a Codex `apply_patch` body names its files relative.
 pub fn extract_file(action: &str) -> Option<&str> {
     static FILE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"((?:/|\b)[\w.-]+(?:/[\w.-]+)*\.\w+)").unwrap());
+        LazyLock::new(|| Regex::new(r"((?:[/\\]|\b)[\w.-]+(?:[/\\][\w.-]+)*\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
 }
 
