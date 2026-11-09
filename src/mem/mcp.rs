@@ -425,6 +425,9 @@ fn send(obj: &Value) {
 
 fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
     match msg.method.as_str() {
+        "ping" => {
+            send(&json!({"jsonrpc": "2.0", "id": msg.id, "result": {}}));
+        }
         "initialize" => {
             let resp = json!({
                 "jsonrpc": "2.0",
