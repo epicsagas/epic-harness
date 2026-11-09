@@ -666,3 +666,5 @@ Original files are **not deleted** after import. New users are automatically on 
 - Serialize orchestration updates with portable interprocess file locks and independent atomic-write files (#243).
 
 - Reject empty or ambiguous Orbit deletion IDs and match exact project-scoped sidecars (#221).
+
+- Dismiss exact Orbit records in primary SQLite and sidecar state, preserving project scope and reporting failures (#264).

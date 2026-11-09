@@ -450,14 +450,17 @@ pub fn dismiss_orbit_pipeline_for(
         format!("PIPELINE-{pipeline_id}.json")
     };
     let mut candidates = Vec::new();
-    for (slug, _) in selected_project_dirs(project)? {
-        let file = crate::shared::paths::checked_harness_path_for_slug(
+    for (slug, dir) in selected_project_dirs(project)? {
+        crate::shared::paths::checked_harness_path_for_slug(
             &slug,
             std::path::Path::new("orbit").join(&file_name),
         )
         .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        // Validate the resolved target, but remove the selected directory
+        // entry itself, never a different in-project file a symlink targets.
+        let file = dir.join("orbit").join(&file_name);
         if file.is_file() {
-            candidates.push(file);
+            candidates.push((slug, file));
         }
     }
     if candidates.len() > 1 {
@@ -466,10 +469,50 @@ pub fn dismiss_orbit_pipeline_for(
             "pipeline id requires a project",
         ));
     }
-    match candidates.pop() {
-        Some(file) => std::fs::remove_file(file).map(|()| true),
-        None => Ok(false),
-    }
+    crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        let database_project: Option<String> =
+            sqlx::query_scalar("SELECT project FROM orbit_pipelines WHERE id = ?")
+                .bind(pipeline_id)
+                .fetch_optional(&pool)
+                .await
+                .map_err(Error::other)?;
+        if project.is_none()
+            && let Some(database_project) = database_project
+            && candidates.iter().any(|(slug, _)| slug != &database_project)
+        {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "pipeline id requires a project",
+            ));
+        }
+        let mut transaction = pool.begin().await.map_err(Error::other)?;
+        let result = match project {
+            Some(slug) => {
+                sqlx::query("DELETE FROM orbit_pipelines WHERE id = ? AND project = ?")
+                    .bind(pipeline_id)
+                    .bind(slug)
+                    .execute(&mut *transaction)
+                    .await
+            }
+            None => {
+                sqlx::query("DELETE FROM orbit_pipelines WHERE id = ?")
+                    .bind(pipeline_id)
+                    .execute(&mut *transaction)
+                    .await
+            }
+        }
+        .map_err(Error::other)?;
+        let mut removed_sidecar = false;
+        for (_, file) in candidates {
+            // A filesystem failure drops/rolls back the transaction. Do not
+            // announce success with the primary row still visible.
+            std::fs::remove_file(file)?;
+            removed_sidecar = true;
+        }
+        transaction.commit().await.map_err(Error::other)?;
+        Ok(result.rows_affected() > 0 || removed_sidecar)
+    })
 }
 
 fn selected_project_dirs(
