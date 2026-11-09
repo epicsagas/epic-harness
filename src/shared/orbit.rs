@@ -69,7 +69,7 @@ pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> 
                 return None;
             }
             let content = fs::read_to_string(&path).ok()?;
-            match serde_json::from_str::<serde_json::Value>(&content) {
+            match super::helpers::parse_persisted_json::<serde_json::Value>(&content) {
                 Ok(val) if val.get("status").and_then(|v| v.as_str()) == Some("running") => {
                     let fresh = val
                         .get("updated_at")
@@ -179,7 +179,7 @@ pub fn try_acquire_orbit_lock(dir: &Path) -> bool {
     let path = dir.join(".orbit.lock");
     let epoch = now_epoch_secs();
     if let Ok(contents) = fs::read_to_string(&path) {
-        let acquired = serde_json::from_str::<serde_json::Value>(&contents)
+        let acquired = super::helpers::parse_persisted_json::<serde_json::Value>(&contents)
             .ok()
             .and_then(|v| v.get("acquired_at").and_then(|v| v.as_u64()));
         if acquired.is_some_and(|at| epoch.saturating_sub(at) < 120) {
@@ -225,7 +225,7 @@ pub fn try_release_orbit_lock(dir: &Path) -> bool {
     }
     let path = dir.join(".orbit.lock");
     if let Ok(contents) = fs::read_to_string(&path)
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(&contents)
+        && let Ok(value) = super::helpers::parse_persisted_json::<serde_json::Value>(&contents)
         && let Some(owner) = value.get("owner").and_then(|v| v.as_str())
         && std::env::var("EPIC_ORBIT_OWNER").as_deref() != Ok(owner)
     {
@@ -314,7 +314,7 @@ pub fn warn_on_invalid_completion(dir: &Path) -> usize {
         let Ok(content) = fs::read_to_string(entry.path()) else {
             continue;
         };
-        let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content) else {
+        let Ok(pl) = super::helpers::parse_persisted_json::<serde_json::Value>(&content) else {
             continue;
         };
         // PIPELINE-{timestamp} makes lexicographic order equal creation order.

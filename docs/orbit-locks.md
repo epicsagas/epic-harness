@@ -1,5 +1,12 @@
 # Orbit admission and recovery
 
+Persisted pipeline and control JSON accepts ordinary UTF-8 or a single leading
+UTF-8 byte-order mark, including files written with Windows PowerShell 5
+`Set-Content -Encoding utf8`. This compatibility applies consistently to Orbit
+admission, attribution, completion checks and pipeline projections. It does not
+relax hook payload validation or accept malformed UTF-8/JSON. Reads preserve
+existing files; native writes continue to produce UTF-8 without a marker.
+
 `epic orbit lock` checks for a fresh running pipeline on every acquisition,
 including when `.orbit.lock` is absent. A fresh startup reservation remains
 exclusive for two minutes while the first pipeline state is written. Admission

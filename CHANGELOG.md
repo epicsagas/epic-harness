@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- accept PowerShell UTF-8 BOM state (#282).
 - preserve startup reservations and active guards (#247).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
