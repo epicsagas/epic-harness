@@ -660,3 +660,5 @@ Original files are **not deleted** after import. New users are automatically on 
 - Broken CI badge removed from all READMEs
 
 - Fix native dashboard project scoping and aggregate metrics, filtering history and snapshots before limits (#237).
+
+- Register native evolution dashboard handlers with project-scoped canonical path validation and read-only sidecar access (#239).
