@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Dismissing an Orbit pipeline removes its primary SQLite row and exact legacy sidecar, including database-only rows (#264).
 - Orbit dismissal rejects empty IDs and deletes only exact resources in the selected project (#221).
 - Project/reflection readers validate canonical project and child paths before
   reading or deleting fallback data; snapshots omit escaping skill paths (#252).
