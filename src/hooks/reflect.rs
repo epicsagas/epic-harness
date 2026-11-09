@@ -1586,23 +1586,6 @@ mod tests {
         assert_eq!(epoch_days_to_ymd(0), (1970, 1, 1));
     }
 
-    fn obs_at(ts: &str) -> ObsRecord {
-        ObsRecord {
-            timestamp: ts.into(),
-            tool: "Bash".into(),
-            tool_category: "bash".into(),
-            action: None,
-            result: Some("success".into()),
-            score: Some(1.0),
-            dimensions: None,
-            failure_category: None,
-            error_snippet: None,
-            file_ext: None,
-            sequence_id: None,
-            pipeline_id: None,
-        }
-    }
-
     /// 2026-08-31T00:00:00Z is epoch day 20696.
     const DAY_2026_08_31: u64 = 20_696 * 86_400;
 

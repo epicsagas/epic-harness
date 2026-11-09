@@ -271,36 +271,15 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
         total += r.rows_affected() as usize;
     }
 
+    // Relabelled histories have independent progress even when IDs stay in
+    // the same global table. Reanalysis is safer than skipping pending rows.
+    sqlx::query("UPDATE metrics_state SET value='0' WHERE key='reflection_cursor' AND project=?")
+        .bind(to)
+        .execute(&mut conn)
+        .await
+        .map_err(sqlx_err)?;
     conn.execute("COMMIT").await.map_err(sqlx_err)?;
     Ok(total)
-}
-
-#[cfg(test)]
-mod reflection_cursor_tests {
-    use super::*;
-    use sqlx::Connection;
-
-    #[tokio::test]
-    async fn issue_218_project_relabel_resets_derived_cursor() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("global.db");
-        let mut connection = SqliteConnectOptions::new().filename(&path)
-            .create_if_missing(true).connect().await.unwrap();
-        sqlx::raw_sql(crate::store::schema::DDL_SQLITE).execute(&mut connection).await.unwrap();
-        sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source'),('reflection_cursor','555','target')")
-            .execute(&mut connection).await.unwrap();
-        sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2026-11-09T00:00:00Z','first','Read','read','first','source'),('2026-11-09T00:00:00Z','second','Read','read','second','target')")
-            .execute(&mut connection).await.unwrap();
-        connection.close().await.unwrap();
-        merge_global_db(&path, "source", "target", false).await.unwrap();
-        let mut connection = SqliteConnectOptions::new().filename(path).connect().await.unwrap();
-        let cursor: String = sqlx::query_scalar("SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'")
-            .fetch_one(&mut connection).await.unwrap();
-        assert_eq!(cursor, "0", "Independent project progress cannot be combined into one row cutoff");
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")
-            .fetch_one(&mut connection).await.unwrap();
-        assert_eq!(count, 2, "Resetting derived progress must preserve observations");
-    }
 }
 
 // ── Per-project harness.db: ATTACH + INSERT OR IGNORE ───────────────────────
@@ -497,4 +476,58 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
     }
 
     Ok(new_lines.len())
+}
+
+#[cfg(test)]
+mod reflection_cursor_tests {
+    use super::*;
+    use sqlx::Connection;
+
+    #[tokio::test]
+    async fn issue_218_project_relabel_resets_derived_cursor() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("global.db");
+        let mut connection = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true)
+            .connect()
+            .await
+            .unwrap();
+        sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+            .execute(&mut connection)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source'),('reflection_cursor','555','target')")
+            .execute(&mut connection).await.unwrap();
+        sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2026-11-09T00:00:00Z','first','Read','read','first','source'),('2026-11-09T00:00:00Z','second','Read','read','second','target')")
+            .execute(&mut connection).await.unwrap();
+        connection.close().await.unwrap();
+        merge_global_db(&path, "source", "target", false)
+            .await
+            .unwrap();
+        let mut connection = SqliteConnectOptions::new()
+            .filename(path)
+            .connect()
+            .await
+            .unwrap();
+        let cursor: String = sqlx::query_scalar(
+            "SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'",
+        )
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+        assert_eq!(
+            cursor, "0",
+            "Independent project progress cannot be combined into one row cutoff"
+        );
+        let count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")
+                .fetch_one(&mut connection)
+                .await
+                .unwrap();
+        assert_eq!(
+            count, 2,
+            "Resetting derived progress must preserve observations"
+        );
+    }
 }

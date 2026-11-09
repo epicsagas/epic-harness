@@ -16,7 +16,13 @@ fn issue_218_legacy_watermark_migration_keeps_delayed_fallback() {
     let delayed: String = (0..3).map(|i| {
         serde_json::json!({"timestamp":"2024-01-01T00:00:00Z","tool":"Bash","tool_category":"bash","action":format!("delayed-{i}"),"result":"success","score":1.0}).to_string() + "\n"
     }).collect();
-    fixture::write(f.project.join(format!("obs/session_{}_delayed.jsonl", epic_harness::shared::today())), &delayed);
+    fixture::write(
+        f.project.join(format!(
+            "obs/session_{}_delayed.jsonl",
+            epic_harness::shared::today()
+        )),
+        &delayed,
+    );
     f.call(&["reflect"], serde_json::json!({"hook_event_name":"Stop"}));
     assert_eq!(f.metric()["total_sessions"], 1);
     assert_eq!(

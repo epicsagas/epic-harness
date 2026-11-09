@@ -48,7 +48,10 @@ impl Fixture {
             .env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
             .env("HARNESS_DIR", self.data.canonicalize().unwrap())
-            .env("HARNESS_DB_URL", format!("sqlite:{}?mode=rwc", self.data.join("harness.db").display()))
+            .env(
+                "HARNESS_DB_URL",
+                format!("sqlite:{}", self.data.join("harness.db").display()),
+            )
             .env("HARNESS_ROOT", self._temp.path())
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("APPDATA", self.home.join("AppData/Roaming"))
