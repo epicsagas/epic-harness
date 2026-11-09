@@ -202,41 +202,36 @@ fn check_agent_timeout(agent_id: &str) -> Option<String> {
 /// Called on every Agent tool invocation in the observe hook (both PreToolUse and PostToolUse).
 /// - PreToolUse: `tool_output` is None → record "running" state
 /// - PostToolUse: `tool_output` exists → parse output and record final state
-fn track_agent_spawn(input: &HookInput) {
+fn track_agent_spawn(input: &HookInput) -> i32 {
     use crate::orchestrate;
 
     // Codex names the lifecycle explicitly instead of routing subagents
     // through a tool call, so trust the event when it is present rather than
     // inferring start-vs-stop from whether output happens to be attached.
-    match input.hook_event_name.as_deref() {
-        Some("SubagentStart") => {
-            if let Err(e) = orchestrate::run_pre_checked(input) {
-                eprintln!("[harness] agent track pre error: {e}");
-            }
-            return;
+    let is_post = match input.hook_event_name.as_deref() {
+        Some("SubagentStop" | "PostToolUse") => true,
+        Some("SubagentStart" | "PreToolUse") => false,
+        _ => {
+            input.tool_output.is_some()
+                || input.tool_response.is_some()
+                || input.tool_result.is_some()
         }
-        Some("SubagentStop") => {
-            if let Err(e) = orchestrate::run_post_checked(input) {
-                eprintln!("[harness] agent track post error: {e}");
-            }
-            return;
-        }
-        _ => {}
-    }
-
-    let has_output =
-        input.tool_output.is_some() || input.tool_response.is_some() || input.tool_result.is_some();
-
-    if has_output {
-        // PostToolUse: agent completed — let orchestrate::run_post handle it
-        if let Err(e) = orchestrate::run_post_checked(input) {
-            eprintln!("[harness] agent track post error: {e}");
-        }
+    };
+    let result = if is_post {
+        orchestrate::run_post_checked(input)
     } else {
-        // PreToolUse: agent starting — let orchestrate::run_pre handle it
-        if let Err(e) = orchestrate::run_pre_checked(input) {
-            eprintln!("[harness] agent track pre error: {e}");
-        }
+        orchestrate::run_pre_checked(input)
+    };
+    let code = result.unwrap_or_else(|error| {
+        eprintln!("[harness] agent track error: {error}");
+        0
+    });
+    // Only a synchronous pre-tool hook can deny a spawn. Lifecycle start
+    // notifications arrive after the host has started the agent.
+    if !is_post && matches!(input.hook_event_name.as_deref(), None | Some("PreToolUse")) {
+        code
+    } else {
+        0
     }
 }
 
@@ -605,7 +600,10 @@ pub fn run(input: &HookInput) -> i32 {
         Some("SubagentStart") | Some("SubagentStop")
     );
     if tool_name_lower == "agent" || is_subagent_event {
-        track_agent_spawn(input);
+        let control_code = track_agent_spawn(input);
+        if control_code != 0 {
+            return control_code;
+        }
 
         // Timeout detection still gated by EPIC_ORCHESTRATION
         if let Some(agent_id) = input

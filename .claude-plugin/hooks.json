@@ -28,7 +28,7 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
-            "async": true,
+            "async": false,
             "timeout": 5
           }
         ]
