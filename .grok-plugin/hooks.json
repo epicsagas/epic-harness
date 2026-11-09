@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs resume",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" resume",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs guard",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" guard",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs polish",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" polish",
             "timeout": 30
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" observe",
             "timeout": 5
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" observe",
             "timeout": 5
           }
         ]
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs snapshot",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" snapshot",
             "timeout": 10
           }
         ]
@@ -76,7 +76,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs reflect",
+            "command": "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" reflect",
             "timeout": 30
           }
         ]

@@ -33,10 +33,10 @@ fn commands_for(m: &Value, event: &str, matcher: &str) -> Vec<String> {
 }
 
 /// True when `cmd` invokes `epic <sub>`. All three host manifests route
-/// through the launcher (`node ${...}/registry/scripts/hooks/run.mjs <sub>`,
-/// with the host's own root variable).
+/// through the launcher with an environment-provided root. The exact static
+/// command form is validated separately in plugin_assets_test.
 fn invokes(cmd: &str, sub: &str) -> bool {
-    cmd.ends_with(&format!("run.mjs {sub}"))
+    cmd.contains("registry/scripts/hooks/run.mjs") && cmd.rsplit(' ').next() == Some(sub)
 }
 
 const CLAUDE: &str = ".claude-plugin/hooks.json";

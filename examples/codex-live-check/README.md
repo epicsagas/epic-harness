@@ -36,8 +36,8 @@ flowchart LR
   name mismatch that broke marketplace install was fixed by aligning
   `.claude-plugin/marketplace.json` to the plugin manifests' `name: epic`.
   Hooks are a separate question: the user-level `CODEX_HOME/hooks.json` is
-  seeded from `HARNESS_SRC/.codex-plugin/hooks.json` (resolving
-  `${PLUGIN_ROOT}`), which guarantees the hook registrations fire regardless
+  seeded unchanged from `HARNESS_SRC/.codex-plugin/hooks.json`, with
+  `PLUGIN_ROOT` exported by `.envrc`, so the hook registrations fire regardless
   of whether this codex version loads plugin hooks on its own. If case 1
   shows doubled observations, the plugin path fires too; drop the seeded
   file then.
@@ -145,12 +145,8 @@ available on Windows. Hooks have the same PATH requirement and degrade to
 All Codex hook handlers route through
 `registry/scripts/hooks/run.mjs`, so the only prerequisites are `node` (the
 plugin bootstrap already required it) and `epic` on PATH — no `sh`, Git Bash,
-or WSL. One known limit:
-
-- Codex runs Windows hook commands via `cmd.exe /C`, and an install path
-  containing spaces breaks unquoted commands (openai/codex#32402). Until
-  that upstream bug is fixed, install the plugin (and Node) under
-  space-free paths.
+or WSL. Plugin roots containing spaces, literal percent references and shell
+metacharacters are covered by the real-shell regression tests below.
 
 ### Windows acceptance: automated (CI) vs manual
 
@@ -172,3 +168,20 @@ the install path. Manual runbook on a native Windows box (no Git Bash/WSL):
    — the epic hooks must be listed as trusted plugin sources (no
    hand-seeded `CODEX_HOME/hooks.json` anywhere).
 4. Check `%USERPROFILE%\.harness\` received observations after the session.
+
+
+### Plugin paths containing spaces
+
+Hook manifests use a fixed Node loader that reads the plugin root from the
+host environment. Path bytes never enter shell command text, preserving spaces,
+literal `%NAME%` references and shell metacharacters on Windows.
+Run `node --test registry/scripts/hooks/launcher-spaces.test.mjs` to execute every
+shipped handler through the actual platform shell in a temporary plugin path
+containing spaces and metacharacters. The existing released-artifact checks remain in place.
+
+The root environment is a host contract: Claude supplies `CLAUDE_PLUGIN_ROOT`;
+Codex's [`rust-v0.167.0` hook discovery](https://github.com/openai/codex/blob/cb41599ccbe371272892f156286a236aa097bada/codex-rs/hooks/src/engine/discovery.rs)
+inserts `PLUGIN_ROOT` into each command handler's environment; Grok's
+[plugin hook adapter](https://github.com/xai-org/grok-build/blob/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8/crates/codegen/xai-grok-agent/src/plugins/hooks_adapter.rs)
+supplies `GROK_PLUGIN_ROOT`. These source contracts and real-shell fixtures do
+not replace the authenticated host smoke check above.

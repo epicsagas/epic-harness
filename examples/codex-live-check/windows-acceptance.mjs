@@ -26,24 +26,21 @@ const manifest = JSON.parse(
   readFileSync(path.join(root, ".codex-plugin", "hooks.json"), "utf8"),
 );
 
-// Codex substitutes ${PLUGIN_ROOT} inline and hands the command to a shell
-// (cmd.exe /C on Windows, openai/codex#32402). The manifest commands are
-// pinned shell-free (`node ${PLUGIN_ROOT}/... <sub>`, enforced by
-// tests/plugin_assets_test.rs), so the driver resolves them to argv and
-// spawns directly — no shell string, so a PLUGIN_ROOT with spaces or
-// metacharacters cannot break or inject into the command (CodeQL
-// js/shell-command-injection-from-environment). An unrecognized shape is a
-// hard error: the driver must never silently skip a manifest command.
+// Manifests use a fixed Node loader with an environment-provided root. Accept
+// only that exact static form. This legacy acceptance driver invokes the script
+// as argv; real host-shell coverage is in launcher-spaces.test.mjs, while the
+// release acceptance driver/installer fidelity change is tracked by #132.
 const hooks = Object.values(manifest.hooks)
   .flat()
   .flatMap((group) => group.hooks)
   .filter((handler) => handler.type === "command")
   .map((handler) => {
-    const m = handler.command.match(
-      /^node\s+\$\{PLUGIN_ROOT\}\/(\S+)\s+(\S+)$/,
-    );
-    if (!m) throw new Error(`unrecognized hook command: ${handler.command}`);
-    return { raw: handler.command, script: m[1], sub: m[2] };
+    const prefix = `node -e "const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)" `;
+    const sub = handler.command.slice(prefix.length);
+    if (!handler.command.startsWith(prefix) || !/^[a-z-]+$/.test(sub)) {
+      throw new Error(`unrecognized hook command: ${handler.command}`);
+    }
+    return { raw: handler.command, script: "registry/scripts/hooks/run.mjs", sub };
   });
 
 let failures = 0;

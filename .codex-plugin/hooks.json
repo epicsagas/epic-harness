@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs session-start"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" session-start"
           }
         ],
         "description": "Restore previous session context + load project memory and evolved skills"
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs guard"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" guard"
           }
         ],
         "description": "Block dangerous commands (force push, prod DB drop, rm -rf /)"
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs guard"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" guard"
           }
         ],
         "description": "Multi-agent pause directives and concurrent write-conflict warnings"
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" observe"
           }
         ],
         "description": "Record Bash tool result for evolution loop"
@@ -50,11 +50,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" observe"
           },
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs polish"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" polish"
           }
         ],
         "description": "Edits (apply_patch carries Write/Edit as matcher aliases) — observe for evolution loop + auto-format/typecheck"
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" observe"
           }
         ],
         "description": "Record subagent start for orchestration state and the dashboard"
@@ -78,7 +78,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs observe"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" observe"
           }
         ],
         "description": "Record subagent completion for orchestration state and the dashboard"
@@ -90,7 +90,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs snapshot"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" snapshot"
           }
         ],
         "description": "Snapshot session state before context compaction so resume can restore it"
@@ -102,7 +102,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs reflect"
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" reflect"
           }
         ],
         "description": "Analyze session observations -> evolve skills -> gate mutations"

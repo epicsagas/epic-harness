@@ -1,5 +1,5 @@
 //! Static sanity checks for the shipped plugin assets (issue #131): every
-//! Claude, Codex, and Grok hook handler must route through the shell-free
+//! Claude, Codex, and Grok hook handler must route through the environment-root
 //! `registry/scripts/hooks/run.mjs` launcher, and the MCP config must launch
 //! `epic` directly instead of going through `sh -c`. The files are embedded
 //! from their real paths, so a regression fails the build instead of a user
@@ -13,9 +13,9 @@ const GROK_HOOKS: &str = include_str!("../.grok-plugin/hooks.json");
 const MCP_CONFIG: &str = include_str!("../mcp_config.json");
 const RUN_MJS: &str = include_str!("../registry/scripts/hooks/run.mjs");
 
-const LAUNCHER: &str = "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
-const CLAUDE_LAUNCHER: &str = "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
-const GROK_LAUNCHER: &str = "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
+const LAUNCHER: &str = "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\"";
+const CLAUDE_LAUNCHER: &str = "node -e \"const p=require('node:path').join(process.env.CLAUDE_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\"";
+const GROK_LAUNCHER: &str = "node -e \"const p=require('node:path').join(process.env.GROK_PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\"";
 
 /// Command handlers, in manifest order: events, matcher groups, handlers.
 fn command_handlers(value: &Value) -> Vec<&str> {
@@ -34,21 +34,11 @@ fn command_handlers(value: &Value) -> Vec<&str> {
 /// Strings that must never appear in a hook command: they either require a
 /// POSIX shell, break under `cmd.exe /C` argv re-escaping (openai/codex#32402),
 /// or reintroduce shell sequencing the launcher exists to remove.
-const FORBIDDEN: &[&str] = &[
-    "\"",
-    "$(",
-    "test ",
-    "command -v",
-    ";",
-    "&&",
-    "||",
-    ">",
-    "<",
-    "|",
-];
+const FORBIDDEN: &[&str] = &["$(", "test ", "command -v", "&&", "||", ">", "<", "|"];
 
 /// Shared manifest contract: every handler is exactly `<launcher> <sub>` (one
-/// trailing word) and carries no shell syntax.
+/// trailing word). Only the fixed, quoted JavaScript may contain semicolons;
+/// dynamic path bytes are transported through the environment, never the shell.
 fn assert_launcher_form(handlers: &[&str], launcher: &str) {
     assert!(!handlers.is_empty(), "no command handlers found");
     for (i, cmd) in handlers.iter().enumerate() {
@@ -78,8 +68,8 @@ fn codex_hook_commands_all_use_launcher() {
     assert_launcher_form(&handlers, LAUNCHER);
 }
 
-/// The Claude manifest shares the launcher (claude expands `${CLAUDE_PLUGIN_ROOT}`
-/// in hook commands), so all three hosts run one shell-free code path and the
+/// The Claude manifest reads the exported CLAUDE_PLUGIN_ROOT from Node's
+/// environment, so all three hosts share one launcher code path and the
 /// SessionStart bootstrap no longer injects install.cjs stdout into context.
 #[test]
 fn claude_hook_commands_all_use_launcher() {
@@ -89,8 +79,8 @@ fn claude_hook_commands_all_use_launcher() {
     assert_launcher_form(&handlers, CLAUDE_LAUNCHER);
 }
 
-/// The Grok manifest shares the launcher (grok injects `GROK_PLUGIN_ROOT` and
-/// expands `${VAR}` in hook commands), so no POSIX inline form survives
+/// The Grok manifest reads the exported GROK_PLUGIN_ROOT from Node's environment,
+/// so no POSIX inline form survives
 /// anywhere and the guard exit code reaches grok unswallowed.
 #[test]
 fn grok_hook_commands_all_use_launcher() {

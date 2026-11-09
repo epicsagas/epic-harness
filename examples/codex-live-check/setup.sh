@@ -43,10 +43,9 @@ if [ -d "$REAL_CODEX_HOME/plugins/.plugin-appserver" ] && [ ! -e "$CODEX_HOME/pl
   ln -s "$REAL_CODEX_HOME/plugins/.plugin-appserver" "$CODEX_HOME/plugins/.plugin-appserver"
 fi
 
-# Hook manifest from HARNESS_SRC, PLUGIN_ROOT resolved to it.
+# Hook manifest from HARNESS_SRC; .envrc supplies PLUGIN_ROOT at execution.
 # Marketplace is bypassed on purpose: it tracks remote HEAD (pre-merge code).
-sed "s|\${PLUGIN_ROOT}|$HARNESS_SRC|g" "$HARNESS_SRC/.codex-plugin/hooks.json" \
-  > "$CODEX_HOME/hooks.json"
+cp "$HARNESS_SRC/.codex-plugin/hooks.json" "$CODEX_HOME/hooks.json"
 
 # Frontier-class sessions withhold template (un-synthesized) skill bodies —
 # the case-2 injection probes ARE templates, so opt them in regardless of the

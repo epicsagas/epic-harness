@@ -4,7 +4,8 @@
 //
 // Every hook in .claude-plugin/hooks.json, .codex-plugin/hooks.json, and
 // .grok-plugin/hooks.json routes through this script so the command strings
-// stay shell-free: `node ${<host root>}/registry/scripts/hooks/run.mjs <sub>`
+// use a fixed Node loader that reads the host root from process.env, keeping
+// path bytes out of shell command text before invoking this script with <sub>.
 // (PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT / GROK_PLUGIN_ROOT per host). The host
 // pipes hook JSON on stdin and expects the hook's stdout + exit code back, so
 // we spawn `epic` with inherited stdio and propagate its exit code. When
