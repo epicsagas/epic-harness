@@ -11,6 +11,15 @@ const summary = { recent_sessions: [], tool_stats: [], total_tool_calls: 0, avg_
 const activity = (id: string) => ({ runs: [], sessions: [{ session_id: id, project: 'test', last_seen: new Date().toISOString(), tool_calls: 2 }], recent_sessions: [], activity_window_seconds: 300 });
 
 describe('Live Agents activity', () => {
+  it('shows invocation-only sessions without inventing tool calls', async () => {
+    const data = activity('invocation-session');
+    data.sessions[0].tool_calls = 0;
+    api.activity.mockResolvedValue(data);
+    api.summary.mockResolvedValue(summary);
+    render(Agents);
+    expect(await screen.findByText('invocation-session')).toBeTruthy();
+    expect(screen.getByText('Invocation activity')).toBeTruthy();
+  });
   it('keeps same-ID subagents in different projects visible', async () => {
     const runs = ['project-one', 'project-two'].map(project => ({
       project, id: 'same-run', status: 'running', dependency_graph: {}, agent_statuses: {},

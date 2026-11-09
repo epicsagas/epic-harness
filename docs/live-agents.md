@@ -3,7 +3,8 @@
 The dashboard shows two distinct sources of recorded activity:
 
 - **Recently active coding sessions** have recorded tool activity within the
-  last five minutes. They do not require `/orbit` or a spawned subagent. The
+  last five minutes, or a host invocation recorded by the resume hook. They do
+  not require `/orbit` or a spawned subagent. The
   timestamp is the latest observation, not the session ID or a process scan.
   Sessions expire from this section after five minutes without observations.
 - **Tracked subagents** come from explicit `SubagentStart`/`SubagentStop` events
@@ -23,11 +24,13 @@ responses from a previously selected project, and shows load failures. It never
 fills an unavailable live view with demo agents. Session history dates and
 ordering come from actual observation timestamps, including UUID session IDs.
 
-Hosts must deliver Epic observation/lifecycle hooks to appear here. The panel
+Hosts must deliver Epic observation/lifecycle hooks to appear here. Invocation
+activity is stored separately under the project harness's `live_sessions/` and
+does not create tool observations or scores. It refreshes even when resume
+context injection is deduplicated. The panel
 cannot discover an uninstrumented coding process or prove process liveness
-from a recent tool call. Antigravity currently contributes invocation activity
-only when its supported hooks produce observations; it does not claim an
-unsupported subagent lifecycle contract.
+from a recent tool call. Antigravity contributes activity through its supported
+invocation hooks; it does not claim an unsupported subagent lifecycle contract.
 
 After installing a binary with dashboard changes, restart the dashboard server
 and reload the browser: an already running `epic-harness serve` process keeps

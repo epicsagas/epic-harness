@@ -5,6 +5,8 @@ use sqlx::{AnyPool, Row};
 use std::{collections::BTreeMap, io, path::Path};
 
 const SESSION_WINDOW: u64 = 300;
+mod invocations;
+pub(crate) use invocations::record_invocation;
 
 fn valid_project(project: &str) -> bool {
     !project.is_empty() && crate::shared::paths::sanitize_slug_name(project) == project
@@ -126,6 +128,7 @@ pub async fn snapshot(
             "last_heartbeat": row.try_get::<String, _>("last_heartbeat").map_err(crate::store::sqlx_err)?,
         });
     }
+    let mut invocation_sessions = Vec::new();
     if let (Ok(root), Ok(entries)) = (
         projects_root.canonicalize(),
         std::fs::read_dir(projects_root),
@@ -141,6 +144,7 @@ pub async fn snapshot(
             if !directory.starts_with(&root) || !directory.is_dir() {
                 continue;
             }
+            invocation_sessions.extend(invocations::read(&directory, &name, now));
             if !contained_file(&directory.join("orchestrator").join("run.json"), &directory) {
                 continue;
             }
@@ -219,6 +223,16 @@ pub async fn snapshot(
             history.push(value);
         }
     }
+    for invocation in invocation_sessions {
+        let existing = sessions.iter_mut().find(|session| session["project"] == invocation["project"]
+            && session["session_id"] == invocation["session_id"]);
+        if let Some(existing) = existing {
+            if invocation["last_seen"].as_str() > existing["last_seen"].as_str() {
+                existing["last_seen"] = invocation["last_seen"].clone();
+            }
+        } else { sessions.push(invocation); }
+    }
+    sessions.sort_by(|a, b| b["last_seen"].as_str().cmp(&a["last_seen"].as_str()));
     Ok(
         json!({"runs": runs, "sessions": sessions, "recent_sessions": history, "activity_window_seconds": SESSION_WINDOW}),
     )

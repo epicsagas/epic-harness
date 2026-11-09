@@ -39,7 +39,7 @@
             <div class="agent-name">{session.project || $tStore('unscopedProject')}</div>
             <code class="activity-id">{session.session_id}</code>
             <p class="activity-note">{$tStore('lastRecordedActivity')}: {ago(session.last_seen)}</p>
-            <span class="pill info">{session.tool_calls} {$tStore('colToolCalls')}</span>
+            <span class="pill info">{session.tool_calls ? `${session.tool_calls} ${$tStore('colToolCalls')}` : $tStore('invocationActivity')}</span>
           </article>
         {/each}
       </div>

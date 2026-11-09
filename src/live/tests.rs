@@ -2,6 +2,26 @@ use super::*;
 
 const NOW: u64 = 1794139200; // 2026-11-08T12:00:00Z
 
+#[tokio::test]
+async fn invocation_activity_needs_no_tool_observation_and_expires() {
+    let pool = pool().await;
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("antigravity");
+    std::fs::create_dir(&project).unwrap();
+    record_invocation(&project, "conversation-id", "2026-11-08T11:59:00Z").unwrap();
+    let activity = snapshot(&pool, temp.path(), None, NOW).await.unwrap();
+    assert_eq!(activity["sessions"][0]["session_id"], "conversation-id");
+    assert_eq!(activity["sessions"][0]["tool_calls"], 0);
+    assert!(activity["recent_sessions"].as_array().unwrap().is_empty());
+    record_invocation(&project, "conversation-id", "2026-11-08T12:00:00Z").unwrap();
+    let refreshed = snapshot(&pool, temp.path(), None, NOW).await.unwrap();
+    assert_eq!(refreshed["sessions"][0]["last_seen"], "2026-11-08T12:00:00Z");
+    let expired = snapshot(&pool, temp.path(), None, NOW + 301).await.unwrap();
+    assert!(expired["sessions"].as_array().unwrap().is_empty());
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations").fetch_one(&pool).await.unwrap();
+    assert_eq!(count, 0);
+}
+
 async fn pool() -> AnyPool {
     let pool = crate::store::pool::test_memory_pool().await;
     crate::store::schema::init_schema_pool(&pool).await.unwrap();
