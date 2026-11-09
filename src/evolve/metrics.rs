@@ -362,9 +362,8 @@ pub fn update_skill_attribution(
     // The settled-verdict path (attribution_eval_sessions) is unchanged:
     // after the eval window the skill simply stays active every session.
 
-    metrics
-        .skill_attribution
-        .retain(|name, _| active.contains(name) || holdout.contains(name));
+    // Other sessions may expose a different subset. Inventory pruning belongs
+    // to the caller, not to this per-session update.
 }
 
 fn entry_for<'m>(metrics: &'m mut Metrics, skill: &str) -> &'m mut SkillAttribution {
