@@ -124,11 +124,47 @@ fn read_guard_rule_lines() -> Vec<String> {
 /// when the DB has no data yet (cold start).
 /// Project-scoped metrics summary via the scoped loader (None/empty = CWD).
 fn metrics_summary_for(project: Option<&str>) -> MetricsSummary {
+    let project = project
+        .filter(|p| !p.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(project_slug);
+    let configured = &CONFIG.db.harness_url;
+    let url = if configured.is_empty() {
+        format!(
+            "sqlite:{}",
+            crate::shared::paths::global_harness_db_path().display()
+        )
+    } else {
+        configured.clone()
+    };
+    let url = if url.starts_with("sqlite:") {
+        // A snapshot must not use harness_pool(): it creates the database,
+        // initializes schema and changes permissions. Override even an explicit
+        // write/create mode so reading a missing store remains side-effect free.
+        let (base, query) = url.split_once('?').unwrap_or((&url, ""));
+        let mut params = url::form_urlencoded::Serializer::new(String::new());
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            if key != "mode" {
+                params.append_pair(&key, &value);
+            }
+        }
+        params.append_pair("mode", "ro");
+        format!("{base}?{}", params.finish())
+    } else {
+        url
+    };
     let m = crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::harness_pool().await.ok()?;
-        crate::store::metrics::load_metrics_scoped_pool(&pool, project)
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::any::AnyPoolOptions::new()
+            .max_connections(1)
+            .connect(&url)
             .await
-            .ok()
+            .ok()?;
+        let result = crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&project))
+            .await
+            .ok();
+        pool.close().await;
+        result
     });
     match m {
         Some(m) => MetricsSummary {
