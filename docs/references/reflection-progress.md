@@ -12,6 +12,8 @@ The stored observations and existing metrics remain intact.
 Copying a project database allocates destination row IDs, and relabeling project
 histories combines independent progress boundaries. These operations reset the
 derived reflection cursor to zero instead of trying to reuse either cutoff.
+This also initializes progress for legacy histories that only had a timestamp
+watermark, so newly imported older records remain eligible for analysis.
 Observations remain stored; the next reflection may analyze existing history
 again. This conservative replay avoids silently skipping imported or previously
 pending observations.

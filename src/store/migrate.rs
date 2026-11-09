@@ -830,7 +830,7 @@ pub async fn merge_attached_db_async(
     // cannot be combined safely: reset derived progress, preserving all data.
     if stats.obs > 0 || stats.metrics > 0 {
         sqlx::query(
-            "UPDATE metrics_state SET value='0' WHERE key='reflection_cursor' AND project=?",
+            "INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','0',?) ON CONFLICT(key,project) DO UPDATE SET value='0'",
         )
         .bind(slug)
         .execute(&mut *conn)

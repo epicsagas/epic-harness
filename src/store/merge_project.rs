@@ -273,7 +273,7 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
 
     // Relabelled histories have independent progress even when IDs stay in
     // the same global table. Reanalysis is safer than skipping pending rows.
-    sqlx::query("UPDATE metrics_state SET value='0' WHERE key='reflection_cursor' AND project=?")
+    sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','0',?) ON CONFLICT(key,project) DO UPDATE SET value='0'")
         .bind(to)
         .execute(&mut conn)
         .await
