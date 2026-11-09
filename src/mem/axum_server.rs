@@ -7,8 +7,8 @@
 //! ## Key improvements over tiny_http
 //! - Concurrent request handling (tokio multi-thread runtime)
 //! - Standards-compliant CORS via `tower-http`
-//! - Proper async I/O — no blocking the thread pool on DB calls (DB ops are
-//!   still sync SQLite; they are offloaded with `spawn_blocking`)
+//! - Proper async I/O — handlers await the shared sqlx pool without entering
+//!   the synchronous store runtime from a Tokio task
 //! - Graceful shutdown via CTRL-C signal
 
 use axum::{
@@ -28,8 +28,8 @@ use super::store::{
     Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, read_node_pool, read_nodes_limited_pool,
-    remove_edges_for_node, remove_from_index, search_nodes_pool, validate_uuid,
+    delete_edge_by_id_pool, read_node_pool, read_nodes_limited_pool, search_nodes_pool,
+    validate_uuid,
 };
 use crate::store::pool;
 
@@ -485,7 +485,10 @@ async fn handle_update_node(
     }
 }
 
-async fn handle_delete_node(Path(id): Path<String>) -> impl IntoResponse {
+async fn handle_delete_node(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     if !validate_uuid(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -493,10 +496,30 @@ async fn handle_delete_node(Path(id): Path<String>) -> impl IntoResponse {
         )
             .into_response();
     }
-    let _ = delete_node_file(&id);
-    let _ = remove_edges_for_node(&id);
-    let _ = remove_from_index(&id);
-    Json(json!({"deleted": id})).into_response()
+    // Keep the node and its incident edges together on failure. The FTS index
+    // follows the node DELETE through its schema trigger.
+    let result: Result<(), sqlx::Error> = async {
+        let mut tx = state.pool.begin().await?;
+        sqlx::query("DELETE FROM edges WHERE source = ? OR target = ?")
+            .bind(&id)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM nodes WHERE id = ?")
+            .bind(&id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await
+    }
+    .await;
+    match result {
+        Ok(()) => Json(json!({"deleted": id})).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl IntoResponse {
@@ -506,7 +529,10 @@ async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl
     }
 }
 
-async fn handle_delete_edge(Path(id): Path<String>) -> impl IntoResponse {
+async fn handle_delete_edge(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     if !validate_uuid(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -514,7 +540,7 @@ async fn handle_delete_edge(Path(id): Path<String>) -> impl IntoResponse {
         )
             .into_response();
     }
-    match delete_edge_by_id(&id) {
+    match delete_edge_by_id_pool(&state.pool, &id).await {
         Ok(_) => Json(json!({"deleted": id})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -696,5 +722,97 @@ mod tests {
             nodes.as_array().unwrap().is_empty(),
             "limit=0 should return empty array"
         );
+    }
+
+    #[tokio::test]
+    async fn delete_node_uses_request_pool_and_removes_incident_edges() {
+        let state = make_state().await;
+        let server = TestServer::new(build_router(state.clone(), 7700));
+        let first: Value = server
+            .post("/api/nodes")
+            .json(&json!({"type":"concept", "title":"first", "body":"first body"}))
+            .await
+            .json();
+        let second: Value = server
+            .post("/api/nodes")
+            .json(&json!({"type":"concept", "title":"second", "body":"second body"}))
+            .await
+            .json();
+        let id = first["id"].as_str().unwrap();
+        let survivor = second["id"].as_str().unwrap();
+        let edge = server
+            .post("/api/edges")
+            .json(&json!({"source":id, "target":survivor, "relation":"related"}))
+            .await;
+        edge.assert_status(StatusCode::CREATED);
+
+        server
+            .delete(&format!("/api/nodes/{id}"))
+            .await
+            .assert_status_ok();
+        server
+            .get(&format!("/api/nodes/{id}"))
+            .await
+            .assert_status(StatusCode::NOT_FOUND);
+        server
+            .get(&format!("/api/nodes/{survivor}"))
+            .await
+            .assert_status_ok();
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_edge_uses_request_pool_without_nested_runtime() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let id = uuid::Uuid::new_v4();
+        server
+            .delete(&format!("/api/edges/{id}"))
+            .await
+            .assert_status_ok();
+        server.get("/api/stats").await.assert_status_ok();
+    }
+
+    #[tokio::test]
+    async fn delete_node_failure_rolls_back_edge_removal_and_returns_error() {
+        let state = make_state().await;
+        let server = TestServer::new(build_router(state.clone(), 7700));
+        let first: Value = server
+            .post("/api/nodes")
+            .json(&json!({"type":"concept", "title":"blocked", "body":"synthetic"}))
+            .await
+            .json();
+        let second: Value = server
+            .post("/api/nodes")
+            .json(&json!({"type":"concept", "title":"survivor", "body":"synthetic"}))
+            .await
+            .json();
+        let id = first["id"].as_str().unwrap();
+        server
+            .post("/api/edges")
+            .json(&json!({"source":id, "target":second["id"]}))
+            .await
+            .assert_status(StatusCode::CREATED);
+        sqlx::query("CREATE TRIGGER reject_node_delete BEFORE DELETE ON nodes BEGIN SELECT RAISE(ABORT, 'synthetic deletion failure'); END")
+            .execute(&state.pool)
+            .await
+            .unwrap();
+
+        server
+            .delete(&format!("/api/nodes/{id}"))
+            .await
+            .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+        server
+            .get(&format!("/api/nodes/{id}"))
+            .await
+            .assert_status_ok();
+        let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges")
+            .fetch_one(&state.pool)
+            .await
+            .unwrap();
+        assert_eq!(remaining, 1, "failed deletion must retain incident edges");
     }
 }
