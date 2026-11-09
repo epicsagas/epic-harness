@@ -38,19 +38,25 @@ pub(crate) async fn smart_recall_async(
         let fts_query = escape_fts(query);
         // Get matching rowids from FTS, then fetch full nodes — avoids JOIN column ambiguity
         // with sqlx AnyPool which doesn't support FTS5 virtual table column access reliably.
-        let rowids: Vec<i64> = sqlx::query(
-            "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
-        )
-        .bind(&fts_query)
-        .bind(limit as i64 * 3)
-        .fetch_all(pool)
-        .await
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|r| r.try_get::<i64, _>(0).ok())
-                .collect()
-        })
-        .unwrap_or_default();
+        let mut sql = "SELECT nodes_fts.rowid FROM nodes_fts JOIN nodes ON nodes.rowid = nodes_fts.rowid WHERE nodes_fts MATCH ?".to_string();
+        if project.is_some() {
+            sql.push_str(" AND instr(',' || nodes.projects || ',', ',' || ? || ',') > 0");
+        }
+        sql.push_str(" ORDER BY rank LIMIT ?");
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(&fts_query);
+        if let Some(project) = project {
+            query = query.bind(project);
+        }
+        let rowids: Vec<i64> = query
+            .bind(limit as i64 * 3)
+            .fetch_all(pool)
+            .await
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|r| r.try_get::<i64, _>(0).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         if rowids.is_empty() {
             return Ok(vec![]);
