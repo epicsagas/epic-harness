@@ -258,10 +258,14 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
     .bind(from)
     .execute(&mut conn)
     .await;
-    let _ = sqlx::query("DELETE FROM promotion_counters WHERE project = ?")
-        .bind(from)
-        .execute(&mut conn)
-        .await;
+    let _ = sqlx::query(
+        "DELETE FROM promotion_counters WHERE project = ? \
+         AND pattern_key IN (SELECT pattern_key FROM promotion_counters WHERE project = ?)",
+    )
+    .bind(from)
+    .bind(to)
+    .execute(&mut conn)
+    .await;
     if let Ok(r) = sqlx::query("UPDATE promotion_counters SET project = ? WHERE project = ?")
         .bind(to)
         .bind(from)
@@ -470,3 +474,7 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
 
     Ok(new_lines.len())
 }
+
+#[cfg(test)]
+#[path = "regression_254.rs"]
+mod regression_254;
