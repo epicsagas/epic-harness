@@ -151,7 +151,9 @@
     try {
       await dismissOrbitPipeline(id);
       pipelines = pipelines.filter(p => p.id !== id);
-    } catch { /* ignore */ }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
   }
 </script>
 
