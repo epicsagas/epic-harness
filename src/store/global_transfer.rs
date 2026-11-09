@@ -25,6 +25,18 @@ pub(super) async fn transfer(
 
 async fn transfer_inner(conn: &mut SqliteConnection, from: &str, to: &str) -> io::Result<usize> {
     let mut total = 0;
+    // Cursors from separate project streams cannot be combined without skipping
+    // pending observations. Reset derived progress, retaining all observations.
+    sqlx::query("DELETE FROM metrics_state WHERE key='reflection_cursor' AND project=?")
+        .bind(from)
+        .execute(&mut *conn)
+        .await
+        .map_err(super::sqlx_err)?;
+    sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','0',?) ON CONFLICT(key,project) DO UPDATE SET value=excluded.value")
+        .bind(to)
+        .execute(&mut *conn)
+        .await
+        .map_err(super::sqlx_err)?;
     for table in [
         "observations",
         "sessions",
