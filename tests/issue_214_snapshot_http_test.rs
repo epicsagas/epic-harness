@@ -196,3 +196,38 @@ fn issue_214_duplicate_snapshot_copies_preserve_distinct_projects() {
         std::collections::HashSet::from(["project-a", "project-b"])
     );
 }
+
+#[test]
+fn issue_214_empty_project_legacy_database_snapshots_remain_visible() {
+    let dashboard = Dashboard::start();
+    dashboard.seed_snapshot("project-a", "legacy unattributed", 1);
+    dashboard.seed_snapshot("project-b", "scoped snapshot", 2);
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::AnyPool::connect(&format!(
+            "sqlite:{}",
+            dashboard.data.join("harness.db").display(),
+        ))
+        .await
+        .unwrap();
+        sqlx::query("UPDATE sessions SET project = '' WHERE summary = 'legacy unattributed'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+    });
+    let (_, all) = dashboard.request("GET", "/api/harness?cmd=get_session_snapshots");
+    assert_eq!(all.as_array().unwrap().len(), 2);
+    assert!(
+        all.as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["summary"] == "legacy unattributed")
+    );
+    let (_, scoped) = dashboard.request(
+        "GET",
+        "/api/harness?cmd=get_session_snapshots&project=project-b",
+    );
+    assert_eq!(scoped.as_array().unwrap().len(), 1);
+    assert_eq!(scoped[0]["summary"], "scoped snapshot");
+}
