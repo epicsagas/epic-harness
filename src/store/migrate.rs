@@ -20,6 +20,13 @@ use std::str::FromStr;
 
 use super::sqlx_err;
 
+#[path = "migration_copy.rs"]
+mod migration_copy;
+
+#[cfg(test)]
+#[path = "regression_185.rs"]
+mod regression_185;
+
 // ── Connection factory ──────────────────────────────────────────────────────
 
 async fn open_migrate_conn() -> io::Result<sqlx::SqliteConnection> {
@@ -681,152 +688,7 @@ pub async fn merge_attached_db_async(
     slug: &str,
     attach_name: &str,
 ) -> io::Result<GlobalMergeStats> {
-    let mut stats = GlobalMergeStats::default();
-
-    // Tables with simple columns — direct INSERT with project appended.
-    let simple_tables = [
-        // (table, columns_without_project, src_columns_without_project)
-        (
-            "observations",
-            "timestamp, session_id, tool, tool_category, action, result, score, \
-          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
-          file_ext, sequence_id, pipeline_id, project",
-            "timestamp, session_id, tool, tool_category, action, result, score, \
-          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
-          file_ext, sequence_id, pipeline_id",
-        ),
-        (
-            "sessions",
-            "timestamp, snap_type, summary, pending_tasks, context_usage, \
-          pipeline_state, created_at_millis, project",
-            "timestamp, snap_type, summary, pending_tasks, context_usage, \
-          pipeline_state, created_at_millis",
-        ),
-        (
-            "evolution_records",
-            "timestamp, observations, success_rate, avg_score, error_patterns, \
-          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
-          analysis_summary, project",
-            "timestamp, observations, success_rate, avg_score, error_patterns, \
-          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
-          analysis_summary",
-        ),
-        (
-            "orch_runs",
-            "id, status, agents_json, dep_graph_json, created_at, updated_at, project",
-            "id, status, agents_json, dep_graph_json, created_at, updated_at",
-        ),
-        (
-            "orch_control",
-            "action, target, message, generation, project",
-            "action, target, message, generation",
-        ),
-    ];
-
-    for (table, dest_cols, src_cols) in &simple_tables {
-        let sql = format!(
-            "INSERT OR IGNORE INTO main.{table} ({dest_cols}) \
-             SELECT {src_cols}, ? FROM {attach_name}.{table}"
-        );
-        match sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(slug)
-            .execute(&mut *conn)
-            .await
-        {
-            Ok(r) => match *table {
-                "observations" => stats.obs += r.rows_affected() as usize,
-                "sessions" => stats.sessions += r.rows_affected() as usize,
-                "evolution_records" => stats.evo += r.rows_affected() as usize,
-                _ => {}
-            },
-            Err(e) => {
-                // Table may not exist in the source DB — skip silently.
-                if !e.to_string().contains("no such table") {
-                    eprintln!("[migrate/to-global] {table}: {e}");
-                }
-            }
-        }
-    }
-
-    // metrics_state: key-value with project
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.metrics_state (key, value, project) \
-         SELECT key, value, ? FROM {attach_name}.metrics_state"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.metrics += r.rows_affected() as usize;
-    }
-
-    // score_history: has UNIQUE(timestamp) so INSERT OR IGNORE deduplicates
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.score_history \
-         (timestamp, success_rate, avg_score, observations, \
-          dim_success, dim_quality, dim_cost, project) \
-         SELECT timestamp, success_rate, avg_score, observations, \
-                dim_success, dim_quality, dim_cost, ? \
-         FROM {attach_name}.score_history"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.score_history += r.rows_affected() as usize;
-    }
-
-    // skill_attribution: composite PK (skill_name, project) — safe to INSERT OR IGNORE
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.skill_attribution \
-         (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) \
-         SELECT skill_name, ?, sessions_active, avg_score_with, avg_score_without, first_seen \
-         FROM {attach_name}.skill_attribution"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.skill_attr += r.rows_affected() as usize;
-    }
-
-    // promotion_counters: composite PK (pattern_key, project)
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.promotion_counters (pattern_key, project, count) \
-         SELECT pattern_key, ?, count FROM {attach_name}.promotion_counters"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.promo += r.rows_affected() as usize;
-    }
-
-    // orch_agents, orch_agent_events, orch_agent_inbox: FK-linked to orch_runs
-    let orch_tables: &[(&str, &str)] = &[
-        (
-            "orch_agents",
-            "id, run_id, role, task, satisfies_json, status, phase, progress, \
-             last_heartbeat, started_at, completed_at",
-        ),
-        (
-            "orch_agent_events",
-            "id, agent_id, timestamp, event_type, data_json",
-        ),
-        (
-            "orch_agent_inbox",
-            "id, agent_id, from_agent, timestamp, message",
-        ),
-    ];
-    for (table, cols) in orch_tables {
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "INSERT OR IGNORE INTO main.{table} ({cols}) SELECT {cols} FROM {attach_name}.{table}"
-        )))
-        .execute(&mut *conn)
-        .await;
-    }
-
-    Ok(stats)
+    migration_copy::merge(conn, slug, attach_name).await
 }
 
 /// Entry point for `epic-harness migrate --to-global [--dry-run]`.
@@ -890,6 +752,7 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
     };
 
     let mut total = GlobalMergeStats::default();
+    let mut failures = 0usize;
     for (slug, db_path) in &candidates {
         // ATTACH the per-project DB.
         // SQLite ATTACH does not support parameterized arguments — the database
@@ -906,6 +769,7 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
             .map_err(sqlx_err)
         {
             eprintln!("[migrate/to-global] ATTACH failed for {slug}: {e}");
+            failures += 1;
             continue;
         }
 
@@ -919,10 +783,21 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
             }
             Err(e) => {
                 eprintln!("[migrate/to-global] merge failed for {slug}: {e}");
+                failures += 1;
             }
         }
 
-        let _ = conn.execute("DETACH src").await;
+        if let Err(error) = conn.execute("DETACH src").await {
+            eprintln!("[migrate/to-global] DETACH failed for {slug}: {error}");
+            failures += 1;
+        }
+    }
+
+    if failures > 0 {
+        eprintln!(
+            "[migrate/to-global] incomplete: {failures} transfer error(s); original databases retained"
+        );
+        return 1;
     }
 
     // Mark consolidation complete
