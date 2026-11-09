@@ -285,10 +285,19 @@ pub fn run_context(
     let mut skills_generated: u64 = 0;
     let mut stagnation_count: u64 = 0;
     for r in &evo_records {
-        if let Some(pats) = r.get("patterns").and_then(|p| p.as_array()) {
+        if let Some(pats) = r
+            .get("failure_patterns")
+            .or_else(|| r.get("patterns"))
+            .and_then(|p| p.as_array())
+        {
             for p in pats {
-                if let Some(t) = p.get("type").and_then(|v| v.as_str()) {
-                    *pattern_freq.entry(t.to_string()).or_default() += 1;
+                if let Some(t) = p
+                    .get("pattern_type")
+                    .or_else(|| p.get("type"))
+                    .and_then(|v| v.as_str())
+                {
+                    *pattern_freq.entry(t.to_string()).or_default() +=
+                        p.get("count").and_then(|v| v.as_u64()).unwrap_or(1);
                 }
             }
         }
@@ -298,7 +307,8 @@ pub fn run_context(
             trend_hist.push(t.to_string());
         }
         skills_generated += r
-            .get("skills_generated")
+            .get("skills_seeded")
+            .or_else(|| r.get("skills_generated"))
             .and_then(|v| v.as_u64())
             .unwrap_or(0);
         if r.get("stagnation_triggered")
@@ -341,7 +351,7 @@ pub fn run_context(
         .collect();
     let evo_stats = serde_json::json!({
         "total_sessions": evo_records.len(),
-        "patterns_detected": evo_records.iter().filter(|r| r.get("patterns").and_then(|p| p.as_object()).map(|o| !o.is_empty()).unwrap_or(false)).count(),
+        "patterns_detected": evo_records.iter().map(|r| r.get("failure_patterns").or_else(|| r.get("patterns")).and_then(|p| p.as_array()).map(|p| p.len()).unwrap_or(0)).sum::<usize>(),
         "skills_generated": skills_generated,
         "pattern_frequency": pf_map,
         "trend_last10": trend_hist.into_iter().rev().take(10).collect::<Vec<_>>(),
