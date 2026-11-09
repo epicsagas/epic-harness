@@ -192,8 +192,20 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                 let project =
                     parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
                 let harness_dir = common::harness_dir();
-                let body = handle_harness_cmd(&cmd, &harness_dir, project.as_deref());
-                json_response(&body)
+                match validate_harness_read(&cmd, project.as_deref()) {
+                    Ok(()) => {
+                        let body = handle_harness_cmd(&cmd, &harness_dir, project.as_deref());
+                        json_response(&body)
+                    }
+                    Err(error) => {
+                        json_response(&serde_json::json!({"error": error.to_string()}).to_string())
+                            .with_status_code(if error.kind() == std::io::ErrorKind::InvalidInput {
+                                400
+                            } else {
+                                500
+                            })
+                    }
+                }
             }
 
             // ── Orbit Pipeline Dismiss ───────────────────────
@@ -440,6 +452,36 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> S
     }
 }
 
+fn selected_project_dirs(
+    project: Option<&str>,
+) -> std::io::Result<Vec<(String, std::path::PathBuf)>> {
+    use std::io::{Error, ErrorKind};
+    if let Some(slug) = project {
+        let dir = crate::shared::paths::checked_harness_dir_for_slug(slug)
+            .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        return Ok(vec![(slug.to_string(), dir)]);
+    }
+    let entries = match std::fs::read_dir(crate::shared::paths::harness_projects_root()) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let mut projects = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let Some(slug) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        // Exclude escaping project junctions from aggregate access.
+        if let Ok(dir) = crate::shared::paths::checked_harness_dir_for_slug(&slug)
+            && dir.is_dir()
+        {
+            projects.push((slug, dir));
+        }
+    }
+    Ok(projects)
+}
+
 fn parse_query_param(url: &str, key: &str) -> Option<String> {
     let query = url.split('?').nth(1)?;
     for pair in query.split('&') {
@@ -451,8 +493,56 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
     None
 }
 
+fn validate_harness_read(cmd: &str, project: Option<&str>) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    let slug = project
+        .map(str::to_owned)
+        .unwrap_or_else(crate::shared::paths::project_slug);
+    crate::shared::paths::checked_harness_dir_for_slug(&slug)
+        .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+    let (files, folders): (&[&str], &[&str]) = match cmd {
+        "get_harness_metrics" => (&["metrics.json"], &[]),
+        "get_evolved_skills" => (&["metrics.json", "evolution.jsonl"], &["evolved"]),
+        "get_obs_summary" => (&[], &["obs"]),
+        "get_orbit_pipelines" => (&[], &["orbit"]),
+        "get_seesaw_registry" => (&["seesaw.json"], &[]),
+        "get_variant_pool" => (&["variants.json"], &[]),
+        "get_harness_snapshot" => (&[], &["evolved"]),
+        "get_manifests" => (&["manifests.jsonl"], &[]),
+        "get_session_snapshots" => (&[], &["sessions"]),
+        "get_effect_pending" => (&[".cross-project-enabled"], &[]),
+        _ => (&[], &[]),
+    };
+    for relative in files.iter().chain(folders.iter()) {
+        crate::shared::paths::checked_harness_path_for_slug(&slug, relative)
+            .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+    }
+    for relative in folders {
+        let folder = crate::shared::paths::checked_harness_path_for_slug(&slug, relative)
+            .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+        if !folder.is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(folder)? {
+            let entry = entry?;
+            let child = std::path::Path::new(relative).join(entry.file_name());
+            let resolved = crate::shared::paths::checked_harness_path_for_slug(&slug, &child)
+                .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+            if *relative == "evolved" && resolved.is_dir() {
+                crate::shared::paths::checked_harness_path_for_slug(&slug, child.join("SKILL.md"))
+                    .map_err(|error| Error::new(ErrorKind::InvalidInput, error))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<&str>) -> String {
     use std::fs;
+    // File fallbacks must use the same selected project as the SQL readers.
+    let selected_dir =
+        project.and_then(|slug| crate::shared::paths::checked_harness_dir_for_slug(slug).ok());
+    let harness_dir = selected_dir.as_deref().unwrap_or(harness_dir);
     match cmd {
         "get_harness_metrics" => {
             // Project-scoped load: a specific slug, or cross-project aggregate
@@ -757,7 +847,12 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                 crate::store::orbit_store::list_all_pipelines_pool(&pool).await
             }) && !pipelines.is_empty()
             {
-                let mut sorted = pipelines;
+                let mut sorted: Vec<_> = pipelines
+                    .into_iter()
+                    .filter(|pipeline| {
+                        project.is_none_or(|slug| pipeline["project"].as_str() == Some(slug))
+                    })
+                    .collect();
                 sorted.sort_by(|a, b| {
                     let ta = a["started_at"].as_str().unwrap_or("");
                     let tb = b["started_at"].as_str().unwrap_or("");
@@ -766,26 +861,29 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                 return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
             }
             // Fallback: scan PIPELINE-*.json files
-            let projects_root = harness_dir.parent().unwrap_or(harness_dir);
             let mut all: Vec<serde_json::Value> = vec![];
-            if let Ok(rd) = fs::read_dir(projects_root) {
-                for proj_entry in rd.filter_map(|e| e.ok()) {
-                    let orbit_dir = proj_entry.path().join("orbit");
-                    if !orbit_dir.exists() {
+            if let Ok(projects) = selected_project_dirs(project) {
+                for (slug, _) in projects {
+                    let Ok(orbit_dir) =
+                        crate::shared::paths::checked_harness_path_for_slug(&slug, "orbit")
+                    else {
                         continue;
-                    }
+                    };
                     if let Ok(files) = fs::read_dir(&orbit_dir) {
                         for f in files.filter_map(|e| e.ok()) {
                             let fname = f.file_name().to_string_lossy().to_string();
                             if fname.starts_with("PIPELINE-")
                                 && fname.ends_with(".json")
-                                && let Ok(content) = fs::read_to_string(f.path())
+                                && let Ok(path) =
+                                    crate::shared::paths::checked_harness_path_for_slug(
+                                        &slug,
+                                        std::path::Path::new("orbit").join(f.file_name()),
+                                    )
+                                && let Ok(content) = fs::read_to_string(path)
                                 && let Ok(mut v) =
                                     serde_json::from_str::<serde_json::Value>(&content)
                             {
-                                v["_project"] = serde_json::Value::String(
-                                    proj_entry.file_name().to_string_lossy().to_string(),
-                                );
+                                v["_project"] = serde_json::Value::String(slug.clone());
                                 all.push(v);
                             }
                         }
@@ -861,7 +959,13 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
         // adaptation-landscape state. Each is a thin reader; computation
         // stays in the evolve modules.
         "get_seesaw_registry" => {
-            let reg = crate::evolve::seesaw::load_registry_for(project);
+            // Dashboard reads never perform the evolution engine's on-load
+            // legacy migration/scrub. Mutations belong to explicit writes.
+            let reg: crate::shared::evolution::SolvedTaskRegistry =
+                fs::read_to_string(harness_dir.join("seesaw.json"))
+                    .ok()
+                    .and_then(|text| serde_json::from_str(&text).ok())
+                    .unwrap_or_default();
             serde_json::to_string(&reg).unwrap_or_else(|_| "null".into())
         }
         "get_variant_pool" => {

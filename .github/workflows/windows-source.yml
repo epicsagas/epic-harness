@@ -1,0 +1,43 @@
+name: Windows source regressions
+on:
+  pull_request:
+  push:
+    branches: ['fix/**']
+permissions:
+  contents: read
+env:
+  SKIP_DASHBOARD_BUILD: '1'
+jobs:
+  source:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p epic-harness --all-targets -- -D warnings
+      - name: Build both executables from this commit
+        run: cargo build -p epic-harness --bins
+      - name: Source regressions
+        shell: pwsh
+        run: |
+          foreach ($target in @('worktree_identity_test', 'reflection_containment_test')) {
+            if (Test-Path "tests/$target.rs") {
+              cargo test -p epic-harness --test $target
+              if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            }
+          }
+          foreach ($filter in @('powershell_reads_do_not_classify_quoted_failures', 'authoritative_outcomes_override_printed_keywords', 'rooted_windows_actions_are_masked')) {
+            cargo test -p epic-harness $filter
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          $scripts = @(Get-ChildItem registry/scripts/hooks/*.test.mjs -ErrorAction SilentlyContinue)
+          if ($scripts.Count) {
+            node --test @($scripts.FullName)
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
