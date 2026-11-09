@@ -75,13 +75,13 @@ async fn query_nodes_async(
     let mut sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE 1=1");
 
     if tag.is_some() {
-        sql.push_str(" AND tags LIKE ?");
+        sql.push_str(" AND instr(',' || tags || ',', ',' || ? || ',') > 0");
     }
     if node_type.is_some() {
         sql.push_str(" AND type = ?");
     }
     if project.is_some() {
-        sql.push_str(" AND projects LIKE ?");
+        sql.push_str(" AND instr(',' || projects || ',', ',' || ? || ',') > 0");
     }
     // Cap limit at 200
     let safe_limit = (limit.min(200)) as i64;
@@ -89,13 +89,13 @@ async fn query_nodes_async(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(t) = tag {
-        query = query.bind(format!("%{t}%"));
+        query = query.bind(t);
     }
     if let Some(t) = node_type {
         query = query.bind(t);
     }
     if let Some(p) = project {
-        query = query.bind(format!("%{p}%"));
+        query = query.bind(p);
     }
     query = query.bind(safe_limit);
 

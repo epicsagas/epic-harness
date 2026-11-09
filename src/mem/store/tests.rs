@@ -150,3 +150,55 @@ fn test_session_importance_lower_than_pattern() {
         "session importance should be lower than pattern"
     );
 }
+
+#[tokio::test]
+async fn issue_228_project_and_tag_membership_are_exact_literals() {
+    let pool = crate::store::pool::test_memory_pool().await;
+    init_schema_pool(&pool).await.unwrap();
+    for (id, project, tag) in [
+        ("alpha-note", "alpha", "prod"),
+        ("alphabet-note", "alphabet", "production"),
+        ("literal-percent", "%", "%"),
+    ] {
+        let mut node = make_node(id, id, "concept", &[tag], None);
+        node.frontmatter.projects = vec![project.into()];
+        write_node_pool(&pool, &node).await.unwrap();
+    }
+    let alpha = query_nodes_pool(&pool, None, None, Some("alpha"), 20)
+        .await
+        .unwrap();
+    assert_eq!(
+        alpha
+            .iter()
+            .map(|n| n.frontmatter.id.as_str())
+            .collect::<Vec<_>>(),
+        ["alpha-note"]
+    );
+    assert_eq!(
+        query_nodes_pool(&pool, Some("prod"), None, None, 20)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        query_nodes_pool(&pool, None, None, Some("%"), 20)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        query_nodes_pool(&pool, Some("_"), None, None, 20)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        smart_recall_pool(&pool, Some("alpha"), None, 20)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
