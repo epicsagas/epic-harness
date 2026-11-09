@@ -150,3 +150,35 @@ fn test_session_importance_lower_than_pattern() {
         "session importance should be lower than pattern"
     );
 }
+
+#[tokio::test]
+async fn issue_181_dedup_preserves_distinct_project_knowledge() {
+    let pool = crate::store::pool::test_memory_pool().await;
+    init_schema_pool(&pool).await.unwrap();
+    let mut alpha = make_node("alpha-id", "Database choice", "decision", &[], None);
+    alpha.frontmatter.projects = vec!["alpha".into()];
+    alpha.frontmatter.updated = now_iso();
+    alpha.body = "Alpha uses SQLite".into();
+    let (alpha_id, _) = write_node_dedup_pool(&pool, &alpha, 24).await.unwrap();
+    let mut beta = alpha.clone();
+    beta.frontmatter.id = "beta-id".into();
+    beta.frontmatter.projects = vec!["beta".into()];
+    beta.body = "Beta uses PostgreSQL".into();
+    let (beta_id, deduped) = write_node_dedup_pool(&pool, &beta, 24).await.unwrap();
+    assert!(!deduped, "a different project is not duplicate knowledge");
+    assert_ne!(alpha_id, beta_id);
+    let stored = read_node_pool(&pool, &beta_id).await.unwrap();
+    assert_eq!(stored.body, beta.body);
+    assert_eq!(stored.frontmatter.projects, beta.frontmatter.projects);
+    beta.frontmatter.id = "another-beta-id".into();
+    assert_eq!(
+        write_node_dedup_pool(&pool, &beta, 24).await.unwrap(),
+        (beta_id, true)
+    );
+
+    alpha.frontmatter.id = "another-alpha-id".into();
+    assert_eq!(
+        write_node_dedup_pool(&pool, &alpha, 24).await.unwrap(),
+        (alpha_id, true)
+    );
+}
