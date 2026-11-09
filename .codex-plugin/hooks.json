@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const p=require('node:path').join(process.env.PLUGIN_ROOT,'registry/scripts/hooks/run.mjs');process.argv.splice(1,0,p);import(require('node:url').pathToFileURL(p).href)\" dispatch"
+          }
+        ],
+        "description": "Deliver bounded task-specific static skill guidance and scoped memory"
+      }
+    ],
     "SessionStart": [
       {
         "matcher": "*",

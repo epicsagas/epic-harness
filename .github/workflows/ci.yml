@@ -36,6 +36,8 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Native prompt transport and release boundary
+        run: node --test registry/scripts/hooks/prompt-dispatch.test.mjs
       - name: Dashboard typecheck and tests
         working-directory: app
         run: |
@@ -52,6 +54,29 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test
+
+  windows-source-redaction:
+    name: Windows source redaction regression
+    runs-on: windows-latest
+    env:
+      SKIP_DASHBOARD_BUILD: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test credential redaction from changed source
+        shell: pwsh
+        run: |
+          cargo test -p epic-harness --locked --lib issue_177
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Build and test native prompt dispatch
+        run: cargo test -p epic-harness --locked --test prompt_dispatch_test --test plugin_assets_test --test hook_manifest_test
+      - name: Test real-shell prompt transport and release boundary
+        run: node --test registry/scripts/hooks/prompt-dispatch.test.mjs
 
   windows-hooks:
     name: Windows hook portability

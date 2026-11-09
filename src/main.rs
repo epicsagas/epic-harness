@@ -163,7 +163,7 @@ fn main() {
     // the dispatch below let a new hook subcommand silently skip stdin
     // (HookInput::default() → session_id None → degraded resume lock keys).
     const HOOK_SUBCMDS: &[&str] = &[
-        "resume", "guard", "polish", "observe", "snapshot", "reflect",
+        "resume", "guard", "polish", "observe", "snapshot", "reflect", "dispatch",
     ];
 
     // Read stdin once, pass to hook subcommands only. Other subcommands
@@ -172,15 +172,21 @@ fn main() {
     let hook_subcmd = HOOK_SUBCMDS.contains(&subcmd);
     let mut stdin_buf = String::new();
     if hook_subcmd && !io::stdin().is_terminal() {
-        match shared::helpers::read_stdin_bounded() {
+        let payload = if subcmd == "dispatch" {
+            hooks::dispatch::read_input()
+        } else {
+            shared::helpers::read_stdin_bounded()
+        };
+        match payload {
             Some(buf) => stdin_buf = buf,
-            None => {
+            None if subcmd != "dispatch" => {
                 // Headless caller with no payload (e.g. manual Bash-tool run).
                 // Session_id will be absent — degraded keys, same as empty stdin.
                 eprintln!(
                     "[harness] stdin payload timeout after 5s — proceeding without hook input"
                 );
             }
+            None => {}
         }
     }
 
@@ -192,6 +198,7 @@ fn main() {
 
     let exit_code = match subcmd {
         "resume" => hooks::resume::run(&input),
+        "dispatch" => hooks::dispatch::run(&input),
         "guard" => hooks::guard::run(&input),
         "polish" => hooks::polish::run(&input),
         "observe" => hooks::observe::run(&input),
@@ -280,6 +287,7 @@ fn main() {
             eprintln!("  epic-harness <SUBCOMMAND> [OPTIONS]\n");
             eprintln!("HOOK SUBCOMMANDS (invoked automatically by agent hooks):");
             eprintln!("  resume       Restore session context on conversation start");
+            eprintln!("  dispatch     Deliver task-specific skill guidance and project memory");
             eprintln!("  guard        Block/warn on dangerous shell commands");
             eprintln!("  observe      Record tool call observations for pattern analysis");
             eprintln!("  polish       Auto-format and typecheck after file edits");
@@ -341,8 +349,8 @@ fn main() {
     };
 
     // stdout output varies by host protocol:
-    // - Claude Code: stdin passthrough (original contract)
-    // - Codex/Antigravity: event-specific JSON (detected via hook_event_name)
+    // - Legacy lifecycle payloads: stdin passthrough (original contract)
+    // - Supported named events: event-specific JSON (hook_event_name)
     if input.hook_event_name.is_some() {
         // Codex / Antigravity protocol
         match subcmd {
@@ -352,7 +360,7 @@ fn main() {
                     r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#
                 );
             }
-            "guard" | "observe" | "polish" | "resume" => {
+            "guard" | "observe" | "polish" | "resume" | "dispatch" => {
                 // hint() writes to stderr, which Codex does NOT feed to the
                 // model, so replay the mirrored lines on stdout. Raw text is
                 // not safe: Codex parses stdout that starts with `{` or `[`
@@ -361,7 +369,7 @@ fn main() {
                 // `[polish]` prefixes hit exactly that. Non-JSON stdout is
                 // accepted too, but JSON is deterministic. Verified wire
                 // shapes (codex-rs/hooks/src/schema.rs, deny_unknown_fields):
-                // SessionStart/SubagentStart/PreToolUse/PostToolUse carry
+                // SessionStart/SubagentStart/PreToolUse/PostToolUse/UserPromptSubmit carry
                 // `hookSpecificOutput.additionalContext`; SubagentStop and
                 // PreCompact accept only universal fields, so mirrored text
                 // rides `systemMessage` there.
@@ -371,7 +379,8 @@ fn main() {
                     let payload = serde_json::to_string(&mirrored.join("\n"))
                         .unwrap_or_else(|_| "\"\"".to_string());
                     match event {
-                        "SessionStart" | "SubagentStart" | "PreToolUse" | "PostToolUse" => {
+                        "SessionStart" | "SubagentStart" | "PreToolUse" | "PostToolUse"
+                        | "UserPromptSubmit" => {
                             println!(
                                 r#"{{"hookSpecificOutput":{{"hookEventName":"{event}","additionalContext":{payload}}}}}"#
                             );
@@ -388,8 +397,8 @@ fn main() {
             }
             _ => {}
         }
-    } else {
-        // Claude Code: stdin passthrough contract
+    } else if subcmd != "dispatch" {
+        // Legacy lifecycle input: stdin passthrough contract.
         print!("{stdin_buf}");
     }
 

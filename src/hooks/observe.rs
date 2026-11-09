@@ -7,7 +7,7 @@ use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
-use crate::shared::sanitize::{mask_path_action, mask_secrets};
+use crate::shared::sanitize::{mask_json_secrets, mask_path_action, mask_secrets};
 
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
@@ -380,14 +380,14 @@ fn resolve_action(v: &serde_json::Value) -> String {
             let files = apply_patch_paths(cmd, true);
             if files.is_empty() {
                 // A real shell command, not a patch payload.
-                return Some(mask_secrets(truncate_str(cmd, 500)));
+                return Some(truncate_str(&mask_secrets(cmd), 500).to_string());
             }
             let masked: Vec<String> = files.iter().map(|f| mask_path_action(f)).collect();
             Some(truncate_str(&masked.join(" "), 500).to_string())
         })
         .unwrap_or_else(|| {
-            let s = serde_json::to_string(v).unwrap_or_default();
-            mask_secrets(truncate_str(&s, 200))
+            let s = serde_json::to_string(&mask_json_secrets(v)).unwrap_or_default();
+            truncate_str(&mask_secrets(&s), 200).to_string()
         })
 }
 
@@ -552,7 +552,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(truncate_str(&combined, 500));
+            let masked = truncate_str(&mask_secrets(&combined), 500).to_string();
             record.error_snippet = Some(masked);
         }
     }
@@ -626,6 +626,14 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    #[test]
+    fn issue_177_redacts_structured_actions_before_truncation() {
+        let secret = "SYNTHETIC PRIVATE VALUE ".repeat(40);
+        let action = resolve_action(&serde_json::json!({"password": secret}));
+        assert!(!action.contains("SYNTHETIC"));
+        assert!(action.contains("<REDACTED>"));
+    }
 
     // ── resolve_action ──────────────────────────────
     fn patch_for(file: &str) -> serde_json::Value {

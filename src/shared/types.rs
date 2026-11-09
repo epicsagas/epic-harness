@@ -15,13 +15,15 @@ pub struct HookInput {
     pub conversation_summary: Option<String>,
     pub pending_tasks: Option<Vec<String>>,
     pub context_usage: Option<f64>,
-    /// Codex/Antigravity hook event name (e.g. "SessionStart", "PreToolUse").
-    /// When present, stdout follows the Codex hook protocol instead of Claude
-    /// Code's stdin-passthrough contract.
+    /// Host hook event name (e.g. "SessionStart", "UserPromptSubmit").
+    /// When present, stdout follows the event-specific JSON hook protocol.
+    /// Legacy lifecycle inputs without an event retain stdin passthrough.
     pub hook_event_name: Option<String>,
     /// Claude Code hook payload session_id. Absent on legacy hosts — callers
     /// fall back to a date+pid key.
     pub session_id: Option<String>,
+    /// UserPromptSubmit task text. Non-string values are ordinary no-op input.
+    pub prompt: Option<serde_json::Value>,
     /// Claude Code SessionStart source: "startup" | "resume" | "clear" | "compact".
     pub source: Option<String>,
     /// Codex subagent identity, supplied on `SubagentStart` / `SubagentStop`.
