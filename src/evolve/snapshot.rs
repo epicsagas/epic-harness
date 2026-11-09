@@ -103,18 +103,26 @@ fn content_hash(snapshot_without_hash_and_ts: &HarnessSnapshot) -> String {
     format!("{:016x}{:016x}", h1.finish(), h2.finish())
 }
 
-/// Read guard-rules.yaml as a sorted list of non-empty, trimmed lines.
+/// Read the effective guard rules, preserving action and rule priority.
 /// Absent file → empty vec (snapshot still valid).
 fn read_guard_rule_lines() -> Vec<String> {
     let path = guard_rules_file();
     let Ok(content) = fs::read_to_string(&path) else {
         return Vec::new();
     };
-    let mut lines: Vec<String> = content
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect();
+    // The runtime parser owns the supported format. Sorting raw lines loses
+    // section membership, making a blocked→warned policy change invisible.
+    let (blocked, warned) = crate::shared::classify::parse_guard_rules(&content);
+    let mut lines = Vec::new();
+    for (action, rules) in [("blocked", blocked), ("warned", warned)] {
+        for (priority, rule) in rules.iter().enumerate() {
+            let value = serde_json::json!({
+                "pattern": rule.pattern.as_str(),
+                "message": rule.msg,
+            });
+            lines.push(format!("{action}[{priority}]:{value}"));
+        }
+    }
     lines.sort();
     lines.dedup();
     lines
