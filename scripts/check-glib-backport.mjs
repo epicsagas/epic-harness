@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+
+const read = relative => readFileSync(new URL('../' + relative, import.meta.url), 'utf8');
+const provenance = JSON.parse(read('vendor/glib-0.18.5/EPIC_BACKPORT.json'));
+const source = read('vendor/glib-0.18.5/src/variant_iter.rs').replaceAll('\r\n', '\n');
+const hash = createHash('sha256').update(source).digest('hex');
+assert.equal(provenance.archive_sha256, '233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5');
+assert.equal(provenance.upstream_fix_commit, '05dff0ee696f9bcd8617cd48c4b812d046d440cb');
+assert.equal(provenance.patched_source_sha256_lf, 'a0f5ee8acb8faa089bcdfbc9a57372609fce7654026ccef7d9a224d05a654ccc');
+assert.equal(hash, provenance.patched_source_sha256_lf, 'vendored safety fix changed: re-review before accepting the advisory exception');
+assert.match(source, /let mut p: \*mut libc::c_char/);
+assert.match(source, /g_variant_get_child\([\s\S]*?&mut p,/);
+assert.match(read('Cargo.toml'), /\[patch\.crates-io\][\s\S]*glib\s*=\s*\{\s*path\s*=\s*"vendor\/glib-0\.18\.5"\s*\}/);
+const entry = read('Cargo.lock').split('[[package]]').find(block => /^\s*name = "glib"\s*$/m.test(block));
+assert.ok(entry, 'glib must remain resolved in the workspace lockfile');
+assert.match(entry, /version = "0\.18\.5"/);
+assert.doesNotMatch(entry, /source = "registry|checksum = /, 'the lock must resolve the reviewed path backport, not the original registry crate');
+console.log('PASS: glib 0.18.5 resolves to the reviewed VariantStrIter mutable-out-pointer backport');

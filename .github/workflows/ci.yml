@@ -128,3 +128,19 @@ jobs:
         with:
           name: sbom
           path: "*.cdx.json"
+
+  glib-backport:
+    name: GLib source safety regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install GLib development library
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libglib2.0-dev
+      - name: Verify reviewed GLib source
+        run: node scripts/check-glib-backport.mjs
+      - name: Exercise optimized variant string iterator
+        run: cargo test --manifest-path vendor/glib-0.18.5/Cargo.toml --locked --release --test issue_138_variant_str_iter

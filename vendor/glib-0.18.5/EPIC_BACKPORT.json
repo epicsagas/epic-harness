@@ -1,0 +1,21 @@
+{
+  "crate": "glib",
+  "version": "0.18.5",
+  "license": "MIT",
+  "upstream": "https://github.com/gtk-rs/gtk-rs-core",
+  "archive": "https://static.crates.io/crates/glib/glib-0.18.5.crate",
+  "archive_sha256": "233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5",
+  "advisory": "RUSTSEC-2024-0429 / GHSA-wrw7-89jp-8q8g",
+  "upstream_fix": "https://github.com/gtk-rs/gtk-rs-core/pull/1343",
+  "upstream_fix_commit": "05dff0ee696f9bcd8617cd48c4b812d046d440cb",
+  "modified_source": "src/variant_iter.rs",
+  "original_source_sha256_lf": "1fd02859333761c45321b32f28b24233446b97d0022a90d3a937ed162585b90e",
+  "patched_source_sha256_lf": "a0f5ee8acb8faa089bcdfbc9a57372609fce7654026ccef7d9a224d05a654ccc",
+  "local_additions": [
+    "tests/issue_138_variant_str_iter.rs",
+    "EPIC_BACKPORT.json",
+    "Cargo.lock"
+  ],
+  "local_manifest_metadata": "An empty workspace table isolates this third-party crate's locked release regression from application-wide formatting and test selection.",
+  "api_changes": false
+}
