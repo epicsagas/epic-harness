@@ -408,6 +408,21 @@ pub fn run(input: &HookInput) -> i32 {
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
     let action = input.tool_input.as_ref().map(resolve_action);
+    let invocation_id = [
+        input.tool_use_id.as_deref(),
+        input.tool_call_id.as_deref(),
+        input.call_id.as_deref(),
+        input.invocation_id.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|id| !id.is_empty())
+    .map(|id| {
+        format!(
+            "{}:{id}",
+            input.hook_event_name.as_deref().unwrap_or("PostToolUse")
+        )
+    });
 
     let file_ext = input.tool_input.as_ref().and_then(extract_file_ext);
     let seq_id = if db.is_none() {
@@ -564,14 +579,15 @@ pub fn run(input: &HookInput) -> i32 {
     // that observation is excluded from end-of-session analysis. This is an
     // acceptable tradeoff; persistent DB failures are treated as a setup problem.
     if let Some(ref pool) = db {
-        if let Err(e) =
-            crate::store::runtime::block_on(crate::store::observations::insert_observation_pool(
+        if let Err(e) = crate::store::runtime::block_on(
+            crate::store::observations::insert_observation_with_identity_pool(
                 pool,
                 &record,
                 &sid,
                 &crate::shared::paths::project_slug(),
-            ))
-        {
+                invocation_id.as_deref(),
+            ),
+        ) {
             eprintln!("[observe] SQLite write failed, falling back to JSONL: {e}");
             append_jsonl(&session_file, &record);
         }
