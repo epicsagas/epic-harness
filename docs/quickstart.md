@@ -103,3 +103,10 @@ If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is 
 - Read [README.md](README.md) for the full architecture
 - See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup
 - Report issues: [GitHub Issues](https://github.com/epicsagas/epic-harness/issues)
+
+### Harness identity in linked worktrees
+
+`epic-harness path` and `epic-harness slug` use the main repository identity
+from Git's common directory, including Windows drive and UNC paths. Run these
+commands from the main checkout, a subdirectory, or a linked worktree to find
+the same existing project data. This does not rename or migrate stored data.
