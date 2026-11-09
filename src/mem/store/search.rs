@@ -10,24 +10,37 @@ use super::util::{NODE_COLUMNS, row_to_node};
 use crate::store::runtime;
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
+    search_nodes_filtered(query, limit, None)
+}
+
+/// Search literal memory terms, restricting node type before the result limit.
+/// Existing callers can keep using [`search_nodes`] for unfiltered results.
+pub fn search_nodes_filtered(query: &str, limit: usize, node_type: Option<&str>) -> Vec<Node> {
     let pool = match memory_pool_sync() {
         Ok(c) => c,
         Err(_) => return vec![],
     };
-    runtime::block_on(search_nodes_async(&pool, query, limit))
+    runtime::block_on(search_nodes_filtered_async(&pool, query, limit, node_type))
 }
 
-async fn search_nodes_async(pool: &sqlx::AnyPool, query: &str, limit: usize) -> Vec<Node> {
+async fn search_nodes_filtered_async(
+    pool: &sqlx::AnyPool,
+    query: &str,
+    limit: usize,
+    node_type: Option<&str>,
+) -> Vec<Node> {
     let fts_query = escape_fts(query);
     // Step 1: get matching rowids from FTS index
-    let rowids: Vec<i64> = match sqlx::query(
-        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
-    )
-    .bind(&fts_query)
-    .bind(limit as i64)
-    .fetch_all(pool)
-    .await
-    {
+    let sql = if node_type.is_some() {
+        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? AND rowid IN (SELECT rowid FROM nodes WHERE type = ?) ORDER BY rank LIMIT ?"
+    } else {
+        "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?"
+    };
+    let mut query = sqlx::query(sql).bind(&fts_query);
+    if let Some(node_type) = node_type {
+        query = query.bind(node_type);
+    }
+    let rowids: Vec<i64> = match query.bind(limit as i64).fetch_all(pool).await {
         Ok(rows) => rows
             .iter()
             .filter_map(|r| r.try_get::<i64, _>(0).ok())
@@ -137,7 +150,17 @@ pub async fn search_nodes_pool(
     query: &str,
     limit: i64,
 ) -> io::Result<Vec<Node>> {
-    Ok(search_nodes_async(pool, query, limit as usize).await)
+    search_nodes_filtered_pool(pool, query, limit, None).await
+}
+
+/// Search on an explicit memory pool, filtering type before the result limit.
+pub async fn search_nodes_filtered_pool(
+    pool: &sqlx::AnyPool,
+    query: &str,
+    limit: i64,
+    node_type: Option<&str>,
+) -> io::Result<Vec<Node>> {
+    Ok(search_nodes_filtered_async(pool, query, limit.max(0) as usize, node_type).await)
 }
 
 pub async fn query_nodes_pool(

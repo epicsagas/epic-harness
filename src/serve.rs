@@ -257,15 +257,28 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Memory API (Search) ──────────────────────────
             (Method::Get, url) if url.starts_with("/api/search") => {
-                let query = url
-                    .split("q=")
-                    .nth(1)
-                    .unwrap_or("")
-                    .split('&')
-                    .next()
-                    .unwrap_or("");
-                let decoded = percent_decode(query);
-                let nodes = store::search_nodes(&decoded, 20);
+                let decoded = parse_query_param(url, "q").unwrap_or_default();
+                let node_type = parse_query_param(url, "type").filter(|value| !value.is_empty());
+                if let Some(node_type) = node_type.as_deref()
+                    && !matches!(
+                        node_type,
+                        "concept"
+                            | "pattern"
+                            | "project"
+                            | "decision"
+                            | "error"
+                            | "session"
+                            | "resolution"
+                            | "instinct"
+                            | "psychographic"
+                    )
+                {
+                    let _ = request.respond(
+                        json_response("{\"error\":\"invalid node type\"}").with_status_code(400),
+                    );
+                    continue;
+                }
+                let nodes = store::search_nodes_filtered(&decoded, 20, node_type.as_deref());
                 let results: Vec<serde_json::Value> = nodes
                     .into_iter()
                     .map(|n| {
@@ -273,6 +286,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                             "id": n.frontmatter.id,
                             "title": n.frontmatter.title,
                             "type": n.frontmatter.node_type,
+                            "tags": n.frontmatter.tags,
+                            "projects": n.frontmatter.projects,
+                            "agents": n.frontmatter.agents,
+                            "created": n.frontmatter.created,
+                            "updated": n.frontmatter.updated,
+                            "importance": n.frontmatter.importance,
+                            "access_count": n.frontmatter.access_count,
+                            "body": n.body,
                             "snippet": n.body.chars().take(160).collect::<String>()
                         })
                     })
