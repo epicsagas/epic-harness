@@ -15,9 +15,9 @@ use crate::evolve::critic::{Critic, CriticVerdict};
 use crate::evolve::edits::EditManifest;
 use crate::evolve::skills::{gate_skills, write_skill_with_meta};
 use crate::evolve::synthesis::{assemble_skill, find_pending, mark_consumed, validate_body};
-use crate::shared::evolution::{EditType, Metrics};
-use crate::shared::helpers::{append_jsonl, hint, read_json, read_stdin_bounded};
-use crate::shared::paths::{evolved_dir, manifests_file, metrics_file};
+use crate::shared::evolution::EditType;
+use crate::shared::helpers::{append_jsonl, hint, read_stdin_bounded};
+use crate::shared::paths::{evolved_dir, manifests_file};
 
 const EXIT_OK: i32 = 0;
 const EXIT_NO_MANIFEST: i32 = 2;
@@ -147,7 +147,29 @@ fn run_accept_synth(args: &[String]) -> i32 {
             pending.origin, pending.confidence
         ),
     };
-    let metrics: Metrics = read_json(&metrics_file(), Metrics::default());
+    let metrics = match crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        let project = crate::shared::paths::project_slug();
+        let mut metrics =
+            crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&project)).await?;
+        // The Critic's authoritative Boolean must not depend on a stale JSON
+        // mirror (or on numeric aggregation of the persisted true/false flag).
+        let flag: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM metrics_state WHERE key = 'reward_hacking_suspected' AND project = ?",
+        ).bind(&project).fetch_optional(&pool).await.map_err(std::io::Error::other)?;
+        metrics.reward_hacking_suspected = match flag.as_deref() {
+            Some("true" | "1") => true,
+            Some("false" | "0") | None => false,
+            Some(_) => return Err(std::io::Error::other("invalid primary Critic flag")),
+        };
+        Ok::<_, std::io::Error>(metrics)
+    }) {
+        Ok(metrics) => metrics,
+        Err(error) => {
+            eprintln!("cannot verify primary Critic state: {error}");
+            return EXIT_IO;
+        }
+    };
     if let CriticVerdict::Reject(reason) = Critic::verify_against_evidence(&manifest, &[], &metrics)
     {
         eprintln!("critic rejected: {reason}");
