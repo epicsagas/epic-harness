@@ -33,6 +33,7 @@
       metrics = m;
       snapshots = s;
       patterns = p;
+      error = '';
     } catch (e) {
       if (generation !== staleGeneration) return;
       error = String(e);
