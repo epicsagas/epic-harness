@@ -3,6 +3,7 @@ mod eval;
 mod evolve;
 mod harness_cli;
 mod hooks;
+mod live;
 mod mem;
 mod orchestrate;
 mod serve;

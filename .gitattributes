@@ -1,0 +1,5 @@
+app/**/*.svelte text eol=lf
+app/**/*.ts text eol=lf
+app/**/*.css text eol=lf
+app/index.html text eol=lf
+assets/dashboard.html text eol=lf

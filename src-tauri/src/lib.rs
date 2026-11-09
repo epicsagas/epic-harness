@@ -61,6 +61,7 @@ pub fn run() {
             commands::harness::get_orbit_pipelines,
             commands::harness::get_evolved_skills,
             commands::harness::get_obs_summary,
+            commands::harness::get_live_activity,
             commands::harness::get_integration_status,
             commands::harness::get_session_snapshots,
             commands::harness::get_global_patterns,

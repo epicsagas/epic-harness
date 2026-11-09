@@ -202,6 +202,10 @@ pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_RESUME) {
         return 0;
     }
+    let had_harness = harness_exists();
+    if had_harness && let Some(id) = input.session_id.as_deref() {
+        let _ = crate::live::record_invocation(&harness_dir(), id, &now_iso());
+    }
     // Guard: SessionStart fires multiple times per session in Claude Code.
     // The dedup lock applies ONLY to plain "startup" — Claude Code double-fires
     // startup for one real session, and re-injecting the same skills twice is
@@ -304,6 +308,10 @@ pub fn run(input: &HookInput) -> i32 {
                 harness_dir().display()
             ),
         );
+    }
+
+    if !had_harness && let Some(id) = input.session_id.as_deref() {
+        let _ = crate::live::record_invocation(&harness_dir(), id, &now_iso());
     }
 
     // Seed the default org/team whenever orgs dir is empty (idempotent)

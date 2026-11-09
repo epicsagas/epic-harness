@@ -1,0 +1,42 @@
+name: Live activity verification
+on:
+  push:
+    branches: [fix/live-agent-activity]
+  pull_request:
+    paths: ['src/live/**', 'src/live.rs', 'app/**', '.github/workflows/live-activity.yml']
+permissions:
+  contents: read
+env:
+  SKIP_DASHBOARD_BUILD: '1'
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - name: Frontend checks and embedded asset
+        working-directory: app
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run check
+          pnpm exec vitest run
+          pnpm run build
+          cmp dist/index.html ../assets/dashboard.html
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy -p epic-harness --all-targets -- -D warnings
+      - run: cargo test -p epic-harness live::tests
+      - name: Native dashboard command bridge
+        run: cargo check -p epic-harness-dashboard --lib

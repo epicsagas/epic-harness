@@ -1,312 +1,56 @@
 <script lang="ts">
   import { tStore } from '$lib/i18n.js';
-  import { getOrchestratorRun, getOrchestratorAgentStatus } from '../lib/harness.js';
-  import type { OrchestrationRun, OrchAgentDef, OrchAgentStatus } from '../lib/harness.js';
-  import { getObsSummary } from '../lib/harness.js';
-  import type { ObsSummary } from '../lib/harness.js';
+  import { getLiveActivity, getObsSummary } from '../lib/harness.js';
+  import type { LiveActivity, ObsSummary } from '../lib/harness.js';
+  import LiveActivityView from '$lib/components/LiveActivity.svelte';
   import { selectedProject } from '$lib/stores/project.js';
-
-  let run = $state<OrchestrationRun | null>(null);
-  let agentStatuses = $state<Map<string, OrchAgentStatus>>(new Map());
+  let activity = $state<LiveActivity | null>(null);
   let obs = $state<ObsSummary | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-
-  // ── Update-flash: glow a section's border when its data changes.
-  // Agents polls every 5s, so only the status signal (id+state) triggers a
-  // flash — not every poll — to avoid constant blinking.
-  let flash = $state<Record<string, boolean>>({});
-  const flashPrev: Record<string, string> = {};
-  function canon(value: unknown): string {
-    if (value === null || typeof value !== 'object') return JSON.stringify(value);
-    if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
-    const obj = value as Record<string, unknown>;
-    return '{' + Object.keys(obj).sort().map(k => JSON.stringify(k)+':'+canon(obj[k])).join(',') + '}';
-  }
-  function flashIfChanged(key: string, payload: unknown): void {
-    const sig = canon(payload);
-    if (flashPrev[key] !== undefined && flashPrev[key] !== sig) {
-      flash[key] = false;
-      queueMicrotask(() => { flash[key] = true; });
-      window.setTimeout(() => { flash[key] = false; }, 1700);
-    }
-    flashPrev[key] = sig;
-  }
-  function statusSignal(): string {
-    return [...agentStatuses.entries()].map(([id, s]) => `${id}:${s.status ?? '?'}`).sort().join('|');
-  }
-
-  async function load() {
-    try {
-      error = null;
-      const [orchRun, orchObs] = await Promise.all([
-        getOrchestratorRun(),
-        getObsSummary(),
-      ]);
-      run = orchRun;
-      obs = orchObs;
-
-      // Load per-agent statuses
-      if (orchRun && orchRun.agents) {
-        const statusMap = new Map<string, OrchAgentStatus>();
-        await Promise.all(
-          orchRun.agents.map(async (agent) => {
-            try {
-              const status = await getOrchestratorAgentStatus(agent.id);
-              if (status) statusMap.set(agent.id, status);
-            } catch { /* skip missing */ }
-          })
-        );
-        agentStatuses = statusMap;
-      }
-      flashIfChanged('agents', statusSignal());
-    } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading = false;
-    }
-  }
-
-  // Reload on project switch (getObsSummary is project-scoped) + poll for live view.
+  let now = $state(Date.now());
+  const history = $derived(activity?.recent_sessions ?? []);
+  const lowSuccessTools = $derived(obs?.tool_stats.filter(tool => tool.success_rate < 0.85) ?? []);
   $effect(() => {
-    const _project = $selectedProject; // reactive dependency
-    load();
-    const id = setInterval(load, 5000);
-    return () => clearInterval(id);
+    const project = $selectedProject;
+    let cancelled = false;
+    let pending = false;
+    activity = null;
+    obs = null;
+    loading = true;
+    error = null;
+    async function refresh() {
+      if (pending) return;
+      pending = true;
+      try {
+        const [nextActivity, nextObs] = await Promise.all([getLiveActivity(project), getObsSummary()]);
+        if (!cancelled) { activity = nextActivity; obs = nextObs; error = null; }
+      } catch (reason) {
+        if (!cancelled) error = reason instanceof Error ? reason.message : String(reason);
+      } finally {
+        pending = false;
+        if (!cancelled) { loading = false; now = Date.now(); }
+      }
+    }
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
   });
-
-  function statusPillClass(status: string): string {
-    switch (status) {
-      case 'running': return 'info';
-      case 'done': return 'success';
-      case 'failed': return 'danger';
-      case 'blocked': return 'warning';
-      default: return 'info';
-    }
-  }
-
-  function runStatusPillClass(status: string): string {
-    switch (status) {
-      case 'running': return 'info';
-      case 'complete': return 'success';
-      case 'aborted': return 'danger';
-      case 'paused': return 'warning';
-      default: return 'info';
-    }
-  }
-
-  function relativeTime(ts: string): string {
-    if (!ts) return '--';
-    const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-    if (diff < 0) return 'just now';
-    if (diff < 60) return `${diff}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    return `${Math.floor(diff / 3600)}h ago`;
-  }
-
-  function progressPercent(agent: OrchAgentDef): number {
-    const status = agentStatuses.get(agent.id);
-    if (status) return Math.round(status.progress * 100);
-    if (agent.status === 'done') return 100;
-    return 0;
-  }
-
-  const activeCount = $derived(
-    run ? run.agents.filter(a => a.status === 'running').length : 0
-  );
-  const completedCount = $derived(
-    run ? run.agents.filter(a => a.status === 'done').length : 0
-  );
-  const failedCount = $derived(
-    run ? run.agents.filter(a => a.status === 'failed').length : 0
-  );
-
-  // Cards only show agents active or completed within the last 24h — older
-  // ones are still available in the completed table below, so the card grid
-  // stays focused on recent activity.
-  const DAY_MS = 24 * 60 * 60 * 1000;
-  function within24h(agent: OrchAgentDef): boolean {
-    if (agent.status === 'running') return true;
-    const ts = agent.completed_at ?? agent.started_at;
-    if (!ts) return false;
-    return Date.now() - new Date(ts).getTime() < DAY_MS;
-  }
-  const recentAgents = $derived(
-    run ? run.agents.filter(within24h) : []
-  );
-  const olderCount = $derived(
-    run ? run.agents.length - recentAgents.length : 0
-  );
-
-  // Low success tools from obs
-  const lowSuccessTools = $derived(
-    obs ? obs.tool_stats.filter(t => t.success_rate < 0.85) : []
-  );
-
   function scorePillClass(score: number): string {
-    if (score >= 0.9) return 'success';
-    if (score >= 0.7) return 'warning';
-    return 'danger';
+    return score >= 0.9 ? 'success' : score >= 0.7 ? 'warning' : 'danger';
   }
-
-  function fmtScore(v: number): string {
-    return v.toFixed(3);
-  }
+  function fmtScore(value: number): string { return value.toFixed(3); }
 </script>
-
 <div class="screen-header">
   <h2>{$tStore('pageAgentsLive')}</h2>
   <p>{$tStore('pageAgentsLiveDesc')}</p>
 </div>
-
 {#if error}
   <div class="panel" style="margin-bottom:16px;">
-    <div class="panel-body">
-      <span style="color:var(--danger)">{$tStore('loadError')}: {error}</span>
-    </div>
+    <div class="panel-body" role="alert" style="color:var(--danger)">{$tStore('loadError')}: {error}</div>
   </div>
 {/if}
-
-<!-- Orchestration Run Status -->
-{#if loading}
-  <div class="panel" style="margin-bottom:16px;">
-    <div class="panel-header"><h3>{$tStore('liveAgentStatus')}</h3></div>
-    <div class="panel-body">
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        {#each [1, 2] as _}
-          <div class="agent-card" style="flex:1;min-width:200px;">
-            <div class="skeleton" style="width:80px;height:16px;border-radius:3px;background:var(--border);margin-bottom:8px;"></div>
-            <div class="skeleton" style="width:100%;height:12px;border-radius:3px;background:var(--border);margin-bottom:4px;"></div>
-            <div class="skeleton" style="width:60%;height:12px;border-radius:3px;background:var(--border);"></div>
-          </div>
-        {/each}
-      </div>
-    </div>
-  </div>
-{:else if run}
-  <!-- Active Orchestration Run -->
-  <div class="panel" style="margin-bottom:16px;">
-    <div class="panel-header">
-      <h3>{$tStore('liveAgentStatus')}</h3>
-      <span class="pill {runStatusPillClass(run.status)}" style="margin-left:8px;">{run.status}</span>
-    </div>
-    <div class="panel-body">
-      <!-- Run Summary -->
-      <div class="stats-grid" style="margin-bottom:16px;">
-        <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--accent)"></span> {$tStore('runIdLabel')}</div>
-          <div class="stat-value" style="font-family:var(--font-mono);font-size:14px;">{run.id}</div>
-          <div class="stat-sub">{$tStore('orchRunSub')}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--info)"></span> {$tStore('activeLabel')}</div>
-          <div class="stat-value">{activeCount}</div>
-          <div class="stat-sub">{$tStore('ofAgents', run.agents.length)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--success)"></span> {$tStore('completedLabel')}</div>
-          <div class="stat-value">{completedCount}</div>
-          <div class="stat-sub">{$tStore('doneLabel')}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label"><span class="dot" style="background:var(--danger)"></span> {$tStore('failedStatusLabel')}</div>
-          <div class="stat-value">{failedCount}</div>
-          <div class="stat-sub">{$tStore('failedLabel')}</div>
-        </div>
-      </div>
-
-      <!-- Agent Cards — last 24h only (older agents in the completed table) -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;">
-        {#each recentAgents as agent}
-          {@const status = agentStatuses.get(agent.id)}
-          <div class="agent-card" class:hx-flash={flash.agents}>
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-              <div class="agent-name">{agent.role}</div>
-              <span class="pill {statusPillClass(agent.status)}">{agent.status}</span>
-            </div>
-            <div class="agent-desc" style="font-size:12px;color:var(--fg-secondary);margin-bottom:8px;">
-              {agent.task}
-            </div>
-            <!-- Progress bar -->
-            <div style="background:var(--border);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px;">
-              <div
-                style="height:100%;border-radius:4px;transition:width 0.5s ease;background:{agent.status === 'done' ? 'var(--success)' : agent.status === 'failed' ? 'var(--danger)' : 'var(--accent)'};width:{progressPercent(agent)}%;"
-              ></div>
-            </div>
-            <div style="display:flex;align-items:center;justify-content:space-between;font-size:11px;color:var(--muted);">
-              <span>{$tStore('agentIdLabel')} <code>{agent.id}</code></span>
-              {#if status}
-                <span>{$tStore('heartbeatLabel')} {relativeTime(status.last_heartbeat)}</span>
-              {:else if agent.completed_at}
-                <span>{$tStore('completedAtLabel')} {relativeTime(agent.completed_at)}</span>
-              {/if}
-            </div>
-            {#if agent.satisfies.length > 0}
-              <div style="margin-top:6px;">
-                {#each agent.satisfies as req}
-                  <span class="pill info" style="font-size:10px;margin-right:4px;">{req}</span>
-                {/each}
-              </div>
-            {/if}
-          </div>
-        {/each}
-      </div>
-
-      {#if recentAgents.length === 0}
-        <div style="text-align:center;padding:32px 16px;color:var(--muted);font-size:13px;">
-          {$tStore('noActiveOrchestration')} — last 24h
-        </div>
-      {/if}
-      {#if olderCount > 0}
-        <div style="margin-top:10px;font-size:11px;color:var(--muted);font-family:var(--font-mono);text-align:right;">
-          +{olderCount} older agents — see completed table below
-        </div>
-      {/if}
-
-      <!-- Dependency Graph -->
-      {#if Object.keys(run.dependency_graph).length > 0}
-        <div style="margin-top:16px;">
-          <h4 style="margin-bottom:8px;font-size:13px;color:var(--fg-secondary);">{$tStore('depGraphTitle')}</h4>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>{$tStore('colAgentId')}</th>
-                <th>{$tStore('colDependsOn')}</th>
-                <th>{$tStore('colStatus')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each Object.entries(run.dependency_graph) as [agentId, deps]}
-                {@const agentDef = run!.agents.find(a => a.id === agentId)}
-                <tr>
-                  <td style="font-family:var(--font-mono);font-size:11px;">{agentId}</td>
-                  <td style="font-family:var(--font-mono);font-size:11px;color:var(--fg-secondary);">{deps.join(', ')}</td>
-                  <td>
-                    {#if agentDef}
-                      <span class="pill {statusPillClass(agentDef.status)}">{agentDef.status}</span>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    </div>
-  </div>
-{:else}
-  <!-- No active orchestration -->
-  <div class="panel" style="margin-bottom:16px;">
-    <div class="panel-header"><h3>{$tStore('liveAgentStatus')}</h3></div>
-    <div class="panel-body">
-      <div style="text-align:center;padding:40px 24px;">
-        <div style="font-size:48px;margin-bottom:12px;opacity:0.3;">&#9734;</div>
-        <div style="font-size:15px;color:var(--fg);margin-bottom:6px;">{$tStore('noActiveOrchestration')}</div>
-        <div style="font-size:13px;color:var(--muted);">{$tStore('noActiveOrchestrationHint')}</div>
-      </div>
-    </div>
-  </div>
-{/if}
+<LiveActivityView {activity} {loading} {now} />
 
 <!-- Low Success Tools -->
 <div class="panel" style="margin-top:16px;">
@@ -355,7 +99,7 @@
   <div class="panel-body" style="padding:0;">
     {#if loading}
       <div style="padding:16px;color:var(--muted);font-size:13px;">{$tStore('loading')}</div>
-    {:else if obs && obs.recent_sessions.length > 0}
+    {:else if history.length > 0}
       <table class="data-table">
         <thead>
           <tr>
@@ -367,7 +111,7 @@
           </tr>
         </thead>
         <tbody>
-          {#each obs.recent_sessions as session}
+          {#each history as session}
             <tr>
               <td style="font-family:var(--font-mono);font-size:11px;color:var(--muted)">{session.session_id}</td>
               <td style="font-family:var(--font-mono)">{session.date}</td>

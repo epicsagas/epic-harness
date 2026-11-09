@@ -7,6 +7,28 @@ const MAX_SCORE_HISTORY: usize = 200;
 const MAX_EVOLUTION_ENTRIES: i64 = 50;
 const MAX_ORBIT_PIPELINES: i64 = 100;
 
+/// Read the same project-scoped activity projection as the browser dashboard.
+#[tauri::command]
+pub async fn get_live_activity(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    epic_harness::live::snapshot(
+        &state.harness_db,
+        &epic_harness::shared::paths::harness_projects_root(),
+        project
+            .as_deref()
+            .filter(|name| !name.is_empty() && *name != "__all__"),
+        now,
+    )
+    .await
+    .map_err(|_| "Unable to load live activity".to_string())
+}
+
 // ── Metrics ──────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Default)]
