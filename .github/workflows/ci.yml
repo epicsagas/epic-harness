@@ -53,6 +53,21 @@ jobs:
       - name: Test
         run: cargo test
 
+  windows-source-issue-191:
+    name: Windows source regression (issue 191)
+    runs-on: windows-latest
+    env:
+      SKIP_DASHBOARD_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Verify issue 191 from source
+        shell: pwsh
+        run: |
+          cargo test -p epic-harness --locked --test issue_191_test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   windows-hooks:
     name: Windows hook portability
     runs-on: windows-latest
