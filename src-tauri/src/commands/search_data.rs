@@ -1,6 +1,6 @@
 //! Native memory search data contract, independent of the desktop runtime.
 
-use epic_harness::mem::store::search_nodes_pool;
+use epic_harness::mem::store::search_nodes_filtered_pool;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -24,16 +24,38 @@ pub async fn search_nodes(
     pool: &sqlx::AnyPool,
     query: &str,
     limit: Option<usize>,
+    node_type: Option<&str>,
 ) -> Result<Vec<SearchResult>, String> {
+    if let Some(node_type) = node_type.filter(|node_type| !node_type.is_empty())
+        && !matches!(
+            node_type,
+            "decision"
+                | "resolution"
+                | "concept"
+                | "project"
+                | "pattern"
+                | "error"
+                | "session"
+                | "instinct"
+                | "psychographic"
+        )
+    {
+        return Err("invalid node type".into());
+    }
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
     if query.len() > 200 {
         return Err("search query too long".into());
     }
-    let nodes = search_nodes_pool(pool, query, limit.unwrap_or(20).min(100) as i64)
-        .await
-        .map_err(|error| format!("failed to search nodes: {error}"))?;
+    let nodes = search_nodes_filtered_pool(
+        pool,
+        query,
+        limit.unwrap_or(20).min(100) as i64,
+        node_type.filter(|node_type| !node_type.is_empty()),
+    )
+    .await
+    .map_err(|error| format!("failed to search nodes: {error}"))?;
     Ok(nodes
         .into_iter()
         .map(|node| SearchResult {

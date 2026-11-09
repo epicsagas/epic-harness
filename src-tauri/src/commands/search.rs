@@ -44,9 +44,10 @@ pub struct ScoredNodeResponse {
 pub async fn search_nodes(
     query: String,
     limit: Option<usize>,
+    node_type: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
-    super::search_data::search_nodes(&state.db, &query, limit).await
+    super::search_data::search_nodes(&state.db, &query, limit, node_type.as_deref()).await
 }
 
 #[tauri::command]

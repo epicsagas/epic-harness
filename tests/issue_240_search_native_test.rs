@@ -44,7 +44,7 @@ async fn seed(pool: &sqlx::AnyPool, node_type: &str) {
 async fn issue_240_native_search_returns_renderable_memory_rows() {
     let pool = pool().await;
     seed(&pool, "concept").await;
-    let rows = search_data::search_nodes(&pool, "Zebrafixture", None)
+    let rows = search_data::search_nodes(&pool, "Zebrafixture", None, None)
         .await
         .unwrap();
     let value = serde_json::to_value(rows).unwrap();
