@@ -1606,7 +1606,7 @@ mod reflection_cursor_tests {
 
     #[tokio::test]
     async fn issue_218_attached_migration_resets_derived_cursor() {
-        for with_observation in [false, true] {
+        for (with_observation, with_cursor) in [(false, true), (true, true), (true, false)] {
             let temp = tempfile::tempdir().unwrap();
             let source = temp.path().join("source.db");
             let mut source_conn = sqlx::sqlite::SqliteConnectOptions::new()
@@ -1619,10 +1619,12 @@ mod reflection_cursor_tests {
                 .execute(&mut source_conn)
                 .await
                 .unwrap();
-            sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source')")
-                .execute(&mut source_conn).await.unwrap();
+            if with_cursor {
+                sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source')")
+                    .execute(&mut source_conn).await.unwrap();
+            }
             if with_observation {
-                sqlx::query("INSERT INTO observations(id,timestamp,session_id,tool,tool_category,action,project) VALUES(999,'2026-11-09T00:00:00Z','source','Read','read','source-pending','source')")
+                sqlx::query("INSERT INTO observations(id,timestamp,session_id,tool,tool_category,action,project) VALUES(999,'2024-01-01T00:00:00Z','source','Read','read','source-pending','source')")
                     .execute(&mut source_conn).await.unwrap();
             }
             source_conn.close().await.unwrap();
@@ -1637,9 +1639,11 @@ mod reflection_cursor_tests {
                 .await
                 .unwrap();
             if with_observation {
-                sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','555','target')")
-                    .execute(&mut destination).await.unwrap();
-                sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2026-11-09T00:00:00Z','target','Read','read','target-pending','target')")
+                if with_cursor {
+                    sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','555','target')")
+                        .execute(&mut destination).await.unwrap();
+                }
+                sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2024-01-01T00:00:00Z','target','Read','read','target-pending','target')")
                     .execute(&mut destination).await.unwrap();
             }
             sqlx::query("ATTACH DATABASE ? AS src")
@@ -1650,11 +1654,12 @@ mod reflection_cursor_tests {
             merge_attached_db_async(&mut destination, "target", "src")
                 .await
                 .unwrap();
-            let cursor: String = sqlx::query_scalar("SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'")
-                .fetch_one(&mut destination).await.unwrap();
+            let cursor: Option<String> = sqlx::query_scalar("SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'")
+                .fetch_optional(&mut destination).await.unwrap();
             assert_eq!(
-                cursor, "0",
-                "Copied row identities cannot reuse a source or destination cutoff"
+                cursor.as_deref(),
+                Some("0"),
+                "Copied histories must invalidate existing AND absent legacy cursor state"
             );
             let count: i64 =
                 sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")

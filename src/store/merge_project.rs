@@ -485,49 +485,50 @@ mod reflection_cursor_tests {
 
     #[tokio::test]
     async fn issue_218_project_relabel_resets_derived_cursor() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("global.db");
-        let mut connection = SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true)
-            .connect()
-            .await
-            .unwrap();
-        sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
-            .execute(&mut connection)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source'),('reflection_cursor','555','target')")
-            .execute(&mut connection).await.unwrap();
-        sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2026-11-09T00:00:00Z','first','Read','read','first','source'),('2026-11-09T00:00:00Z','second','Read','read','second','target')")
-            .execute(&mut connection).await.unwrap();
-        connection.close().await.unwrap();
-        merge_global_db(&path, "source", "target", false)
-            .await
-            .unwrap();
-        let mut connection = SqliteConnectOptions::new()
-            .filename(path)
-            .connect()
-            .await
-            .unwrap();
-        let cursor: String = sqlx::query_scalar(
-            "SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'",
-        )
-        .fetch_one(&mut connection)
-        .await
-        .unwrap();
-        assert_eq!(
-            cursor, "0",
-            "Independent project progress cannot be combined into one row cutoff"
-        );
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")
-                .fetch_one(&mut connection)
+        for with_cursor in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("global.db");
+            let mut connection = SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true)
+                .connect()
                 .await
                 .unwrap();
-        assert_eq!(
-            count, 2,
-            "Resetting derived progress must preserve observations"
-        );
+            sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+                .execute(&mut connection)
+                .await
+                .unwrap();
+            if with_cursor {
+                sqlx::query("INSERT INTO metrics_state(key,value,project) VALUES('reflection_cursor','999','source'),('reflection_cursor','555','target')")
+                    .execute(&mut connection).await.unwrap();
+            }
+            sqlx::query("INSERT INTO observations(timestamp,session_id,tool,tool_category,action,project) VALUES('2024-01-01T00:00:00Z','first','Read','read','first','source'),('2024-01-01T00:00:00Z','second','Read','read','second','target')")
+                .execute(&mut connection).await.unwrap();
+            connection.close().await.unwrap();
+            merge_global_db(&path, "source", "target", false)
+                .await
+                .unwrap();
+            let mut connection = SqliteConnectOptions::new()
+                .filename(path)
+                .connect()
+                .await
+                .unwrap();
+            let cursor: Option<String> = sqlx::query_scalar("SELECT value FROM metrics_state WHERE key='reflection_cursor' AND project='target'")
+                .fetch_optional(&mut connection).await.unwrap();
+            assert_eq!(
+                cursor.as_deref(),
+                Some("0"),
+                "Combined histories must initialize progress even when both projects only had legacy watermarks"
+            );
+            let count: i64 =
+                sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project='target'")
+                    .fetch_one(&mut connection)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                count, 2,
+                "Resetting derived progress must preserve observations"
+            );
+        }
     }
 }
