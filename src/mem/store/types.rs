@@ -115,10 +115,12 @@ pub(crate) struct GraphNode {
 /// Flat edge as stored in the `edges` table.
 #[derive(Debug, Clone)]
 pub(crate) struct GraphEdge {
+    pub id: String,
     pub source: String,
     pub target: String,
     pub label: String,
     pub created: String,
+    pub weight: f64,
 }
 
 // ── Conversion helpers ──────────────────────────────────────
@@ -164,9 +166,11 @@ pub(crate) fn graph_to_node(gn: GraphNode) -> Node {
 /// Convert Edge → GraphEdge for SQL storage.
 pub(crate) fn edge_to_graph(edge: &Edge) -> GraphEdge {
     GraphEdge {
+        id: edge.id.clone(),
         source: edge.source.clone(),
         target: edge.target.clone(),
         label: edge.relation.clone(),
         created: edge.ts.clone(),
+        weight: edge.weight,
     }
 }

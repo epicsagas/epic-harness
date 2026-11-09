@@ -40,18 +40,18 @@ pub fn read_edges_limit(limit: usize) -> Vec<Edge> {
 }
 
 async fn read_edges_pool_async(pool: &sqlx::AnyPool, limit: usize) -> Vec<Edge> {
-    sqlx::query("SELECT source, target, label, created FROM edges ORDER BY created DESC LIMIT ?")
+    sqlx::query("SELECT source, target, label, created, id, weight FROM edges ORDER BY created DESC LIMIT ?")
         .bind(limit as i64)
         .fetch_all(pool)
         .await
         .map(|rows| {
             rows.iter()
                 .map(|r| Edge {
-                    id: String::new(), // edges table doesn't store id
+                    id: r.get::<String, _>(4),
                     source: r.get::<String, _>(0),
                     target: r.get::<String, _>(1),
                     relation: r.get::<String, _>(2),
-                    weight: 1.0, // edges table doesn't store weight
+                    weight: r.get::<f64, _>(5),
                     ts: r.get::<String, _>(3),
                 })
                 .collect()
@@ -59,15 +59,14 @@ async fn read_edges_pool_async(pool: &sqlx::AnyPool, limit: usize) -> Vec<Edge> 
         .unwrap_or_default()
 }
 
+#[allow(dead_code)] // Public synchronous compatibility API; async transports use pool variant.
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
     let pool = memory_pool_sync()?;
     runtime::block_on(delete_edge_by_id_async(&pool, edge_id))
 }
 
 async fn delete_edge_by_id_async(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<()> {
-    sqlx::query("DELETE FROM edges WHERE source = ? OR target = ? OR label = ?")
-        .bind(edge_id)
-        .bind(edge_id)
+    sqlx::query("DELETE FROM edges WHERE id = ?")
         .bind(edge_id)
         .execute(pool)
         .await

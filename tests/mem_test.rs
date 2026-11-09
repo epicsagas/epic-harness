@@ -288,9 +288,10 @@ fn test_delete_edge_by_id_is_consistent() {
     append_edge(&edge_b).unwrap();
     assert_eq!(read_edges().len(), 2, "should have 2 edges before delete");
 
-    // delete_edge_by_id matches against source, target, or label (relation).
-    // edges table has no id column, so we delete by source.
+    // Node identifiers must never delete edges through the edge-ID API.
     delete_edge_by_id("src-1").unwrap();
+    assert_eq!(read_edges().len(), 2, "a source is not an edge ID");
+    delete_edge_by_id("edge-aaa").unwrap();
     let remaining = read_edges();
     assert_eq!(remaining.len(), 1, "should have 1 edge after delete");
     assert_eq!(remaining[0].source, "src-2");
