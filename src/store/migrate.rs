@@ -90,8 +90,10 @@ async fn run_subcommand_async(dry_run: bool, reset: bool) -> i32 {
         }
     };
 
+    let marker = legacy_marker();
     let migration_state: Option<String> =
-        sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
+        sqlx::query("SELECT value FROM _harness_meta WHERE key = ?")
+            .bind(&marker)
             .fetch_optional(&mut conn)
             .await
             .ok()
@@ -105,8 +107,9 @@ async fn run_subcommand_async(dry_run: bool, reset: bool) -> i32 {
         }
         Some("in_progress") => {
             if reset {
-                if let Err(e) = conn
-                    .execute("DELETE FROM _harness_meta WHERE key = 'legacy_migrated'")
+                if let Err(e) = sqlx::query("DELETE FROM _harness_meta WHERE key = ?")
+                    .bind(&marker)
+                    .execute(&mut conn)
                     .await
                     .map_err(sqlx_err)
                 {
@@ -228,10 +231,15 @@ pub(crate) fn do_migrate(conn: &mut sqlx::SqliteConnection) -> io::Result<Migrat
     super::runtime::block_on(do_migrate_async(conn))
 }
 
+fn legacy_marker() -> String {
+    format!("legacy_migrated:{}", crate::shared::paths::project_slug())
+}
+
 pub(crate) async fn do_migrate_async(
     conn: &mut sqlx::SqliteConnection,
 ) -> io::Result<MigrationStats> {
     let harness_dir = crate::shared::paths::harness_dir();
+    let marker = legacy_marker();
     let mut stats = MigrationStats {
         obs_imported: 0,
         sess_imported: 0,
@@ -245,14 +253,14 @@ pub(crate) async fn do_migrate_async(
     // window between the outer read in run_subcommand and this BEGIN IMMEDIATE.
     {
         begin_immediate(conn).await?;
-        let already: bool =
-            sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
-                .fetch_optional(&mut *conn)
-                .await
-                .ok()
-                .flatten()
-                .and_then(|row| row.try_get::<String, _>(0).ok())
-                .is_some_and(|v| v == "1" || v == "in_progress");
+        let already: bool = sqlx::query("SELECT value FROM _harness_meta WHERE key = ?")
+            .bind(&marker)
+            .fetch_optional(&mut *conn)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<String, _>(0).ok())
+            .is_some_and(|v| v == "1" || v == "in_progress");
 
         if already {
             rollback(conn).await;
@@ -260,8 +268,9 @@ pub(crate) async fn do_migrate_async(
         }
 
         sqlx::query(
-            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', 'in_progress') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO _harness_meta (key, value) VALUES (?, 'in_progress') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
+        .bind(&marker)
         .execute(&mut *conn)
         .await
         .map_err(sqlx_err)?;
@@ -280,8 +289,9 @@ pub(crate) async fn do_migrate_async(
     {
         begin_immediate(conn).await?;
         sqlx::query(
-            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO _harness_meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
+        .bind(&marker)
         .execute(&mut *conn)
         .await
         .map_err(sqlx_err)?;
@@ -1350,13 +1360,13 @@ mod tests {
         assert_eq!(stats.obs_imported, 0);
         assert_eq!(stats.sess_imported, 0);
 
-        let migrated: String =
-            sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
-                .fetch_one(&mut conn)
-                .await
-                .unwrap()
-                .try_get(0)
-                .unwrap();
+        let migrated: String = sqlx::query("SELECT value FROM _harness_meta WHERE key = ?")
+            .bind(legacy_marker())
+            .fetch_one(&mut conn)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap();
         assert_eq!(migrated, "1");
     }
 
@@ -1587,3 +1597,7 @@ mod tests {
         assert_eq!(sess_count, 1);
     }
 }
+
+#[cfg(test)]
+#[path = "regression_258.rs"]
+mod regression_258;
