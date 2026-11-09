@@ -73,11 +73,42 @@ epic-harness evolve record-pr <PR_URL> [--goal <goal_slug>] [--branch <branch>]
 
 ### Step 4: CI Verification
 
+Inspect the exact PR head and the base repository from its URL before watching:
+
 ```bash
-gh pr checks <PR_NUMBER> --watch
+gh pr view <PR_NUMBER> --repo <BASE_OWNER/BASE_REPO> --json headRefOid,statusCheckRollup,url
+gh api "repos/<BASE_OWNER>/<BASE_REPO>/actions/runs?head_sha=<HEAD_SHA>&per_page=100"
+gh api "repos/<BASE_OWNER>/<BASE_REPO>/commits/<HEAD_SHA>/check-suites?per_page=100"
 ```
 
-If CI fails, diagnose and fix automatically. Retry up to 2 times.
+Follow pagination as needed and match evidence to that head SHA. An empty check
+rollup does not prove that CI is absent or passing.
+
+- Runs/suites with `action_required`: report **PENDING — maintainer approval
+  required**, with head SHA and run links. Skip the impossible check watch;
+  do not mark ready to merge or treat approval as a source failure.
+- Same-head runs/suites without check contexts: inspect actual runs with
+  `gh run view <RUN_ID> --repo <BASE_OWNER/BASE_REPO> --json headSha,status,conclusion,url,jobs`.
+  Poll queued/in-progress runs within a declared deadline and report **PENDING**
+  if unfinished. Preserve completed failures and infrastructure errors; do not
+  watch an empty check set. Accept a completed success only after verifying its
+  current head, required workflow and successful required jobs.
+- Executable current-head check contexts: run
+  `gh pr checks <PR_NUMBER> --repo <BASE_OWNER/BASE_REPO> --watch`.
+  Diagnose and fix actual source failures, retrying up to 2 times. Distinguish
+  infrastructure startup errors from executed compiler/test failures.
+- Successful queries with no contexts, runs or suites: report **no checks
+  observed**, skip the empty watch, and allow at most one bounded re-probe for
+  delayed registration. Claim **N/A — no applicable CI** only after verifying
+  that no applicable provider is configured.
+- API/authentication/permission/network errors: report **UNKNOWN** and the error;
+  do not turn failed queries into empty results.
+
+Re-read the PR head before accepting CI results and discard stale evidence.
+Record the classification, head SHA and links in the report. Only verified
+passing current-head CI is **PASS**; pending/unknown CI is not ready to merge.
+When called from Orbit, return this outcome without blocking indefinitely so
+Orbit can run its unconditional reflection; green-only additions remain gated.
 
 ### Step 5: Report
 
@@ -85,7 +116,7 @@ If CI fails, diagnose and fix automatically. Retry up to 2 times.
 ## Ship Report
 - Spec: SPEC-{timestamp} ({goal_slug})
 - PR: <URL>
-- CI: [PASS/FAIL/N/A]
+- CI: [PASS/FAIL/PENDING/UNKNOWN/N/A]
 - Ready to merge: [YES/NO]
 - Action needed: <if any>
 ```
@@ -106,7 +137,7 @@ If CI fails, diagnose and fix automatically. Retry up to 2 times.
 
 - [ ] Isolated test passed in clean worktree
 - [ ] PR created with spec + audit report in body
-- [ ] CI status checked (PASS, FAIL with fix, or N/A)
+- [ ] Current-head CI evidence checked and reported as PASS, FAIL, PENDING, UNKNOWN or verified N/A
 - [ ] All Conventional Commits applied
 
 ## Red Flags
