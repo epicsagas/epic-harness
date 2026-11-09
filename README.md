@@ -585,6 +585,11 @@ touch ~/.harness/projects/{slug}/.cross-project-enabled
 
 Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl`. Session start → shows hints from other projects' weak areas.
 
+Each exporting or receiving project opts in separately. Existing explicit
+`~/.harness/global/.cross-project-enabled` consent and an existing
+`global/patterns.jsonl` fallback store remain supported for older installations;
+new project consent never silently enables global sharing.
+
 ---
 
 ## Unified Memory
