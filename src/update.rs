@@ -8,6 +8,34 @@ const CRATE_NAME: &str = "epic-harness";
 const SYNC_COOLDOWN_SECS: u64 = 3600;
 const DEFAULT_WEBUI_PORT: u16 = 7700;
 
+#[derive(serde::Deserialize)]
+struct ManagedInstallation {
+    schema: u32,
+    repository: String,
+    commit: String,
+    automatic_updates: bool,
+}
+
+fn managed_installation() -> Option<ManagedInstallation> {
+    let executable = std::env::current_exe().ok()?;
+    let path = executable.parent()?.join("epic-managed.json");
+    let marker: ManagedInstallation = serde_json::from_slice(&fs::read(path).ok()?).ok()?;
+    let repository_parts: Vec<_> = marker.repository.split('/').collect();
+    let repository_valid = repository_parts.len() == 2
+        && repository_parts.iter().all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || b"_.-".contains(&c))
+        });
+    (marker.schema == 1
+        && !marker.automatic_updates
+        && marker.commit.len() == 40
+        && marker.commit.bytes().all(|c| c.is_ascii_hexdigit())
+        && repository_valid)
+        .then_some(marker)
+}
+
 #[derive(Debug, PartialEq)]
 enum InstallMethod {
     Brew,
@@ -321,6 +349,23 @@ fn start_webui() {
 pub fn run(args: &[String]) -> i32 {
     let check_only = args.iter().any(|a| a == "--check");
     let force = args.iter().any(|a| a == "--force");
+
+    if let Some(managed) = managed_installation() {
+        if let Some(cur) = current_version() {
+            eprintln!("Current: {cur}");
+        }
+        eprintln!(
+            "Managed: {}@{} (automatic updates disabled)",
+            managed.repository, managed.commit
+        );
+        if check_only {
+            return 0;
+        }
+        eprintln!(
+            "[epic] This installation is pinned. Use its source rollout to update it, or remove epic-managed.json to resume upstream updates."
+        );
+        return 1;
+    }
 
     // ── resolve or install binary ────────────────────────────────
     let eh = resolve_binary().or_else(install_binary);

@@ -15,7 +15,7 @@ const {
   existsSync,
   readFileSync,
 } = require("fs");
-const { join } = require("path");
+const { join, dirname, delimiter } = require("path");
 const https = require("https");
 const os = require("os");
 
@@ -31,6 +31,25 @@ function log(msg) {
 function hasCommand(cmd) {
   const r = spawnSync(cmd, ["version"], { stdio: "pipe", shell: false });
   return r.status === 0;
+}
+
+// Explicit rollout metadata pins a verified source/fork installation. Ordinary
+// releases never create this marker and retain normal bootstrap updates.
+function managedInstallation() {
+  for (const directory of (process.env.PATH || "").split(delimiter)) {
+    if (!directory) continue;
+    const binary = join(directory, os.platform() === "win32" ? `${BINARY}.exe` : BINARY);
+    if (!existsSync(binary)) continue;
+    try {
+      const marker = JSON.parse(readFileSync(join(dirname(binary), "epic-managed.json"), "utf8"));
+      if (marker.schema === 1 && marker.automatic_updates === false
+        && typeof marker.commit === "string" && /^[0-9a-f]{40}$/i.test(marker.commit)
+        && typeof marker.repository === "string" && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(marker.repository)) return marker;
+    } catch (_) {}
+    // A later PATH entry cannot pin the executable selected by the host.
+    return null;
+  }
+  return null;
 }
 
 function getBinaryVersion() {
@@ -152,6 +171,12 @@ async function install() {
 
 async function main() {
   const pluginVersion = getPluginVersion();
+
+  const managed = managedInstallation();
+  if (managed && hasCommand(BINARY)) {
+    log(`Keeping managed installation ${managed.commit.slice(0, 12)} (automatic updates disabled)`);
+    return;
+  }
 
   // 1. Binary not found — fresh install
   if (!hasCommand(BINARY)) {
