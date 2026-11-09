@@ -662,3 +662,5 @@ Original files are **not deleted** after import. New users are automatically on 
 - Fix native dashboard project scoping and aggregate metrics, filtering history and snapshots before limits (#237).
 
 - Register native evolution dashboard handlers with project-scoped canonical path validation and read-only sidecar access (#239).
+
+- Serialize orchestration updates with portable interprocess file locks and independent atomic-write files (#243).
