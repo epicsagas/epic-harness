@@ -1,0 +1,5 @@
+# Complete operational database transfer
+
+`migrate --to-global` preserves supported operational tables and available columns, including pipeline state, evolved skill bodies, attribution, workspace state and invocation identity where present. Missing optional legacy columns use destination defaults. Unknown source columns or conflicting destination contents fail and roll back the source transfer. Sources remain intact. Reallocated observation IDs reset derived reflection progress to zero, allowing safe reanalysis instead of skipped observations. Retry idempotency is separately addressed by #256.
+
+The reflection reset creates an absent cursor transactionally; otherwise a legacy timestamp watermark could suppress newly imported older-dated records. Original dates stay intact. Cursor-write failure rolls back the observation transfer.

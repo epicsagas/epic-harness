@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Database consolidation tracks source rows so retries preserve identical legitimate history without duplicating imported rows (#256).
+- Database consolidation preserves every supported operational table and available field, and rolls back unsupported or conflicting transfers (#185).
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names
