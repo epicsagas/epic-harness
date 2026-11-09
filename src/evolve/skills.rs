@@ -574,13 +574,24 @@ pub fn write_skill_with_meta(
     origin: &str,
     confidence: f64,
     synthesized: bool,
-) {
+) -> std::io::Result<()> {
     if !sanitize_skill_name(name) {
-        hint("reflect", &format!("Rejected invalid skill name: {name}"));
-        return;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid evolved skill name",
+        ));
     }
     let dir = evolved_dir().join(name);
-    ensure_dir(&dir);
+    // Validate before staging or gating: a failed write must never turn an
+    // existing directory/sentinel into a successfully consumed synthesis.
+    for target in [&dir.join("SKILL.md"), &dir.join("meta.json")] {
+        if target.exists() && !target.is_file() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "skill target is not a regular file",
+            ));
+        }
+    }
 
     let meta = SkillMeta {
         name: name.into(),
@@ -593,31 +604,74 @@ pub fn write_skill_with_meta(
         synthesized,
         slow_updates: Vec::new(),
     };
-    let json = match serde_json::to_string_pretty(&meta) {
-        Ok(j) => j,
-        Err(e) => {
-            hint(
-                "reflect",
-                &format!("Failed to serialize meta.json for {name}: {e}"),
-            );
-            return;
+    let json = serde_json::to_vec_pretty(&meta).map_err(std::io::Error::other)?;
+    let staging_root = harness_dir().join(".skill-install");
+    fs::create_dir_all(&staging_root)?;
+    if fs::symlink_metadata(&staging_root)?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(std::io::Error::other("skill staging directory is a link"));
+    }
+    fs::create_dir_all(evolved_dir())?;
+    let transaction = uuid::Uuid::new_v4().to_string();
+    let stage = staging_root.join(format!("{transaction}.new"));
+    let backup = staging_root.join(format!("{transaction}.old"));
+    fs::create_dir(&stage)?;
+    let installed = (|| -> std::io::Result<()> {
+        if dir.exists() {
+            copy_skill_files(&dir, &stage)?;
         }
-    };
-    if let Err(e) = fs::write(dir.join("meta.json"), json) {
-        hint(
-            "reflect",
-            &format!("Failed to write meta.json for {name}: {e}"),
-        );
-        return;
+        fs::write(stage.join("SKILL.md"), content)?;
+        fs::write(stage.join("meta.json"), json)?;
+        let had_previous = dir.exists();
+        if had_previous {
+            fs::rename(&dir, &backup)?;
+        }
+        if let Err(error) = fs::rename(&stage, &dir) {
+            if had_previous {
+                fs::rename(&backup, &dir).map_err(|restore| std::io::Error::other(format!("skill install failed: {error}; backup retained after restore failed: {restore}")))?;
+            }
+            return Err(error);
+        }
+        // A cleanup failure retains a recovery copy outside the active skill
+        // inventory; it must not remove the successfully installed pair.
+        if had_previous {
+            let _ = fs::remove_dir_all(&backup);
+        }
+        Ok(())
+    })();
+    if stage.exists() {
+        let _ = fs::remove_dir_all(&stage);
     }
-    if let Err(e) = fs::write(dir.join("SKILL.md"), content) {
-        hint(
-            "reflect",
-            &format!("Failed to write SKILL.md for {name}: {e}"),
-        );
-        // Clean up orphaned meta.json
-        let _ = fs::remove_file(dir.join("meta.json"));
+    installed
+}
+
+fn copy_skill_files(source: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
+    if fs::symlink_metadata(source)?.file_type().is_symlink() {
+        return Err(std::io::Error::other(
+            "linked evolved skill content is not supported",
+        ));
     }
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let metadata = fs::symlink_metadata(entry.path())?;
+        let destination = target.join(entry.file_name());
+        if metadata.file_type().is_symlink() {
+            return Err(std::io::Error::other(
+                "linked evolved skill content is not supported",
+            ));
+        }
+        if metadata.is_dir() {
+            fs::create_dir(&destination)?;
+            copy_skill_files(&entry.path(), &destination)?;
+        } else if metadata.is_file() {
+            fs::copy(entry.path(), destination)?;
+        } else {
+            return Err(std::io::Error::other("non-regular evolved skill content"));
+        }
+    }
+    Ok(())
 }
 
 /// Whether a skill's body was upgraded by a host agent (`evolve accept-synth`).

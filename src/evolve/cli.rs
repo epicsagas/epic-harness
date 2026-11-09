@@ -16,8 +16,8 @@ use crate::evolve::edits::EditManifest;
 use crate::evolve::skills::{gate_skills, write_skill_with_meta};
 use crate::evolve::synthesis::{assemble_skill, find_pending, mark_consumed, validate_body};
 use crate::shared::evolution::{EditType, Metrics};
-use crate::shared::helpers::{append_jsonl, hint, read_json, read_stdin_bounded};
-use crate::shared::paths::{evolved_dir, manifests_file, metrics_file};
+use crate::shared::helpers::{hint, read_json, read_stdin_bounded};
+use crate::shared::paths::{evolved_dir, harness_dir, manifests_file, metrics_file};
 
 const EXIT_OK: i32 = 0;
 const EXIT_NO_MANIFEST: i32 = 2;
@@ -94,6 +94,29 @@ fn run_accept_synth(args: &[String]) -> i32 {
         return EXIT_USAGE;
     };
 
+    // Preserve the no-manifest exit even before a harness has been created.
+    if find_pending(&skill).is_none() {
+        eprintln!("no pending-synthesis manifest for skill '{skill}'");
+        return EXIT_NO_MANIFEST;
+    }
+    // Serialize retries so each pending acceptance has one ledger entry.
+    let acceptance_lock = match fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(harness_dir().join(".accept-synth.lock"))
+    {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("cannot open synthesis lock: {error}");
+            return EXIT_IO;
+        }
+    };
+    if let Err(error) = acceptance_lock.try_lock() {
+        eprintln!("cannot lock synthesis acceptance: {error}");
+        return EXIT_IO;
+    }
     // 2. Resolve the pending manifest (join key = skill name).
     let pending = match find_pending(&skill) {
         Some(p) => p,
@@ -155,21 +178,64 @@ fn run_accept_synth(args: &[String]) -> i32 {
     }
 
     // 7. Apply, gate, mark consumed, ledger.
-    write_skill_with_meta(
+    if let Err(error) = write_skill_with_meta(
         &skill,
         &assembled,
         &pending.origin,
         pending.confidence,
         true,
-    );
+    ) {
+        eprintln!("failed to install synthesized skill '{skill}': {error}");
+        return EXIT_IO;
+    }
     gate_skills();
-    mark_consumed(&skill);
-    append_jsonl(&manifests_file(), &manifest);
+    if fs::read_to_string(evolved_dir().join(&skill).join("SKILL.md"))
+        .ok()
+        .as_deref()
+        != Some(assembled.as_str())
+    {
+        eprintln!("installed skill '{skill}' did not survive validation; pending work retained");
+        return EXIT_IO;
+    }
+    // Ledger first: a failed append must never consume pending work. A later
+    // pending-file error is retryable because the ledger key is stable for
+    // this pending record rather than a new UUID on every CLI attempt.
+    let persisted =
+        append_synthesis_manifest(&manifest, &pending.created).and_then(|()| mark_consumed(&skill));
+    if let Err(error) = persisted {
+        eprintln!("cannot finish synthesis acceptance; pending work retained: {error}");
+        return EXIT_IO;
+    }
     hint(
         "evolve",
         &format!("synthesized body accepted for skill '{skill}'"),
     );
     EXIT_OK
+}
+
+fn append_synthesis_manifest(manifest: &EditManifest, created: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let path = manifests_file();
+    let existing = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    let mut record = serde_json::to_value(manifest).map_err(std::io::Error::other)?;
+    record["synthesis_created"] = created.into();
+    if existing.lines().any(|line| {
+        serde_json::from_str::<serde_json::Value>(line).is_ok_and(|value| value == record)
+    }) {
+        return Ok(());
+    }
+    let mut line = serde_json::to_vec(&record).map_err(std::io::Error::other)?;
+    line.push(b'\n');
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    file.write_all(&line)?;
+    file.sync_data()
 }
 
 /// Minimal `--flag value` / `--flag=value` parser (mirrors main.rs).

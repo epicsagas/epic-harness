@@ -110,8 +110,18 @@ impl HarnessEdit {
                 origin,
                 confidence,
             } => {
-                super::skills::write_skill_with_meta(name, content, origin, *confidence, false);
-                EditOutcome::Applied
+                match super::skills::write_skill_with_meta(
+                    name,
+                    content,
+                    origin,
+                    *confidence,
+                    false,
+                ) {
+                    Ok(()) => EditOutcome::Applied,
+                    Err(error) => {
+                        EditOutcome::Skipped(format!("skill installation failed: {error}"))
+                    }
+                }
             }
         }
     }
