@@ -172,7 +172,11 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
 
     // Extract output text
     let output = resolve_output(input);
-    let new_status = orch_state::parse_agent_state(&output);
+    let new_status = if crate::hooks::observe::explicit_success(input) == Some(false) {
+        Some(AgentStatus::Failed)
+    } else {
+        orch_state::parse_agent_state(&output)
+    };
 
     // Always: update agent status in run.json (agent tracking — no gate)
     let final_status = new_status.clone().unwrap_or(orch_state::AgentStatus::Done);
@@ -196,20 +200,20 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
         event_type: "tool_result".to_string(),
         data: serde_json::json!({
             "agent_id": agent_id,
-            "status": new_status.as_ref().map(|s| serde_json::to_string(s).unwrap_or_default()),
+            "status": &final_status,
             "output_len": output.len(),
         }),
     };
     let _ = orch_state::append_event(&base, &agent_id, &event);
 
     // Evaluate dependency graph if agent is done
-    if final_status == AgentStatus::Done
+    if matches!(&final_status, AgentStatus::Done | AgentStatus::Failed)
         && let Some(mut run) = orch_state::read_run(&base)
     {
         // Update agent status in run
         for agent in &mut run.agents {
             if agent.id == agent_id {
-                agent.status = AgentStatus::Done;
+                agent.status = final_status.clone();
                 agent.completed_at = Some(now_iso());
             }
         }

@@ -392,7 +392,7 @@ fn resolve_action(v: &serde_json::Value) -> String {
 }
 
 /// Prefer host outcome metadata over words printed by a successful tool.
-fn explicit_success(input: &HookInput) -> Option<bool> {
+pub(crate) fn explicit_success(input: &HookInput) -> Option<bool> {
     let response_outcome = |response: Option<&serde_json::Value>| {
         (
             response.and_then(|value| value.get("is_error")?.as_bool()),
