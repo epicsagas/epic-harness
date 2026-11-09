@@ -1,6 +1,6 @@
 ---
 name: _dispatch
-description: "Core router. Always active. Auto-invokes matching skill before every response. Runs confusion protocol on high-risk ambiguity."
+description: "Core router guidance. Select matching skills on clear task signals and run confusion protocol on high-risk ambiguity."
 ---
 
 # Skill Dispatch Engine
@@ -10,6 +10,12 @@ description: "Core router. Always active. Auto-invokes matching skill before eve
 You have access to the following skills. Invoke a skill **only on a clear trigger
 signal from the table below**; when the signal is ambiguous, proceed without a
 skill — a wrong skill costs more than no skill.
+
+Supported Claude Code and Codex hosts also receive bounded static guidance and
+task-specific project memory from the native `UserPromptSubmit` hook. Treat this
+as selected context, not evidence that a skill was executed. Apply relevant
+guidance and load further skill details when needed; user instructions and host
+policy retain priority. The broader routing table below remains agent guidance.
 
 ## Project Overrides (load before dispatching)
 
@@ -123,16 +129,24 @@ If a user says "skip tests", respect that. Skills guide, users decide.
 
 ## Dispatch Logging
 
-Every skill invocation must be logged for evolution analysis. After selecting skills to invoke, record the dispatch event:
+Log actual skill invocations for evolution analysis. Native hook records already
+describe selection and context delivery; do not label those as executed skills.
+For a skill the agent actually invokes, record a separate metadata-only event:
 
 1. Create `$HARNESS_DIR/dispatch/dispatch_YYYYMMDD.jsonl` if it doesn't exist
-2. Append a JSON line: `{ "timestamp": "<ISO>", "trigger_signal": "<signal>", "selected_skills": ["<skill1>", ...], "context_hint": "<why>" }`
+2. Append a JSON line: `{ "timestamp": "<ISO>", "source": "agent_skill", "trigger_signal": "task_category", "selected_skills": ["<skill1>", ...], "action": "invoked" }`
+3. Use fixed trigger categories (`explicit`, `task_category`, `error`, `pipeline`).
+   Never log raw prompts, task hints, secrets, memory titles/bodies, session IDs or
+   personal paths. Skill names must come from the known skill catalog.
 
 This enables Ring 3 to analyze which skills fire most often, which are effective, and tune dispatch rules accordingly.
 
 ## Memory-Augmented Dispatch
 
 Before invoking any skill, **proactively recall** relevant knowledge from the memory graph:
+
+If the native prompt hook already delivered relevant task memories, reuse them.
+Recall again when the task hint changes, an error appears or more detail is needed.
 
 1. **At task start**: Run `epic mem recall "<task hint>"` (e.g., "auth refactor", "CI pipeline fix"). This returns relevance-ranked memories combining FTS match, importance, recency, access frequency, and graph connectivity.
 2. **On errors**: Run `epic mem recall` with the error category/message as hint. Past resolutions and patterns for similar errors surface automatically.

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Claude Code and supported Codex hosts receive bounded static skill guidance
+  and task-hinted project memory through a native UserPromptSubmit hook. Dispatch
+  logs contain delivery metadata only; guidance does not guarantee model compliance (#276).
 - Exclude stale-tagged nodes from all smart recall candidates before applying result limits (#266).
 - Apply project scope before the full-text candidate cap so recall retains in-project matches (#230).
 - Redact complete JSON and quoted credential values before observation truncation (#177).

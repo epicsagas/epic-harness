@@ -168,6 +168,13 @@ sequenceDiagram
 
 ### Dispatch Priority Resolution
 
+On Claude Code and Codex hosts with `UserPromptSubmit`, a native hook delivers
+bounded static guidance and task-hinted, project-scoped memory before each task.
+The `_dispatch` skill remains agent guidance for selecting the broader skill set.
+Selection and context delivery do not guarantee model compliance, skill execution
+or successful verification. See [native prompt dispatch](prompt-dispatch.md) for
+the supported payload, budgets, privacy contract and host acceptance requirements.
+
 ```
 1. User explicit instruction    → "skip tests" → tdd skipped
 2. Static skills (11)           → tdd, debug, discover, secure, perf, simplify, document, verify, context, council, agent-introspection

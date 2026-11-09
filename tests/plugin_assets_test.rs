@@ -17,10 +17,14 @@ const LAUNCHER: &str = "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 const CLAUDE_LAUNCHER: &str = "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 const GROK_LAUNCHER: &str = "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 
-/// Command handlers, in manifest order: events, matcher groups, handlers.
-fn command_handlers(value: &Value) -> Vec<&str> {
+/// Preserve the upstream lifecycle command contract; native prompt transport
+/// is checked independently by prompt_dispatch_test and its real-shell test.
+fn lifecycle_command_handlers(value: &Value) -> Vec<&str> {
     let mut out = Vec::new();
-    for groups in value["hooks"].as_object().expect("hooks object").values() {
+    for (event, groups) in value["hooks"].as_object().expect("hooks object") {
+        if event == "UserPromptSubmit" {
+            continue;
+        }
         for group in groups.as_array().expect("matcher groups") {
             for handler in group["hooks"].as_array().expect("handlers") {
                 assert_eq!(handler["type"], "command", "unexpected handler type");
@@ -73,7 +77,7 @@ fn assert_launcher_form(handlers: &[&str], launcher: &str) {
 #[test]
 fn codex_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CODEX_HOOKS).expect("valid JSON");
-    let handlers = command_handlers(&hooks);
+    let handlers = lifecycle_command_handlers(&hooks);
     assert_eq!(handlers.len(), 10, "expected 10 command handlers");
     assert_launcher_form(&handlers, LAUNCHER);
 }
@@ -84,7 +88,7 @@ fn codex_hook_commands_all_use_launcher() {
 #[test]
 fn claude_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CLAUDE_HOOKS).expect("valid JSON");
-    let handlers = command_handlers(&hooks);
+    let handlers = lifecycle_command_handlers(&hooks);
     assert_eq!(handlers.len(), 7, "expected 7 command handlers");
     assert_launcher_form(&handlers, CLAUDE_LAUNCHER);
 }
@@ -95,7 +99,7 @@ fn claude_hook_commands_all_use_launcher() {
 #[test]
 fn grok_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(GROK_HOOKS).expect("valid JSON");
-    let handlers = command_handlers(&hooks);
+    let handlers = lifecycle_command_handlers(&hooks);
     assert_eq!(handlers.len(), 7, "expected 7 command handlers");
     assert_launcher_form(&handlers, GROK_LAUNCHER);
 }
