@@ -97,14 +97,30 @@ pub async fn list_recent_snapshots_pool(
     pool: &AnyPool,
     limit: i64,
 ) -> io::Result<Vec<SessionSnapshot>> {
-    let rows = sqlx::query(
-        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
-         FROM sessions ORDER BY id DESC LIMIT ?",
-    )
-    .bind(limit)
-    .fetch_all(pool)
-    .await
-    .map_err(super::sqlx_err)?;
+    list_recent_snapshots_scoped_pool(pool, limit, None).await
+}
+
+/// Filter by project before limiting; None explicitly selects all projects.
+pub async fn list_recent_snapshots_scoped_pool(
+    pool: &AnyPool,
+    limit: i64,
+    project: Option<&str>,
+) -> io::Result<Vec<SessionSnapshot>> {
+    let query = if let Some(project) = project {
+        sqlx::query(
+            "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
+             FROM sessions WHERE project = ? ORDER BY id DESC LIMIT ?",
+        )
+        .bind(project)
+        .bind(limit)
+    } else {
+        sqlx::query(
+            "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
+             FROM sessions ORDER BY id DESC LIMIT ?",
+        )
+        .bind(limit)
+    };
+    let rows = query.fetch_all(pool).await.map_err(super::sqlx_err)?;
 
     let mut snaps = Vec::with_capacity(rows.len());
     for r in rows {
