@@ -10,7 +10,8 @@ fn issue243_concurrent_successful_updates_preserve_every_agent() {
     let now = "2026-01-01T00:00:00Z".to_owned();
     let run = OrchestrationRun {
         id: "concurrency-fixture".into(),
-        status: RunStatus::Complete,
+        // Reopening completed runs is covered separately by #242.
+        status: RunStatus::Running,
         agents: (0..1000)
             .map(|i| AgentDef {
                 id: format!("old-{i}"),
