@@ -291,28 +291,70 @@ pub struct CopyResult {
     pub errors: u64,
 }
 
+/// Reparse points (including Windows junctions) are not ordinary directories.
+/// A contained migration must report them instead of following their targets.
+pub fn is_link_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+
 /// Like `copy_dir` but counts successes and errors instead of silently ignoring failures.
 pub fn copy_dir_counted(src: &Path, dest: &Path) -> CopyResult {
     let mut result = CopyResult { ok: 0, errors: 0 };
-    if !src.is_dir() {
+    let metadata = match src.symlink_metadata() {
+        Ok(metadata) if !is_link_or_reparse_point(&metadata) => metadata,
+        _ => {
+            result.errors += 1;
+            return result;
+        }
+    };
+    if !metadata.is_dir() {
+        result.errors += 1;
         return result;
     }
-    ensure_dir(dest);
-    if let Ok(entries) = fs::read_dir(src) {
-        for entry in entries.flatten() {
-            let src_path = entry.path();
-            let dest_path = dest.join(entry.file_name());
-            if src_path.is_dir() {
-                let sub = copy_dir_counted(&src_path, &dest_path);
-                result.ok += sub.ok;
-                result.errors += sub.errors;
-            } else {
-                match fs::copy(&src_path, &dest_path) {
-                    Ok(_) => result.ok += 1,
-                    Err(_) => result.errors += 1,
+    if fs::create_dir_all(dest).is_err() {
+        result.errors += 1;
+        return result;
+    }
+    match fs::read_dir(src) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(_) => {
+                        result.errors += 1;
+                        continue;
+                    }
+                };
+                let src_path = entry.path();
+                let dest_path = dest.join(entry.file_name());
+                let metadata = match src_path.symlink_metadata() {
+                    Ok(metadata) if !is_link_or_reparse_point(&metadata) => metadata,
+                    _ => {
+                        result.errors += 1;
+                        continue;
+                    }
+                };
+                if metadata.is_dir() {
+                    let sub = copy_dir_counted(&src_path, &dest_path);
+                    result.ok += sub.ok;
+                    result.errors += sub.errors;
+                } else {
+                    match fs::copy(&src_path, &dest_path) {
+                        Ok(_) => result.ok += 1,
+                        Err(_) => result.errors += 1,
+                    }
                 }
             }
         }
+        Err(_) => result.errors += 1,
     }
     result
 }
