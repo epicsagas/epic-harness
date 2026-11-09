@@ -242,8 +242,14 @@ fn main() {
                     // invariants can finally be checked against real state.
                     // Warn only — unlock also runs on abort and after a crash.
                     shared::orbit::warn_on_invalid_completion(&dir);
-                    shared::orbit::release_orbit_lock(&dir);
-                    0
+                    if shared::orbit::try_release_orbit_lock(&dir) {
+                        0
+                    } else {
+                        eprintln!(
+                            "orbit lock retained: pipeline is active, owner differs, or release failed"
+                        );
+                        1
+                    }
                 }
                 _ => {
                     eprintln!("usage: epic orbit lock|unlock");
