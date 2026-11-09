@@ -31,7 +31,11 @@ pub fn read_json(project: &Path, name: &str, default: Value) -> Result<Value, St
 }
 
 pub fn manifests(project: &Path, limit: usize) -> Result<Vec<Value>, String> {
-    let path = checked_file(project, "manifests.jsonl")?;
+    read_jsonl(project, "manifests.jsonl", limit)
+}
+
+pub fn read_jsonl(project: &Path, name: &str, limit: usize) -> Result<Vec<Value>, String> {
+    let path = checked_file(project, name)?;
     let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),

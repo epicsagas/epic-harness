@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::native_files;
+use super::native_orchestration;
 use super::native_store;
 use crate::state::AppState;
 
@@ -496,4 +497,100 @@ pub async fn get_adaptation_landscape(
 #[tauri::command]
 pub async fn get_manifests(project: Option<String>) -> Result<Vec<serde_json::Value>, String> {
     native_files::manifests(&selected_project_dir(project.as_deref())?, 50)
+}
+
+#[tauri::command]
+pub async fn get_orchestrator_run(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    native_orchestration::run(
+        &state.harness_db,
+        &selected_project_dir(project.as_deref())?,
+        native_store::project_scope(project.as_deref()).is_some(),
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_orchestrator_agent_status(
+    agent_id: String,
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    native_orchestration::status(
+        &state.harness_db,
+        &selected_project_dir(project.as_deref())?,
+        native_store::project_scope(project.as_deref()).is_some(),
+        &agent_id,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_agent_events(
+    agent_id: String,
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    native_orchestration::events(
+        &state.harness_db,
+        &selected_project_dir(project.as_deref())?,
+        native_store::project_scope(project.as_deref()).is_some(),
+        &agent_id,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn get_agent_inbox(
+    agent_id: String,
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    native_orchestration::inbox(
+        &state.harness_db,
+        &selected_project_dir(project.as_deref())?,
+        native_store::project_scope(project.as_deref()).is_some(),
+        &agent_id,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn dismiss_orbit_pipeline(
+    id: String,
+    project: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let scoped = native_store::project_scope(project.as_deref()).map(str::to_string);
+    let ok = tauri::async_runtime::spawn_blocking(move || {
+        epic_harness::serve::dismiss_orbit_pipeline_for(&id, scoped.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({"ok":ok}))
+}
+
+#[tauri::command]
+pub async fn dismiss_agent(
+    agent_id: String,
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    if !epic_harness::orchestrate::state::validate_agent_id(&agent_id) {
+        return Err("invalid agent id".into());
+    }
+    let directory = selected_project_dir(project.as_deref())?;
+    // The shared helper applies the same interprocess state lock as hook writers.
+    let file_removed = epic_harness::orchestrate::state::dismiss_agent(&directory, &agent_id)
+        .map_err(|e| e.to_string())?;
+    let db_removed = if native_store::project_scope(project.as_deref()).is_none() || file_removed {
+        epic_harness::store::orchestrator::dismiss_agent_pool(&state.harness_db, &agent_id)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        false
+    };
+    Ok(serde_json::json!({"ok":file_removed || db_removed,"dismissed":agent_id}))
 }

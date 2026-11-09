@@ -376,6 +376,11 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
 }
 export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
 export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
+  if (isTauriRuntime()) {
+    const result = await invoke<{ ok: boolean }>('dismiss_orbit_pipeline', { id, ...projectArgs() });
+    if (result?.ok !== true) throw new Error('Pipeline dismissal failed');
+    return result;
+  }
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();
 }
@@ -396,6 +401,7 @@ export const getManifests = () => invoke<EditManifestEntry[]>('get_manifests', p
 
 export async function getOrchestratorRun(): Promise<OrchestrationRun | null> {
   try {
+    if (isTauriRuntime()) return await invoke<OrchestrationRun | null>('get_orchestrator_run', projectArgs());
     const res = await fetch('/api/run');
     if (!res.ok) return null;
     const data = await res.json();
@@ -407,6 +413,7 @@ export async function getOrchestratorRun(): Promise<OrchestrationRun | null> {
 
 export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchAgentStatus | null> {
   try {
+    if (isTauriRuntime()) return await invoke<OrchAgentStatus | null>('get_orchestrator_agent_status', { agentId, ...projectArgs() });
     const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/status`);
     if (!res.ok) return null;
     const data = await res.json();
@@ -417,12 +424,18 @@ export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchA
 }
 
 export async function dismissAgent(agentId: string): Promise<{ ok: boolean }> {
+  if (isTauriRuntime()) {
+    const result = await invoke<{ ok: boolean }>('dismiss_agent', { agentId, ...projectArgs() });
+    if (result?.ok !== true) throw new Error('Agent dismissal failed');
+    return result;
+  }
   const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}`, { method: 'DELETE' });
   return res.json();
 }
 
 export async function getAgentEvents(agentId: string): Promise<AgentEvent[]> {
   try {
+    if (isTauriRuntime()) return await invoke<AgentEvent[]>('get_agent_events', { agentId, ...projectArgs() });
     const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/events`);
     if (!res.ok) return [];
     return await res.json();
@@ -433,6 +446,7 @@ export async function getAgentEvents(agentId: string): Promise<AgentEvent[]> {
 
 export async function getAgentInbox(agentId: string): Promise<InboxMessage[]> {
   try {
+    if (isTauriRuntime()) return await invoke<InboxMessage[]>('get_agent_inbox', { agentId, ...projectArgs() });
     const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/inbox`);
     if (!res.ok) return [];
     return await res.json();
@@ -443,6 +457,16 @@ export async function getAgentInbox(agentId: string): Promise<InboxMessage[]> {
 
 export async function getGraphStats(): Promise<GraphStats | null> {
   try {
+    if (isTauriRuntime()) {
+      const data = await invoke<Record<string, unknown>>('get_stats');
+      if (!data || data.error) return null;
+      return {
+        total_nodes: Number(data.total_nodes ?? data.nodes),
+        total_edges: Number(data.total_edges ?? data.edges),
+        avg_importance: Number(data.avg_importance),
+        by_type: (data.by_type ?? data.types ?? {}) as Record<string, number>,
+      };
+    }
     const res = await fetch('/api/stats');
     if (!res.ok) return null;
     const data = await res.json();
@@ -454,6 +478,7 @@ export async function getGraphStats(): Promise<GraphStats | null> {
 
 export async function getMemoryNodes(): Promise<MemoryNode[]> {
   try {
+    if (isTauriRuntime()) return (await invoke<MemoryNode[]>('get_nodes')).map(normalizeMemoryNode);
     const res = await fetch('/api/nodes');
     if (!res.ok) return [];
     return await res.json();
@@ -464,6 +489,7 @@ export async function getMemoryNodes(): Promise<MemoryNode[]> {
 
 export async function getMemoryNode(id: string): Promise<MemoryNode | null> {
   try {
+    if (isTauriRuntime()) return normalizeMemoryNode(await invoke<MemoryNode>('get_node', { id }));
     const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`);
     if (!res.ok) return null;
     return await res.json();
@@ -474,6 +500,7 @@ export async function getMemoryNode(id: string): Promise<MemoryNode | null> {
 
 export async function searchMemory(query: string, type?: string): Promise<MemoryNode[]> {
   try {
+    if (isTauriRuntime()) return (await invoke<MemoryNode[]>('search_nodes', { query, ...(type ? { nodeType: type } : {}) })).map(normalizeMemoryNode);
     let url = `/api/search?q=${encodeURIComponent(query)}`;
     if (type) url += `&type=${encodeURIComponent(type)}`;
     const res = await fetch(url);
@@ -482,6 +509,11 @@ export async function searchMemory(query: string, type?: string): Promise<Memory
   } catch {
     return [];
   }
+}
+
+function normalizeMemoryNode(node: MemoryNode): MemoryNode {
+  const list = (value: unknown): string[] => Array.isArray(value) ? value.map(String) : typeof value === 'string' ? value.split(',').filter(Boolean) : [];
+  return { ...node, tags: list(node.tags), projects: list(node.projects) };
 }
 
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────

@@ -668,3 +668,5 @@ Original files are **not deleted** after import. New users are automatically on 
 - Reject empty or ambiguous Orbit deletion IDs and match exact project-scoped sidecars (#221).
 
 - Dismiss exact Orbit records in primary SQLite and sidecar state, preserving project scope and reporting failures (#264).
+
+- Route native memory and orchestration reads and dismissals through registered scoped IPC, retaining agent history and dependency semantics (#238).
