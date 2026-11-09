@@ -1573,6 +1573,7 @@ fn detect_session_stack(observations: &[ObsRecord]) -> Vec<String> {
                 })
             })
             .unwrap_or_default()
+            .trim_start_matches('.')
             .to_lowercase();
         let tag = match ext.as_str() {
             "rs" => "rust",
@@ -1616,6 +1617,20 @@ mod tests {
             file_ext: None,
             sequence_id: None,
             pipeline_id: None,
+        }
+    }
+
+    #[test]
+    fn issue_270_routes_extensions_produced_by_observe() {
+        for (file, stack) in [
+            ("src/view.tsx", "typescript"),
+            ("src/main.rs", "rust"),
+            ("src/app.py", "python"),
+        ] {
+            let mut obs = obs_at("2026-11-09T12:00:00Z");
+            obs.file_ext =
+                crate::shared::classify::extract_file_ext(&serde_json::json!({"file_path": file}));
+            assert_eq!(detect_session_stack(&[obs]), vec![stack], "{file}");
         }
     }
 
