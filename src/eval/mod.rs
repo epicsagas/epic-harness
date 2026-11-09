@@ -11,6 +11,19 @@ use crate::shared::paths::harness_dir;
 /// Entry point for `epic eval` subcommand.
 pub fn run(args: &[String]) -> i32 {
     let json_mode = args.iter().any(|a| a == "--json");
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        let usage = "epic eval [--json] [--dimension correctness|performance|quality|benchmarks|regression] [--baseline-update] | --init | --scaffold";
+        if json_mode {
+            println!("{}", serde_json::json!({"action": "help", "usage": usage}));
+        } else {
+            println!("{usage}");
+        }
+        return 0;
+    }
+    if let Err(error) = validate_args(args) {
+        eprintln!("error: {error}");
+        return 2;
+    }
     let init_mode = args.iter().any(|a| a == "--init");
     let scaffold_mode = args.iter().any(|a| a == "--scaffold");
     let baseline_update = args.iter().any(|a| a == "--baseline-update");
@@ -264,6 +277,41 @@ fn parse_flag_str(args: &[String], flag: &str) -> Option<String> {
                 .and_then(|i| args.get(i + 1))
                 .cloned()
         })
+}
+
+fn validate_args(args: &[String]) -> Result<(), String> {
+    let dimensions = [
+        "correctness",
+        "performance",
+        "quality",
+        "benchmarks",
+        "regression",
+    ];
+    let mut index = 0;
+    while let Some(arg) = args.get(index) {
+        match arg.as_str() {
+            "--json" | "--init" | "--scaffold" | "--baseline-update" => {}
+            "--dimension" => {
+                index += 1;
+                let value = args.get(index).ok_or("--dimension requires a value")?;
+                if !dimensions.contains(&value.as_str()) {
+                    return Err(format!("unknown dimension '{value}'"));
+                }
+            }
+            value if value.starts_with("--dimension=") => {
+                let value = &value["--dimension=".len()..];
+                if !dimensions.contains(&value) {
+                    return Err(format!("unknown dimension '{value}'"));
+                }
+            }
+            other => return Err(format!("unknown eval argument '{other}'")),
+        }
+        index += 1;
+    }
+    if args.iter().any(|a| a == "--init") && args.iter().any(|a| a == "--scaffold") {
+        return Err("--init and --scaffold are separate actions".into());
+    }
+    Ok(())
 }
 
 fn chrono_now() -> String {
