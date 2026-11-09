@@ -95,6 +95,7 @@ pub struct ResolvedCommands {
     #[expect(dead_code)]
     pub mutation_command: Option<String>,
     pub stack: String,
+    pub max_regression_pct: f64,
 }
 
 // ── Defaults ────────────────────────────────────────────────────────
@@ -359,6 +360,16 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
 /// eval delegates build/test/lint to `verify`. Only explicitly configured
 /// dimension commands are returned; stack is informational.
 pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
+    if !cfg
+        .dimensions
+        .performance
+        .extra
+        .max_regression_pct
+        .is_finite()
+        || cfg.dimensions.performance.extra.max_regression_pct < 0.0
+    {
+        return Err("performance max_regression_pct must be finite and non-negative".into());
+    }
     let stack = if cfg.stack == "auto" {
         detect_stack(&std::env::current_dir().unwrap_or_default())
     } else {
@@ -384,5 +395,6 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         bench_command: cfg.dimensions.performance.command.clone(),
         mutation_command: mutation_cmd,
         stack,
+        max_regression_pct: cfg.dimensions.performance.extra.max_regression_pct,
     })
 }
