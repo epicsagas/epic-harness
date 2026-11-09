@@ -163,7 +163,7 @@ pub fn atomic_write_json(path: &Path, data: &impl Serialize) -> io::Result<()> {
 /// Read a JSON file, returning None if missing or unparseable.
 pub fn read_json_opt<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
     let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+    crate::shared::helpers::parse_persisted_json(&content).ok()
 }
 
 /// Append a JSON line to a JSONL file.

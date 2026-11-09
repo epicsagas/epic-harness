@@ -69,7 +69,7 @@ pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> 
                 return None;
             }
             let content = fs::read_to_string(&path).ok()?;
-            match serde_json::from_str::<serde_json::Value>(&content) {
+            match super::helpers::parse_persisted_json::<serde_json::Value>(&content) {
                 Ok(val) if val.get("status").and_then(|v| v.as_str()) == Some("running") => {
                     let fresh = val
                         .get("updated_at")
@@ -167,26 +167,33 @@ pub fn detect_active_orbit_id() -> Option<String> {
 
 /// Try to acquire the concurrent-orbit guard in `dir` (the orbit state dir).
 /// Returns true on success (creates `.orbit.lock`), false if another orbit is
-/// running. # ponytail: hole between acquire and the first PIPELINE write
-/// (seconds) — a second start inside that window is not excluded.
+/// running. Fresh startup reservations remain exclusive for two minutes,
+/// including the interval before the first pipeline-state write.
 pub fn try_acquire_orbit_lock(dir: &Path) -> bool {
-    if fs::create_dir_all(dir).is_err() {
+    let Ok(_admission) = admission_lock(dir) else {
+        return false;
+    };
+    if scan_running_pipeline_in(dir).is_some() {
         return false;
     }
     let path = dir.join(".orbit.lock");
-    if path.exists() {
-        // Reclaimable when no pipeline is actually running (crashed orbit
-        // left the lock behind).
-        if scan_running_pipeline_in(dir).is_some() {
+    let epoch = now_epoch_secs();
+    if let Ok(contents) = fs::read_to_string(&path) {
+        let acquired = super::helpers::parse_persisted_json::<serde_json::Value>(&contents)
+            .ok()
+            .and_then(|v| v.get("acquired_at").and_then(|v| v.as_u64()));
+        if acquired.is_some_and(|at| epoch.saturating_sub(at) < 120) {
             return false;
         }
-        let _ = fs::remove_file(&path);
+        if fs::remove_file(&path).is_err() {
+            return false;
+        }
     }
-    let epoch = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let body = format!("{{\"pid\":{},\"acquired_at\":{epoch}}}", std::process::id());
+    let owner = std::env::var("EPIC_ORBIT_OWNER")
+        .ok()
+        .filter(|v| !v.is_empty());
+    let body = serde_json::json!({"pid": std::process::id(), "acquired_at":epoch, "owner":owner})
+        .to_string();
     fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -195,9 +202,47 @@ pub fn try_acquire_orbit_lock(dir: &Path) -> bool {
         .is_ok()
 }
 
-/// Release the concurrent-orbit guard (best-effort; safe if absent/foreign).
+fn admission_lock(dir: &Path) -> std::io::Result<fs::File> {
+    fs::create_dir_all(dir)?;
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(dir.join(".orbit.admission.lock"))?;
+    file.lock()?;
+    Ok(file)
+}
+
+/// Release after terminal state or stale recovery. An explicit owner, when
+/// supplied on acquisition, must match across the short-lived CLI processes.
+pub fn try_release_orbit_lock(dir: &Path) -> bool {
+    let Ok(_admission) = admission_lock(dir) else {
+        return false;
+    };
+    if scan_running_pipeline_in(dir).is_some() {
+        return false;
+    }
+    let path = dir.join(".orbit.lock");
+    if let Ok(contents) = fs::read_to_string(&path)
+        && let Ok(value) = super::helpers::parse_persisted_json::<serde_json::Value>(&contents)
+        && let Some(owner) = value.get("owner").and_then(|v| v.as_str())
+        && std::env::var("EPIC_ORBIT_OWNER").as_deref() != Ok(owner)
+    {
+        return false;
+    }
+    match fs::remove_file(path) {
+        Ok(()) => true,
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
+/// Compatibility wrapper for callers that do not need the release outcome.
+#[allow(dead_code)] // Library callers retain this API; the CLI uses the checked release.
 pub fn release_orbit_lock(dir: &Path) {
-    let _ = fs::remove_file(dir.join(".orbit.lock"));
+    if !try_release_orbit_lock(dir) {
+        eprintln!("[orbit] lock retained: pipeline is active, owner differs, or release failed");
+    }
 }
 
 /// Read the full pipeline state for an active orbit (uncached, authoritative).
@@ -269,7 +314,7 @@ pub fn warn_on_invalid_completion(dir: &Path) -> usize {
         let Ok(content) = fs::read_to_string(entry.path()) else {
             continue;
         };
-        let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content) else {
+        let Ok(pl) = super::helpers::parse_persisted_json::<serde_json::Value>(&content) else {
             continue;
         };
         // PIPELINE-{timestamp} makes lexicographic order equal creation order.
@@ -333,6 +378,66 @@ pub fn sanitize_orbit_field(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn issue247_fresh_startup_reservation_excludes_second_start() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(try_acquire_orbit_lock(temp.path()));
+        assert!(
+            !try_acquire_orbit_lock(temp.path()),
+            "a second start stole a fresh reservation"
+        );
+    }
+
+    #[test]
+    fn issue247_active_pipeline_blocks_admission_without_lock_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let now = crate::shared::helpers::now_iso();
+        fs::write(
+            temp.path().join("PIPELINE-current.json"),
+            serde_json::json!({"id":"current","status":"running","updated_at":now}).to_string(),
+        )
+        .unwrap();
+        assert!(!try_acquire_orbit_lock(temp.path()));
+    }
+
+    #[test]
+    fn issue247_unlock_cannot_remove_active_pipeline_guard() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(try_acquire_orbit_lock(temp.path()));
+        let pipeline = temp.path().join("PIPELINE-current.json");
+        fs::write(&pipeline, serde_json::json!({"id":"current","status":"running","updated_at":crate::shared::helpers::now_iso()}).to_string()).unwrap();
+        release_orbit_lock(temp.path());
+        assert!(temp.path().join(".orbit.lock").exists());
+        assert!(!try_acquire_orbit_lock(temp.path()));
+        fs::write(pipeline, r#"{"id":"current","status":"complete"}"#).unwrap();
+        release_orbit_lock(temp.path());
+        assert!(!temp.path().join(".orbit.lock").exists());
+    }
+
+    #[test]
+    fn issue247_expired_startup_reservation_can_be_recovered() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join(".orbit.lock"),
+            r#"{"pid":1,"acquired_at":1}"#,
+        )
+        .unwrap();
+        assert!(try_acquire_orbit_lock(temp.path()));
+    }
+
+    #[test]
+    fn issue247_foreign_owner_cannot_release_a_reservation() {
+        let temp = tempfile::tempdir().unwrap();
+        let foreign = format!("foreign-{}", uuid::Uuid::new_v4());
+        fs::write(
+            temp.path().join(".orbit.lock"),
+            serde_json::json!({"acquired_at":now_epoch_secs(),"owner":foreign}).to_string(),
+        )
+        .unwrap();
+        release_orbit_lock(temp.path());
+        assert!(temp.path().join(".orbit.lock").exists());
+    }
 
     #[test]
     fn epoch_from_iso_roundtrip() {

@@ -1293,7 +1293,8 @@ pub fn run(_input: &HookInput) -> i32 {
                     continue;
                 }
                 if let Ok(content) = fs::read_to_string(&path)
-                    && let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content)
+                    && let Ok(pl) =
+                        crate::shared::helpers::parse_persisted_json::<serde_json::Value>(&content)
                 {
                     let id = pl["id"].as_str().unwrap_or(name.trim_end_matches(".json"));
                     let status = pl["status"].as_str().unwrap_or("unknown");
@@ -1499,10 +1500,11 @@ fn patch_orbit_evolve_gap(orbit_dir: &std::path::Path, now: &str) -> usize {
             Ok(c) => c,
             Err(_) => continue,
         };
-        let mut pipeline: serde_json::Value = match serde_json::from_str(&content) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
+        let mut pipeline: serde_json::Value =
+            match crate::shared::helpers::parse_persisted_json(&content) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
 
         // Only touch pipelines that completed ship but have no evolve entry.
         let status_complete = matches!(

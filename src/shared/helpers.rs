@@ -175,10 +175,19 @@ pub fn mirror_line(line: &str) {
     mirror_push(line.to_string());
 }
 
+/// Decode persisted host-authored JSON, accepting one leading UTF-8 BOM.
+/// Windows PowerShell 5 emits that marker with `Set-Content -Encoding utf8`.
+/// Do not trim other content or change the hook/stdin protocol's JSON rules.
+pub(crate) fn parse_persisted_json<T: serde::de::DeserializeOwned>(
+    content: &str,
+) -> Result<T, serde_json::Error> {
+    serde_json::from_str(content.strip_prefix('\u{feff}').unwrap_or(content))
+}
+
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T {
     fs::read_to_string(path)
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| parse_persisted_json(&s).ok())
         .unwrap_or(fallback)
 }
 

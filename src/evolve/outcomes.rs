@@ -324,7 +324,7 @@ pub fn run_reconcile(args: &[String]) -> i32 {
         let Ok(text) = fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(v) = serde_json::from_str::<Value>(&text) else {
+        let Ok(v) = crate::shared::helpers::parse_persisted_json::<Value>(&text) else {
             continue;
         };
         let pid = path.file_name().map(|n| {
