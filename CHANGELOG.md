@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Migrate edge IDs and weights additively, delete exact edge identities, and align native edge creation (#227).
+- Allow legacy edge writers to omit additive IDs until reopen assigns unique identities (#227).
+- Align existing edge integration coverage with persisted edge IDs and reject accidental deletion by source node (#227).
+
 ### Fixed
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so

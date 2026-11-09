@@ -4,7 +4,7 @@
 //! indexes) plus epic-harness-specific indexes and data migrations.
 //! Called by `pool::memory_pool()` on first pool creation.
 
-use sqlx::AnyPool;
+use sqlx::{AnyPool, Row};
 use std::io;
 
 /// SQL DDL for the graph schema — nodes table, FTS5 virtual table, edges table, and indexes.
@@ -47,10 +47,12 @@ CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
 END;
 
 CREATE TABLE IF NOT EXISTS edges (
+    id TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL,
     target TEXT NOT NULL,
     label TEXT NOT NULL DEFAULT '',
     created TEXT NOT NULL DEFAULT '',
+    weight REAL NOT NULL DEFAULT 1.0,
     PRIMARY KEY (source, target, label)
 );
 
@@ -86,6 +88,8 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
         .await
         .map_err(io::Error::other)?;
 
+    migrate_edge_metadata(pool).await?;
+
     // Harness-specific indexes
     sqlx::query(HARNESS_INDEXES_SQL)
         .execute(pool)
@@ -101,6 +105,54 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     // Legacy file migration
     migrate_legacy_files(pool).await;
 
+    Ok(())
+}
+
+/// Add metadata without rebuilding or dropping legacy relationships.
+async fn migrate_edge_metadata(pool: &AnyPool) -> io::Result<()> {
+    for (column, ddl) in [
+        (
+            "id",
+            "ALTER TABLE edges ADD COLUMN id TEXT NOT NULL DEFAULT ''",
+        ),
+        (
+            "weight",
+            "ALTER TABLE edges ADD COLUMN weight REAL NOT NULL DEFAULT 1.0",
+        ),
+    ] {
+        let columns = sqlx::query("PRAGMA table_info(edges)")
+            .fetch_all(pool)
+            .await
+            .map_err(io::Error::other)?;
+        if !columns.iter().any(|r| r.get::<String, _>("name") == column)
+            && let Err(error) = sqlx::query(ddl).execute(pool).await
+        {
+            // Another opener may have completed the same additive migration.
+            let columns = sqlx::query("PRAGMA table_info(edges)")
+                .fetch_all(pool)
+                .await
+                .map_err(io::Error::other)?;
+            if !columns.iter().any(|r| r.get::<String, _>("name") == column) {
+                return Err(io::Error::other(error));
+            }
+        }
+    }
+    let rows = sqlx::query("SELECT source, target, label FROM edges WHERE id IS NULL OR id = ''")
+        .fetch_all(pool)
+        .await
+        .map_err(io::Error::other)?;
+    for row in rows {
+        sqlx::query("UPDATE edges SET id = ? WHERE source = ? AND target = ? AND label = ? AND (id IS NULL OR id = '')")
+            .bind(super::util::new_uuid())
+            .bind(row.get::<String, _>(0)).bind(row.get::<String, _>(1)).bind(row.get::<String, _>(2))
+            .execute(pool).await.map_err(io::Error::other)?;
+    }
+    // Legacy writers still omit the new column. Empty placeholders must not
+    // conflict with one another before the next opener assigns persistent IDs.
+    sqlx::query("CREATE UNIQUE INDEX IF NOT EXISTS idx_edges_id ON edges(id) WHERE id <> ''")
+        .execute(pool)
+        .await
+        .map_err(io::Error::other)?;
     Ok(())
 }
 
@@ -238,11 +290,14 @@ pub(crate) async fn append_graph_edge(
     ge: &super::types::GraphEdge,
 ) -> io::Result<()> {
     sqlx::query(
-        "INSERT OR REPLACE INTO edges (source, target, label, created) VALUES (?, ?, ?, ?)",
+        "INSERT INTO edges (id, source, target, label, weight, created) VALUES (?, ?, ?, ?, ?, ?) \
+         ON CONFLICT(source, target, label) DO UPDATE SET id=excluded.id, weight=excluded.weight, created=excluded.created",
     )
+    .bind(if ge.id.is_empty() { super::util::new_uuid() } else { ge.id.clone() })
     .bind(&ge.source)
     .bind(&ge.target)
     .bind(&ge.label)
+    .bind(ge.weight)
     .bind(&ge.created)
     .execute(pool)
     .await

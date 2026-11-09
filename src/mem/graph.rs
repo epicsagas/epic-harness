@@ -98,7 +98,7 @@ async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::R
         .collect();
 
     let mut edges: Vec<GraphEdge> = sqlx::query(
-        "SELECT source, target, label, created FROM edges ORDER BY created DESC LIMIT ?",
+        "SELECT source, target, label, weight FROM edges ORDER BY created DESC LIMIT ?",
     )
     .bind(MAX_GRAPH_EDGES as i64)
     .fetch_all(pool)
@@ -109,7 +109,7 @@ async fn build_graph_async(pool: &sqlx::AnyPool, include_virtual: bool) -> io::R
         source: r.get::<String, _>(0),
         target: r.get::<String, _>(1),
         relation: r.get::<String, _>(2),
-        weight: 1.0,
+        weight: r.get::<f64, _>(3),
         virtual_: false,
     })
     .collect();

@@ -116,7 +116,7 @@ pub async fn create_edge(
         return Err(format!("target node {} does not exist", edge.target));
     }
     sqlx::query(
-        "INSERT INTO edges (id, source, target, relation, weight, ts) VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO edges (id, source, target, label, weight, created) VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(&edge.id)
     .bind(&edge.source)
