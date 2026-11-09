@@ -386,6 +386,11 @@ epic harness diff before.json after.json   # field-by-field structural diff
 # (restore is deferred — destructive)
 ```
 
+CLI and native snapshots list skills only from contained project paths. Missing
+or escaping project/evolved directories contribute an empty skill list; escaping
+skill entries are omitted while valid siblings remain visible. Snapshot requests
+continue to succeed with the contained state available.
+
 ---
 
 ## Security Pipeline
