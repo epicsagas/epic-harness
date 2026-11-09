@@ -273,6 +273,14 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                             "id": n.frontmatter.id,
                             "title": n.frontmatter.title,
                             "type": n.frontmatter.node_type,
+                            "tags": n.frontmatter.tags,
+                            "projects": n.frontmatter.projects,
+                            "agents": n.frontmatter.agents,
+                            "created": n.frontmatter.created,
+                            "updated": n.frontmatter.updated,
+                            "importance": n.frontmatter.importance,
+                            "access_count": n.frontmatter.access_count,
+                            "body": n.body,
                             "snippet": n.body.chars().take(160).collect::<String>()
                         })
                     })
