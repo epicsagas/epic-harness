@@ -6,7 +6,6 @@
 //! Implements MCP protocol version 2024-11-05 over stdin/stdout.
 //! Tools: mem_add, mem_query, mem_search, mem_related, mem_context
 
-use serde::Deserialize;
 use serde_json::{Value, json};
 use sqlx::AnyPool;
 use std::io::{self, BufRead, Write};
@@ -408,48 +407,52 @@ fn call_tool(pool: &AnyPool, name: &str, args: &Value) -> Value {
 
 // ── JSON-RPC dispatch ──────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-struct RpcRequest {
-    #[allow(dead_code)]
-    jsonrpc: String,
-    id: Option<Value>,
-    method: String,
-    params: Option<Value>,
-}
-
 fn send(obj: &Value) {
     let mut out = io::stdout().lock();
     let _ = writeln!(out, "{}", obj);
     let _ = out.flush();
 }
 
-fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
-    match msg.method.as_str() {
-        "initialize" => {
-            let resp = json!({
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": { "tools": {} },
-                    "serverInfo": { "name": "harness-mem", "version": env!("CARGO_PKG_VERSION") }
-                }
-            });
-            send(&resp);
-        }
-        "notifications/initialized" => {
-            // client notification, no response
-        }
-        "tools/list" => {
-            let resp = json!({
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "result": { "tools": tool_definitions() }
-            });
-            send(&resp);
-        }
+fn rpc_error(id: Value, code: i64, message: &str) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+}
+
+/// Validate the envelope before dispatch. A missing ID is a notification;
+/// an explicitly null ID is still a request and receives a response.
+fn handle_message(pool: &AnyPool, msg: &Value) -> Option<Value> {
+    let id = msg.get("id").cloned();
+    let invalid_id = id
+        .as_ref()
+        .is_some_and(|id| !id.is_string() && !id.is_number() && !id.is_null());
+    if !msg.is_object()
+        || msg["jsonrpc"] != "2.0"
+        || msg["method"].as_str().is_none()
+        || invalid_id
+        || msg
+            .get("params")
+            .is_some_and(|p| !p.is_object() && !p.is_array())
+    {
+        return Some(rpc_error(
+            if invalid_id {
+                Value::Null
+            } else {
+                id.unwrap_or(Value::Null)
+            },
+            -32600,
+            "Invalid Request",
+        ));
+    }
+
+    let result = match msg["method"].as_str().unwrap_or_default() {
+        "notifications/initialized" => Ok(json!({})),
+        "initialize" => Ok(json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": { "tools": {} },
+            "serverInfo": { "name": "harness-mem", "version": env!("CARGO_PKG_VERSION") }
+        })),
+        "tools/list" => Ok(json!({ "tools": tool_definitions() })),
         "tools/call" => {
-            let params = msg.params.as_ref().and_then(|p| p.as_object());
+            let params = msg["params"].as_object();
             let tool_name = params
                 .and_then(|p| p.get("name"))
                 .and_then(|v| v.as_str())
@@ -459,24 +462,26 @@ fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
                 .cloned()
                 .unwrap_or(json!({}));
 
-            let result = call_tool(pool, tool_name, &tool_args);
-            let resp = json!({
-                "jsonrpc": "2.0",
-                "id": msg.id,
-                "result": result
-            });
-            send(&resp);
-        }
-        _ => {
-            if msg.id.is_some() {
-                let resp = json!({
-                    "jsonrpc": "2.0",
-                    "id": msg.id,
-                    "error": { "code": -32601, "message": "Method not found" }
-                });
-                send(&resp);
+            if params.is_none() || tool_name.is_empty() || !tool_args.is_object() {
+                Err((-32602, "Invalid params"))
+            } else {
+                Ok(call_tool(pool, tool_name, &tool_args))
             }
         }
+        _ => Err((-32601, "Method not found")),
+    };
+    // Notifications may execute tools, but must never elicit a response,
+    // including errors for unknown methods or invalid method parameters.
+    id.map(|id| match result {
+        Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+        Err((code, message)) => rpc_error(id, code, message),
+    })
+}
+
+fn response_for_line(pool: &AnyPool, line: &str) -> Option<Value> {
+    match serde_json::from_str::<Value>(line) {
+        Ok(message) => handle_message(pool, &message),
+        Err(_) => Some(rpc_error(Value::Null, -32700, "Parse error")),
     }
 }
 
@@ -506,11 +511,8 @@ pub fn run_mcp_server() -> i32 {
         if line.is_empty() {
             continue;
         }
-        match serde_json::from_str::<RpcRequest>(&line) {
-            Ok(msg) => handle_message(&pool, &msg),
-            Err(_) => {
-                // Ignore parse errors silently (per MCP spec)
-            }
+        if let Some(response) = response_for_line(&pool, &line) {
+            send(&response);
         }
     }
     0
