@@ -75,13 +75,42 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     }
     static ZERO_TIMEOUT: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"(?i)\btimeout["']?\s*[:=]\s*["']?0\b"#).unwrap());
-    let sample = ZERO_TIMEOUT.replace_all(truncate_str(output, 2000), "");
+    let bounded = diagnostic_sample(output);
+    let sample = ZERO_TIMEOUT.replace_all(&bounded, "");
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(&sample) {
             return Some(cat);
         }
     }
     None
+}
+
+fn diagnostic_sample(output: &str) -> String {
+    if output.len() <= 4000 {
+        return output.to_string();
+    }
+    let mut tail = output.len().saturating_sub(2000);
+    while !output.is_char_boundary(tail) {
+        tail += 1;
+    }
+    format!("{}\n{}", truncate_str(output, 2000), &output[tail..])
+}
+
+/// Keep the matched diagnostic in a bounded snippet instead of a verbose
+/// stdout prefix. Callers must mask secrets before selecting the excerpt.
+pub fn failure_excerpt(output: &str) -> String {
+    let sample = diagnostic_sample(output);
+    for (rule, _) in COMPILED_RULES.iter() {
+        if let Some(found) = rule.find(&sample) {
+            let line_start = sample[..found.start()].rfind('\n').map_or(0, |p| p + 1);
+            let mut start = line_start.max(found.start().saturating_sub(120));
+            while !sample.is_char_boundary(start) {
+                start += 1;
+            }
+            return truncate_str(&sample[start..], 500).to_string();
+        }
+    }
+    truncate_str(&sample, 500).to_string()
 }
 
 /// Commands whose stdout is *quoted material* — file contents, diffs, search
@@ -218,7 +247,7 @@ pub fn classify_bash_failure(
     streams_separated: bool,
 ) -> Option<&'static str> {
     if !is_read_only_command(command) {
-        return classify_failure(&format!("{stdout}\n{stderr}"));
+        return classify_failure(stderr).or_else(|| classify_failure(stdout));
     }
     if streams_separated {
         return classify_failure(stderr);

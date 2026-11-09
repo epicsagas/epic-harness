@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Retain separate stderr and bounded tail diagnostics in classification and error snippets after verbose output (#190).
 - Explicit failure wins conflicting success metadata across top-level,
   canonical `tool_response`, and legacy `tool_result` outcome fields.
 - Observation classification honors explicit tool outcome metadata, recognizes
