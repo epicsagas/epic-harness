@@ -182,7 +182,13 @@ pub fn compute_regression(
     let mut any_regression = false;
 
     for r in results {
+        if r.verdict == "SKIPPED" {
+            continue;
+        }
         if let Some(prev_dim) = prev.get(&r.dimension) {
+            if prev_dim.get("verdict").and_then(Value::as_str) == Some("SKIPPED") {
+                continue;
+            }
             let prev_score = prev_dim
                 .get("score")
                 .and_then(|v| v.as_f64())
@@ -204,6 +210,10 @@ pub fn compute_regression(
         }
     }
 
+    // An existing baseline with no comparable inputs is not a passing check.
+    if deltas.is_empty() {
+        any_regression = true;
+    }
     let score = if any_regression { 0.0 } else { 1.0 };
 
     DimResult {

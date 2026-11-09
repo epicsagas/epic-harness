@@ -115,7 +115,8 @@ pub fn run(args: &[String]) -> i32 {
     let mut results = Vec::new();
 
     let dims = &cfg.dimensions;
-    let run_all = dimension_filter.is_none();
+    // Regression needs fresh measurements; selecting it must not skip its inputs.
+    let run_all = dimension_filter.is_none() || dimension_filter.as_deref() == Some("regression");
 
     if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled {
         results.push(runner::run_correctness(&effective));
@@ -132,6 +133,11 @@ pub fn run(args: &[String]) -> i32 {
         for bench in &cfg.benchmarks {
             results.push(runner::run_benchmark(bench));
         }
+    }
+
+    if results.iter().all(|r| r.verdict == "SKIPPED") {
+        eprintln!("error: no enabled evaluation measurement ran; configure a command or benchmark");
+        return 1;
     }
 
     // Resolve baseline directory: in-repo benchmarks/baselines/ first, then harness-local
