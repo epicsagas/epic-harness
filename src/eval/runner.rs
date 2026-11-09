@@ -204,6 +204,10 @@ pub fn compute_regression(
         }
     }
 
+    // An existing baseline with no comparable inputs is not a passing check.
+    if deltas.is_empty() {
+        any_regression = true;
+    }
     let score = if any_regression { 0.0 } else { 1.0 };
 
     DimResult {
