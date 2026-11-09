@@ -77,52 +77,19 @@ pub async fn get_harness_metrics(
 
 // ── Orbit Pipelines ───────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize)]
-pub struct OrbitPipeline {
-    pub id: String,
-    pub mode: Option<String>,
-    pub phase: String,
-    pub status: String,
-    pub goal_slug: Option<String>,
-    pub branch: Option<String>,
-    pub audit_fail_count: u32,
-    pub started_at: String,
-    pub updated_at: String,
-    pub deadline: Option<String>,
-    pub phase_history: Vec<serde_json::Value>,
-}
-
 #[tauri::command]
-pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<OrbitPipeline>, String> {
-    let pool = state.harness_db.clone();
-
-    let pipelines = epic_harness::store::orbit_store::list_all_pipelines_pool_limited(
-        &pool,
-        MAX_ORBIT_PIPELINES,
+pub async fn get_orbit_pipelines(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    epic_harness::serve::list_dashboard_pipelines_pool(
+        &state.harness_db,
+        project.as_deref(),
+        Some(MAX_ORBIT_PIPELINES as usize),
     )
     .await
-    .map_err(|e| format!("list pipelines: {e}"))?;
-
-    let result: Vec<OrbitPipeline> = pipelines
-        .into_iter()
-        .map(|v| OrbitPipeline {
-            id: v["id"].as_str().unwrap_or("").to_string(),
-            mode: v["mode"].as_str().map(str::to_string),
-            phase: v["phase"].as_str().unwrap_or("unknown").to_string(),
-            status: v["status"].as_str().unwrap_or("unknown").to_string(),
-            goal_slug: v["goal_slug"].as_str().map(str::to_string),
-            branch: v["branch"].as_str().map(str::to_string),
-            audit_fail_count: v["audit_fail_count"].as_u64().unwrap_or(0) as u32,
-            started_at: v["started_at"].as_str().unwrap_or("").to_string(),
-            updated_at: v["updated_at"].as_str().unwrap_or("").to_string(),
-            deadline: v["deadline"].as_str().map(str::to_string),
-            phase_history: v["phase_history"].as_array().cloned().unwrap_or_default(),
-        })
-        .collect();
-
-    Ok(result)
+    .map_err(|e| format!("list pipelines: {e}"))
 }
-
 // ── Evolved Skills ────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize)]

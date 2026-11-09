@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { selectedProject } from '../lib/stores/project.js';
   import { getOrbitPipelines, dismissOrbitPipeline } from '../lib/harness.js';
   import type { OrbitPipeline } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
@@ -7,6 +7,7 @@
 
   let pipelines = $state<OrbitPipeline[]>([]);
   let loading = $state(true);
+  let loadGeneration = 0;
   let error = $state<string | null>(null);
 
   // ── Update-flash: glow a section's border when its data changes.
@@ -68,24 +69,28 @@
   const PHASES = ['spec', 'go', 'check', 'ship', 'complete'] as const;
   type Phase = typeof PHASES[number];
 
-  async function load() {
+  async function load(project: string, generation: number) {
     try {
+      const result = await getOrbitPipelines(project);
+      if (generation !== loadGeneration) return;
       error = null;
-      pipelines = await getOrbitPipelines();
+      pipelines = result;
       flashIfChanged('pipelines', pipelines);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      if (generation === loadGeneration) error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
-  onMount(() => {
-    load();
-    const id = setInterval(load, 30000);
-    return () => clearInterval(id);
+  $effect(() => {
+    const project = $selectedProject;
+    loading = true;
+    pipelines = [];
+    load(project, ++loadGeneration);
+    const id = setInterval(() => load(project, ++loadGeneration), 30000);
+    return () => { ++loadGeneration; clearInterval(id); };
   });
-
   function clearFilters() {
     filterGoal = '';
     filterProject = '';

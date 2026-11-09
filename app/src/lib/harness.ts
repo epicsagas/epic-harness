@@ -374,7 +374,7 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
     trend,
   };
 }
-export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
+export const getOrbitPipelines = (project = get(selectedProject)) => invoke<OrbitPipeline[]>('get_orbit_pipelines', projectArgs(project));
 export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();
@@ -487,8 +487,7 @@ export async function searchMemory(query: string, type?: string): Promise<Memory
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
 /** Build project args from the store. `__all__` means aggregate → omit from request. */
-function projectArgs(): Record<string, unknown> | undefined {
-  const p = get(selectedProject);
+function projectArgs(p = get(selectedProject)): Record<string, unknown> | undefined {
   return p && p !== '__all__' ? { project: p } : undefined;
 }
 
