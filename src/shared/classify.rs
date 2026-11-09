@@ -132,7 +132,7 @@ static REDIRECT_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r">|<\(").unw
 /// i" is exact for the flag set.
 fn is_in_place_sed_flag(token: &str) -> bool {
     token.starts_with("--in-place")
-        || (token.starts_with('-') && !token.starts_with("--") && token.contains('i'))
+        || (token.starts_with('-') && !token.starts_with("--") && token.contains(['i', 'I']))
 }
 
 /// A stage that survives [`READ_ONLY_CMD`] but can still write: an in-place
@@ -145,11 +145,71 @@ fn stage_is_read_only(stage: &str) -> bool {
     if REDIRECT_CMD.is_match(stage) || !READ_ONLY_CMD.is_match(stage) {
         return false;
     }
-    let mut tokens = stage
+    let tokens: Vec<_> = stage
         .trim_start()
         .trim_start_matches("sudo ")
-        .split_whitespace();
-    !(tokens.next() == Some("sed") && tokens.any(is_in_place_sed_flag))
+        .split_whitespace()
+        .collect();
+    let Some((head, args)) = tokens.split_first() else {
+        return false;
+    };
+    match head.to_ascii_lowercase().as_str() {
+        "sed" => !args.iter().any(|t| is_in_place_sed_flag(t)),
+        "find" => !args.iter().any(|t| {
+            matches!(
+                *t,
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprint0"
+                    | "-fprintf"
+                    | "-fls"
+            )
+        }),
+        "fd" => !args.iter().any(|t| {
+            matches!(*t, "-x" | "-X" | "--exec" | "--exec-batch") || t.starts_with("--exec=")
+        }),
+        "git" if args.first() == Some(&"branch") => {
+            let args = &args[1..];
+            if args.iter().any(|token| {
+                let flag = token.split('=').next().unwrap_or(token);
+                matches!(
+                    flag,
+                    "--delete"
+                        | "--move"
+                        | "--copy"
+                        | "--force"
+                        | "--set-upstream-to"
+                        | "--unset-upstream"
+                        | "--edit-description"
+                        | "--track"
+                        | "--no-track"
+                        | "--create-reflog"
+                ) || (flag.starts_with('-')
+                    && !flag.starts_with("--")
+                    && flag.chars().skip(1).any(|c| "dDmMcCfutl".contains(c)))
+            }) {
+                return false;
+            }
+            args.is_empty()
+                || args
+                    .iter()
+                    .all(|t| matches!(*t, "-v" | "-vv" | "--verbose" | "--show-current"))
+                || args
+                    .iter()
+                    .any(|t| matches!(*t, "--list" | "-a" | "--all" | "-r" | "--remotes"))
+        }
+        "git" if args.first() == Some(&"remote") => {
+            let args = &args[1..];
+            args.is_empty()
+                || args.iter().all(|t| matches!(*t, "-v" | "--verbose"))
+                || args.first() == Some(&"get-url")
+        }
+        _ => true,
+    }
 }
 
 /// True when `command`'s output should not be keyword-scanned for failures.
