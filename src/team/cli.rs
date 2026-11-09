@@ -457,6 +457,12 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
         }
     }
 
+    // Home-wide mirrors require an explicit --global choice. Project sync has
+    // already written its local host destinations above.
+    if !global {
+        return Ok(count);
+    }
+
     // Also sync to other installed tools with tool-specific transforms.
     // This writes agent files to ~/.codex/agents/, ~/.gemini/config/plugins/epic/agents/, etc.
     // when those directories exist.  Print a notice for each tool synced so
