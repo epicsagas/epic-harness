@@ -267,9 +267,23 @@ pub fn run_context(
     });
 
     // 2. Evolution stats (SQLite first, fallback to JSONL)
+    let context_scope = if all_projects {
+        None
+    } else {
+        project_slugs.first().cloned()
+    };
+    let context_dir = context_scope
+        .as_deref()
+        .map(harness_dir_for_slug)
+        .unwrap_or_else(harness_dir);
     let evo_records: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::evolution::query_all_records_pool(&pool).await
+        crate::store::evolution::query_recent_records_scoped_pool(
+            &pool,
+            i64::MAX,
+            context_scope.as_deref(),
+        )
+        .await
     })
     .map(|recs| {
         recs.iter()
@@ -278,7 +292,7 @@ pub fn run_context(
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
-        read_jsonl_typed::<serde_json::Value>(&evolution_file())
+        read_jsonl_typed::<serde_json::Value>(&context_dir.join("evolution.jsonl"))
     });
     let mut pattern_freq: HashMap<String, u64> = HashMap::new();
     let mut trend_hist: Vec<String> = Vec::new();
@@ -354,18 +368,14 @@ pub fn run_context(
     // Scoped to the invoking project unless --all-projects asked for the
     // cross-project aggregate; the unscoped loader is indeterminate when
     // several projects share the harness DB.
-    let metrics_scope: Option<String> = if all_projects {
-        None
-    } else {
-        project_slugs.first().cloned()
-    };
+    let metrics_scope = context_scope.clone();
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
         crate::store::metrics::load_metrics_scoped_pool(&pool, metrics_scope.as_deref()).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
-        read_json(&metrics_file(), default_metrics())
+        read_json(&context_dir.join("metrics.json"), default_metrics())
     });
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
@@ -439,7 +449,12 @@ pub fn run_context(
     // 4. Session snapshots (SQLite first, fallback to JSON)
     let snapshots: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::sessions::list_recent_snapshots_pool(&pool, 5).await
+        crate::store::sessions::list_recent_snapshots_scoped_pool(
+            &pool,
+            5,
+            context_scope.as_deref(),
+        )
+        .await
     })
     .map(|snaps| {
         snaps
@@ -460,9 +475,10 @@ pub fn run_context(
     let snapshots: Vec<serde_json::Value> = if !snapshots.is_empty() {
         snapshots
     } else {
-        let snap_files = list_files(&sessions_dir(), ".json");
+        let context_sessions = context_dir.join("sessions");
+        let snap_files = list_files(&context_sessions, ".json");
         snap_files.iter().rev().take(5).filter_map(|f| {
-            let sp: serde_json::Value = read_json(&sessions_dir().join(f), serde_json::Value::Null);
+            let sp: serde_json::Value = read_json(&context_sessions.join(f), serde_json::Value::Null);
             if sp.is_null() { return None; }
             Some(serde_json::json!({
                 "timestamp": sp.get("timestamp").and_then(|v| v.as_str()).unwrap_or(""),
@@ -473,11 +489,12 @@ pub fn run_context(
     };
 
     // 5. Evolved skills
-    let evolved_list_dirs = list_dirs(&evolved_dir());
+    let context_evolved = context_dir.join("evolved");
+    let evolved_list_dirs = list_dirs(&context_evolved);
     let mut evolved_list: Vec<serde_json::Value> = Vec::new();
     let mut by_type: HashMap<&str, u64> = HashMap::new();
     for name in &evolved_list_dirs {
-        let skill_path = evolved_dir().join(name).join("SKILL.md");
+        let skill_path = context_evolved.join(name).join("SKILL.md");
         let content = fs::read_to_string(&skill_path).unwrap_or_default();
         let stype = if content.contains("Evolved:") || content.contains("evolved_from:") {
             "evolved"
@@ -522,10 +539,10 @@ pub fn run_context(
     };
 
     // Fix 4: Scope note clarifying which fields are per-project vs aggregated
-    let scope_note = if all_projects || project.is_some() {
-        "evolution_stats, metrics_summary, session_snapshots, and evolved_skills are scoped to the current working directory project. Only obs_stats is aggregated across all analyzed projects."
+    let scope_note = if all_projects {
+        "Database-backed sections aggregate all selected projects. File-backed skills and fallback sections use the current working directory project."
     } else {
-        ""
+        "Sections are scoped to the selected project."
     };
 
     // Compile
