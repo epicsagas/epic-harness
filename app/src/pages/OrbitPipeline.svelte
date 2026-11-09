@@ -65,7 +65,7 @@
     page = 1;
   });
 
-  const PHASES = ['spec', 'go', 'check', 'ship', 'complete'] as const;
+  const PHASES = ['spec', 'go', 'audit', 'eval', 'ship', 'evolve'] as const;
   type Phase = typeof PHASES[number];
 
   async function load() {
@@ -106,8 +106,12 @@
     return map[status] ?? 'muted';
   }
 
+  function canonicalPhase(phase: string): string {
+    return ({ check: 'audit', complete: 'evolve' } as Record<string, string>)[phase] ?? phase;
+  }
+
   function phaseIndex(phase: string): number {
-    return PHASES.indexOf(phase as Phase);
+    return PHASES.indexOf(canonicalPhase(phase) as Phase);
   }
 
   function durationMinutes(startedAt: string, updatedAt: string): number {
@@ -129,18 +133,18 @@
   }
 
   function phaseStageClass(phase: string, currentPhase: string, phaseHistory: OrbitPipeline['phase_history']): string {
-    const done = phaseHistory.map(h => h.phase);
+    const done = phaseHistory.map(h => canonicalPhase(h.phase));
     if (done.includes(phase)) return 'completed';
-    if (phase === currentPhase) return 'running';
+    if (phase === canonicalPhase(currentPhase)) return 'running';
     return 'pending';
   }
 
   function phaseIcon(phase: string): string {
-    return ({ spec: '☰', go: '▶', check: '✓', ship: '↑', complete: '↻' } as Record<string,string>)[phase] ?? phase;
+    return ({ spec: '☰', go: '▶', audit: '✓', eval: '◇', ship: '↑', evolve: '↻' } as Record<string,string>)[phase] ?? phase;
   }
 
   function phaseColor(phase: string): string {
-    return ({ spec: 'var(--accent)', go: 'var(--accent)', check: 'var(--success)', ship: 'var(--purple)', complete: 'var(--teal)' } as Record<string,string>)[phase] ?? 'var(--muted)';
+    return ({ spec: 'var(--accent)', go: 'var(--accent)', audit: 'var(--success)', eval: 'var(--success)', ship: 'var(--purple)', evolve: 'var(--teal)' } as Record<string,string>)[phase] ?? 'var(--muted)';
   }
 
   function projectLabel(raw: string | undefined): string {
@@ -157,7 +161,7 @@
 
 <div class="screen-header">
   <h2>/orbit <span class="subtitle-tag">Autonomous Pipeline</span></h2>
-  <p>spec → go → check → ship → evolve — single-command spec-to-PR execution</p>
+  <p>spec → go → audit → eval → ship → evolve — single-command spec-to-PR execution</p>
 </div>
 
 {#if error}
@@ -364,7 +368,7 @@
         <tbody>
           <tr><td style="color:var(--muted)">id</td><td style="color:var(--fg)">{'{timestamp}'}</td></tr>
           <tr><td style="color:var(--muted)">mode</td><td style="color:var(--fg)">interactive | council | direct</td></tr>
-          <tr><td style="color:var(--muted)">phase</td><td style="color:var(--accent)">spec → go → check → ship</td></tr>
+          <tr><td style="color:var(--muted)">phase</td><td style="color:var(--accent)">spec → go → audit → eval → ship → evolve</td></tr>
           <tr><td style="color:var(--muted)">status</td><td style="color:var(--fg)">running | complete | failed | timeout | aborted</td></tr>
           <tr><td style="color:var(--muted)">check_fail_count</td><td style="color:var(--fg)">0..3</td></tr>
           <tr><td style="color:var(--muted)">deadline</td><td style="color:var(--fg)">now + 30min</td></tr>
