@@ -145,11 +145,25 @@ pub fn run(args: &[String]) -> i32 {
 
     // Compute regression dimension
     if dims.regression.enabled && (run_all || dimension_filter.as_deref() == Some("regression")) {
-        results.push(runner::compute_regression(
-            &results,
-            prev.as_ref(),
-            dims.regression.extra.threshold,
-        ));
+        let mut regression =
+            runner::compute_regression(&results, prev.as_ref(), dims.regression.extra.threshold);
+        // Warning-only policy softens measured regressions, never command
+        // failures or an invalid/empty comparison.
+        if !dims.regression.extra.fail_on_regression
+            && regression.verdict == "FAIL"
+            && regression.details["comparison_error"] != true
+            && regression
+                .details
+                .get("deltas")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|deltas| !deltas.is_empty())
+        {
+            regression.verdict = "WARN".into();
+            regression.passed = true;
+        }
+        regression.details["fail_on_regression"] =
+            serde_json::json!(dims.regression.extra.fail_on_regression);
+        results.push(regression);
     }
 
     // Build report
