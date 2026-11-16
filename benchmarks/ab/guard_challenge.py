@@ -264,23 +264,34 @@ def print_table(rep: Dict[str, Any]) -> None:
 
 
 def self_test() -> int:
-    assert classify(2, "") == "block"
-    assert classify(0, "[guard] WARNING: x\n") == "warn"
-    assert classify(0, "[orchestrator] x\n") == "allow"
-    assert classify(1, "") == "error"
+    failed: List[str] = []
+
+    def check(ok: bool, msg: str) -> None:  # explicit, so `python3 -O` still checks
+        if not ok:
+            failed.append(msg)
+            print(f"self-test FAIL: {msg}")
+
+    check(classify(2, "") == "block", "classify(2) must be block")
+    check(classify(0, "[guard] WARNING: x\n") == "warn", "classify warning output must be warn")
+    check(classify(0, "[orchestrator] x\n") == "allow", "classify plain output must be allow")
+    check(classify(1, "") == "error", "classify(1) must be error")
 
     def row(suite: str, expected: str, actual: str) -> Dict[str, str]:
         return {"suite": suite, "command": "x", "desc": "", "expected": expected, "actual": actual}
 
-    assert not summarize("t", [])["ok"], "zero executed cases must not be ok"
-    assert not summarize("t", [row("benign", "allow", "block")])["ok"], "blocked benign must not be ok"
-    assert not summarize("t", [row("challenge", "block", "error")])["ok"], "an errored case must not be ok"
-    assert summarize("t", [row("benign", "allow", "warn")])["ok"], "false-warn is measured, not failed"
-    assert sum(c.suite == "challenge" for c in CASES) == 50
-    assert sum(c.suite == "benign" for c in CASES) == 46
-    assert all("/Users/" not in c.command.replace("/Users/example-user", "") for c in CASES)
+    check(not summarize("t", [])["ok"], "zero executed cases must not be ok")
+    check(not summarize("t", [row("benign", "allow", "block")])["ok"], "blocked benign must not be ok")
+    check(not summarize("t", [row("challenge", "block", "error")])["ok"], "an errored case must not be ok")
+    check(summarize("t", [row("benign", "allow", "warn")])["ok"], "false-warn is measured, not failed")
+    check(sum(c.suite == "challenge" for c in CASES) == 50, "challenge suite must have 50 cases")
+    check(sum(c.suite == "benign" for c in CASES) == 46, "benign suite must have 46 cases")
+    check(all("/Users/" not in c.command.replace("/Users/example-user", "") for c in CASES),
+          "no real home path in case commands")
     own = Path(__file__).read_text()
-    assert "GUARD_" + "BLOCK_PATTERNS" not in own and "GUARD_" + "WARN_PATTERNS" not in own
+    check("GUARD_" + "BLOCK_PATTERNS" not in own and "GUARD_" + "WARN_PATTERNS" not in own,
+          "script must not embed guard pattern tables")
+    if failed:
+        return 1
     print("self-test ok")
     return 0
 

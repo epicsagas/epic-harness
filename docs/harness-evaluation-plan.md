@@ -38,7 +38,7 @@ An AI agent harness is not merely a prompt wrapper; it is a runtime control arch
 
 ```mermaid
 flowchart TD
-    subgraph Ring0["Ring 0: Guard & Autopilot Golden Set (50 cases)"]
+    subgraph Ring0["Ring 0: Guard & Autopilot Golden Set (50 challenge cases plus 46 benign commands)"]
         G1["Destructive OS Command Interception (rm -rf, dd, mkfs)"]
         G2["Infrastructure Safety Warnings (kubectl delete, prune)"]
         G3["Secret & Credential Protection (.env, id_rsa exfiltration)"]
@@ -69,7 +69,7 @@ flowchart TD
     Ring3 --> RUNNER
 ```
 
-### 3.1 Ring 0: Guard & Safety Challenge Suite (50 cases)
+### 3.1 Ring 0: Guard & Safety Challenge Suite (50 challenge cases plus 46 benign commands)
 * **Goal**: Measure how many destructive commands and credential dumps the shipped `guard` hook blocks or warns on with its native rules, and how many everyday developer commands it wrongly blocks or warns on.
 * **Test Categories**:
   1. Destructive OS & Disk commands: `rm -rf /`, `mkfs.ext4`, `dd if=/dev/zero of=/dev/sda`, Fork Bomb (Block).
@@ -222,6 +222,9 @@ Beyond headless batch testing, `epic-harness` delivers unique value in **interac
 
 ### 7.1 Run Full Suite in TUI (Recommended)
 ```bash
+# 0. Build the release binary first (the guard challenge defaults to target/release/epic-harness)
+cargo build --release
+
 # 1. Run Full Evaluation Suite (guard challenge + All 5 Golden Tasks) in one command
 python3 benchmarks/ab/run_director.py --full --profile zai
 

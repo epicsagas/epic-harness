@@ -6,6 +6,8 @@ TUI Director / Orchestrator for Bare-vs-Epic A/B Evaluation & Full Suite Runner.
 Executes headless worker sessions for both Bare (unassisted) and Epic (harness)
 arms, independently verifies output using test runners and SAST tools,
 and synthesizes a comprehensive multi-dimensional evaluation report.
+
+The guard challenge step runs target/release/epic-harness: run `cargo build --release` first.
 """
 
 import argparse

@@ -158,13 +158,13 @@ Combine CLI output + LLM-as-judge results into a single report:
 - Lint errors: {count}
 - LLM judge: {score}/10 (if enabled)
 
-### Regression: [PASS/FAIL]
+### Regression: [PASS/FAIL/SKIPPED]
 | Dimension | Baseline | Current | Delta | Verdict |
 |-----------|----------|---------|-------|---------|
 | correctness | {prev} | {cur} | {delta} | {pass/fail} |
 | quality | {prev} | {cur} | {delta} | {pass/fail} |
 
-### Overall: [PASS/WARN/FAIL] — {overall_score}
+### Overall: [PASS/WARN/FAIL/SKIPPED]: {overall_score}
 ```
 
 ### Step 5: Act
@@ -198,7 +198,7 @@ Results auto-saved to `$HARNESS_DIR/eval/results/EVAL-{timestamp}.json`.
 
 - [ ] `epic eval --json` output captured (all enabled dimensions scored)
 - [ ] Baseline comparison performed (or first baseline established)
-- [ ] Each dimension has PASS/WARN/FAIL verdict
+- [ ] Each dimension has PASS/WARN/FAIL/SKIPPED verdict
 - [ ] No dimension regressed beyond threshold (or explicit user override)
 - [ ] Results saved to `$HARNESS_DIR/eval/results/`
 - [ ] LLM-as-judge scores recorded (if enabled)
