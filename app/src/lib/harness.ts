@@ -347,8 +347,8 @@ export interface MemoryNode {
 
 // ── API calls ─────────────────────────────────────────────────────────────────
 
-export async function getHarnessMetrics(): Promise<HarnessMetrics> {
-  const raw = await invoke<HarnessMetrics>('get_harness_metrics', projectArgs());
+export async function getHarnessMetrics(project?: string): Promise<HarnessMetrics> {
+  const raw = await invoke<HarnessMetrics>('get_harness_metrics', projectArgs(project));
   if (!raw) throw new Error('metrics.json not found');
 
   // Derive avg_score from score_history
@@ -374,22 +374,22 @@ export async function getHarnessMetrics(): Promise<HarnessMetrics> {
     trend,
   };
 }
-export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines');
+export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines', projectArgs());
 export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
   return res.json();
 }
-export const getEvolvedSkills = () => invoke<EvolutionData>('get_evolved_skills', projectArgs());
+export const getEvolvedSkills = (project?: string) => invoke<EvolutionData>('get_evolved_skills', projectArgs(project));
 export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary', projectArgs());
 export const getGraph = () => invoke<GraphData>('get_graph');
 export const getIntegrationStatus = () => invoke<IntegrationStatus[]>('get_integration_status');
 export const getSessionSnapshots = () => invoke<SessionSnapshotData[]>('get_session_snapshots', projectArgs());
 export const getGlobalPatterns = () => invoke<GlobalPattern[]>('get_global_patterns', projectArgs());
 // ── HarnessX evolution-engine surfaces ──
-export const getSeesawRegistry = () => invoke<SolvedTaskRegistry>('get_seesaw_registry', projectArgs());
-export const getVariantPool = () => invoke<VariantPool>('get_variant_pool', projectArgs());
+export const getSeesawRegistry = (project?: string) => invoke<SolvedTaskRegistry>('get_seesaw_registry', projectArgs(project));
+export const getVariantPool = (project?: string) => invoke<VariantPool>('get_variant_pool', projectArgs(project));
 export const getHarnessSnapshot = () => invoke<HarnessSnapshotData>('get_harness_snapshot', projectArgs());
-export const getAdaptationLandscape = () => invoke<AdaptationLandscape>('get_adaptation_landscape', projectArgs());
+export const getAdaptationLandscape = (project?: string) => invoke<AdaptationLandscape>('get_adaptation_landscape', projectArgs(project));
 export const getManifests = () => invoke<EditManifestEntry[]>('get_manifests', projectArgs());
 
 // ── Orchestration API ──────────────────────────────────────────────────────
@@ -487,8 +487,7 @@ export async function searchMemory(query: string, type?: string): Promise<Memory
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────
 
 /** Build project args from the store. `__all__` means aggregate → omit from request. */
-function projectArgs(): Record<string, unknown> | undefined {
-  const p = get(selectedProject);
+function projectArgs(p: string | undefined = get(selectedProject)): Record<string, unknown> | undefined {
   return p && p !== '__all__' ? { project: p } : undefined;
 }
 

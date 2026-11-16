@@ -26,6 +26,9 @@ pub struct SearchResult {
     pub title: String,
     #[serde(rename = "type")]
     pub node_type: String,
+    pub tags: Vec<String>,
+    pub importance: f64,
+    pub updated: String,
     pub snippet: String,
 }
 
@@ -66,15 +69,21 @@ pub async fn search_nodes(
     let nodes = search_nodes_pool(&pool, &query, limit)
         .await
         .map_err(|e| format!("failed to search nodes: {e}"))?;
-    Ok(nodes
-        .into_iter()
-        .map(|n| SearchResult {
-            id: n.frontmatter.id,
-            title: n.frontmatter.title,
-            node_type: n.frontmatter.node_type,
-            snippet: n.body.chars().take(160).collect(),
-        })
-        .collect())
+    Ok(nodes.into_iter().map(search_result).collect())
+}
+
+/// The Memory page renders a search row as a `MemoryNode`: it needs the list
+/// columns (`tags`, `importance`, `updated`) as well as the snippet.
+fn search_result(n: epic_harness::mem::store::Node) -> SearchResult {
+    SearchResult {
+        id: n.frontmatter.id,
+        title: n.frontmatter.title,
+        node_type: n.frontmatter.node_type,
+        tags: n.frontmatter.tags,
+        importance: n.frontmatter.importance,
+        updated: n.frontmatter.updated,
+        snippet: n.body.chars().take(160).collect(),
+    }
 }
 
 #[tauri::command]
@@ -128,4 +137,32 @@ pub async fn recall_nodes(
             importance: sn.node.frontmatter.importance,
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use epic_harness::mem::store::{Node, NodeFrontmatter};
+
+    #[test]
+    fn search_result_serializes_tags_for_the_renderer() {
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: "n1".into(),
+                node_type: "decision".into(),
+                title: "t".into(),
+                tags: vec!["a".into(), "b".into()],
+                updated: "2026-01-01".into(),
+                importance: 0.9,
+                ..Default::default()
+            },
+            body: "x".repeat(300),
+        };
+        let v = serde_json::to_value(search_result(node)).unwrap();
+        assert_eq!(v["tags"], serde_json::json!(["a", "b"]));
+        assert_eq!(v["type"], "decision");
+        assert_eq!(v["importance"], 0.9);
+        assert_eq!(v["updated"], "2026-01-01");
+        assert_eq!(v["snippet"].as_str().unwrap().len(), 160);
+    }
 }

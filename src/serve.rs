@@ -185,23 +185,23 @@ pub fn run_serve(port: Option<u16>) -> i32 {
 
             // ── Harness API ──────────────────────────────────
             (Method::Get, url) if url.starts_with("/api/harness") => {
-                let cmd = parse_query_param(url, "cmd").unwrap_or_default();
-                // `project` selects a specific project slug; absent or
-                // `__all__` means cross-project aggregate. The frontend's
-                // projectArgs() omits the param entirely for "all".
-                let project =
-                    parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
-                let harness_dir = common::harness_dir();
-                let body = handle_harness_cmd(&cmd, &harness_dir, project.as_deref());
-                json_response(&body)
+                let (status, body) = handle_harness_request(url, &common::harness_dir());
+                json_response(&body).with_status_code(status)
             }
 
             // ── Orbit Pipeline Dismiss ───────────────────────
             (Method::Delete, url) if url.starts_with("/api/orbit/") => {
-                let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
-                let harness_dir = common::harness_dir();
-                let (status, body) = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
-                json_response(&body).with_status_code(status)
+                if !is_loopback_same_origin(request.headers(), port) {
+                    forbidden_response()
+                } else {
+                    let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
+                    let harness_dir = common::harness_dir();
+                    let pool =
+                        crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
+                    let (status, body) =
+                        dismiss_orbit_pipeline(pipeline_id, &harness_dir, pool.as_ref());
+                    json_response(&body).with_status_code(status)
+                }
             }
 
             // ── Memory API (Nodes) ───────────────────────────
@@ -266,17 +266,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
                     .unwrap_or("");
                 let decoded = percent_decode(query);
                 let nodes = store::search_nodes(&decoded, 20);
-                let results: Vec<serde_json::Value> = nodes
-                    .into_iter()
-                    .map(|n| {
-                        serde_json::json!({
-                            "id": n.frontmatter.id,
-                            "title": n.frontmatter.title,
-                            "type": n.frontmatter.node_type,
-                            "snippet": n.body.chars().take(160).collect::<String>()
-                        })
-                    })
-                    .collect();
+                let results: Vec<serde_json::Value> =
+                    nodes.into_iter().map(search_result_json).collect();
                 let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".into());
                 json_response(&body)
             }
@@ -314,7 +305,9 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
                 let agent_id = url.trim_start_matches("/api/agents/").trim_end_matches('/');
                 let harness_dir = common::harness_dir();
-                if !orch::validate_agent_id(agent_id) {
+                if !is_loopback_same_origin(request.headers(), port) {
+                    forbidden_response()
+                } else if !orch::validate_agent_id(agent_id) {
                     json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
                 } else {
                     let ok = crate::store::runtime::block_on(async {
@@ -375,6 +368,20 @@ pub fn run_serve(port: Option<u16>) -> i32 {
     0
 }
 
+/// One `/api/search` row. The Memory page renders it as a `MemoryNode`, so it
+/// carries the list columns (`tags`, `importance`, `updated`), not only a snippet.
+fn search_result_json(n: crate::mem::store::Node) -> serde_json::Value {
+    serde_json::json!({
+        "id": n.frontmatter.id,
+        "title": n.frontmatter.title,
+        "type": n.frontmatter.node_type,
+        "tags": n.frontmatter.tags,
+        "importance": n.frontmatter.importance,
+        "updated": n.frontmatter.updated,
+        "snippet": n.body.chars().take(160).collect::<String>()
+    })
+}
+
 fn json_response(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string(body)
         .with_header(Header::from_bytes(b"Content-Type", b"application/json").unwrap())
@@ -406,14 +413,21 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&decoded).into_owned()
 }
 
-/// Dismiss (delete) an orbit pipeline file across all projects.
+/// Dismiss (delete) an orbit pipeline across all projects: the
+/// `PIPELINE-<id>.json` sidecar and, when `pool` is given, the DB-backed row
+/// (reflect re-syncs sidecars into SQLite, so both must go or it reappears).
 ///
-/// The id must be non-empty `[A-Za-z0-9_-]` and is matched against the exact
-/// file name `PIPELINE-<id>.json` (e.g. id "20260523105350"). Returns
-/// `(http_status, json_body)`.
-fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> (u16, String) {
-    if pipeline_id.is_empty()
-        || !pipeline_id
+/// The id may carry the `PIPELINE-` file prefix; the rest must be non-empty
+/// `[A-Za-z0-9_-]` and is matched against the exact file name (e.g. id
+/// "20260523105350"). Returns `(http_status, json_body)`.
+fn dismiss_orbit_pipeline(
+    pipeline_id: &str,
+    harness_dir: &std::path::Path,
+    pool: Option<&sqlx::AnyPool>,
+) -> (u16, String) {
+    let bare = pipeline_id.strip_prefix("PIPELINE-").unwrap_or(pipeline_id);
+    if bare.is_empty()
+        || !bare
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
@@ -424,7 +438,7 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> (
     }
 
     let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-    let file_name = format!("PIPELINE-{pipeline_id}.json");
+    let file_name = format!("PIPELINE-{bare}.json");
     let mut deleted = false;
 
     if let Ok(rd) = std::fs::read_dir(projects_root) {
@@ -433,6 +447,17 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> (
             if path.is_file() && std::fs::remove_file(path).is_ok() {
                 deleted = true;
             }
+        }
+    }
+
+    // Rows are keyed by the sidecar's `id` field, or by the file stem when it
+    // has none, so either spelling can be stored.
+    if let Some(pool) = pool {
+        for id in [bare.to_string(), format!("PIPELINE-{bare}")] {
+            deleted |= crate::store::runtime::block_on(
+                crate::store::orbit_store::dismiss_pipeline_pool(pool, &id),
+            )
+            .unwrap_or(false);
         }
     }
 
@@ -447,6 +472,55 @@ fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> (
             serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string(),
         )
     }
+}
+
+/// Header value by case-insensitive name.
+fn header_value<'a>(headers: &'a [Header], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case(name))
+        .map(|h| h.value.as_str())
+}
+
+/// Gate for mutating (DELETE) routes, mirroring `mem/axum_server.rs`: reject
+/// a foreign `Origin` or `Sec-Fetch-Site: cross-site` (CSRF), and any `Host`
+/// other than the loopback names on our port (DNS rebinding: a rebound
+/// hostname resolves to 127.0.0.1 but keeps its own `Host`).
+fn is_loopback_same_origin(headers: &[Header], port: u16) -> bool {
+    let host_ok = header_value(headers, "Host").is_some_and(|h| {
+        h.eq_ignore_ascii_case(&format!("localhost:{port}"))
+            || h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
+    });
+    let origin_ok = header_value(headers, "Origin").is_none_or(|o| {
+        o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
+            || o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
+    });
+    let cross_site = header_value(headers, "Sec-Fetch-Site").is_some_and(|v| v == "cross-site");
+    host_ok && origin_ok && !cross_site
+}
+
+fn forbidden_response() -> Response<std::io::Cursor<Vec<u8>>> {
+    json_response("{\"error\":\"cross-origin request rejected\"}").with_status_code(403)
+}
+
+/// `/api/harness?cmd=..&project=..`. `project` selects a specific project
+/// slug; absent or `__all__` means cross-project aggregate (the frontend's
+/// projectArgs() omits the param entirely for "all"). A slug is joined onto
+/// the data root by the file-backed readers, so anything outside
+/// `[A-Za-z0-9._-]` (or `.`/`..`) is rejected with 400 here, the single entry
+/// every project-scoped command routes through.
+fn handle_harness_request(url: &str, harness_dir: &std::path::Path) -> (u16, String) {
+    let cmd = parse_query_param(url, "cmd").unwrap_or_default();
+    let project = parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
+    if let Some(p) = &project
+        && !crate::shared::paths::is_valid_project_slug(p)
+    {
+        return (400, "{\"error\":\"invalid project\"}".into());
+    }
+    (
+        200,
+        handle_harness_cmd(&cmd, harness_dir, project.as_deref()),
+    )
 }
 
 /// Collect `PIPELINE-*.json` sidecars from every project's `orbit/` dir,
@@ -493,6 +567,22 @@ fn parse_query_param(url: &str, key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Tail-read the falsifiability ledger sidecar (manifests.jsonl), newest
+/// first. Capped at the most recent 50 to bound payload size. Shared by the
+/// dashboard server and the native app.
+pub fn recent_manifests(project: Option<&str>) -> Vec<serde_json::Value> {
+    let path = crate::shared::paths::manifests_file_for(project);
+    let mut items: Vec<serde_json::Value> = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(&path) {
+        for line in text.lines().rev().take(50) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                items.push(v);
+            }
+        }
+    }
+    items
 }
 
 fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<&str>) -> String {
@@ -908,18 +998,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             serde_json::to_string(&landscape).unwrap_or_else(|_| "null".into())
         }
         "get_manifests" => {
-            // Tail-read the falsifiability ledger sidecar (manifests.jsonl).
-            // Cap at the most recent 50 to bound payload size.
-            let path = crate::shared::paths::manifests_file_for(project);
-            let mut items: Vec<serde_json::Value> = Vec::new();
-            if let Ok(text) = std::fs::read_to_string(&path) {
-                for line in text.lines().rev().take(50) {
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                        items.push(v);
-                    }
-                }
-            }
-            serde_json::to_string(&items).unwrap_or_else(|_| "[]".into())
+            serde_json::to_string(&recent_manifests(project)).unwrap_or_else(|_| "[]".into())
         }
         // ── Previously-broken panels (returned "null" via the fallthrough) ─
         "get_session_snapshots" => {
@@ -1000,7 +1079,7 @@ mod tests {
         let harness_dir = tmp.path().join("projects").join("proj-a");
 
         for bad in ["", "..", "../x", "a/b", "a.b", "20260101000000.json", "%2e"] {
-            let (status, _) = dismiss_orbit_pipeline(bad, &harness_dir);
+            let (status, _) = dismiss_orbit_pipeline(bad, &harness_dir, None);
             assert_eq!(status, 400, "id {bad:?}");
         }
         assert!(a.exists() && b.exists(), "invalid ids must delete nothing");
@@ -1014,11 +1093,11 @@ mod tests {
         let harness_dir = tmp.path().join("projects").join("proj-a");
 
         // A substring of an existing id is not an id.
-        let (status, _) = dismiss_orbit_pipeline("2026", &harness_dir);
+        let (status, _) = dismiss_orbit_pipeline("2026", &harness_dir, None);
         assert_eq!(status, 404);
         assert!(a.exists() && b.exists());
 
-        let (status, body) = dismiss_orbit_pipeline("20260101000000", &harness_dir);
+        let (status, body) = dismiss_orbit_pipeline("20260101000000", &harness_dir, None);
         assert_eq!(status, 200);
         assert!(body.contains("\"ok\":true"));
         assert!(!a.exists(), "exact id deletes its file");
@@ -1037,5 +1116,130 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0]["id"], "4");
         assert_eq!(all[0]["_project"], "proj-a");
+    }
+
+    #[test]
+    fn search_result_carries_tags_for_the_memory_page() {
+        let node = crate::mem::store::Node {
+            frontmatter: crate::mem::store::NodeFrontmatter {
+                id: "n1".into(),
+                node_type: "decision".into(),
+                title: "t".into(),
+                tags: vec!["a".into(), "b".into()],
+                updated: "2026-01-01".into(),
+                importance: 0.9,
+                ..Default::default()
+            },
+            body: "x".repeat(300),
+        };
+        let v = search_result_json(node);
+        assert_eq!(v["tags"], serde_json::json!(["a", "b"]));
+        assert_eq!(v["importance"], 0.9);
+        assert_eq!(v["updated"], "2026-01-01");
+        assert_eq!(v["snippet"].as_str().unwrap().len(), 160);
+    }
+
+    fn hdr(name: &str, value: &str) -> Header {
+        Header::from_bytes(name.as_bytes(), value.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn harness_request_rejects_unsafe_project_selectors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let harness_dir = tmp.path().join("projects").join("proj-a");
+        for bad in [
+            "..", ".", "../x", "%2e%2e", "..%2Fx", "a%2Fb", "%2Fetc", "a%5Cb", "C%3A",
+        ] {
+            let url = format!("/api/harness?cmd=get_seesaw_registry&project={bad}");
+            let (status, _) = handle_harness_request(&url, &harness_dir);
+            assert_eq!(status, 400, "project {bad:?}");
+        }
+        assert!(
+            !tmp.path().join("projects").exists(),
+            "rejected selectors must not touch the filesystem"
+        );
+
+        // Valid slugs, absent and `__all__` still reach the command.
+        for url in [
+            "/api/harness?cmd=get_effect_pending&project=proj-b.1_x",
+            "/api/harness?cmd=get_effect_pending&project=__all__",
+            "/api/harness?cmd=get_effect_pending",
+        ] {
+            let (status, body) = handle_harness_request(url, &harness_dir);
+            assert_eq!(status, 200, "{url}");
+            assert!(body.contains("enabled"), "{url}");
+        }
+    }
+
+    #[test]
+    fn mutating_routes_require_loopback_host_and_origin() {
+        let ok = [hdr("Host", "localhost:7700")];
+        assert!(is_loopback_same_origin(&ok, 7700));
+        let ok_ip = [
+            hdr("host", "127.0.0.1:7700"),
+            hdr("Origin", "http://127.0.0.1:7700"),
+            hdr("Sec-Fetch-Site", "same-origin"),
+        ];
+        assert!(is_loopback_same_origin(&ok_ip, 7700));
+
+        // DNS rebinding: loopback IP, attacker Host.
+        assert!(!is_loopback_same_origin(
+            &[hdr("Host", "evil.example:7700")],
+            7700
+        ));
+        assert!(!is_loopback_same_origin(
+            &[hdr("Host", "localhost:7701")],
+            7700
+        ));
+        assert!(!is_loopback_same_origin(&[hdr("Host", "localhost")], 7700));
+        assert!(!is_loopback_same_origin(&[], 7700));
+        // Foreign origin, even with a good Host.
+        for origin in ["http://evil.example", "http://localhost:5173", "null"] {
+            let h = [hdr("Host", "localhost:7700"), hdr("Origin", origin)];
+            assert!(!is_loopback_same_origin(&h, 7700), "origin {origin:?}");
+        }
+        let cross = [
+            hdr("Host", "localhost:7700"),
+            hdr("Sec-Fetch-Site", "cross-site"),
+        ];
+        assert!(!is_loopback_same_origin(&cross, 7700));
+    }
+
+    #[test]
+    fn dismiss_orbit_pipeline_accepts_prefixed_id_and_removes_db_row() {
+        use crate::store::orbit_store::{list_all_pipelines_pool, upsert_pipeline_pool};
+        let tmp = tempfile::tempdir().unwrap();
+        let a = write_sidecar(tmp.path(), "proj-a", "PIPELINE-20260101000000.json", "{}");
+        let harness_dir = tmp.path().join("projects").join("proj-a");
+        let pool = crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::test_memory_pool().await;
+            crate::store::schema::init_schema_pool(&pool).await.unwrap();
+            // One row keyed by the sidecar `id`, one by the file stem.
+            for id in ["20260101000000", "PIPELINE-20260202000000"] {
+                upsert_pipeline_pool(&pool, id, "proj-a", "running", None, None, "{}")
+                    .await
+                    .unwrap();
+            }
+            pool
+        });
+        let rows = || {
+            crate::store::runtime::block_on(list_all_pipelines_pool(&pool))
+                .unwrap()
+                .len()
+        };
+
+        let (status, _) =
+            dismiss_orbit_pipeline("PIPELINE-20260101000000", &harness_dir, Some(&pool));
+        assert_eq!(status, 200);
+        assert!(!a.exists(), "prefixed id still removes the sidecar");
+        assert_eq!(rows(), 1, "the DB row for the same pipeline is gone");
+
+        // DB-only row (no sidecar), bare id for a prefixed row.
+        let (status, _) = dismiss_orbit_pipeline("20260202000000", &harness_dir, Some(&pool));
+        assert_eq!(status, 200);
+        assert_eq!(rows(), 0);
+
+        let (status, _) = dismiss_orbit_pipeline("PIPELINE-", &harness_dir, Some(&pool));
+        assert_eq!(status, 400);
     }
 }

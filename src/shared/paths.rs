@@ -27,17 +27,8 @@ pub fn project_slug() -> String {
             && out.status.success()
         {
             let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            // Absolute path → linked worktree; derive project root from common .git dir.
-            if raw.starts_with('/') {
-                let common_git = PathBuf::from(&raw);
-                // common_git = /main/repo/.git  →  parent = /main/repo
-                if let Some(repo_root) = common_git.parent() {
-                    let name = repo_root
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "project".into());
-                    return sanitize_slug_name(&name);
-                }
+            if let Some(slug) = slug_from_git_common_dir(&raw) {
+                return slug;
             }
         }
 
@@ -74,6 +65,27 @@ pub fn project_slug() -> String {
         sanitize_slug_name(&name)
     });
     SLUG.clone()
+}
+
+/// Slug from `git rev-parse --git-common-dir` output: `Some` only for an
+/// absolute path (linked worktree), where the main repo is the parent of the
+/// common `.git` dir. A normal checkout prints the relative `.git` (`None`).
+///
+/// Git on Windows prints drive paths (`C:/repo/.git`), which `is_absolute`
+/// rejects on other hosts, so the drive form is matched explicitly.
+fn slug_from_git_common_dir(raw: &str) -> Option<String> {
+    let b = raw.as_bytes();
+    let drive = b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/';
+    if !drive && !std::path::Path::new(raw).is_absolute() {
+        return None;
+    }
+    // common_git = /main/repo/.git  →  parent = /main/repo
+    let repo_root = PathBuf::from(raw).parent()?.to_path_buf();
+    let name = repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "project".into());
+    Some(sanitize_slug_name(&name))
 }
 
 /// Sanitize a name for use as a slug component.
@@ -228,6 +240,17 @@ pub fn retention_marker_file() -> PathBuf {
     harness_dir().join("retention_last_sweep.txt")
 }
 
+/// Whether an externally supplied project selector is a safe directory name:
+/// `^[A-Za-z0-9._-]+$`, excluding `.` and `..`. Callers that take a slug from
+/// a request must check this before it reaches `resolve_harness_dir`.
+pub fn is_valid_project_slug(p: &str) -> bool {
+    p != "."
+        && p != ".."
+        && !p.is_empty()
+        && p.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 /// Resolve the per-project harness dir for a request. Falls back to the
 /// CWD-derived dir when `project` is `None`/empty (preserves existing callers
 /// that don't pass a project). Used by the dashboard read-path to scope
@@ -340,6 +363,44 @@ pub fn claude_plugin_cache_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn linked_worktree_slug_handles_posix_and_windows_drive_paths() {
+        assert_eq!(
+            slug_from_git_common_dir("/main/repo/.git").as_deref(),
+            Some("repo")
+        );
+        // Git on Windows prints a drive path with forward slashes.
+        assert_eq!(
+            slug_from_git_common_dir("C:/main/repo/.git").as_deref(),
+            Some("repo")
+        );
+        // Normal checkout: relative, caller falls through to --show-toplevel.
+        assert_eq!(slug_from_git_common_dir(".git"), None);
+    }
+
+    #[test]
+    fn project_slug_allowlist() {
+        for ok in ["proj-a", "my.proj_1", "A", "a..b", ".hidden"] {
+            assert!(is_valid_project_slug(ok), "{ok:?}");
+        }
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../x",
+            "a/b",
+            "a\\b",
+            "/abs",
+            "C:",
+            "a b",
+            "a%2fb",
+            "a\0b",
+            "프로젝트",
+        ] {
+            assert!(!is_valid_project_slug(bad), "{bad:?}");
+        }
+    }
 
     #[test]
     fn project_path_helpers_resolve_by_slug() {

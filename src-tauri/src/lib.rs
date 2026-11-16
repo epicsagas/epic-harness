@@ -65,6 +65,12 @@ pub fn run() {
             commands::harness::get_session_snapshots,
             commands::harness::get_global_patterns,
             commands::harness::list_projects,
+            // Evolution engine
+            commands::harness::get_seesaw_registry,
+            commands::harness::get_variant_pool,
+            commands::harness::get_harness_snapshot,
+            commands::harness::get_adaptation_landscape,
+            commands::harness::get_manifests,
         ])
         .run(tauri::generate_context!())
     {

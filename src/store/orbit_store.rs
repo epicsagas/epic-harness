@@ -75,12 +75,34 @@ pub async fn read_running_pipeline_pool(
 
 /// List all pipelines across all projects (for dashboard).
 pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_json::Value>> {
-    let rows = sqlx::query(
-        "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
-         FROM orbit_pipelines ORDER BY created_at DESC",
-    )
-    .fetch_all(pool)
-    .await
+    list_pipelines_scoped_pool(pool, None).await
+}
+
+/// List pipelines for one project, or across all projects when `project` is
+/// `None` (most recent first).
+pub async fn list_pipelines_scoped_pool(
+    pool: &AnyPool,
+    project: Option<&str>,
+) -> io::Result<Vec<serde_json::Value>> {
+    let rows = match project {
+        Some(p) => {
+            sqlx::query(
+                "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
+                 FROM orbit_pipelines WHERE project = ? ORDER BY created_at DESC",
+            )
+            .bind(p)
+            .fetch_all(pool)
+            .await
+        }
+        None => {
+            sqlx::query(
+                "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
+                 FROM orbit_pipelines ORDER BY created_at DESC",
+            )
+            .fetch_all(pool)
+            .await
+        }
+    }
     .map_err(super::sqlx_err)?;
 
     let mut pipelines = Vec::with_capacity(rows.len());
@@ -197,6 +219,33 @@ mod tests {
 
         let pipelines = list_all_pipelines_pool(&pool).await.unwrap();
         assert_eq!(pipelines.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_pipelines_scoped_filters_by_project() {
+        let pool = test_pool().await;
+        upsert_pipeline_pool(&pool, "PIPELINE-1", "proj-a", "running", None, None, "{}")
+            .await
+            .unwrap();
+        upsert_pipeline_pool(&pool, "PIPELINE-2", "proj-b", "complete", None, None, "{}")
+            .await
+            .unwrap();
+
+        let b = list_pipelines_scoped_pool(&pool, Some("proj-b"))
+            .await
+            .unwrap();
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0]["id"], "PIPELINE-2");
+        assert!(
+            list_pipelines_scoped_pool(&pool, Some("none"))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            list_pipelines_scoped_pool(&pool, None).await.unwrap().len(),
+            2
+        );
     }
 
     #[tokio::test]

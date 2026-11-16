@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { getOrbitPipelines, dismissOrbitPipeline } from '../lib/harness.js';
   import type { OrbitPipeline } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore, t } from '$lib/i18n.js';
+  import { selectedProject } from '$lib/stores/project.js';
 
   let pipelines = $state<OrbitPipeline[]>([]);
   let loading = $state(true);
@@ -80,7 +80,9 @@
     }
   }
 
-  onMount(() => {
+  // Reload when the project changes: the native backend scopes the list to it.
+  $effect(() => {
+    const _project = $selectedProject; // reactive dependency
     load();
     const id = setInterval(load, 30000);
     return () => clearInterval(id);

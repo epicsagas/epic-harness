@@ -96,15 +96,21 @@ pub struct OrbitPipeline {
 }
 
 #[tauri::command]
-pub async fn get_orbit_pipelines(state: State<'_, AppState>) -> Result<Vec<OrbitPipeline>, String> {
-    let pool = state.harness_db.clone();
+pub async fn get_orbit_pipelines(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<OrbitPipeline>, String> {
+    orbit_pipelines(&state.harness_db, project.as_deref()).await
+}
 
-    let pipelines = epic_harness::store::orbit_store::list_all_pipelines_pool_limited(
-        &pool,
-        MAX_ORBIT_PIPELINES,
-    )
-    .await
-    .map_err(|e| format!("list pipelines: {e}"))?;
+async fn orbit_pipelines(
+    pool: &AnyPool,
+    project: Option<&str>,
+) -> Result<Vec<OrbitPipeline>, String> {
+    let mut pipelines = epic_harness::store::orbit_store::list_pipelines_scoped_pool(pool, project)
+        .await
+        .map_err(|e| format!("list pipelines: {e}"))?;
+    pipelines.truncate(MAX_ORBIT_PIPELINES as usize);
 
     let result: Vec<OrbitPipeline> = pipelines
         .into_iter()
@@ -389,6 +395,68 @@ pub async fn get_global_patterns(
     Ok(patterns)
 }
 
+// ── HarnessX evolution-engine surfaces ────────────────────────────────────────
+
+/// File-backed readers join the project onto the data root, so a selector from
+/// the webview must be a plain slug (same allowlist as the dashboard server).
+fn checked_project(project: Option<&str>) -> Result<Option<&str>, String> {
+    match project.filter(|p| !p.is_empty()) {
+        Some(p) if !epic_harness::shared::paths::is_valid_project_slug(p) => {
+            Err("invalid project".to_string())
+        }
+        p => Ok(p),
+    }
+}
+
+fn to_json(v: impl Serialize) -> Result<serde_json::Value, String> {
+    serde_json::to_value(v).map_err(|e| format!("serialize: {e}"))
+}
+
+#[tauri::command]
+pub async fn get_seesaw_registry(project: Option<String>) -> Result<serde_json::Value, String> {
+    let p = checked_project(project.as_deref())?;
+    to_json(epic_harness::evolve::seesaw::load_registry_for(p))
+}
+
+#[tauri::command]
+pub async fn get_variant_pool(project: Option<String>) -> Result<serde_json::Value, String> {
+    let p = checked_project(project.as_deref())?;
+    to_json(epic_harness::evolve::variants::VariantPool::load_for(p))
+}
+
+#[tauri::command]
+pub async fn get_harness_snapshot(project: Option<String>) -> Result<serde_json::Value, String> {
+    let p = checked_project(project.as_deref())?;
+    to_json(epic_harness::evolve::snapshot::build_snapshot_for(p))
+}
+
+#[tauri::command]
+pub async fn get_manifests(project: Option<String>) -> Result<serde_json::Value, String> {
+    let p = checked_project(project.as_deref())?;
+    to_json(epic_harness::serve::recent_manifests(p))
+}
+
+#[tauri::command]
+pub async fn get_adaptation_landscape(
+    project: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let p = checked_project(project.as_deref())?;
+    // Landscape comes from evolution history alone (no per-session digests).
+    let history = epic_harness::store::evolution::query_recent_records_scoped_pool(
+        &state.harness_db,
+        i64::MAX,
+        p,
+    )
+    .await
+    .map_err(|e| format!("query evolution records: {e}"))?;
+    to_json(epic_harness::evolve::planner::build_landscape(
+        &history,
+        &[],
+        2,
+    ))
+}
+
 // ── Project List ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -574,11 +642,53 @@ mod tests {
             assert_eq!(s.len(), 1, "snapshots scoped to proj-b");
             assert_eq!(s[0].summary, "proj-b work");
 
+            for (proj, id) in [("proj-a", "PIPELINE-1"), ("proj-b", "PIPELINE-2")] {
+                epic_harness::store::orbit_store::upsert_pipeline_pool(
+                    &pool,
+                    id,
+                    proj,
+                    "running",
+                    Some("go"),
+                    None,
+                    "{}",
+                )
+                .await
+                .unwrap();
+            }
+            let p = orbit_pipelines(&pool, Some("proj-b")).await.unwrap();
+            assert_eq!(p.len(), 1, "orbit pipelines scoped to proj-b");
+            assert_eq!(p[0].id, "PIPELINE-2");
+            assert_eq!(orbit_pipelines(&pool, None).await.unwrap().len(), 2);
+
             // No project selected means the cross-project view.
             assert_eq!(obs_summary(&pool, None).await.unwrap().total_tool_calls, 2);
             assert_eq!(session_snapshots(&pool, None).await.unwrap().len(), 2);
         });
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn project_selector_must_be_a_plain_slug() {
+        assert_eq!(checked_project(None), Ok(None));
+        assert_eq!(checked_project(Some("")), Ok(None));
+        assert_eq!(checked_project(Some("proj-a.1")), Ok(Some("proj-a.1")));
+        for bad in ["..", ".", "../x", "a/b", "a\\b", "/abs", "C:"] {
+            assert!(checked_project(Some(bad)).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn evolution_readers_reject_unsafe_project_before_touching_files() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let bad = || Some("../escape".to_string());
+        rt.block_on(async {
+            assert!(get_seesaw_registry(bad()).await.is_err());
+            assert!(get_variant_pool(bad()).await.is_err());
+            assert!(get_harness_snapshot(bad()).await.is_err());
+            assert!(get_manifests(bad()).await.is_err());
+        });
     }
 }

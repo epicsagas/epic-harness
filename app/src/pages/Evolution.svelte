@@ -141,17 +141,25 @@
     }, 0)
   );
 
-  async function load() {
+  // Each load captures the project once and drops its results when a newer
+  // load has started, so a slow response for the previous project cannot
+  // overwrite the selected project's view.
+  let loadGeneration = 0;
+
+  async function load(generation: number, project: string) {
     try {
-      data = await getEvolvedSkills();
+      const evolved = await getEvolvedSkills(project);
+      if (generation !== loadGeneration) return;
+      data = evolved;
       // Fetch HarnessX evolution-engine surfaces in parallel (best-effort;
       // these may be absent on a cold project — treat null as empty).
       const [m, sw, vp, al] = await Promise.allSettled([
-        getHarnessMetrics(),
-        getSeesawRegistry(),
-        getVariantPool(),
-        getAdaptationLandscape(),
+        getHarnessMetrics(project),
+        getSeesawRegistry(project),
+        getVariantPool(project),
+        getAdaptationLandscape(project),
       ]);
+      if (generation !== loadGeneration) return;
       metrics = m.status === 'fulfilled' ? m.value : null;
       seesaw = sw.status === 'fulfilled' ? sw.value : null;
       variants = vp.status === 'fulfilled' ? vp.value : null;
@@ -164,9 +172,10 @@
       flashIfChanged('landscape', landscape);
       error = null;
     } catch (e) {
+      if (generation !== loadGeneration) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (generation === loadGeneration) loading = false;
     }
   }
 
@@ -199,9 +208,10 @@
   // Reload whenever the selected project changes (projectArgs() reads it at
   // call time), then poll on an interval. $effect re-runs on project switch.
   $effect(() => {
-    const _project = $selectedProject; // reactive dependency
-    load();
-    const id = setInterval(() => { if (!document.hidden) load(); }, 30_000);
+    const project = $selectedProject; // reactive dependency
+    const gen = ++loadGeneration;
+    load(gen, project);
+    const id = setInterval(() => { if (!document.hidden) load(gen, project); }, 30_000);
     return () => clearInterval(id);
   });
 </script>

@@ -5,6 +5,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getEvolvedSkills, getHarnessMetrics, getObsSummary, getOrbitPipelines } from './harness.js';
+import { selectedProject } from './stores/project.js';
 
 function stubFetch(impl: () => Promise<Partial<Response>>) {
   const fn = vi.fn(impl);
@@ -48,5 +49,23 @@ describe('browserFallback error handling', () => {
     expect(m.total_sessions).toBe(3);
     expect(m.avg_score).toBe(0.5);
     expect(fetchMock).toHaveBeenCalledWith('/api/harness?cmd=get_harness_metrics');
+  });
+});
+
+describe('project selection', () => {
+  afterEach(() => selectedProject.set('__all__'));
+
+  it('an explicit project wins over the store, so a load keeps the project it started with', async () => {
+    selectedProject.set('proj-new');
+    const fetchMock = stubFetch(() => json({ evolved_skills: [] }));
+    await getEvolvedSkills('proj-old');
+    expect(fetchMock).toHaveBeenCalledWith('/api/harness?cmd=get_evolved_skills&project=proj-old');
+  });
+
+  it('orbit pipelines follow the selected project', async () => {
+    selectedProject.set('proj-a');
+    const fetchMock = stubFetch(() => json([]));
+    await getOrbitPipelines();
+    expect(fetchMock).toHaveBeenCalledWith('/api/harness?cmd=get_orbit_pipelines&project=proj-a');
   });
 });
