@@ -953,11 +953,7 @@ pub fn install_default_team_if_needed(org: &str) -> bool {
     let playbook = build_playbook_section(team, DEFAULT_TEAM_TYPE, &agent_list, "—");
     let playbook_path = store_dir.join("playbook.md");
     let tmp = playbook_path.with_extension("md.tmp");
-    if fs::write(&tmp, &playbook).is_err() || fs::rename(&tmp, &playbook_path).is_err() {
-        return false;
-    }
-
-    true
+    fs::write(&tmp, &playbook).is_ok() && fs::rename(&tmp, &playbook_path).is_ok()
 }
 
 #[cfg(test)]
