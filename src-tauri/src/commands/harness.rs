@@ -107,10 +107,13 @@ async fn orbit_pipelines(
     pool: &AnyPool,
     project: Option<&str>,
 ) -> Result<Vec<OrbitPipeline>, String> {
-    let mut pipelines = epic_harness::store::orbit_store::list_pipelines_scoped_pool(pool, project)
-        .await
-        .map_err(|e| format!("list pipelines: {e}"))?;
-    pipelines.truncate(MAX_ORBIT_PIPELINES as usize);
+    let pipelines = epic_harness::store::orbit_store::list_pipelines_scoped_pool(
+        pool,
+        project,
+        Some(MAX_ORBIT_PIPELINES),
+    )
+    .await
+    .map_err(|e| format!("list pipelines: {e}"))?;
 
     let result: Vec<OrbitPipeline> = pipelines
         .into_iter()

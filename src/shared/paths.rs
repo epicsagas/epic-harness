@@ -241,14 +241,15 @@ pub fn retention_marker_file() -> PathBuf {
 }
 
 /// Whether an externally supplied project selector is a safe directory name:
-/// `^[A-Za-z0-9._-]+$`, excluding `.` and `..`. Callers that take a slug from
+/// Unicode letters/digits plus `.`, `_`, `-` (what `sanitize_slug_name` keeps),
+/// excluding `.` and `..`. Callers that take a slug from
 /// a request must check this before it reaches `resolve_harness_dir`.
 pub fn is_valid_project_slug(p: &str) -> bool {
     p != "."
         && p != ".."
         && !p.is_empty()
-        && p.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        && p.chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Resolve the per-project harness dir for a request. Falls back to the
@@ -381,7 +382,15 @@ mod tests {
 
     #[test]
     fn project_slug_allowlist() {
-        for ok in ["proj-a", "my.proj_1", "A", "a..b", ".hidden"] {
+        for ok in [
+            "proj-a",
+            "my.proj_1",
+            "A",
+            "a..b",
+            ".hidden",
+            "프로젝트",
+            "앱-1",
+        ] {
             assert!(is_valid_project_slug(ok), "{ok:?}");
         }
         for bad in [
@@ -396,7 +405,8 @@ mod tests {
             "a b",
             "a%2fb",
             "a\0b",
-            "프로젝트",
+            "a?b",
+            "a\u{ff0f}b",
         ] {
             assert!(!is_valid_project_slug(bad), "{bad:?}");
         }

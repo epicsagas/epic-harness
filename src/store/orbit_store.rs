@@ -75,30 +75,35 @@ pub async fn read_running_pipeline_pool(
 
 /// List all pipelines across all projects (for dashboard).
 pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_json::Value>> {
-    list_pipelines_scoped_pool(pool, None).await
+    list_pipelines_scoped_pool(pool, None, None).await
 }
 
 /// List pipelines for one project, or across all projects when `project` is
-/// `None` (most recent first).
+/// `None` (most recent first), at most `limit` rows (`None` = no limit).
 pub async fn list_pipelines_scoped_pool(
     pool: &AnyPool,
     project: Option<&str>,
+    limit: Option<i64>,
 ) -> io::Result<Vec<serde_json::Value>> {
+    // SQLite: a negative LIMIT means no limit.
+    let limit = limit.unwrap_or(-1);
     let rows = match project {
         Some(p) => {
             sqlx::query(
                 "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
-                 FROM orbit_pipelines WHERE project = ? ORDER BY created_at DESC",
+                 FROM orbit_pipelines WHERE project = ? ORDER BY created_at DESC LIMIT ?",
             )
             .bind(p)
+            .bind(limit)
             .fetch_all(pool)
             .await
         }
         None => {
             sqlx::query(
                 "SELECT id, project, status, phase, mode, state_json, created_at, updated_at
-                 FROM orbit_pipelines ORDER BY created_at DESC",
+                 FROM orbit_pipelines ORDER BY created_at DESC LIMIT ?",
             )
+            .bind(limit)
             .fetch_all(pool)
             .await
         }
@@ -231,21 +236,33 @@ mod tests {
             .await
             .unwrap();
 
-        let b = list_pipelines_scoped_pool(&pool, Some("proj-b"))
+        let b = list_pipelines_scoped_pool(&pool, Some("proj-b"), None)
             .await
             .unwrap();
         assert_eq!(b.len(), 1);
         assert_eq!(b[0]["id"], "PIPELINE-2");
         assert!(
-            list_pipelines_scoped_pool(&pool, Some("none"))
+            list_pipelines_scoped_pool(&pool, Some("none"), None)
                 .await
                 .unwrap()
                 .is_empty()
         );
         assert_eq!(
-            list_pipelines_scoped_pool(&pool, None).await.unwrap().len(),
+            list_pipelines_scoped_pool(&pool, None, None)
+                .await
+                .unwrap()
+                .len(),
             2
         );
+        // LIMIT applies in SQL, with and without a project.
+        let one = list_pipelines_scoped_pool(&pool, None, Some(1))
+            .await
+            .unwrap();
+        assert_eq!(one.len(), 1);
+        let none = list_pipelines_scoped_pool(&pool, Some("proj-a"), Some(0))
+            .await
+            .unwrap();
+        assert!(none.is_empty());
     }
 
     #[tokio::test]

@@ -105,6 +105,10 @@ pub fn run_serve(port: Option<u16>) -> i32 {
         let method = request.method().clone();
 
         let response = match (method, url.as_str()) {
+            // Every route, reads included: a DNS-rebound page keeps its own
+            // Host and could otherwise read /api/* from the browser.
+            _ if !is_loopback_host(request.headers(), port) => forbidden_response(),
+
             (Method::Get, "/") | (Method::Get, "/index.html") => Response::from_string(
                 dashboard_html_with_version(),
             )
@@ -482,15 +486,21 @@ fn header_value<'a>(headers: &'a [Header], name: &str) -> Option<&'a str> {
         .map(|h| h.value.as_str())
 }
 
-/// Gate for mutating (DELETE) routes, mirroring `mem/axum_server.rs`: reject
-/// a foreign `Origin` or `Sec-Fetch-Site: cross-site` (CSRF), and any `Host`
-/// other than the loopback names on our port (DNS rebinding: a rebound
-/// hostname resolves to 127.0.0.1 but keeps its own `Host`).
-fn is_loopback_same_origin(headers: &[Header], port: u16) -> bool {
-    let host_ok = header_value(headers, "Host").is_some_and(|h| {
+/// `Host` must be a loopback name on our port (DNS rebinding: a rebound
+/// hostname resolves to 127.0.0.1 but keeps its own `Host`). Fails closed on
+/// a missing header.
+fn is_loopback_host(headers: &[Header], port: u16) -> bool {
+    header_value(headers, "Host").is_some_and(|h| {
         h.eq_ignore_ascii_case(&format!("localhost:{port}"))
             || h.eq_ignore_ascii_case(&format!("127.0.0.1:{port}"))
-    });
+    })
+}
+
+/// Extra gate for mutating (DELETE) routes, mirroring `mem/axum_server.rs`:
+/// the loopback `Host` check plus rejecting a foreign `Origin` or
+/// `Sec-Fetch-Site: cross-site` (CSRF).
+fn is_loopback_same_origin(headers: &[Header], port: u16) -> bool {
+    let host_ok = is_loopback_host(headers, port);
     let origin_ok = header_value(headers, "Origin").is_none_or(|o| {
         o.eq_ignore_ascii_case(&format!("http://localhost:{port}"))
             || o.eq_ignore_ascii_case(&format!("http://127.0.0.1:{port}"))
@@ -1203,6 +1213,67 @@ mod tests {
             hdr("Sec-Fetch-Site", "cross-site"),
         ];
         assert!(!is_loopback_same_origin(&cross, 7700));
+    }
+
+    /// Raw HTTP/1.1 GET against a live `run_serve`; returns the status code.
+    fn get_status(port: u16, path: &str, host: Option<&str>) -> u16 {
+        use std::io::{Read, Write};
+        let mut c = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let host_line = host.map(|h| format!("Host: {h}\r\n")).unwrap_or_default();
+        write!(
+            c,
+            "GET {path} HTTP/1.1\r\n{host_line}Connection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut out = Vec::new();
+        c.read_to_end(&mut out).unwrap();
+        String::from_utf8_lossy(&out)
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    #[test]
+    fn every_route_rejects_a_foreign_host() {
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        std::thread::spawn(move || run_serve(Some(port)));
+        for _ in 0..50 {
+            if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Rejected before routing: reads, the SSE stream, and unknown paths.
+        for path in [
+            "/",
+            "/api/graph",
+            "/api/events",
+            "/api/projects",
+            "/api/harness?cmd=get_manifests",
+        ] {
+            for host in [
+                Some("evil.example:1"),
+                Some("localhost"),
+                Some("localhost:1"),
+                None,
+            ] {
+                assert_eq!(get_status(port, path, host), 403, "{path} {host:?}");
+            }
+        }
+        // The dashboard page loads for both loopback names (case-insensitive).
+        for host in [
+            format!("localhost:{port}"),
+            format!("127.0.0.1:{port}"),
+            format!("LOCALHOST:{port}"),
+        ] {
+            assert_eq!(get_status(port, "/", Some(&host)), 200, "{host}");
+        }
     }
 
     #[test]
