@@ -30,6 +30,16 @@ fn acquire_session_lock(lock: &Path) -> bool {
     }
 }
 
+/// Entries of the pre-v0.1.4 project-local `.harness/` data layout. Their
+/// presence triggers a hint; guard-rules.yaml and engagement.md do not.
+const LEGACY_ENTRIES: &[&str] = &[
+    "obs",
+    "evolved",
+    "sessions",
+    "metrics.json",
+    "evolution.jsonl",
+];
+
 /// Delete `resume.*.lock` files older than 7 days. They otherwise accumulate
 /// one per session start forever. Only touches the `resume.` prefix, so
 /// `dashboard.lock` and other locks are unaffected.
@@ -243,48 +253,27 @@ pub fn run(input: &HookInput) -> i32 {
 
     let wd = cwd();
 
-    // Migrate legacy .harness/ from project dir to ~/.harness/projects/{slug}/
+    // Pre-v0.1.4 data in the project-local .harness/ is no longer read. Only
+    // tell the user; never move, copy or delete anything in the project tree.
     let local = local_harness_dir();
     let is_real_dir = local
         .symlink_metadata()
         .map(|m| m.file_type().is_dir())
         .unwrap_or(false);
-    if is_real_dir && !harness_exists() {
-        ensure_dir(&harness_dir());
-        let copied = copy_dir_counted(&local, &harness_dir());
-        if copied.errors > 0 {
-            hint(
-                "resume",
-                &format!(
-                    "Migration partial: {}/{} files copied — check {}",
-                    copied.ok,
-                    copied.ok + copied.errors,
-                    harness_dir().display()
-                ),
-            );
-        } else {
-            // Remove migrated local dir; guard-rules.yaml lives at project root
-            // (.harness/guard-rules.yaml) — move it up before deleting the dir.
-            let guard_src = local.join("guard-rules.yaml");
-            let guard_dst = cwd().join(".harness").join("guard-rules.yaml");
-            if guard_src.exists() && !guard_dst.exists() {
-                // guard-rules is *inside* local — it will be deleted with the dir.
-                // Copy it to a standalone location the user can check into git.
-                let root_guard = cwd().join("guard-rules.yaml");
-                if !root_guard.exists() {
-                    let _ = std::fs::copy(&guard_src, &root_guard);
-                }
-            }
-            let _ = std::fs::remove_dir_all(&local);
-            hint(
-                "resume",
-                &format!(
-                    "Migrated .harness/ → {} ({} files). Removed project-local .harness/.",
-                    harness_dir().display(),
-                    copied.ok
-                ),
-            );
-        }
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    if is_real_dir
+        && canon(&local) != canon(&harness_root())
+        && canon(&local) != canon(&harness_dir())
+        && LEGACY_ENTRIES.iter().any(|e| local.join(e).exists())
+    {
+        hint(
+            "resume",
+            &format!(
+                "Project-local .harness/ holds pre-v0.1.4 data that is no longer read. \
+                 Move it to {} or delete it.",
+                harness_dir().display()
+            ),
+        );
     }
 
     // Auto-init ~/.harness/projects/{slug}/

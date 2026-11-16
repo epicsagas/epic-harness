@@ -286,37 +286,6 @@ pub fn copy_dir(src: &Path, dest: &Path) {
     }
 }
 
-pub struct CopyResult {
-    pub ok: u64,
-    pub errors: u64,
-}
-
-/// Like `copy_dir` but counts successes and errors instead of silently ignoring failures.
-pub fn copy_dir_counted(src: &Path, dest: &Path) -> CopyResult {
-    let mut result = CopyResult { ok: 0, errors: 0 };
-    if !src.is_dir() {
-        return result;
-    }
-    ensure_dir(dest);
-    if let Ok(entries) = fs::read_dir(src) {
-        for entry in entries.flatten() {
-            let src_path = entry.path();
-            let dest_path = dest.join(entry.file_name());
-            if src_path.is_dir() {
-                let sub = copy_dir_counted(&src_path, &dest_path);
-                result.ok += sub.ok;
-                result.errors += sub.errors;
-            } else {
-                match fs::copy(&src_path, &dest_path) {
-                    Ok(_) => result.ok += 1,
-                    Err(_) => result.errors += 1,
-                }
-            }
-        }
-    }
-    result
-}
-
 pub fn rm_dir(dir: &Path) {
     if dir.is_dir() {
         let _ = fs::remove_dir_all(dir);
