@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.14] - 2026-11-17
+
+Thanks to @Tomauskasz for the issue reports and reference PRs behind most fixes in this release; the fixes were reimplemented on main and credit each commit with Co-authored-by.
+
 ### Fixed
+- **Project merge keeps the source on failure**: `merge-project` now returns a failing exit code when any file fails to transfer, runs the global DB step in one transaction, and deletes the source project only after a full success with no unmerged entries left. Slug and canonical path checks stop it from merging a project into itself. (#183)
+- **Eval no longer passes failing work**: `correctness` passes only when the test command exits 0 and the score reaches `min_pass_rate` (validated to 0..=1). `composite` treats a missing, invalid, or out-of-range score as FAIL instead of 1.0. (#178, #180)
+- **Reward-hacking flag**: the metrics loader read `reward_hacking_suspected` as a number while it is stored as text, so it was always false. (#259)
+- **Dashboard**: the web client no longer shows fabricated mock data when the API fails; orbit pipeline deletion accepts only `[A-Za-z0-9_-]+` ids and removes the exact `PIPELINE-<id>.json` (an empty id used to delete every pipeline file); non-object pipeline JSON no longer crashes `epic serve`; the native app loads sessions and pipelines for the current project only. (#210, #221, #222, #237)
+- **Memory delete endpoints**: deleting a node removes its edges, and a missing node or edge returns 404 instead of crashing the handler. (#182)
+- **Session start no longer touches project `.harness/`**: the pre-v0.1.4 legacy migration is removed. It could delete a committed `.harness/guard-rules.yaml` on the first resume. Legacy data now only produces a one-line hint with the target path. (#217)
+- **Windows installer**: `install.ps1` downloads `epic-harness-<target>.zip`, the name releases actually publish. (#132)
 - **Dashboard English labels**: 27 translation keys used by the Topbar,
   Dashboard, Memory, and Settings pages were missing from `en.ts`, so
   English (and the fallback for every other locale) rendered raw key names
@@ -16,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `state` field, so agent status changes never flashed. It now reads `status`.
 
 ### Security
+- **Memory server rejects cross-site writes**: mutating requests with a foreign `Origin`, `Origin: null`, or `Sec-Fetch-Site: cross-site`, and non-JSON request bodies, are refused, and CORS allows only `localhost` and `127.0.0.1` on the bound port. A web page could previously post `text/plain` bodies into memory, which later reached the model through recall. (#234)
+- **Secret redaction**: observations and polish snippets now redact secrets inside JSON keys, quoted and escaped values, auth headers, cookies, URL userinfo, common token formats, and PEM blocks, and they mask before truncating. (#177)
 - Dashboard dev dependencies bumped to patched versions (vite 6.4.5,
   vitest 5.1.0, undici 7.30.1, source-map-js 1.2.2), clearing 13 Dependabot
   alerts. No shipped code changes: the dashboard ships as a prebuilt file.
