@@ -322,6 +322,23 @@ pub fn run(args: &[String]) -> i32 {
     let check_only = args.iter().any(|a| a == "--check");
     let force = args.iter().any(|a| a == "--force");
 
+    // --check: report version status only, skip side effects. Runs before
+    // binary resolution so a failed lookup never triggers an installer.
+    if check_only {
+        if let Some(cur) = current_version() {
+            eprintln!("Current: {cur}");
+            if let Some(latest) = latest_github_version() {
+                eprintln!("Latest:  {latest}");
+                if semver_gt(&latest, &cur) {
+                    eprintln!("[epic] Update available: {cur} → {latest}");
+                    return 1;
+                }
+                eprintln!("[epic] Already up to date.");
+            }
+        }
+        return 0;
+    }
+
     // ── resolve or install binary ────────────────────────────────
     let eh = resolve_binary().or_else(install_binary);
     let eh = match eh {
@@ -331,8 +348,7 @@ pub fn run(args: &[String]) -> i32 {
 
     // ── auto-update check (cooled down) ─────────────────────────
     let mut did_update = false;
-    if !check_only
-        && (force || should_check())
+    if (force || should_check())
         && let Some(cur) = current_version()
         && let Some(latest) = latest_github_version()
         && semver_gt(&latest, &cur)
@@ -356,22 +372,6 @@ pub fn run(args: &[String]) -> i32 {
         eh
     };
 
-    // --check: report version status only, skip side effects
-    if check_only {
-        if let Some(cur) = current_version() {
-            eprintln!("Current: {cur}");
-            if let Some(latest) = latest_github_version() {
-                eprintln!("Latest:  {latest}");
-                if semver_gt(&latest, &cur) {
-                    eprintln!("[epic] Update available: {cur} → {latest}");
-                    return 1;
-                }
-                eprintln!("[epic] Already up to date.");
-            }
-        }
-        return 0;
-    }
-
     // ── MCP registration (idempotent) ───────────────────────────
     let _ = Command::new(&eh).args(["mem", "mcp-install"]).output();
 
@@ -379,4 +379,49 @@ pub fn run(args: &[String]) -> i32 {
     start_webui();
 
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn check_only_never_invokes_installers() {
+        use std::os::unix::fs::PermissionsExt;
+        // Shims for every installer `install_binary` may call; PATH holds
+        // nothing else, so `which` fails exactly like stock Windows.
+        let tmp = tempfile::tempdir().unwrap();
+        let bin = tmp.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let marker = tmp.path().join("installer-ran");
+        for name in ["brew", "cargo-binstall", "cargo"] {
+            let shim = bin.join(name);
+            fs::write(&shim, format!("#!/bin/sh\n: > '{}'\n", marker.display())).unwrap();
+            fs::set_permissions(&shim, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let old_path = std::env::var_os("PATH");
+        let old_root = std::env::var_os("CLAUDE_PLUGIN_ROOT");
+        // SAFETY: serial test; restored below.
+        unsafe {
+            std::env::set_var("PATH", &bin);
+            std::env::remove_var("CLAUDE_PLUGIN_ROOT");
+        }
+
+        let code = run(&["--check".to_string()]);
+
+        unsafe {
+            match old_path {
+                Some(v) => std::env::set_var("PATH", v),
+                None => std::env::remove_var("PATH"),
+            }
+            if let Some(v) = old_root {
+                std::env::set_var("CLAUDE_PLUGIN_ROOT", v);
+            }
+        }
+        assert!(!marker.exists(), "--check must not run an installer");
+        assert_eq!(code, 0);
+    }
 }

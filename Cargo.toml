@@ -58,7 +58,7 @@ bin-dir = "epic-harness-{ target }/{ bin }"
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-url = "{ repo }/releases/download/v{ version }/epic-harness-{ target }.zip"
 pkg-fmt = "zip"
-bin-dir = "epic-harness-{ target }/epic-harness.exe"
+bin-dir = "{ bin }{ binary-ext }"
 
 [profile.release]
 opt-level = "s"

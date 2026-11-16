@@ -4,6 +4,10 @@ param(
     [string]$InstallDir = "$env:USERPROFILE\.local\bin"
 )
 
+# A failed step (locked binary, bad download) must stop the script, not fall
+# through to the success message.
+$ErrorActionPreference = "Stop"
+
 $Repo   = "epicsagas/epic-harness"
 $Binary = "epic"
 
@@ -12,7 +16,9 @@ $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
 if ($arch -eq "X64") {
     $target = "x86_64-pc-windows-msvc"
 } elseif ($arch -eq "Arm64") {
-    $target = "aarch64-pc-windows-msvc"
+    # No aarch64-pc-windows-msvc archive is published; the x64 build runs under emulation.
+    Write-Host "Windows on Arm: installing the x86_64 build (runs under emulation)."
+    $target = "x86_64-pc-windows-msvc"
 } else {
     Write-Error "Error: unsupported architecture $arch"; exit 1
 }
@@ -34,24 +40,33 @@ $tmpdir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "epic-install-
 $zip    = Join-Path $tmpdir $archive
 $shaFile = Join-Path $tmpdir "$archive.sha256"
 
-Invoke-WebRequest -Uri $url    -OutFile $zip     -UseBasicParsing
-Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing
+try {
+    Invoke-WebRequest -Uri $url    -OutFile $zip     -UseBasicParsing
+    Invoke-WebRequest -Uri $shaUrl -OutFile $shaFile -UseBasicParsing
 
-# SHA-256 verification
-$expected = (Get-Content $shaFile -Raw).Split(" ")[0].Trim()
-$actual   = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
-if ($actual -ne $expected) {
-    Write-Error "Error: SHA-256 verification failed (expected $expected, got $actual)"; exit 1
+    # SHA-256 verification
+    $expected = (Get-Content $shaFile -Raw).Split(" ")[0].Trim()
+    $actual   = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLower()
+    if ($actual -ne $expected) {
+        Write-Error "Error: SHA-256 verification failed (expected $expected, got $actual)"; exit 1
+    }
+
+    Expand-Archive -Path $zip -DestinationPath $tmpdir -Force
+
+    if (-not (Test-Path $InstallDir)) {
+        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+    }
+
+    $src = Join-Path $tmpdir "$Binary.exe"
+    $dst = Join-Path $InstallDir "$Binary.exe"
+    Copy-Item -Path $src -Destination $dst -Force
+    # Confirm the installed file is the new binary, not a stale one.
+    if ((Get-FileHash -Path $dst -Algorithm SHA256).Hash -ne (Get-FileHash -Path $src -Algorithm SHA256).Hash) {
+        Write-Error "Error: $dst was not replaced (is $Binary running?)"; exit 1
+    }
+} finally {
+    Remove-Item -Path $tmpdir -Recurse -Force -ErrorAction SilentlyContinue
 }
-
-Expand-Archive -Path $zip -DestinationPath $tmpdir -Force
-
-if (-not (Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-}
-
-Copy-Item -Path (Join-Path $tmpdir "$Binary.exe") -Destination (Join-Path $InstallDir "$Binary.exe") -Force
-Remove-Item -Path $tmpdir -Recurse -Force
 
 # ── Verify ────────────────────────────────────────────────────────────────────
 if (Get-Command $Binary -ErrorAction SilentlyContinue) {
