@@ -194,11 +194,11 @@ pub fn find_pending(skill_name: &str) -> Option<PendingSynth> {
 
 /// Mark every pending manifest for a skill as synthesized. Idempotent — a
 /// second call finds no pending record and does nothing.
-pub fn mark_consumed(skill_name: &str) {
+pub fn mark_consumed(skill_name: &str) -> std::io::Result<()> {
     let path = pending_synth_file();
     let mut records: Vec<PendingSynth> = read_jsonl_typed(&path);
     if records.is_empty() {
-        return;
+        return Ok(());
     }
     let now = now_iso();
     let mut changed = false;
@@ -210,8 +210,9 @@ pub fn mark_consumed(skill_name: &str) {
         }
     }
     if changed {
-        rewrite_jsonl(&path, &records);
+        rewrite_jsonl(&path, &records)?;
     }
+    Ok(())
 }
 
 /// Drop consumed records and cap pending growth (oldest first by `created`,
@@ -223,21 +224,19 @@ fn gc_pending(path: &Path) {
         records.sort_by(|a, b| b.created.cmp(&a.created));
         records.truncate(MAX_PENDING_SYNTH);
     }
-    rewrite_jsonl(path, &records);
+    let _ = rewrite_jsonl(path, &records);
 }
 
-fn rewrite_jsonl(path: &Path, records: &[PendingSynth]) {
+fn rewrite_jsonl(path: &Path, records: &[PendingSynth]) -> std::io::Result<()> {
     use std::io::Write;
     let tmp = path.with_extension("jsonl.tmp");
-    let Ok(mut f) = fs::File::create(&tmp) else {
-        return;
-    };
+    let mut f = fs::File::create(&tmp)?;
     for r in records {
         if let Ok(j) = serde_json::to_string(r) {
-            let _ = writeln!(f, "{j}");
+            writeln!(f, "{j}")?;
         }
     }
-    let _ = fs::rename(&tmp, path);
+    fs::rename(&tmp, path)
 }
 
 /// Validate and normalize a synthesized body. Rejects output that is too

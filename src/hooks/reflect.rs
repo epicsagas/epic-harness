@@ -82,11 +82,15 @@ pub fn run_context(
         // Fix 1: Verify resolved path stays within harness projects root
         let slug_harness = harness_dir_for_slug(slug);
         let safe = if slug_harness.exists() {
-            slug_harness
-                .canonicalize()
-                .ok()
-                .map(|p| p.starts_with(harness_projects_root()))
-                .unwrap_or(false)
+            // Canonicalize both sides: a prefix added by one (Windows `\\?\`,
+            // macOS /private, symlinked roots) must not reject a valid path.
+            match (
+                slug_harness.canonicalize(),
+                harness_projects_root().canonicalize(),
+            ) {
+                (Ok(p), Ok(root)) => p.starts_with(root),
+                _ => false,
+            }
         } else {
             slug_harness.starts_with(harness_projects_root())
         };
@@ -266,10 +270,24 @@ pub fn run_context(
         "tool_success_rate": tool_success_rate,
     });
 
+    // Scoped to the invoking project unless --all-projects asked for the
+    // cross-project aggregate; the unscoped loaders are indeterminate when
+    // several projects share the harness DB.
+    let context_scope: Option<String> = if all_projects {
+        None
+    } else {
+        project_slugs.first().cloned()
+    };
+
     // 2. Evolution stats (SQLite first, fallback to JSONL)
     let evo_records: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::evolution::query_all_records_pool(&pool).await
+        crate::store::evolution::query_recent_records_scoped_pool(
+            &pool,
+            i64::MAX,
+            context_scope.as_deref(),
+        )
+        .await
     })
     .map(|recs| {
         recs.iter()
@@ -351,17 +369,9 @@ pub fn run_context(
     });
 
     // 3. Metrics summary (SQLite first, fallback to JSON)
-    // Scoped to the invoking project unless --all-projects asked for the
-    // cross-project aggregate; the unscoped loader is indeterminate when
-    // several projects share the harness DB.
-    let metrics_scope: Option<String> = if all_projects {
-        None
-    } else {
-        project_slugs.first().cloned()
-    };
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_scoped_pool(&pool, metrics_scope.as_deref()).await
+        crate::store::metrics::load_metrics_scoped_pool(&pool, context_scope.as_deref()).await
     })
     .unwrap_or_else(|e| {
         eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
@@ -439,7 +449,12 @@ pub fn run_context(
     // 4. Session snapshots (SQLite first, fallback to JSON)
     let snapshots: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::sessions::list_recent_snapshots_pool(&pool, 5).await
+        crate::store::sessions::list_recent_snapshots_scoped_pool(
+            &pool,
+            5,
+            context_scope.as_deref(),
+        )
+        .await
     })
     .map(|snaps| {
         snaps
@@ -522,8 +537,10 @@ pub fn run_context(
     };
 
     // Fix 4: Scope note clarifying which fields are per-project vs aggregated
-    let scope_note = if all_projects || project.is_some() {
-        "evolution_stats, metrics_summary, session_snapshots, and evolved_skills are scoped to the current working directory project. Only obs_stats is aggregated across all analyzed projects."
+    let scope_note = if all_projects {
+        "obs_stats, evolution_stats, metrics_summary, and session_snapshots are aggregated across all analyzed projects. evolved_skills is scoped to the current working directory project."
+    } else if project.is_some() {
+        "obs_stats, evolution_stats, metrics_summary, and session_snapshots are scoped to the selected project. evolved_skills is scoped to the current working directory project."
     } else {
         ""
     };
@@ -688,7 +705,9 @@ fn collect_alcove(cfg: &crate::config::AlcoveConfig) -> serde_json::Value {
     };
     // Fix 2: Canonicalize vault path and verify it stays within home directory
     let vault = if let Ok(canonical) = vault.canonicalize() {
-        let home = dirs_home();
+        let Ok(home) = dirs_home().canonicalize() else {
+            return serde_json::json!({"error": "home directory cannot be resolved"});
+        };
         if !canonical.starts_with(&home) {
             return serde_json::json!({
                 "error": format!("vault_path escapes home directory: {}", canonical.display())
@@ -800,7 +819,7 @@ fn is_leap(y: i32) -> bool {
 
 // ── Main Hook ───────────────────────────────────────
 
-/// Ingest today's JSONL fallback session files into SQLite, then remove them.
+/// Ingest the JSONL fallback session files into SQLite, then remove them.
 ///
 /// observe/polish write JSONL only when the SQLite write failed mid-session.
 /// Without this backfill, those records were stranded forever: the old read
@@ -808,15 +827,14 @@ fn is_leap(y: i32) -> bool {
 /// one later successful SQLite write and the fallback data went unread.
 /// The file is removed only after every record was inserted, so a partial
 /// backfill leaves the remainder for the next attempt.
-async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool, today_str: &str) {
+async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool) {
     if !obs_dir().is_dir() {
         return;
     }
     let project = crate::shared::paths::project_slug();
+    // Every fallback file, whatever its name: a host session id (UUID) carries
+    // no date, and each record keeps its own timestamp in SQLite.
     for fname in list_files(&obs_dir(), ".jsonl") {
-        if !fname.contains(today_str) {
-            continue;
-        }
         let recs = read_jsonl_typed(&obs_dir().join(&fname));
         if recs.is_empty() {
             continue;
@@ -913,7 +931,7 @@ pub fn run(_input: &HookInput) -> i32 {
     let current_project = project_slug();
     let observations = match crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        backfill_jsonl_to_sqlite(&pool, &today_str).await;
+        backfill_jsonl_to_sqlite(&pool).await;
         crate::store::observations::query_obs_for_date_range_pool(
             &pool,
             &today_str,
@@ -938,16 +956,18 @@ pub fn run(_input: &HookInput) -> i32 {
         if !obs_dir().is_dir() {
             return 0;
         }
-        let obs_files: Vec<String> = list_files(&obs_dir(), ".jsonl")
-            .into_iter()
-            .filter(|f| f.contains(&today_str))
-            .collect();
+        let obs_files = list_files(&obs_dir(), ".jsonl");
         if obs_files.is_empty() {
             return 0;
         }
+        // Host session ids carry no date, so pick today's records by timestamp.
         let mut recs: Vec<ObsRecord> = vec![];
         for f in &obs_files {
-            recs.extend(read_jsonl_typed(&obs_dir().join(f)));
+            recs.extend(
+                read_jsonl_typed::<ObsRecord>(&obs_dir().join(f))
+                    .into_iter()
+                    .filter(|r| r.timestamp.replace('-', "").starts_with(&today_str)),
+            );
         }
         recs
     };
@@ -1574,7 +1594,8 @@ fn detect_session_stack(observations: &[ObsRecord]) -> Vec<String> {
             })
             .unwrap_or_default()
             .to_lowercase();
-        let tag = match ext.as_str() {
+        // `file_ext` is stored with its leading dot (".tsx"); the action fallback has none.
+        let tag = match ext.trim_start_matches('.') {
             "rs" => "rust",
             "py" => "python",
             "ts" | "tsx" => "typescript",
@@ -1600,6 +1621,43 @@ mod tests {
     fn epoch_days_to_ymd_known_date() {
         // 1970-01-01 = day 0
         assert_eq!(epoch_days_to_ymd(0), (1970, 1, 1));
+    }
+
+    /// `file_ext` is stored with its leading dot by observe; stack routing must
+    /// still see it, and the dotless action fallback must keep working.
+    #[test]
+    fn session_stack_reads_dotted_and_dotless_extensions() {
+        let rec = |file_ext: Option<&str>, action: Option<&str>| ObsRecord {
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            tool: "Read".into(),
+            tool_category: "read".into(),
+            action: action.map(String::from),
+            result: Some("success".into()),
+            score: Some(1.0),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: file_ext.map(String::from),
+            sequence_id: None,
+            pipeline_id: None,
+        };
+        for (ext, stack) in [
+            (".tsx", "typescript"),
+            (".ts", "typescript"),
+            (".rs", "rust"),
+            ("py", "python"),
+        ] {
+            assert_eq!(
+                detect_session_stack(&[rec(Some(ext), None)]),
+                [stack],
+                "{ext}"
+            );
+        }
+        assert_eq!(
+            detect_session_stack(&[rec(None, Some("src/main.go"))]),
+            ["go"]
+        );
+        assert!(detect_session_stack(&[rec(Some(".md"), None)]).is_empty());
     }
 
     fn obs_at(ts: &str) -> ObsRecord {

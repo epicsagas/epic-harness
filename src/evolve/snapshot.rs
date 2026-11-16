@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::config::CONFIG;
+use crate::shared::classify::parse_guard_rules;
 use crate::shared::evolution::{ConfigSummary, HarnessSnapshot, MetricsSummary};
 use crate::shared::helpers::list_dirs;
 use crate::shared::paths::{evolved_dir_for, guard_rules_file, project_slug};
@@ -103,21 +104,23 @@ fn content_hash(snapshot_without_hash_and_ts: &HarnessSnapshot) -> String {
     format!("{:016x}{:016x}", h1.finish(), h2.finish())
 }
 
-/// Read guard-rules.yaml as a sorted list of non-empty, trimmed lines.
-/// Absent file → empty vec (snapshot still valid).
+/// Read guard-rules.yaml as parsed rules, `"<action>[<index>]: <pattern> | <msg>"`,
+/// in file order. The action keeps blocked vs warned distinct and the index keeps
+/// order. Absent file → empty vec (snapshot still valid).
 fn read_guard_rule_lines() -> Vec<String> {
-    let path = guard_rules_file();
-    let Ok(content) = fs::read_to_string(&path) else {
+    let Ok(content) = fs::read_to_string(guard_rules_file()) else {
         return Vec::new();
     };
-    let mut lines: Vec<String> = content
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .collect();
-    lines.sort();
-    lines.dedup();
-    lines
+    let (blocked, warned) = parse_guard_rules(&content);
+    [("blocked", blocked), ("warned", warned)]
+        .into_iter()
+        .flat_map(|(action, rules)| {
+            rules
+                .into_iter()
+                .enumerate()
+                .map(move |(i, r)| format!("{action}[{i}]: {} | {}", r.pattern.as_str(), r.msg))
+        })
+        .collect()
 }
 
 /// Build a MetricsSummary from the project's metrics, defaulting gracefully
@@ -438,11 +441,6 @@ mod tests {
         expected.dedup();
         assert_eq!(snap.active_skills, expected, "active_skills sorted+deduped");
         assert_eq!(snap.evolved_skills, snap.active_skills);
-        // guard_rules are sorted/deduped.
-        let mut g = snap.guard_rules.clone();
-        g.sort();
-        g.dedup();
-        assert_eq!(snap.guard_rules, g);
     }
 
     /// Rebuilding the same instant produces a stable hash (modulo timestamp).

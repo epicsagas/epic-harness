@@ -181,7 +181,10 @@ fn check_and_increment_counter(counter_file: &std::path::Path) -> bool {
 /// fresh counter file almost every call — never capping, and leaving one
 /// one-byte file per tool error behind.
 fn should_sample_tool_error(sid: &str) -> bool {
-    let counter_file = obs_dir().join(format!("telemetry_error_count_{}.txt", sid));
+    let counter_file = obs_dir().join(format!(
+        "telemetry_error_count_{}.txt",
+        crate::shared::paths::sanitize_slug_name(sid)
+    ));
     check_and_increment_counter(&counter_file)
 }
 
@@ -404,7 +407,11 @@ pub fn run(input: &HookInput) -> i32 {
 
     // Open harness DB pool for SQLite writes (fallback to JSONL if DB unavailable)
     let db = crate::store::runtime::block_on(crate::store::pool::harness_pool()).ok();
-    let session_file = obs_dir().join(format!("session_{}.jsonl", sid));
+    // The id is host input: keep path separators and `..` out of the file name.
+    let session_file = obs_dir().join(format!(
+        "session_{}.jsonl",
+        crate::shared::paths::sanitize_slug_name(&sid)
+    ));
     let tool_cat = classify_tool(input.tool_name.as_deref().unwrap_or(""));
 
     let action = input.tool_input.as_ref().map(resolve_action);

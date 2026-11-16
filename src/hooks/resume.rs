@@ -240,7 +240,10 @@ pub fn run(input: &HookInput) -> i32 {
         }
     };
     if source == "startup" {
-        let lock = harness_dir().join(format!("resume.{sid}.{source}.lock"));
+        let lock = harness_dir().join(format!(
+            "resume.{}.{source}.lock",
+            crate::shared::paths::sanitize_slug_name(&sid)
+        ));
         if !acquire_session_lock(&lock) {
             return 0;
         }

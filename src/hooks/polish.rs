@@ -32,6 +32,11 @@ fn stored_snippet(s: &str) -> String {
     mask_snippet(s, 500)
 }
 
+/// The TypeScript error hint reaches the host context: mask like the stored snippet.
+fn ts_errors_hint(combined: &str) -> String {
+    format!("TS errors:\n{}", stored_snippet(combined))
+}
+
 fn feedback_to_observe(
     file_path: &str,
     formatter: &str,
@@ -98,7 +103,10 @@ fn feedback_to_observe(
     let stored = crate::store::observations::insert_observation(&record, &sid);
     if let Err(e) = stored {
         eprintln!("[polish] SQLite write failed, falling back to JSONL: {e}");
-        let session_file = obs_dir().join(format!("session_{sid}.jsonl"));
+        let session_file = obs_dir().join(format!(
+            "session_{}.jsonl",
+            crate::shared::paths::sanitize_slug_name(&sid)
+        ));
         append_jsonl(&session_file, &record);
     }
 }
@@ -190,8 +198,7 @@ fn check_ts(file_path: &str, wd: &Path) {
         let stderr = String::from_utf8_lossy(&o.stderr);
         let combined = format!("{stdout}{stderr}");
         if !o.status.success() || combined.contains("error TS") {
-            let snippet = truncate_str(&combined, 500);
-            hint("polish", &format!("TS errors:\n{snippet}"));
+            hint("polish", &ts_errors_hint(&combined));
             feedback_to_observe(file_path, "tsc", false, Some(&combined));
             Telemetry::init().track_polish_failed(FormatterKind::Tsc);
         } else {
@@ -329,6 +336,18 @@ mod tests {
         // Cut inside the value: the unterminated quote still masks to end of line.
         let cut = format!("{} password=\"SYNTHETICA SYNTHETICB", "x".repeat(460));
         assert!(!stored_snippet(&cut).contains("SYNTHETIC"));
+    }
+
+    #[test]
+    fn ts_errors_hint_masks_secrets() {
+        let out = format!(
+            "{} password=\"SYNTHETICA SYNTHETICB\" error TS2304",
+            "x".repeat(40)
+        );
+        let h = ts_errors_hint(&out);
+        assert!(h.starts_with("TS errors:\n"), "{h}");
+        assert!(!h.contains("SYNTHETIC"), "{h}");
+        assert!(h.contains("<REDACTED>"), "{h}");
     }
 
     /// Codex sends the patch body in `command`; a `file_path`-only reader made

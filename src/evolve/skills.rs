@@ -568,16 +568,17 @@ pub fn sanitize_skill_name(name: &str) -> bool {
         && name.len() < 64
 }
 
+/// Install a skill's SKILL.md and meta.json. SKILL.md goes first, so a failed
+/// write leaves an existing skill's meta.json untouched.
 pub fn write_skill_with_meta(
     name: &str,
     content: &str,
     origin: &str,
     confidence: f64,
     synthesized: bool,
-) {
+) -> Result<(), String> {
     if !sanitize_skill_name(name) {
-        hint("reflect", &format!("Rejected invalid skill name: {name}"));
-        return;
+        return Err(format!("invalid skill name: {name}"));
     }
     let dir = evolved_dir().join(name);
     ensure_dir(&dir);
@@ -593,31 +594,11 @@ pub fn write_skill_with_meta(
         synthesized,
         slow_updates: Vec::new(),
     };
-    let json = match serde_json::to_string_pretty(&meta) {
-        Ok(j) => j,
-        Err(e) => {
-            hint(
-                "reflect",
-                &format!("Failed to serialize meta.json for {name}: {e}"),
-            );
-            return;
-        }
-    };
-    if let Err(e) = fs::write(dir.join("meta.json"), json) {
-        hint(
-            "reflect",
-            &format!("Failed to write meta.json for {name}: {e}"),
-        );
-        return;
-    }
-    if let Err(e) = fs::write(dir.join("SKILL.md"), content) {
-        hint(
-            "reflect",
-            &format!("Failed to write SKILL.md for {name}: {e}"),
-        );
-        // Clean up orphaned meta.json
-        let _ = fs::remove_file(dir.join("meta.json"));
-    }
+    let json = serde_json::to_string_pretty(&meta)
+        .map_err(|e| format!("serialize meta.json for {name}: {e}"))?;
+    fs::write(dir.join("SKILL.md"), content)
+        .map_err(|e| format!("write SKILL.md for {name}: {e}"))?;
+    fs::write(dir.join("meta.json"), json).map_err(|e| format!("write meta.json for {name}: {e}"))
 }
 
 /// Whether a skill's body was upgraded by a host agent (`evolve accept-synth`).

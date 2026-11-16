@@ -154,16 +154,23 @@ fn run_accept_synth(args: &[String]) -> i32 {
         return EXIT_CRITIC;
     }
 
-    // 7. Apply, gate, mark consumed, ledger.
-    write_skill_with_meta(
+    // 7. Apply, gate, mark consumed, ledger. A failed install or mark leaves the
+    //    manifest pending and writes no ledger entry.
+    if let Err(e) = write_skill_with_meta(
         &skill,
         &assembled,
         &pending.origin,
         pending.confidence,
         true,
-    );
+    ) {
+        eprintln!("failed to install skill '{skill}': {e}");
+        return EXIT_IO;
+    }
     gate_skills();
-    mark_consumed(&skill);
+    if let Err(e) = mark_consumed(&skill) {
+        eprintln!("skill '{skill}' installed but its manifest could not be marked consumed: {e}");
+        return EXIT_IO;
+    }
     append_jsonl(&manifests_file(), &manifest);
     hint(
         "evolve",
