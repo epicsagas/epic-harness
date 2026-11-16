@@ -1565,12 +1565,14 @@ mod tests {
             .unwrap()
     }
 
-    /// A project dir holding one valid legacy observation file.
-    fn legacy_project_dir() -> tempfile::TempDir {
+    /// A project dir holding one valid legacy observation file. `tag` keeps the
+    /// session id distinct per project: the dedup key has no project column, and
+    /// real projects never share a session id.
+    fn legacy_project_dir(tag: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("obs")).unwrap();
         std::fs::write(
-            dir.path().join("obs/session_20261109_a.jsonl"),
+            dir.path().join(format!("obs/session_20261109_{tag}.jsonl")),
             "{\"timestamp\":\"2026-11-09T00:00:00Z\",\"tool\":\"Bash\",\
              \"tool_category\":\"bash\",\"result\":\"success\",\"score\":1.0}\n",
         )
@@ -1583,7 +1585,7 @@ mod tests {
         // Regression: one global `legacy_migrated` key made the first project's
         // migration report "already migrated" for every other project.
         let mut conn = make_global_conn().await;
-        let (alpha, beta) = (legacy_project_dir(), legacy_project_dir());
+        let (alpha, beta) = (legacy_project_dir("a"), legacy_project_dir("b"));
 
         let a = do_migrate_project(&mut conn, "alpha", alpha.path())
             .await
@@ -1608,7 +1610,7 @@ mod tests {
         .execute(&mut conn)
         .await
         .unwrap();
-        let (alpha, beta) = (legacy_project_dir(), legacy_project_dir());
+        let (alpha, beta) = (legacy_project_dir("a"), legacy_project_dir("b"));
 
         // alpha already has rows: adopt the old marker, import nothing (no duplicates).
         let a = do_migrate_project(&mut conn, "alpha", alpha.path())

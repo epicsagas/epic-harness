@@ -327,3 +327,31 @@ fn a_baseline_update_refuses_skipped() {
     assert!(err.contains("baseline not saved"), "{err}");
     assert!(!env.latest_exists());
 }
+
+fn regressed_run(fail_on_regression: &str) -> (i32, String, String) {
+    let env = Env::new();
+    env.script("b.sh", "echo '{\"composite\": 0.5}'\n");
+    env.config(&format!(
+        "dimensions:\n  regression:\n    extra:\n      fail_on_regression: {fail_on_regression}\nbenchmarks:\n  - name: b\n    command: \"sh b.sh\"\n    result_type: composite\n"
+    ));
+    env.baseline(r#"{"benchmark:b": {"score": 1.0, "verdict": "PASS"}}"#);
+    env.eval()
+}
+
+#[test]
+fn a_fail_on_regression_true_fails() {
+    let (code, out, err) = regressed_run("true");
+    assert_eq!(code, 1, "{out} {err}");
+    let v = json(&out);
+    assert_eq!(v["dimensions"]["regression"]["verdict"], "FAIL");
+    assert_eq!(v["overall_verdict"], "FAIL");
+}
+
+#[test]
+fn a_fail_on_regression_false_warns() {
+    let (code, out, err) = regressed_run("false");
+    assert_eq!(code, 0, "{out} {err}");
+    let v = json(&out);
+    assert_eq!(v["dimensions"]["regression"]["verdict"], "WARN");
+    assert_eq!(v["overall_verdict"], "WARN");
+}

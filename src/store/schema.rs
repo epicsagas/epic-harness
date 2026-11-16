@@ -288,11 +288,15 @@ pub(crate) const DDL_SQLITE: &str = r#"
     -- each matched hook command twice per tool call, and hooks are separate
     -- processes, so the in-batch key never sees the duplicate. Collapse
     -- historical rows first — the unique index cannot be created over them.
+    -- SQLite treats NULLs as distinct in a unique index, so the key uses
+    -- COALESCE(action, '') to dedup action-less rows too (a retried JSONL
+    -- backfill re-inserts them). The old action-keyed index is dropped.
+    DROP INDEX IF EXISTS idx_obs_dedup;
     DELETE FROM observations
      WHERE id NOT IN (SELECT MIN(id) FROM observations
-                       GROUP BY session_id, timestamp, tool, action);
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_dedup
-        ON observations(session_id, timestamp, tool, action);
+                       GROUP BY session_id, timestamp, tool, COALESCE(action, ''));
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_dedup_v2
+        ON observations(session_id, timestamp, tool, COALESCE(action, ''));
 
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -511,5 +515,54 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(v, "5", "row preserved across the rebuild");
+    }
+
+    #[tokio::test]
+    async fn obs_dedup_migrates_to_null_safe_index_idempotently() {
+        // A database written by an older build: action-keyed unique index and
+        // NULL-action duplicates that index never collapsed.
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::raw_sql(
+            "CREATE TABLE observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+                session_id TEXT NOT NULL, tool TEXT NOT NULL, tool_category TEXT NOT NULL,
+                action TEXT, result TEXT, score REAL, dim_success REAL, dim_quality REAL,
+                dim_cost REAL, failure_category TEXT, error_snippet TEXT, file_ext TEXT,
+                sequence_id INTEGER, pipeline_id TEXT, project TEXT);
+             CREATE UNIQUE INDEX idx_obs_dedup
+                ON observations(session_id, timestamp, tool, action);
+             INSERT INTO observations (timestamp, session_id, tool, tool_category, action)
+                VALUES ('2026-06-02T10:00:00Z', 's', 'Read', 'read', NULL),
+                       ('2026-06-02T10:00:00Z', 's', 'Read', 'read', NULL),
+                       ('2026-06-02T10:00:00Z', 's', 'Bash', 'bash', 'ls');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+        super::init_schema_pool(&pool).await.unwrap();
+
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 2, "NULL-action duplicates collapse, the rest is kept");
+        let old: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = 'idx_obs_dedup'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(old, 0, "old action-keyed index is dropped");
+        let dup = sqlx::query(
+            "INSERT INTO observations (timestamp, session_id, tool, tool_category, action)
+             VALUES ('2026-06-02T10:00:00Z', 's', 'Read', 'read', NULL)",
+        )
+        .execute(&pool)
+        .await;
+        assert!(
+            dup.is_err(),
+            "NULL-action duplicate is rejected by the index"
+        );
     }
 }

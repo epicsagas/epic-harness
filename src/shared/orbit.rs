@@ -13,6 +13,20 @@ use super::paths::orbit_dir;
 /// reacquired (`epic orbit lock` exits 1 for every future orbit).
 const STALE_RUNNING_SECS: u64 = 45 * 60;
 
+/// Clock-skew tolerance for an `updated_at` ahead of this machine's clock.
+/// Beyond it the timestamp is bogus (or from a skewed clock) and the file is
+/// stale, otherwise a future-dated `running` file would block orbit forever.
+const FUTURE_SKEW_SECS: u64 = 5 * 60;
+
+/// Whether a `running` file last updated at `epoch` is still live at `now`.
+fn is_fresh(epoch: u64, now: u64) -> bool {
+    if epoch > now {
+        epoch - now <= FUTURE_SKEW_SECS
+    } else {
+        now - epoch <= STALE_RUNNING_SECS
+    }
+}
+
 /// Parse an ISO-8601 UTC timestamp (`2026-08-30T13:57:58Z`, the `now_iso()`
 /// format) to epoch seconds. Returns None for missing/malformed values.
 /// Day-precision core is the same Howard Hinnant days-from-civil algorithm
@@ -41,8 +55,8 @@ fn now_epoch_secs() -> u64 {
 /// Returns the most recent running pipeline (by filename sort order), or None.
 /// Returns None immediately if the directory does not exist (hot path optimization).
 /// Symlinks are skipped to prevent path traversal attacks.
-/// A `running` file whose `updated_at` is older than STALE_RUNNING_SECS (or
-/// missing/unparseable) is skipped — crashed orbits must not block lock
+/// A `running` file whose `updated_at` is older than STALE_RUNNING_SECS or more
+/// than FUTURE_SKEW_SECS in the future (or missing/unparseable) is skipped — crashed orbits must not block lock
 /// reclamation or pollute observe/polish orbit detection.
 /// When multiple running files exist (should not happen; the orbit skill runs
 /// `epic orbit lock` first — see `try_acquire_orbit_lock`), logs a warning and
@@ -76,9 +90,7 @@ pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> 
                         .get("updated_at")
                         .and_then(|v| v.as_str())
                         .and_then(epoch_from_iso)
-                        .is_some_and(|epoch| {
-                            now_epoch_secs().saturating_sub(epoch) <= STALE_RUNNING_SECS
-                        });
+                        .is_some_and(|epoch| is_fresh(epoch, now_epoch_secs()));
                     if fresh {
                         Some((name_str.into_owned(), val))
                     } else {
@@ -461,6 +473,27 @@ mod tests {
         }
         fs::write(dir.path().join("PIPELINE-20260101T000000.json"), bytes).unwrap();
         assert!(scan_running_pipeline_in(dir.path()).is_none());
+    }
+
+    #[test]
+    fn future_updated_at_beyond_tolerance_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("PIPELINE-20260101T000000.json"),
+            running_json("2999-01-01T00:00:00Z"),
+        )
+        .unwrap();
+        assert!(scan_running_pipeline_in(dir.path()).is_none());
+        assert!(try_acquire_orbit_lock(dir.path()));
+    }
+
+    #[test]
+    fn is_fresh_future_tolerance_boundaries() {
+        let now = 1_000_000;
+        assert!(is_fresh(now + FUTURE_SKEW_SECS, now));
+        assert!(!is_fresh(now + FUTURE_SKEW_SECS + 1, now));
+        assert!(is_fresh(now - STALE_RUNNING_SECS, now));
+        assert!(!is_fresh(now - STALE_RUNNING_SECS - 1, now));
     }
 
     // ── completion invariants ──────────────────────────

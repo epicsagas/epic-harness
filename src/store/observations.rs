@@ -31,7 +31,7 @@ pub async fn insert_observation_pool(
     // Cross-process dedup: Codex fires each matched hook command twice per
     // tool call (measured on codex-cli 0.155.0), and each hook runs as its
     // own process, so the in-batch dedup key can never see the duplicate.
-    // The unique index on (session_id, timestamp, tool, action) absorbs the
+    // The unique index on (session_id, timestamp, tool, COALESCE(action, '')) absorbs the
     // race atomically — a WHERE NOT EXISTS pre-check lost it once two hook
     // processes SELECTed between each other's INSERTs.
     let res = sqlx::query(
@@ -66,7 +66,8 @@ pub async fn insert_observation_pool(
         // on the observation still resolve.
         let existing: Option<i64> = sqlx::query_scalar(
             "SELECT id FROM observations
-             WHERE session_id = ? AND timestamp = ? AND tool = ? AND action IS ?
+             WHERE session_id = ? AND timestamp = ? AND tool = ?
+               AND COALESCE(action, '') = COALESCE(?, '')
              ORDER BY id DESC LIMIT 1",
         )
         .bind(session_id)
@@ -849,5 +850,51 @@ mod tests {
         assert!(ids.windows(2).all(|w| w[0] < w[1]));
         let tools: Vec<&str> = rows.iter().map(|(_, r)| r.tool.as_str()).collect();
         assert_eq!(tools, ["A", "B", "C"]);
+    }
+
+    fn null_action_rec(ts: &str, tool: &str) -> ObsRecord {
+        ObsRecord {
+            timestamp: ts.into(),
+            tool: tool.into(),
+            tool_category: "bash".into(),
+            action: None,
+            result: None,
+            score: None,
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        }
+    }
+
+    /// A partially failed JSONL backfill keeps the file, so the next round
+    /// re-inserts every record. Rows without an action must dedup like any
+    /// other row, or the id cursor counts them twice.
+    #[tokio::test]
+    async fn null_action_retry_does_not_duplicate_rows() {
+        let pool = test_pool().await;
+        let recs = [
+            null_action_rec("2026-06-02T10:00:00Z", "Read"),
+            null_action_rec("2026-06-02T10:00:01Z", "Glob"),
+        ];
+        let first: Vec<i64> = {
+            let mut ids = vec![];
+            for r in &recs {
+                ids.push(insert_observation_pool(&pool, r, "s1", "p").await.unwrap());
+            }
+            ids
+        };
+        // Retry of the whole file.
+        for (r, id) in recs.iter().zip(&first) {
+            let again = insert_observation_pool(&pool, r, "s1", "p").await.unwrap();
+            assert_eq!(again, *id, "duplicate must resolve to the existing row id");
+        }
+        let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(n, 2);
     }
 }

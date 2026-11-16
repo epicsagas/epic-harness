@@ -195,6 +195,7 @@ pub fn compute_regression(
     results: &[DimResult],
     baseline: Option<&serde_json::Value>,
     threshold: f64,
+    fail_on_regression: bool,
 ) -> DimResult {
     let start = Instant::now();
 
@@ -257,11 +258,16 @@ pub fn compute_regression(
         return r;
     }
 
+    let verdict = match (any_regression, fail_on_regression) {
+        (false, _) => "PASS",
+        (true, true) => "FAIL",
+        (true, false) => "WARN",
+    };
     DimResult {
         dimension: "regression".into(),
         score: if any_regression { 0.0 } else { 1.0 },
-        passed: !any_regression,
-        verdict: if any_regression { "FAIL" } else { "PASS" }.into(),
+        passed: verdict != "FAIL",
+        verdict: verdict.into(),
         details: json!({
             "threshold": threshold,
             "compared": deltas.len(),
@@ -515,7 +521,7 @@ mod tests {
             "benchmark:a": {"score": 1.0, "verdict": "PASS"},
             "benchmark:old": {"score": 1.0, "verdict": "PASS"},
         }));
-        let r = compute_regression(&[dim("benchmark:a", 1.0, "PASS")], Some(&base), 0.05);
+        let r = compute_regression(&[dim("benchmark:a", 1.0, "PASS")], Some(&base), 0.05, true);
         assert_eq!(r.verdict, "PASS");
         assert_eq!(r.details["missing_in_current"], json!(["benchmark:old"]));
     }
@@ -531,7 +537,7 @@ mod tests {
             dim("benchmark:a", 0.9, "PASS"),
             dim("performance", 0.0, "SKIPPED"),
         ];
-        let r = compute_regression(&results, Some(&base), 0.05);
+        let r = compute_regression(&results, Some(&base), 0.05, true);
         assert_eq!(r.verdict, "FAIL");
         assert_eq!(
             r.details,
@@ -552,8 +558,12 @@ mod tests {
             for &base in &steps {
                 let b = baseline(json!({"benchmark:a": {"score": base, "verdict": "PASS"}}));
                 for &cur in &steps {
-                    let r =
-                        compute_regression(&[dim("benchmark:a", cur, "PASS")], Some(&b), threshold);
+                    let r = compute_regression(
+                        &[dim("benchmark:a", cur, "PASS")],
+                        Some(&b),
+                        threshold,
+                        true,
+                    );
                     let want = if cur - base < -threshold {
                         "FAIL"
                     } else {
@@ -564,10 +574,109 @@ mod tests {
                         &[dim("benchmark:a", cur, "SKIPPED")],
                         Some(&b),
                         threshold,
+                        true,
                     );
                     assert_eq!(s.verdict, "SKIPPED");
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_fail_on_regression_flag_sets_fail_or_warn() {
+        let base = baseline(json!({"benchmark:a": {"score": 1.0, "verdict": "PASS"}}));
+        let cur = [dim("benchmark:a", 0.5, "PASS")];
+        assert_eq!(
+            compute_regression(&cur, Some(&base), 0.05, true).verdict,
+            "FAIL"
+        );
+        let warn = compute_regression(&cur, Some(&base), 0.05, false);
+        assert_eq!(warn.verdict, "WARN");
+        assert_eq!(warn.details["deltas"]["benchmark:a"]["regressed"], true);
+        // No regression stays PASS regardless of the flag.
+        let ok = [dim("benchmark:a", 1.0, "PASS")];
+        assert_eq!(
+            compute_regression(&ok, Some(&base), 0.05, false).verdict,
+            "PASS"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_score_is_skipped_not_compared() {
+        let base = baseline(json!({
+            "benchmark:a": {"score": 1.0, "verdict": "PASS"},
+            "benchmark:b": {"verdict": "PASS"},
+            "benchmark:c": {"score": "high", "verdict": "PASS"},
+        }));
+        let results = [
+            dim("benchmark:a", f64::NAN, "PASS"),
+            dim("benchmark:b", 1.0, "PASS"),
+            dim("benchmark:c", 1.0, "PASS"),
+        ];
+        let r = compute_regression(&results, Some(&base), 0.05, true);
+        assert_eq!(r.verdict, "SKIPPED");
+        assert_eq!(r.details["reason"], "no_comparable_dimensions");
+        assert_eq!(
+            r.details["skipped"],
+            json!({
+                "benchmark:a": "non_finite",
+                "benchmark:b": "non_finite",
+                "benchmark:c": "non_finite",
+            })
+        );
+    }
+
+    #[test]
+    fn a_baseline_skipped_dimension_not_compared() {
+        let base = baseline(json!({
+            "performance": {"score": 0.0, "verdict": "SKIPPED"},
+            "benchmark:a": {"score": 1.0, "verdict": "PASS"},
+        }));
+        let results = [
+            dim("performance", 1.0, "PASS"),
+            dim("benchmark:a", 1.0, "PASS"),
+        ];
+        let r = compute_regression(&results, Some(&base), 0.05, true);
+        assert_eq!(r.verdict, "PASS");
+        assert_eq!(r.details["compared"], 1);
+        assert_eq!(
+            r.details["skipped"],
+            json!({"performance": "baseline_skipped"})
+        );
+    }
+
+    #[test]
+    fn a_no_baseline_entry_for_dimension() {
+        let base = baseline(json!({"benchmark:a": {"score": 1.0, "verdict": "PASS"}}));
+        let results = [
+            dim("benchmark:a", 1.0, "PASS"),
+            dim("benchmark:new", 0.0, "FAIL"),
+        ];
+        let r = compute_regression(&results, Some(&base), 0.05, true);
+        assert_eq!(r.verdict, "PASS");
+        assert_eq!(
+            r.details["skipped"],
+            json!({"benchmark:new": "no_baseline_entry"})
+        );
+    }
+
+    #[test]
+    fn a_all_baseline_skipped_is_no_comparable() {
+        let base = baseline(json!({
+            "benchmark:a": {"score": 0.0, "verdict": "SKIPPED"},
+            "performance": {"score": 0.0, "verdict": "SKIPPED"},
+        }));
+        let results = [
+            dim("benchmark:a", 1.0, "PASS"),
+            dim("performance", 1.0, "PASS"),
+        ];
+        let r = compute_regression(&results, Some(&base), 0.05, true);
+        assert_eq!(r.verdict, "SKIPPED");
+        assert_eq!(r.details["reason"], "no_comparable_dimensions");
+        assert_eq!(r.details["compared"], 0);
+        assert_eq!(
+            r.details["skipped"],
+            json!({"benchmark:a": "baseline_skipped", "performance": "baseline_skipped"})
+        );
     }
 }

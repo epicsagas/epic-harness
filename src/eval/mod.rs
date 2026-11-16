@@ -221,6 +221,7 @@ pub fn run(args: &[String]) -> i32 {
             &results,
             prev.as_ref(),
             dims.regression.extra.threshold,
+            dims.regression.extra.fail_on_regression,
         ));
     }
 
