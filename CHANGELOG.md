@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.15] - 2026-11-17
+
+Thanks to @Tomauskasz for the issue reports and reference PRs behind this release; fixes were reimplemented on main and credit each commit with Co-authored-by.
+
+### Fixed
+- **Project merge is lossless**: same-name files with different content are kept under a suffixed name, every per-project table and field moves in one transaction, promotion counters survive, and evolution records are deduplicated only when identical. `--delete-source` and dry-run refuse while any nested entry, differing evolved skill, or failed table copy remains. (#184, #185, #254, #255)
+- **Legacy import**: observations keep their project, and completion is tracked per project, so the first migrated project no longer blocks the rest. (#257, #258)
+- **Config overrides**: database environment overrides apply even when `config.toml` is missing or unreadable. (#251)
+- **Memory recall scoping**: project and tag filters use exact membership instead of substring matches, the project filter runs inside the full-text query so a large project cannot hide another project's matches, stale nodes stay out of recall and graph neighbors, and MCP neighbors respect an explicit project. (#228, #229, #230, #266)
+- **Memory data**: title dedup keeps a node for a new project, opening the database keeps explicit importance values, and malformed timestamps no longer crash recall. (#181, #232, #233)
+- **Eval CLI**: `--help` prints usage, unknown flags or dimensions exit 2, a corrupted baseline is reported when regression runs, failed result or baseline writes exit 1, run files no longer overwrite each other, and eval no longer recurses into itself through make targets. (#195, #196, #197, #198, #350)
+- **Failure classification**: PowerShell output, read-only cmdlets, timeout settings, and printed assert calls no longer produce false failures, and Windows backslash paths no longer form false debug loops. (#144, #189)
+- **Reflection and evolution**: guard snapshots keep blocked versus warned rules, reflection stays inside the working project, accepts non-canonical Windows and vault paths, reads host UUID fallback files, and failed synthesis writes keep the work pending. (#165, #194, #203, #204, #206, #270)
+- **Dashboard and native app**: a late Evolution response no longer overwrites another project's view, dismissed orbit pipelines stay dismissed, the native app registers its evolution commands and scopes orbit pipelines to the current project, and memory search results carry tags. (#211, #239, #240)
+- **Orchestration**: the edit pause guard reads the state the orchestrator writes, a new start reopens a completed run with a fresh start time, and concurrent Windows starts no longer lose agents. (#187, #242, #243)
+- **Windows**: linked worktrees resolve to the right project, polish runs `npx.cmd` formatters, the installer reports a locked binary instead of claiming success, Windows on Arm installs the x86_64 build, and `update --check` never runs an installer. (#164, #219, #224, #226)
+
+### Security
+- **Loopback-only Host**: the memory server and every dashboard request refuse any Host other than `localhost:{port}` or `127.0.0.1:{port}`, closing DNS rebinding access. (#234 follow-up)
+- **Project selectors**: dashboard and native app project parameters must be plain slugs, so they cannot read or write outside the data directory. Project merge applies the same rule. (#220)
+- **Session ids in file names** are sanitized in observe, polish, and resume, and the TypeScript error hint is masked before it reaches context.
+
+### Changed
+- `epic eval` exits 2 on unknown arguments and 1 when it cannot write its result.
+- `merge-project --dry-run` exits 1 when the real run would refuse to delete the source.
+
 ## [0.8.14] - 2026-11-17
 
 Thanks to @Tomauskasz for the issue reports and reference PRs behind most fixes in this release; the fixes were reimplemented on main and credit each commit with Co-authored-by.
