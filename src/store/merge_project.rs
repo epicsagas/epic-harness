@@ -10,7 +10,7 @@
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteQueryResult};
 use sqlx::{ConnectOptions, Executor};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use super::sqlx_err;
@@ -24,9 +24,16 @@ pub fn run_merge(from: &str, to: &str, dry_run: bool, delete_source: bool) -> i3
 
 // ── Core async impl ──────────────────────────────────────────────────────────
 
-/// A slug names one directory directly under the projects root.
+/// A slug names one directory directly under the projects root: letters and digits (any
+/// script, as `project_slug()` produces), `.`, `_` and `-`, minus `.` and `..`. This keeps
+/// `:` and `?` out, which break Windows path joins and the sqlite URL.
 fn is_valid_slug(slug: &str) -> bool {
-    !slug.is_empty() && slug != "." && slug != ".." && !slug.contains(['/', '\\', '\0'])
+    slug != "."
+        && slug != ".."
+        && !slug.is_empty()
+        && slug
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Top-level entries of a project dir that a merge step handles.
@@ -98,6 +105,9 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
 
     let mut exit = 0;
+    // Source entries the merge leaves behind (nested files, differing skills); they block
+    // --delete-source.
+    let mut skipped: Vec<String> = Vec::new();
     let mut global_rows = 0usize;
     let mut db_obs = 0usize;
     let mut db_sessions = 0usize;
@@ -119,7 +129,7 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     let from_db = from_dir.join("harness.db");
     let to_db = to_dir.join("harness.db");
     if from_db.exists() {
-        match merge_per_project_dbs(&from_db, &to_db, to, dry_run).await {
+        match merge_per_project_dbs(&from_db, &to_db, to, dry_run, &mut skipped).await {
             Ok((o, s, e)) => {
                 db_obs = o;
                 db_sessions = s;
@@ -134,18 +144,36 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
 
     // ── 3. File-based data ───────────────────────────────────────────────────
     let mut file_errors = 0usize;
-    let (obs_files, e) = copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run);
+    let (obs_files, e) = copy_dir_files(
+        &from_dir.join("obs"),
+        &to_dir.join("obs"),
+        from,
+        dry_run,
+        &mut skipped,
+    );
     file_errors += e;
     let (session_files, e) = copy_dir_files(
         &from_dir.join("sessions"),
         &to_dir.join("sessions"),
+        from,
         dry_run,
+        &mut skipped,
     );
     file_errors += e;
-    let (orbit_files, e) = copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run);
+    let (orbit_files, e) = copy_dir_files(
+        &from_dir.join("orbit"),
+        &to_dir.join("orbit"),
+        from,
+        dry_run,
+        &mut skipped,
+    );
     file_errors += e;
-    let (evolved_dirs, e) =
-        copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run);
+    let (evolved_dirs, e) = copy_evolved_dir(
+        &from_dir.join("evolved"),
+        &to_dir.join("evolved"),
+        dry_run,
+        &mut skipped,
+    );
     file_errors += e;
     let evo_lines = match append_evolution_jsonl(&from_dir, &to_dir, dry_run) {
         Ok(n) => n,
@@ -171,25 +199,27 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     println!("  orbit files copied       : {orbit_files}");
 
     if delete_source {
-        if dry_run {
-            println!("  [dry-run] would delete   : {}", from_dir.display());
-        } else if exit != 0 {
+        // Same gate for dry-run and real run, so a dry run never promises a delete
+        // the real run would refuse.
+        let mut leftover = unmerged_entries(&from_dir);
+        leftover.extend(skipped);
+        leftover.sort();
+        if exit != 0 {
             eprintln!("[merge-project] source NOT deleted: merge had errors (see above)");
+        } else if !leftover.is_empty() {
+            eprintln!(
+                "[merge-project] source NOT deleted: entries not handled by merge: {}",
+                leftover.join(", ")
+            );
+            exit = 1;
+        } else if dry_run {
+            println!("  [dry-run] would delete   : {}", from_dir.display());
         } else {
-            let leftover = unmerged_entries(&from_dir);
-            if !leftover.is_empty() {
-                eprintln!(
-                    "[merge-project] source NOT deleted: entries not handled by merge: {}",
-                    leftover.join(", ")
-                );
-                exit = 1;
-            } else {
-                match std::fs::remove_dir_all(&from_dir) {
-                    Ok(_) => println!("  source dir deleted       : {}", from_dir.display()),
-                    Err(e) => {
-                        eprintln!("[merge-project] could not delete source: {e}");
-                        exit = 1;
-                    }
+            match std::fs::remove_dir_all(&from_dir) {
+                Ok(_) => println!("  source dir deleted       : {}", from_dir.display()),
+                Err(e) => {
+                    eprintln!("[merge-project] could not delete source: {e}");
+                    exit = 1;
                 }
             }
         }
@@ -361,11 +391,16 @@ async fn apply_global_updates(
         .execute(&mut *conn)
         .await,
     )?;
+    // Delete only the source keys summed above; source-only keys are re-labelled below.
     rows_or_missing(
-        sqlx::query("DELETE FROM promotion_counters WHERE project = ?")
-            .bind(from)
-            .execute(&mut *conn)
-            .await,
+        sqlx::query(
+            "DELETE FROM promotion_counters WHERE project = ? \
+             AND pattern_key IN (SELECT pattern_key FROM promotion_counters WHERE project = ?)",
+        )
+        .bind(from)
+        .bind(to)
+        .execute(&mut *conn)
+        .await,
     )?;
     total += rows_or_missing(
         sqlx::query("UPDATE promotion_counters SET project = ? WHERE project = ?")
@@ -385,6 +420,7 @@ async fn merge_per_project_dbs(
     to_db: &Path,
     to_slug: &str,
     dry_run: bool,
+    skipped: &mut Vec<String>,
 ) -> io::Result<(usize, usize, usize)> {
     if dry_run {
         let url = format!("sqlite:{}", from_db.display());
@@ -408,6 +444,17 @@ async fn merge_per_project_dbs(
             .await
             .unwrap_or(0);
         println!("  [dry-run] per-project DB would merge: obs={obs} sessions={sess} evo={evo}");
+        if to_db.is_file() {
+            let url = format!("sqlite:{}", to_db.display());
+            let mut target = SqliteConnectOptions::from_str(&url)
+                .map_err(sqlx_err)?
+                .journal_mode(SqliteJournalMode::Wal)
+                .connect()
+                .await
+                .map_err(sqlx_err)?;
+            attach_source(&mut target, from_db).await?;
+            skipped.extend(differing_skills(&mut target).await?);
+        }
         return Ok((obs as usize, sess as usize, evo as usize));
     }
 
@@ -436,12 +483,8 @@ async fn merge_per_project_dbs(
             .map_err(sqlx_err)?;
     }
 
-    let escaped = from_db.to_string_lossy().replace('\'', "''");
-    conn.execute(sqlx::AssertSqlSafe(format!(
-        "ATTACH DATABASE '{escaped}' AS src"
-    )))
-    .await
-    .map_err(sqlx_err)?;
+    attach_source(&mut conn, from_db).await?;
+    skipped.extend(differing_skills(&mut conn).await?);
 
     let stats = super::migrate::merge_attached_db_async(&mut conn, to_slug, "src").await?;
 
@@ -452,11 +495,86 @@ async fn merge_per_project_dbs(
     Ok((stats.obs, stats.sessions, stats.evo))
 }
 
+async fn attach_source(conn: &mut SqliteConnection, from_db: &Path) -> io::Result<()> {
+    let escaped = from_db.to_string_lossy().replace('\'', "''");
+    conn.execute(sqlx::AssertSqlSafe(format!(
+        "ATTACH DATABASE '{escaped}' AS src"
+    )))
+    .await
+    .map_err(sqlx_err)?;
+    Ok(())
+}
+
+/// Source `evolved_skills` rows whose UNIQUE name already exists in the target with other
+/// content. The copy keeps the target row, so these block --delete-source. Identical rows
+/// do not.
+async fn differing_skills(conn: &mut SqliteConnection) -> io::Result<Vec<String>> {
+    let rows = sqlx::query_scalar::<_, String>(
+        "SELECT 'evolved_skills:' || s.name FROM src.evolved_skills s \
+         JOIN main.evolved_skills t ON t.name = s.name \
+         WHERE s.origin IS NOT t.origin OR s.confidence IS NOT t.confidence \
+            OR s.skill_md IS NOT t.skill_md OR s.active IS NOT t.active \
+            OR s.created IS NOT t.created OR s.updated IS NOT t.updated",
+    )
+    .fetch_all(&mut *conn)
+    .await;
+    match rows {
+        Ok(rows) => Ok(rows),
+        Err(e) if e.to_string().contains("no such table") => Ok(Vec::new()),
+        Err(e) => Err(sqlx_err(e)),
+    }
+}
+
 // ── File-level helpers ───────────────────────────────────────────────────────
 
-/// Copy files from `src_dir` to `dst_dir`, skipping files that already exist.
-/// Returns the number of files copied (or would copy in dry-run) and the number of failures.
-fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> (usize, usize) {
+/// True when every file under `src` exists under `dst` with equal bytes.
+fn is_covered(src: &Path, dst: &Path) -> bool {
+    if src.is_dir() {
+        return std::fs::read_dir(src).is_ok_and(|rd| {
+            rd.flatten()
+                .all(|e| is_covered(&e.path(), &dst.join(e.file_name())))
+        });
+    }
+    matches!((std::fs::read(src), std::fs::read(dst)), (Ok(a), Ok(b)) if a == b)
+}
+
+/// Destination for the file `src` in `dst_dir`: its own name, or `<stem>.from-<tag><ext>`
+/// (then `-2`, `-3`, ...) when a different file already holds the name. `None` when an
+/// identical copy is already in place, so a retried merge adds nothing.
+fn free_dest(src: &Path, dst_dir: &Path, tag: &str) -> Option<PathBuf> {
+    let stem = src.file_stem()?.to_string_lossy();
+    let ext = src
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let mut dst = dst_dir.join(src.file_name()?);
+    let mut n = 0;
+    while dst.exists() {
+        if is_covered(src, &dst) {
+            return None;
+        }
+        n += 1;
+        let sep = if n == 1 {
+            String::new()
+        } else {
+            format!("-{n}")
+        };
+        dst = dst_dir.join(format!("{stem}.from-{tag}{sep}{ext}"));
+    }
+    Some(dst)
+}
+
+/// Copy files from `src_dir` to `dst_dir`. A same-name file with different content is
+/// kept under a suffixed name, never overwritten. Entries that are not files are pushed to
+/// `skipped`. Returns the number of files copied (or would copy in dry-run) and the number
+/// of failures.
+fn copy_dir_files(
+    src_dir: &Path,
+    dst_dir: &Path,
+    tag: &str,
+    dry_run: bool,
+    skipped: &mut Vec<String>,
+) -> (usize, usize) {
     let entries = match std::fs::read_dir(src_dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return (0, 0),
@@ -470,13 +588,12 @@ fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> (usize, usiz
     for entry in entries.flatten() {
         let src = entry.path();
         if !src.is_file() {
+            skipped.push(src.display().to_string());
             continue;
         }
-        let name = entry.file_name();
-        let dst = dst_dir.join(&name);
-        if dst.exists() {
+        let Some(dst) = free_dest(&src, dst_dir, tag) else {
             continue;
-        }
+        };
         if dry_run {
             count += 1;
         } else {
@@ -495,8 +612,15 @@ fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> (usize, usiz
     (count, errors)
 }
 
-/// Copy evolved skill subdirectories that don't already exist in target.
-fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> (usize, usize) {
+/// Copy evolved skill subdirectories that don't already exist in target. A skill whose
+/// target copy differs is kept as is (target wins) and pushed to `skipped`, as are
+/// non-directory entries.
+fn copy_evolved_dir(
+    src_evolved: &Path,
+    dst_evolved: &Path,
+    dry_run: bool,
+    skipped: &mut Vec<String>,
+) -> (usize, usize) {
     let entries = match std::fs::read_dir(src_evolved) {
         Ok(entries) => entries,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return (0, 0),
@@ -510,11 +634,15 @@ fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> (u
     for entry in entries.flatten() {
         let src = entry.path();
         if !src.is_dir() {
+            skipped.push(src.display().to_string());
             continue;
         }
         let name = entry.file_name();
         let dst = dst_evolved.join(&name);
         if dst.exists() {
+            if !is_covered(&src, &dst) {
+                skipped.push(src.display().to_string());
+            }
             continue;
         }
         if !dry_run && let Err(e) = copy_dir_recursive(&src, &dst) {
@@ -541,7 +669,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Append lines from source evolution.jsonl that don't exist in target (dedup by content hash).
+/// Append lines from source evolution.jsonl that don't exist in target (dedup by whole line).
 fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::Result<usize> {
     let src = from_dir.join("evolution.jsonl");
     let dst = to_dir.join("evolution.jsonl");
@@ -555,11 +683,11 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
         return Ok(0);
     }
 
-    // Build set of existing lines (by first 80 chars as a cheap dedup key).
-    let existing: std::collections::HashSet<String> = if dst.exists() {
+    // Only whole equal records are duplicates; distinct records often share a long prefix.
+    let mut existing: std::collections::HashSet<String> = if dst.exists() {
         std::fs::read_to_string(&dst)?
             .lines()
-            .map(|l| l.chars().take(80).collect())
+            .map(String::from)
             .collect()
     } else {
         std::collections::HashSet::new()
@@ -567,10 +695,7 @@ fn append_evolution_jsonl(from_dir: &Path, to_dir: &Path, dry_run: bool) -> io::
 
     let new_lines: Vec<&str> = src_lines
         .iter()
-        .filter(|l| {
-            let key: String = l.chars().take(80).collect();
-            !existing.contains(&key)
-        })
+        .filter(|l| existing.insert((**l).to_string()))
         .copied()
         .collect();
 

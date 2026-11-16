@@ -90,8 +90,10 @@ async fn run_subcommand_async(dry_run: bool, reset: bool) -> i32 {
         }
     };
 
+    let marker = legacy_marker(&crate::shared::paths::project_slug());
     let migration_state: Option<String> =
-        sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
+        sqlx::query("SELECT value FROM _harness_meta WHERE key = ?")
+            .bind(&marker)
             .fetch_optional(&mut conn)
             .await
             .ok()
@@ -105,8 +107,9 @@ async fn run_subcommand_async(dry_run: bool, reset: bool) -> i32 {
         }
         Some("in_progress") => {
             if reset {
-                if let Err(e) = conn
-                    .execute("DELETE FROM _harness_meta WHERE key = 'legacy_migrated'")
+                if let Err(e) = sqlx::query("DELETE FROM _harness_meta WHERE key = ?")
+                    .bind(&marker)
+                    .execute(&mut conn)
                     .await
                     .map_err(sqlx_err)
                 {
@@ -228,10 +231,24 @@ pub(crate) fn do_migrate(conn: &mut sqlx::SqliteConnection) -> io::Result<Migrat
     super::runtime::block_on(do_migrate_async(conn))
 }
 
+/// Marker key for one project; the legacy import is tracked per project, not globally.
+fn legacy_marker(slug: &str) -> String {
+    format!("legacy_migrated:{slug}")
+}
+
 pub(crate) async fn do_migrate_async(
     conn: &mut sqlx::SqliteConnection,
 ) -> io::Result<MigrationStats> {
-    let harness_dir = crate::shared::paths::harness_dir();
+    let slug = crate::shared::paths::project_slug();
+    do_migrate_project(conn, &slug, &crate::shared::paths::harness_dir()).await
+}
+
+async fn do_migrate_project(
+    conn: &mut sqlx::SqliteConnection,
+    slug: &str,
+    harness_dir: &std::path::Path,
+) -> io::Result<MigrationStats> {
+    let marker = legacy_marker(slug);
     let mut stats = MigrationStats {
         obs_imported: 0,
         sess_imported: 0,
@@ -245,43 +262,73 @@ pub(crate) async fn do_migrate_async(
     // window between the outer read in run_subcommand and this BEGIN IMMEDIATE.
     {
         begin_immediate(conn).await?;
-        let already: bool =
+        let state: Option<String> = sqlx::query("SELECT value FROM _harness_meta WHERE key = ?")
+            .bind(&marker)
+            .fetch_optional(&mut *conn)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<String, _>(0).ok());
+
+        if state.is_some() {
+            rollback(conn).await;
+            return Ok(stats);
+        }
+
+        // Older releases kept one global `legacy_migrated` marker with no slug. When it is
+        // set and this slug already has sessions or evolution rows, this is the project
+        // that migrated: adopt it without importing again. The old key is never deleted.
+        let global_done =
             sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
                 .fetch_optional(&mut *conn)
                 .await
                 .ok()
                 .flatten()
                 .and_then(|row| row.try_get::<String, _>(0).ok())
-                .is_some_and(|v| v == "1" || v == "in_progress");
-
-        if already {
-            rollback(conn).await;
-            return Ok(stats);
-        }
+                .is_some_and(|v| v == "1");
+        let has_rows: i64 = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sessions WHERE project = ?) \
+                 OR EXISTS(SELECT 1 FROM evolution_records WHERE project = ?)",
+        )
+        .bind(slug)
+        .bind(slug)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(sqlx_err)?;
+        let value = if global_done && has_rows != 0 {
+            "1"
+        } else {
+            "in_progress"
+        };
 
         sqlx::query(
-            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', 'in_progress') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO _harness_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
+        .bind(&marker)
+        .bind(value)
         .execute(&mut *conn)
         .await
         .map_err(sqlx_err)?;
         commit(conn).await?;
+        if value == "1" {
+            return Ok(stats);
+        }
     }
 
     // Phase 2: Per-file imports. Each source file gets its own BEGIN IMMEDIATE so
     // the WAL never grows unboundedly for large legacy datasets.
-    import_observations(conn, &harness_dir, &mut stats).await?;
-    let slug = crate::shared::paths::project_slug();
-    import_sessions(conn, &slug, &harness_dir, &mut stats).await?;
-    import_evolution(conn, &slug, &harness_dir, &mut stats).await?;
-    import_metrics(conn, &slug, &harness_dir, &mut stats).await?;
+    import_observations(conn, slug, harness_dir, &mut stats).await?;
+    import_sessions(conn, slug, harness_dir, &mut stats).await?;
+    import_evolution(conn, slug, harness_dir, &mut stats).await?;
+    import_metrics(conn, slug, harness_dir, &mut stats).await?;
 
     // Phase 3: Mark complete.
     {
         begin_immediate(conn).await?;
         sqlx::query(
-            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
+            "INSERT INTO _harness_meta (key, value) VALUES (?, '1') ON CONFLICT (key) DO UPDATE SET value=excluded.value",
         )
+        .bind(&marker)
         .execute(&mut *conn)
         .await
         .map_err(sqlx_err)?;
@@ -299,6 +346,7 @@ pub(crate) async fn do_migrate_async(
 /// be re-imported without resetting the entire migration.
 async fn import_observations(
     conn: &mut sqlx::SqliteConnection,
+    slug: &str,
     harness_dir: &std::path::Path,
     stats: &mut MigrationStats,
 ) -> io::Result<()> {
@@ -352,8 +400,8 @@ async fn import_observations(
                         "INSERT INTO observations \
                          (timestamp, session_id, tool, tool_category, action, result, score, \
                           dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
-                          file_ext, sequence_id, pipeline_id) \
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
+                          file_ext, sequence_id, pipeline_id, project) \
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
                     )
                     .bind(&rec.timestamp)
                     .bind(&session_id)
@@ -370,6 +418,7 @@ async fn import_observations(
                     .bind(&rec.file_ext)
                     .bind(rec.sequence_id.map(super::u64_to_i64))
                     .bind(&rec.pipeline_id)
+                    .bind(slug)
                     .execute(&mut *conn)
                     .await;
 
@@ -676,157 +725,110 @@ pub fn merge_attached_db(
     super::runtime::block_on(merge_attached_db_async(conn, slug, attach_name))
 }
 
+/// Runs the whole copy in one transaction: any failed table insert rolls everything back.
 pub async fn merge_attached_db_async(
+    conn: &mut sqlx::SqliteConnection,
+    slug: &str,
+    attach_name: &str,
+) -> io::Result<GlobalMergeStats> {
+    begin_immediate(conn).await?;
+    let res = match copy_attached_tables(conn, slug, attach_name).await {
+        Ok(stats) => commit(conn).await.map(|_| stats),
+        Err(e) => Err(e),
+    };
+    if res.is_err() {
+        rollback(conn).await;
+    }
+    res
+}
+
+async fn copy_attached_tables(
     conn: &mut sqlx::SqliteConnection,
     slug: &str,
     attach_name: &str,
 ) -> io::Result<GlobalMergeStats> {
     let mut stats = GlobalMergeStats::default();
 
-    // Tables with simple columns — direct INSERT with project appended.
-    let simple_tables = [
-        // (table, columns_without_project, src_columns_without_project)
-        (
-            "observations",
-            "timestamp, session_id, tool, tool_category, action, result, score, \
-          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
-          file_ext, sequence_id, pipeline_id, project",
-            "timestamp, session_id, tool, tool_category, action, result, score, \
-          dim_success, dim_quality, dim_cost, failure_category, error_snippet, \
-          file_ext, sequence_id, pipeline_id",
-        ),
-        (
-            "sessions",
-            "timestamp, snap_type, summary, pending_tasks, context_usage, \
-          pipeline_state, created_at_millis, project",
-            "timestamp, snap_type, summary, pending_tasks, context_usage, \
-          pipeline_state, created_at_millis",
-        ),
-        (
-            "evolution_records",
-            "timestamp, observations, success_rate, avg_score, error_patterns, \
-          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
-          analysis_summary, project",
-            "timestamp, observations, success_rate, avg_score, error_patterns, \
-          failure_patterns, skills_seeded, skills_rolled_back, total_evolved, \
-          analysis_summary",
-        ),
-        (
-            "orch_runs",
-            "id, status, agents_json, dep_graph_json, created_at, updated_at, project",
-            "id, status, agents_json, dep_graph_json, created_at, updated_at",
-        ),
-        (
-            "orch_control",
-            "action, target, message, generation, project",
-            "action, target, message, generation",
-        ),
-    ];
+    // Every table of the live schema is moved, so a table or column added later is not
+    // dropped. Conflicts keep the target row (INSERT OR IGNORE). A column the source lacks
+    // (older schema) takes the target default.
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM main.sqlite_master WHERE type = 'table' \
+         AND name NOT LIKE 'sqlite_%' AND name != '_harness_meta' ORDER BY rowid",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(sqlx_err)?;
 
-    for (table, dest_cols, src_cols) in &simple_tables {
+    for table in &tables {
+        let dest = table_columns(conn, table, "main").await?;
+        let src = table_columns(conn, table, attach_name).await?;
+        if src.is_empty() {
+            continue; // table absent in the source DB
+        }
+        let has_project = dest.iter().any(|(n, _)| n == "project");
+        // Integer ids of project-scoped tables are surrogate keys that collide across
+        // projects, so they are re-assigned. Text ids and project-less tables keep theirs.
+        let cols: Vec<&str> = dest
+            .iter()
+            .filter(|(n, t)| {
+                n == "project"
+                    || (src.iter().any(|(s, _)| s == n)
+                        && !(n == "id" && t == "INTEGER" && has_project))
+            })
+            .map(|(n, _)| n.as_str())
+            .collect();
+        let dest_cols: Vec<String> = cols.iter().map(|c| format!("\"{c}\"")).collect();
+        let select: Vec<String> = cols
+            .iter()
+            .map(|c| {
+                if *c == "project" {
+                    "?".into()
+                } else {
+                    format!("\"{c}\"")
+                }
+            })
+            .collect();
         let sql = format!(
-            "INSERT OR IGNORE INTO main.{table} ({dest_cols}) \
-             SELECT {src_cols}, ? FROM {attach_name}.{table}"
+            "INSERT OR IGNORE INTO main.\"{table}\" ({}) SELECT {} FROM {attach_name}.\"{table}\"",
+            dest_cols.join(", "),
+            select.join(", ")
         );
-        match sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(slug)
-            .execute(&mut *conn)
-            .await
-        {
-            Ok(r) => match *table {
-                "observations" => stats.obs += r.rows_affected() as usize,
-                "sessions" => stats.sessions += r.rows_affected() as usize,
-                "evolution_records" => stats.evo += r.rows_affected() as usize,
-                _ => {}
-            },
-            Err(e) => {
-                // Table may not exist in the source DB — skip silently.
-                if !e.to_string().contains("no such table") {
-                    eprintln!("[migrate/to-global] {table}: {e}");
+        let query = sqlx::query(sqlx::AssertSqlSafe(sql));
+        let query = if has_project { query.bind(slug) } else { query };
+        match query.execute(&mut *conn).await {
+            Ok(r) => {
+                let n = r.rows_affected() as usize;
+                match table.as_str() {
+                    "observations" => stats.obs += n,
+                    "sessions" => stats.sessions += n,
+                    "evolution_records" => stats.evo += n,
+                    "metrics_state" => stats.metrics += n,
+                    "score_history" => stats.score_history += n,
+                    "skill_attribution" => stats.skill_attr += n,
+                    "promotion_counters" => stats.promo += n,
+                    _ => {}
                 }
             }
+            Err(e) => return Err(io::Error::other(format!("{table}: {e}"))),
         }
     }
 
-    // metrics_state: key-value with project
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.metrics_state (key, value, project) \
-         SELECT key, value, ? FROM {attach_name}.metrics_state"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.metrics += r.rows_affected() as usize;
-    }
-
-    // score_history: has UNIQUE(timestamp) so INSERT OR IGNORE deduplicates
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.score_history \
-         (timestamp, success_rate, avg_score, observations, \
-          dim_success, dim_quality, dim_cost, project) \
-         SELECT timestamp, success_rate, avg_score, observations, \
-                dim_success, dim_quality, dim_cost, ? \
-         FROM {attach_name}.score_history"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.score_history += r.rows_affected() as usize;
-    }
-
-    // skill_attribution: composite PK (skill_name, project) — safe to INSERT OR IGNORE
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.skill_attribution \
-         (skill_name, project, sessions_active, avg_score_with, avg_score_without, first_seen) \
-         SELECT skill_name, ?, sessions_active, avg_score_with, avg_score_without, first_seen \
-         FROM {attach_name}.skill_attribution"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.skill_attr += r.rows_affected() as usize;
-    }
-
-    // promotion_counters: composite PK (pattern_key, project)
-    if let Ok(r) = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "INSERT OR IGNORE INTO main.promotion_counters (pattern_key, project, count) \
-         SELECT pattern_key, ?, count FROM {attach_name}.promotion_counters"
-    )))
-    .bind(slug)
-    .execute(&mut *conn)
-    .await
-    {
-        stats.promo += r.rows_affected() as usize;
-    }
-
-    // orch_agents, orch_agent_events, orch_agent_inbox: FK-linked to orch_runs
-    let orch_tables: &[(&str, &str)] = &[
-        (
-            "orch_agents",
-            "id, run_id, role, task, satisfies_json, status, phase, progress, \
-             last_heartbeat, started_at, completed_at",
-        ),
-        (
-            "orch_agent_events",
-            "id, agent_id, timestamp, event_type, data_json",
-        ),
-        (
-            "orch_agent_inbox",
-            "id, agent_id, from_agent, timestamp, message",
-        ),
-    ];
-    for (table, cols) in orch_tables {
-        let _ = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "INSERT OR IGNORE INTO main.{table} ({cols}) SELECT {cols} FROM {attach_name}.{table}"
-        )))
-        .execute(&mut *conn)
-        .await;
-    }
-
     Ok(stats)
+}
+
+/// `(name, type)` of every column of `table` in the given attached schema, in table order.
+async fn table_columns(
+    conn: &mut sqlx::SqliteConnection,
+    table: &str,
+    schema: &str,
+) -> io::Result<Vec<(String, String)>> {
+    sqlx::query_as("SELECT name, type FROM pragma_table_info(?, ?)")
+        .bind(table)
+        .bind(schema)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(sqlx_err)
 }
 
 /// Entry point for `epic-harness migrate --to-global [--dry-run]`.
@@ -1342,22 +1344,97 @@ mod tests {
     #[tokio::test]
     async fn do_migrate_is_idempotent() {
         let mut conn = make_global_conn().await;
+        let dir = tempfile::tempdir().unwrap();
 
-        // First run marks legacy_migrated=1
-        do_migrate_async(&mut conn).await.unwrap();
+        // First run marks legacy_migrated:<slug>=1
+        do_migrate_project(&mut conn, "demo", dir.path())
+            .await
+            .unwrap();
         // Second run must see the flag and be a no-op (returns empty stats)
-        let stats = do_migrate_async(&mut conn).await.unwrap();
+        let stats = do_migrate_project(&mut conn, "demo", dir.path())
+            .await
+            .unwrap();
         assert_eq!(stats.obs_imported, 0);
         assert_eq!(stats.sess_imported, 0);
 
-        let migrated: String =
-            sqlx::query("SELECT value FROM _harness_meta WHERE key = 'legacy_migrated'")
-                .fetch_one(&mut conn)
-                .await
-                .unwrap()
-                .try_get(0)
-                .unwrap();
-        assert_eq!(migrated, "1");
+        assert_eq!(marker_value(&mut conn, "legacy_migrated:demo").await, "1");
+    }
+
+    async fn marker_value(conn: &mut sqlx::SqliteConnection, key: &str) -> String {
+        sqlx::query("SELECT value FROM _harness_meta WHERE key = ?")
+            .bind(key)
+            .fetch_one(&mut *conn)
+            .await
+            .unwrap()
+            .try_get(0)
+            .unwrap()
+    }
+
+    /// A project dir holding one valid legacy observation file.
+    fn legacy_project_dir() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("obs")).unwrap();
+        std::fs::write(
+            dir.path().join("obs/session_20261109_a.jsonl"),
+            "{\"timestamp\":\"2026-11-09T00:00:00Z\",\"tool\":\"Bash\",\
+             \"tool_category\":\"bash\",\"result\":\"success\",\"score\":1.0}\n",
+        )
+        .unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn legacy_migration_is_tracked_per_project() {
+        // Regression: one global `legacy_migrated` key made the first project's
+        // migration report "already migrated" for every other project.
+        let mut conn = make_global_conn().await;
+        let (alpha, beta) = (legacy_project_dir(), legacy_project_dir());
+
+        let a = do_migrate_project(&mut conn, "alpha", alpha.path())
+            .await
+            .unwrap();
+        let b = do_migrate_project(&mut conn, "beta", beta.path())
+            .await
+            .unwrap();
+
+        assert_eq!((a.obs_imported, b.obs_imported), (1, 1));
+        assert_eq!(marker_value(&mut conn, "legacy_migrated:alpha").await, "1");
+        assert_eq!(marker_value(&mut conn, "legacy_migrated:beta").await, "1");
+    }
+
+    #[tokio::test]
+    async fn old_global_marker_is_adopted_only_by_the_project_that_migrated() {
+        let mut conn = make_global_conn().await;
+        sqlx::raw_sql(
+            "INSERT INTO _harness_meta (key, value) VALUES ('legacy_migrated', '1');
+             INSERT INTO sessions (timestamp, created_at_millis, project) \
+                 VALUES ('t', 1, 'alpha');",
+        )
+        .execute(&mut conn)
+        .await
+        .unwrap();
+        let (alpha, beta) = (legacy_project_dir(), legacy_project_dir());
+
+        // alpha already has rows: adopt the old marker, import nothing (no duplicates).
+        let a = do_migrate_project(&mut conn, "alpha", alpha.path())
+            .await
+            .unwrap();
+        assert_eq!(a.obs_imported, 0);
+        assert_eq!(marker_value(&mut conn, "legacy_migrated:alpha").await, "1");
+
+        // beta has no rows: its files were never imported, so migrate them.
+        let b = do_migrate_project(&mut conn, "beta", beta.path())
+            .await
+            .unwrap();
+        assert_eq!(b.obs_imported, 1);
+        assert_eq!(marker_value(&mut conn, "legacy_migrated:beta").await, "1");
+
+        assert_eq!(marker_value(&mut conn, "legacy_migrated").await, "1");
+        let obs: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
+        assert_eq!(obs, 1, "only beta's file was imported");
     }
 
     #[tokio::test]
@@ -1585,5 +1662,141 @@ mod tests {
             .try_get(0)
             .unwrap();
         assert_eq!(sess_count, 1);
+    }
+
+    /// Open (creating) a file DB with the full harness schema.
+    async fn schema_db(path: &std::path::Path) -> sqlx::SqliteConnection {
+        let mut conn = SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .connect()
+            .await
+            .unwrap();
+        sqlx::raw_sql(crate::store::schema::DDL_SQLITE)
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        conn
+    }
+
+    #[tokio::test]
+    async fn attached_merge_moves_every_table_and_field() {
+        // Regression: the merge used hand-written table and column lists, so
+        // orbit_pipelines, evolved_skills, global_patterns and workspace_manifest
+        // never moved, and evolution_records.edit_type and
+        // skill_attribution.sessions_holdout fell back to their defaults.
+        let dir = tempfile::tempdir().unwrap();
+        let mut src = schema_db(&dir.path().join("src.db")).await;
+        sqlx::raw_sql(
+            "INSERT INTO observations (timestamp, session_id, tool, tool_category) \
+                 VALUES ('t', 's', 'Bash', 'shell');
+             INSERT INTO sessions (timestamp, created_at_millis) VALUES ('t', 1);
+             INSERT INTO evolution_records (timestamp, edit_type) VALUES ('t', 'modify_skill');
+             INSERT INTO metrics_state (key, value) VALUES ('k', 'v');
+             INSERT INTO score_history (timestamp, success_rate, avg_score) VALUES ('t', 1, 1);
+             INSERT INTO skill_attribution (skill_name, first_seen, sessions_holdout) \
+                 VALUES ('sk', 't', 6);
+             INSERT INTO orch_runs (id, created_at, updated_at) VALUES ('r', 't', 't');
+             INSERT INTO orch_agents (id, run_id) VALUES ('a', 'r');
+             INSERT INTO orch_agent_events (agent_id, timestamp, event_type) \
+                 VALUES ('a', 't', 'e');
+             INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message) \
+                 VALUES ('a', 'b', 't', 'm');
+             INSERT INTO orch_control (id, action) VALUES (1, 'pause');
+             INSERT INTO orbit_pipelines (id, project, created_at, updated_at) \
+                 VALUES ('p', 'old', 't', 't');
+             INSERT INTO evolved_skills (name, project, created, updated) \
+                 VALUES ('ev', 'old', 't', 't');
+             INSERT INTO promotion_counters (pattern_key, count) VALUES ('pk', 3);
+             INSERT INTO workspace_manifest (id, updated) VALUES (1, 't');
+             INSERT INTO global_patterns (timestamp, project) VALUES ('t', 'old');",
+        )
+        .execute(&mut src)
+        .await
+        .unwrap();
+        drop(src);
+
+        let mut dst = schema_db(&dir.path().join("dst.db")).await;
+        let escaped = dir.path().join("src.db").display().to_string();
+        dst.execute(sqlx::AssertSqlSafe(format!(
+            "ATTACH '{}' AS src",
+            escaped.replace('\'', "''")
+        )))
+        .await
+        .unwrap();
+        merge_attached_db_async(&mut dst, "to", "src")
+            .await
+            .unwrap();
+
+        // Enumerated from the schema, so a table added later must be seeded above.
+        let tables: Vec<String> = sqlx::query_scalar(
+            "SELECT name FROM main.sqlite_master WHERE type = 'table' \
+             AND name NOT LIKE 'sqlite_%' AND name != '_harness_meta'",
+        )
+        .fetch_all(&mut dst)
+        .await
+        .unwrap();
+        for table in &tables {
+            let n: i64 =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                    .fetch_one(&mut dst)
+                    .await
+                    .unwrap();
+            assert_eq!(n, 1, "table {table} was not moved");
+        }
+
+        let edit_type: String = sqlx::query_scalar("SELECT edit_type FROM evolution_records")
+            .fetch_one(&mut dst)
+            .await
+            .unwrap();
+        assert_eq!(edit_type, "modify_skill");
+        let holdout: i64 = sqlx::query_scalar("SELECT sessions_holdout FROM skill_attribution")
+            .fetch_one(&mut dst)
+            .await
+            .unwrap();
+        assert_eq!(holdout, 6);
+        let project: String = sqlx::query_scalar("SELECT project FROM orbit_pipelines")
+            .fetch_one(&mut dst)
+            .await
+            .unwrap();
+        assert_eq!(project, "to", "project-scoped rows are relabelled");
+    }
+
+    #[tokio::test]
+    async fn import_observations_binds_the_project_slug() {
+        // Regression: the legacy observation INSERT left project NULL, so every
+        // project-scoped reader (WHERE project = ?) skipped the imported rows.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("obs")).unwrap();
+        std::fs::write(
+            dir.path().join("obs/session_20261109_a.jsonl"),
+            "{\"timestamp\":\"2026-11-09T00:00:00Z\",\"tool\":\"Bash\",\
+             \"tool_category\":\"bash\",\"result\":\"success\",\"score\":1.0}\n",
+        )
+        .unwrap();
+        let mut conn = make_global_conn().await;
+        let mut stats = MigrationStats {
+            obs_imported: 0,
+            sess_imported: 0,
+            evo_imported: 0,
+            errors: 0,
+            total_lines: 0,
+        };
+
+        import_observations(&mut conn, "demo-project", dir.path(), &mut stats)
+            .await
+            .unwrap();
+
+        assert_eq!(stats.obs_imported, 1);
+        let scoped: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM observations WHERE project = 'demo-project'")
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(
+            scoped, 1,
+            "imported row must be visible to the scoped reader"
+        );
     }
 }
