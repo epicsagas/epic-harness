@@ -200,8 +200,8 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             (Method::Delete, url) if url.starts_with("/api/orbit/") => {
                 let pipeline_id = url.trim_start_matches("/api/orbit/").trim_end_matches('/');
                 let harness_dir = common::harness_dir();
-                let body = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
-                json_response(&body)
+                let (status, body) = dismiss_orbit_pipeline(pipeline_id, &harness_dir);
+                json_response(&body).with_status_code(status)
             }
 
             // ── Memory API (Nodes) ───────────────────────────
@@ -407,37 +407,81 @@ fn percent_decode(s: &str) -> String {
 }
 
 /// Dismiss (delete) an orbit pipeline file across all projects.
-fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> String {
+///
+/// The id must be non-empty `[A-Za-z0-9_-]` and is matched against the exact
+/// file name `PIPELINE-<id>.json` (e.g. id "20260523105350"). Returns
+/// `(http_status, json_body)`.
+fn dismiss_orbit_pipeline(pipeline_id: &str, harness_dir: &std::path::Path) -> (u16, String) {
+    if pipeline_id.is_empty()
+        || !pipeline_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return (
+            400,
+            serde_json::json!({"ok": false, "error": "invalid pipeline id"}).to_string(),
+        );
+    }
+
     let projects_root = harness_dir.parent().unwrap_or(harness_dir);
+    let file_name = format!("PIPELINE-{pipeline_id}.json");
     let mut deleted = false;
 
+    if let Ok(rd) = std::fs::read_dir(projects_root) {
+        for proj_entry in rd.filter_map(|e| e.ok()) {
+            let path = proj_entry.path().join("orbit").join(&file_name);
+            if path.is_file() && std::fs::remove_file(path).is_ok() {
+                deleted = true;
+            }
+        }
+    }
+
+    if deleted {
+        (
+            200,
+            serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string(),
+        )
+    } else {
+        (
+            404,
+            serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string(),
+        )
+    }
+}
+
+/// Collect `PIPELINE-*.json` sidecars from every project's `orbit/` dir,
+/// tagging each with its `_project`. Files that are not JSON objects are
+/// skipped: indexing a non-object would panic the single request loop.
+fn scan_orbit_pipeline_files(projects_root: &std::path::Path) -> Vec<serde_json::Value> {
+    let mut all: Vec<serde_json::Value> = vec![];
     if let Ok(rd) = std::fs::read_dir(projects_root) {
         for proj_entry in rd.filter_map(|e| e.ok()) {
             let orbit_dir = proj_entry.path().join("orbit");
             if !orbit_dir.exists() {
                 continue;
             }
-            // Match by ID — pipeline_id is the timestamp part (e.g. "20260523105350")
             if let Ok(files) = std::fs::read_dir(&orbit_dir) {
                 for f in files.filter_map(|e| e.ok()) {
                     let fname = f.file_name().to_string_lossy().to_string();
                     if fname.starts_with("PIPELINE-")
                         && fname.ends_with(".json")
-                        && fname.contains(pipeline_id)
-                        && std::fs::remove_file(f.path()).is_ok()
+                        && let Ok(content) = std::fs::read_to_string(f.path())
+                        && let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&content)
+                        && let Some(obj) = v.as_object_mut()
                     {
-                        deleted = true;
+                        obj.insert(
+                            "_project".into(),
+                            serde_json::Value::String(
+                                proj_entry.file_name().to_string_lossy().to_string(),
+                            ),
+                        );
+                        all.push(v);
                     }
                 }
             }
         }
     }
-
-    if deleted {
-        serde_json::json!({"ok": true, "dismissed": pipeline_id}).to_string()
-    } else {
-        serde_json::json!({"ok": false, "error": "pipeline not found"}).to_string()
-    }
+    all
 }
 
 fn parse_query_param(url: &str, key: &str) -> Option<String> {
@@ -767,31 +811,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             }
             // Fallback: scan PIPELINE-*.json files
             let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-            let mut all: Vec<serde_json::Value> = vec![];
-            if let Ok(rd) = fs::read_dir(projects_root) {
-                for proj_entry in rd.filter_map(|e| e.ok()) {
-                    let orbit_dir = proj_entry.path().join("orbit");
-                    if !orbit_dir.exists() {
-                        continue;
-                    }
-                    if let Ok(files) = fs::read_dir(&orbit_dir) {
-                        for f in files.filter_map(|e| e.ok()) {
-                            let fname = f.file_name().to_string_lossy().to_string();
-                            if fname.starts_with("PIPELINE-")
-                                && fname.ends_with(".json")
-                                && let Ok(content) = fs::read_to_string(f.path())
-                                && let Ok(mut v) =
-                                    serde_json::from_str::<serde_json::Value>(&content)
-                            {
-                                v["_project"] = serde_json::Value::String(
-                                    proj_entry.file_name().to_string_lossy().to_string(),
-                                );
-                                all.push(v);
-                            }
-                        }
-                    }
-                }
-            }
+            let mut all = scan_orbit_pipeline_files(projects_root);
             all.sort_by(|a, b| {
                 let ta = a["started_at"].as_str().unwrap_or("");
                 let tb = b["started_at"].as_str().unwrap_or("");
@@ -956,5 +976,66 @@ mod tests {
     #[test]
     fn default_port_is_7700() {
         assert_eq!(DEFAULT_PORT, 7700);
+    }
+
+    /// `<root>/projects/<slug>/orbit/<file>` with `content`; returns the path.
+    fn write_sidecar(
+        root: &std::path::Path,
+        slug: &str,
+        file: &str,
+        content: &str,
+    ) -> std::path::PathBuf {
+        let dir = root.join("projects").join(slug).join("orbit");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(file);
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn dismiss_orbit_pipeline_rejects_empty_and_invalid_ids() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = write_sidecar(tmp.path(), "proj-a", "PIPELINE-20260101000000.json", "{}");
+        let b = write_sidecar(tmp.path(), "proj-b", "PIPELINE-20260202000000.json", "{}");
+        let harness_dir = tmp.path().join("projects").join("proj-a");
+
+        for bad in ["", "..", "../x", "a/b", "a.b", "20260101000000.json", "%2e"] {
+            let (status, _) = dismiss_orbit_pipeline(bad, &harness_dir);
+            assert_eq!(status, 400, "id {bad:?}");
+        }
+        assert!(a.exists() && b.exists(), "invalid ids must delete nothing");
+    }
+
+    #[test]
+    fn dismiss_orbit_pipeline_matches_exact_file_name_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = write_sidecar(tmp.path(), "proj-a", "PIPELINE-20260101000000.json", "{}");
+        let b = write_sidecar(tmp.path(), "proj-b", "PIPELINE-20260202000000.json", "{}");
+        let harness_dir = tmp.path().join("projects").join("proj-a");
+
+        // A substring of an existing id is not an id.
+        let (status, _) = dismiss_orbit_pipeline("2026", &harness_dir);
+        assert_eq!(status, 404);
+        assert!(a.exists() && b.exists());
+
+        let (status, body) = dismiss_orbit_pipeline("20260101000000", &harness_dir);
+        assert_eq!(status, 200);
+        assert!(body.contains("\"ok\":true"));
+        assert!(!a.exists(), "exact id deletes its file");
+        assert!(b.exists(), "other pipelines are untouched");
+    }
+
+    #[test]
+    fn scan_orbit_pipeline_files_skips_non_object_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_sidecar(tmp.path(), "proj-a", "PIPELINE-1.json", "[]");
+        write_sidecar(tmp.path(), "proj-a", "PIPELINE-2.json", "42");
+        write_sidecar(tmp.path(), "proj-a", "PIPELINE-3.json", "not json");
+        write_sidecar(tmp.path(), "proj-a", "PIPELINE-4.json", r#"{"id":"4"}"#);
+
+        let all = scan_orbit_pipeline_files(&tmp.path().join("projects"));
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0]["id"], "4");
+        assert_eq!(all[0]["_project"], "proj-a");
     }
 }

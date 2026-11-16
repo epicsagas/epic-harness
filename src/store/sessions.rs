@@ -97,11 +97,31 @@ pub async fn list_recent_snapshots_pool(
     pool: &AnyPool,
     limit: i64,
 ) -> io::Result<Vec<SessionSnapshot>> {
-    let rows = sqlx::query(
-        "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
-         FROM sessions ORDER BY id DESC LIMIT ?",
-    )
-    .bind(limit)
+    list_recent_snapshots_scoped_pool(pool, limit, None).await
+}
+
+/// Project-scoped recent snapshots. `Some(p)` adds `WHERE project = ?`;
+/// `None` lists every project. Static-SQL two-branch form because sqlx 0.9's
+/// SqlSafeStr rejects dynamically-built strings.
+pub async fn list_recent_snapshots_scoped_pool(
+    pool: &AnyPool,
+    limit: i64,
+    project: Option<&str>,
+) -> io::Result<Vec<SessionSnapshot>> {
+    let rows = if let Some(p) = project {
+        sqlx::query(
+            "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
+             FROM sessions WHERE project = ? ORDER BY id DESC LIMIT ?",
+        )
+        .bind(p)
+        .bind(limit)
+    } else {
+        sqlx::query(
+            "SELECT timestamp, snap_type, summary, pending_tasks, context_usage, pipeline_state
+             FROM sessions ORDER BY id DESC LIMIT ?",
+        )
+        .bind(limit)
+    }
     .fetch_all(pool)
     .await
     .map_err(super::sqlx_err)?;
@@ -287,5 +307,45 @@ mod tests {
         let recent = list_recent_snapshots_pool(&pool, 3).await.unwrap();
         assert_eq!(recent.len(), 3);
         assert_eq!(recent[0].summary, "Session 4");
+    }
+
+    #[tokio::test]
+    async fn list_recent_snapshots_scoped_to_project() {
+        let pool = test_pool().await;
+        let mk = |summary: &str| SessionSnapshot {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            snap_type: "pre-compact".into(),
+            summary: summary.into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        };
+        insert_snapshot_pool(&pool, &mk("A work"), 1000, "proj-a")
+            .await
+            .unwrap();
+        insert_snapshot_pool(&pool, &mk("B work"), 2000, "proj-b")
+            .await
+            .unwrap();
+        // Malformed JSON columns decode to defaults instead of failing the list.
+        sqlx::query(
+            "INSERT INTO sessions (timestamp, summary, pending_tasks, pipeline_state, created_at_millis, project)
+             VALUES ('2026-06-02T11:00:00Z', 'A bad row', 'not json', 'not json', 3000, 'proj-a')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let a = list_recent_snapshots_scoped_pool(&pool, 10, Some("proj-a"))
+            .await
+            .unwrap();
+        assert_eq!(a.len(), 2, "only proj-a rows");
+        assert_eq!(a[0].summary, "A bad row");
+        assert!(a[0].pending_tasks.is_empty() && a[0].pipeline_state.is_none());
+        assert_eq!(a[1].summary, "A work");
+
+        let all = list_recent_snapshots_scoped_pool(&pool, 10, None)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 3);
     }
 }

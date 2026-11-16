@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use sqlx::AnyPool;
 use tauri::State;
 
 use crate::state::AppState;
@@ -29,12 +30,14 @@ pub struct HarnessMetrics {
 
 #[tauri::command]
 pub async fn get_harness_metrics(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<HarnessMetrics, String> {
-    let pool = state.harness_db.clone();
+    harness_metrics(&state.harness_db, project.as_deref()).await
+}
 
-    let m = epic_harness::store::metrics::load_metrics_pool(&pool)
+async fn harness_metrics(pool: &AnyPool, project: Option<&str>) -> Result<HarnessMetrics, String> {
+    let m = epic_harness::store::metrics::load_metrics_scoped_pool(pool, project)
         .await
         .map_err(|e| format!("load metrics: {e}"))?;
 
@@ -150,16 +153,18 @@ pub async fn get_evolved_skills(
     project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<EvolutionData, String> {
-    let pool = state.harness_db.clone();
+    evolved_skills(&state.harness_db, project.as_deref()).await
+}
 
+async fn evolved_skills(pool: &AnyPool, project: Option<&str>) -> Result<EvolutionData, String> {
     // Evolved skills — list_skills_full_pool is already cross-project;
     // filter in-memory when a specific project is requested.
-    let skills = epic_harness::store::evolved::list_skills_full_pool(&pool)
+    let skills = epic_harness::store::evolved::list_skills_full_pool(pool)
         .await
         .map_err(|e| format!("list evolved skills: {e}"))?;
     let evolved_skills: Vec<EvolvedSkill> = skills
         .into_iter()
-        .filter(|s| project.as_ref().is_none_or(|p| s.project == *p))
+        .filter(|s| project.is_none_or(|p| s.project == p))
         .map(|s| EvolvedSkill {
             name: s.name,
             origin: s.origin,
@@ -177,10 +182,13 @@ pub async fn get_evolved_skills(
         .collect();
 
     // Evolution history
-    let records =
-        epic_harness::store::evolution::query_recent_records_pool(&pool, MAX_EVOLUTION_ENTRIES)
-            .await
-            .map_err(|e| format!("query evolution records: {e}"))?;
+    let records = epic_harness::store::evolution::query_recent_records_scoped_pool(
+        pool,
+        MAX_EVOLUTION_ENTRIES,
+        project,
+    )
+    .await
+    .map_err(|e| format!("query evolution records: {e}"))?;
 
     let total_sessions = records.len() as u32;
     let patterns_detected: u32 = records
@@ -249,16 +257,22 @@ pub struct FailureCategory {
 
 #[tauri::command]
 pub async fn get_obs_summary(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<ObsSummary, String> {
-    let pool = state.harness_db.clone();
+    obs_summary(&state.harness_db, project.as_deref()).await
+}
 
+async fn obs_summary(pool: &AnyPool, project: Option<&str>) -> Result<ObsSummary, String> {
     // Use a wide date range to cover all stored data.
-    let stats =
-        epic_harness::store::observations::query_obs_stats_pool(&pool, "2000-01-01", "2099-12-31")
-            .await
-            .map_err(|e| format!("query obs stats: {e}"))?;
+    let stats = epic_harness::store::observations::query_obs_stats_scoped_pool(
+        pool,
+        "2000-01-01",
+        "2099-12-31",
+        project,
+    )
+    .await
+    .map_err(|e| format!("query obs stats: {e}"))?;
 
     // Session summaries from aggregate stats
     let session_summaries: Vec<SessionSummary> = stats
@@ -329,11 +343,17 @@ pub struct SessionSnapshotResponse {
 
 #[tauri::command]
 pub async fn get_session_snapshots(
-    _project: Option<String>,
+    project: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SessionSnapshotResponse>, String> {
-    let pool = state.harness_db.clone();
-    let snaps = epic_harness::store::sessions::list_recent_snapshots_pool(&pool, 50)
+    session_snapshots(&state.harness_db, project.as_deref()).await
+}
+
+async fn session_snapshots(
+    pool: &AnyPool,
+    project: Option<&str>,
+) -> Result<Vec<SessionSnapshotResponse>, String> {
+    let snaps = epic_harness::store::sessions::list_recent_snapshots_scoped_pool(pool, 50, project)
         .await
         .map_err(|e| format!("query session snapshots: {e}"))?;
 
@@ -431,4 +451,134 @@ pub async fn get_integration_status() -> Result<Vec<IntegrationStatus>, String> 
         .collect();
 
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use epic_harness::shared::evolution::{EditType, EvolutionRecord, Metrics};
+    use epic_harness::shared::obs::ObsRecord;
+    use epic_harness::shared::types::SessionSnapshot;
+
+    fn obs(tool: &str) -> ObsRecord {
+        ObsRecord {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            tool: tool.into(),
+            tool_category: "file".into(),
+            action: Some("run".into()),
+            result: Some("success".into()),
+            score: Some(0.9),
+            dimensions: None,
+            failure_category: None,
+            error_snippet: None,
+            file_ext: None,
+            sequence_id: None,
+            pipeline_id: None,
+        }
+    }
+
+    fn evo(summary: &str) -> EvolutionRecord {
+        EvolutionRecord {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            observations: 1,
+            success_rate: 1.0,
+            avg_score: 0.9,
+            error_patterns: Default::default(),
+            failure_patterns: vec![],
+            skills_seeded: 0,
+            skills_rolled_back: 0,
+            total_evolved: 0,
+            analysis_summary: summary.into(),
+            edit_type: EditType::default(),
+            manifests: vec![],
+        }
+    }
+
+    fn snap(summary: &str) -> SessionSnapshot {
+        SessionSnapshot {
+            timestamp: "2026-06-02T10:00:00Z".into(),
+            snap_type: "pre-compact".into(),
+            summary: summary.into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        }
+    }
+
+    /// Every command that takes a project must read only that project's rows.
+    /// One test fn: it sets HARNESS_DIR (process-global) to a temp dir before
+    /// the harness pool is first opened, so the real store is never touched.
+    #[test]
+    fn commands_return_project_scoped_data() {
+        let tmp = std::env::temp_dir().join(format!("epic_tauri_scope_{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        // SAFETY: this is the only test in this crate and it runs before any
+        // other thread reads HARNESS_DIR.
+        unsafe { std::env::set_var("HARNESS_DIR", &tmp) };
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let pool = epic_harness::store::pool::harness_pool().await.unwrap();
+
+            for (proj, sessions, tool) in [("proj-a", 3u64, "Read"), ("proj-b", 7u64, "Edit")] {
+                let m = Metrics {
+                    total_sessions: sessions,
+                    ..Default::default()
+                };
+                epic_harness::store::metrics::save_metrics_pool(&pool, &m, proj)
+                    .await
+                    .unwrap();
+                epic_harness::store::observations::insert_observation_pool(
+                    &pool,
+                    &obs(tool),
+                    &format!("20260602_{proj}"),
+                    proj,
+                )
+                .await
+                .unwrap();
+                epic_harness::store::evolution::insert_record_pool(
+                    &pool,
+                    &evo(&format!("{proj} analysis")),
+                    proj,
+                )
+                .await
+                .unwrap();
+                epic_harness::store::sessions::insert_snapshot_pool(
+                    &pool,
+                    &snap(&format!("{proj} work")),
+                    1000,
+                    proj,
+                )
+                .await
+                .unwrap();
+            }
+
+            let m = harness_metrics(&pool, Some("proj-b")).await.unwrap();
+            assert_eq!(m.total_sessions, 7, "metrics scoped to proj-b");
+
+            let o = obs_summary(&pool, Some("proj-b")).await.unwrap();
+            assert_eq!(o.total_tool_calls, 1, "obs stats scoped to proj-b");
+            assert_eq!(o.tool_stats[0].tool, "Edit");
+
+            let e = evolved_skills(&pool, Some("proj-b")).await.unwrap();
+            assert_eq!(e.evolution_history.len(), 1, "history scoped to proj-b");
+            assert_eq!(
+                e.evolution_history[0]["analysis_summary"],
+                "proj-b analysis"
+            );
+
+            let s = session_snapshots(&pool, Some("proj-b")).await.unwrap();
+            assert_eq!(s.len(), 1, "snapshots scoped to proj-b");
+            assert_eq!(s[0].summary, "proj-b work");
+
+            // No project selected means the cross-project view.
+            assert_eq!(obs_summary(&pool, None).await.unwrap().total_tool_calls, 2);
+            assert_eq!(session_snapshots(&pool, None).await.unwrap().len(), 2);
+        });
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

@@ -94,9 +94,11 @@ pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_jso
         let created_at: String = r.try_get(6).map_err(super::sqlx_err)?;
         let updated_at: String = r.try_get(7).map_err(super::sqlx_err)?;
 
-        let mut val: serde_json::Value = serde_json::from_str(&state_json)
-            .unwrap_or(serde_json::Value::Object(Default::default()));
-        let map = val.as_object_mut().unwrap();
+        // A corrupt or non-object state_json still lists the row (empty map).
+        let mut map = match serde_json::from_str::<serde_json::Value>(&state_json) {
+            Ok(serde_json::Value::Object(m)) => m,
+            _ => Default::default(),
+        };
         map.insert("id".into(), serde_json::Value::String(id));
         map.insert("project".into(), serde_json::Value::String(project));
         map.insert("status".into(), serde_json::Value::String(status));
@@ -108,7 +110,7 @@ pub async fn list_all_pipelines_pool(pool: &AnyPool) -> io::Result<Vec<serde_jso
         }
         map.insert("started_at".into(), serde_json::Value::String(created_at));
         map.insert("updated_at".into(), serde_json::Value::String(updated_at));
-        pipelines.push(val);
+        pipelines.push(serde_json::Value::Object(map));
     }
     Ok(pipelines)
 }
@@ -195,6 +197,28 @@ mod tests {
 
         let pipelines = list_all_pipelines_pool(&pool).await.unwrap();
         assert_eq!(pipelines.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_all_pipelines_tolerates_non_object_state_json() {
+        let pool = test_pool().await;
+        for (id, state) in [
+            ("PIPELINE-1", "[]"),
+            ("PIPELINE-2", "42"),
+            ("PIPELINE-3", "x"),
+        ] {
+            upsert_pipeline_pool(&pool, id, "proj", "running", Some("go"), None, state)
+                .await
+                .unwrap();
+        }
+
+        let pipelines = list_all_pipelines_pool(&pool).await.unwrap();
+        assert_eq!(pipelines.len(), 3, "rows with bad state_json stay listed");
+        for p in &pipelines {
+            assert_eq!(p["project"], "proj");
+            assert_eq!(p["phase"], "go");
+            assert!(p["id"].as_str().unwrap().starts_with("PIPELINE-"));
+        }
     }
 
     #[tokio::test]
