@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-17
+
+Pipeline changes designed from a literature and practice review (docs/references/research-0.9.0-pipeline.md) and recorded in docs/adr/0001 to 0006. Thanks to @Tomauskasz for the reports and reference PRs behind these changes.
+
+### Changed
+- **Eval reports SKIPPED when nothing was measured**: `epic eval` reports `overall_verdict: "SKIPPED"` (exit 0) when no dimension produced a measurement, and the regression dimension reports SKIPPED on a first run with no baseline. Both used to report PASS. Skipped dimensions no longer drag `overall_score` down and are not compared against an old baseline, and `--baseline-update` refuses to save a SKIPPED run. Scripts that only accept `PASS` should also accept `SKIPPED`; orbit records SKIPPED and continues. (#179, #284)
+- **`epic eval --dimension regression` measures before comparing**: it now runs the configured checks and benchmarks and can fail. It used to compare nothing and always pass.
+- **Session-start memory no longer inflates rankings**: memory shown at session start and in `reflect --context` no longer increases a node's access count, so access frequency reflects only explicit recalls. `epic mem recall` and `epic mem context` accept `--passive` for the same read-only behavior. No per-prompt recall hook is added (ADR 0003).
+- **Guard benchmark measures the real guard**: `benchmarks/ab/guard_challenge.py` runs the built `epic-harness guard` binary and adds 46 everyday commands to measure false positives. The README shows the measured native numbers instead of "50/50". (#274)
+
+### Fixed
+- **Invalid eval thresholds fail fast**: a regression threshold that is NaN, infinite, or outside 0.0 to 1.0 stops `epic eval` with an error instead of silently disabling the regression gate.
+- **Ignored eval option is flagged**: `max_regression_pct` never did anything; `epic eval` warns when it is set and `epic eval --init` no longer writes it. (#275, partial)
+- **Late observations are no longer lost**: reflection tracks consumed observations by id in `reflect_cursor.json`, so an observation recorded in the same second as the previous round is analyzed next time instead of being dropped. The old watermark is still read and written for compatibility. (#218)
+- **A running orbit blocks a second start even without a lock file**: `epic orbit lock` refuses whenever a fresh running pipeline exists. (#247)
+- **Busy agents are not cleaned up early**: orchestration cleanup uses the latest heartbeat, not only the start time, before marking an agent done. (#244, #282)
+- **Windows PowerShell state files are read correctly**: pipeline, orchestration, and control files that start with a UTF-8 byte order mark are recognized.
+- **Dashboard cross-project status** reads the global opt-in marker.
+- **`fail_on_regression: false` is honored**: a regression now reports WARN instead of FAIL when the option is false.
+- **Retried backfills no longer double count**: the observation dedup key treats a missing action as empty, so a retried JSONL backfill cannot re-insert rows that reflection would count twice. Existing exact duplicates are collapsed when the database opens.
+- **A clock-skewed orbit pipeline no longer blocks orbit**: an `updated_at` more than 5 minutes in the future counts as stale.
+
+### Docs
+- **Cross-project learning opt-in path corrected**: the opt-in marker is global, `~/.harness/global/.cross-project-enabled`, and patterns are stored in `~/.harness/global/patterns.jsonl`. The previously documented per-project marker never enabled sharing; create the global marker to opt in. (#272)
+
 ## [0.8.15] - 2026-11-17
 
 Thanks to @Tomauskasz for the issue reports and reference PRs behind this release; fixes were reimplemented on main and credit each commit with Co-authored-by.
