@@ -3,6 +3,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
+use super::helpers::parse_persisted_json;
 use super::paths::orbit_dir;
 
 /// A `running` pipeline file not updated within this window belongs to a
@@ -69,7 +70,7 @@ pub(crate) fn scan_running_pipeline_in(dir: &Path) -> Option<serde_json::Value> 
                 return None;
             }
             let content = fs::read_to_string(&path).ok()?;
-            match serde_json::from_str::<serde_json::Value>(&content) {
+            match parse_persisted_json::<serde_json::Value>(&content) {
                 Ok(val) if val.get("status").and_then(|v| v.as_str()) == Some("running") => {
                     let fresh = val
                         .get("updated_at")
@@ -167,19 +168,23 @@ pub fn detect_active_orbit_id() -> Option<String> {
 
 /// Try to acquire the concurrent-orbit guard in `dir` (the orbit state dir).
 /// Returns true on success (creates `.orbit.lock`), false if another orbit is
-/// running. # ponytail: hole between acquire and the first PIPELINE write
-/// (seconds) — a second start inside that window is not excluded.
+/// running. The running-pipeline scan always runs first, so a fresh running
+/// pipeline refuses the lock whether or not a lock file exists.
+/// # ponytail: two ceilings. (1) Startup window: between acquire and the first
+/// PIPELINE write (seconds) a second start is not excluded. (2) Reclaim race:
+/// two processes that both see a stale lock can both remove it and both create
+/// a new one, because `remove_file` then `create_new` is not atomic. Fencing
+/// tokens or kernel locks would close both; deferred.
 pub fn try_acquire_orbit_lock(dir: &Path) -> bool {
     if fs::create_dir_all(dir).is_err() {
         return false;
     }
+    if scan_running_pipeline_in(dir).is_some() {
+        return false;
+    }
     let path = dir.join(".orbit.lock");
     if path.exists() {
-        // Reclaimable when no pipeline is actually running (crashed orbit
-        // left the lock behind).
-        if scan_running_pipeline_in(dir).is_some() {
-            return false;
-        }
+        // No pipeline is actually running: a crashed orbit left the lock behind.
         let _ = fs::remove_file(&path);
     }
     let epoch = std::time::SystemTime::now()
@@ -269,7 +274,7 @@ pub fn warn_on_invalid_completion(dir: &Path) -> usize {
         let Ok(content) = fs::read_to_string(entry.path()) else {
             continue;
         };
-        let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content) else {
+        let Ok(pl) = parse_persisted_json::<serde_json::Value>(&content) else {
             continue;
         };
         // PIPELINE-{timestamp} makes lexicographic order equal creation order.
@@ -376,6 +381,86 @@ mod tests {
         fs::write(dir.join(".orbit.lock"), "{}").unwrap();
         assert!(try_acquire_orbit_lock(&dir));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ── orbit lock ─────────────────────────────────────
+
+    fn running_json(updated_at: &str) -> String {
+        format!(r#"{{"id":"p1","status":"running","updated_at":"{updated_at}"}}"#)
+    }
+
+    #[test]
+    fn e_lock_refused_when_running_pipeline_without_lock_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let now = crate::shared::helpers::now_iso();
+        fs::write(
+            dir.path().join("PIPELINE-20260101T000000.json"),
+            running_json(&now),
+        )
+        .unwrap();
+        assert!(!try_acquire_orbit_lock(dir.path()));
+        assert!(!dir.path().join(".orbit.lock").exists());
+    }
+
+    #[test]
+    fn e_lock_reclaimed_when_no_running_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("PIPELINE-20260101T000000.json"),
+            r#"{"id":"p1","status":"complete"}"#,
+        )
+        .unwrap();
+        fs::write(dir.path().join(".orbit.lock"), "stale").unwrap();
+        assert!(try_acquire_orbit_lock(dir.path()));
+        let body = fs::read_to_string(dir.path().join(".orbit.lock")).unwrap();
+        assert!(
+            body.contains("acquired_at"),
+            "lock file must be new: {body}"
+        );
+    }
+
+    #[test]
+    fn e_lock_refused_for_bom_running_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend(running_json(&crate::shared::helpers::now_iso()).bytes());
+        fs::write(dir.path().join("PIPELINE-20260101T000000.json"), bytes).unwrap();
+        assert!(!try_acquire_orbit_lock(dir.path()));
+    }
+
+    #[test]
+    fn e_unlock_unconditional_while_running() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("PIPELINE-20260101T000000.json"),
+            running_json(&crate::shared::helpers::now_iso()),
+        )
+        .unwrap();
+        fs::write(dir.path().join(".orbit.lock"), "{}").unwrap();
+        release_orbit_lock(dir.path());
+        assert!(!dir.path().join(".orbit.lock").exists());
+    }
+
+    #[test]
+    fn e_stale_running_pipeline_does_not_block() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("PIPELINE-20260101T000000.json"),
+            running_json(&crate::shared::helpers::iso_secs_ago(46 * 60)),
+        )
+        .unwrap();
+        assert!(try_acquire_orbit_lock(dir.path()));
+    }
+
+    #[test]
+    fn e_utf16_pipeline_is_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut bytes = vec![0xFF, 0xFE];
+        for u in running_json(&crate::shared::helpers::now_iso()).encode_utf16() {
+            bytes.extend(u.to_le_bytes());
+        }
+        fs::write(dir.path().join("PIPELINE-20260101T000000.json"), bytes).unwrap();
+        assert!(scan_running_pipeline_in(dir.path()).is_none());
     }
 
     // ── completion invariants ──────────────────────────

@@ -65,7 +65,7 @@ pub async fn read_running_pipeline_pool(
     match row {
         Some(r) => {
             let json_str: String = r.try_get(0).map_err(super::sqlx_err)?;
-            let val: serde_json::Value = serde_json::from_str(&json_str)
+            let val: serde_json::Value = crate::shared::helpers::parse_persisted_json(&json_str)
                 .unwrap_or(serde_json::Value::Object(Default::default()));
             Ok(Some(val))
         }
@@ -122,10 +122,11 @@ pub async fn list_pipelines_scoped_pool(
         let updated_at: String = r.try_get(7).map_err(super::sqlx_err)?;
 
         // A corrupt or non-object state_json still lists the row (empty map).
-        let mut map = match serde_json::from_str::<serde_json::Value>(&state_json) {
-            Ok(serde_json::Value::Object(m)) => m,
-            _ => Default::default(),
-        };
+        let mut map =
+            match crate::shared::helpers::parse_persisted_json::<serde_json::Value>(&state_json) {
+                Ok(serde_json::Value::Object(m)) => m,
+                _ => Default::default(),
+            };
         map.insert("id".into(), serde_json::Value::String(id));
         map.insert("project".into(), serde_json::Value::String(project));
         map.insert("status".into(), serde_json::Value::String(status));
@@ -209,6 +210,28 @@ mod tests {
             .unwrap();
         assert!(result.is_some());
         let val = result.unwrap();
+        assert_eq!(val["requirement"], "fix bug");
+    }
+
+    #[tokio::test]
+    async fn e_orbit_store_parses_bom_state() {
+        let pool = test_pool().await;
+        upsert_pipeline_pool(
+            &pool,
+            "PIPELINE-bom",
+            "my-project",
+            "running",
+            None,
+            None,
+            "\u{feff}{\"requirement\":\"fix bug\"}",
+        )
+        .await
+        .unwrap();
+
+        let val = read_running_pipeline_pool(&pool, Some("my-project"))
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(val["requirement"], "fix bug");
     }
 

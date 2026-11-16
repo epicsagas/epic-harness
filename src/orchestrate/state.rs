@@ -163,7 +163,7 @@ pub fn atomic_write_json(path: &Path, data: &impl Serialize) -> io::Result<()> {
 /// Read a JSON file, returning None if missing or unparseable.
 pub fn read_json_opt<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
     let content = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&content).ok()
+    crate::shared::helpers::parse_persisted_json(&content).ok()
 }
 
 /// Append a JSON line to a JSONL file.
@@ -467,7 +467,7 @@ pub fn upsert_agent_to_run(
 ///
 /// - Complete runs older than 1 hour: remove agent status directories
 /// - Running runs older than 2 hours: mark as complete, then clean
-/// - Individual agents with stale heartbeat (>30 min): mark as done
+/// - Individual agents with neither a start nor a heartbeat in the last 30 min: mark as done
 pub fn auto_cleanup_stale_runs(base: &Path) {
     let orch_dir = orchestrator_dir(base);
     let lock_path = orch_dir.join("run.json.lock");
@@ -485,15 +485,17 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     let current_epoch = epoch_secs_now();
     let now = crate::shared::helpers::now_iso();
 
-    // Mark individual stale agents as done (heartbeat > 30 min ago)
+    // Mark individual stale agents as done (no start or heartbeat in 30 min)
     let mut any_agent_cleaned = false;
     for agent in &mut run.agents {
         if agent.status != AgentStatus::Running {
             continue;
         }
-        let stale = agent.started_at.as_ref().is_none_or(|started| {
-            current_epoch.saturating_sub(epoch_secs_from_iso(started)) > 1800 // 30 min
-        });
+        let started = agent.started_at.as_deref().map(epoch_secs_from_iso);
+        let heartbeat =
+            read_agent_status(base, &agent.id).map(|s| epoch_secs_from_iso(&s.last_heartbeat));
+        let last_alive = started.into_iter().chain(heartbeat).max();
+        let stale = last_alive.is_none_or(|t| current_epoch.saturating_sub(t) > 1800); // 30 min
         if stale {
             agent.status = AgentStatus::Done;
             agent.completed_at = Some(now.clone());
@@ -538,7 +540,8 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
         for entry in entries.flatten() {
             let status_path = entry.path().join("status.json");
             if let Ok(content) = fs::read_to_string(&status_path) {
-                let status: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
+                let status: serde_json::Value =
+                    crate::shared::helpers::parse_persisted_json(&content).unwrap_or_default();
                 let is_running = status["status"].as_str() == Some("running");
                 if is_running {
                     // Check heartbeat staleness
@@ -1228,5 +1231,89 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o600);
+    }
+
+    // ── Agent staleness uses the newest liveness signal ──
+
+    use crate::shared::helpers::iso_secs_ago as ago;
+
+    /// Run `auto-x` with Running agents started `started_secs_ago` seconds ago.
+    fn cleanup_fixture(base: &Path, agents: &[(&str, u64)]) {
+        let mut run = make_run("auto-x", vec![], vec![]);
+        run.agents = agents
+            .iter()
+            .map(|(id, started)| {
+                let mut a = make_run("r", vec![(id, AgentStatus::Running)], vec![]).agents;
+                let mut a = a.remove(0);
+                a.started_at = Some(ago(*started));
+                a
+            })
+            .collect();
+        run.updated_at = crate::shared::helpers::now_iso();
+        init_run(base, &run).unwrap();
+    }
+
+    fn heartbeat(base: &Path, id: &str, secs_ago: u64) {
+        let status = AgentStatusFile {
+            agent_id: id.to_string(),
+            phase: "executing".to_string(),
+            progress: 0.0,
+            last_heartbeat: ago(secs_ago),
+            status: AgentStatus::Running,
+        };
+        write_agent_status(base, id, &status).unwrap();
+    }
+
+    fn agent_status_of(base: &Path, id: &str) -> AgentStatus {
+        read_run(base)
+            .unwrap()
+            .agents
+            .into_iter()
+            .find(|a| a.id == id)
+            .unwrap()
+            .status
+    }
+
+    #[test]
+    fn e_cleanup_keeps_agent_with_fresh_heartbeat() {
+        let tmp = tempfile::tempdir().unwrap();
+        cleanup_fixture(tmp.path(), &[("a1", 7200)]);
+        heartbeat(tmp.path(), "a1", 300);
+        auto_cleanup_stale_runs(tmp.path());
+        assert_eq!(agent_status_of(tmp.path(), "a1"), AgentStatus::Running);
+        assert!(agent_dir(tmp.path(), "a1").is_dir());
+    }
+
+    #[test]
+    fn e_cleanup_marks_done_when_both_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        cleanup_fixture(tmp.path(), &[("a1", 7200)]);
+        heartbeat(tmp.path(), "a1", 45 * 60);
+        auto_cleanup_stale_runs(tmp.path());
+        let run = read_run(tmp.path()).unwrap();
+        assert_eq!(run.agents[0].status, AgentStatus::Done);
+        assert!(run.agents[0].completed_at.is_some());
+    }
+
+    #[test]
+    fn e_cleanup_without_status_uses_started_at() {
+        let tmp = tempfile::tempdir().unwrap();
+        cleanup_fixture(tmp.path(), &[("fresh", 600), ("old", 7200)]);
+        auto_cleanup_stale_runs(tmp.path());
+        assert_eq!(agent_status_of(tmp.path(), "fresh"), AgentStatus::Running);
+        assert_eq!(agent_status_of(tmp.path(), "old"), AgentStatus::Done);
+    }
+
+    #[test]
+    fn e_cleanup_reads_bom_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        cleanup_fixture(tmp.path(), &[("a1", 7200)]);
+        heartbeat(tmp.path(), "a1", 300);
+        let path = agent_status_file(tmp.path(), "a1");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend(fs::read(&path).unwrap());
+        fs::write(&path, bytes).unwrap();
+        auto_cleanup_stale_runs(tmp.path());
+        assert_eq!(agent_status_of(tmp.path(), "a1"), AgentStatus::Running);
     }
 }

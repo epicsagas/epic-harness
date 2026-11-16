@@ -252,7 +252,8 @@ fn running_agent_ids(orch_dir: &Path) -> Vec<String> {
             };
             let status_path = entry.path().join("status.json");
             if let Ok(content) = std::fs::read_to_string(&status_path)
-                && let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content)
+                && let Ok(doc) =
+                    crate::shared::helpers::parse_persisted_json::<serde_json::Value>(&content)
                 && doc.get("status").and_then(|v| v.as_str()) == Some("running")
             {
                 ids.push(agent_id);
@@ -342,7 +343,7 @@ fn check_control_json_pause(current_agent: Option<&str>, orch_dir: &Path) -> boo
         Ok(c) => c,
         Err(_) => return false,
     };
-    let doc: serde_json::Value = match serde_json::from_str(&content) {
+    let doc: serde_json::Value = match crate::shared::helpers::parse_persisted_json(&content) {
         Ok(d) => d,
         Err(_) => return false,
     };
@@ -975,6 +976,20 @@ mod tests {
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":true}").unwrap();
 
         assert!(check_control_json_pause(Some("agent-1"), &orch_dir));
+    }
+
+    #[test]
+    fn e_guard_pause_honored_with_bom_control() {
+        let dir = tempfile::tempdir().unwrap();
+        let orch_dir = dir.path().join("orchestrator");
+        std::fs::create_dir_all(&orch_dir).unwrap();
+        std::fs::write(
+            orch_dir.join("control.json"),
+            "\u{feff}{\"action\":\"pause\",\"target\":\"a1\"}",
+        )
+        .unwrap();
+
+        assert!(check_control_json_pause(Some("a1"), &orch_dir));
     }
 
     #[test]

@@ -550,7 +550,9 @@ fn scan_orbit_pipeline_files(projects_root: &std::path::Path) -> Vec<serde_json:
                     if fname.starts_with("PIPELINE-")
                         && fname.ends_with(".json")
                         && let Ok(content) = std::fs::read_to_string(f.path())
-                        && let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&content)
+                        && let Ok(mut v) = crate::shared::helpers::parse_persisted_json::<
+                            serde_json::Value,
+                        >(&content)
                         && let Some(obj) = v.as_object_mut()
                     {
                         obj.insert(
