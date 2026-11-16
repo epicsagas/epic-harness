@@ -23,7 +23,7 @@ if (-not $tag) { Write-Error "Error: could not determine latest version"; exit 1
 $version = $tag.TrimStart("v")
 
 $baseUrl = "https://github.com/$Repo/releases/download/$tag"
-$archive = "$Binary-$target.zip"
+$archive = "epic-harness-$target.zip"
 $url     = "$baseUrl/$archive"
 $shaUrl  = "$baseUrl/$archive.sha256"
 
