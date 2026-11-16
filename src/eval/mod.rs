@@ -138,6 +138,10 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
+    for w in config::warnings(&cfg) {
+        eprintln!("warning: {w}");
+    }
+
     if let Err(e) = enter_context(&eval_dir) {
         eprintln!("error: {e}");
         return 1;
@@ -160,13 +164,21 @@ pub fn run(args: &[String]) -> i32 {
 
     let dims = &cfg.dimensions;
     let run_all = dimension_filter.is_none();
+    // `--dimension regression` measures first: it runs every producer, like an unfiltered run.
+    let regression_only = dimension_filter.as_deref() == Some("regression");
+    let producers = run_all || (regression_only && dims.regression.enabled);
+    if regression_only && !dims.regression.enabled {
+        results.push(runner::skipped_regression(
+            "regression_disabled",
+            dims.regression.extra.threshold,
+        ));
+    }
 
     // Resolve baseline directory: in-repo benchmarks/baselines/ first, then harness-local
     let baseline_path = resolve_baseline_dir(&cwd, &harness, dims);
 
     // A missing baseline is a first run; an unreadable one must not pass silently.
-    let regression_runs =
-        dims.regression.enabled && (run_all || dimension_filter.as_deref() == Some("regression"));
+    let regression_runs = dims.regression.enabled && (run_all || regression_only);
     let prev = if regression_runs {
         match baseline::load_latest(&baseline_path) {
             Ok(prev) => prev,
@@ -181,21 +193,23 @@ pub fn run(args: &[String]) -> i32 {
         None
     };
 
-    if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled {
+    if (producers || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled
+    {
         results.push(runner::run_correctness(
             &effective,
             dims.correctness.extra.min_pass_rate,
         ));
     }
-    if (run_all || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled {
+    if (producers || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled
+    {
         results.push(runner::run_performance(&effective));
     }
-    if (run_all || dimension_filter.as_deref() == Some("quality")) && dims.quality.enabled {
+    if (producers || dimension_filter.as_deref() == Some("quality")) && dims.quality.enabled {
         results.push(runner::run_quality(&effective));
     }
 
     // Run configured project benchmarks
-    if run_all || dimension_filter.as_deref() == Some("benchmarks") {
+    if producers || dimension_filter.as_deref() == Some("benchmarks") {
         for bench in &cfg.benchmarks {
             results.push(runner::run_benchmark(bench));
         }
@@ -219,10 +233,14 @@ pub fn run(args: &[String]) -> i32 {
     } else {
         eval_dir.join("results")
     };
+    let nothing_measured = rpt.overall_verdict == "SKIPPED";
+    if baseline_update && nothing_measured {
+        eprintln!("warning: nothing was measured (overall SKIPPED); baseline not saved");
+    }
     let saved = persist(
         &rpt,
         &results_dir,
-        baseline_update.then_some(baseline_path.as_path()),
+        (baseline_update && !nothing_measured).then_some(baseline_path.as_path()),
     );
 
     // Output

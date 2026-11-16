@@ -173,6 +173,24 @@ pub fn run_quality(cmds: &ResolvedCommands) -> DimResult {
 
 // ── Regression ──────────────────────────────────────────────────────
 
+/// A SKIPPED regression result. `reason` is one of
+/// "no_baseline" | "no_comparable_dimensions" | "regression_disabled".
+pub fn skipped_regression(reason: &str, threshold: f64) -> DimResult {
+    DimResult {
+        dimension: "regression".into(),
+        score: 0.0,
+        passed: false,
+        verdict: "SKIPPED".into(),
+        details: json!({
+            "threshold": threshold,
+            "compared": 0,
+            "reason": reason,
+            "deltas": {},
+        }),
+        duration_ms: 0,
+    }
+}
+
 pub fn compute_regression(
     results: &[DimResult],
     baseline: Option<&serde_json::Value>,
@@ -180,51 +198,77 @@ pub fn compute_regression(
 ) -> DimResult {
     let start = Instant::now();
 
-    let Some(prev) = baseline.and_then(|b| b.get("dimensions")) else {
-        return DimResult {
-            dimension: "regression".into(),
-            score: 1.0,
-            passed: true,
-            verdict: "PASS".into(),
-            details: json!({"note": "no previous baseline — first run"}),
-            duration_ms: start.elapsed().as_millis() as u64,
-        };
+    let Some(prev) = baseline
+        .and_then(|b| b.get("dimensions"))
+        .and_then(Value::as_object)
+    else {
+        let mut r = skipped_regression("no_baseline", threshold);
+        r.details["note"] = json!("no previous baseline, first run");
+        return r;
     };
 
     let mut deltas = serde_json::Map::new();
+    let mut skipped = serde_json::Map::new();
     let mut any_regression = false;
 
-    for r in results {
-        if let Some(prev_dim) = prev.get(&r.dimension) {
-            let prev_score = prev_dim
-                .get("score")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0);
-            let delta = r.score - prev_score;
-            let regressed = delta < -threshold;
-            if regressed {
-                any_regression = true;
+    for r in results.iter().filter(|r| r.dimension != "regression") {
+        let reason = if r.verdict == "SKIPPED" {
+            "current_skipped"
+        } else if let Some(prev_dim) = prev.get(&r.dimension) {
+            if prev_dim.get("verdict").and_then(Value::as_str) == Some("SKIPPED") {
+                "baseline_skipped"
+            } else {
+                match prev_dim.get("score").and_then(Value::as_f64) {
+                    Some(prev_score) if prev_score.is_finite() && r.score.is_finite() => {
+                        let delta = r.score - prev_score;
+                        let regressed = delta < -threshold;
+                        any_regression |= regressed;
+                        deltas.insert(
+                            r.dimension.clone(),
+                            json!({
+                                "baseline": prev_score,
+                                "current": r.score,
+                                "delta": format!("{:+.4}", delta),
+                                "regressed": regressed,
+                            }),
+                        );
+                        continue;
+                    }
+                    _ => "non_finite",
+                }
             }
-            deltas.insert(
-                r.dimension.clone(),
-                json!({
-                    "baseline": prev_score,
-                    "current": r.score,
-                    "delta": format!("{:+.4}", delta),
-                    "regressed": regressed,
-                }),
-            );
-        }
+        } else {
+            "no_baseline_entry"
+        };
+        skipped.insert(r.dimension.clone(), json!(reason));
     }
 
-    let score = if any_regression { 0.0 } else { 1.0 };
+    let mut missing_in_current: Vec<&String> = prev
+        .keys()
+        .filter(|k| *k != "regression" && !results.iter().any(|r| &r.dimension == *k))
+        .collect();
+    missing_in_current.sort();
+
+    if deltas.is_empty() {
+        let mut r = skipped_regression("no_comparable_dimensions", threshold);
+        r.details["skipped"] = json!(skipped);
+        r.details["missing_in_current"] = json!(missing_in_current);
+        r.duration_ms = start.elapsed().as_millis() as u64;
+        return r;
+    }
 
     DimResult {
         dimension: "regression".into(),
-        score,
+        score: if any_regression { 0.0 } else { 1.0 },
         passed: !any_regression,
         verdict: if any_regression { "FAIL" } else { "PASS" }.into(),
-        details: json!({ "deltas": deltas, "threshold": threshold }),
+        details: json!({
+            "threshold": threshold,
+            "compared": deltas.len(),
+            "deltas": deltas,
+            "skipped": skipped,
+            "missing_in_current": missing_in_current,
+        }),
         duration_ms: start.elapsed().as_millis() as u64,
     }
 }
@@ -444,4 +488,86 @@ fn truncate(s: &str, max: usize) -> String {
         .find(|&i| s.is_char_boundary(i))
         .unwrap_or(0);
     format!("...{}", &s[end..])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dim(name: &str, score: f64, verdict: &str) -> DimResult {
+        DimResult {
+            dimension: name.into(),
+            score,
+            passed: verdict == "PASS",
+            verdict: verdict.into(),
+            details: json!({}),
+            duration_ms: 0,
+        }
+    }
+
+    fn baseline(entries: Value) -> Value {
+        json!({ "dimensions": entries })
+    }
+
+    #[test]
+    fn a_missing_in_current_listed() {
+        let base = baseline(json!({
+            "benchmark:a": {"score": 1.0, "verdict": "PASS"},
+            "benchmark:old": {"score": 1.0, "verdict": "PASS"},
+        }));
+        let r = compute_regression(&[dim("benchmark:a", 1.0, "PASS")], Some(&base), 0.05);
+        assert_eq!(r.verdict, "PASS");
+        assert_eq!(r.details["missing_in_current"], json!(["benchmark:old"]));
+    }
+
+    #[test]
+    fn a_regression_details_golden() {
+        let base = baseline(json!({
+            "benchmark:a": {"score": 1.0, "verdict": "PASS"},
+            "benchmark:old": {"score": 1.0, "verdict": "PASS"},
+            "performance": {"score": 1.0, "verdict": "PASS"},
+        }));
+        let results = [
+            dim("benchmark:a", 0.9, "PASS"),
+            dim("performance", 0.0, "SKIPPED"),
+        ];
+        let r = compute_regression(&results, Some(&base), 0.05);
+        assert_eq!(r.verdict, "FAIL");
+        assert_eq!(
+            r.details,
+            json!({
+                "threshold": 0.05,
+                "compared": 1,
+                "deltas": { "benchmark:a": { "baseline": 1.0, "current": 0.9, "delta": "-0.1000", "regressed": true } },
+                "skipped": { "performance": "current_skipped" },
+                "missing_in_current": ["benchmark:old"]
+            })
+        );
+    }
+
+    #[test]
+    fn a_regression_grid_property() {
+        let steps: Vec<f64> = (0..=20).map(|i| f64::from(i) * 0.05).collect();
+        for threshold in [0.0, 0.05, 0.5, 1.0] {
+            for &base in &steps {
+                let b = baseline(json!({"benchmark:a": {"score": base, "verdict": "PASS"}}));
+                for &cur in &steps {
+                    let r =
+                        compute_regression(&[dim("benchmark:a", cur, "PASS")], Some(&b), threshold);
+                    let want = if cur - base < -threshold {
+                        "FAIL"
+                    } else {
+                        "PASS"
+                    };
+                    assert_eq!(r.verdict, want, "cur={cur} base={base} t={threshold}");
+                    let s = compute_regression(
+                        &[dim("benchmark:a", cur, "SKIPPED")],
+                        Some(&b),
+                        threshold,
+                    );
+                    assert_eq!(s.verdict, "SKIPPED");
+                }
+            }
+        }
+    }
 }

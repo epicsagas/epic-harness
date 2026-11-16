@@ -20,14 +20,12 @@ pub fn build(results: &[DimResult], _prev: &Option<serde_json::Value>) -> Report
     let mut dims = serde_json::Map::new();
     let mut total_score = 0.0;
     let mut count = 0usize;
-    let mut any_fail = false;
 
     for r in results {
         let score = r.score;
-        total_score += score;
-        count += 1;
-        if r.verdict == "FAIL" {
-            any_fail = true;
+        if r.verdict != "SKIPPED" {
+            total_score += score;
+            count += 1;
         }
         dims.insert(
             r.dimension.clone(),
@@ -47,18 +45,10 @@ pub fn build(results: &[DimResult], _prev: &Option<serde_json::Value>) -> Report
         0.0
     };
 
-    let overall_verdict = if any_fail {
-        "FAIL"
-    } else if dims.values().any(|v| {
-        v.get("verdict")
-            .and_then(|v| v.as_str())
-            .map(|s| s == "WARN")
-            .unwrap_or(false)
-    }) {
-        "WARN"
-    } else {
-        "PASS"
-    };
+    let overall_verdict = ["FAIL", "WARN", "PASS"]
+        .into_iter()
+        .find(|v| results.iter().any(|r| r.verdict == *v))
+        .unwrap_or("SKIPPED");
 
     Report {
         timestamp,
@@ -102,6 +92,7 @@ pub fn print_table(report: &Report) {
         "PASS" => "✓",
         "WARN" => "⚠",
         "FAIL" => "✗",
+        "SKIPPED" => "○",
         _ => "?",
     };
     println!(
@@ -109,4 +100,46 @@ pub fn print_table(report: &Report) {
         "OVERALL", report.overall_score, overall_icon, report.overall_verdict
     );
     println!();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dim(name: &str, score: f64, verdict: &str) -> DimResult {
+        DimResult {
+            dimension: name.into(),
+            score,
+            passed: verdict == "PASS",
+            verdict: verdict.into(),
+            details: serde_json::json!({}),
+            duration_ms: 0,
+        }
+    }
+
+    #[test]
+    fn a_overall_score_excludes_skipped() {
+        let r = build(
+            &[
+                dim("benchmark:a", 1.0, "PASS"),
+                dim("correctness", 0.0, "SKIPPED"),
+            ],
+            &None,
+        );
+        assert_eq!(r.overall_score, 1.0);
+        assert_eq!(r.overall_verdict, "PASS");
+    }
+
+    #[test]
+    fn overall_verdict_precedence() {
+        let v = |d: &[(&str, &str)]| {
+            let rs: Vec<_> = d.iter().map(|(n, x)| dim(n, 1.0, x)).collect();
+            build(&rs, &None).overall_verdict
+        };
+        assert_eq!(v(&[("a", "PASS"), ("b", "WARN"), ("c", "FAIL")]), "FAIL");
+        assert_eq!(v(&[("a", "PASS"), ("b", "WARN")]), "WARN");
+        assert_eq!(v(&[("a", "SKIPPED"), ("b", "PASS")]), "PASS");
+        assert_eq!(v(&[("a", "SKIPPED")]), "SKIPPED");
+        assert_eq!(v(&[]), "SKIPPED");
+    }
 }

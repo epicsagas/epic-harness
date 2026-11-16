@@ -160,6 +160,7 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
    - `benchmarks/eval_runner.py` in CWD (auto-detected benchmark)
 2. If eval is active, run `epic eval --json` via the **eval** skill
 3. **Eval PASS** → proceed to Ship
+3b. **Eval SKIPPED** (nothing measured, or no baseline yet): record "eval": "SKIPPED" in the pipeline state and proceed to Ship. SKIPPED is not a failure and does not increment audit_fail_count.
 4. **Eval FAIL (regression detected)** → increment `audit_fail_count`:
    - `< 3`: plan fixes, execute, return to Step 4
    - `≥ 3`: **PAUSE** — ask user "continue or abort?"

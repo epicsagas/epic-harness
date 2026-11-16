@@ -49,8 +49,13 @@ impl Env {
 
     /// Returns (exit code, stdout, stderr).
     fn eval(&self) -> (i32, String, String) {
+        self.run(&["--json"])
+    }
+
+    fn run(&self, args: &[&str]) -> (i32, String, String) {
         let out = Command::new(env!("CARGO_BIN_EXE_epic-harness"))
-            .args(["eval", "--json"])
+            .arg("eval")
+            .args(args)
             .current_dir(&self.cwd)
             .env("HOME", &self.home)
             .env("HARNESS_DIR", &self.harness)
@@ -154,4 +159,171 @@ fn composite_without_valid_score_fails() {
         assert_eq!(verdict(&out), "FAIL", "{body}");
         assert_eq!(code, 1, "{body}");
     }
+}
+
+// ── 0.9.0 regression gating: SKIPPED verdict and validated threshold ──
+
+fn json(stdout: &str) -> serde_json::Value {
+    serde_json::from_str(stdout.trim()).unwrap()
+}
+
+const BENCH_B: &str = "benchmarks:\n  - name: b\n    command: \"sh b.sh\"\n";
+
+impl Env {
+    fn baseline(&self, dimensions: &str) {
+        let dir = self.cwd.join("benchmarks/baselines");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("latest.json"),
+            format!("{{\"dimensions\": {dimensions}}}"),
+        )
+        .unwrap();
+    }
+
+    fn latest_exists(&self) -> bool {
+        self.cwd.join("benchmarks/baselines/latest.json").exists()
+            || self
+                .harness
+                .join("projects")
+                .join(SLUG)
+                .join("eval/baselines/latest.json")
+                .exists()
+    }
+}
+
+#[test]
+fn a_threshold_nan_rejected() {
+    let env = Env::new();
+    env.config("dimensions:\n  regression:\n    extra:\n      threshold: .nan\n");
+    let (code, _, err) = env.eval();
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("threshold must be a finite number"), "{err}");
+}
+
+#[test]
+fn a_threshold_inf_rejected() {
+    for bad in [".inf", "-.inf"] {
+        let env = Env::new();
+        env.config(&format!(
+            "dimensions:\n  regression:\n    extra:\n      threshold: {bad}\n"
+        ));
+        let (code, _, err) = env.eval();
+        assert_eq!(code, 1, "{bad}: {err}");
+        assert!(
+            err.contains("threshold must be a finite number"),
+            "{bad}: {err}"
+        );
+    }
+}
+
+#[test]
+fn a_regression_filter_runs_producers() {
+    let env = Env::new();
+    env.script("b.sh", "exit 1\n");
+    env.config(BENCH_B);
+    env.baseline(r#"{"benchmark:b": {"score": 1.0, "verdict": "PASS"}}"#);
+    let (code, out, err) = env.run(&["--dimension", "regression", "--json"]);
+    assert_eq!(code, 1, "{out} {err}");
+    let v = json(&out);
+    assert_eq!(v["dimensions"]["benchmark:b"]["verdict"], "FAIL");
+    let reg = &v["dimensions"]["regression"];
+    assert_eq!(reg["verdict"], "FAIL");
+    assert_eq!(reg["details"]["deltas"]["benchmark:b"]["regressed"], true);
+}
+
+#[test]
+fn a_regression_no_baseline_is_skipped() {
+    let env = Env::new();
+    env.script("b.sh", "exit 0\n");
+    env.config(BENCH_B);
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{err}");
+    let v = json(&out);
+    let reg = &v["dimensions"]["regression"];
+    assert_eq!(reg["verdict"], "SKIPPED");
+    assert_eq!(reg["details"]["reason"], "no_baseline");
+    assert_eq!(v["overall_verdict"], "PASS");
+}
+
+#[test]
+fn a_empty_config_overall_skipped() {
+    let env = Env::new();
+    let (code, _, err) = env.run(&["--init"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{err}");
+    let v = json(&out);
+    assert_eq!(v["overall_verdict"], "SKIPPED");
+    assert_eq!(v["overall_score"], 0.0);
+}
+
+#[test]
+fn a_skipped_dim_not_compared() {
+    let env = Env::new();
+    env.config("dimensions:\n  performance:\n    enabled: true\n");
+    env.baseline(r#"{"performance": {"score": 1.0, "verdict": "PASS"}}"#);
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    let reg = &json(&out)["dimensions"]["regression"];
+    assert_eq!(reg["verdict"], "SKIPPED");
+    assert_eq!(reg["details"]["skipped"]["performance"], "current_skipped");
+}
+
+#[test]
+fn a_regression_disabled_filter() {
+    let env = Env::new();
+    env.script("b.sh", "touch ran.txt\n");
+    env.config(&format!(
+        "dimensions:\n  regression:\n    enabled: false\n{BENCH_B}"
+    ));
+    let (code, out, err) = env.run(&["--dimension", "regression", "--json"]);
+    assert_eq!(code, 0, "{out} {err}");
+    let reg = &json(&out)["dimensions"]["regression"];
+    assert_eq!(reg["verdict"], "SKIPPED");
+    assert_eq!(reg["details"]["reason"], "regression_disabled");
+    assert!(!env.cwd.join("ran.txt").exists());
+}
+
+#[test]
+fn a_max_regression_pct_warns_when_perf_enabled() {
+    let env = Env::new();
+    env.script("p.sh", "exit 0\n");
+    env.config("dimensions:\n  regression:\n    enabled: false\n  performance:\n    enabled: true\n    command: \"sh p.sh\"\n    extra:\n      max_regression_pct: 5\n");
+    let (code, _, err) = env.eval();
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("max_regression_pct is ignored"), "{err}");
+}
+
+#[test]
+fn a_max_regression_pct_silent_when_perf_disabled() {
+    let env = Env::new();
+    env.config("dimensions:\n  regression:\n    enabled: false\n  performance:\n    enabled: false\n    extra:\n      max_regression_pct: 10.0\n");
+    let (_, _, err) = env.eval();
+    assert!(!err.contains("max_regression_pct"), "{err}");
+}
+
+#[test]
+fn a_init_omits_max_regression_pct() {
+    let env = Env::new();
+    let (code, _, err) = env.run(&["--init"]);
+    assert_eq!(code, 0, "{err}");
+    let yaml = fs::read_to_string(
+        env.harness
+            .join("projects")
+            .join(SLUG)
+            .join("eval/eval.yaml"),
+    )
+    .unwrap();
+    assert!(!yaml.contains("max_regression_pct"), "{yaml}");
+}
+
+#[test]
+fn a_baseline_update_refuses_skipped() {
+    let env = Env::new();
+    let (code, _, err) = env.run(&["--init"]);
+    assert_eq!(code, 0, "{err}");
+    let (code, _, err) = env.run(&["--baseline-update", "--json"]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("baseline not saved"), "{err}");
+    assert!(!env.latest_exists());
 }

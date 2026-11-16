@@ -51,10 +51,12 @@ pub struct CorrectnessExtra {
     pub min_pass_rate: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PerformanceExtra {
-    #[serde(default = "default_regression_pct")]
-    pub max_regression_pct: f64,
+    /// Not implemented: performance is gated on exit status only. Kept so old
+    /// eval.yaml files still parse; never scaffolded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_regression_pct: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -111,9 +113,6 @@ fn default_true() -> bool {
 fn default_pass_rate() -> f64 {
     1.0
 }
-fn default_regression_pct() -> f64 {
-    10.0
-}
 fn default_threshold() -> f64 {
     0.05
 }
@@ -169,14 +168,6 @@ impl Default for CorrectnessExtra {
     }
 }
 
-impl Default for PerformanceExtra {
-    fn default() -> Self {
-        Self {
-            max_regression_pct: 10.0,
-        }
-    }
-}
-
 impl Default for QualityExtra {
     fn default() -> Self {
         Self { llm_judge: true }
@@ -204,6 +195,12 @@ pub fn load(eval_dir: &Path) -> Result<EvalConfig, String> {
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let cfg: EvalConfig =
         serde_yaml::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))?;
+    validate(&cfg, &path)?;
+    Ok(cfg)
+}
+
+/// Semantic validation after YAML parse.
+fn validate(cfg: &EvalConfig, path: &Path) -> Result<(), String> {
     let rate = cfg.dimensions.correctness.extra.min_pass_rate;
     if !(0.0..=1.0).contains(&rate) {
         return Err(format!(
@@ -211,7 +208,27 @@ pub fn load(eval_dir: &Path) -> Result<EvalConfig, String> {
             path.display()
         ));
     }
-    Ok(cfg)
+    let threshold = cfg.dimensions.regression.extra.threshold;
+    if !(threshold.is_finite() && (0.0..=1.0).contains(&threshold)) {
+        return Err(format!(
+            "{}: dimensions.regression.extra.threshold must be a finite number within 0.0..=1.0, got {threshold:?}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Non-fatal configuration warnings, one per line, printed by `mod.rs`.
+pub fn warnings(cfg: &EvalConfig) -> Vec<String> {
+    let perf = &cfg.dimensions.performance;
+    let mut out = Vec::new();
+    if perf.enabled && perf.extra.max_regression_pct.is_some() {
+        out.push(
+            "dimensions.performance.extra.max_regression_pct is ignored: epic eval gates performance on exit status only. Remove the key to silence this warning."
+                .to_string(),
+        );
+    }
+    out
 }
 
 /// Scaffold a minimal eval.yaml with auto-detected stack and benchmarks.
@@ -406,4 +423,26 @@ pub fn resolve_commands(cfg: &EvalConfig) -> Result<ResolvedCommands, String> {
         mutation_command: mutation_cmd,
         stack,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_threshold_range_boundaries() {
+        let load_with = |v: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(
+                dir.path().join("eval.yaml"),
+                format!("dimensions:\n  regression:\n    extra:\n      threshold: {v}\n"),
+            )
+            .unwrap();
+            load(dir.path()).map(|_| ())
+        };
+        assert!(load_with("-0.1").is_err());
+        assert!(load_with("1.5").is_err());
+        assert!(load_with("0.0").is_ok());
+        assert!(load_with("1.0").is_ok());
+    }
 }

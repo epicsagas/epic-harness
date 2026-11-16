@@ -98,6 +98,8 @@ epic eval --json
 
 This runs all enabled dimensions and outputs a JSON result. Capture the output.
 
+overall_verdict is PASS, WARN, FAIL, or SKIPPED. SKIPPED means no dimension was measured and exits 0. Report it as SKIPPED, never as PASS.
+
 If the CLI reports `llm_judge: SKIPPED` (no LLM available in CLI mode), proceed to Step 2 for LLM-as-judge. Otherwise, skip to Step 3.
 
 ### Step 2: LLM-as-Judge (when llm_judge enabled)
@@ -124,6 +126,8 @@ If the quality dimension has `llm_judge: true` and CLI marked it SKIPPED:
 ```bash
 cat $HARNESS_DIR/eval/baselines/latest.json
 ```
+
+Without a baseline, the regression dimension reports SKIPPED with reason no_baseline.
 
 If no baseline exists, the current run BECOMES the first baseline. Save it:
 ```bash
