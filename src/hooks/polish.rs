@@ -3,7 +3,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use super::common::*;
-use crate::shared::sanitize::mask_secrets;
+use crate::shared::sanitize::mask_snippet;
 use crate::telemetry::{FormatterKind, Telemetry};
 
 /// Host-supplied session id captured at hook entry (None → date+PID fallback).
@@ -29,7 +29,7 @@ fn try_exec_args(prog: &str, args: &[&str], cwd: &Path) -> Option<String> {
 /// Formatter/compiler output reaches the observation store: mask first, then
 /// truncate, so a secret cut by the limit cannot slip past the masks.
 fn stored_snippet(s: &str) -> String {
-    truncate_str(&mask_secrets(s), 500).to_string()
+    mask_snippet(s, 500)
 }
 
 fn feedback_to_observe(

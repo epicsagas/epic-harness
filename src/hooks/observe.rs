@@ -7,7 +7,7 @@ use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
-use crate::shared::sanitize::{mask_json_secrets, mask_path_action, mask_secrets};
+use crate::shared::sanitize::{mask_json_secrets, mask_path_action, mask_snippet};
 
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
@@ -380,14 +380,14 @@ fn resolve_action(v: &serde_json::Value) -> String {
             let files = apply_patch_paths(cmd, true);
             if files.is_empty() {
                 // A real shell command, not a patch payload.
-                return Some(truncate_str(&mask_secrets(cmd), 500).to_string());
+                return Some(mask_snippet(cmd, 500));
             }
             let masked: Vec<String> = files.iter().map(|f| mask_path_action(f)).collect();
             Some(truncate_str(&masked.join(" "), 500).to_string())
         })
         .unwrap_or_else(|| {
             let s = serde_json::to_string(&mask_json_secrets(v)).unwrap_or_default();
-            truncate_str(&mask_secrets(&s), 200).to_string()
+            mask_snippet(&s, 200)
         })
 }
 
@@ -552,7 +552,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = truncate_str(&mask_secrets(&combined), 500).to_string();
+            let masked = mask_snippet(&combined, 500);
             record.error_snippet = Some(masked);
         }
     }
@@ -625,6 +625,7 @@ pub fn run(input: &HookInput) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::sanitize::mask_secrets;
     use serial_test::serial;
 
     // ── resolve_action ──────────────────────────────

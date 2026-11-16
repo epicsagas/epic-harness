@@ -166,9 +166,33 @@ pub fn mask_secrets(s: &str) -> String {
         .into_owned()
 }
 
+/// Most bytes `mask_snippet` scans. Tool output can run to many megabytes; a
+/// secret that starts past this point cannot reach a snippet of a few hundred
+/// bytes, so scanning the rest only costs hook latency.
+const SNIPPET_SCAN_LIMIT: usize = 64 * 1024;
+
+/// Mask, then truncate to `max` bytes, scanning at most `SNIPPET_SCAN_LIMIT`
+/// bytes of `s`. Masking before the final cut keeps a secret split by the limit
+/// from slipping past the patterns.
+pub fn mask_snippet(s: &str, max: usize) -> String {
+    use crate::shared::helpers::truncate_str;
+    truncate_str(&mask_secrets(truncate_str(s, SNIPPET_SCAN_LIMIT)), max).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mask_snippet_bounds_scan_and_output() {
+        let big = format!(
+            "token=sk-abcdefghijklmnopqrstuvwx {}",
+            "x".repeat(8 * 1024 * 1024)
+        );
+        let out = mask_snippet(&big, 500);
+        assert!(out.len() <= 500);
+        assert!(!out.contains("sk-abcdefghijklmnopqrstuvwx"), "{out}");
+    }
 
     /// Two files in the project must stay distinguishable after sanitizing.
     /// Masking an absolute path alone turns every one of them into `<PATH>`,
