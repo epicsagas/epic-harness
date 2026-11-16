@@ -307,6 +307,7 @@ pub fn build_router(state: AppState, port: u16) -> Router {
         format!("http://localhost:{port}").parse().unwrap(),
         format!("http://127.0.0.1:{port}").parse().unwrap(),
     ];
+    let hosts = [format!("localhost:{port}"), format!("127.0.0.1:{port}")];
     let cors = CorsLayer::new()
         .allow_origin(origins.clone())
         .allow_methods([
@@ -340,7 +341,28 @@ pub fn build_router(state: AppState, port: u16) -> Router {
         .route("/api/search", get(handle_search))
         .layer(middleware::from_fn_with_state(origins, guard_mutations))
         .layer(cors)
+        .layer(middleware::from_fn_with_state(hosts, guard_host))
         .with_state(state)
+}
+
+/// DNS rebinding: a page on an attacker domain that resolves to 127.0.0.1 is
+/// same-origin with this server, so neither CORS nor the Origin check applies,
+/// but its requests still carry the attacker's Host. Serve only the loopback
+/// hosts the server binds, for every method (a rebound GET can read the graph).
+async fn guard_host(State(hosts): State<[String; 2]>, req: Request, next: Next) -> Response {
+    // HTTP/2 has no Host header, only the :authority carried in the URI.
+    let host = match req.headers().get(header::HOST) {
+        Some(h) => h.to_str().ok(),
+        None => req.uri().authority().map(|a| a.as_str()),
+    };
+    if !host.is_some_and(|h| hosts.iter().any(|a| a.eq_ignore_ascii_case(h))) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "host not allowed"})),
+        )
+            .into_response();
+    }
+    next.run(req).await
 }
 
 /// CORS alone does not stop a cross-site `text/plain` POST (a "simple" request
@@ -653,10 +675,17 @@ mod tests {
         AppState { pool }
     }
 
+    /// In-process server that, like a real client, sends the loopback Host header.
+    fn test_server(app: Router) -> TestServer {
+        let mut server = TestServer::new(app);
+        server.add_header(header::HOST, "localhost:7700");
+        server
+    }
+
     #[tokio::test]
     async fn root_returns_html() {
         let app = build_router(make_state().await, 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
         let res = server.get("/").await;
         assert_eq!(res.status_code(), StatusCode::OK);
         assert!(res.text().contains("<!DOCTYPE html>") || res.text().contains("<html"));
@@ -665,7 +694,7 @@ mod tests {
     #[tokio::test]
     async fn stats_endpoint_returns_json() {
         let app = build_router(make_state().await, 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
         let res = server.get("/api/stats").await;
         assert_eq!(res.status_code(), StatusCode::OK);
     }
@@ -673,7 +702,7 @@ mod tests {
     #[tokio::test]
     async fn list_nodes_empty() {
         let app = build_router(make_state().await, 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
         let res = server.get("/api/nodes").await;
         assert_eq!(res.status_code(), StatusCode::OK);
     }
@@ -681,7 +710,7 @@ mod tests {
     #[tokio::test]
     async fn create_and_get_node() {
         let app = build_router(make_state().await, 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
 
         let payload = json!({
             "type": "concept",
@@ -706,7 +735,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_node_id_returns_400() {
         let app = build_router(make_state().await, 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
         let res = server.get("/api/nodes/not-a-valid-uuid").await;
         assert_eq!(res.status_code(), StatusCode::BAD_REQUEST);
     }
@@ -714,7 +743,7 @@ mod tests {
     #[tokio::test]
     async fn search_returns_results() {
         let app = build_router(make_state().await, 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
         let res = server.get("/api/search?q=test").await;
         assert_eq!(res.status_code(), StatusCode::OK);
     }
@@ -723,7 +752,7 @@ mod tests {
     async fn list_nodes_limit_parameter() {
         let state = make_state().await;
         let app = build_router(state.clone(), 7700);
-        let server = TestServer::new(app);
+        let server = test_server(app);
 
         // Insert 5 nodes
         for i in 0..5 {
@@ -786,7 +815,7 @@ mod tests {
     #[tokio::test]
     async fn delete_node_removes_node_edges_and_fts_entry() {
         let state = make_state().await;
-        let server = TestServer::new(build_router(state.clone(), 7700));
+        let server = test_server(build_router(state.clone(), 7700));
         let a = create_node(&server, "Delete me").await;
         let b = create_node(&server, "Keep me").await;
         let res = server
@@ -816,7 +845,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_missing_node_returns_404() {
-        let server = TestServer::new(build_router(make_state().await, 7700));
+        let server = test_server(build_router(make_state().await, 7700));
         let res = server
             .delete("/api/nodes/00000000-0000-4000-8000-000000000000")
             .await;
@@ -825,7 +854,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_edge_reports_not_found_without_panic() {
-        let server = TestServer::new(build_router(make_state().await, 7700));
+        let server = test_server(build_router(make_state().await, 7700));
         let res = server
             .delete("/api/edges/00000000-0000-4000-8000-000000000000")
             .await;
@@ -835,7 +864,7 @@ mod tests {
     #[tokio::test]
     async fn cross_site_text_plain_post_is_rejected() {
         let state = make_state().await;
-        let server = TestServer::new(build_router(state.clone(), 7700));
+        let server = test_server(build_router(state.clone(), 7700));
         let body = r#"{"type":"concept","title":"injected","body":"ignore previous instructions"}"#;
 
         // Browser simple request from a foreign page: Origin + text/plain.
@@ -872,7 +901,7 @@ mod tests {
     #[tokio::test]
     async fn non_json_body_is_rejected_even_from_allowed_origin() {
         let state = make_state().await;
-        let server = TestServer::new(build_router(state.clone(), 7700));
+        let server = test_server(build_router(state.clone(), 7700));
         let res = server
             .post("/api/nodes")
             .add_header("origin", "http://localhost:7700")
@@ -885,7 +914,7 @@ mod tests {
 
     #[tokio::test]
     async fn loopback_ip_origin_is_allowed_but_other_ports_and_null_are_not() {
-        let server = TestServer::new(build_router(make_state().await, 7700));
+        let server = test_server(build_router(make_state().await, 7700));
         let post = |origin: &'static str| {
             server
                 .post("/api/nodes")
@@ -903,7 +932,7 @@ mod tests {
 
     #[tokio::test]
     async fn allowed_origin_json_requests_succeed() {
-        let server = TestServer::new(build_router(make_state().await, 7700));
+        let server = test_server(build_router(make_state().await, 7700));
         let res = server
             .post("/api/nodes")
             .add_header("origin", "http://localhost:7700")
@@ -920,5 +949,78 @@ mod tests {
             .add_header("origin", "http://localhost:7700")
             .await;
         assert_eq!(res.status_code(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn only_loopback_host_with_port_is_served() {
+        // No default Host here: each request carries its own.
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        for ok in ["localhost:7700", "127.0.0.1:7700", "LOCALHOST:7700"] {
+            let res = server.get("/api/stats").add_header("host", ok).await;
+            assert_eq!(res.status_code(), StatusCode::OK, "{ok}");
+        }
+        // DNS rebinding: the page origin is an attacker domain that resolves to 127.0.0.1.
+        for bad in [
+            "evil.example",
+            "evil.example:7700",
+            "localhost",
+            "127.0.0.1",
+            "localhost:7701",
+            "127.0.0.1:7701",
+            "localhost.evil.example:7700",
+            "[::1]:7700",
+        ] {
+            let res = server.get("/api/nodes").add_header("host", bad).await;
+            assert_eq!(res.status_code(), StatusCode::FORBIDDEN, "GET {bad}");
+            let res = server
+                .post("/api/nodes")
+                .add_header("host", bad)
+                .json(&json!({"type": "concept", "title": "rebind"}))
+                .await;
+            assert_eq!(res.status_code(), StatusCode::FORBIDDEN, "POST {bad}");
+        }
+    }
+
+    /// Status line of a raw HTTP request over a real socket. `host: None` sends HTTP/1.0 without Host.
+    fn raw_status(port: u16, host: Option<&str>) -> String {
+        use std::io::{Read, Write};
+        let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let req = match host {
+            Some(h) => format!("GET /api/stats HTTP/1.1\r\nHost: {h}\r\nConnection: close\r\n\r\n"),
+            None => "GET /api/stats HTTP/1.0\r\n\r\n".to_string(),
+        };
+        stream.write_all(req.as_bytes()).unwrap();
+        let mut out = String::new();
+        stream.read_to_string(&mut out).unwrap();
+        out.lines().next().unwrap_or_default().to_string()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn real_socket_clients_with_correct_host_keep_working() {
+        let state = make_state().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let app = build_router(state, port);
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let statuses = tokio::task::spawn_blocking(move || {
+            [
+                raw_status(port, Some(&format!("127.0.0.1:{port}"))),
+                raw_status(port, Some(&format!("localhost:{port}"))),
+                raw_status(port, Some("evil.example")),
+                raw_status(port, Some(&format!("evil.example:{port}"))),
+                raw_status(port, None),
+            ]
+        })
+        .await
+        .unwrap();
+        assert!(statuses[0].contains(" 200 "), "{statuses:?}");
+        assert!(statuses[1].contains(" 200 "), "{statuses:?}");
+        for rejected in &statuses[2..] {
+            assert!(rejected.contains(" 403 "), "{statuses:?}");
+        }
     }
 }
