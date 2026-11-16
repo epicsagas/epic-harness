@@ -26,6 +26,21 @@ fn try_exec_args(prog: &str, args: &[&str], cwd: &Path) -> Option<String> {
     }
 }
 
+/// `npx` invocation for `args`: Windows ships npx as a `.cmd` shim, which
+/// `Command` does not resolve via PATHEXT, so it is named explicitly. Hooks
+/// must never download a package, hence `--no-install`.
+fn npx_invocation<'a>(windows: bool, args: &[&'a str]) -> (&'static str, Vec<&'a str>) {
+    let prog = if windows { "npx.cmd" } else { "npx" };
+    let mut full = vec!["--no-install"];
+    full.extend_from_slice(args);
+    (prog, full)
+}
+
+fn try_exec_npx(args: &[&str], cwd: &Path) -> Option<String> {
+    let (prog, full) = npx_invocation(cfg!(windows), args);
+    try_exec_args(prog, &full, cwd)
+}
+
 /// Formatter/compiler output reaches the observation store: mask first, then
 /// truncate, so a secret cut by the limit cannot slip past the masks.
 fn stored_snippet(s: &str) -> String {
@@ -116,7 +131,7 @@ fn format_js(file_path: &str, wd: &Path) {
     let has_prettier = wd.join(".prettierrc").is_file() || wd.join(".prettierrc.json").is_file();
 
     if has_biome {
-        if try_exec_args("npx", &["biome", "format", "--write", file_path], wd).is_some() {
+        if try_exec_npx(&["biome", "format", "--write", file_path], wd).is_some() {
             let name = Path::new(file_path)
                 .file_name()
                 .unwrap_or_default()
@@ -124,9 +139,7 @@ fn format_js(file_path: &str, wd: &Path) {
             hint("polish", &format!("Biome: {name}"));
             feedback_to_observe(file_path, "biome", true, None);
         }
-    } else if has_prettier
-        && try_exec_args("npx", &["prettier", "--write", file_path], wd).is_some()
-    {
+    } else if has_prettier && try_exec_npx(&["prettier", "--write", file_path], wd).is_some() {
         let name = Path::new(file_path)
             .file_name()
             .unwrap_or_default()
@@ -180,7 +193,8 @@ fn check_ts(file_path: &str, wd: &Path) {
     let (prog, base_args): (String, Vec<&str>) = if local_tsc.exists() {
         (local_tsc.to_string_lossy().into_owned(), vec![])
     } else {
-        ("npx".into(), vec!["tsc"])
+        let (prog, args) = npx_invocation(cfg!(windows), &["tsc"]);
+        (prog.into(), args)
     };
 
     let mut args = base_args;
@@ -437,6 +451,16 @@ mod tests {
         std::fs::remove_file(dir.path().join("pyproject.toml")).unwrap();
         std::fs::write(dir.path().join("ruff.toml"), "").unwrap();
         assert_eq!(python_formatter(dir.path()), Some("ruff"));
+    }
+
+    #[test]
+    fn npx_invocation_is_cmd_shim_on_windows_and_never_installs() {
+        let (prog, args) = npx_invocation(true, &["biome", "format"]);
+        assert_eq!(prog, "npx.cmd");
+        assert_eq!(args, ["--no-install", "biome", "format"]);
+        let (prog, args) = npx_invocation(false, &["tsc"]);
+        assert_eq!(prog, "npx");
+        assert_eq!(args, ["--no-install", "tsc"]);
     }
 
     #[test]

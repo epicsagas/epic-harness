@@ -183,7 +183,7 @@ fn check_warned(cmd: &str) -> Vec<&'static str> {
 
 // ── Orchestration: Concurrent Write Conflict Detection ──────
 
-/// Returns true when `EPIC_ORCHESTRATION=enabled` or when `HARNESS_DIR/orchestrator` exists.
+/// Returns true when `EPIC_ORCHESTRATION=enabled` or when the project's orchestrator dir exists.
 fn is_orchestration_enabled() -> bool {
     if std::env::var("EPIC_ORCHESTRATION").as_deref() == Ok("enabled") {
         return true;
@@ -222,14 +222,16 @@ fn extract_written_paths(tool_input: &serde_json::Value) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Resolve the orchestrator base directory from `$HARNESS_DIR/orchestrator`.
+/// Resolve the orchestrator base directory where orchestration writes its
+/// state: `<harness root>/projects/<slug>/orchestrator` (`HARNESS_DIR` only
+/// relocates the root; unset means `~/.harness`).
 fn orchestrator_dir() -> Option<PathBuf> {
-    std::env::var("HARNESS_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .map(|p| p.join("orchestrator"))
-        .filter(|p| p.is_dir())
+    Some(
+        crate::shared::paths::harness_projects_root()
+            .join(crate::shared::paths::project_slug())
+            .join("orchestrator"),
+    )
+    .filter(|p| p.is_dir())
 }
 
 /// Return agent IDs whose `status.json` reports `"running"`.
@@ -503,6 +505,13 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use serial_test::serial;
+
+    /// Where orchestration writes state for a `HARNESS_DIR` root.
+    fn harness_orch_dir(root: &Path) -> PathBuf {
+        root.join("projects")
+            .join(crate::shared::paths::project_slug())
+            .join("orchestrator")
+    }
 
     // ── Blocked commands ────────────────────────────
     #[test]
@@ -1031,7 +1040,7 @@ mod tests {
     #[serial]
     fn run_orchestration_pause_blocks_edit() {
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = harness_orch_dir(dir.path());
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-x\"}").unwrap();
 
@@ -1063,7 +1072,7 @@ mod tests {
     #[serial]
     fn run_orchestration_pause_not_targeting_passes() {
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = harness_orch_dir(dir.path());
         std::fs::create_dir_all(&orch_dir).unwrap();
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-other\"}").unwrap();
 
@@ -1093,9 +1102,11 @@ mod tests {
     #[test]
     #[serial]
     fn run_orchestration_not_enabled_skips_checks() {
-        // No HARNESS_DIR set — orchestration checks are skipped entirely
+        // Empty harness root (no orchestrator dir) — orchestration checks are
+        // skipped entirely. A temp root keeps the test off the real ~/.harness.
+        let dir = tempfile::tempdir().unwrap();
         unsafe {
-            std::env::remove_var("HARNESS_DIR");
+            std::env::set_var("HARNESS_DIR", dir.path());
             std::env::remove_var("EPIC_ORCHESTRATION");
         }
 
@@ -1106,13 +1117,17 @@ mod tests {
         };
         // Should return 0 (no command field -> early return, no orchestration block)
         assert_eq!(run(&input), 0);
+
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+        }
     }
 
     #[test]
     #[serial]
     fn run_orchestration_concurrent_warning_does_not_block() {
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = harness_orch_dir(dir.path());
         let agents_dir = orch_dir.join("agents");
 
         // agent-1 running, modified /src/shared.rs
@@ -1153,7 +1168,7 @@ mod tests {
     fn run_orchestration_bash_tool_skipped() {
         // Bash tool should not trigger orchestration checks
         let dir = tempfile::tempdir().unwrap();
-        let orch_dir = dir.path().join("orchestrator");
+        let orch_dir = harness_orch_dir(dir.path());
         std::fs::create_dir_all(&orch_dir).unwrap();
 
         // SAFETY: env mutation scoped to this test

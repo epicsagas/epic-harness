@@ -333,21 +333,18 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     Ok(file)
 }
 
+/// `File::lock` is `LockFileEx` on Windows. The previous fallback only opened
+/// the file and excluded nothing, so concurrent agent spawns lost updates.
 #[cfg(not(unix))]
 fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
-    use std::sync::OnceLock;
-    static WARNED: OnceLock<()> = OnceLock::new();
-    WARNED.get_or_init(|| {
-        eprintln!(
-            "[harness] warning: file locking unavailable on this platform — \
-             concurrent agent spawns may race"
-        );
-    });
-    fs::OpenOptions::new()
-        .create_new(true)
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
         .write(true)
-        .open(lock_path)
-        .or_else(|_| fs::File::open(lock_path))
+        .open(lock_path)?;
+    file.lock()?;
+    Ok(file)
 }
 
 /// Upsert an agent into an auto-created run.json.
@@ -393,12 +390,19 @@ pub fn upsert_agent_to_run(
     fs::create_dir_all(&a_dir)?;
 
     if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
+        let was_running = existing.status == AgentStatus::Running;
         existing.status = status.clone();
         if status == AgentStatus::Done {
             existing.completed_at = Some(now.clone());
         }
-        if status == AgentStatus::Running && existing.started_at.is_none() {
-            existing.started_at = Some(now.clone());
+        if status == AgentStatus::Running {
+            // A restart: the previous completion no longer applies, and the
+            // old started_at would make stale-heartbeat cleanup end it early.
+            // (Repeated Running updates keep the original start.)
+            existing.completed_at = None;
+            if !was_running || existing.started_at.is_none() {
+                existing.started_at = Some(now.clone());
+            }
         }
     } else {
         run.agents.push(AgentDef {
@@ -420,9 +424,11 @@ pub fn upsert_agent_to_run(
         });
     }
 
-    // Check if all agents are done
+    // Check if all agents are done; a new start reopens a completed run.
     if is_run_complete(&run) {
         run.status = RunStatus::Complete;
+    } else if status == AgentStatus::Running && run.status == RunStatus::Complete {
+        run.status = RunStatus::Running;
     }
     run.updated_at = now.clone();
     write_run(base, &run)?;
@@ -1128,5 +1134,99 @@ mod tests {
 
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600, "file must be owner-read/write only");
+    }
+
+    #[test]
+    fn upsert_running_agent_reopens_completed_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Done).unwrap();
+        let run = read_run(base).unwrap();
+        assert_eq!(run.status, RunStatus::Complete);
+        assert!(run.agents[0].completed_at.is_some());
+
+        // A new agent starts: the run is running again.
+        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Running).unwrap();
+        assert_eq!(read_run(base).unwrap().status, RunStatus::Running);
+
+        // Finish it, then restart the first agent: stale completed_at cleared.
+        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Done).unwrap();
+        assert_eq!(read_run(base).unwrap().status, RunStatus::Complete);
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_eq!(run.status, RunStatus::Running);
+        let a = run.agents.iter().find(|x| x.id == "a").unwrap();
+        assert!(a.completed_at.is_none(), "restart clears completed_at");
+    }
+
+    #[test]
+    fn restarted_agent_gets_fresh_started_at_and_heartbeat() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Done).unwrap();
+        // Age the agent: started an hour ago, heartbeat an hour ago.
+        let old = "2000-01-01T00:00:00Z".to_string();
+        let mut run = read_run(base).unwrap();
+        run.agents[0].started_at = Some(old.clone());
+        write_run(base, &run).unwrap();
+        let mut st = read_agent_status(base, "a").unwrap();
+        st.last_heartbeat = old.clone();
+        write_agent_status(base, "a", &st).unwrap();
+
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        let started = run.agents[0].started_at.clone().unwrap();
+        assert_ne!(started, old, "restart resets started_at");
+        assert_ne!(read_agent_status(base, "a").unwrap().last_heartbeat, old);
+
+        // A repeated Running update (heartbeat cycle) keeps the start time.
+        write_run(base, &{
+            let mut r = run.clone();
+            r.agents[0].started_at = Some(old.clone());
+            r
+        })
+        .unwrap();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        assert_eq!(read_run(base).unwrap().agents[0].started_at, Some(old));
+    }
+
+    #[test]
+    fn concurrent_upserts_keep_every_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let base = base.clone();
+                std::thread::spawn(move || {
+                    upsert_agent_to_run(
+                        &base,
+                        &format!("agent-{i}"),
+                        "t",
+                        "builder",
+                        AgentStatus::Running,
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(read_run(&base).unwrap().agents.len(), 16);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lock_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        upsert_agent_to_run(tmp.path(), "a", "t", "builder", AgentStatus::Running).unwrap();
+        let mode = fs::metadata(orchestrator_dir(tmp.path()).join("run.json.lock"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }
