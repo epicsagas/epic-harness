@@ -1,6 +1,9 @@
 //! eval/config.rs — Eval configuration loading and stack detection
 
 use std::path::Path;
+use std::sync::LazyLock;
+
+use regex::Regex;
 
 use serde::{Deserialize, Serialize};
 
@@ -335,11 +338,7 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
     }
 
     // Makefile `eval` target
-    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile"))
-        && content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-    {
+    if has_eval_target(&cwd.join("Makefile")) {
         found.push(Benchmark {
             name: "make_eval".into(),
             command: "make eval".into(),
@@ -348,11 +347,7 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
     }
 
     // justfile `eval` recipe
-    if let Ok(content) = std::fs::read_to_string(cwd.join("justfile"))
-        && content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-    {
+    if has_eval_target(&cwd.join("justfile")) {
         found.push(Benchmark {
             name: "just_eval".into(),
             command: "just eval".into(),
@@ -361,6 +356,23 @@ fn detect_benchmarks(cwd: &Path) -> Vec<Benchmark> {
     }
 
     found
+}
+
+/// True when `path` defines an `eval` target that is not a wrapper around
+/// `epic eval` itself (registering that wrapper would make eval run itself).
+pub fn has_eval_target(path: &Path) -> bool {
+    static SELF_CALL: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"\bepic(-harness)?\s+eval\b").unwrap());
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let mut lines = content
+        .lines()
+        .skip_while(|l| !(l.starts_with("eval:") || l.starts_with("eval :")));
+    lines.next().is_some()
+        && !lines
+            .take_while(|l| l.is_empty() || l.starts_with([' ', '\t']))
+            .any(|l| SELF_CALL.is_match(l))
 }
 
 /// Resolve commands from explicit config only — no stack-based defaults.

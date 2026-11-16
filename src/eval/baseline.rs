@@ -4,18 +4,21 @@ use std::path::Path;
 
 /// Load the latest baseline from the baselines directory.
 ///
-/// Looks for `latest.json` symlink/copy in the given directory.
-pub fn load_latest(baseline_dir: &Path) -> Result<serde_json::Value, String> {
+/// Looks for `latest.json` symlink/copy in the given directory. `Ok(None)` means
+/// no baseline exists yet; an existing but unreadable or invalid file is an `Err`.
+pub fn load_latest(baseline_dir: &Path) -> Result<Option<serde_json::Value>, String> {
     let latest = baseline_dir.join("latest.json");
-    if !latest.exists() {
-        // Try to find any BASELINE-*.json if latest.json missing
-        let fallback = find_newest_baseline(baseline_dir)?;
-        if let Some(path) = fallback {
-            return load_json(&path);
-        }
-        return Err("no baseline found".to_string());
+    let latest_exists = latest
+        .try_exists()
+        .map_err(|e| format!("stat {}: {e}", latest.display()))?;
+    if latest_exists {
+        return load_json(&latest).map(Some);
     }
-    load_json(&latest)
+    // Try to find any BASELINE-*.json if latest.json missing
+    match find_newest_baseline(baseline_dir)? {
+        Some(path) => load_json(&path).map(Some),
+        None => Ok(None),
+    }
 }
 
 fn load_json(path: &Path) -> Result<serde_json::Value, String> {

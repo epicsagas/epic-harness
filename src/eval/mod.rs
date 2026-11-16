@@ -8,8 +8,47 @@ mod scaffold;
 
 use crate::shared::paths::harness_dir;
 
+const DIMENSIONS: [&str; 5] = [
+    "correctness",
+    "performance",
+    "quality",
+    "benchmarks",
+    "regression",
+];
+
+const USAGE: &str = "usage: epic eval [--json] [--init] [--scaffold] [--baseline-update] [--dimension <dim>]\n  dim: correctness | performance | quality | benchmarks | regression";
+
+/// Reject unknown arguments and bad `--dimension` values before anything runs.
+fn validate_args(args: &[String]) -> Result<(), String> {
+    let check = |dim: &str| {
+        if DIMENSIONS.contains(&dim) {
+            Ok(())
+        } else {
+            Err(format!("unknown dimension: {dim}"))
+        }
+    };
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--json" | "--init" | "--scaffold" | "--baseline-update" => {}
+            "--dimension" => check(rest.next().ok_or("--dimension requires a value")?)?,
+            a if a.starts_with("--dimension=") => check(&a["--dimension=".len()..])?,
+            a => return Err(format!("unknown argument: {a}")),
+        }
+    }
+    Ok(())
+}
+
 /// Entry point for `epic eval` subcommand.
 pub fn run(args: &[String]) -> i32 {
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        println!("{USAGE}");
+        return 0;
+    }
+    if let Err(e) = validate_args(args) {
+        eprintln!("error: {e}\n{USAGE}");
+        return 2;
+    }
     let json_mode = args.iter().any(|a| a == "--json");
     let init_mode = args.iter().any(|a| a == "--init");
     let scaffold_mode = args.iter().any(|a| a == "--scaffold");
@@ -99,6 +138,11 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
 
+    if let Err(e) = enter_context(&eval_dir) {
+        eprintln!("error: {e}");
+        return 1;
+    }
+
     // Warn if benchmark files exist but none are configured
     check_unconfigured_benchmarks(&cwd, &cfg);
 
@@ -116,6 +160,26 @@ pub fn run(args: &[String]) -> i32 {
 
     let dims = &cfg.dimensions;
     let run_all = dimension_filter.is_none();
+
+    // Resolve baseline directory: in-repo benchmarks/baselines/ first, then harness-local
+    let baseline_path = resolve_baseline_dir(&cwd, &harness, dims);
+
+    // A missing baseline is a first run; an unreadable one must not pass silently.
+    let regression_runs =
+        dims.regression.enabled && (run_all || dimension_filter.as_deref() == Some("regression"));
+    let prev = if regression_runs {
+        match baseline::load_latest(&baseline_path) {
+            Ok(prev) => prev,
+            Err(e) => {
+                eprintln!(
+                    "error: baseline unreadable: {e}\nFix or delete the file, then run `epic eval --baseline-update`."
+                );
+                return 1;
+            }
+        }
+    } else {
+        None
+    };
 
     if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled {
         results.push(runner::run_correctness(
@@ -137,17 +201,8 @@ pub fn run(args: &[String]) -> i32 {
         }
     }
 
-    // Resolve baseline directory: in-repo benchmarks/baselines/ first, then harness-local
-    let baseline_path = resolve_baseline_dir(&cwd, &harness, dims);
-
-    let prev = if dims.regression.enabled {
-        baseline::load_latest(&baseline_path).ok()
-    } else {
-        None
-    };
-
     // Compute regression dimension
-    if dims.regression.enabled && (run_all || dimension_filter.as_deref() == Some("regression")) {
+    if regression_runs {
         results.push(runner::compute_regression(
             &results,
             prev.as_ref(),
@@ -164,29 +219,11 @@ pub fn run(args: &[String]) -> i32 {
     } else {
         eval_dir.join("results")
     };
-    let _ = std::fs::create_dir_all(&results_dir);
-
-    // --baseline-update: save current as new baseline
-    if baseline_update {
-        let ts = chrono_now();
-        if let Err(e) = std::fs::create_dir_all(&baseline_path) {
-            eprintln!("warning: could not create baseline dir: {e}");
-        }
-        let file = baseline_path.join(format!("BASELINE-{ts}.json"));
-        let latest = baseline_path.join("latest.json");
-        if let Ok(json) = serde_json::to_string_pretty(&rpt) {
-            let _ = std::fs::write(&file, &json);
-            let _ = std::fs::write(&latest, &json);
-            eprintln!("baseline saved: {}", file.display());
-        }
-    }
-
-    // Save result
-    let ts = chrono_now();
-    let result_file = results_dir.join(format!("EVAL-{ts}.json"));
-    if let Ok(json) = serde_json::to_string_pretty(&rpt) {
-        let _ = std::fs::write(&result_file, &json);
-    }
+    let saved = persist(
+        &rpt,
+        &results_dir,
+        baseline_update.then_some(baseline_path.as_path()),
+    );
 
     // Output
     if json_mode {
@@ -197,10 +234,70 @@ pub fn run(args: &[String]) -> i32 {
         report::print_table(&rpt);
     }
 
+    if let Err(e) = saved {
+        eprintln!("error: could not save evaluation: {e}");
+        return 1;
+    }
+
     if rpt.overall_verdict == "FAIL" { 1 } else { 0 }
 }
 
+/// Write the baseline (when requested) and the result file. Success is reported
+/// only after the writes it describes have completed.
+fn persist(
+    rpt: &report::Report,
+    results_dir: &std::path::Path,
+    baseline_dir: Option<&std::path::Path>,
+) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(rpt).map_err(|e| format!("serialize report: {e}"))?;
+    let id = run_id();
+    if let Some(dir) = baseline_dir {
+        std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+        let file = dir.join(format!("BASELINE-{id}.json"));
+        write_atomic(&file, &json)?;
+        write_atomic(&dir.join("latest.json"), &json)?;
+        eprintln!("baseline saved: {}", file.display());
+    }
+    std::fs::create_dir_all(results_dir)
+        .map_err(|e| format!("create {}: {e}", results_dir.display()))?;
+    write_atomic(&results_dir.join(format!("EVAL-{id}.json")), &json)
+}
+
+/// Write via a temp file and rename so a failed write never leaves a partial file.
+fn write_atomic(path: &std::path::Path, contents: &str) -> Result<(), String> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, contents)
+        .and_then(|()| std::fs::rename(&tmp, path))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+        .map_err(|e| format!("write {}: {e}", path.display()))
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
+
+/// Refuse to run when this config is already being evaluated further up the process
+/// tree (a benchmark or wrapper that calls `epic eval`). Evaluations of other
+/// configs may still nest. Otherwise record this config for the commands we run.
+fn enter_context(eval_dir: &std::path::Path) -> Result<(), String> {
+    let config = eval_dir.join("eval.yaml");
+    let key = std::fs::canonicalize(&config)
+        .unwrap_or(config)
+        .to_string_lossy()
+        .into_owned();
+    let mut chain = std::env::var(runner::CHAIN_ENV).unwrap_or_default();
+    if chain.lines().any(|c| c == key) {
+        return Err(format!(
+            "eval is already running for {key}; a benchmark or wrapper calls `epic eval` recursively"
+        ));
+    }
+    if !chain.is_empty() {
+        chain.push('\n');
+    }
+    chain.push_str(&key);
+    runner::set_chain(chain);
+    Ok(())
+}
 
 /// Resolve the baseline directory. Priority:
 /// 1. Explicit `baseline_dir` in config (absolute or CWD-relative)
@@ -244,12 +341,8 @@ fn check_unconfigured_benchmarks(cwd: &std::path::Path, cfg: &config::EvalConfig
             break;
         }
     }
-    // Also check Makefile/justfile for eval target
-    if let Ok(content) = std::fs::read_to_string(cwd.join("Makefile"))
-        && content
-            .lines()
-            .any(|l| l.starts_with("eval:") || l.starts_with("eval :"))
-    {
+    // Also check Makefile for eval target
+    if config::has_eval_target(&cwd.join("Makefile")) {
         eprintln!(
             "warning: Makefile has an `eval` target but no benchmarks are configured in eval.yaml"
         );
@@ -269,13 +362,19 @@ fn parse_flag_str(args: &[String], flag: &str) -> Option<String> {
         })
 }
 
+/// UTC timestamp as `YYYYMMDDTHHMMSS`, from std time (no external `date`).
 fn chrono_now() -> String {
-    let output = std::process::Command::new("date")
-        .args(["+%Y%m%dT%H%M%S"])
-        .output()
-        .ok();
-    output
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+    crate::shared::helpers::now_iso()
+        .replace(['-', ':'], "")
+        .trim_end_matches('Z')
+        .to_string()
+}
+
+/// Timestamp plus sub-second nanos: file names stay distinct and ordered across runs.
+fn run_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    format!("{}-{nanos:09}", chrono_now())
 }

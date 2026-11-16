@@ -1,5 +1,6 @@
 //! eval/runner.rs — Execute eval commands and parse results
 
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use serde_json::{Value, json};
@@ -15,6 +16,17 @@ pub struct DimResult {
     pub verdict: String, // PASS, WARN, FAIL, SKIPPED
     pub details: Value,
     pub duration_ms: u64,
+}
+
+/// Env var carrying the eval configs on the current call chain (newline separated),
+/// so a benchmark that calls `epic eval` again is detected instead of recursing.
+pub const CHAIN_ENV: &str = "EPIC_EVAL_CHAIN";
+
+static CHAIN: OnceLock<String> = OnceLock::new();
+
+/// Set the chain passed to every command this process runs.
+pub fn set_chain(chain: String) {
+    let _ = CHAIN.set(chain);
 }
 
 // ── Correctness ─────────────────────────────────────────────────────
@@ -301,7 +313,12 @@ fn exec_command(cmd: &str) -> CmdOutput {
         }
     };
 
-    let output = std::process::Command::new(program).args(&args).output();
+    let mut command = std::process::Command::new(program);
+    command.args(&args);
+    if let Some(chain) = CHAIN.get() {
+        command.env(CHAIN_ENV, chain);
+    }
+    let output = command.output();
 
     match output {
         Ok(o) => CmdOutput {
