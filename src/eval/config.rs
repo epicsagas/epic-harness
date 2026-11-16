@@ -199,7 +199,16 @@ pub fn load(eval_dir: &Path) -> Result<EvalConfig, String> {
     }
     let contents =
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    serde_yaml::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))
+    let cfg: EvalConfig =
+        serde_yaml::from_str(&contents).map_err(|e| format!("parse {}: {e}", path.display()))?;
+    let rate = cfg.dimensions.correctness.extra.min_pass_rate;
+    if !(0.0..=1.0).contains(&rate) {
+        return Err(format!(
+            "{}: min_pass_rate must be within 0.0..=1.0, got {rate}",
+            path.display()
+        ));
+    }
+    Ok(cfg)
 }
 
 /// Scaffold a minimal eval.yaml with auto-detected stack and benchmarks.

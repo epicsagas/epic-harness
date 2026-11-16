@@ -19,7 +19,7 @@ pub struct DimResult {
 
 // ── Correctness ─────────────────────────────────────────────────────
 
-pub fn run_correctness(cmds: &ResolvedCommands) -> DimResult {
+pub fn run_correctness(cmds: &ResolvedCommands, min_pass_rate: f64) -> DimResult {
     let start = Instant::now();
 
     let test_cmd = match &cmds.test_command {
@@ -50,18 +50,19 @@ pub fn run_correctness(cmds: &ResolvedCommands) -> DimResult {
         0.0
     };
 
-    let verdict = if score >= 1.0 {
-        "PASS"
-    } else if score >= 0.8 {
-        "WARN"
-    } else {
+    let passed = exit_ok && score >= min_pass_rate;
+    let verdict = if !passed {
         "FAIL"
+    } else if score >= 1.0 {
+        "PASS"
+    } else {
+        "WARN"
     };
 
     DimResult {
         dimension: "correctness".into(),
         score,
-        passed: exit_ok,
+        passed,
         verdict: verdict.into(),
         details: json!({
             "command": test_cmd,
@@ -225,25 +226,22 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
     let duration = start.elapsed().as_millis() as u64;
     let exit_ok = output.exit_code == 0;
 
-    let score = match bench.result_type.as_str() {
-        "composite" => {
-            parse_composite_score(&output.stdout).unwrap_or(if exit_ok { 1.0 } else { 0.0 })
-        }
-        _ => {
-            if exit_ok {
-                1.0
-            } else {
-                0.0
-            }
-        }
+    // A composite benchmark without a valid score is a FAIL, never a perfect 1.0.
+    let (score, score_ok) = match bench.result_type.as_str() {
+        "composite" => match parse_composite_score(&output.stdout) {
+            Some(s) => (s, true),
+            None => (0.0, false),
+        },
+        _ => (if exit_ok { 1.0 } else { 0.0 }, true),
     };
 
-    let verdict = if exit_ok { "PASS" } else { "FAIL" };
+    let passed = exit_ok && score_ok;
+    let verdict = if passed { "PASS" } else { "FAIL" };
 
     DimResult {
         dimension: format!("benchmark:{}", bench.name),
         score,
-        passed: exit_ok,
+        passed,
         verdict: verdict.into(),
         details: json!({
             "command": bench.command,
@@ -257,21 +255,28 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
     }
 }
 
-/// Try to extract a composite/score float from JSON stdout (last JSON line wins).
+/// Extract the composite/score value from the last JSON object in stdout that
+/// carries one. Objects may span lines (pretty-printed) or follow log text.
+/// Returns `None` when the score is missing, not a number, or outside 0.0..=1.0.
 fn parse_composite_score(stdout: &str) -> Option<f64> {
-    for line in stdout.lines().rev() {
-        let line = line.trim();
-        if line.starts_with('{')
-            && let Ok(v) = serde_json::from_str::<serde_json::Value>(line)
-            && let Some(s) = v
-                .get("composite")
-                .or_else(|| v.get("score"))
-                .and_then(|v| v.as_f64())
-        {
-            return Some(s.clamp(0.0, 1.0));
+    let mut last = None;
+    let mut rest = stdout;
+    while let Some(i) = rest.find('{') {
+        let mut stream = serde_json::Deserializer::from_str(&rest[i..]).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(v)) => {
+                let end = stream.byte_offset();
+                if let Some(s) = v.get("composite").or_else(|| v.get("score")) {
+                    last = Some(s.clone());
+                }
+                rest = &rest[i + end..];
+            }
+            _ => rest = &rest[i + 1..],
         }
     }
-    None
+    last?
+        .as_f64()
+        .filter(|s| s.is_finite() && (0.0..=1.0).contains(s))
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

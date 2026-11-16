@@ -118,7 +118,10 @@ pub fn run(args: &[String]) -> i32 {
     let run_all = dimension_filter.is_none();
 
     if (run_all || dimension_filter.as_deref() == Some("correctness")) && dims.correctness.enabled {
-        results.push(runner::run_correctness(&effective));
+        results.push(runner::run_correctness(
+            &effective,
+            dims.correctness.extra.min_pass_rate,
+        ));
     }
     if (run_all || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled {
         results.push(runner::run_performance(&effective));
