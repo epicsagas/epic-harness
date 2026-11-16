@@ -454,7 +454,7 @@ warned:
 `epic-harness` is evaluated against unassisted baseline models (**Bare Model**) via an automated A/B evaluation suite spanning multi-tier benchmarks and 4-Ring golden sets:
 
 ```bash
-# Run the local Director A/B evaluation suite (Guard 50 + Golden Tasks)
+# Run the local Director A/B evaluation suite (guard challenge + Golden Tasks)
 python3 benchmarks/ab/run_director.py --full --profile zai
 
 # Run SWE-bench Verified stratified A/B pipeline
@@ -465,7 +465,7 @@ MANIFEST=benchmarks/ab/manifest.jsonl PROFILE=zai ./benchmarks/ab/run_swebench.s
 
 | Benchmark Tier | Suite / Scope | Result / Metric | Key Value Finding |
 | :--- | :--- | :---: | :--- |
-| **Ring 0 Guard 50** | 50 destructive OS, infra & credential commands | **50/50 (100%) Interception** | 0% false positives on standard developer tools (`cargo test`, `pytest`) |
+| **Ring 0 Guard (native rules)** | 50 challenge commands (25 must-block, 10 must-warn, 15 safe) plus 46 benign | blocked 2/25 must-block; warned 1/10 must-warn (2 more were blocked instead); allowed 15/15 safe; benign false-block 0/46, false-warn 5/46 | Measured against the shipped binary with no project rules. Most challenge cases need project rules in `.harness/guard-rules.yaml`; the guard is a defense-in-depth layer, not a sandbox. Reproduce: `cargo build && python3 -I benchmarks/ab/guard_challenge.py --binary target/debug/epic-harness --json`. |
 | **Golden Set Multi-File** | `task4` (Cart multi-file discount & tax) | **-2 Turns (13 ➔ 11 turns)** | `/tdd` and `/verify` gates eliminate regression loops |
 | **Golden Set Concurrency** | `task5` (Async lock race condition) | **-36.4% Turns, -21.1% Time** | Root-cause isolation cuts trial-and-error thrashing (7 vs 11 turns) |
 | **SWE-bench Verified (12 instances, Sonnet)** | Real GitHub issues, bare vs epic, 1 seed | **bare 10/12, epic 8/12** (McNemar p = 0.5) | No resolve-rate difference supported. Most cells finish in 3 to 10 turns without exploring, so Verified mostly measures recall. Polish fix holds: `django-11740` patch 61,684 B ➔ 1,262 B |
@@ -527,9 +527,10 @@ papers over:
   and guarded through the patch body, which may name several files at once.
 - **Model context comes from stdout.** Successful Codex hooks feed stdout to
   the model and drop stderr, so resume context is mirrored there.
-- **`Stop` is turn-scoped, not session-scoped.** Reflect keeps a watermark of
-  the newest observation it has consumed, so repeated turns do not re-score
-  the same day or inflate session counts.
+- **`Stop` is turn-scoped, not session-scoped.** Reflect keeps a cursor of
+  the observations it has consumed (last observation id plus a timestamp
+  floor), so repeated turns do not re-score the same day or inflate session
+  counts.
 - **Team agents are generated as TOML** under `~/.codex/agents/` (and a
   project's `.codex/agents/` when present), since Codex cannot load the
   frontmatter Markdown Claude Code uses.
@@ -580,10 +581,10 @@ flowchart TB
 Opt-in to share failure patterns across projects:
 
 ```bash
-touch ~/.harness/projects/{slug}/.cross-project-enabled
+touch ~/.harness/global/.cross-project-enabled
 ```
 
-Session end → exports anonymized patterns to `~/.harness/global_patterns.jsonl`. Session start → shows hints from other projects' weak areas.
+Session end exports anonymized patterns to the shared harness database and to `~/.harness/global/patterns.jsonl`. Session start shows hints from other projects' weak areas. The opt-in is global: one marker enables sharing for every project.
 
 ---
 
@@ -647,7 +648,8 @@ All data lives in `~/.harness/` (home directory), not in your project root. Surv
 ├── memory.db                  # SQLite knowledge graph (nodes + edges + FTS5)
 ├── graph.json                 # Cached graph (for web UI)
 ├── config.toml                # User configuration
-├── global_patterns.jsonl      # Cross-project patterns (opt-in)
+├── global/
+│   └── patterns.jsonl         # Cross-project patterns (opt-in)
 ├── orgs/                      # Team global store
 │   └── {org}/teams/{team}/
 │       ├── config.json, mission.md, playbook.md, agents/, .history/

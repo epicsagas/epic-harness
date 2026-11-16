@@ -133,8 +133,8 @@ Teams commit `.epic/team.md` (and gitignored `.epic/team.local.md`) beside the c
 
 ## Cross-Project Learning
 
-Opt-in by creating `~/.harness/projects/{slug}/.cross-project-enabled`.
-On session end, patterns export to `~/.harness/global_patterns.jsonl`.
+Opt-in by creating `~/.harness/global/.cross-project-enabled` (one global marker for all projects).
+On session end, patterns export to `~/.harness/global/patterns.jsonl` (and the `global_patterns` table).
 On next session start, weak patterns from other projects shown as hints.
 
 ## Model Class Awareness
@@ -289,7 +289,7 @@ Memory retrieval uses composite scoring instead of simple latest-N:
 
 ### Memory Lifecycle
 
-- **Access tracking**: Every recall/search/context call increments `access_count` and updates `accessed_at`.
+- **Access tracking**: Explicit recall and context calls (CLI, MCP) increment `access_count` and update `accessed_at`. Hook-driven reads (SessionStart, reflect --context) and calls with `--passive` update `accessed_at` only, so they do not inflate ranking.
 - **Gradual decay**: Nodes untouched for 30+ days lose 10% importance per cycle (floor=0.05). `pinned` tag prevents decay.
 - **Stale tagging**: Nodes untouched for 180+ days tagged as `stale` and excluded from recall.
 - **Graph augmentation**: `epic mem recall` follows 1-hop edges from top results, returning related nodes with connection counts.
@@ -320,7 +320,6 @@ _dispatch skill runs `epic mem recall` with current task context before invoking
 - `eval/` — Eval config, baselines, and results (eval.yaml, baselines/*.json, results/*.json)
 - `metrics.json` — Aggregate stats (score_history, trend, stagnation_count, skill_attribution)
 - `evolution.jsonl` — Evolution history (SessionAnalysis + patterns)
-- `.cross-project-enabled` — Cross-project learning opt-in marker (optional)
 
 `~/.harness/projects/{slug}/` auto-created on session start. Keep `.harness/guard-rules.yaml` in your project root to share safety rules with your team.
 
