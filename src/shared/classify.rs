@@ -31,9 +31,9 @@ const FAILURE_RULES: &[FailureRule] = &[
         //   - rust:   "test result: FAILED. 0 passed; 1 failed"    → yes (loud banner)
         // `\b(?:FAIL|FAILED)\b` is case-sensitive: failure banners are loud
         // (Go "FAIL", cargo "FAILED"); lowercase "failed" in prose is too
-        // noisy without a count. Bare `assertion` was dropped — it matched the
-        // word in grep/docs success output.
-        pattern: r"\b(?:FAIL|FAILED)\b|(?i:\b[1-9]\d*\s+(?:failed|failures?|failing)\b)|(?i:(?:failures?|errors?|failed|failing)\s*[:=]\s*[1-9]\d*)|(?i:\btests?\s+failed\b)|AssertionError|(?i:assert\.\w+)",
+        // noisy without a count. Bare `assertion` and `assert.xxx` were dropped —
+        // they matched the words in printed test source and docs.
+        pattern: r"\b(?:FAIL|FAILED)\b|(?i:\b[1-9]\d*\s+(?:failed|failures?|failing)\b)|(?i:(?:failures?|errors?|failed|failing)\s*[:=]\s*[1-9]\d*)|(?i:\btests?\s+failed\b)|AssertionError",
         category: "test_fail",
     },
     FailureRule {
@@ -49,7 +49,10 @@ const FAILURE_RULES: &[FailureRule] = &[
         category: "permission_denied",
     },
     FailureRule {
-        pattern: r"(?i)timeout|ETIMEDOUT|timed out",
+        // Word-bounded: `LegacyCompleteTimeoutMilliseconds` or `subprocess.TimeoutExpired`
+        // in printed source is not a timeout. Zero settings are stripped first
+        // (see `ZERO_TIMEOUT`).
+        pattern: r"(?i)\btimed? ?out\b|\bETIMEDOUT\b|\bTimeout(?:Error|Exception)\b",
         category: "timeout",
     },
     FailureRule {
@@ -69,13 +72,19 @@ static COMPILED_RULES: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
         .collect()
 });
 
+/// A timeout *setting* of zero (`"timeout": "0"` in a green .NET TRX summary)
+/// reports no timeout. The regex crate has no lookaround, so strip it first.
+static ZERO_TIMEOUT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)\btimeout"?\s*[:=]\s*"?0\b"#).unwrap());
+
 pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
     let sample = truncate_str(output, 2000);
+    let sample = ZERO_TIMEOUT.replace_all(sample, "");
     for (rx, cat) in COMPILED_RULES.iter() {
-        if rx.is_match(sample) {
+        if rx.is_match(&sample) {
             return Some(cat);
         }
     }
@@ -105,9 +114,11 @@ static READ_ONLY_CMD: LazyLock<Regex> = LazyLock::new(|| {
             rg|grep|egrep|fgrep|ag|ack|
             find|fd|ls|tree|stat|file|wc|du|
             sed|awk|cut|sort|uniq|diff|
-            echo|printf|pwd|whoami|date|env
+            echo|printf|pwd|whoami|date|env|
+            (?i:get-content|select-string|get-childitem|get-item|get-filehash|
+                test-path|resolve-path|convertfrom-json)
         )\b
-        |^\s*git\s+(?:diff|log|show|status|blame|branch|remote|describe|rev-parse)\b
+        |^\s*git\s+(?:diff|log|show|status|blame|branch|remote|describe|rev-parse|ls-tree|ls-files|cat-file)\b
         ",
     )
     .unwrap()
@@ -224,7 +235,8 @@ pub fn classify_bash_failure(
 
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
-        "bash" => "bash",
+        // Windows hosts run shell commands through PowerShell; same command/output shape.
+        "bash" | "powershell" | "pwsh" => "bash",
         // Codex's canonical edit tool — without this every Codex edit was
         // categorized as "other" and scored by the generic path.
         "edit" | "apply_patch" => "edit",
@@ -315,7 +327,7 @@ pub fn parse_guard_rules(content: &str) -> (Vec<GuardRule>, Vec<GuardRule>) {
 /// paths that way, and a Codex `apply_patch` body names its files relative.
 pub fn extract_file(action: &str) -> Option<&str> {
     static FILE_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"((?:/|\b)[\w.-]+(?:/[\w.-]+)*\.\w+)").unwrap());
+        LazyLock::new(|| Regex::new(r"((?:[/\\]|\b)[\w.-]+(?:[/\\][\w.-]+)*\.\w+)").unwrap());
     FILE_RE.find(action).map(|m| m.as_str())
 }
 
@@ -497,5 +509,82 @@ mod tests {
             classify_bash_failure("cargo build", "error TS2304: cannot find name", "", true),
             Some("build_fail")
         );
+    }
+
+    // ── #144: PowerShell and quoted material ────────────────
+
+    #[test]
+    fn powershell_is_a_shell_tool() {
+        assert_eq!(classify_tool("PowerShell"), "bash");
+        assert_eq!(classify_tool("pwsh"), "bash");
+    }
+
+    #[test]
+    fn powershell_read_only_cmdlets_are_not_scanned() {
+        for cmd in [
+            "Get-Content src/Tests.cs",
+            "get-childitem -Recurse | Select-String Timeout",
+            "Get-FileHash a.bin",
+            "Test-Path x",
+            "git ls-tree HEAD",
+            "git cat-file -p HEAD",
+        ] {
+            assert!(is_read_only_command(cmd), "{cmd}");
+        }
+        for cmd in [
+            "Remove-Item a.txt",
+            "Get-Content a.txt; Remove-Item a.txt",
+            "Get-Content a.txt > b.txt",
+            "Get-ItemProperty HKLM:\\x",
+        ] {
+            assert!(!is_read_only_command(cmd), "{cmd}");
+        }
+        let printed = "Assert.Equal(1, x);\nLegacyCompleteTimeoutMilliseconds = 5";
+        assert_eq!(
+            classify_bash_failure("Get-Content Tests.cs", printed, "", false),
+            None
+        );
+    }
+
+    #[test]
+    fn timeout_needs_a_word_not_a_substring_or_zero_setting() {
+        for quoted in [
+            "LegacyCompleteTimeoutMilliseconds = 5",
+            "except subprocess.TimeoutExpired:",
+            "{\"timeout\": \"0\", \"failed\": \"0\"}",
+            "timeout=0",
+        ] {
+            assert_eq!(classify_failure(quoted), None, "{quoted}");
+        }
+        for real in [
+            "ETIMEDOUT: connection timed out",
+            "Navigation timeout of 30000 ms exceeded",
+            "TimeoutError: waited too long",
+            "{\"timeout\": \"0\"} then the request timed out",
+        ] {
+            assert_eq!(classify_failure(real), Some("timeout"), "{real}");
+        }
+    }
+
+    #[test]
+    fn printed_assert_api_is_not_a_test_failure() {
+        assert_eq!(classify_failure("Assert.Equal(1, x);"), None);
+        assert_eq!(classify_failure("assert.strictEqual(a, b);"), None);
+        assert_eq!(
+            classify_failure("AssertionError: expected 5 == 4"),
+            Some("test_fail")
+        );
+    }
+
+    // ── #189: native path separators ────────────────────────
+
+    #[test]
+    fn extract_file_keeps_backslash_directories() {
+        assert_eq!(extract_file("src\\a\\index.rs"), Some("src\\a\\index.rs"));
+        assert_ne!(
+            extract_file("src\\a\\index.rs"),
+            extract_file("src\\b\\index.rs")
+        );
+        assert_eq!(extract_file("src/a/index.rs"), Some("src/a/index.rs"));
     }
 }

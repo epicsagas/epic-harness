@@ -694,6 +694,20 @@ mod tests {
         assert!(patterns.iter().any(|p| p.pattern_type == "long_debug_loop"));
     }
 
+    /// Distinct Windows paths that share a basename are different files.
+    #[test]
+    fn backslash_paths_do_not_form_a_debug_loop() {
+        let runs = CONFIG.model.scaled_threshold(CONFIG.pattern.debug_loop_min) * 2;
+        let obs: Vec<_> = (0..runs)
+            .map(|i| {
+                let path = format!("src\\component{i}\\index.rs");
+                make_obs("Edit", "edit", "success", 0.8, Some(&path))
+            })
+            .collect();
+        let patterns = detect_patterns(&obs);
+        assert!(!patterns.iter().any(|p| p.pattern_type == "long_debug_loop"));
+    }
+
     #[test]
     fn no_debug_loop_below_threshold() {
         let mut obs = vec![];
