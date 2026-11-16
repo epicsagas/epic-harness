@@ -43,9 +43,10 @@ pub use schema::init_schema_pool;
 
 #[allow(unused_imports)]
 pub use node::{
-    delete_node_file, delete_node_pool, list_node_ids, list_node_ids_pool, node_exists_pool,
-    parse_node, read_all_nodes_pool, read_node, read_node_pool, read_nodes_limited_pool,
-    read_nodes_pool, serialize_node, write_node, write_node_pool,
+    delete_node_file, delete_node_pool, delete_node_with_edges_pool, list_node_ids,
+    list_node_ids_pool, node_exists_pool, parse_node, read_all_nodes_pool, read_node,
+    read_node_pool, read_nodes_limited_pool, read_nodes_pool, serialize_node, write_node,
+    write_node_pool,
 };
 
 // ── Re-exports: edge ──────────────────────────────────

@@ -59,20 +59,22 @@ async fn read_edges_pool_async(pool: &sqlx::AnyPool, limit: usize) -> Vec<Edge> 
         .unwrap_or_default()
 }
 
+#[allow(dead_code)]
 pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(delete_edge_by_id_async(&pool, edge_id))
+    runtime::block_on(delete_edge_by_id_async(&pool, edge_id)).map(|_| ())
 }
 
-async fn delete_edge_by_id_async(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<()> {
+/// Returns the number of deleted rows.
+async fn delete_edge_by_id_async(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<u64> {
     sqlx::query("DELETE FROM edges WHERE source = ? OR target = ? OR label = ?")
         .bind(edge_id)
         .bind(edge_id)
         .bind(edge_id)
         .execute(pool)
         .await
-        .map_err(io::Error::other)?;
-    Ok(())
+        .map(|r| r.rows_affected())
+        .map_err(io::Error::other)
 }
 
 pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
@@ -103,7 +105,7 @@ pub async fn read_edges_pool(pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec
 }
 
 #[allow(dead_code)]
-pub async fn delete_edge_by_id_pool(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<()> {
+pub async fn delete_edge_by_id_pool(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<u64> {
     delete_edge_by_id_async(pool, edge_id).await
 }
 

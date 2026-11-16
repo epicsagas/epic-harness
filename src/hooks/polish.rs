@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use super::common::*;
+use crate::shared::sanitize::mask_secrets;
 use crate::telemetry::{FormatterKind, Telemetry};
 
 /// Host-supplied session id captured at hook entry (None → date+PID fallback).
@@ -23,6 +24,12 @@ fn try_exec_args(prog: &str, args: &[&str], cwd: &Path) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Formatter/compiler output reaches the observation store: mask first, then
+/// truncate, so a secret cut by the limit cannot slip past the masks.
+fn stored_snippet(s: &str) -> String {
+    truncate_str(&mask_secrets(s), 500).to_string()
 }
 
 fn feedback_to_observe(
@@ -80,7 +87,7 @@ fn feedback_to_observe(
                 .into(),
             )
         },
-        error_snippet: error_snippet.map(|s| truncate_str(s, 500).to_string()),
+        error_snippet: error_snippet.map(stored_snippet),
         file_ext: ext,
         sequence_id: None,
     };
@@ -185,7 +192,7 @@ fn check_ts(file_path: &str, wd: &Path) {
         if !o.status.success() || combined.contains("error TS") {
             let snippet = truncate_str(&combined, 500);
             hint("polish", &format!("TS errors:\n{snippet}"));
-            feedback_to_observe(file_path, "tsc", false, Some(snippet));
+            feedback_to_observe(file_path, "tsc", false, Some(&combined));
             Telemetry::init().track_polish_failed(FormatterKind::Tsc);
         } else {
             feedback_to_observe(file_path, "tsc", true, None);
@@ -309,6 +316,20 @@ pub fn run(input: &HookInput) -> i32 {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn stored_snippet_masks_before_truncating() {
+        let out = format!(
+            "{} password=\"SYNTHETICA SYNTHETICB\" error TS2304",
+            "x".repeat(470)
+        );
+        let s = stored_snippet(&out);
+        assert!(!s.contains("SYNTHETIC"), "{s}");
+        assert!(s.contains("<REDACTED>"));
+        // Cut inside the value: the unterminated quote still masks to end of line.
+        let cut = format!("{} password=\"SYNTHETICA SYNTHETICB", "x".repeat(460));
+        assert!(!stored_snippet(&cut).contains("SYNTHETIC"));
+    }
 
     /// Codex sends the patch body in `command`; a `file_path`-only reader made
     /// polish a silent no-op on that host.

@@ -16,9 +16,105 @@ pub fn sanitize_skill_content(s: &str) -> String {
 static MASK_BEARER: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)Bearer\s+[^\s"']+"#).unwrap());
 static MASK_SK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"sk-[a-zA-Z0-9\-_]{8,}").unwrap());
+
+/// Quoted-value alternatives shared by the key/value and CLI-flag masks. A quote
+/// may be backslash-escaped (JSON nested inside a JSON string, `password=\"a b\"`)
+/// and an unterminated quote runs to the end of the line.
+const QUOTED_VALUE: &str = r#"\\+"[^"\r\n]*?\\+"|\\+"[^\r\n]*|"(?:\\.|[^"\\\r\n])*"|"[^\r\n]*|'(?:\\.|[^'\\\r\n])*'|'[^\r\n]*"#;
+
+// The key may be quoted or escape-quoted (`"token":"a b"`, `\"token\":\"a b\"`),
+// carry a prefix (`AWS_SECRET_ACCESS_KEY`, `x-api-key`) or suffix, and the value
+// may be a quoted string with spaces. `max_token: 5` is over-redacted on purpose:
+// a word boundary would also let `access_token` through.
 static MASK_KV: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)(password|passwd|token|api_key|apikey|secret|private_key)[=:]\s*\S+").unwrap()
+    Regex::new(
+        &r#"(?i)(?:\\*["'])?((?:password|passwd|token|api[_-]?key|secret|private[_-]?key)(?:[_-][a-z0-9]+)*)(?:\\*["'])?\s*[=:]\s*(?:QUOTED|\S+)"#
+            .replace("QUOTED", QUOTED_VALUE),
+    )
+    .unwrap()
 });
+/// `--password VALUE` / `--api-key VALUE` (the `=` form is covered by `MASK_KV`).
+/// A following flag is not taken for the value.
+static MASK_FLAG: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        &r#"(?i)(--[\w-]*(?:password|passwd|token|secret|api-?key|private-?key)\s+)(?:QUOTED|[^\s-]\S*)"#
+            .replace("QUOTED", QUOTED_VALUE),
+    )
+    .unwrap()
+});
+/// `Authorization: Basic|token|Digest <value>` (`Bearer` is `MASK_BEARER`).
+static MASK_AUTH: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)(authorization(?:\\*["'])?\s*[:=]\s*(?:\\*["'])?(?:basic|token|digest))\s+[^\s"',\\]+"#,
+    )
+    .unwrap()
+});
+static MASK_COOKIE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\b((?:set-)?cookie(?:\\*["'])?\s*:\s*(?:\\*["'])?)[^\r\n"'\\]+"#).unwrap()
+});
+/// Password in URL userinfo: `scheme://user:PASS@host`.
+static MASK_URL_USERINFO: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)([a-z][a-z0-9+.-]*://[^\s:/@"'\\]+:)[^\s/@"'\\]+@"#).unwrap()
+});
+/// Well-known credential formats: GitHub, Slack, AWS access key id, JWT.
+static MASK_TOKEN_FORMATS: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*)",
+    )
+    .unwrap()
+});
+/// PEM private key block; an unterminated (truncated) block runs to the end.
+static MASK_PEM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|\z)")
+        .unwrap()
+});
+
+/// Every credential mask except the path mask.
+fn mask_credentials(s: &str) -> String {
+    let s = MASK_PEM.replace_all(s, "<REDACTED>");
+    let s = MASK_BEARER.replace_all(&s, "Bearer <REDACTED>");
+    let s = MASK_AUTH.replace_all(&s, "$1 <REDACTED>");
+    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
+    let s = MASK_TOKEN_FORMATS.replace_all(&s, "<REDACTED>");
+    let s = MASK_URL_USERINFO.replace_all(&s, "${1}<REDACTED>@");
+    let s = MASK_COOKIE.replace_all(&s, "${1}<REDACTED>");
+    let s = MASK_FLAG.replace_all(&s, "${1}<REDACTED>");
+    MASK_KV.replace_all(&s, "$1=<REDACTED>").into_owned()
+}
+
+/// Redact secrets in a JSON value by structure: the value of any object key
+/// matching the `MASK_KV` key set is replaced, and a string that itself parses
+/// as a JSON object or array is redacted recursively and re-serialized. Text
+/// regexes cannot see through the escaping of a JSON string nested in JSON.
+pub fn mask_json_secrets(v: &serde_json::Value) -> serde_json::Value {
+    use serde_json::Value;
+    static SECRET_KEY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)password|passwd|token|api[_-]?key|secret|private[_-]?key").unwrap()
+    });
+    match v {
+        Value::Object(m) => Value::Object(
+            m.iter()
+                .map(|(k, x)| {
+                    let x = if SECRET_KEY.is_match(k) {
+                        Value::String("<REDACTED>".into())
+                    } else {
+                        mask_json_secrets(x)
+                    };
+                    (k.clone(), x)
+                })
+                .collect(),
+        ),
+        Value::Array(a) => Value::Array(a.iter().map(mask_json_secrets).collect()),
+        Value::String(s) => match serde_json::from_str::<Value>(s) {
+            Ok(inner @ (Value::Object(_) | Value::Array(_))) => {
+                Value::String(mask_json_secrets(&inner).to_string())
+            }
+            _ => v.clone(),
+        },
+        _ => v.clone(),
+    }
+}
+
 /// Absolute file paths — Unix (`/home/u/p/x.rs`), Windows (`C:\Users\me\y`),
 /// and tilde-home (`~/repo/z`). Error snippets reach an external LLM via
 /// skill synthesis and may land in generated SKILL.md, so paths are masked.
@@ -58,20 +154,16 @@ pub fn mask_path_action(path: &str) -> String {
         }
     };
 
-    let s = MASK_BEARER.replace_all(&rel, "Bearer <REDACTED>");
-    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-    MASK_KV.replace_all(&s, "$1=<REDACTED>").into_owned()
+    mask_credentials(&rel)
 }
 
 /// Mask common secret patterns in a string.
 /// Covers: Bearer tokens, sk-* API keys, password/token/apikey/secret/private_key
 /// values, and absolute file paths (Unix/Windows/tilde-home).
 pub fn mask_secrets(s: &str) -> String {
-    let s = MASK_BEARER.replace_all(s, "Bearer <REDACTED>");
-    let s = MASK_SK.replace_all(&s, "sk-<REDACTED>");
-    let s = MASK_KV.replace_all(&s, "$1=<REDACTED>");
-    let s = MASK_PATH.replace_all(&s, "<PATH>");
-    s.into_owned()
+    MASK_PATH
+        .replace_all(&mask_credentials(s), "<PATH>")
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -141,6 +233,179 @@ mod tests {
         assert_eq!(
             mask_secrets("apikey: my-secret-key-123"),
             "apikey=<REDACTED>"
+        );
+    }
+
+    #[test]
+    fn mask_json_quoted_key_and_value() {
+        assert_eq!(
+            mask_secrets(r#"{"token":"abc def","n":1}"#),
+            "{token=<REDACTED>,\"n\":1}"
+        );
+        assert_eq!(mask_secrets(r#"{"api_key": "x"}"#), "{api_key=<REDACTED>}");
+        assert_eq!(
+            mask_secrets(r#"{"password":"a \"b\" c"}"#),
+            "{password=<REDACTED>}"
+        );
+    }
+
+    #[test]
+    fn mask_json_value_redacts_nested_and_embedded_json() {
+        let v = serde_json::json!({
+            "n": 1,
+            "auth": {"api_key": "SYNTHETICA SYNTHETICB"},
+            "list": [{"password": "SYNTHETICC SYNTHETICD"}],
+            "payload": r#"{"token":"SYNTHETICE SYNTHETICF","ok":1}"#,
+        });
+        let out = mask_json_secrets(&v).to_string();
+        assert!(!out.contains("SYNTHETIC"));
+        assert!(out.contains("\"n\":1"));
+        assert!(out.contains("ok"));
+    }
+
+    #[test]
+    fn mask_escaped_nested_json_in_plain_text() {
+        let nested = r#"{"payload":"{\"token\":\"SYN A B\"}"}"#;
+        let out = mask_secrets(nested);
+        assert!(!out.contains("SYN") && !out.contains(" B"), "{out}");
+        assert!(out.contains("<REDACTED>"));
+        let prompt = r#"{"prompt":"password=\"SYN A B\""}"#;
+        let out = mask_secrets(prompt);
+        assert!(!out.contains("SYN") && !out.contains(" B"), "{out}");
+        // Twice-escaped (JSON inside JSON inside JSON).
+        let deep = r#"{"a":"{\"b\":\"{\\\"token\\\":\\\"SYN A B\\\"}\"}"}"#;
+        let out = mask_secrets(deep);
+        assert!(!out.contains("SYN") && !out.contains(" B"), "{out}");
+    }
+
+    #[test]
+    fn mask_unterminated_quoted_value_to_end_of_line() {
+        let out = mask_secrets("{\"token\":\"SYN A B\nnext line stays");
+        assert!(!out.contains("SYN") && !out.contains(" B"), "{out}");
+        assert!(out.contains("next line stays"));
+        let out = mask_secrets("password='SYN A B");
+        assert!(!out.contains("SYN") && !out.contains(" B"), "{out}");
+    }
+
+    #[test]
+    fn mask_authorization_schemes() {
+        for h in [
+            "Authorization: Basic c3ludGhldGljOnB3",
+            "Authorization: Bearer SYNTHETICVALUE",
+            "Authorization: token SYNTHETICVALUE",
+            r#"{"Authorization":"Basic SYNTHETICVALUE"}"#,
+        ] {
+            let out = mask_secrets(h);
+            assert!(
+                !out.contains("c3ludGhldGljOnB3") && !out.contains("SYNTHETICVALUE"),
+                "{out}"
+            );
+            assert!(out.contains("<REDACTED>"));
+        }
+    }
+
+    #[test]
+    fn mask_hyphenated_and_prefixed_keys() {
+        for h in [
+            "x-api-key: SYNTHETICVALUE",
+            "api-key=SYNTHETICVALUE",
+            "GET https://example.test/v1?api-key=SYNTHETICVALUE",
+            "AWS_SECRET_ACCESS_KEY=SYNTHETICVALUE",
+            "GITHUB_TOKEN=SYNTHETICVALUE",
+            "client_secret: SYNTHETICVALUE",
+        ] {
+            let out = mask_secrets(h);
+            assert!(!out.contains("SYNTHETICVALUE"), "{out}");
+            assert!(out.contains("<REDACTED>"));
+        }
+    }
+
+    #[test]
+    fn mask_url_userinfo_password() {
+        let url = "git clone https://synthuser:SYNTHETICPASS@host.test/repo.git";
+        assert!(!mask_secrets(url).contains("SYNTHETICPASS"));
+        // The path mask would also hide the user name; check the credential mask alone.
+        assert_eq!(
+            mask_credentials(url),
+            "git clone https://synthuser:<REDACTED>@host.test/repo.git"
+        );
+    }
+
+    #[test]
+    fn mask_cookie_header() {
+        let out = mask_secrets("Cookie: sid=SYNTHETICVALUE; theme=dark\nHost: x");
+        assert!(
+            !out.contains("SYNTHETICVALUE") && !out.contains("theme"),
+            "{out}"
+        );
+        assert!(out.contains("Host: x"));
+        let out = mask_secrets("Set-Cookie: sid=SYNTHETICVALUE; HttpOnly");
+        assert!(!out.contains("SYNTHETICVALUE"), "{out}");
+    }
+
+    #[test]
+    fn mask_cli_flag_values() {
+        for h in [
+            "deploy --password SYNTHETICVALUE --force",
+            "deploy --token SYNTHETICVALUE",
+            "deploy --password \"SYN A B\" --force",
+            "deploy --api-key SYNTHETICVALUE",
+        ] {
+            let out = mask_secrets(h);
+            assert!(
+                !out.contains("SYNTHETICVALUE") && !out.contains("SYN A") && !out.contains(" B"),
+                "{out}"
+            );
+        }
+        let out = mask_secrets("deploy --password --force");
+        assert!(out.contains("--force"));
+    }
+
+    #[test]
+    fn mask_well_known_token_formats() {
+        for t in [
+            "ghp_SYNTHETIC0123456789ABCDEFGHIJKLMN",
+            "gho_SYNTHETIC0123456789ABCDEFGHIJKLMN",
+            "github_pat_SYNTHETIC0123456789ABCDEFGHIJKLMN",
+            concat!("xo", "xb-123456789012-SYNTHETICVALUE"),
+            concat!("xo", "xp-123456789012-SYNTHETICVALUE"),
+            "AKIAABCDEFGHIJKLMNOP",
+            "eyJhbGciOiJub25lIn0.eyJzdWIiOiJzeW50aGV0aWMifQ.c2lnbmF0dXJl",
+        ] {
+            let out = mask_secrets(&format!("saw {t} in output"));
+            assert_eq!(out, "saw <REDACTED> in output");
+        }
+    }
+
+    #[test]
+    fn mask_pem_private_key_block() {
+        let pem = "before\n-----BEGIN RSA PRIVATE KEY-----\nSYNTHETICLINE1\nSYNTHETICLINE2\n-----END RSA PRIVATE KEY-----\nafter";
+        assert_eq!(mask_secrets(pem), "before\n<REDACTED>\nafter");
+        let cut = "-----BEGIN PRIVATE KEY-----\nSYNTHETICLINE1\nSYNTHETICLI";
+        assert_eq!(mask_secrets(cut), "<REDACTED>");
+    }
+
+    #[test]
+    fn ordinary_words_are_not_masked() {
+        for t in [
+            "the token budget was exceeded",
+            "cookie banner shown to the user",
+            "tokenization of secrets is hard",
+            "ssh://git@host.test/repo.git",
+            "http://host.test:8080/path",
+            "deploy --token-file path.txt",
+            "max_tokens: 5",
+            "see eyJ docs and ghp_short",
+        ] {
+            assert_eq!(mask_credentials(t), t);
+        }
+    }
+
+    #[test]
+    fn mask_single_quoted_value_with_spaces() {
+        assert_eq!(
+            mask_secrets("secret='two words' ok"),
+            "secret=<REDACTED> ok"
         );
     }
 

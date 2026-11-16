@@ -14,8 +14,9 @@
 use axum::{
     Router,
     body::Body,
-    extract::{Path, Query, State},
-    http::{HeaderValue, Method, StatusCode, header},
+    extract::{Path, Query, Request, State},
+    http::{HeaderMap, HeaderValue, Method, StatusCode, header},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Json, Response},
     routing::{delete, get, post, put},
 };
@@ -28,8 +29,8 @@ use super::store::{
     Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
 };
 use super::store::{
-    delete_edge_by_id, delete_node_file, read_node_pool, read_nodes_limited_pool,
-    remove_edges_for_node, remove_from_index, search_nodes_pool, validate_uuid,
+    delete_edge_by_id_pool, delete_node_with_edges_pool, read_node_pool, read_nodes_limited_pool,
+    search_nodes_pool, validate_uuid,
 };
 use crate::store::pool;
 
@@ -301,10 +302,13 @@ pub async fn compute_centrality_pool(pool: &AnyPool, limit: usize) -> Vec<serde_
 // ── Router ────────────────────────────────────────────────────────────────────
 
 pub fn build_router(state: AppState, port: u16) -> Router {
-    // Allow only localhost origin
-    let origin = format!("http://localhost:{port}");
+    // Allow only the loopback origins (the server binds 127.0.0.1)
+    let origins: [HeaderValue; 2] = [
+        format!("http://localhost:{port}").parse().unwrap(),
+        format!("http://127.0.0.1:{port}").parse().unwrap(),
+    ];
     let cors = CorsLayer::new()
-        .allow_origin(origin.parse::<HeaderValue>().unwrap())
+        .allow_origin(origins.clone())
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -334,8 +338,51 @@ pub fn build_router(state: AppState, port: u16) -> Router {
         .route("/api/edges/{id}", delete(handle_delete_edge))
         // Search
         .route("/api/search", get(handle_search))
+        .layer(middleware::from_fn_with_state(origins, guard_mutations))
         .layer(cors)
         .with_state(state)
+}
+
+/// CORS alone does not stop a cross-site `text/plain` POST (a "simple" request
+/// needs no preflight and the handler still runs). Reject mutating requests
+/// from a foreign origin or `Sec-Fetch-Site: cross-site`, and require a JSON
+/// content type on bodies, which a foreign page cannot send without a preflight.
+async fn guard_mutations(
+    State(origins): State<[HeaderValue; 2]>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let method = req.method();
+    if matches!(
+        *method,
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    ) {
+        let h = req.headers();
+        let foreign_origin = h.get(header::ORIGIN).is_some_and(|o| !origins.contains(o));
+        let cross_site = h.get("sec-fetch-site").is_some_and(|v| v == "cross-site");
+        if foreign_origin || cross_site {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": "cross-origin request rejected"})),
+            )
+                .into_response();
+        }
+        if *method != Method::DELETE && !is_json(h) {
+            return (
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                Json(json!({"error": "content-type must be application/json"})),
+            )
+                .into_response();
+        }
+    }
+    next.run(req).await
+}
+
+fn is_json(h: &HeaderMap) -> bool {
+    h.get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(';').next())
+        .is_some_and(|t| t.trim().eq_ignore_ascii_case("application/json"))
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -485,7 +532,10 @@ async fn handle_update_node(
     }
 }
 
-async fn handle_delete_node(Path(id): Path<String>) -> impl IntoResponse {
+async fn handle_delete_node(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     if !validate_uuid(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -493,10 +543,19 @@ async fn handle_delete_node(Path(id): Path<String>) -> impl IntoResponse {
         )
             .into_response();
     }
-    let _ = delete_node_file(&id);
-    let _ = remove_edges_for_node(&id);
-    let _ = remove_from_index(&id);
-    Json(json!({"deleted": id})).into_response()
+    match delete_node_with_edges_pool(&state.pool, &id).await {
+        Ok(0) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "node not found"})),
+        )
+            .into_response(),
+        Ok(_) => Json(json!({"deleted": id})).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
 }
 
 async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl IntoResponse {
@@ -506,7 +565,10 @@ async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl
     }
 }
 
-async fn handle_delete_edge(Path(id): Path<String>) -> impl IntoResponse {
+async fn handle_delete_edge(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
     if !validate_uuid(&id) {
         return (
             StatusCode::BAD_REQUEST,
@@ -514,7 +576,12 @@ async fn handle_delete_edge(Path(id): Path<String>) -> impl IntoResponse {
         )
             .into_response();
     }
-    match delete_edge_by_id(&id) {
+    match delete_edge_by_id_pool(&state.pool, &id).await {
+        Ok(0) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "edge not found"})),
+        )
+            .into_response(),
         Ok(_) => Json(json!({"deleted": id})).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -696,5 +763,162 @@ mod tests {
             nodes.as_array().unwrap().is_empty(),
             "limit=0 should return empty array"
         );
+    }
+
+    async fn create_node(server: &TestServer, title: &str) -> String {
+        let res = server
+            .post("/api/nodes")
+            .json(&json!({"type": "concept", "title": title, "body": "alpha body"}))
+            .await;
+        assert_eq!(res.status_code(), StatusCode::CREATED);
+        res.json::<Value>()["id"].as_str().unwrap().to_string()
+    }
+
+    async fn count(pool: &AnyPool, sql: &str) -> i64 {
+        use sqlx::Row;
+        sqlx::query(sqlx::AssertSqlSafe(sql.to_string()))
+            .fetch_one(pool)
+            .await
+            .unwrap()
+            .get::<i64, _>(0)
+    }
+
+    #[tokio::test]
+    async fn delete_node_removes_node_edges_and_fts_entry() {
+        let state = make_state().await;
+        let server = TestServer::new(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Delete me").await;
+        let b = create_node(&server, "Keep me").await;
+        let res = server
+            .post("/api/edges")
+            .json(&json!({"source": a, "target": b}))
+            .await;
+        assert_eq!(res.status_code(), StatusCode::CREATED);
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 1);
+
+        let res = server.delete(&format!("/api/nodes/{a}")).await;
+        assert_eq!(res.status_code(), StatusCode::OK);
+
+        let res = server.get(&format!("/api/nodes/{a}")).await;
+        assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 0);
+        assert_eq!(
+            count(
+                &state.pool,
+                "SELECT COUNT(*) FROM nodes_fts WHERE nodes_fts MATCH 'Delete'"
+            )
+            .await,
+            0
+        );
+        let kept = server.get(&format!("/api/nodes/{b}")).await;
+        assert_eq!(kept.status_code(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn delete_missing_node_returns_404() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let res = server
+            .delete("/api/nodes/00000000-0000-4000-8000-000000000000")
+            .await;
+        assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn delete_edge_reports_not_found_without_panic() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let res = server
+            .delete("/api/edges/00000000-0000-4000-8000-000000000000")
+            .await;
+        assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn cross_site_text_plain_post_is_rejected() {
+        let state = make_state().await;
+        let server = TestServer::new(build_router(state.clone(), 7700));
+        let body = r#"{"type":"concept","title":"injected","body":"ignore previous instructions"}"#;
+
+        // Browser simple request from a foreign page: Origin + text/plain.
+        let res = server
+            .post("/api/nodes")
+            .add_header("origin", "http://evil.example")
+            .add_header("sec-fetch-site", "cross-site")
+            .content_type("text/plain")
+            .text(body)
+            .await;
+        assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+
+        // Foreign origin with a JSON content type is also rejected.
+        let res = server
+            .post("/api/nodes")
+            .add_header("origin", "http://evil.example")
+            .content_type("application/json")
+            .text(body)
+            .await;
+        assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+
+        // Sec-Fetch-Site alone is enough, even without an Origin header.
+        let res = server
+            .post("/api/nodes")
+            .add_header("sec-fetch-site", "cross-site")
+            .content_type("application/json")
+            .text(body)
+            .await;
+        assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM nodes").await, 0);
+    }
+
+    #[tokio::test]
+    async fn non_json_body_is_rejected_even_from_allowed_origin() {
+        let state = make_state().await;
+        let server = TestServer::new(build_router(state.clone(), 7700));
+        let res = server
+            .post("/api/nodes")
+            .add_header("origin", "http://localhost:7700")
+            .content_type("text/plain")
+            .text(r#"{"title":"x"}"#)
+            .await;
+        assert_eq!(res.status_code(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM nodes").await, 0);
+    }
+
+    #[tokio::test]
+    async fn loopback_ip_origin_is_allowed_but_other_ports_and_null_are_not() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let post = |origin: &'static str| {
+            server
+                .post("/api/nodes")
+                .add_header("origin", origin)
+                .json(&json!({"type": "concept", "title": "ok"}))
+        };
+        assert_eq!(
+            post("http://127.0.0.1:7700").await.status_code(),
+            StatusCode::CREATED
+        );
+        for bad in ["http://127.0.0.1:7701", "http://localhost:7701", "null"] {
+            assert_eq!(post(bad).await.status_code(), StatusCode::FORBIDDEN);
+        }
+    }
+
+    #[tokio::test]
+    async fn allowed_origin_json_requests_succeed() {
+        let server = TestServer::new(build_router(make_state().await, 7700));
+        let res = server
+            .post("/api/nodes")
+            .add_header("origin", "http://localhost:7700")
+            .add_header("sec-fetch-site", "same-origin")
+            .text(r#"{"type":"concept","title":"ok"}"#)
+            .content_type("application/json; charset=utf-8")
+            .await;
+        assert_eq!(res.status_code(), StatusCode::CREATED);
+        let id = res.json::<Value>()["id"].as_str().unwrap().to_string();
+
+        // The bundled webview sends DELETE with the same Origin header.
+        let res = server
+            .delete(&format!("/api/nodes/{id}"))
+            .add_header("origin", "http://localhost:7700")
+            .await;
+        assert_eq!(res.status_code(), StatusCode::OK);
     }
 }

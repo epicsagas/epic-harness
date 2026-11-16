@@ -7,7 +7,7 @@ use crate::telemetry::{FailureClass, Telemetry, ToolCategory};
 
 static TELEMETRY: LazyLock<Telemetry> = LazyLock::new(Telemetry::init);
 
-use crate::shared::sanitize::{mask_path_action, mask_secrets};
+use crate::shared::sanitize::{mask_json_secrets, mask_path_action, mask_secrets};
 
 static SILENT_OK_CMDS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*(mkdir|cp|mv|rm|chmod|chown|ln|touch|git\s+(add|checkout|switch|branch|stash|tag|remote)|cd|export|source|tsc\s+--noEmit)\b").unwrap()
@@ -374,20 +374,20 @@ fn resolve_action(v: &serde_json::Value) -> String {
     v.get("file_path")
         .and_then(|c| c.as_str())
         .filter(|c| !c.is_empty())
-        .map(|c| mask_path_action(truncate_str(c, 500)))
+        .map(|c| truncate_str(&mask_path_action(c), 500).to_string())
         .or_else(|| {
             let cmd = v.get("command").and_then(|c| c.as_str())?;
             let files = apply_patch_paths(cmd, true);
             if files.is_empty() {
                 // A real shell command, not a patch payload.
-                return Some(mask_secrets(truncate_str(cmd, 500)));
+                return Some(truncate_str(&mask_secrets(cmd), 500).to_string());
             }
             let masked: Vec<String> = files.iter().map(|f| mask_path_action(f)).collect();
             Some(truncate_str(&masked.join(" "), 500).to_string())
         })
         .unwrap_or_else(|| {
-            let s = serde_json::to_string(v).unwrap_or_default();
-            mask_secrets(truncate_str(&s, 200))
+            let s = serde_json::to_string(&mask_json_secrets(v)).unwrap_or_default();
+            truncate_str(&mask_secrets(&s), 200).to_string()
         })
 }
 
@@ -552,7 +552,7 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_secrets(truncate_str(&combined, 500));
+            let masked = truncate_str(&mask_secrets(&combined), 500).to_string();
             record.error_snippet = Some(masked);
         }
     }
@@ -824,6 +824,33 @@ mod tests {
         let score = compute_score(&dims);
         assert!(score <= 0.5);
         assert_eq!(dims.tool_success, 0.0);
+    }
+
+    // ── mask before truncate ────────────────────────
+    // A secret value with spaces that straddles the truncation length must not
+    // leak its tail: masking a truncated string would see an unterminated quote.
+    #[test]
+    fn action_masks_secret_straddling_truncation() {
+        let value = "SYNTHETICWORD ".repeat(40);
+        let cmd = format!("{} password=\"{value}\"", "x".repeat(465));
+        let action = resolve_action(&serde_json::json!({ "command": cmd }));
+        assert!(!action.contains("SYNTHETIC"));
+        assert!(action.contains("<REDACTED>"));
+    }
+
+    #[test]
+    fn action_masks_tool_input_json() {
+        let action = resolve_action(&serde_json::json!({"token": "abc def", "url": "u"}));
+        assert!(!action.contains("abc") && !action.contains("def"));
+        assert!(action.contains("<REDACTED>"));
+    }
+
+    #[test]
+    fn action_masks_json_string_inside_tool_input() {
+        let inner = r#"{"token":"SYNTHETICA SYNTHETICB"}"#;
+        let action = resolve_action(&serde_json::json!({ "payload": inner }));
+        assert!(!action.contains("SYNTHETIC"));
+        assert!(action.contains("<REDACTED>"));
     }
 
     // ── mask_secrets ────────────────────────────────

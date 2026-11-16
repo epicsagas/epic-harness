@@ -140,6 +140,26 @@ pub async fn delete_node_pool(pool: &sqlx::AnyPool, id: &str) -> io::Result<()> 
     Ok(())
 }
 
+/// Delete a node and its edges in one transaction. The FTS index follows the
+/// `nodes` row through the `nodes_ad` trigger. Returns the number of deleted nodes.
+pub async fn delete_node_with_edges_pool(pool: &sqlx::AnyPool, id: &str) -> io::Result<u64> {
+    let mut tx = pool.begin().await.map_err(io::Error::other)?;
+    sqlx::query("DELETE FROM edges WHERE source = ? OR target = ?")
+        .bind(id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(io::Error::other)?;
+    let deleted = sqlx::query("DELETE FROM nodes WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .map_err(io::Error::other)?
+        .rows_affected();
+    tx.commit().await.map_err(io::Error::other)?;
+    Ok(deleted)
+}
+
 #[allow(dead_code)]
 pub async fn node_exists_pool(pool: &sqlx::AnyPool, id: &str) -> bool {
     read_node_async(pool, id).await.is_ok()
