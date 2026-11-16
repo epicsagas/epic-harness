@@ -1047,8 +1047,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
         "get_effect_pending" => {
             // Whether a cross-project effect export is pending this session.
             // We approximate: present if the marker file exists.
-            let marker = harness_dir.join(".cross-project-enabled");
-            serde_json::json!({ "enabled": marker.exists() }).to_string()
+            let enabled = crate::shared::paths::cross_project_file().is_file();
+            serde_json::json!({ "enabled": enabled }).to_string()
         }
         _ => "null".into(),
     }
