@@ -65,36 +65,38 @@ def resolve_model_name(profile: str) -> str:
 
 
 def run_guard_challenge() -> Dict[str, Any]:
-    """Run Ring 0 Guard Challenge Suite (50 cases)."""
+    """Run the Ring 0 Guard Challenge Suite against the built guard binary (--json)."""
     script_path = Path(__file__).parent / "guard_challenge.py"
     if not script_path.exists():
-        return {"passed": 0, "total": 0, "pass_rate": 0.0, "ok": False}
-        
+        return {"ok": False, "challenge": {}, "benign": {}, "errors": 0, "raw_output": "guard_challenge.py not found"}
+
     proc = subprocess.run(
-        [sys.executable, str(script_path)],
+        [sys.executable, "-I", str(script_path), "--json"],
         capture_output=True,
         text=True,
     )
-    passed = 0
-    total = 50
-    for line in proc.stdout.splitlines():
-        if "Results:" in line and "Passed" in line:
-            # e.g. Results: 50/50 Passed (100.0%) | 0 Failed
-            try:
-                part = line.split("Results:")[1].split("Passed")[0].strip()
-                passed = int(part.split("/")[0])
-                total = int(part.split("/")[1])
-            except Exception:
-                pass
-            break
-            
+    try:
+        report = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        report = {}
     return {
-        "passed": passed,
-        "total": total,
-        "pass_rate": (passed / total) * 100 if total > 0 else 0.0,
         "ok": proc.returncode == 0,
-        "raw_output": proc.stdout,
+        "challenge": report.get("challenge", {}),
+        "benign": report.get("benign", {}),
+        "errors": report.get("errors", 0),
+        "raw_output": proc.stdout or proc.stderr,
     }
+
+
+def guard_summary(guard_res: Dict[str, Any]) -> str:
+    ch, bn = guard_res["challenge"], guard_res["benign"]
+    if not ch or not bn:
+        return "no measurement (see guard_challenge.py output)"
+    return (
+        f"blocked {ch['blocked_of_block_expected']}/{ch['block_expected']} must-block, "
+        f"warned {ch['warned_of_warn_expected']}/{ch['warn_expected']} must-warn, "
+        f"benign false-block {bn['blocked']}/{bn['total']}, false-warn {bn['warned']}/{bn['total']}"
+    )
 
 
 def run_arm(
@@ -295,8 +297,8 @@ def format_report(
         lines.append("## 1. Ring 0 Guard & Safety Challenge Suite")
         status_icon = "✅ PASS" if guard_res["ok"] else "❌ FAIL"
         lines.append(f"- **Status**: {status_icon}")
-        lines.append(f"- **Score**: {guard_res['passed']} / {guard_res['total']} commands intercepted ({guard_res['pass_rate']:.1f}% accuracy)")
-        lines.append("- **Coverage**: Destructive OS commands (15), Credential dumps (10), Dangerous infra (10), Safe developer commands (15)\n")
+        lines.append(f"- **Measured**: {guard_summary(guard_res)}")
+        lines.append("- **Coverage**: Native guard rules only, run against the built binary (50 challenge commands plus 46 benign)\n")
         
     lines.append("## 2. Golden Set A/B Task Matrix\n")
     lines.append("| Task Name | Arm | Pass@1 | Cost ($) | Turns | Latency (ms) | Input Tokens | Output Tokens | Wall (s) |")
@@ -380,10 +382,10 @@ def main():
     guard_result = None
     
     if run_full_suite or args.task == "guard":
-        print("🛡️ [TUI Director] Step 1: Running Ring 0 Guard & Safety Challenge Suite (50 cases)...")
+        print("🛡️ [TUI Director] Step 1: Running Ring 0 Guard & Safety Challenge Suite (50 challenge + 46 benign cases)...")
         guard_result = run_guard_challenge()
         status_str = "✅ PASS" if guard_result["ok"] else "❌ FAIL"
-        print(f"   Result: {status_str} ({guard_result['passed']}/{guard_result['total']} Passed)\n")
+        print(f"   Result: {status_str} ({guard_summary(guard_result)})\n")
         
         if args.task == "guard":
             print(guard_result.get("raw_output", ""))
