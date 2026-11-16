@@ -7,7 +7,7 @@
 //! 2. Per-project harness.db: ATTACH source DB, INSERT OR IGNORE into target.
 //! 3. File-based: obs/*.jsonl, sessions/*.json, evolved/, evolution.jsonl, orbit/.
 
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteQueryResult};
 use sqlx::{ConnectOptions, Executor};
 use std::io;
 use std::path::Path;
@@ -24,7 +24,45 @@ pub fn run_merge(from: &str, to: &str, dry_run: bool, delete_source: bool) -> i3
 
 // ── Core async impl ──────────────────────────────────────────────────────────
 
+/// A slug names one directory directly under the projects root.
+fn is_valid_slug(slug: &str) -> bool {
+    !slug.is_empty() && slug != "." && slug != ".." && !slug.contains(['/', '\\', '\0'])
+}
+
+/// Top-level entries of a project dir that a merge step handles.
+const MERGED_ENTRIES: &[&str] = &[
+    "harness.db",
+    "harness.db-wal",
+    "harness.db-shm",
+    "obs",
+    "sessions",
+    "orbit",
+    "evolved",
+    "evolution.jsonl",
+];
+
+/// Names of top-level entries in `dir` that the merge does not handle.
+/// An unreadable dir is reported as one entry so the caller refuses to delete it.
+fn unmerged_entries(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return vec!["<unreadable>".into()];
+    };
+    let mut names: Vec<String> = entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !MERGED_ENTRIES.contains(&n.as_str()))
+        .collect();
+    names.sort();
+    names
+}
+
 async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: bool) -> i32 {
+    for slug in [from, to] {
+        if !is_valid_slug(slug) {
+            eprintln!("[merge-project] invalid slug: {slug:?}");
+            return 1;
+        }
+    }
     let projects_root = harness_projects_root();
     let from_dir = projects_root.join(from);
     let to_dir = projects_root.join(to);
@@ -36,6 +74,12 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
     if from == to {
         eprintln!("[merge-project] --from and --to must be different slugs");
+        return 1;
+    }
+    if let (Ok(f), Ok(t)) = (from_dir.canonicalize(), to_dir.canonicalize())
+        && (f.starts_with(&t) || t.starts_with(&f))
+    {
+        eprintln!("[merge-project] source and target resolve to the same or nested directories");
         return 1;
     }
 
@@ -89,16 +133,32 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     }
 
     // ── 3. File-based data ───────────────────────────────────────────────────
-    let obs_files = copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run);
-    let session_files = copy_dir_files(
+    let mut file_errors = 0usize;
+    let (obs_files, e) = copy_dir_files(&from_dir.join("obs"), &to_dir.join("obs"), dry_run);
+    file_errors += e;
+    let (session_files, e) = copy_dir_files(
         &from_dir.join("sessions"),
         &to_dir.join("sessions"),
         dry_run,
     );
-    let orbit_files = copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run);
-    let evolved_dirs =
+    file_errors += e;
+    let (orbit_files, e) = copy_dir_files(&from_dir.join("orbit"), &to_dir.join("orbit"), dry_run);
+    file_errors += e;
+    let (evolved_dirs, e) =
         copy_evolved_dir(&from_dir.join("evolved"), &to_dir.join("evolved"), dry_run);
-    let evo_lines = append_evolution_jsonl(&from_dir, &to_dir, dry_run).unwrap_or(0);
+    file_errors += e;
+    let evo_lines = match append_evolution_jsonl(&from_dir, &to_dir, dry_run) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("[merge-project] evolution.jsonl error: {e}");
+            file_errors += 1;
+            0
+        }
+    };
+    if file_errors > 0 {
+        eprintln!("[merge-project] {file_errors} file transfer error(s)");
+        exit = 1;
+    }
 
     // ── Summary ──────────────────────────────────────────────────────────────
     println!("\n[merge-project] ─── summary ───────────────────────────");
@@ -113,12 +173,23 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
     if delete_source {
         if dry_run {
             println!("  [dry-run] would delete   : {}", from_dir.display());
+        } else if exit != 0 {
+            eprintln!("[merge-project] source NOT deleted: merge had errors (see above)");
         } else {
-            match std::fs::remove_dir_all(&from_dir) {
-                Ok(_) => println!("  source dir deleted       : {}", from_dir.display()),
-                Err(e) => {
-                    eprintln!("[merge-project] could not delete source: {e}");
-                    exit = 1;
+            let leftover = unmerged_entries(&from_dir);
+            if !leftover.is_empty() {
+                eprintln!(
+                    "[merge-project] source NOT deleted: entries not handled by merge: {}",
+                    leftover.join(", ")
+                );
+                exit = 1;
+            } else {
+                match std::fs::remove_dir_all(&from_dir) {
+                    Ok(_) => println!("  source dir deleted       : {}", from_dir.display()),
+                    Err(e) => {
+                        eprintln!("[merge-project] could not delete source: {e}");
+                        exit = 1;
+                    }
                 }
             }
         }
@@ -136,6 +207,28 @@ async fn run_merge_async(from: &str, to: &str, dry_run: bool, delete_source: boo
 
 // ── Global DB: UPDATE project column ────────────────────────────────────────
 
+// Tables where project is a plain (non-PK) column — safe to UPDATE directly.
+const SIMPLE: &[&str] = &[
+    "observations",
+    "sessions",
+    "evolution_records",
+    "score_history",
+    "orch_runs",
+    "orch_control",
+    "orbit_pipelines",
+    "evolved_skills",
+    "global_patterns",
+];
+
+/// Rows affected by a statement; a missing table counts as 0, any other error propagates.
+fn rows_or_missing(r: Result<SqliteQueryResult, sqlx::Error>) -> io::Result<usize> {
+    match r {
+        Ok(r) => Ok(r.rows_affected() as usize),
+        Err(e) if e.to_string().contains("no such") => Ok(0),
+        Err(e) => Err(sqlx_err(e)),
+    }
+}
+
 async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) -> io::Result<usize> {
     let url = format!("sqlite:{}", db_path.display());
     let mut conn = SqliteConnectOptions::from_str(&url)
@@ -144,19 +237,6 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
         .connect()
         .await
         .map_err(sqlx_err)?;
-
-    // Tables where project is a plain (non-PK) column — safe to UPDATE directly.
-    const SIMPLE: &[&str] = &[
-        "observations",
-        "sessions",
-        "evolution_records",
-        "score_history",
-        "orch_runs",
-        "orch_control",
-        "orbit_pipelines",
-        "evolved_skills",
-        "global_patterns",
-    ];
 
     let mut total = 0usize;
 
@@ -192,86 +272,109 @@ async fn merge_global_db(db_path: &Path, from: &str, to: &str, dry_run: bool) ->
 
     conn.execute("BEGIN IMMEDIATE").await.map_err(sqlx_err)?;
 
+    let res = match apply_global_updates(&mut conn, from, to).await {
+        Ok(total) => conn
+            .execute("COMMIT")
+            .await
+            .map(|_| total)
+            .map_err(sqlx_err),
+        Err(e) => Err(e),
+    };
+    if res.is_err() {
+        let _ = conn.execute("ROLLBACK").await;
+    }
+    res
+}
+
+/// Runs inside the caller's transaction; any error other than a missing table aborts the merge.
+async fn apply_global_updates(
+    conn: &mut SqliteConnection,
+    from: &str,
+    to: &str,
+) -> io::Result<usize> {
+    let mut total = 0usize;
+
     for table in SIMPLE {
-        match sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE {table} SET project = ? WHERE project = ?"
-        )))
-        .bind(to)
-        .bind(from)
-        .execute(&mut conn)
-        .await
-        {
-            Ok(r) => total += r.rows_affected() as usize,
-            Err(e) if e.to_string().contains("no such") => {}
-            Err(e) => eprintln!("[merge-project] update {table}: {e}"),
-        }
+        total += rows_or_missing(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE {table} SET project = ? WHERE project = ?"
+            )))
+            .bind(to)
+            .bind(from)
+            .execute(&mut *conn)
+            .await,
+        )?;
     }
 
     // metrics_state: composite PK (key, project) — drop conflicting source rows, then rename.
-    let _ = sqlx::query(
-        "DELETE FROM metrics_state WHERE project = ? \
-         AND key IN (SELECT key FROM metrics_state WHERE project = ?)",
-    )
-    .bind(from)
-    .bind(to)
-    .execute(&mut conn)
-    .await;
-    if let Ok(r) = sqlx::query("UPDATE metrics_state SET project = ? WHERE project = ?")
-        .bind(to)
+    rows_or_missing(
+        sqlx::query(
+            "DELETE FROM metrics_state WHERE project = ? \
+             AND key IN (SELECT key FROM metrics_state WHERE project = ?)",
+        )
         .bind(from)
-        .execute(&mut conn)
-        .await
-    {
-        total += r.rows_affected() as usize;
-    }
+        .bind(to)
+        .execute(&mut *conn)
+        .await,
+    )?;
+    total += rows_or_missing(
+        sqlx::query("UPDATE metrics_state SET project = ? WHERE project = ?")
+            .bind(to)
+            .bind(from)
+            .execute(&mut *conn)
+            .await,
+    )?;
 
     // skill_attribution: composite PK (skill_name, project) — keep target rows on conflict.
-    let _ = sqlx::query(
-        "DELETE FROM skill_attribution WHERE project = ? \
-         AND skill_name IN (SELECT skill_name FROM skill_attribution WHERE project = ?)",
-    )
-    .bind(from)
-    .bind(to)
-    .execute(&mut conn)
-    .await;
-    if let Ok(r) = sqlx::query("UPDATE skill_attribution SET project = ? WHERE project = ?")
-        .bind(to)
+    rows_or_missing(
+        sqlx::query(
+            "DELETE FROM skill_attribution WHERE project = ? \
+             AND skill_name IN (SELECT skill_name FROM skill_attribution WHERE project = ?)",
+        )
         .bind(from)
-        .execute(&mut conn)
-        .await
-    {
-        total += r.rows_affected() as usize;
-    }
+        .bind(to)
+        .execute(&mut *conn)
+        .await,
+    )?;
+    total += rows_or_missing(
+        sqlx::query("UPDATE skill_attribution SET project = ? WHERE project = ?")
+            .bind(to)
+            .bind(from)
+            .execute(&mut *conn)
+            .await,
+    )?;
 
     // promotion_counters: composite PK (pattern_key, project) — sum counts on conflict.
-    let _ = sqlx::query(
-        "UPDATE promotion_counters \
-         SET count = count + (
-             SELECT count FROM promotion_counters AS src
-             WHERE src.project = ? AND src.pattern_key = promotion_counters.pattern_key
-         ) \
-         WHERE project = ? \
-         AND pattern_key IN (SELECT pattern_key FROM promotion_counters WHERE project = ?)",
-    )
-    .bind(from)
-    .bind(to)
-    .bind(from)
-    .execute(&mut conn)
-    .await;
-    let _ = sqlx::query("DELETE FROM promotion_counters WHERE project = ?")
+    rows_or_missing(
+        sqlx::query(
+            "UPDATE promotion_counters \
+             SET count = count + (
+                 SELECT count FROM promotion_counters AS src
+                 WHERE src.project = ? AND src.pattern_key = promotion_counters.pattern_key
+             ) \
+             WHERE project = ? \
+             AND pattern_key IN (SELECT pattern_key FROM promotion_counters WHERE project = ?)",
+        )
         .bind(from)
-        .execute(&mut conn)
-        .await;
-    if let Ok(r) = sqlx::query("UPDATE promotion_counters SET project = ? WHERE project = ?")
         .bind(to)
         .bind(from)
-        .execute(&mut conn)
-        .await
-    {
-        total += r.rows_affected() as usize;
-    }
+        .execute(&mut *conn)
+        .await,
+    )?;
+    rows_or_missing(
+        sqlx::query("DELETE FROM promotion_counters WHERE project = ?")
+            .bind(from)
+            .execute(&mut *conn)
+            .await,
+    )?;
+    total += rows_or_missing(
+        sqlx::query("UPDATE promotion_counters SET project = ? WHERE project = ?")
+            .bind(to)
+            .bind(from)
+            .execute(&mut *conn)
+            .await,
+    )?;
 
-    conn.execute("COMMIT").await.map_err(sqlx_err)?;
     Ok(total)
 }
 
@@ -352,12 +455,18 @@ async fn merge_per_project_dbs(
 // ── File-level helpers ───────────────────────────────────────────────────────
 
 /// Copy files from `src_dir` to `dst_dir`, skipping files that already exist.
-/// Returns the number of files copied (or would copy in dry-run).
-fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> usize {
-    let Ok(entries) = std::fs::read_dir(src_dir) else {
-        return 0;
+/// Returns the number of files copied (or would copy in dry-run) and the number of failures.
+fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> (usize, usize) {
+    let entries = match std::fs::read_dir(src_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return (0, 0),
+        Err(e) => {
+            eprintln!("[merge-project] cannot read {}: {e}", src_dir.display());
+            return (0, 1);
+        }
     };
     let mut count = 0;
+    let mut errors = 0;
     for entry in entries.flatten() {
         let src = entry.path();
         if !src.is_file() {
@@ -374,20 +483,30 @@ fn copy_dir_files(src_dir: &Path, dst_dir: &Path, dry_run: bool) -> usize {
             if let Some(parent) = dst.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
-            if std::fs::copy(&src, &dst).is_ok() {
-                count += 1;
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => count += 1,
+                Err(e) => {
+                    eprintln!("[merge-project] copy {} failed: {e}", src.display());
+                    errors += 1;
+                }
             }
         }
     }
-    count
+    (count, errors)
 }
 
 /// Copy evolved skill subdirectories that don't already exist in target.
-fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> usize {
-    let Ok(entries) = std::fs::read_dir(src_evolved) else {
-        return 0;
+fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> (usize, usize) {
+    let entries = match std::fs::read_dir(src_evolved) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return (0, 0),
+        Err(e) => {
+            eprintln!("[merge-project] cannot read {}: {e}", src_evolved.display());
+            return (0, 1);
+        }
     };
     let mut count = 0;
+    let mut errors = 0;
     for entry in entries.flatten() {
         let src = entry.path();
         if !src.is_dir() {
@@ -398,12 +517,14 @@ fn copy_evolved_dir(src_evolved: &Path, dst_evolved: &Path, dry_run: bool) -> us
         if dst.exists() {
             continue;
         }
-        if !dry_run && copy_dir_recursive(&src, &dst).is_err() {
+        if !dry_run && let Err(e) = copy_dir_recursive(&src, &dst) {
+            eprintln!("[merge-project] copy {} failed: {e}", src.display());
+            errors += 1;
             continue;
         }
         count += 1;
     }
-    count
+    (count, errors)
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {

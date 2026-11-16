@@ -437,25 +437,23 @@ pub async fn load_metrics_scoped_pool(
     project: Option<&str>,
 ) -> io::Result<Metrics> {
     // Scalar state — aggregate across projects.
-    async fn get_sum(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<f64> {
+    async fn get_str(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<String> {
         let q = if project.is_some() {
             "SELECT value FROM metrics_state WHERE key = ? AND project = ? LIMIT 1"
         } else {
             "SELECT value FROM metrics_state WHERE key = ? LIMIT 1"
         };
-        let row = if let Some(p) = project {
+        if let Some(p) = project {
             sqlx::query_scalar::<_, String>(q).bind(key).bind(p)
         } else {
             sqlx::query_scalar::<_, String>(q).bind(key)
         }
         .fetch_optional(pool)
         .await
-        .ok()??;
-        row.parse().ok()
+        .ok()?
     }
-    async fn get_str(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<String> {
-        let v = get_sum(pool, key, project).await?;
-        Some(v.to_string())
+    async fn get_sum(pool: &AnyPool, key: &str, project: Option<&str>) -> Option<f64> {
+        get_str(pool, key, project).await?.parse().ok()
     }
 
     // Aggregate scalar metrics across projects for the "all" view, or take
@@ -571,14 +569,13 @@ pub async fn load_metrics_scoped_pool(
         None
     };
     let reward_hacking_suspected: bool = if let Some(p) = project {
-        get_sum(pool, "reward_hacking_suspected", Some(p))
+        get_str(pool, "reward_hacking_suspected", Some(p))
             .await
-            .map(|v| v != 0.0)
-            .unwrap_or(false)
+            .is_some_and(|v| v == "true" || v == "1")
     } else {
         sqlx::query_scalar::<_, Option<i64>>(
-            "SELECT CASE WHEN MAX(CAST(value AS REAL)) > 0 THEN 1 ELSE 0 END
-             FROM metrics_state WHERE key = 'reward_hacking_suspected'",
+            "SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
+             FROM metrics_state WHERE key = 'reward_hacking_suspected' AND value IN ('true', '1')",
         )
         .fetch_one(pool)
         .await
@@ -913,6 +910,56 @@ mod tests {
         assert!(!la.skill_attribution.contains_key("skill-b"));
         assert!(lb.skill_attribution.contains_key("skill-b"));
         assert!(!lb.skill_attribution.contains_key("skill-a"));
+    }
+
+    #[tokio::test]
+    async fn scoped_load_returns_stored_string_and_flag_fields() {
+        let pool = test_pool().await;
+        let mut m = sample_metrics_reward_hacking();
+        m.best_session = "2026-06-01".into();
+        save_metrics_pool(&pool, &m, "proj-a").await.unwrap();
+
+        let loaded = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+        assert_eq!(loaded.trend, "improving");
+        assert_eq!(loaded.best_session, "2026-06-01");
+        assert_eq!(loaded.last_session.as_deref(), Some("2026-06-02"));
+        assert_eq!(
+            loaded.last_error_context.as_deref(),
+            Some("type_error in main.rs")
+        );
+        assert_eq!(
+            loaded.epoch_class,
+            Some(crate::shared::evolution::EpochClass::Regressing)
+        );
+        assert!(loaded.reward_hacking_suspected);
+
+        // Legacy numeric flag spelling still counts as set.
+        sqlx::query("UPDATE metrics_state SET value = '1' WHERE key = 'reward_hacking_suspected'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let loaded = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+        assert!(loaded.reward_hacking_suspected);
+    }
+
+    #[tokio::test]
+    async fn unscoped_load_flags_reward_hacking_if_any_project_set() {
+        let pool = test_pool().await;
+        save_metrics_pool(&pool, &sample_metrics(), "proj-a")
+            .await
+            .unwrap();
+        let loaded = load_metrics_scoped_pool(&pool, None).await.unwrap();
+        assert!(!loaded.reward_hacking_suspected);
+
+        save_metrics_pool(&pool, &sample_metrics_reward_hacking(), "proj-b")
+            .await
+            .unwrap();
+        let loaded = load_metrics_scoped_pool(&pool, None).await.unwrap();
+        assert!(loaded.reward_hacking_suspected);
     }
 
     #[tokio::test]
