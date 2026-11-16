@@ -37,18 +37,26 @@ pub(crate) async fn write_node_dedup_async(
     };
 
     let existing = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SELECT {NODE_COLUMNS} FROM nodes WHERE title = ? AND type = ? AND updated >= ? LIMIT 1"
+        "SELECT {NODE_COLUMNS} FROM nodes WHERE title = ? AND type = ? AND updated >= ?"
     )))
     .bind(&gn.title)
     .bind(&gn.node_type)
     .bind(&cutoff_ts)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await
     .map_err(io::Error::other)?;
 
-    if let Some(row) = existing {
+    // A title is only a duplicate within the same project association set; a global
+    // match dropped both the newly requested association and its body.
+    let projects = super::util::split_csv(&gn.projects);
+    for row in existing {
         let existing_gn = row_to_graph_node(&row);
-        return Ok((existing_gn.id, true));
+        let existing_projects = super::util::split_csv(&existing_gn.projects);
+        if existing_projects.len() == projects.len()
+            && projects.iter().all(|p| existing_projects.contains(p))
+        {
+            return Ok((existing_gn.id, true));
+        }
     }
 
     // No duplicate found — insert

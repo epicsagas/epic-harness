@@ -9,11 +9,34 @@ use sqlx::Row as _;
 
 use super::conn::memory_pool_sync;
 use super::types::{ScoredNode, graph_to_node};
-use super::util::{NODE_COLUMNS, now_iso, parse_iso_to_secs, row_to_graph_node};
+use super::util::{
+    NODE_COLUMNS, NOT_STALE, csv_member, now_iso, parse_iso_to_secs, row_to_graph_node,
+};
 use crate::store::runtime;
 
 /// Half-life in seconds for recency decay (30 days).
 const HALF_LIFE_SECS: f64 = 30.0 * 86400.0;
+
+/// Step 1 with a hint and a project. `pub(crate)` so the plan test uses the same text.
+/// The scope sits inside the FTS query so other projects cannot fill the candidate cap.
+pub(crate) const FTS_SCOPED_SQL: &str = "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? \
+     AND rowid IN (SELECT rowid FROM nodes \
+                   WHERE instr(',' || projects || ',', ',' || ? || ',') > 0 \
+                     AND instr(',' || tags || ',', ',stale,') = 0) \
+     ORDER BY rank LIMIT ?";
+
+/// Step 1 with a hint and no project.
+pub(crate) const FTS_UNSCOPED_SQL: &str = "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? \
+     AND rowid IN (SELECT rowid FROM nodes WHERE instr(',' || tags || ',', ',stale,') = 0) \
+     ORDER BY rank LIMIT ?";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RecallAccess {
+    /// access_count + 1 and accessed_at = now
+    Explicit,
+    /// accessed_at = now only; access_count unchanged
+    Passive,
+}
 
 pub fn smart_recall(
     project: Option<&str>,
@@ -21,7 +44,30 @@ pub fn smart_recall(
     limit: usize,
 ) -> io::Result<Vec<ScoredNode>> {
     let pool = memory_pool_sync()?;
-    runtime::block_on(smart_recall_async(&pool, project, hint, limit))
+    runtime::block_on(smart_recall_async(
+        &pool,
+        project,
+        hint,
+        limit,
+        RecallAccess::Explicit,
+    ))
+}
+
+// Not called until the hook and CLI call sites switch to passive reads.
+#[allow(dead_code)]
+pub fn smart_recall_passive(
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> io::Result<Vec<ScoredNode>> {
+    let pool = memory_pool_sync()?;
+    runtime::block_on(smart_recall_async(
+        &pool,
+        project,
+        hint,
+        limit,
+        RecallAccess::Passive,
+    ))
 }
 
 /// Async core — shared by sync wrapper and pool variant.
@@ -30,68 +76,62 @@ pub(crate) async fn smart_recall_async(
     project: Option<&str>,
     hint: Option<&str>,
     limit: usize,
+    access: RecallAccess,
 ) -> io::Result<Vec<ScoredNode>> {
     let now_secs = parse_iso_to_secs(&now_iso()) as f64;
+
+    // An empty project means unscoped (what `LIKE '%%'` used to do).
+    let project = project.filter(|p| !p.is_empty());
 
     // Step 1: Get candidate nodes filtered by project and/or FTS hint
     let candidates = if let Some(query) = hint {
         let fts_query = escape_fts(query);
         // Get matching rowids from FTS, then fetch full nodes — avoids JOIN column ambiguity
         // with sqlx AnyPool which doesn't support FTS5 virtual table column access reliably.
-        let rowids: Vec<i64> = sqlx::query(
-            "SELECT rowid FROM nodes_fts WHERE nodes_fts MATCH ? ORDER BY rank LIMIT ?",
-        )
-        .bind(&fts_query)
-        .bind(limit as i64 * 3)
-        .fetch_all(pool)
-        .await
-        .map(|rows| {
-            rows.iter()
-                .filter_map(|r| r.try_get::<i64, _>(0).ok())
-                .collect()
-        })
-        .unwrap_or_default();
+        // The project scope is applied inside this query so it happens before the LIMIT.
+        let step1 = match project {
+            Some(proj) => sqlx::query(FTS_SCOPED_SQL).bind(&fts_query).bind(proj),
+            None => sqlx::query(FTS_UNSCOPED_SQL).bind(&fts_query),
+        };
+        let rowids: Vec<i64> = step1
+            .bind(limit as i64 * 3)
+            .fetch_all(pool)
+            .await
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|r| r.try_get::<i64, _>(0).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
 
         if rowids.is_empty() {
             return Ok(vec![]);
         }
 
         let placeholders = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        if let Some(proj) = project {
-            let csv_proj = format!("%{proj}%");
-            let sql = format!(
-                "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) AND projects LIKE ? \
-                 ORDER BY importance DESC"
-            );
-            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
-            for rid in &rowids {
-                q = q.bind(*rid);
-            }
-            q.bind(&csv_proj).fetch_all(pool).await
-        } else {
-            let sql = format!(
-                "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) \
-                 ORDER BY importance DESC"
-            );
-            let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
-            for rid in &rowids {
-                q = q.bind(*rid);
-            }
-            q.fetch_all(pool).await
+        let sql = format!(
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE rowid IN ({placeholders}) \
+             ORDER BY importance DESC"
+        );
+        let mut q = sqlx::query(sqlx::AssertSqlSafe(sql));
+        for rid in &rowids {
+            q = q.bind(*rid);
         }
+        q.fetch_all(pool).await
     } else if let Some(proj) = project {
-        let csv_proj = format!("%{proj}%");
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {NODE_COLUMNS} FROM nodes WHERE projects LIKE ? \
-             ORDER BY importance DESC LIMIT ?"
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE {} AND {NOT_STALE} \
+             ORDER BY importance DESC LIMIT ?",
+            csv_member("projects")
         )))
-        .bind(&csv_proj)
+        .bind(proj)
         .bind(limit as i64 * 3)
         .fetch_all(pool)
         .await
     } else {
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {NODE_COLUMNS} FROM nodes ORDER BY importance DESC LIMIT ?"
+            "SELECT {NODE_COLUMNS} FROM nodes WHERE {NOT_STALE} \
+             ORDER BY importance DESC LIMIT ?"
         )))
         .bind(limit as i64 * 3)
         .fetch_all(pool)
@@ -135,30 +175,38 @@ pub(crate) async fn smart_recall_async(
     });
     scored.truncate(limit);
 
-    // Step 4: Touch accessed nodes (increment access_count)
+    // Step 4: Touch accessed nodes (access_count only for explicit recall)
     let ids: Vec<String> = scored
         .iter()
         .map(|s| s.node.frontmatter.id.clone())
         .collect();
     if !ids.is_empty() {
-        let _ = touch_nodes_async(pool, &ids).await;
+        let _ = touch_nodes_async(pool, &ids, access).await;
     }
 
     Ok(scored)
 }
 
-/// Increment access_count and update accessed_at for the given node IDs.
-async fn touch_nodes_async(pool: &sqlx::AnyPool, ids: &[String]) -> io::Result<()> {
+/// Update accessed_at (and access_count when explicit) for the given node IDs.
+async fn touch_nodes_async(
+    pool: &sqlx::AnyPool,
+    ids: &[String],
+    access: RecallAccess,
+) -> io::Result<()> {
     let now = now_iso();
     for id in ids {
-        sqlx::query(
-            "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?",
-        )
-        .bind(&now)
-        .bind(id)
-        .execute(pool)
-        .await
-        .map_err(io::Error::other)?;
+        let sql = match access {
+            RecallAccess::Explicit => {
+                "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?"
+            }
+            RecallAccess::Passive => "UPDATE nodes SET accessed_at = ? WHERE id = ?",
+        };
+        sqlx::query(sql)
+            .bind(&now)
+            .bind(id)
+            .execute(pool)
+            .await
+            .map_err(io::Error::other)?;
     }
     Ok(())
 }
@@ -200,5 +248,5 @@ pub async fn smart_recall_pool(
     hint: Option<&str>,
     limit: usize,
 ) -> io::Result<Vec<ScoredNode>> {
-    smart_recall_async(pool, project, hint, limit).await
+    smart_recall_async(pool, project, hint, limit, RecallAccess::Explicit).await
 }

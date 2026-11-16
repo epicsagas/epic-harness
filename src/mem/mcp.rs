@@ -274,7 +274,7 @@ fn tool_mem_related(pool: &AnyPool, args: &Value) -> Value {
 }
 
 fn tool_mem_context(pool: &AnyPool, args: &Value) -> Value {
-    let project = args["project"].as_str();
+    let project = args["project"].as_str().filter(|p| !p.is_empty());
     let limit = args["limit"].as_u64().unwrap_or(5) as usize;
 
     // Use smart_recall for importance-weighted context
@@ -302,12 +302,23 @@ fn tool_mem_context(pool: &AnyPool, args: &Value) -> Value {
     json!(results)
 }
 
+const NEIGHBOR_TAKE: usize = 5;
+const NEIGHBOR_SCAN_CHUNK: usize = 32;
+// ponytail: bounded scan; a hub node with more than 256 neighbors may hide in-scope ones past the bound.
+const NEIGHBOR_SCAN_MAX: usize = 256;
+
+/// Stale nodes never come back as neighbors; with a project, only its own nodes do.
+fn neighbor_in_scope(node: &Node, project: Option<&str>) -> bool {
+    !node.frontmatter.tags.iter().any(|t| t == "stale")
+        && project.is_none_or(|p| node.frontmatter.projects.iter().any(|x| x == p))
+}
+
 fn tool_mem_recall(pool: &AnyPool, args: &Value) -> Value {
     let hint = match args["hint"].as_str() {
         Some(s) if !s.is_empty() => s,
         _ => return json!({ "error": "mem_recall requires hint" }),
     };
-    let project = args["project"].as_str();
+    let project = args["project"].as_str().filter(|p| !p.is_empty());
     let limit = args["limit"].as_u64().unwrap_or(10) as usize;
     let include_neighbors = args["include_neighbors"].as_bool().unwrap_or(true);
 
@@ -340,50 +351,52 @@ fn tool_mem_recall(pool: &AnyPool, args: &Value) -> Value {
             .collect();
         let neighbors = runtime::block_on(graph_neighbors_pool(pool, &seed_ids));
 
-        // Add up to 5 graph neighbors not already in results — batch-read in one query.
+        // Add up to NEIGHBOR_TAKE in-scope neighbors not already in results.
         let existing_ids: std::collections::HashSet<&str> = scored
             .iter()
             .map(|sn| sn.node.frontmatter.id.as_str())
             .collect();
 
-        // Collect candidate (id, weight) pairs first so we can batch-read nodes.
         let candidates: Vec<(&str, f64)> = neighbors
             .iter()
             .filter(|(nid, _)| !existing_ids.contains(nid.as_str()))
-            .take(5)
+            .take(NEIGHBOR_SCAN_MAX)
             .map(|(nid, w)| (nid.as_str(), *w))
             .collect();
 
-        if !candidates.is_empty() {
-            let candidate_ids: Vec<&str> = candidates.iter().map(|(id, _)| *id).collect();
-            let weight_by_id: std::collections::HashMap<&str, f64> =
-                candidates.iter().cloned().collect();
-
-            let neighbor_results: Vec<Value> =
-                runtime::block_on(read_nodes_pool(pool, &candidate_ids))
+        // Scan in chunks, in discovery order, keeping only nodes in scope.
+        let mut selected: Vec<(Node, f64)> = Vec::new();
+        'scan: for chunk in candidates.chunks(NEIGHBOR_SCAN_CHUNK) {
+            let chunk_ids: Vec<&str> = chunk.iter().map(|(id, _)| *id).collect();
+            let mut nodes: std::collections::HashMap<String, Node> =
+                runtime::block_on(read_nodes_pool(pool, &chunk_ids))
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|node| {
-                        let edge_weight = weight_by_id
-                            .get(node.frontmatter.id.as_str())
-                            .copied()
-                            .unwrap_or(0.0);
-                        json!({
-                            "id":          node.frontmatter.id,
-                            "title":       node.frontmatter.title,
-                            "type":        node.frontmatter.node_type,
-                            "tags":        node.frontmatter.tags,
-                            "importance":  node.frontmatter.importance,
-                            "score":       (edge_weight * 100.0).round() / 100.0,
-                            "body":        node.body.chars().take(200).collect::<String>(),
-                            "via_graph":   true,
-                            "connections": (edge_weight * 100.0).round() / 100.0
-                        })
-                    })
+                    .map(|n| (n.frontmatter.id.clone(), n))
                     .collect();
-
-            results.extend(neighbor_results);
+            for (id, weight) in chunk {
+                if let Some(node) = nodes.remove(*id).filter(|n| neighbor_in_scope(n, project)) {
+                    selected.push((node, *weight));
+                    if selected.len() == NEIGHBOR_TAKE {
+                        break 'scan;
+                    }
+                }
+            }
         }
+
+        results.extend(selected.into_iter().map(|(node, edge_weight)| {
+            json!({
+                "id":          node.frontmatter.id,
+                "title":       node.frontmatter.title,
+                "type":        node.frontmatter.node_type,
+                "tags":        node.frontmatter.tags,
+                "importance":  node.frontmatter.importance,
+                "score":       (edge_weight * 100.0).round() / 100.0,
+                "body":        node.body.chars().take(200).collect::<String>(),
+                "via_graph":   true,
+                "connections": (edge_weight * 100.0).round() / 100.0
+            })
+        }));
     }
 
     json!({
@@ -514,4 +527,129 @@ pub fn run_mcp_server() -> i32 {
         }
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mem::store::{Edge, append_edge_pool, init_schema_pool, write_node_pool};
+
+    fn setup() -> AnyPool {
+        runtime::block_on(async {
+            let pool = crate::store::pool::test_memory_pool().await;
+            init_schema_pool(&pool).await.unwrap();
+            pool
+        })
+    }
+
+    fn add_node(pool: &AnyPool, id: &str, title: &str, project: &str, tags: &[&str]) {
+        let ts = "2024-01-01T00:00:00Z".to_string();
+        let node = Node {
+            frontmatter: NodeFrontmatter {
+                id: id.to_string(),
+                node_type: "concept".to_string(),
+                title: title.to_string(),
+                tags: tags.iter().map(|t| t.to_string()).collect(),
+                projects: vec![project.to_string()],
+                created: ts.clone(),
+                updated: ts,
+                ..Default::default()
+            },
+            body: format!("body of {id}"),
+        };
+        runtime::block_on(write_node_pool(pool, &node)).unwrap();
+    }
+
+    fn link(pool: &AnyPool, source: &str, target: &str) {
+        let edge = Edge {
+            id: new_uuid(),
+            source: source.to_string(),
+            target: target.to_string(),
+            relation: "related".to_string(),
+            weight: 1.0,
+            ts: now_iso(),
+        };
+        runtime::block_on(append_edge_pool(pool, &edge)).unwrap();
+    }
+
+    /// Ids of the graph neighbors returned by `mem_recall` for the hint "needle".
+    fn neighbor_ids(pool: &AnyPool, project: Option<&str>) -> Vec<String> {
+        let mut args = json!({"hint": "needle"});
+        if let Some(p) = project {
+            args["project"] = json!(p);
+        }
+        let out = tool_mem_recall(pool, &args);
+        out["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|n| n["via_graph"] == json!(true))
+            .map(|n| n["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    /// Seed "a" (alpha, matches the hint) linked to alpha "c" and beta "b".
+    fn seed_basic(pool: &AnyPool) {
+        add_node(pool, "a", "needle", "alpha", &[]);
+        add_node(pool, "b", "other beta", "beta", &[]);
+        add_node(pool, "c", "other alpha", "alpha", &[]);
+        link(pool, "a", "b");
+        link(pool, "a", "c");
+    }
+
+    #[test]
+    fn f_mcp_neighbors_scoped() {
+        let pool = setup();
+        seed_basic(&pool);
+        assert_eq!(neighbor_ids(&pool, Some("alpha")), vec!["c"]);
+    }
+
+    #[test]
+    fn f_mcp_neighbors_unscoped_unchanged() {
+        let pool = setup();
+        seed_basic(&pool);
+        assert_eq!(neighbor_ids(&pool, None), vec!["b", "c"]);
+        // an empty project is unscoped as well
+        assert_eq!(neighbor_ids(&pool, Some("")), vec!["b", "c"]);
+    }
+
+    #[test]
+    fn f_mcp_neighbors_skip_stale() {
+        let pool = setup();
+        seed_basic(&pool);
+        add_node(&pool, "d", "other alpha stale", "alpha", &["stale"]);
+        link(&pool, "a", "d");
+        assert_eq!(neighbor_ids(&pool, Some("alpha")), vec!["c"]);
+        assert_eq!(neighbor_ids(&pool, None), vec!["b", "c"]);
+    }
+
+    #[test]
+    fn f_mcp_neighbors_skip_out_of_scope_prefix() {
+        let pool = setup();
+        add_node(&pool, "a", "needle", "alpha", &[]);
+        for i in 0..13 {
+            let project = if i < 10 { "beta" } else { "alpha" };
+            let id = format!("n-{i:02}");
+            add_node(&pool, &id, "other", project, &[]);
+            link(&pool, "a", &id);
+        }
+        assert_eq!(
+            neighbor_ids(&pool, Some("alpha")),
+            vec!["n-10", "n-11", "n-12"]
+        );
+    }
+
+    #[test]
+    fn f_mcp_neighbors_scan_bound() {
+        let pool = setup();
+        add_node(&pool, "a", "needle", "alpha", &[]);
+        for i in 0..301 {
+            let project = if i < 300 { "beta" } else { "alpha" };
+            let id = format!("n-{i:03}");
+            add_node(&pool, &id, "other", project, &[]);
+            link(&pool, "a", &id);
+        }
+        // Documented ceiling: only the first NEIGHBOR_SCAN_MAX candidates are scanned.
+        assert!(neighbor_ids(&pool, Some("alpha")).is_empty());
+    }
 }

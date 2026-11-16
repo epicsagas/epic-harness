@@ -86,14 +86,14 @@ async fn find_prev_session_async(
     session_node_id: &str,
     slug: &str,
 ) -> Option<String> {
-    let csv_proj = format!("%{slug}%");
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT id FROM nodes WHERE type = 'session' AND id != ?
-         AND projects LIKE ?
+         AND {}
          ORDER BY updated DESC LIMIT 1",
-    )
+        store::util::csv_member("projects")
+    )))
     .bind(session_node_id)
-    .bind(&csv_proj)
+    .bind(slug)
     .fetch_optional(pool)
     .await
     .ok()
@@ -1083,5 +1083,30 @@ mod tests {
             resolved_edges.is_empty(),
             "no resolved_in edges should exist when pattern is still present"
         );
+    }
+
+    #[tokio::test]
+    async fn f_ingest_prev_session_exact() {
+        let pool = open_test_mem_pool().await;
+        for (id, slug, updated) in [
+            ("sess-alphabet", "alphabet", "2026-01-02T00:00:00Z"),
+            ("sess-alpha", "alpha", "2026-01-01T00:00:00Z"),
+        ] {
+            let node = store::Node {
+                frontmatter: store::NodeFrontmatter {
+                    id: id.into(),
+                    node_type: "session".into(),
+                    title: format!("session: {slug}"),
+                    projects: vec![slug.into()],
+                    created: updated.into(),
+                    updated: updated.into(),
+                    ..Default::default()
+                },
+                body: String::new(),
+            };
+            store::write_node_pool(&pool, &node).await.unwrap();
+        }
+        let prev = find_prev_session_async(&pool, "sess-current", "alpha").await;
+        assert_eq!(prev.as_deref(), Some("sess-alpha"));
     }
 }

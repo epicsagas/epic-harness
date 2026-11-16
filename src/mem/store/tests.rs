@@ -150,3 +150,343 @@ fn test_session_importance_lower_than_pattern() {
         "session importance should be lower than pattern"
     );
 }
+
+// ── Area F: exact scope, starvation, stale; Area C: access mode ──
+use super::decay::{decay_importance_pool, tag_stale_nodes_pool};
+use super::recall::{FTS_SCOPED_SQL, RecallAccess, smart_recall_async};
+use super::util::{csv_member, split_csv};
+
+async fn mem_pool() -> sqlx::AnyPool {
+    let pool = crate::store::pool::test_memory_pool().await;
+    init_schema_pool(&pool).await.unwrap();
+    pool
+}
+
+fn scoped_node(id: &str, title: &str, body: &str, projects: &[&str], tags: &[&str]) -> Node {
+    let mut node = make_node(id, title, "concept", tags, None);
+    node.frontmatter.projects = projects.iter().map(|s| s.to_string()).collect();
+    node.body = body.to_string();
+    node
+}
+
+async fn recall_ids(
+    pool: &sqlx::AnyPool,
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+) -> Vec<String> {
+    let mut ids: Vec<String> =
+        smart_recall_async(pool, project, hint, limit, RecallAccess::Explicit)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| s.node.frontmatter.id)
+            .collect();
+    ids.sort();
+    ids
+}
+
+/// 60 nodes in `big` repeating the hint terms, one weak match in `small`.
+async fn seed_starvation(pool: &sqlx::AnyPool) {
+    for i in 0..60 {
+        let body = "cache invalidation ".repeat(20);
+        let node = scoped_node(
+            &format!("big-{i:02}"),
+            &format!("cache invalidation {i}"),
+            &body,
+            &["big"],
+            &[],
+        );
+        write_node_pool(pool, &node).await.unwrap();
+    }
+    let body = format!("{} cache {}", "filler ".repeat(200), "padding ".repeat(200));
+    let node = scoped_node("small-0", "unrelated title", &body, &["small"], &[]);
+    write_node_pool(pool, &node).await.unwrap();
+}
+
+#[tokio::test]
+async fn f_project_membership_exact() {
+    let pool = mem_pool().await;
+    let a = scoped_node("node-a", "shared topic", "x", &["alpha"], &["pin"]);
+    let b = scoped_node("node-b", "shared topic", "x", &["alphabet"], &["pinned"]);
+    write_node_pool(&pool, &a).await.unwrap();
+    write_node_pool(&pool, &b).await.unwrap();
+
+    let only_a = vec!["node-a".to_string()];
+    assert_eq!(
+        recall_ids(&pool, Some("alpha"), Some("shared"), 10).await,
+        only_a
+    );
+    assert_eq!(recall_ids(&pool, Some("alpha"), None, 10).await, only_a);
+    let found = query_nodes_pool(&pool, None, None, Some("alpha"), 10)
+        .await
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].frontmatter.id, "node-a");
+    // the tag filter is exact as well: "pin" must not match "pinned"
+    let found = query_nodes_pool(&pool, Some("pin"), None, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].frontmatter.id, "node-a");
+}
+
+#[tokio::test]
+async fn f_wildcards_are_literal() {
+    let pool = mem_pool().await;
+    let node = scoped_node("node-a", "wild topic", "x", &["abc"], &["abc"]);
+    write_node_pool(&pool, &node).await.unwrap();
+    for p in ["a_c", "a%"] {
+        assert!(
+            recall_ids(&pool, Some(p), Some("wild"), 10)
+                .await
+                .is_empty(),
+            "{p}"
+        );
+        assert!(recall_ids(&pool, Some(p), None, 10).await.is_empty(), "{p}");
+        let found = query_nodes_pool(&pool, None, None, Some(p), 10)
+            .await
+            .unwrap();
+        assert!(found.is_empty(), "{p}");
+        let found = query_nodes_pool(&pool, Some(p), None, None, 10)
+            .await
+            .unwrap();
+        assert!(found.is_empty(), "{p}");
+    }
+}
+
+#[tokio::test]
+async fn f_scoped_recall_not_starved() {
+    let pool = mem_pool().await;
+    seed_starvation(&pool).await;
+    let ids = recall_ids(&pool, Some("small"), Some("cache invalidation"), 2).await;
+    assert_eq!(ids, vec!["small-0".to_string()]);
+}
+
+#[tokio::test]
+async fn f_scoped_recall_big_project_still_ranked() {
+    let pool = mem_pool().await;
+    seed_starvation(&pool).await;
+    let ids = recall_ids(&pool, Some("big"), Some("cache invalidation"), 2).await;
+    assert_eq!(ids.len(), 2);
+    assert!(ids.iter().all(|id| id.starts_with("big-")));
+}
+
+#[tokio::test]
+async fn f_scoped_query_plan_not_correlated() {
+    use sqlx::Row as _;
+    let pool = mem_pool().await;
+    let version: String = sqlx::query("select sqlite_version()")
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get(0);
+    println!("sqlite_version = {version}");
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "EXPLAIN QUERY PLAN {FTS_SCOPED_SQL}"
+    )))
+    .bind("\"cache\"")
+    .bind("small")
+    .bind(6_i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let details: Vec<String> = rows.iter().map(|r| r.get::<String, _>(3)).collect();
+    println!("{details:#?}");
+    assert!(
+        details.iter().any(|d| d.contains("nodes_fts")),
+        "{details:?}"
+    );
+    assert!(
+        !details
+            .iter()
+            .any(|d| d.to_uppercase().contains("CORRELATED")),
+        "{details:?}"
+    );
+}
+
+#[tokio::test]
+async fn f_empty_project_is_unscoped() {
+    let pool = mem_pool().await;
+    let a = scoped_node("node-a", "shared topic", "x", &["alpha"], &[]);
+    let b = scoped_node("node-b", "shared topic", "x", &["beta"], &[]);
+    write_node_pool(&pool, &a).await.unwrap();
+    write_node_pool(&pool, &b).await.unwrap();
+    for hint in [Some("shared"), None] {
+        let scoped = recall_ids(&pool, Some(""), hint, 10).await;
+        assert_eq!(scoped, recall_ids(&pool, None, hint, 10).await);
+        assert_eq!(scoped.len(), 2);
+    }
+}
+
+#[tokio::test]
+async fn f_stale_excluded_from_recall() {
+    let pool = mem_pool().await;
+    let stale = scoped_node("node-stale", "stale topic", "x", &["p"], &["stale"]);
+    let ness = scoped_node("node-ness", "stale topic", "x", &["p"], &["staleness"]);
+    write_node_pool(&pool, &stale).await.unwrap();
+    write_node_pool(&pool, &ness).await.unwrap();
+    for project in [None, Some("p")] {
+        for hint in [Some("stale"), None] {
+            let ids = recall_ids(&pool, project, hint, 10).await;
+            assert_eq!(ids, vec!["node-ness".to_string()], "{project:?} {hint:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn f_decay_pinned_exact() {
+    let pool = mem_pool().await;
+    for (id, tag) in [("node-pinned", "pinned"), ("node-unpinned", "unpinned")] {
+        let mut node = scoped_node(id, id, "x", &[], &[tag]);
+        node.frontmatter.importance = 0.8;
+        node.frontmatter.accessed_at = "2020-01-01T00:00:00Z".into();
+        write_node_pool(&pool, &node).await.unwrap();
+    }
+    decay_importance_pool(&pool, 30, 0.9, 0.05).await.unwrap();
+    let pinned = read_node_pool(&pool, "node-pinned").await.unwrap();
+    let unpinned = read_node_pool(&pool, "node-unpinned").await.unwrap();
+    assert_eq!(pinned.frontmatter.importance, 0.8);
+    assert!(unpinned.frontmatter.importance < 0.8);
+}
+
+#[tokio::test]
+async fn f_stale_tagging_exact() {
+    let pool = mem_pool().await;
+    // make_node sets updated to 2024-01-01, far older than 180 days
+    let ness = scoped_node("node-ness", "x", "x", &[], &["staleness"]);
+    let pinned = scoped_node("node-pinned", "x", "x", &[], &["pinned"]);
+    write_node_pool(&pool, &ness).await.unwrap();
+    write_node_pool(&pool, &pinned).await.unwrap();
+    assert_eq!(tag_stale_nodes_pool(&pool, 180).await.unwrap(), 1);
+    let ness = read_node_pool(&pool, "node-ness").await.unwrap();
+    assert_eq!(ness.frontmatter.tags, vec!["staleness", "stale"]);
+    let pinned = read_node_pool(&pool, "node-pinned").await.unwrap();
+    assert_eq!(pinned.frontmatter.tags, vec!["pinned"]);
+}
+
+#[tokio::test]
+async fn f_csv_member_matches_split_csv() {
+    use sqlx::Row as _;
+    let pool = mem_pool().await;
+    let sql = format!("SELECT CASE WHEN {} THEN 1 ELSE 0 END", csv_member("?"));
+    let csvs = ["", "a", "a,b", "alpha,alphabet", "x_y,x%y", "a,,b"];
+    let values = ["a", "b", "alpha", "alph", "x_y", "x%y", "%", "_"];
+    for csv in csvs {
+        for value in values {
+            let hit: i64 = sqlx::query(sqlx::AssertSqlSafe(sql.clone()))
+                .bind(csv)
+                .bind(value)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+                .get(0);
+            let expected = split_csv(csv).iter().any(|x| x == value);
+            assert_eq!(hit == 1, expected, "csv={csv:?} value={value:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn c_passive_recall_keeps_access_count() {
+    let pool = mem_pool().await;
+    let mut node = scoped_node("node-a", "topic", "x", &["p"], &[]);
+    node.frontmatter.access_count = 3;
+    write_node_pool(&pool, &node).await.unwrap();
+    let got = smart_recall_async(&pool, Some("p"), None, 5, RecallAccess::Passive)
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 1);
+    let after = read_node_pool(&pool, "node-a").await.unwrap();
+    assert_eq!(after.frontmatter.access_count, 3);
+    assert!(!after.frontmatter.accessed_at.is_empty());
+}
+
+#[tokio::test]
+async fn c_explicit_recall_bumps_access_count() {
+    let pool = mem_pool().await;
+    let mut node = scoped_node("node-a", "topic", "x", &["p"], &[]);
+    node.frontmatter.access_count = 3;
+    write_node_pool(&pool, &node).await.unwrap();
+    smart_recall_async(&pool, Some("p"), None, 5, RecallAccess::Explicit)
+        .await
+        .unwrap();
+    let after = read_node_pool(&pool, "node-a").await.unwrap();
+    assert_eq!(after.frontmatter.access_count, 4);
+}
+
+// ── Items 2 to 4: dedup, importance on reopen, malformed timestamps ──
+#[tokio::test]
+async fn issue_181_dedup_preserves_distinct_project_knowledge() {
+    let pool = mem_pool().await;
+    let mut alpha = make_node("alpha-id", "Database choice", "decision", &[], None);
+    alpha.frontmatter.projects = vec!["alpha".into()];
+    alpha.frontmatter.updated = now_iso();
+    alpha.body = "Alpha uses SQLite".into();
+    let (alpha_id, _) = write_node_dedup_pool(&pool, &alpha, 24).await.unwrap();
+
+    let mut beta = alpha.clone();
+    beta.frontmatter.id = "beta-id".into();
+    beta.frontmatter.projects = vec!["beta".into()];
+    beta.body = "Beta uses PostgreSQL".into();
+    let (beta_id, deduped) = write_node_dedup_pool(&pool, &beta, 24).await.unwrap();
+    assert!(!deduped, "a different project is not duplicate knowledge");
+    assert_ne!(alpha_id, beta_id);
+    let stored = read_node_pool(&pool, &beta_id).await.unwrap();
+    assert_eq!(stored.body, beta.body);
+    assert_eq!(stored.frontmatter.projects, beta.frontmatter.projects);
+
+    // Same title and same project set still deduplicates, in both projects.
+    beta.frontmatter.id = "another-beta-id".into();
+    assert_eq!(
+        write_node_dedup_pool(&pool, &beta, 24).await.unwrap(),
+        (beta_id, true)
+    );
+    alpha.frontmatter.id = "another-alpha-id".into();
+    assert_eq!(
+        write_node_dedup_pool(&pool, &alpha, 24).await.unwrap(),
+        (alpha_id, true)
+    );
+}
+
+#[tokio::test]
+async fn issue_232_reopening_preserves_explicit_importance() {
+    let pool = mem_pool().await;
+    for (id, kind, importance) in [
+        ("explicit-concept", "concept", 0.5),
+        ("explicit-session", "session", 0.7),
+    ] {
+        write_node_pool(&pool, &make_node(id, id, kind, &[], Some(importance)))
+            .await
+            .unwrap();
+    }
+    init_schema_pool(&pool).await.unwrap();
+    for (id, importance) in [("explicit-concept", 0.5), ("explicit-session", 0.7)] {
+        let node = read_node_pool(&pool, id).await.unwrap();
+        assert_eq!(node.frontmatter.importance, importance, "{id}");
+    }
+}
+
+#[test]
+fn issue_232_legacy_import_defaults_only_missing_importance() {
+    let legacy = "---\nid: legacy-decision\ntype: decision\ntitle: Legacy choice\ncreated: 2024-01-01\nupdated: 2024-01-01\n---\nbody";
+    assert_eq!(parse_node(legacy).unwrap().frontmatter.importance, 0.9);
+    let explicit = legacy.replace(
+        "title: Legacy choice",
+        "title: Legacy choice\nimportance: 0.5",
+    );
+    assert_eq!(parse_node(&explicit).unwrap().frontmatter.importance, 0.5);
+}
+
+#[test]
+fn issue_233_malformed_unicode_timestamp_is_rejected_without_panicking() {
+    for value in [
+        "202é-01-01T00:00:00Z",
+        "2024-01-01T00:00:0é",
+        "0000-01-01T00:00:00Z",
+        "1969-12-31T23:59:59Z",
+    ] {
+        assert_eq!(parse_iso_to_secs(value), 0, "malformed timestamp {value}");
+    }
+    assert_eq!(parse_iso_to_secs("2024-01-01T00:00:00Z"), 1_704_067_200);
+}

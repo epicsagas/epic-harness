@@ -3,7 +3,7 @@
 use std::io;
 
 use super::conn::memory_pool_sync;
-use super::util::now_iso;
+use super::util::{NOT_STALE, now_iso};
 use crate::store::runtime;
 
 pub fn decay_importance(days: u64, factor: f64, floor: f64) -> io::Result<u64> {
@@ -36,7 +36,7 @@ async fn decay_importance_async(
     let result = sqlx::query(
         "UPDATE nodes SET importance = MAX(importance * ?, ?) \
          WHERE accessed_at < ? AND accessed_at != '' \
-         AND type != 'session' AND tags NOT LIKE '%pinned%'",
+         AND type != 'session' AND instr(',' || tags || ',', ',pinned,') = 0",
     )
     .bind(factor)
     .bind(floor)
@@ -66,14 +66,14 @@ async fn tag_stale_nodes_async(pool: &sqlx::AnyPool, days: u64) -> io::Result<u6
         format!("{y:04}-{m:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
     };
 
-    let result = sqlx::query(
+    let result = sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE nodes SET tags = CASE \
          WHEN tags = '' THEN 'stale' \
          ELSE tags || ',stale' END \
          WHERE updated < ? AND updated != '' \
-         AND type != 'session' AND tags NOT LIKE '%pinned%' \
-         AND tags NOT LIKE '%stale%'",
-    )
+         AND type != 'session' AND instr(',' || tags || ',', ',pinned,') = 0 \
+         AND {NOT_STALE}"
+    )))
     .bind(&cutoff_ts)
     .execute(pool)
     .await

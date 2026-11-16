@@ -6,7 +6,7 @@ use sqlx::Row as _;
 
 use super::conn::memory_pool_sync;
 use super::types::Node;
-use super::util::{NODE_COLUMNS, row_to_node};
+use super::util::{NODE_COLUMNS, csv_member, row_to_node};
 use crate::store::runtime;
 
 pub fn search_nodes(query: &str, limit: usize) -> Vec<Node> {
@@ -72,16 +72,19 @@ async fn query_nodes_async(
     project: Option<&str>,
     limit: usize,
 ) -> Vec<Node> {
+    // Empty tag or project means no filter (what `LIKE '%%'` used to do).
+    let tag = tag.filter(|t| !t.is_empty());
+    let project = project.filter(|p| !p.is_empty());
     let mut sql = format!("SELECT {NODE_COLUMNS} FROM nodes WHERE 1=1");
 
     if tag.is_some() {
-        sql.push_str(" AND tags LIKE ?");
+        sql.push_str(&format!(" AND {}", csv_member("tags")));
     }
     if node_type.is_some() {
         sql.push_str(" AND type = ?");
     }
     if project.is_some() {
-        sql.push_str(" AND projects LIKE ?");
+        sql.push_str(&format!(" AND {}", csv_member("projects")));
     }
     // Cap limit at 200
     let safe_limit = (limit.min(200)) as i64;
@@ -89,13 +92,13 @@ async fn query_nodes_async(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(t) = tag {
-        query = query.bind(format!("%{t}%"));
+        query = query.bind(t);
     }
     if let Some(t) = node_type {
         query = query.bind(t);
     }
     if let Some(p) = project {
-        query = query.bind(format!("%{p}%"));
+        query = query.bind(p);
     }
     query = query.bind(safe_limit);
 
