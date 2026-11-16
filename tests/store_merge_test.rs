@@ -600,3 +600,113 @@ fn differing_evolved_skill_row_blocks_delete_but_identical_does_not() {
     assert_eq!(run_merge("src-proj", "dst-proj", false, true), 0);
     assert!(!src.exists(), "identical rows do not block the delete");
 }
+
+#[test]
+fn differing_keyed_row_blocks_delete_but_identical_does_not() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    set_root(tmp.path());
+    seed_project(tmp.path(), "src-proj");
+    let src = project(tmp.path(), "src-proj");
+    let src_db = src.join("harness.db");
+    let dst_db = project(tmp.path(), "dst-proj").join("harness.db");
+    for db in [&src_db, &dst_db] {
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        exec(
+            db,
+            "CREATE TABLE metrics_state (key TEXT NOT NULL, value TEXT NOT NULL, \
+             project TEXT NOT NULL DEFAULT '', PRIMARY KEY (key, project))",
+        );
+    }
+    exec(
+        &src_db,
+        "INSERT INTO metrics_state VALUES ('same', 'v', 'src-proj'), ('differs', 'src', 'src-proj')",
+    );
+    exec(
+        &dst_db,
+        "INSERT INTO metrics_state VALUES ('same', 'v', 'dst-proj'), ('differs', 'dst', 'dst-proj')",
+    );
+
+    let dry = run_cli(
+        tmp.path(),
+        &[
+            "--from",
+            "src-proj",
+            "--to",
+            "dst-proj",
+            "--dry-run",
+            "--delete-source",
+        ],
+    );
+    assert!(
+        !String::from_utf8_lossy(&dry.stdout).contains("would delete"),
+        "dry run must not promise a delete the real run refuses"
+    );
+
+    assert_ne!(run_merge("src-proj", "dst-proj", false, true), 0);
+    assert!(src_db.exists(), "a differing row blocks the delete");
+    assert_eq!(
+        scalar(
+            &dst_db,
+            "SELECT value FROM metrics_state WHERE key = 'differs'"
+        ),
+        "dst",
+        "the target row is never overwritten"
+    );
+
+    exec(&src_db, "DELETE FROM metrics_state WHERE key = 'differs'");
+    assert_eq!(run_merge("src-proj", "dst-proj", false, true), 0);
+    assert!(!src.exists(), "identical rows do not block the delete");
+}
+
+#[test]
+fn to_global_keeps_promotion_counters_unsummed_and_source_untouched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let global = tmp.path().join("harness.db");
+    let src_db = project(tmp.path(), "alpha").join("harness.db");
+    std::fs::create_dir_all(src_db.parent().unwrap()).unwrap();
+    exec(
+        &global,
+        "CREATE TABLE _harness_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+    );
+    for db in [&global, &src_db] {
+        exec(
+            db,
+            "CREATE TABLE promotion_counters (pattern_key TEXT NOT NULL, \
+             project TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0, \
+             PRIMARY KEY (pattern_key, project))",
+        );
+    }
+    exec(
+        &global,
+        "INSERT INTO promotion_counters VALUES ('shared', 'alpha', 3)",
+    );
+    exec(
+        &src_db,
+        "INSERT INTO promotion_counters VALUES ('shared', 'alpha', 2), ('only', 'alpha', 7)",
+    );
+    let home = tmp.path().join("home");
+    write(&home.join(".config/epic-harness/telemetry-consent"), "off");
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_epic-harness"))
+        .args(["migrate", "--to-global"])
+        .env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env("HARNESS_DIR", tmp.path())
+        .output()
+        .unwrap();
+
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let rows = "SELECT group_concat(pattern_key || ':' || count, ' ') FROM \
+                (SELECT * FROM promotion_counters ORDER BY pattern_key)";
+    assert_eq!(scalar(&global, rows), "only:7 shared:3", "no summing");
+    assert_eq!(
+        scalar(&src_db, rows),
+        "only:7 shared:2",
+        "source left in place"
+    );
+}

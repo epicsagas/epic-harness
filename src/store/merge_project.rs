@@ -4,8 +4,14 @@
 //!
 //! Three-layer merge:
 //! 1. Global harness.db (`~/.harness/harness.db`): UPDATE project column from→to.
-//! 2. Per-project harness.db: ATTACH source DB, INSERT OR IGNORE into target.
+//! 2. Per-project harness.db: ATTACH source DB, INSERT OR IGNORE into target. Surrogate ids
+//!    are re-assigned, promotion counters are summed, and a source row that differs from the
+//!    target row with the same key blocks `--delete-source`.
 //! 3. File-based: obs/*.jsonl, sessions/*.json, evolved/, evolution.jsonl, orbit/.
+//!
+//! Close sessions in the source project before merging: a session still writing to it
+//! can add rows or files after the merge has read them, and `--delete-source` then removes
+//! them.
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqliteQueryResult};
 use sqlx::{ConnectOptions, Executor};
@@ -453,7 +459,7 @@ async fn merge_per_project_dbs(
                 .await
                 .map_err(sqlx_err)?;
             attach_source(&mut target, from_db).await?;
-            skipped.extend(differing_skills(&mut target).await?);
+            skipped.extend(super::migrate::attached_conflicts(&mut target, to_slug, "src").await?);
         }
         return Ok((obs as usize, sess as usize, evo as usize));
     }
@@ -484,9 +490,9 @@ async fn merge_per_project_dbs(
     }
 
     attach_source(&mut conn, from_db).await?;
-    skipped.extend(differing_skills(&mut conn).await?);
+    skipped.extend(super::migrate::attached_conflicts(&mut conn, to_slug, "src").await?);
 
-    let stats = super::migrate::merge_attached_db_async(&mut conn, to_slug, "src").await?;
+    let stats = super::migrate::merge_attached_db_async(&mut conn, to_slug, "src", true).await?;
 
     conn.execute("DETACH DATABASE src")
         .await
@@ -503,26 +509,6 @@ async fn attach_source(conn: &mut SqliteConnection, from_db: &Path) -> io::Resul
     .await
     .map_err(sqlx_err)?;
     Ok(())
-}
-
-/// Source `evolved_skills` rows whose UNIQUE name already exists in the target with other
-/// content. The copy keeps the target row, so these block --delete-source. Identical rows
-/// do not.
-async fn differing_skills(conn: &mut SqliteConnection) -> io::Result<Vec<String>> {
-    let rows = sqlx::query_scalar::<_, String>(
-        "SELECT 'evolved_skills:' || s.name FROM src.evolved_skills s \
-         JOIN main.evolved_skills t ON t.name = s.name \
-         WHERE s.origin IS NOT t.origin OR s.confidence IS NOT t.confidence \
-            OR s.skill_md IS NOT t.skill_md OR s.active IS NOT t.active \
-            OR s.created IS NOT t.created OR s.updated IS NOT t.updated",
-    )
-    .fetch_all(&mut *conn)
-    .await;
-    match rows {
-        Ok(rows) => Ok(rows),
-        Err(e) if e.to_string().contains("no such table") => Ok(Vec::new()),
-        Err(e) => Err(sqlx_err(e)),
-    }
 }
 
 // ── File-level helpers ───────────────────────────────────────────────────────

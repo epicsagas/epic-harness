@@ -321,6 +321,7 @@ fn main() {
             eprintln!("    --to <slug>          Target slug to merge into");
             eprintln!("    --dry-run            Preview without writing");
             eprintln!("    --delete-source      Remove source directory after merge");
+            eprintln!("                         (close sessions in the source project first)");
             eprintln!("  org          Browse org team libraries  (epic org help)");
             eprintln!("  team         Manage org-level agent teams  (epic team help)");
             eprintln!("  mem          Cross-agent unified memory  (harness mem help)");

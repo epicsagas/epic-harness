@@ -721,18 +721,29 @@ pub fn merge_attached_db(
     conn: &mut sqlx::SqliteConnection,
     slug: &str,
     attach_name: &str,
+    sum_counters: bool,
 ) -> io::Result<GlobalMergeStats> {
-    super::runtime::block_on(merge_attached_db_async(conn, slug, attach_name))
+    super::runtime::block_on(merge_attached_db_async(
+        conn,
+        slug,
+        attach_name,
+        sum_counters,
+    ))
 }
 
 /// Runs the whole copy in one transaction: any failed table insert rolls everything back.
+///
+/// `sum_counters`: add source `promotion_counters` to conflicting target counts and then
+/// remove the merged source rows (merge-project). When false, conflicts keep the target
+/// count and the source rows stay untouched (`migrate --to-global`).
 pub async fn merge_attached_db_async(
     conn: &mut sqlx::SqliteConnection,
     slug: &str,
     attach_name: &str,
+    sum_counters: bool,
 ) -> io::Result<GlobalMergeStats> {
     begin_immediate(conn).await?;
-    let res = match copy_attached_tables(conn, slug, attach_name).await {
+    let res = match copy_attached_tables(conn, slug, attach_name, sum_counters).await {
         Ok(stats) => commit(conn).await.map(|_| stats),
         Err(e) => Err(e),
     };
@@ -742,17 +753,25 @@ pub async fn merge_attached_db_async(
     res
 }
 
-async fn copy_attached_tables(
-    conn: &mut sqlx::SqliteConnection,
-    slug: &str,
-    attach_name: &str,
-) -> io::Result<GlobalMergeStats> {
-    let mut stats = GlobalMergeStats::default();
+/// A table of the live schema that the attached DB also has, with how its rows are keyed.
+struct AttachedTable {
+    name: String,
+    /// Target columns the source also has, plus `project` (bound), minus a surrogate `id`.
+    cols: Vec<String>,
+    has_project: bool,
+    /// `id INTEGER PRIMARY KEY AUTOINCREMENT`: re-assigned on copy, never compared.
+    surrogate_id: bool,
+    /// Natural keys: unique indexes, or a non-surrogate integer `id` (singleton rows).
+    keys: Vec<Vec<String>>,
+}
 
+async fn attached_tables(
+    conn: &mut sqlx::SqliteConnection,
+    attach_name: &str,
+) -> io::Result<Vec<AttachedTable>> {
     // Every table of the live schema is moved, so a table or column added later is not
-    // dropped. Conflicts keep the target row (INSERT OR IGNORE). A column the source lacks
-    // (older schema) takes the target default.
-    let tables: Vec<String> = sqlx::query_scalar(
+    // dropped. A column the source lacks (older schema) takes the target default.
+    let names: Vec<String> = sqlx::query_scalar(
         "SELECT name FROM main.sqlite_master WHERE type = 'table' \
          AND name NOT LIKE 'sqlite_%' AND name != '_harness_meta' ORDER BY rowid",
     )
@@ -760,57 +779,233 @@ async fn copy_attached_tables(
     .await
     .map_err(sqlx_err)?;
 
-    for table in &tables {
-        let dest = table_columns(conn, table, "main").await?;
-        let src = table_columns(conn, table, attach_name).await?;
+    let mut tables = Vec::new();
+    for name in names {
+        let dest = table_columns(conn, &name, "main").await?;
+        let src = table_columns(conn, &name, attach_name).await?;
         if src.is_empty() {
             continue; // table absent in the source DB
         }
+        let ddl: String = sqlx::query_scalar("SELECT sql FROM main.sqlite_master WHERE name = ?")
+            .bind(&name)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(sqlx_err)?;
+        let int_id = dest.iter().any(|(n, t)| n == "id" && t == "INTEGER");
+        let surrogate_id = int_id && ddl.to_uppercase().contains("AUTOINCREMENT");
         let has_project = dest.iter().any(|(n, _)| n == "project");
-        // Integer ids of project-scoped tables are surrogate keys that collide across
-        // projects, so they are re-assigned. Text ids and project-less tables keep theirs.
-        let cols: Vec<&str> = dest
+        let in_src = |c: &str| src.iter().any(|(s, _)| s == c);
+        let cols: Vec<String> = dest
             .iter()
-            .filter(|(n, t)| {
-                n == "project"
-                    || (src.iter().any(|(s, _)| s == n)
-                        && !(n == "id" && t == "INTEGER" && has_project))
-            })
-            .map(|(n, _)| n.as_str())
+            .map(|(n, _)| n.clone())
+            .filter(|n| n == "project" || (in_src(n) && !(surrogate_id && n == "id")))
             .collect();
-        let dest_cols: Vec<String> = cols.iter().map(|c| format!("\"{c}\"")).collect();
-        let select: Vec<String> = cols
+
+        let mut keys: Vec<Vec<String>> = Vec::new();
+        let indexes: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_index_list(?) WHERE \"unique\" = 1")
+                .bind(&name)
+                .fetch_all(&mut *conn)
+                .await
+                .map_err(sqlx_err)?;
+        for index in indexes {
+            let key: Vec<Option<String>> =
+                sqlx::query_scalar("SELECT name FROM pragma_index_info(?) ORDER BY seqno")
+                    .bind(index)
+                    .fetch_all(&mut *conn)
+                    .await
+                    .map_err(sqlx_err)?;
+            keys.extend(key.into_iter().collect::<Option<Vec<_>>>());
+        }
+        if int_id && !surrogate_id {
+            keys.push(vec!["id".into()]);
+        }
+        keys.retain(|k| k.iter().all(|c| c == "project" || in_src(c)));
+
+        tables.push(AttachedTable {
+            name,
+            cols,
+            has_project,
+            surrogate_id,
+            keys,
+        });
+    }
+    Ok(tables)
+}
+
+/// Source rows that share a natural key with a target row but differ from it. The copy
+/// keeps the target row, so the caller must treat these as not merged (never delete the
+/// source over them). Identical rows are not reported. `promotion_counters` are summed
+/// by the copy, so they never conflict.
+pub async fn attached_conflicts(
+    conn: &mut sqlx::SqliteConnection,
+    slug: &str,
+    attach_name: &str,
+) -> io::Result<Vec<String>> {
+    let mut found = Vec::new();
+    for t in attached_tables(conn, attach_name).await? {
+        let name = &t.name;
+        let compared: Vec<&String> = t.cols.iter().filter(|c| *c != "project").collect();
+        if name == "promotion_counters" || compared.is_empty() {
+            continue;
+        }
+        let differs: Vec<String> = compared
+            .iter()
+            .map(|c| format!("s.\"{c}\" IS NOT t.\"{c}\""))
+            .collect();
+        for key in &t.keys {
+            let on: Vec<String> = key
+                .iter()
+                .map(|k| {
+                    if k == "project" {
+                        "t.\"project\" = ?".to_string()
+                    } else {
+                        format!("t.\"{k}\" = s.\"{k}\"")
+                    }
+                })
+                .collect();
+            let label: Vec<String> = key
+                .iter()
+                .filter(|k| *k != "project")
+                .map(|k| format!("CAST(s.\"{k}\" AS TEXT)"))
+                .collect();
+            let sql = format!(
+                "SELECT '{name}:' || {} FROM {attach_name}.\"{name}\" s \
+                 JOIN main.\"{name}\" t ON {} WHERE {}",
+                if label.is_empty() {
+                    "''".to_string()
+                } else {
+                    label.join(" || '/' || ")
+                },
+                on.join(" AND "),
+                differs.join(" OR ")
+            );
+            let mut query = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(sql));
+            for _ in key.iter().filter(|k| *k == "project") {
+                query = query.bind(slug.to_string());
+            }
+            found.extend(query.fetch_all(&mut *conn).await.map_err(sqlx_err)?);
+        }
+    }
+    Ok(found)
+}
+
+async fn copy_attached_tables(
+    conn: &mut sqlx::SqliteConnection,
+    slug: &str,
+    attach_name: &str,
+    sum_counters: bool,
+) -> io::Result<GlobalMergeStats> {
+    let mut stats = GlobalMergeStats::default();
+    let tables = attached_tables(conn, attach_name).await?;
+
+    // Surrogate ids are re-assigned, so a foreign key that points at one would dangle.
+    // The schema has none today; refuse rather than corrupt if one is ever added.
+    for t in &tables {
+        let parents: Vec<String> =
+            sqlx::query_scalar("SELECT \"table\" FROM pragma_foreign_key_list(?)")
+                .bind(&t.name)
+                .fetch_all(&mut *conn)
+                .await
+                .map_err(sqlx_err)?;
+        if let Some(p) = parents
+            .iter()
+            .find(|p| tables.iter().any(|o| &o.name == *p && o.surrogate_id))
+        {
+            return Err(io::Error::other(format!(
+                "{} references re-keyed ids of {p}; remap is not implemented",
+                t.name
+            )));
+        }
+    }
+
+    for t in &tables {
+        let name = &t.name;
+        let is_counters = sum_counters && name == "promotion_counters";
+        if is_counters {
+            // Counts add up on a key conflict, as in the global merge. The conflicting
+            // rows are summed before the insert so new rows are not counted twice.
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE main.promotion_counters SET count = count + (\
+                     SELECT s.count FROM {attach_name}.promotion_counters s \
+                     WHERE s.pattern_key = main.promotion_counters.pattern_key) \
+                 WHERE project = ? AND pattern_key IN \
+                     (SELECT pattern_key FROM {attach_name}.promotion_counters)"
+            )))
+            .bind(slug)
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| io::Error::other(format!("{name}: {e}")))?;
+        }
+
+        let dest_cols: Vec<String> = t.cols.iter().map(|c| format!("\"{c}\"")).collect();
+        let select: Vec<String> = t
+            .cols
             .iter()
             .map(|c| {
-                if *c == "project" {
+                if c == "project" {
                     "?".into()
                 } else {
-                    format!("\"{c}\"")
+                    format!("s.\"{c}\"")
                 }
             })
             .collect();
-        let sql = format!(
-            "INSERT OR IGNORE INTO main.\"{table}\" ({}) SELECT {} FROM {attach_name}.\"{table}\"",
+        let mut sql = format!(
+            "INSERT OR IGNORE INTO main.\"{name}\" ({}) SELECT {} FROM {attach_name}.\"{name}\" s",
             dest_cols.join(", "),
             select.join(", ")
         );
-        let query = sqlx::query(sqlx::AssertSqlSafe(sql));
-        let query = if has_project { query.bind(slug) } else { query };
-        match query.execute(&mut *conn).await {
-            Ok(r) => {
-                let n = r.rows_affected() as usize;
-                match table.as_str() {
-                    "observations" => stats.obs += n,
-                    "sessions" => stats.sessions += n,
-                    "evolution_records" => stats.evo += n,
-                    "metrics_state" => stats.metrics += n,
-                    "score_history" => stats.score_history += n,
-                    "skill_attribution" => stats.skill_attr += n,
-                    "promotion_counters" => stats.promo += n,
-                    _ => {}
-                }
-            }
-            Err(e) => return Err(io::Error::other(format!("{table}: {e}"))),
+        let mut binds = usize::from(t.has_project);
+        if t.keys.is_empty() {
+            // No natural key to ignore on: skip rows the target already holds verbatim, so
+            // a retried merge adds nothing. ponytail: quadratic without an index on the
+            // compared columns; add a content hash column if tables grow large.
+            let same: Vec<String> = t
+                .cols
+                .iter()
+                .map(|c| {
+                    if c == "project" {
+                        "t.\"project\" = ?".to_string()
+                    } else {
+                        format!("t.\"{c}\" IS s.\"{c}\"")
+                    }
+                })
+                .collect();
+            sql.push_str(&format!(
+                " WHERE NOT EXISTS (SELECT 1 FROM main.\"{name}\" t WHERE {})",
+                same.join(" AND ")
+            ));
+            binds += usize::from(t.has_project);
+        }
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
+        for _ in 0..binds {
+            query = query.bind(slug);
+        }
+        let n = query
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| io::Error::other(format!("{name}: {e}")))?
+            .rows_affected() as usize;
+        match name.as_str() {
+            "observations" => stats.obs += n,
+            "sessions" => stats.sessions += n,
+            "evolution_records" => stats.evo += n,
+            "metrics_state" => stats.metrics += n,
+            "score_history" => stats.score_history += n,
+            "skill_attribution" => stats.skill_attr += n,
+            "promotion_counters" => stats.promo += n,
+            _ => {}
+        }
+
+        if is_counters {
+            // Counters are moved, not copied: removing the merged source rows keeps a
+            // retried merge from adding the same counts again.
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {attach_name}.promotion_counters"
+            )))
+            .execute(&mut *conn)
+            .await
+            .map_err(|e| io::Error::other(format!("{name}: {e}")))?;
         }
     }
 
@@ -911,7 +1106,7 @@ async fn run_to_global_async(dry_run: bool) -> i32 {
             continue;
         }
 
-        match merge_attached_db_async(&mut conn, slug, attach_name).await {
+        match merge_attached_db_async(&mut conn, slug, attach_name, false).await {
             Ok(stats) => {
                 println!(
                     "  {slug}: {} obs, {} sessions, {} evo, {} metrics, {} score_history",
@@ -1635,7 +1830,7 @@ mod tests {
             .await
             .unwrap();
 
-        let merged = merge_attached_db_async(&mut global_conn, slug, "src")
+        let merged = merge_attached_db_async(&mut global_conn, slug, "src", false)
             .await
             .unwrap();
         global_conn.execute("DETACH src").await.unwrap();
@@ -1725,7 +1920,7 @@ mod tests {
         )))
         .await
         .unwrap();
-        merge_attached_db_async(&mut dst, "to", "src")
+        merge_attached_db_async(&mut dst, "to", "src", true)
             .await
             .unwrap();
 
@@ -1761,6 +1956,101 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(project, "to", "project-scoped rows are relabelled");
+    }
+
+    #[tokio::test]
+    async fn attached_merge_keeps_colliding_rows_and_reports_differing_ones() {
+        // Regression: tables without a project column kept their ids and used
+        // INSERT OR IGNORE, so colliding event/inbox ids and same-key rows were silently
+        // dropped, and --delete-source then removed the only copy.
+        let dir = tempfile::tempdir().unwrap();
+        let mut src = schema_db(&dir.path().join("src.db")).await;
+        sqlx::raw_sql(
+            "INSERT INTO orch_runs (id, created_at, updated_at) VALUES ('r1', 't', 't');
+             INSERT INTO orch_agents (id, run_id, task) VALUES ('a1', 'r1', 'src');
+             INSERT INTO orch_agents (id, run_id, task) VALUES ('a2', 'r1', 'new');
+             INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json) \
+                 VALUES ('a1', 't', 'e', 'src-event');
+             INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message) \
+                 VALUES ('a1', 'x', 't', 'src-msg');
+             INSERT INTO metrics_state (key, value, project) VALUES ('k', 'src', 'old');
+             INSERT INTO metrics_state (key, value, project) VALUES ('k2', 'v', 'old');
+             INSERT INTO promotion_counters (pattern_key, project, count) VALUES ('pk', 'old', 2);
+             INSERT INTO promotion_counters (pattern_key, project, count) VALUES ('pk2', 'old', 5);
+             INSERT INTO workspace_manifest (id, updated) VALUES (1, 'src');",
+        )
+        .execute(&mut src)
+        .await
+        .unwrap();
+        drop(src);
+
+        let mut dst = schema_db(&dir.path().join("dst.db")).await;
+        sqlx::raw_sql(
+            "INSERT INTO orch_runs (id, created_at, updated_at) VALUES ('r1', 't', 't');
+             INSERT INTO orch_agents (id, run_id, task) VALUES ('a1', 'r1', 'dst');
+             INSERT INTO orch_agent_events (agent_id, timestamp, event_type, data_json) \
+                 VALUES ('a1', 't', 'e', 'dst-event');
+             INSERT INTO orch_agent_inbox (agent_id, from_agent, timestamp, message) \
+                 VALUES ('a1', 'x', 't', 'dst-msg');
+             INSERT INTO metrics_state (key, value, project) VALUES ('k', 'dst', 'to');
+             INSERT INTO promotion_counters (pattern_key, project, count) VALUES ('pk', 'to', 3);
+             INSERT INTO workspace_manifest (id, updated) VALUES (1, 'dst');",
+        )
+        .execute(&mut dst)
+        .await
+        .unwrap();
+        let path = dir.path().join("src.db").display().to_string();
+        dst.execute(sqlx::AssertSqlSafe(format!(
+            "ATTACH '{}' AS src",
+            path.replace('\'', "''")
+        )))
+        .await
+        .unwrap();
+
+        let mut conflicts = attached_conflicts(&mut dst, "to", "src").await.unwrap();
+        conflicts.sort();
+        assert_eq!(
+            conflicts,
+            ["metrics_state:k", "orch_agents:a1", "workspace_manifest:1"],
+            "differing same-key rows are reported; the identical orch_runs row is not"
+        );
+
+        for _ in 0..2 {
+            // The second pass is a retry: it must not add rows or counts again.
+            merge_attached_db_async(&mut dst, "to", "src", true)
+                .await
+                .unwrap();
+
+            let events: Vec<String> =
+                sqlx::query_scalar("SELECT data_json FROM orch_agent_events ORDER BY id")
+                    .fetch_all(&mut dst)
+                    .await
+                    .unwrap();
+            assert_eq!(events, ["dst-event", "src-event"], "colliding ids re-keyed");
+            let inbox: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orch_agent_inbox")
+                .fetch_one(&mut dst)
+                .await
+                .unwrap();
+            assert_eq!(inbox, 2);
+            let agents: Vec<String> =
+                sqlx::query_scalar("SELECT id || ':' || task FROM orch_agents ORDER BY id")
+                    .fetch_all(&mut dst)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                agents,
+                ["a1:dst", "a2:new"],
+                "target row kept, new row added"
+            );
+            let counters: Vec<String> = sqlx::query_scalar(
+                "SELECT pattern_key || ':' || count FROM promotion_counters \
+                 WHERE project = 'to' ORDER BY pattern_key",
+            )
+            .fetch_all(&mut dst)
+            .await
+            .unwrap();
+            assert_eq!(counters, ["pk:5", "pk2:5"], "counts add up on a conflict");
+        }
     }
 
     #[tokio::test]
