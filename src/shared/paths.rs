@@ -232,6 +232,12 @@ pub fn reflect_watermark_file() -> PathBuf {
     harness_dir().join("reflect_watermark.txt")
 }
 
+/// Per-project reflection cursor (JSON). Supersedes reflect_watermark.txt,
+/// which is still dual-written through 0.9.x for downgrade safety.
+pub fn reflect_cursor_file() -> PathBuf {
+    harness_dir().join("reflect_cursor.json")
+}
+
 /// Date of the last observation-retention sweep (`YYYYMMDD`).
 ///
 /// Keeps the sweep to once a day: Codex's `Stop` is turn-scoped, so an

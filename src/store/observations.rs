@@ -133,15 +133,32 @@ pub async fn query_obs_for_date_range_pool(
     to_ts: &str,
     project: &str,
 ) -> io::Result<Vec<ObsRecord>> {
+    Ok(
+        query_obs_with_ids_for_date_range_pool(pool, from_ts, to_ts, project)
+            .await?
+            .into_iter()
+            .map(|(_, rec)| rec)
+            .collect(),
+    )
+}
+
+/// Same filter as [`query_obs_for_date_range_pool`], plus the row id.
+/// ORDER BY timestamp ASC, id ASC.
+pub async fn query_obs_with_ids_for_date_range_pool(
+    pool: &AnyPool,
+    from_ts: &str,
+    to_ts: &str,
+    project: &str,
+) -> io::Result<Vec<(i64, ObsRecord)>> {
     let (from, to) = expand_day_bounds(from_ts, to_ts);
 
     let rows = sqlx::query(
         "SELECT timestamp, tool, tool_category, action, result, score,
                 dim_success, dim_quality, dim_cost,
-                failure_category, error_snippet, file_ext, sequence_id, pipeline_id
+                failure_category, error_snippet, file_ext, sequence_id, pipeline_id, id
          FROM observations
          WHERE timestamp >= ? AND timestamp <= ? AND project = ?
-         ORDER BY timestamp ASC",
+         ORDER BY timestamp ASC, id ASC",
     )
     .bind(&from)
     .bind(&to)
@@ -169,40 +186,44 @@ pub async fn query_obs_for_date_range_pool(
         }
 
         let seq_id: Option<i64> = row.try_get(12).ok();
-        records.push(ObsRecord {
-            timestamp: row.try_get::<String, _>(0).map_err(super::sqlx_err)?,
-            tool: row.try_get::<String, _>(1).map_err(super::sqlx_err)?,
-            tool_category: row.try_get::<String, _>(2).map_err(super::sqlx_err)?,
-            action: row
-                .try_get::<Option<String>, _>(3)
-                .map_err(super::sqlx_err)?,
-            result: row
-                .try_get::<Option<String>, _>(4)
-                .map_err(super::sqlx_err)?,
-            score: row.try_get::<Option<f64>, _>(5).map_err(super::sqlx_err)?,
-            dimensions: if any_some {
-                Some(ScoreDimensions {
-                    tool_success: dim_s.unwrap_or(0.0),
-                    output_quality: dim_q.unwrap_or(0.0),
-                    execution_cost: dim_c.unwrap_or(0.0),
-                })
-            } else {
-                None
+        let id: i64 = row.try_get(14).map_err(super::sqlx_err)?;
+        records.push((
+            id,
+            ObsRecord {
+                timestamp: row.try_get::<String, _>(0).map_err(super::sqlx_err)?,
+                tool: row.try_get::<String, _>(1).map_err(super::sqlx_err)?,
+                tool_category: row.try_get::<String, _>(2).map_err(super::sqlx_err)?,
+                action: row
+                    .try_get::<Option<String>, _>(3)
+                    .map_err(super::sqlx_err)?,
+                result: row
+                    .try_get::<Option<String>, _>(4)
+                    .map_err(super::sqlx_err)?,
+                score: row.try_get::<Option<f64>, _>(5).map_err(super::sqlx_err)?,
+                dimensions: if any_some {
+                    Some(ScoreDimensions {
+                        tool_success: dim_s.unwrap_or(0.0),
+                        output_quality: dim_q.unwrap_or(0.0),
+                        execution_cost: dim_c.unwrap_or(0.0),
+                    })
+                } else {
+                    None
+                },
+                failure_category: row
+                    .try_get::<Option<String>, _>(9)
+                    .map_err(super::sqlx_err)?,
+                error_snippet: row
+                    .try_get::<Option<String>, _>(10)
+                    .map_err(super::sqlx_err)?,
+                file_ext: row
+                    .try_get::<Option<String>, _>(11)
+                    .map_err(super::sqlx_err)?,
+                sequence_id: seq_id.map(|v| v as u64),
+                pipeline_id: row
+                    .try_get::<Option<String>, _>(13)
+                    .map_err(super::sqlx_err)?,
             },
-            failure_category: row
-                .try_get::<Option<String>, _>(9)
-                .map_err(super::sqlx_err)?,
-            error_snippet: row
-                .try_get::<Option<String>, _>(10)
-                .map_err(super::sqlx_err)?,
-            file_ext: row
-                .try_get::<Option<String>, _>(11)
-                .map_err(super::sqlx_err)?,
-            sequence_id: seq_id.map(|v| v as u64),
-            pipeline_id: row
-                .try_get::<Option<String>, _>(13)
-                .map_err(super::sqlx_err)?,
-        });
+        ));
     }
     Ok(records)
 }
@@ -787,5 +808,46 @@ mod tests {
 
         let last = query_last_action_pool(&pool, "sess1").await.unwrap();
         assert_eq!(last, Some("second edit".to_string()));
+    }
+
+    #[tokio::test]
+    async fn b_query_with_ids_orders_same_timestamp_by_id() {
+        let pool = test_pool().await;
+        let mut inserted = Vec::new();
+        for tool in ["A", "B", "C"] {
+            let rec = ObsRecord {
+                timestamp: "2026-06-02T10:00:00Z".into(),
+                tool: tool.into(),
+                tool_category: "bash".into(),
+                action: None,
+                result: Some("success".into()),
+                score: None,
+                dimensions: None,
+                failure_category: None,
+                error_snippet: None,
+                file_ext: None,
+                sequence_id: None,
+                pipeline_id: None,
+            };
+            inserted.push(
+                insert_observation_pool(&pool, &rec, "sess1", "test-project")
+                    .await
+                    .unwrap(),
+            );
+        }
+
+        let rows = query_obs_with_ids_for_date_range_pool(
+            &pool,
+            "2026-06-02",
+            "2026-06-02",
+            "test-project",
+        )
+        .await
+        .unwrap();
+        let ids: Vec<i64> = rows.iter().map(|(id, _)| *id).collect();
+        assert_eq!(ids, inserted);
+        assert!(ids.windows(2).all(|w| w[0] < w[1]));
+        let tools: Vec<&str> = rows.iter().map(|(_, r)| r.tool.as_str()).collect();
+        assert_eq!(tools, ["A", "B", "C"]);
     }
 }

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 use std::sync::LazyLock;
 
 use super::common::*;
@@ -587,7 +588,7 @@ fn collect_mem(project_slugs: &[String]) -> serde_json::Value {
     };
 
     // Smart recall — hint = broad engineering context, limit = 30
-    let recalled = match store::smart_recall(
+    let recalled = match store::smart_recall_passive(
         project_filter,
         Some("decision pattern error resolution concept"),
         30,
@@ -860,18 +861,121 @@ async fn backfill_jsonl_to_sqlite(pool: &sqlx::AnyPool) {
     }
 }
 
-/// Keep only observations newer than the last consumed one.
+/// Where the current round's observations came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Source {
+    Sqlite,
+    Jsonl,
+}
+
+/// How far earlier rounds consumed observations (ADR 0002).
 ///
-/// ISO-8601 timestamps compare correctly as strings, so a lexical `>` is the
-/// whole test. `None` (first ever round) keeps everything.
-fn filter_past_watermark(observations: Vec<ObsRecord>, watermark: Option<&str>) -> Vec<ObsRecord> {
-    match watermark {
-        Some(mark) => observations
-            .into_iter()
-            .filter(|o| o.timestamp.as_str() > mark)
-            .collect(),
-        None => observations,
+/// SQLite rows are tracked by their strictly increasing id, so a row written
+/// in the same second as an earlier round is not lost. `ts_floor` covers rows
+/// with no id (JSONL fallback) and keeps rows consumed through JSONL from being
+/// counted again once they are backfilled into SQLite with fresh ids. It never
+/// decreases and is never cleared.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+struct ReflectCursor {
+    /// Always 2.
+    v: u32,
+    /// Highest SQLite observation id consumed.
+    obs_id: Option<i64>,
+    /// Rows with timestamp <= ts_floor are never consumed.
+    ts_floor: Option<String>,
+}
+
+#[derive(Debug, PartialEq)]
+enum CursorState {
+    Fresh,
+    Loaded(ReflectCursor),
+    Corrupt,
+}
+
+/// Read the cursor. A missing cursor file falls back to the legacy
+/// `reflect_watermark.txt` (0.8.x); an unreadable one is `Corrupt`.
+fn load_cursor(cursor_path: &Path, legacy_path: &Path) -> CursorState {
+    match fs::read_to_string(cursor_path) {
+        Ok(content) => match parse_persisted_json::<ReflectCursor>(&content) {
+            Ok(cur) if cur.v == 2 => CursorState::Loaded(cur),
+            _ => CursorState::Corrupt,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => fs::read_to_string(legacy_path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map_or(CursorState::Fresh, |ts| {
+                CursorState::Loaded(ReflectCursor {
+                    v: 2,
+                    obs_id: None,
+                    ts_floor: Some(ts),
+                })
+            }),
+        Err(_) => CursorState::Corrupt,
     }
+}
+
+/// Keep only rows the cursor has not consumed. ISO-8601 timestamps compare
+/// correctly as strings. Input order is preserved.
+fn select_new(rows: &[(Option<i64>, ObsRecord)], cur: &ReflectCursor) -> Vec<ObsRecord> {
+    rows.iter()
+        .filter(|(id, rec)| {
+            let id_new = match (id, cur.obs_id) {
+                (Some(id), Some(seen)) => *id > seen,
+                _ => true,
+            };
+            id_new
+                && cur
+                    .ts_floor
+                    .as_deref()
+                    .is_none_or(|floor| rec.timestamp.as_str() > floor)
+        })
+        .map(|(_, rec)| rec.clone())
+        .collect()
+}
+
+/// Cursor after a round. `rows` is everything the query returned, `kept` the
+/// subset that was analyzed.
+fn advance_cursor(
+    cur: &ReflectCursor,
+    source: Source,
+    rows: &[(Option<i64>, ObsRecord)],
+    kept: &[ObsRecord],
+) -> ReflectCursor {
+    let mut next = cur.clone();
+    match source {
+        Source::Sqlite => {
+            next.obs_id = rows
+                .iter()
+                .filter_map(|(id, _)| *id)
+                .chain(cur.obs_id)
+                .max()
+        }
+        Source::Jsonl => {
+            next.ts_floor = kept
+                .iter()
+                .map(|o| o.timestamp.clone())
+                .chain(cur.ts_floor.clone())
+                .max();
+        }
+    }
+    next
+}
+
+/// Persist the cursor atomically, then keep the legacy watermark current
+/// (monotone) so a downgrade resumes at the same point. Returns the first error.
+fn save_cursor(
+    cursor_path: &Path,
+    legacy_path: &Path,
+    cur: &ReflectCursor,
+    kept_max_ts: Option<&str>,
+) -> std::io::Result<()> {
+    crate::orchestrate::state::atomic_write_json(cursor_path, cur)?;
+    if let Some(ts) = kept_max_ts {
+        let legacy = fs::read_to_string(legacy_path).unwrap_or_default();
+        fs::write(legacy_path, ts.max(legacy.trim()))?;
+    }
+    Ok(())
 }
 
 /// Cutoff timestamp for retention: `days` before `now`, as an ISO-8601 date.
@@ -929,27 +1033,31 @@ pub fn run(_input: &HookInput) -> i32 {
     // 1. Collect today's observations from SQLite (fallback to JSONL)
     let today_str = today();
     let current_project = project_slug();
-    let observations = match crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::harness_pool().await?;
-        backfill_jsonl_to_sqlite(&pool).await;
-        crate::store::observations::query_obs_for_date_range_pool(
-            &pool,
-            &today_str,
-            &today_str,
-            &current_project,
-        )
-        .await
-    }) {
-        Ok(recs) => recs,
-        Err(e) => {
-            // Proceed with an empty set so the JSONL fallback below actually runs —
-            // an early `return 0` here silently dropped the whole evolution round.
-            eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
-            Vec::new()
-        }
-    };
-    let observations = if !observations.is_empty() {
-        observations
+    let (rows, source): (Vec<(Option<i64>, ObsRecord)>, Source) =
+        match crate::store::runtime::block_on(async {
+            let pool = crate::store::pool::harness_pool().await?;
+            backfill_jsonl_to_sqlite(&pool).await;
+            crate::store::observations::query_obs_with_ids_for_date_range_pool(
+                &pool,
+                &today_str,
+                &today_str,
+                &current_project,
+            )
+            .await
+        }) {
+            Ok(recs) => (
+                recs.into_iter().map(|(id, r)| (Some(id), r)).collect(),
+                Source::Sqlite,
+            ),
+            Err(e) => {
+                // Proceed with an empty set so the JSONL fallback below actually runs —
+                // an early `return 0` here silently dropped the whole evolution round.
+                eprintln!("[reflect] SQLite observations read failed, falling back to JSONL: {e}");
+                (Vec::new(), Source::Sqlite)
+            }
+        };
+    let (rows, source) = if !rows.is_empty() {
+        (rows, source)
     } else {
         // Fallback: read from JSONL files (SQLite unreachable — the records
         // stay on disk and are backfilled by the next successful run).
@@ -961,15 +1069,16 @@ pub fn run(_input: &HookInput) -> i32 {
             return 0;
         }
         // Host session ids carry no date, so pick today's records by timestamp.
-        let mut recs: Vec<ObsRecord> = vec![];
+        let mut recs: Vec<(Option<i64>, ObsRecord)> = vec![];
         for f in &obs_files {
             recs.extend(
                 read_jsonl_typed::<ObsRecord>(&obs_dir().join(f))
                     .into_iter()
-                    .filter(|r| r.timestamp.replace('-', "").starts_with(&today_str)),
+                    .filter(|r| r.timestamp.replace('-', "").starts_with(&today_str))
+                    .map(|r| (None, r)),
             );
         }
-        recs
+        (recs, Source::Jsonl)
     };
 
     // 1b. Drop observations an earlier round already consumed.
@@ -978,15 +1087,39 @@ pub fn run(_input: &HookInput) -> i32 {
     // fires every turn, so without this the same day's observations would be
     // re-scored on each turn — inflating total_sessions, re-running skill
     // seeding, and feeding stagnation/attribution duplicate samples.
-    let watermark = fs::read_to_string(reflect_watermark_file())
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let observations = filter_past_watermark(observations, watermark.as_deref());
+    let cursor_path = reflect_cursor_file();
+    let legacy_path = reflect_watermark_file();
+    let fresh = ReflectCursor {
+        v: 2,
+        obs_id: None,
+        ts_floor: None,
+    };
+    let cur = match load_cursor(&cursor_path, &legacy_path) {
+        CursorState::Corrupt => {
+            // Fail closed: consume the batch without analysis so a damaged
+            // cursor can never make a round re-count cumulative state.
+            let all: Vec<ObsRecord> = rows.iter().map(|(_, r)| r.clone()).collect();
+            let covered = advance_cursor(&fresh, source, &rows, &all);
+            let newest = rows.iter().map(|(_, r)| r.timestamp.as_str()).max();
+            if let Err(e) = save_cursor(&cursor_path, &legacy_path, &covered, newest) {
+                eprintln!("[reflect] cursor write failed ({e})");
+            }
+            eprintln!(
+                "[reflect] reflect_cursor.json is unreadable; consumed {} observations \
+                 without analysis to avoid double counting",
+                rows.len()
+            );
+            return 0;
+        }
+        CursorState::Fresh => fresh,
+        CursorState::Loaded(cur) => cur,
+    };
+    let observations = select_new(&rows, &cur);
+    let next = advance_cursor(&cur, source, &rows, &observations);
     if observations.len() < 3 {
         return 0;
     }
-    // Advance the watermark before analysis: a crash mid-round must not make
+    // Advance the cursor before analysis: a crash mid-round must not make
     // the next turn re-count this batch. The trade is deliberate: a crash
     // between here and step 11 loses one batch of observations, which are a
     // statistical sample, whereas re-counting corrupts total_sessions, skill
@@ -994,11 +1127,10 @@ pub fn run(_input: &HookInput) -> i32 {
     //
     // A failed write is not silent: it means the next turn re-analyzes this
     // batch, so it gets reported rather than swallowed.
-    if let Some(newest) = observations.iter().map(|o| &o.timestamp).max()
-        && let Err(e) = fs::write(reflect_watermark_file(), newest)
-    {
+    let newest = observations.iter().map(|o| o.timestamp.as_str()).max();
+    if let Err(e) = save_cursor(&cursor_path, &legacy_path, &next, newest) {
         eprintln!(
-            "[reflect] watermark write failed ({e}); the next round will re-analyze \
+            "[reflect] cursor write failed ({e}); the next round will re-analyze \
                  these {} observations",
             observations.len()
         );
@@ -1313,7 +1445,7 @@ pub fn run(_input: &HookInput) -> i32 {
                     continue;
                 }
                 if let Ok(content) = fs::read_to_string(&path)
-                    && let Ok(pl) = serde_json::from_str::<serde_json::Value>(&content)
+                    && let Ok(pl) = parse_persisted_json::<serde_json::Value>(&content)
                 {
                     let id = pl["id"].as_str().unwrap_or(name.trim_end_matches(".json"));
                     let status = pl["status"].as_str().unwrap_or("unknown");
@@ -1519,7 +1651,7 @@ fn patch_orbit_evolve_gap(orbit_dir: &std::path::Path, now: &str) -> usize {
             Ok(c) => c,
             Err(_) => continue,
         };
-        let mut pipeline: serde_json::Value = match serde_json::from_str(&content) {
+        let mut pipeline: serde_json::Value = match parse_persisted_json(&content) {
             Ok(v) => v,
             Err(_) => continue,
         };
@@ -1677,36 +1809,163 @@ mod tests {
         }
     }
 
-    /// Codex fires Stop every turn; a second round must not re-consume the
-    /// observations the first round already scored.
+    // ── reflection cursor ──────────────────────────────
+
+    const T: &str = "2026-08-31T10:00:00Z";
+    const T1S: &str = "2026-08-31T10:00:01Z";
+    const T2S: &str = "2026-08-31T10:00:02Z";
+
+    fn cursor(obs_id: Option<i64>, ts_floor: Option<&str>) -> ReflectCursor {
+        ReflectCursor {
+            v: 2,
+            obs_id,
+            ts_floor: ts_floor.map(String::from),
+        }
+    }
+
+    /// The id travels in `tool` so tests can read back which rows were kept.
+    fn row(id: i64, ts: &str) -> (Option<i64>, ObsRecord) {
+        let mut rec = obs_at(ts);
+        rec.tool = id.to_string();
+        (Some(id), rec)
+    }
+
+    fn kept_ids(kept: &[ObsRecord]) -> Vec<i64> {
+        kept.iter().map(|r| r.tool.parse().unwrap()).collect()
+    }
+
+    /// The #218 reproduction: a late row in the consumed second survives.
     #[test]
-    fn watermark_drops_already_consumed_observations() {
-        let obs = vec![
-            obs_at("2026-08-31T10:00:00Z"),
-            obs_at("2026-08-31T11:00:00Z"),
-            obs_at("2026-08-31T12:00:00Z"),
-        ];
-        let kept = filter_past_watermark(obs, Some("2026-08-31T11:00:00Z"));
+    fn b_same_second_late_row_kept() {
+        let rows = vec![row(9, T), row(10, T), row(11, T)];
+        let kept = select_new(&rows, &cursor(Some(10), None));
+        assert_eq!(kept_ids(&kept), [11]);
+    }
+
+    #[test]
+    fn b_consumed_ids_dropped() {
+        let rows = vec![row(7, "2026-08-31T23:00:00Z")];
+        assert!(select_new(&rows, &cursor(Some(10), None)).is_empty());
+    }
+
+    #[test]
+    fn b_ts_floor_drops_boundary_second() {
+        let rows = vec![(None, obs_at(T)), (None, obs_at(T1S))];
+        let kept = select_new(&rows, &cursor(None, Some(T)));
         assert_eq!(kept.len(), 1);
-        assert_eq!(kept[0].timestamp, "2026-08-31T12:00:00Z");
+        assert_eq!(kept[0].timestamp, T1S);
     }
 
-    /// A turn that produced nothing new yields an empty batch, so reflect
-    /// returns before incrementing total_sessions.
     #[test]
-    fn watermark_at_newest_yields_nothing() {
-        let obs = vec![obs_at("2026-08-31T10:00:00Z")];
-        assert!(filter_past_watermark(obs, Some("2026-08-31T10:00:00Z")).is_empty());
+    fn b_sqlite_round_advances_obs_id_over_all_rows() {
+        let rows = vec![row(6, T), row(7, T1S)];
+        let cur = cursor(Some(5), Some(T));
+        let kept = select_new(&rows, &cur);
+        assert_eq!(kept_ids(&kept), [7]);
+        let next = advance_cursor(&cur, Source::Sqlite, &rows, &kept);
+        assert_eq!(next.obs_id, Some(7));
+        assert_eq!(next.ts_floor.as_deref(), Some(T));
     }
 
-    /// First run on a fresh project keeps the whole batch.
     #[test]
-    fn no_watermark_keeps_everything() {
-        let obs = vec![
-            obs_at("2026-08-31T10:00:00Z"),
-            obs_at("2026-08-31T11:00:00Z"),
-        ];
-        assert_eq!(filter_past_watermark(obs, None).len(), 2);
+    fn b_jsonl_round_advances_ts_floor_only() {
+        let cur = cursor(Some(5), None);
+        let rows = vec![(None, obs_at(T)), (None, obs_at(T1S))];
+        let kept = select_new(&rows, &cur);
+        let next = advance_cursor(&cur, Source::Jsonl, &rows, &kept);
+        assert_eq!(next.ts_floor.as_deref(), Some(T1S));
+        assert_eq!(next.obs_id, Some(5));
+    }
+
+    #[test]
+    fn b_backfill_after_jsonl_round_not_recounted() {
+        let cur = cursor(Some(5), None);
+        let jsonl = vec![(None, obs_at(T)), (None, obs_at(T1S))];
+        let kept = select_new(&jsonl, &cur);
+        let next = advance_cursor(&cur, Source::Jsonl, &jsonl, &kept);
+        // The next round backfills the JSONL records with fresh ids.
+        let rows = vec![row(6, T), row(7, T1S), row(8, T2S)];
+        let kept = select_new(&rows, &next);
+        assert_eq!(kept_ids(&kept), [8]);
+    }
+
+    #[test]
+    fn b_exactly_once_property() {
+        let mut table: Vec<(Option<i64>, ObsRecord)> = vec![];
+        let mut cur = cursor(None, None);
+        let mut seen: Vec<i64> = vec![];
+        for id in 1..=60i64 {
+            table.push(row(id, &format!("2026-08-31T10:00:{:02}Z", id % 6)));
+            if id % 7 == 0 || id == 60 {
+                // The query orders by timestamp then id.
+                let mut rows = table.clone();
+                rows.sort_by(|a, b| (&a.1.timestamp, a.0).cmp(&(&b.1.timestamp, b.0)));
+                let kept = select_new(&rows, &cur);
+                seen.extend(kept_ids(&kept));
+                cur = advance_cursor(&cur, Source::Sqlite, &rows, &kept);
+            }
+        }
+        seen.sort_unstable();
+        assert_eq!(seen, (1..=60).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn b_cursor_json_golden() {
+        assert_eq!(
+            serde_json::to_string(&cursor(Some(42), None)).unwrap(),
+            r#"{"v":2,"obs_id":42,"ts_floor":null}"#
+        );
+    }
+
+    #[test]
+    fn b_load_cursor_states() {
+        let dir = tempfile::tempdir().unwrap();
+        let cur_p = dir.path().join("reflect_cursor.json");
+        let leg_p = dir.path().join("reflect_watermark.txt");
+        let valid = r#"{"v":2,"obs_id":42,"ts_floor":null}"#;
+        let loaded = CursorState::Loaded(cursor(Some(42), None));
+
+        assert_eq!(load_cursor(&cur_p, &leg_p), CursorState::Fresh);
+
+        fs::write(&leg_p, format!("{T}\n")).unwrap();
+        assert_eq!(
+            load_cursor(&cur_p, &leg_p),
+            CursorState::Loaded(cursor(None, Some(T)))
+        );
+
+        fs::write(&leg_p, "  \n").unwrap();
+        assert_eq!(load_cursor(&cur_p, &leg_p), CursorState::Fresh);
+
+        fs::write(&cur_p, valid).unwrap();
+        assert_eq!(load_cursor(&cur_p, &leg_p), loaded);
+
+        fs::write(&cur_p, format!("\u{feff}{valid}")).unwrap();
+        assert_eq!(load_cursor(&cur_p, &leg_p), loaded);
+
+        fs::write(&cur_p, "garbage").unwrap();
+        assert_eq!(load_cursor(&cur_p, &leg_p), CursorState::Corrupt);
+
+        fs::write(&cur_p, r#"{"v":1,"obs_id":42,"ts_floor":null}"#).unwrap();
+        assert_eq!(load_cursor(&cur_p, &leg_p), CursorState::Corrupt);
+
+        // Both present: the cursor wins over the legacy watermark.
+        fs::write(&cur_p, valid).unwrap();
+        fs::write(&leg_p, T).unwrap();
+        assert_eq!(load_cursor(&cur_p, &leg_p), loaded);
+    }
+
+    #[test]
+    fn b_save_cursor_dual_writes_legacy_monotone() {
+        let dir = tempfile::tempdir().unwrap();
+        let cur_p = dir.path().join("reflect_cursor.json");
+        let leg_p = dir.path().join("reflect_watermark.txt");
+        fs::write(&leg_p, T2S).unwrap();
+        let cur = cursor(Some(3), None);
+        save_cursor(&cur_p, &leg_p, &cur, Some(T1S)).unwrap();
+        let saved: ReflectCursor =
+            serde_json::from_str(&fs::read_to_string(&cur_p).unwrap()).unwrap();
+        assert_eq!(saved, cur);
+        assert_eq!(fs::read_to_string(&leg_p).unwrap(), T2S);
     }
 
     // ── retention cutoff ───────────────────────────────
