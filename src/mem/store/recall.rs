@@ -53,8 +53,6 @@ pub fn smart_recall(
     ))
 }
 
-// Not called until the hook and CLI call sites switch to passive reads.
-#[allow(dead_code)]
 pub fn smart_recall_passive(
     project: Option<&str>,
     hint: Option<&str>,

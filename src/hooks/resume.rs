@@ -555,7 +555,7 @@ pub fn run(input: &HookInput) -> i32 {
             let slug = project_slug();
             // Attempt to surface mem context inline (best-effort, non-fatal)
             match std::process::Command::new("epic-harness")
-                .args(["mem", "context", "--project", &slug])
+                .args(["mem", "context", "--project", &slug, "--passive"])
                 .output()
             {
                 Ok(out) if !out.stdout.is_empty() => {
@@ -573,7 +573,7 @@ pub fn run(input: &HookInput) -> i32 {
     // 5b. Knowledge graph recall: smart recall with composite scoring
     {
         let slug = project_slug();
-        let scored = store::smart_recall(Some(&slug), None, 10).unwrap_or_default();
+        let scored = store::smart_recall_passive(Some(&slug), None, 10).unwrap_or_default();
         let important: Vec<_> = scored
             .iter()
             .filter(|sn| {

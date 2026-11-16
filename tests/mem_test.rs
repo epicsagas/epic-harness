@@ -1055,3 +1055,82 @@ fn test_upsert_preserves_higher_access_count() {
         "UPSERT should update to higher access_count (20)"
     );
 }
+
+// ── C: --passive flag on recall and context ───────────
+
+/// Runs the real binary against the store at `root`; returns parsed stdout.
+fn run_mem_json(root: &Path, args: &[&str]) -> Vec<serde_json::Value> {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_epic-harness"))
+        .arg("mem")
+        .args(args)
+        .env("HARNESS_ROOT", root)
+        .env("HOME", root)
+        .env_remove("HARNESS_DIR")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "mem {args:?}: {out:?}");
+    serde_json::from_slice(&out.stdout).unwrap()
+}
+
+/// Seeds one node (access_count 3, never accessed) in project "p".
+fn seed_passive_node(root: &Path) -> String {
+    use epic_harness::mem::store::{Node, NodeFrontmatter, new_uuid, now_iso, write_node};
+    set_root(root);
+    let id = new_uuid();
+    let ts = now_iso();
+    let node = Node {
+        frontmatter: NodeFrontmatter {
+            id: id.clone(),
+            node_type: "decision".into(),
+            title: "alpha topic".into(),
+            tags: vec![],
+            projects: vec!["p".into()],
+            agents: vec![],
+            created: ts.clone(),
+            updated: ts,
+            importance: 0.9,
+            access_count: 3,
+            accessed_at: String::new(),
+        },
+        body: "body".into(),
+    };
+    write_node(&node).unwrap();
+    id
+}
+
+#[test]
+fn c_cli_recall_passive_flag_preserves_hint() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    let id = seed_passive_node(&root);
+
+    for args in [
+        ["recall", "--passive", "alpha topic"],
+        ["recall", "alpha topic", "--passive"],
+    ] {
+        let rows = run_mem_json(&root, &args);
+        assert_eq!(rows.len(), 1, "{args:?}");
+        assert_eq!(rows[0]["id"], id.as_str(), "{args:?}");
+        let fm = epic_harness::mem::store::read_node(&id)
+            .unwrap()
+            .frontmatter;
+        assert_eq!(fm.access_count, 3, "{args:?}");
+        assert!(!fm.accessed_at.is_empty(), "{args:?}");
+    }
+}
+
+#[test]
+fn c_cli_context_passive() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let root = temp_root();
+    let id = seed_passive_node(&root);
+
+    let rows = run_mem_json(&root, &["context", "--project", "p", "--passive"]);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], id.as_str());
+    let fm = epic_harness::mem::store::read_node(&id)
+        .unwrap()
+        .frontmatter;
+    assert_eq!(fm.access_count, 3);
+}

@@ -11,8 +11,8 @@ use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
     Edge, IndexNode, Node, NodeFrontmatter, append_edge, delete_node_file, importance_for_type,
     list_node_ids, now_iso, parse_node, query_nodes, read_node, remove_edges_for_node,
-    remove_from_index, search_nodes, serialize_node, smart_recall, upsert_index, validate_uuid,
-    write_node, write_node_dedup,
+    remove_from_index, search_nodes, serialize_node, smart_recall, smart_recall_passive,
+    upsert_index, validate_uuid, write_node, write_node_dedup,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -32,10 +32,13 @@ const SUBCOMMANDS: &[(&str, &str)] = &[
         "Dump all nodes to Markdown files (for Git backup)",
     ),
     ("migrate", "Import legacy project memory files"),
-    ("context", "Show recently-updated nodes for a project"),
+    (
+        "context",
+        "Show recently-updated nodes for a project [--passive]",
+    ),
     (
         "recall",
-        "Smart recall — relevance-ranked memories for current task",
+        "Smart recall — relevance-ranked memories for current task [--passive]",
     ),
     ("mcp", "Run as stdio MCP server (JSON-RPC 2.0)"),
     (
@@ -169,6 +172,7 @@ fn print_subcommand_help(sub: &str) {
             println!("OPTIONS:");
             println!("  --project <name>    Filter by project slug");
             println!("  --limit <n>         Max nodes to return (default: 5)");
+            println!("  --passive           Update accessed_at only, not access_count");
             println!("\nOUTPUT: JSON array of index nodes sorted by updated desc");
         }
         "recall" => {
@@ -182,6 +186,7 @@ fn print_subcommand_help(sub: &str) {
             println!("OPTIONS:");
             println!("  --project <name>    Filter by project slug");
             println!("  --limit <n>         Max nodes to return (default: 10)");
+            println!("  --passive           Update accessed_at only, not access_count");
             println!("\nOUTPUT: JSON array of relevance-scored nodes");
             println!(
                 "\nScoring: recency(25%) + importance(35%) + access_freq(15%) + FTS_match(25%)"
@@ -324,6 +329,18 @@ fn parse_flags(args: &[String]) -> (Vec<String>, HashMap<String, String>) {
         }
     }
     (positional, flags)
+}
+
+/// Removes the boolean `--passive` flag before `parse_flags`, which would take
+/// the next argument (a hint or value) as its value.
+fn take_passive(args: &[String]) -> (bool, Vec<String>) {
+    let passive = args.iter().any(|a| a == "--passive");
+    let rest = args
+        .iter()
+        .filter(|a| a.as_str() != "--passive")
+        .cloned()
+        .collect();
+    (passive, rest)
 }
 
 fn csv_to_vec(s: &str) -> Vec<String> {
@@ -851,7 +868,8 @@ fn cmd_mcp_install(args: &[String]) -> io::Result<i32> {
 }
 
 fn cmd_context(args: &[String]) -> io::Result<i32> {
-    let (_, flags) = parse_flags(args);
+    let (passive, args) = take_passive(args);
+    let (_, flags) = parse_flags(&args);
     let project = flags.get("project").cloned().unwrap_or_default();
     let limit: usize = flags.get("limit").and_then(|l| l.parse().ok()).unwrap_or(5);
 
@@ -860,7 +878,12 @@ fn cmd_context(args: &[String]) -> io::Result<i32> {
     } else {
         Some(project.as_str())
     };
-    let scored = smart_recall(project_opt, None, limit).unwrap_or_default();
+    let recall = if passive {
+        smart_recall_passive
+    } else {
+        smart_recall
+    };
+    let scored = recall(project_opt, None, limit).unwrap_or_default();
 
     let results: Vec<serde_json::Value> = scored
         .iter()
@@ -887,7 +910,8 @@ fn cmd_context(args: &[String]) -> io::Result<i32> {
 }
 
 fn cmd_recall(args: &[String]) -> io::Result<i32> {
-    let (pos, flags) = parse_flags(args);
+    let (passive, args) = take_passive(args);
+    let (pos, flags) = parse_flags(&args);
     let hint = pos.first().cloned().unwrap_or_default();
     let project = flags.get("project").cloned();
     let limit: usize = flags
@@ -904,7 +928,12 @@ fn cmd_recall(args: &[String]) -> io::Result<i32> {
 
     let project_opt = project.as_deref();
     let hint_opt = Some(hint.as_str());
-    let scored = smart_recall(project_opt, hint_opt, limit)?;
+    let recall = if passive {
+        smart_recall_passive
+    } else {
+        smart_recall
+    };
+    let scored = recall(project_opt, hint_opt, limit)?;
 
     let results: Vec<serde_json::Value> = scored
         .iter()
