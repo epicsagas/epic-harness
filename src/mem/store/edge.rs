@@ -66,10 +66,11 @@ pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
 }
 
 /// Returns the number of deleted rows.
+///
+/// Edges have no persisted id (#227), so this only matches `label`. It never
+/// matches `source` or `target`, so a node id cannot delete that node's edges.
 async fn delete_edge_by_id_async(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<u64> {
-    sqlx::query("DELETE FROM edges WHERE source = ? OR target = ? OR label = ?")
-        .bind(edge_id)
-        .bind(edge_id)
+    sqlx::query("DELETE FROM edges WHERE label = ?")
         .bind(edge_id)
         .execute(pool)
         .await

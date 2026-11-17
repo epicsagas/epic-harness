@@ -284,16 +284,29 @@ fn test_delete_edge_by_id_is_consistent() {
         ts: "2026-01-01T00:00:01Z".to_string(),
     };
 
+    let edge_c = Edge {
+        id: "edge-ccc".to_string(),
+        source: "src-1".to_string(),
+        target: "tgt-3".to_string(),
+        relation: "blocks".to_string(),
+        weight: 0.5,
+        ts: "2026-01-01T00:00:02Z".to_string(),
+    };
+
     append_edge(&edge_a).unwrap();
     append_edge(&edge_b).unwrap();
-    assert_eq!(read_edges().len(), 2, "should have 2 edges before delete");
+    append_edge(&edge_c).unwrap();
+    assert_eq!(read_edges().len(), 3, "should have 3 edges before delete");
 
-    // delete_edge_by_id matches against source, target, or label (relation).
-    // edges table has no id column, so we delete by source.
+    // edges table has no id column (#227): delete_edge_by_id matches only the
+    // label (relation), never source or target.
     delete_edge_by_id("src-1").unwrap();
+    assert_eq!(read_edges().len(), 3, "a source id must delete nothing");
+
+    delete_edge_by_id("uses").unwrap();
     let remaining = read_edges();
-    assert_eq!(remaining.len(), 1, "should have 1 edge after delete");
-    assert_eq!(remaining[0].source, "src-2");
+    assert_eq!(remaining.len(), 2, "only the edge labelled uses is deleted");
+    assert!(remaining.iter().all(|e| e.relation == "blocks"));
 }
 
 #[test]

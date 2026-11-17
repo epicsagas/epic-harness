@@ -862,6 +862,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn delete_edge_by_node_id_keeps_node_edges() {
+        let state = make_state().await;
+        let server = test_server(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Node A").await;
+        let b = create_node(&server, "Node B").await;
+        let c = create_node(&server, "Node C").await;
+        for (source, target) in [(&a, &b), (&b, &c)] {
+            let res = server
+                .post("/api/edges")
+                .json(&json!({"source": source, "target": target}))
+                .await;
+            assert_eq!(res.status_code(), StatusCode::CREATED);
+        }
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 2);
+
+        let res = server.delete(&format!("/api/edges/{a}")).await;
+        assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 2);
+    }
+
+    #[tokio::test]
     async fn cross_site_text_plain_post_is_rejected() {
         let state = make_state().await;
         let server = test_server(build_router(state.clone(), 7700));
