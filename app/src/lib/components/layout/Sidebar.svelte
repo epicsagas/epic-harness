@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { SKILLS } from '../../skillCatalog.js';
+
   interface Props {
     currentScreen: string;
     onNavigate: (screen: string) => void;
@@ -37,7 +39,7 @@
       ringDot: true,
       dotColor: 'var(--purple)',
       items: [
-        { id: 'skills', icon: '✧', label: 'Skills', badge: '19' },
+        { id: 'skills', icon: '✧', label: 'Skills', badge: String(SKILLS.filter((s) => !s.special).length) },
       ],
     },
     {
