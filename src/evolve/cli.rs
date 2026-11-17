@@ -16,8 +16,8 @@ use crate::evolve::edits::EditManifest;
 use crate::evolve::skills::{gate_skills, write_skill_with_meta};
 use crate::evolve::synthesis::{assemble_skill, find_pending, mark_consumed, validate_body};
 use crate::shared::evolution::{EditType, Metrics};
-use crate::shared::helpers::{append_jsonl, hint, read_json, read_stdin_bounded};
-use crate::shared::paths::{evolved_dir, manifests_file, metrics_file};
+use crate::shared::helpers::{append_jsonl, hint, parse_persisted_json, read_stdin_bounded};
+use crate::shared::paths::{evolved_dir, manifests_file, metrics_file, project_slug};
 
 const EXIT_OK: i32 = 0;
 const EXIT_NO_MANIFEST: i32 = 2;
@@ -147,7 +147,28 @@ fn run_accept_synth(args: &[String]) -> i32 {
             pending.origin, pending.confidence
         ),
     };
-    let metrics: Metrics = read_json(&metrics_file(), Metrics::default());
+    let loaded = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&project_slug()))
+            .await
+            .map_err(std::io::Error::other)
+    });
+    let metrics: Metrics = match loaded {
+        Ok(m) => m,
+        Err(e) => match fs::read_to_string(metrics_file())
+            .ok()
+            .and_then(|s| parse_persisted_json::<Metrics>(&s).ok())
+        {
+            Some(m) => {
+                eprintln!("warning: SQLite metrics unavailable ({e}); using metrics.json");
+                m
+            }
+            None => {
+                eprintln!("cannot load metrics for the reward-hacking gate: {e}");
+                return EXIT_IO;
+            }
+        },
+    };
     if let CriticVerdict::Reject(reason) = Critic::verify_against_evidence(&manifest, &[], &metrics)
     {
         eprintln!("critic rejected: {reason}");

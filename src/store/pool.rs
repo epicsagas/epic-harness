@@ -403,6 +403,39 @@ pub async fn harness_pool() -> io::Result<AnyPool> {
     Ok(pool)
 }
 
+/// Opens `harness.db` for reading only, without creating or migrating anything.
+///
+/// SQLite: `Ok(None)` when the URL is in-memory/empty or the file does not exist;
+/// otherwise a single-connection pool opened with `mode=ro`. Never cached in
+/// `HARNESS_POOL`, never runs `init_schema_pool`. The caller owns and closes it.
+/// Postgres goes through `build_postgres_pool` (TLS enforced, no schema init).
+/// MySQL is unsupported and yields `Ok(None)`.
+pub async fn harness_pool_if_exists() -> io::Result<Option<AnyPool>> {
+    let url = harness_url();
+    match DbType::from_url(&url)? {
+        DbType::Sqlite => {
+            let path = url
+                .strip_prefix("sqlite:")
+                .unwrap_or(&url)
+                .trim_start_matches("//");
+            let path = path.split('?').next().unwrap_or(path);
+            if path.is_empty() || path == ":memory:" || !PathBuf::from(path).is_file() {
+                return Ok(None);
+            }
+            ensure_drivers();
+            let sep = if url.contains('?') { "&" } else { "?" };
+            AnyPoolOptions::new()
+                .max_connections(1)
+                .connect(&format!("{url}{sep}mode=ro"))
+                .await
+                .map(Some)
+                .map_err(io::Error::other)
+        }
+        DbType::Postgres => build_postgres_pool(&url, 1).await.map(Some),
+        DbType::Mysql => Ok(None),
+    }
+}
+
 /// Returns a shared `AnyPool` for `memory.db`.
 ///
 /// Same lock-drop-await pattern as `harness_pool()`.

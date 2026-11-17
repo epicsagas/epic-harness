@@ -128,10 +128,15 @@ fn read_guard_rule_lines() -> Vec<String> {
 /// Project-scoped metrics summary via the scoped loader (None/empty = CWD).
 fn metrics_summary_for(project: Option<&str>) -> MetricsSummary {
     let m = crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::harness_pool().await.ok()?;
-        crate::store::metrics::load_metrics_scoped_pool(&pool, project)
+        let pool = crate::store::pool::harness_pool_if_exists()
             .await
             .ok()
+            .flatten()?;
+        let m = crate::store::metrics::load_metrics_scoped_pool(&pool, project)
+            .await
+            .ok();
+        pool.close().await;
+        m
     });
     match m {
         Some(m) => MetricsSummary {
@@ -283,8 +288,13 @@ fn diff_values(parent_path: &str, a: &Value, b: &Value, out: &mut Vec<SnapshotDi
                 diff_values(&child_path, av, bv, out);
             }
         }
-        (Value::Array(aa), Value::Array(bb)) => {
-            // Compare as sets: additions and removals.
+        (Value::Array(aa), Value::Array(bb))
+            if matches!(
+                path.as_str(),
+                "active_skills" | "evolved_skills" | "guard_rules"
+            ) =>
+        {
+            // Unordered lists: compare as sets (additions and removals).
             let set_a: std::collections::BTreeSet<String> = aa.iter().map(canonical_json).collect();
             let set_b: std::collections::BTreeSet<String> = bb.iter().map(canonical_json).collect();
             let added: Vec<&String> = set_b.difference(&set_a).collect();
@@ -413,6 +423,33 @@ mod tests {
                 .any(|d| d.field.ends_with("config_summary.max_skills")),
             "expected max_skills diff: {diffs:?}"
         );
+    }
+
+    /// Ordered arrays (scoring_weights) are compared positionally, not as sets.
+    #[test]
+    fn diff_compares_scoring_weights_positionally() {
+        let a = make_fixture_snapshot("p", &["x"], [0.5, 0.3, 0.2], 10, 3);
+        let b = make_fixture_snapshot("p", &["x"], [0.3, 0.5, 0.2], 10, 3);
+        let diffs = diff_snapshots(&a, &b);
+        let d = diffs
+            .iter()
+            .find(|d| d.field == "config_summary.scoring_weights")
+            .unwrap_or_else(|| panic!("expected scoring_weights diff: {diffs:?}"));
+        assert_eq!(d.before, json!([0.5, 0.3, 0.2]));
+        assert_eq!(d.after, json!([0.3, 0.5, 0.2]));
+    }
+
+    /// Skill lists keep set semantics: reordering is no diff, an addition is.
+    #[test]
+    fn diff_skill_lists_stay_unordered_sets() {
+        let a = make_fixture_snapshot("p", &["a", "b"], [0.5, 0.3, 0.2], 10, 3);
+        let mut reordered = make_fixture_snapshot("p", &["b", "a"], [0.5, 0.3, 0.2], 10, 3);
+        // Real snapshots sort skills so the hash matches; the fixture does not.
+        reordered.hash = a.hash.clone();
+        assert!(diff_snapshots(&a, &reordered).is_empty());
+        let added = make_fixture_snapshot("p", &["a", "b", "c"], [0.5, 0.3, 0.2], 10, 3);
+        let diffs = diff_snapshots(&a, &added);
+        assert!(diffs.iter().any(|d| d.field == "active_skills(added)"));
     }
 
     /// diff ignores the timestamp field.

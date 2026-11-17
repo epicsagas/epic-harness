@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deleting an edge no longer removes a node's edges**: `DELETE /api/edges/{id}` with a node id now returns 404 instead of deleting every edge of that node, and creating an edge in the desktop app works again. Edge identity is still open in #227.
 - **`epic team unlink` and `delete` refuse another org's team**: when the local agent files belong to a different org than `--org`, nothing is removed. (#249)
 - **Re-running team creation keeps the team type in sync**: a new `--type` is saved to the team config, and without `--type` an existing team keeps its type. (#250)
+- **Failures after long command output are detected**: Bash failures are read from stderr first and from both the start and end of long output, and the score now matches the recorded result. (#190)
+- **Read calls that use a path field keep their file name**, and destructive `git branch`, `git remote`, `find`, `fd` and BSD `sed -I` commands are no longer treated as read-only. (#191, #193)
+- **Host-reported Read, Glob and Grep errors keep their message** in the error snippet instead of an empty one.
+- **Orchestration dependency updates no longer lose concurrent changes**: unblocking runs under the run lock, unblocked agents show as pending, failed agents are recorded as failed and still unblock dependents, and a paused or cancelled agent is shown as blocked instead of running. (#245, #246, #241 partial)
+- **Skill attribution counts only skills that were injected**: template skills withheld from frontier-class sessions are no longer credited as active. (#208)
+- **`reflect --context` evolution stats are real**: pattern frequency, patterns detected, skills generated and stagnation count are filled in; fields with no stored source are null instead of a false zero. (#207)
+- **Cold-start presets apply in the first session** instead of the second. (#271)
+- **`epic harness snapshot` no longer creates or migrates the database** and rejects unknown flags; `--help` prints usage. (#261)
+- **Snapshot diff reports reordered scoring weights**, forked variants get unique ids that keep the parent's shape, and accept-synth reads the reward-hacking flag from the database and refuses when no metrics can be read. (#202, #209, #205)
 
 ### Docs
 - **Team sync scope documented**: project syncs also copy agents to the global Codex, Antigravity, Cursor and OpenCode agent folders, and unlink does not remove those copies. (#248)

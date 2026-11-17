@@ -138,6 +138,10 @@ impl VariantPool {
         if !would_regress {
             return target_id.to_string();
         }
+        // Clone the target's shape (tags + skills) before any retirement, so the
+        // sibling starts where the parent left off even if the parent is the
+        // lowest-scoring variant retired below.
+        let parent = self.variants.iter().find(|v| v.id == target_id).cloned();
         if self.variants.len() >= MAX_VARIANTS {
             // Pool full: retire the lowest-scoring variant to make room.
             if let Some(idx) = self.lowest_scoring_index() {
@@ -145,10 +149,7 @@ impl VariantPool {
                 self.routing_stats.remove(&retired.id);
             }
         }
-        // Clone the target's shape (tags + skills) so the sibling starts where
-        // the parent left off, then it diverges as the edit is applied.
-        let parent = self.variants.iter().find(|v| v.id == target_id).cloned();
-        let new_id = format!("{target_id}-fork-{}", self.variants.len() + 1);
+        let new_id = format!("{target_id}-fork-{}", uuid::Uuid::new_v4());
         let sibling = match parent {
             Some(p) => SkillVariant {
                 id: new_id.clone(),
@@ -335,6 +336,28 @@ mod tests {
         assert_eq!(pool.variants.len(), 3);
         assert!(!pool.variants.iter().any(|v| v.id == "v2"));
         assert!(id.starts_with("v1-fork-"));
+    }
+
+    #[test]
+    fn fork_ids_are_unique_and_inherit_parent_when_parent_retired() {
+        let mut parent = variant("base", &["rust"], 0.1); // lowest, retired on fork
+        parent.skills = vec!["tdd".into()];
+        let mut pool = VariantPool {
+            variants: vec![
+                parent,
+                variant("base-fork-3", &["go"], 0.8),
+                variant("other", &["python"], 0.9),
+            ],
+            routing_stats: HashMap::new(),
+        };
+        let id = pool.fork_if_needed("base", true);
+        assert_ne!(id, "base-fork-3");
+        let ids: std::collections::HashSet<_> = pool.variants.iter().map(|v| &v.id).collect();
+        assert_eq!(ids.len(), pool.variants.len(), "ids must be unique");
+        let sibling = pool.variants.iter().find(|v| v.id == id).unwrap();
+        assert_eq!(sibling.domain_tags, vec!["rust".to_string()]);
+        assert_eq!(sibling.skills, vec!["tdd".to_string()]);
+        assert_eq!(sibling.avg_score, 0.1);
     }
 
     #[test]

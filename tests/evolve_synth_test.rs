@@ -143,3 +143,37 @@ fn failed_consume_is_not_reported_as_success() {
     assert_eq!(env.pending_status(), "pending");
     assert_eq!(env.ledger_lines(), 0);
 }
+
+#[test]
+fn reward_hacking_flag_in_sqlite_blocks_accept_synth() {
+    let env = Env::new();
+    // First run: a directory where SKILL.md belongs makes the install fail
+    // after the gate, which still leaves harness.db with its schema.
+    let skill_md = env.project().join("evolved").join(SKILL).join("SKILL.md");
+    fs::create_dir_all(&skill_md).unwrap();
+    let (code, err) = env.accept();
+    assert_eq!(code, EXIT_IO, "{err}");
+    fs::remove_dir(&skill_md).unwrap();
+
+    let db = env.harness.join("harness.db");
+    assert!(db.is_file(), "harness.db should exist after first run");
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let pool = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db))
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO metrics_state (key, value, project) \
+             VALUES ('reward_hacking_suspected', 'true', ?)",
+        )
+        .bind(SLUG)
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    });
+
+    let (code, err) = env.accept();
+    assert_eq!(code, 5, "{err}");
+    assert_eq!(env.pending_status(), "pending");
+}

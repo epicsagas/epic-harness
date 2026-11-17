@@ -43,7 +43,16 @@ pub fn run(args: &[String]) -> i32 {
     }
 }
 
-fn run_snapshot(_flags: &[String]) -> i32 {
+fn run_snapshot(flags: &[String]) -> i32 {
+    if flags.iter().any(|f| f == "--help" || f == "-h") {
+        print_help();
+        return 0;
+    }
+    if let Some(f) = flags.first() {
+        eprintln!("error: unknown flag '{f}'");
+        print_help();
+        return 2;
+    }
     let snap = build_snapshot();
     match serde_json::to_string_pretty(&snap) {
         Ok(json) => {
