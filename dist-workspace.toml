@@ -24,6 +24,8 @@ install-path = "CARGO_HOME"
 install-updater = false
 
 [dist.github-custom-runners]
+# macos-14 runners are retired; dist 0.31 still defaults to them for arm64 macOS.
+aarch64-apple-darwin = "macos-15"
 aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
 
 # NOTE: Linux GTK/WebKit dependencies are installed via explicit apt-get step in release.yml
