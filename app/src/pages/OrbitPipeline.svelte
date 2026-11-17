@@ -8,6 +8,7 @@
   let pipelines = $state<OrbitPipeline[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let dismissError = $state<string | null>(null);
 
   // ── Update-flash: glow a section's border when its data changes.
   let flash = $state<Record<string, boolean>>({});
@@ -65,7 +66,7 @@
     page = 1;
   });
 
-  const PHASES = ['spec', 'go', 'check', 'ship', 'complete'] as const;
+  const PHASES = ['spec', 'go', 'audit', 'eval', 'ship', 'evolve'] as const;
   type Phase = typeof PHASES[number];
 
   async function load() {
@@ -108,8 +109,12 @@
     return map[status] ?? 'muted';
   }
 
+  function canonicalPhase(phase: string): string {
+    return ({ check: 'audit', complete: 'evolve' } as Record<string, string>)[phase] ?? phase;
+  }
+
   function phaseIndex(phase: string): number {
-    return PHASES.indexOf(phase as Phase);
+    return PHASES.indexOf(canonicalPhase(phase) as Phase);
   }
 
   function durationMinutes(startedAt: string, updatedAt: string): number {
@@ -131,18 +136,18 @@
   }
 
   function phaseStageClass(phase: string, currentPhase: string, phaseHistory: OrbitPipeline['phase_history']): string {
-    const done = phaseHistory.map(h => h.phase);
+    const done = phaseHistory.map(h => canonicalPhase(h.phase));
     if (done.includes(phase)) return 'completed';
-    if (phase === currentPhase) return 'running';
+    if (phase === canonicalPhase(currentPhase)) return 'running';
     return 'pending';
   }
 
   function phaseIcon(phase: string): string {
-    return ({ spec: '☰', go: '▶', check: '✓', ship: '↑', complete: '↻' } as Record<string,string>)[phase] ?? phase;
+    return ({ spec: '☰', go: '▶', audit: '✓', eval: '◇', ship: '↑', evolve: '↻' } as Record<string,string>)[phase] ?? phase;
   }
 
   function phaseColor(phase: string): string {
-    return ({ spec: 'var(--accent)', go: 'var(--accent)', check: 'var(--success)', ship: 'var(--purple)', complete: 'var(--teal)' } as Record<string,string>)[phase] ?? 'var(--muted)';
+    return ({ spec: 'var(--accent)', go: 'var(--accent)', audit: 'var(--success)', eval: 'var(--success)', ship: 'var(--purple)', evolve: 'var(--teal)' } as Record<string,string>)[phase] ?? 'var(--muted)';
   }
 
   function projectLabel(raw: string | undefined): string {
@@ -153,13 +158,16 @@
     try {
       await dismissOrbitPipeline(id);
       pipelines = pipelines.filter(p => p.id !== id);
-    } catch { /* ignore */ }
+      dismissError = null;
+    } catch (e) {
+      dismissError = e instanceof Error ? e.message : String(e);
+    }
   }
 </script>
 
 <div class="screen-header">
   <h2>/orbit <span class="subtitle-tag">Autonomous Pipeline</span></h2>
-  <p>spec → go → check → ship → evolve — single-command spec-to-PR execution</p>
+  <p>spec → go → audit → eval → ship → evolve — single-command spec-to-PR execution</p>
 </div>
 
 {#if error}
@@ -192,6 +200,12 @@
   </div>
 </div>
 
+{#if dismissError}
+  <div class="panel" style="margin-bottom:16px;">
+    <div class="panel-body"><span style="color:var(--danger)">{dismissError}</span></div>
+  </div>
+{/if}
+
 <!-- Running Pipelines -->
 {#if loading}
   <div class="panel" style="margin-bottom:16px;">
@@ -205,7 +219,7 @@
         <h3><span class="pill info" style="margin-right:8px;">RUNNING</span>{p.goal_slug ?? $tStore('noGoal')}</h3>
         <div class="panel-actions" style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">
-            ID: {shortId(p.id)} · Mode: {p.mode ?? '--'} · Check fails: {p.check_fail_count}
+            ID: {shortId(p.id)} · Mode: {p.mode ?? '--'} · Check fails: {p.audit_fail_count}
           </span>
           <button
             onclick={() => dismiss(p.id)}
@@ -228,7 +242,7 @@
         <div style="margin-top:12px;font-size:11px;color:var(--muted);font-family:var(--font-mono);display:flex;gap:24px;flex-wrap:wrap;">
           <span>{$tStore('startedAt')}: {fmtDatetime(p.started_at)}</span>
           {#if p.deadline}<span>{$tStore('deadlineAt')}: {fmtDatetime(p.deadline)} ({deadlineRemaining(p.deadline)})</span>{/if}
-          <span>{$tStore('checkFails')}: {p.check_fail_count}/3</span>
+          <span>{$tStore('checkFails')}: {p.audit_fail_count}/3</span>
         </div>
       </div>
     </div>
@@ -366,9 +380,9 @@
         <tbody>
           <tr><td style="color:var(--muted)">id</td><td style="color:var(--fg)">{'{timestamp}'}</td></tr>
           <tr><td style="color:var(--muted)">mode</td><td style="color:var(--fg)">interactive | council | direct</td></tr>
-          <tr><td style="color:var(--muted)">phase</td><td style="color:var(--accent)">spec → go → check → ship</td></tr>
+          <tr><td style="color:var(--muted)">phase</td><td style="color:var(--accent)">spec → go → audit → eval → ship → evolve</td></tr>
           <tr><td style="color:var(--muted)">status</td><td style="color:var(--fg)">running | complete | failed | timeout | aborted</td></tr>
-          <tr><td style="color:var(--muted)">check_fail_count</td><td style="color:var(--fg)">0..3</td></tr>
+          <tr><td style="color:var(--muted)">audit_fail_count</td><td style="color:var(--fg)">0..3</td></tr>
           <tr><td style="color:var(--muted)">deadline</td><td style="color:var(--fg)">now + 30min</td></tr>
           <tr><td style="color:var(--muted)">worktree_name</td><td style="color:var(--fg)">isolated build env</td></tr>
         </tbody>

@@ -80,7 +80,7 @@ export interface OrbitPipeline {
   status: 'running' | 'complete' | 'failed' | 'paused' | 'aborted' | 'timeout';
   goal_slug: string | null;
   branch: string | null;
-  check_fail_count: number;
+  audit_fail_count: number;
   started_at: string;
   updated_at: string;
   deadline: string | null;
@@ -324,10 +324,10 @@ export interface EditManifestEntry {
 }
 
 export interface GraphStats {
-  total_nodes: number;
-  total_edges: number;
+  nodes: number;
+  edges: number;
   avg_importance: number;
-  by_type: Record<string, number>;
+  types: Record<string, number>;
 }
 
 export interface MemoryNode {
@@ -374,10 +374,16 @@ export async function getHarnessMetrics(project?: string): Promise<HarnessMetric
     trend,
   };
 }
-export const getOrbitPipelines = () => invoke<OrbitPipeline[]>('get_orbit_pipelines', projectArgs());
+export async function getOrbitPipelines(): Promise<OrbitPipeline[]> {
+  const rows = await invoke<Array<OrbitPipeline & { check_fail_count?: number }>>('get_orbit_pipelines', projectArgs());
+  return rows.map(p => ({ ...p, audit_fail_count: p.audit_fail_count ?? p.check_fail_count ?? 0 }));
+}
 export async function dismissOrbitPipeline(id: string): Promise<{ ok: boolean }> {
   const res = await fetch(`/api/orbit/${encodeURIComponent(id)}`, { method: 'DELETE' });
-  return res.json();
+  let body: { ok?: boolean } | null = null;
+  try { body = await res.json(); } catch { body = null; }
+  if (!res.ok || body?.ok !== true) throw new Error(`dismiss failed (${res.status})`);
+  return { ok: true };
 }
 export const getEvolvedSkills = (project?: string) => invoke<EvolutionData>('get_evolved_skills', projectArgs(project));
 export const getObsSummary = () => invoke<ObsSummary>('get_obs_summary', projectArgs());
@@ -443,10 +449,10 @@ export async function getAgentInbox(agentId: string): Promise<InboxMessage[]> {
 
 export async function getGraphStats(): Promise<GraphStats | null> {
   try {
-    const res = await fetch('/api/stats');
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && Object.keys(data).length > 0 ? data as GraphStats : null;
+    const data = isTauriRuntime()
+      ? await invoke<GraphStats>('get_stats')
+      : await fetchJson<GraphStats>('/api/stats');
+    return data && Object.keys(data).length > 0 ? data : null;
   } catch {
     return null;
   }
@@ -454,9 +460,9 @@ export async function getGraphStats(): Promise<GraphStats | null> {
 
 export async function getMemoryNodes(): Promise<MemoryNode[]> {
   try {
-    const res = await fetch('/api/nodes');
-    if (!res.ok) return [];
-    return await res.json();
+    return isTauriRuntime()
+      ? await invoke<MemoryNode[]>('get_nodes')
+      : await fetchJson<MemoryNode[]>('/api/nodes');
   } catch {
     return [];
   }
@@ -464,24 +470,29 @@ export async function getMemoryNodes(): Promise<MemoryNode[]> {
 
 export async function getMemoryNode(id: string): Promise<MemoryNode | null> {
   try {
-    const res = await fetch(`/api/nodes/${encodeURIComponent(id)}`);
-    if (!res.ok) return null;
-    return await res.json();
+    return isTauriRuntime()
+      ? await invoke<MemoryNode>('get_node', { id })
+      : await fetchJson<MemoryNode>(`/api/nodes/${encodeURIComponent(id)}`);
   } catch {
     return null;
   }
 }
 
-export async function searchMemory(query: string, type?: string): Promise<MemoryNode[]> {
+export async function searchMemory(query: string): Promise<MemoryNode[]> {
   try {
-    let url = `/api/search?q=${encodeURIComponent(query)}`;
-    if (type) url += `&type=${encodeURIComponent(type)}`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    return await res.json();
+    const rows = isTauriRuntime()
+      ? await invoke<MemoryNode[]>('search_nodes', { query })
+      : await fetchJson<MemoryNode[]>(`/api/search?q=${encodeURIComponent(query)}`);
+    return rows.map(r => ({ ...r, projects: r.projects ?? [] }));
   } catch {
     return [];
   }
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${url} failed: HTTP ${res.status}`);
+  return res.json();
 }
 
 // ── Dev fallback: real data via Vite /api/harness middleware ─────────────────

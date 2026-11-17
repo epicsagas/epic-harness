@@ -4,7 +4,7 @@
 // state), never resolve with invented numbers.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getEvolvedSkills, getHarnessMetrics, getObsSummary, getOrbitPipelines } from './harness.js';
+import { dismissOrbitPipeline, getEvolvedSkills, getGraphStats, getHarnessMetrics, getObsSummary, getOrbitPipelines, searchMemory } from './harness.js';
 import { selectedProject } from './stores/project.js';
 
 function stubFetch(impl: () => Promise<Partial<Response>>) {
@@ -67,5 +67,97 @@ describe('project selection', () => {
     const fetchMock = stubFetch(() => json([]));
     await getOrbitPipelines();
     expect(fetchMock).toHaveBeenCalledWith('/api/harness?cmd=get_orbit_pipelines&project=proj-a');
+  });
+});
+
+describe('dismissOrbitPipeline', () => {
+  it('resolves on 200 {ok:true} and sends no query string', async () => {
+    const fetchMock = stubFetch(() => json({ ok: true }));
+    await expect(dismissOrbitPipeline('pid-1')).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledWith('/api/orbit/pid-1', { method: 'DELETE' });
+  });
+
+  it('throws on 404 {ok:false}', async () => {
+    stubFetch(() => json({ ok: false }, false, 404));
+    await expect(dismissOrbitPipeline('pid-1')).rejects.toThrow('dismiss failed (404)');
+  });
+
+  it('throws on 400', async () => {
+    stubFetch(() => json({ error: 'bad id' }, false, 400));
+    await expect(dismissOrbitPipeline('pid-1')).rejects.toThrow('dismiss failed (400)');
+  });
+
+  it('throws on 404 with a text body', async () => {
+    stubFetch(() => Promise.resolve({ ok: false, status: 404, json: () => Promise.reject(new SyntaxError('not json')) }));
+    await expect(dismissOrbitPipeline('pid-1')).rejects.toThrow('dismiss failed (404)');
+  });
+});
+
+describe('memory reads over fetch', () => {
+  it('searchMemory fetches /api/search?q=x', async () => {
+    const fetchMock = stubFetch(() => json([]));
+    await searchMemory('x');
+    expect(fetchMock).toHaveBeenCalledWith('/api/search?q=x');
+  });
+
+  it('getGraphStats returns the stats object', async () => {
+    stubFetch(() => json({ nodes: 3, edges: 2, avg_importance: 0.5, types: { concept: 3 } }));
+    await expect(getGraphStats()).resolves.toEqual({ nodes: 3, edges: 2, avg_importance: 0.5, types: { concept: 3 } });
+  });
+
+  it('getGraphStats returns null for the empty-object fallback', async () => {
+    stubFetch(() => json({}));
+    await expect(getGraphStats()).resolves.toBeNull();
+  });
+});
+
+describe('getOrbitPipelines fail count mapping', () => {
+  it('maps audit_fail_count and the legacy check_fail_count', async () => {
+    stubFetch(() => json([{ id: 'a', audit_fail_count: 2 }, { id: 'b', check_fail_count: 1 }, { id: 'c' }]));
+    const rows = await getOrbitPipelines();
+    expect(rows.map(r => r.audit_fail_count)).toEqual([2, 1, 0]);
+  });
+});
+
+describe('Tauri runtime memory transport', () => {
+  const invokeMock = vi.fn();
+
+  async function load() {
+    vi.resetModules();
+    vi.doMock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+    (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {};
+    return import('./harness.js');
+  }
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__;
+    vi.doUnmock('@tauri-apps/api/core');
+    invokeMock.mockReset();
+  });
+
+  it('calls the four native commands with their args', async () => {
+    const h = await load();
+    invokeMock.mockResolvedValueOnce({ nodes: 1, edges: 0, avg_importance: 0.1, types: {} });
+    await expect(h.getGraphStats()).resolves.toMatchObject({ nodes: 1 });
+    expect(invokeMock).toHaveBeenLastCalledWith('get_stats', undefined);
+
+    invokeMock.mockResolvedValueOnce([]);
+    await h.getMemoryNodes();
+    expect(invokeMock).toHaveBeenLastCalledWith('get_nodes', undefined);
+
+    invokeMock.mockResolvedValueOnce({ id: 'n1' });
+    await h.getMemoryNode('n1');
+    expect(invokeMock).toHaveBeenLastCalledWith('get_node', { id: 'n1' });
+
+    invokeMock.mockResolvedValueOnce([{ id: 'n1', title: 't' }]);
+    const rows = await h.searchMemory('q');
+    expect(invokeMock).toHaveBeenLastCalledWith('search_nodes', { query: 'q' });
+    expect(rows[0].projects).toEqual([]);
+  });
+
+  it('getMemoryNode returns null when invoke rejects', async () => {
+    const h = await load();
+    invokeMock.mockRejectedValueOnce(new Error('invalid uuid'));
+    await expect(h.getMemoryNode('not-a-uuid')).resolves.toBeNull();
   });
 });

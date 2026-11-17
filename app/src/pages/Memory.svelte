@@ -21,6 +21,8 @@
   let searchResults = $state<MemoryNode[]>([]);
   let detailNode = $state<MemoryNode | null>(null);
   let searching = $state(false);
+  let searchActive = $state(false);
+  let searchGeneration = 0;
   let nodeDisplayLimit = $state(50);
 
   // node type → color
@@ -53,16 +55,21 @@
   });
 
   async function doSearch() {
-    if (!searchQuery.trim()) { searchResults = []; nodeDisplayLimit = 50; return; }
-    searching = true;
+    const gen = ++searchGeneration;
     nodeDisplayLimit = 50;
+    if (!searchQuery.trim()) { searchActive = false; searchResults = []; searching = false; return; }
+    searching = true;
     try {
-      searchResults = await searchMemory(searchQuery.trim());
+      const rows = await searchMemory(searchQuery.trim());
+      if (gen !== searchGeneration) return;
+      searchResults = rows;
     } catch {
+      if (gen !== searchGeneration) return;
       searchResults = [];
     } finally {
-      searching = false;
+      if (gen === searchGeneration) searching = false;
     }
+    searchActive = true;
   }
 
   async function showDetail(id: string) {
@@ -73,7 +80,7 @@
     }
   }
 
-  const displayNodes = $derived(searchResults.length > 0 ? searchResults : nodes);
+  const displayNodes = $derived(searchActive ? searchResults : nodes);
 
   type SimNode = GraphNode & d3.SimulationNodeDatum;
 
@@ -176,13 +183,13 @@
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px;">
       <div class="panel">
         <div class="panel-body" style="text-align:center;">
-          <div style="font-size:28px;font-weight:700;color:var(--purple);font-family:var(--font-mono);">{stats.total_nodes}</div>
+          <div style="font-size:28px;font-weight:700;color:var(--purple);font-family:var(--font-mono);">{stats.nodes}</div>
           <div style="font-size:11px;color:var(--fg-secondary);margin-top:4px;">{$tStore('statTotalNodes')}</div>
         </div>
       </div>
       <div class="panel">
         <div class="panel-body" style="text-align:center;">
-          <div style="font-size:28px;font-weight:700;color:var(--accent);font-family:var(--font-mono);">{stats.total_edges}</div>
+          <div style="font-size:28px;font-weight:700;color:var(--accent);font-family:var(--font-mono);">{stats.edges}</div>
           <div style="font-size:11px;color:var(--fg-secondary);margin-top:4px;">{$tStore('statTotalEdges')}</div>
         </div>
       </div>
@@ -215,7 +222,7 @@
       </div>
 
       <!-- Search results or full node list -->
-      {#if displayNodes.length > 0}
+      {#if displayNodes.length > 0 || searchActive}
         <table class="data-table">
           <thead>
             <tr>
@@ -229,7 +236,7 @@
           <tbody>
             {#each displayNodes.slice(0, nodeDisplayLimit) as node}
               <tr style="cursor:pointer;" onclick={() => showDetail(node.id)}>
-                <td style="color:var(--fg);">{node.title}</td>
+                <td style="color:var(--fg);"><button type="button" onclick={(e) => { e.stopPropagation(); showDetail(node.id); }} style="background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer;">{node.title}</button></td>
                 <td><span class="pill info" style="font-size:10px;">{node.type}</span></td>
                 <td style="font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                   {#if node.tags.length > 0}{node.tags.join(', ')}{/if}
@@ -237,6 +244,8 @@
                 <td style="font-family:var(--font-mono);text-align:right;">{node.importance?.toFixed(2) ?? '—'}</td>
                 <td style="font-family:var(--font-mono);font-size:11px;">{node.updated ? node.updated.slice(0, 10) : '—'}</td>
               </tr>
+            {:else}
+              <tr><td colspan="5" style="color:var(--muted);font-size:13px;text-align:center;padding:16px;">{$tStore('noResults')}</td></tr>
             {/each}
           </tbody>
         </table>
