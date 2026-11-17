@@ -196,10 +196,10 @@ Pipeline stages (`/spec`, `/go`, `/check`, `/ship`, `/discover`) are now **skill
 
 ```mermaid
 flowchart TD
-    START(["/orbit"]) --> MODE{"requirement?"}:::human
-    MODE -->|"unclear"| WAIT["Interactive\n/discover → /spec\nthen 'orbit go'"]:::human
-    MODE -->|"clear + complex"| COUNCIL["Council\n4-voice auto-spec"]:::auto
-    MODE -->|"clear + simple"| DIRECT["Direct\nauto-spec"]:::auto
+    START(["/orbit"]) --> MODE{"entry request?"}:::human
+    MODE -->|"explicit interactive request"| WAIT["Interactive\n/discover → /spec\nthen 'orbit go'"]:::human
+    MODE -->|"vague request or PRD"| COUNCIL["Council\n4-voice auto-spec"]:::auto
+    MODE -->|"specific actionable request"| DIRECT["Direct\nauto-spec"]:::auto
     WAIT --> SPEC_LOAD["Load spec"]
     COUNCIL --> SPEC_LOAD
     DIRECT --> SPEC_LOAD
@@ -218,8 +218,8 @@ flowchart TD
     classDef auto  fill:#1a5c3a,stroke:#4caf7d,color:#fff
 ```
 
-**Purple** — human steps: mode selection (unclear → interactive), 3× check failure pause.
-**Green** — clear + complex → council auto-spec; clear + simple → direct build; both fully autonomous.
+**Purple**: human steps: explicit interactive request, 3× check failure pause.
+**Green**: vague request or PRD → council auto-spec; specific actionable request → direct build; both fully autonomous. Evolve runs after ship regardless of CI outcome; green CI only adds reflection context and a success-pattern memory record.
 
 State persisted in `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json` — survives context compaction.
 
@@ -299,14 +299,14 @@ Propose (Solver — graduated by score: ≥0.90 skip, ≥0.70 moderate, <0.70 fu
     ↓ SkillProposal[] with confidence
 Curate (Accept/Merge/Skip, feedback masked from solver)
     ↓ evolved/{skill}/SKILL.md + meta.json
-Gate (format check, dedup, cap 10, gated promotion ≥ 3 sessions)
+Gate (format check, dedup, cap 10, gated promotion after 2 eligible reflection rounds by default)
     ↓ evolved_backup/ (best checkpoint)
 Reload (next session — resume loads evolved skills)
 ```
 
 Skill seeding: weak tool (success <60%, min 5 obs), weak file type (success <50%, min 3 obs), high-frequency error (5+ occurrences).
 
-Stagnation: 3 sessions without 5% improvement → auto-rollback to best checkpoint.
+Stagnation: after 3 reflection rounds without improvement, restore the best checkpoint when rollback conditions are met. The default improvement threshold is an absolute score increase of 0.02; the separate rollback degradation threshold is 0.05.
 
 ### SkillOpt-Inspired Optimization
 
@@ -692,8 +692,8 @@ weights = [0.5, 0.3, 0.2]   # [success, quality, cost]
 [evolution]
 max_skills = 10
 stagnation_limit = 3
-improvement_threshold = 0.05
-gated_promotion_min = 3
+improvement_threshold = 0.02
+gated_promotion_min = 2
 
 [pattern]
 # repeated_error_min = 3
@@ -732,6 +732,12 @@ These were considered for enhancement but kept as-is after evaluation:
 ---
 
 ## Troubleshooting
+
+<details>
+<summary>Plugin install path contains spaces or %</summary>
+
+Plugin install paths containing spaces or `%` are not supported by the hook launchers yet (#167, #265); install under a path without them.
+</details>
 
 <details>
 <summary>command not found: epic after install</summary>

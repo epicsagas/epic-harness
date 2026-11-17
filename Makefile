@@ -22,8 +22,10 @@ install: build
 # Generate/validate SKILL.md files across all skills
 gen-skills:
 	@echo "Validating skills..."
-	@missing=0; \
-	for dir in registry/skills/*/; do \
+	@missing=0; found=0; \
+	for dir in skills/*/; do \
+		[ -d "$$dir" ] || continue; \
+		found=$$((found + 1)); \
 		skill_file="$$dir/SKILL.md"; \
 		if [ ! -f "$$skill_file" ]; then \
 			echo "MISSING: $$skill_file"; \
@@ -45,6 +47,10 @@ gen-skills:
 			echo "OK: $$name ($$skill_file)"; \
 		fi; \
 	done; \
+	if [ $$found -eq 0 ]; then \
+		echo "FAIL: no skills found under skills/"; \
+		exit 1; \
+	fi; \
 	if [ $$missing -gt 0 ]; then \
 		echo "FAIL: $$missing skill(s) need attention"; \
 		exit 1; \
@@ -55,7 +61,8 @@ gen-skills:
 # Dry-run mode: shows what would change (for CI stagnation detection)
 gen-skills-dry:
 	@echo "Dry-run skill validation..."
-	@for dir in registry/skills/*/; do \
+	@for dir in skills/*/; do \
+		[ -d "$$dir" ] || continue; \
 		skill_file="$$dir/SKILL.md"; \
 		if [ ! -f "$$skill_file" ]; then \
 			echo "WOULD CREATE: $$skill_file"; \
@@ -69,10 +76,11 @@ gen-skills-dry:
 lint-skills:
 	@echo "Linting skill descriptions..."
 	@issues=0; \
-	for dir in registry/skills/*/; do \
+	for dir in skills/*/; do \
+		[ -d "$$dir" ] || continue; \
 		skill_file="$$dir/SKILL.md"; \
 		if [ -f "$$skill_file" ]; then \
-			if grep -qiE 'workflow|step [0-9]|phase [0-9]|dispatch' "$$skill_file" 2>/dev/null; then \
+			if grep -m1 '^description:' "$$skill_file" | grep -qiE 'workflow|step [0-9]|phase [0-9]|dispatch'; then \
 				echo "CSO WARNING: $$skill_file may contain workflow summary in frontmatter"; \
 				issues=$$((issues + 1)); \
 			fi; \

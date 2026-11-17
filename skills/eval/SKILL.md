@@ -1,6 +1,6 @@
 ---
 name: eval
-description: "Quality and performance evaluation with baseline comparison. Sub-modes: correctness, performance, quality, regression. Outputs PASS/WARN/FAIL per dimension. Use for pre-ship evaluation or regression checks."
+description: "Quality and performance evaluation with baseline comparison. Sub-modes: correctness, performance, quality, regression. Outputs PASS/WARN/FAIL/SKIPPED per dimension. Use for pre-ship evaluation or regression checks."
 ---
 
 # Eval — Quality & Regression Gate
@@ -145,16 +145,16 @@ Combine CLI output + LLM-as-judge results into a single report:
 - Branch: {branch}
 - Commit: {commit_short}
 
-### Correctness: [PASS/WARN/FAIL] — score: {score}
+### Correctness: [PASS/WARN/FAIL/SKIPPED], score: {score}
 - Tests: {passed}/{total} passing ({pass_rate}%)
 - Mutation score: {mutation_score}% (if enabled)
 - Delta vs baseline: {+/-delta}
 
-### Performance: [PASS/WARN/FAIL] — score: {score} (if enabled)
+### Performance: [PASS/WARN/FAIL/SKIPPED], score: {score} (if enabled)
 - Avg latency: {latency}ms (delta: {+/-delta})
 - Throughput: {throughput} (delta: {+/-delta})
 
-### Quality: [PASS/WARN/FAIL] — score: {score}
+### Quality: [PASS/WARN/FAIL/SKIPPED], score: {score}
 - Lint errors: {count}
 - LLM judge: {score}/10 (if enabled)
 
@@ -170,7 +170,8 @@ Combine CLI output + LLM-as-judge results into a single report:
 ### Step 5: Act
 
 - **All PASS + no regression**: "Eval passed. Run `/ship` to create a PR."
-- **WARN**: Show warnings. Ask whether to fix before shipping.
+- **WARN**: Show warnings. Ask whether to fix before shipping. Inside `/orbit`, WARN proceeds to Ship without asking.
+- **SKIPPED**: Report SKIPPED, never PASS.
 - **FAIL or regression detected**: List each failure with fix hint. "Fix with `/go`, then re-run `/eval`."
 
 ### Step 6: Save Results

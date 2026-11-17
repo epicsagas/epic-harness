@@ -36,6 +36,8 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Format
         run: cargo fmt --all -- --check
+      - name: Skill validation
+        run: make gen-skills lint-skills
       - name: Dashboard typecheck and tests
         working-directory: app
         run: |

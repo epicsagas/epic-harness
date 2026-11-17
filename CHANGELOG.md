@@ -24,12 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **harness-mem MCP server follows JSON-RPC**: invalid input gets an error response, notifications get none, and `ping` is answered. (#235, #236)
 - **Memory recall keeps words containing AND, OR or NOT**, such as CORS or ALGORITHM. (#231)
 - **Eval commands keep empty and escaped arguments**: an unmatched quote now fails with a clear message instead of running, and `--init --json` and `--scaffold --json` print one valid JSON document. (#201, #199)
+- **Desktop app Memory page loads stats, nodes, details and search**: node and edge counters show values, an empty search shows no results, node details open from the keyboard, and the search type filter that did nothing is removed. (#238 partial, #213, #212, #216, #268)
+- **Orbit page**: a failed dismissal keeps the row and shows the error, the retry counter shows audit failures, and audit, eval and evolve phases are highlighted. (#215, #267, #281)
+- **Settings clears an old error after a successful load**, and the Skills page lists the shipped skills. (#262, #263)
+- **Web dashboard orbit list respects the selected project** and keeps legacy pipelines, session snapshots show their details, and session dates show unknown instead of an id. (#279, #214, #175 partial)
+- **`make gen-skills` and `make lint-skills` validate the real `skills/` folder** and run in CI. (#280)
 
 ### Changed
 - **Faster hook startup**: the observation dedup migration runs once instead of on every hook process (about 130 ms to under 5 ms per hook at 50,000 observations). Repeats of the same command in the same second with a different outcome or project are now kept. Existing databases are migrated once when first opened. (#188)
+- **Orbit and ship report CI as BLOCKED when workflows await maintainer approval** instead of "no CI configured". Eval WARN proceeds to ship. (#397)
 
 ### Docs
 - **Team sync scope documented**: project syncs also copy agents to the global Codex, Antigravity, Cursor and OpenCode agent folders, and unlink does not remove those copies. (#248)
+- **Evolution defaults and the orbit mode contract corrected** in README and AGENTS.md, SKIPPED documented in eval reports, and the limitation on install paths containing spaces or `%` documented. (#273, #283, #167, #265)
 
 ## [0.9.0] - 2026-11-17
 

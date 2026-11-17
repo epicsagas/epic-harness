@@ -156,11 +156,12 @@ pub struct EvolutionConfig {
     /// to the best checkpoint.
     pub stagnation_limit: u64,
 
-    /// Minimum score improvement ratio to count as "improving" (e.g. 0.05 = 5%).
+    /// Minimum absolute score increase over the rolling baseline to count as
+    /// "improving" (default 0.02); this is separate from rollback degradation.
     pub improvement_threshold: f64,
 
-    /// Minimum number of session observations before a skill can be promoted.
-    /// Prevents premature skill creation from single successes.
+    /// Minimum number of eligible reflection rounds before a proposed skill
+    /// can be promoted (default 2), rather than a count of tool observations.
     pub gated_promotion_min: u64,
 
     /// Score degradation threshold that triggers rollback (e.g. 0.05 = 5% drop).
