@@ -56,14 +56,24 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
         return Ok(0);
     }
 
-    // Always: record agent as running (agent tracking — no EPIC_ORCHESTRATION gate)
+    // Full orchestration: read the control directive once, before the upsert,
+    // so a paused or cancelled agent is recorded as Blocked at spawn.
+    // Known limitation: `Blocked` is shared with dependency blocking, so a
+    // paused agent can be flipped to `Pending` when its dependency finishes.
+    let control = if is_full_orchestration() {
+        orch_state::read_control(&base)
+    } else {
+        None
+    };
+
+    // Always: record agent (agent tracking, no EPIC_ORCHESTRATION gate)
     let (description, subagent_type) = extract_agent_meta(input);
     orch_state::upsert_agent_to_run(
         &base,
         &agent_id,
         &description,
         &subagent_type,
-        orch_state::AgentStatus::Running,
+        spawn_status(control.as_ref(), &agent_id),
     )?;
 
     // Full orchestration: control, inbox, heartbeat
@@ -72,10 +82,8 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     }
 
     // Check control directive
-    if let Some(directive) = orch_state::read_control(&base) {
-        let matches_target = directive.target.as_deref() == Some(&agent_id)
-            || directive.target.as_deref() == Some("all")
-            || directive.target.is_none();
+    if let Some(directive) = control {
+        let matches_target = directive_targets(&directive, &agent_id);
 
         if matches_target {
             match directive.action {
@@ -174,8 +182,12 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
     let output = resolve_output(input);
     let new_status = orch_state::parse_agent_state(&output);
 
-    // Always: update agent status in run.json (agent tracking — no gate)
-    let final_status = new_status.clone().unwrap_or(orch_state::AgentStatus::Done);
+    // Always: update agent status in run.json (agent tracking, no gate)
+    let final_status = if tool_reported_error(input) {
+        AgentStatus::Failed
+    } else {
+        new_status.clone().unwrap_or(AgentStatus::Done)
+    };
     let (description, subagent_type) = extract_agent_meta(input);
     orch_state::upsert_agent_to_run(
         &base,
@@ -202,42 +214,23 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
     };
     let _ = orch_state::append_event(&base, &agent_id, &event);
 
-    // Evaluate dependency graph if agent is done
-    if final_status == AgentStatus::Done
-        && let Some(mut run) = orch_state::read_run(&base)
-    {
-        // Update agent status in run
-        for agent in &mut run.agents {
-            if agent.id == agent_id {
-                agent.status = AgentStatus::Done;
-                agent.completed_at = Some(now_iso());
-            }
-        }
-
-        // Evaluate deps
-        let unblocked = orch_state::evaluate_dependencies(&run, &agent_id);
+    // Unblock dependents under the run.json lock (Done or Failed). Inbox
+    // messages go out only after run.json was written.
+    if matches!(final_status, AgentStatus::Done | AgentStatus::Failed) {
+        let unblocked = orch_state::complete_and_unblock(&base, &agent_id, final_status.clone())?;
+        let outcome = if final_status == AgentStatus::Done {
+            "completed"
+        } else {
+            "failed"
+        };
         for ub_id in &unblocked {
             let msg = InboxMessage {
                 from: "orchestrator".to_string(),
                 timestamp: now_iso(),
-                message: format!("Dependency '{}' completed. You are unblocked.", agent_id),
+                message: format!("Dependency '{agent_id}' {outcome}. You are unblocked."),
             };
             let _ = orch_state::post_inbox_message(&base, ub_id, &msg);
-
-            // Update run agent status
-            for agent in &mut run.agents {
-                if agent.id == *ub_id {
-                    agent.status = AgentStatus::Pending;
-                }
-            }
         }
-
-        // Check if run is complete
-        if orch_state::is_run_complete(&run) {
-            run.status = orch_state::RunStatus::Complete;
-        }
-        run.updated_at = now_iso();
-        let _ = orch_state::write_run(&base, &run);
     }
 
     Ok(0)
@@ -339,6 +332,43 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         })
         .unwrap_or_else(|| "general-purpose".to_string());
     (desc, sub_type)
+}
+
+/// True when the directive addresses this agent (its id, `"all"`, or no target).
+fn directive_targets(directive: &orch_state::ControlDirective, agent_id: &str) -> bool {
+    directive.target.as_deref() == Some(agent_id)
+        || directive.target.as_deref() == Some("all")
+        || directive.target.is_none()
+}
+
+/// Status recorded at spawn: Blocked when a Pause or Cancel directive targets
+/// this agent, else Running.
+fn spawn_status(directive: Option<&orch_state::ControlDirective>, agent_id: &str) -> AgentStatus {
+    match directive {
+        Some(d)
+            if directive_targets(d, agent_id)
+                && matches!(d.action, ControlAction::Pause | ControlAction::Cancel) =>
+        {
+            AgentStatus::Blocked
+        }
+        _ => AgentStatus::Running,
+    }
+}
+
+/// True when the host reports the tool call as an error: `tool_response` or
+/// `tool_result` is an object with `is_error == true` or a non-empty string
+/// `error`. Hosts that send neither field give false.
+fn tool_reported_error(input: &HookInput) -> bool {
+    [&input.tool_response, &input.tool_result]
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_object())
+        .any(|o| {
+            o.get("is_error").and_then(|v| v.as_bool()) == Some(true)
+                || o.get("error")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|e| !e.is_empty())
+        })
 }
 
 /// Resolve the output text from hook input.
@@ -618,5 +648,49 @@ mod tests {
     fn resolve_output_empty_when_none() {
         let input = HookInput::default();
         assert_eq!(resolve_output(&input), "");
+    }
+
+    #[test]
+    fn tool_reported_error_golden() {
+        let resp = |v: serde_json::Value| HookInput {
+            tool_response: Some(v),
+            ..Default::default()
+        };
+        assert!(tool_reported_error(&resp(
+            serde_json::json!({"is_error": true})
+        )));
+        assert!(tool_reported_error(&resp(
+            serde_json::json!({"error": "boom"})
+        )));
+        assert!(!tool_reported_error(&resp(
+            serde_json::json!({"error": ""})
+        )));
+        assert!(!tool_reported_error(&resp(serde_json::json!("text"))));
+        assert!(!tool_reported_error(&HookInput::default()));
+        let result = HookInput {
+            tool_result: Some(serde_json::json!({"is_error": true})),
+            ..Default::default()
+        };
+        assert!(tool_reported_error(&result));
+    }
+
+    #[test]
+    fn spawn_status_golden() {
+        let d = |action, target: Option<&str>| orch_state::ControlDirective {
+            action,
+            target: target.map(String::from),
+            message: None,
+            generation: 1,
+        };
+        let blocked = |dir: orch_state::ControlDirective| {
+            spawn_status(Some(&dir), "agent-1") == AgentStatus::Blocked
+        };
+        assert!(blocked(d(ControlAction::Pause, Some("agent-1"))));
+        assert!(blocked(d(ControlAction::Cancel, Some("all"))));
+        assert!(blocked(d(ControlAction::Pause, None)));
+        assert!(!blocked(d(ControlAction::Pause, Some("agent-2"))));
+        assert!(!blocked(d(ControlAction::Redirect, Some("agent-1"))));
+        assert!(!blocked(d(ControlAction::Resume, None)));
+        assert_eq!(spawn_status(None, "agent-1"), AgentStatus::Running);
     }
 }

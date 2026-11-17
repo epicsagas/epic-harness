@@ -392,7 +392,7 @@ pub fn upsert_agent_to_run(
     if let Some(existing) = run.agents.iter_mut().find(|a| a.id == agent_id) {
         let was_running = existing.status == AgentStatus::Running;
         existing.status = status.clone();
-        if status == AgentStatus::Done {
+        if matches!(status, AgentStatus::Done | AgentStatus::Failed) {
             existing.completed_at = Some(now.clone());
         }
         if status == AgentStatus::Running {
@@ -416,7 +416,7 @@ pub fn upsert_agent_to_run(
             } else {
                 None
             },
-            completed_at: if status == AgentStatus::Done {
+            completed_at: if matches!(status, AgentStatus::Done | AgentStatus::Failed) {
                 Some(now.clone())
             } else {
                 None
@@ -442,14 +442,15 @@ pub fn upsert_agent_to_run(
     if should_write_status {
         let status_file = AgentStatusFile {
             agent_id: agent_id.to_string(),
-            phase: if status == AgentStatus::Done {
-                "complete".to_string()
-            } else if status == AgentStatus::Running {
-                "running".to_string()
-            } else {
-                "pending".to_string()
-            },
-            progress: if status == AgentStatus::Done {
+            phase: match status {
+                AgentStatus::Done => "complete",
+                AgentStatus::Running => "running",
+                AgentStatus::Failed => "failed",
+                AgentStatus::Blocked => "blocked",
+                AgentStatus::Pending => "pending",
+            }
+            .to_string(),
+            progress: if matches!(status, AgentStatus::Done | AgentStatus::Failed) {
                 1.0
             } else {
                 0.0
@@ -461,6 +462,60 @@ pub fn upsert_agent_to_run(
     }
 
     Ok(agent_id.to_string())
+}
+
+/// Mark `agent_id` Done or Failed and unblock its dependents, all under one
+/// `run.json.lock` acquisition (never nested: `upsert_agent_to_run` and
+/// `auto_cleanup_stale_runs` take the same lock). Returns the unblocked ids.
+///
+/// Any other `status` is a no-op. Per-agent status files are written after
+/// run.json and a failure there is only logged, since run.json is the source
+/// of truth. Known limitation: `Blocked` is shared with dependency blocking,
+/// so a paused agent can be flipped to `Pending` when its dependency finishes.
+pub fn complete_and_unblock(
+    base: &Path,
+    agent_id: &str,
+    status: AgentStatus,
+) -> io::Result<Vec<String>> {
+    if !matches!(status, AgentStatus::Done | AgentStatus::Failed) {
+        return Ok(vec![]);
+    }
+    let orch_dir = orchestrator_dir(base);
+    fs::create_dir_all(&orch_dir)?;
+    let _lock = acquire_lock(&orch_dir.join("run.json.lock"))?;
+
+    let Some(mut run) = read_run(base) else {
+        return Ok(vec![]);
+    };
+    let now = crate::shared::helpers::now_iso();
+
+    for agent in run.agents.iter_mut().filter(|a| a.id == agent_id) {
+        agent.status = status.clone();
+        agent.completed_at = Some(now.clone());
+    }
+    let unblocked = evaluate_dependencies(&run, agent_id);
+    for agent in run.agents.iter_mut().filter(|a| unblocked.contains(&a.id)) {
+        agent.status = AgentStatus::Pending;
+    }
+    if is_run_complete(&run) {
+        run.status = RunStatus::Complete;
+    }
+    run.updated_at = now.clone();
+    write_run(base, &run)?;
+
+    for id in &unblocked {
+        let status_file = AgentStatusFile {
+            agent_id: id.clone(),
+            phase: "pending".to_string(),
+            progress: 0.0,
+            last_heartbeat: now.clone(),
+            status: AgentStatus::Pending,
+        };
+        if let Err(e) = write_agent_status(base, id, &status_file) {
+            eprintln!("[harness] orchestrate: status write failed for {id}: {e}");
+        }
+    }
+    Ok(unblocked)
 }
 
 /// Clean up stale auto-generated runs.
@@ -1218,6 +1273,148 @@ mod tests {
             h.join().unwrap();
         }
         assert_eq!(read_run(&base).unwrap().agents.len(), 16);
+    }
+
+    // ── complete_and_unblock ──
+
+    #[test]
+    fn complete_and_unblock_done_unblocks_dependent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let run = make_run(
+            "r",
+            vec![("A", AgentStatus::Running), ("B", AgentStatus::Pending)],
+            vec![("B", vec!["A"])],
+        );
+        init_run(base, &run).unwrap();
+
+        let unblocked = complete_and_unblock(base, "A", AgentStatus::Done).unwrap();
+        assert_eq!(unblocked, vec!["B".to_string()]);
+        let run = read_run(base).unwrap();
+        let a = run.agents.iter().find(|x| x.id == "A").unwrap();
+        assert_eq!(a.status, AgentStatus::Done);
+        assert!(a.completed_at.is_some());
+        let b = run.agents.iter().find(|x| x.id == "B").unwrap();
+        assert_eq!(b.status, AgentStatus::Pending);
+        assert_eq!(read_agent_status(base, "B").unwrap().phase, "pending");
+    }
+
+    #[test]
+    fn complete_and_unblock_failed_still_unblocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let run = make_run(
+            "r",
+            vec![("A", AgentStatus::Running), ("B", AgentStatus::Blocked)],
+            vec![("B", vec!["A"])],
+        );
+        init_run(base, &run).unwrap();
+
+        let unblocked = complete_and_unblock(base, "A", AgentStatus::Failed).unwrap();
+        assert_eq!(unblocked, vec!["B".to_string()]);
+        let run = read_run(base).unwrap();
+        let a = run.agents.iter().find(|x| x.id == "A").unwrap();
+        assert_eq!(a.status, AgentStatus::Failed);
+        assert!(a.completed_at.is_some());
+        assert_eq!(agent_status_of(base, "B"), AgentStatus::Pending);
+        assert_eq!(run.status, RunStatus::Running);
+
+        // B finishes too: every agent is Done or Failed, so the run completes.
+        complete_and_unblock(base, "B", AgentStatus::Done).unwrap();
+        assert_eq!(read_run(base).unwrap().status, RunStatus::Complete);
+    }
+
+    #[test]
+    fn complete_and_unblock_ignores_non_terminal_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        init_run(
+            base,
+            &make_run("r", vec![("A", AgentStatus::Running)], vec![]),
+        )
+        .unwrap();
+        let unblocked = complete_and_unblock(base, "A", AgentStatus::Running).unwrap();
+        assert!(unblocked.is_empty());
+        assert_eq!(agent_status_of(base, "A"), AgentStatus::Running);
+    }
+
+    #[test]
+    fn complete_and_unblock_without_run_creates_only_lock() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        assert!(
+            complete_and_unblock(base, "A", AgentStatus::Done)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(read_run(base).is_none());
+        let entries: Vec<_> = fs::read_dir(orchestrator_dir(base))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(entries, vec!["run.json.lock".to_string()]);
+    }
+
+    #[test]
+    fn complete_and_unblock_concurrent_with_upserts_loses_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        init_run(
+            &base,
+            &make_run("r", vec![("seed", AgentStatus::Running)], vec![]),
+        )
+        .unwrap();
+        let handles: Vec<_> = (0..16)
+            .map(|i| {
+                let base = base.clone();
+                std::thread::spawn(move || {
+                    if i == 0 {
+                        complete_and_unblock(&base, "seed", AgentStatus::Done).unwrap();
+                    } else {
+                        upsert_agent_to_run(
+                            &base,
+                            &format!("agent-{i}"),
+                            "t",
+                            "builder",
+                            AgentStatus::Running,
+                        )
+                        .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let run = read_run(&base).unwrap();
+        assert_eq!(run.agents.len(), 16);
+        assert_eq!(agent_status_of(&base, "seed"), AgentStatus::Done);
+    }
+
+    #[test]
+    fn upsert_failed_writes_failed_phase_and_completed_at() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Failed).unwrap();
+        let st = read_agent_status(base, "a").unwrap();
+        assert_eq!(st.phase, "failed");
+        assert_eq!(st.progress, 1.0);
+        assert!(read_run(base).unwrap().agents[0].completed_at.is_some());
+
+        // Existing-agent branch: Running then Failed.
+        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Running).unwrap();
+        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Failed).unwrap();
+        let run = read_run(base).unwrap();
+        let b = run.agents.iter().find(|x| x.id == "b").unwrap();
+        assert!(b.completed_at.is_some());
+        assert_eq!(read_agent_status(base, "b").unwrap().phase, "failed");
+    }
+
+    #[test]
+    fn upsert_blocked_writes_blocked_phase() {
+        let tmp = tempfile::tempdir().unwrap();
+        upsert_agent_to_run(tmp.path(), "a", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(read_agent_status(tmp.path(), "a").unwrap().phase, "blocked");
     }
 
     #[cfg(unix)]
