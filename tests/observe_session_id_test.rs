@@ -31,6 +31,13 @@ impl Env {
         fs::create_dir_all(home.join(".config/epic-harness")).unwrap();
         fs::write(home.join(".config/epic-harness/telemetry-consent"), "off").unwrap();
         fs::create_dir_all(harness.join("projects").join(SLUG).join("obs")).unwrap();
+        // No dashboard auto-launch: it would add dashboard.lock (and spawn a
+        // server) whenever port 7700 is free, as on CI.
+        fs::write(
+            harness.join("config.toml"),
+            "[dashboard]\nport = 0\nauto_open = false\n",
+        )
+        .unwrap();
         Self {
             _temp: temp,
             root,
