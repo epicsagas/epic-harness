@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-11-17
+
+Thanks to @Tomauskasz for the reports and reference PRs behind these fixes.
+
+Update the desktop app together with the CLI: an older desktop build re-creates the old observation dedup index. 0.9.1 removes it again on the next start without deleting rows, but rows the old build already collapsed stay collapsed.
+
 ### Fixed
 - **Absolute paths outside the project are fully masked in observations**: paths with spaces, UNC paths, and rooted Windows paths are recorded as `<PATH>` instead of partly unmasked. (#168)
 - **Deleting an edge no longer removes a node's edges**: `DELETE /api/edges/{id}` with a node id now returns 404 instead of deleting every edge of that node, and creating an edge in the desktop app works again. Edge identity is still open in #227.
@@ -29,9 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Settings clears an old error after a successful load**, and the Skills page lists the shipped skills. (#262, #263)
 - **Web dashboard orbit list respects the selected project** and keeps legacy pipelines, session snapshots show their details, and session dates show unknown instead of an id. (#279, #214, #175 partial)
 - **`make gen-skills` and `make lint-skills` validate the real `skills/` folder** and run in CI. (#280)
+- **Release review fixes**: the dedup migration also drops an old index re-created by an older binary, `epic harness snapshot` errors instead of panicking on a Postgres URL, paths wrapped in whitespace, `~user` paths and rooted paths that escape with `..` are masked, and accept-synth refuses when the reward-hacking flag cannot be read.
 
 ### Changed
-- **Faster hook startup**: the observation dedup migration runs once instead of on every hook process (about 130 ms to under 5 ms per hook at 50,000 observations). Repeats of the same command in the same second with a different outcome or project are now kept. Existing databases are migrated once when first opened. (#188)
+- **Faster hook startup**: the observation dedup migration runs once instead of on every hook process (in a debug-build test with 50,000 observations, a repeated schema init went from about 130 ms to under 5 ms). Repeats of the same command in the same second with a different outcome or project are now kept. Existing databases are migrated once when first opened. (#188)
 - **Orbit and ship report CI as BLOCKED when workflows await maintainer approval** instead of "no CI configured". Eval WARN proceeds to ship. (#397)
 
 ### Docs
