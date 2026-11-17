@@ -555,6 +555,15 @@ fn scan_orbit_pipeline_files(projects_root: &std::path::Path) -> Vec<serde_json:
                         >(&content)
                         && let Some(obj) = v.as_object_mut()
                     {
+                        // Same key `dismiss_orbit_pipeline` stores and deletes by.
+                        if !obj.get("id").is_some_and(|i| i.is_string()) {
+                            obj.insert(
+                                "id".into(),
+                                serde_json::Value::String(
+                                    fname.trim_end_matches(".json").to_string(),
+                                ),
+                            );
+                        }
                         obj.insert(
                             "_project".into(),
                             serde_json::Value::String(
@@ -568,6 +577,68 @@ fn scan_orbit_pipeline_files(projects_root: &std::path::Path) -> Vec<serde_json:
         }
     }
     all
+}
+
+/// Orbit pipelines for the dashboard: SQLite rows merged with `PIPELINE-*.json`
+/// sidecars, scoped to `project` when given.
+pub fn orbit_pipelines(
+    harness_dir: &std::path::Path,
+    project: Option<&str>,
+) -> Vec<serde_json::Value> {
+    let db = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::orbit_store::list_pipelines_scoped_pool(&pool, project, None).await
+    })
+    .unwrap_or_default();
+    let projects_root = harness_dir.parent().unwrap_or(harness_dir);
+    let mut sidecars = scan_orbit_pipeline_files(projects_root);
+    if let Some(p) = project {
+        sidecars.retain(|v| v["_project"].as_str() == Some(p));
+    }
+    merge_orbit_pipelines(db, sidecars)
+}
+
+/// Merge DB rows and sidecars keyed by `(project, bare id)` where the bare id
+/// drops a `PIPELINE-` prefix. The DB row wins; sidecars without a string id
+/// are always kept. Newest `started_at` first, missing last.
+fn merge_orbit_pipelines(
+    db: Vec<serde_json::Value>,
+    sidecars: Vec<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let key = |v: &serde_json::Value, project_key: &str| {
+        v["id"].as_str().map(|id| {
+            (
+                v[project_key].as_str().unwrap_or("").to_string(),
+                id.strip_prefix("PIPELINE-").unwrap_or(id).to_string(),
+            )
+        })
+    };
+    let mut seen = std::collections::HashSet::new();
+    let mut out: Vec<serde_json::Value> = Vec::new();
+    for mut row in db {
+        if let Some(p) = row["project"].clone().as_str()
+            && let Some(obj) = row.as_object_mut()
+        {
+            obj.insert("_project".into(), p.into());
+        }
+        seen.extend(key(&row, "project"));
+        out.push(row);
+    }
+    for sc in sidecars {
+        if key(&sc, "_project").is_none_or(|k| seen.insert(k)) {
+            out.push(sc);
+        }
+    }
+    out.sort_by(|a, b| b["started_at"].as_str().cmp(&a["started_at"].as_str()));
+    out
+}
+
+/// Session date from a `YYYYMMDD_...` id prefix; anything else is "unknown".
+fn session_date(session_id: &str) -> String {
+    match session_id.split('_').next() {
+        Some(d) if d.len() == 8 && d.bytes().all(|b| b.is_ascii_digit()) => d.to_string(),
+        _ => "unknown".into(),
+    }
 }
 
 fn parse_query_param(url: &str, key: &str) -> Option<String> {
@@ -750,15 +821,9 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
                     .iter()
                     .take(10)
                     .map(|s| {
-                        let date = s
-                            .session_id
-                            .split('_')
-                            .next()
-                            .unwrap_or("unknown")
-                            .to_string();
                         serde_json::json!({
                             "session_id": s.session_id,
-                            "date": date,
+                            "date": session_date(&s.session_id),
                             "tool_calls": s.calls,
                             "avg_score": (s.avg_score * 1000.0).round() / 1000.0,
                             "failures": s.failures
@@ -803,7 +868,7 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             for entry in &files {
                 let fname = entry.file_name().to_string_lossy().to_string();
                 let session_key = fname.trim_end_matches(".jsonl").to_string();
-                let date = fname.split('_').nth(1).unwrap_or("unknown").to_string();
+                let date = session_date(fname.split_once('_').map_or("", |(_, rest)| rest));
                 let sess = session_map
                     .entry(session_key.clone())
                     .or_insert((0, 0.0, 0, date));
@@ -896,31 +961,8 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
             })
             .to_string()
         }
-        "get_orbit_pipelines" => {
-            // Try SQLite first
-            if let Ok(pipelines) = crate::store::runtime::block_on(async {
-                let pool = crate::store::pool::harness_pool().await?;
-                crate::store::orbit_store::list_all_pipelines_pool(&pool).await
-            }) && !pipelines.is_empty()
-            {
-                let mut sorted = pipelines;
-                sorted.sort_by(|a, b| {
-                    let ta = a["started_at"].as_str().unwrap_or("");
-                    let tb = b["started_at"].as_str().unwrap_or("");
-                    tb.cmp(ta)
-                });
-                return serde_json::to_string(&sorted).unwrap_or_else(|_| "[]".into());
-            }
-            // Fallback: scan PIPELINE-*.json files
-            let projects_root = harness_dir.parent().unwrap_or(harness_dir);
-            let mut all = scan_orbit_pipeline_files(projects_root);
-            all.sort_by(|a, b| {
-                let ta = a["started_at"].as_str().unwrap_or("");
-                let tb = b["started_at"].as_str().unwrap_or("");
-                tb.cmp(ta)
-            });
-            serde_json::to_string(&all).unwrap_or_else(|_| "[]".into())
-        }
+        "get_orbit_pipelines" => serde_json::to_string(&orbit_pipelines(harness_dir, project))
+            .unwrap_or_else(|_| "[]".into()),
         "get_integration_status" => {
             let home = std::env::var("HOME")
                 .or_else(|_| std::env::var("USERPROFILE"))
@@ -1014,19 +1056,11 @@ fn handle_harness_cmd(cmd: &str, harness_dir: &std::path::Path, project: Option<
         }
         // ── Previously-broken panels (returned "null" via the fallthrough) ─
         "get_session_snapshots" => {
-            // List session snapshot files in the project's sessions/ dir.
-            let sessions_dir = harness_dir.join("sessions");
-            let mut snaps: Vec<String> = Vec::new();
-            if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
-                for e in rd.flatten() {
-                    if let Some(n) = e.file_name().to_str()
-                        && n.ends_with(".json")
-                    {
-                        snaps.push(n.to_string());
-                    }
-                }
-            }
-            snaps.sort();
+            let snaps = crate::store::runtime::block_on(async {
+                let pool = crate::store::pool::harness_pool().await?;
+                crate::store::sessions::list_recent_snapshots_scoped_pool(&pool, 50, project).await
+            })
+            .unwrap_or_default();
             serde_json::to_string(&snaps).unwrap_or_else(|_| "[]".into())
         }
         "get_global_patterns" => {
@@ -1128,6 +1162,78 @@ mod tests {
         assert_eq!(all.len(), 1);
         assert_eq!(all[0]["id"], "4");
         assert_eq!(all[0]["_project"], "proj-a");
+    }
+
+    #[test]
+    fn merge_orbit_pipelines_dedups_per_project_and_sorts() {
+        use serde_json::json;
+        let merged = merge_orbit_pipelines(
+            vec![json!({"id": "PIPELINE-123", "project": "a", "started_at": "2026-01-01"})],
+            vec![
+                json!({"id": "123", "_project": "a", "started_at": "2026-09-09"}),
+                json!({"id": "123", "_project": "b", "started_at": "2026-02-02"}),
+                json!({"_project": "b"}),
+            ],
+        );
+        assert_eq!(merged.len(), 3, "{merged:?}");
+        let a: Vec<_> = merged.iter().filter(|v| v["_project"] == "a").collect();
+        assert_eq!(a.len(), 1);
+        assert_eq!(a[0]["id"], "PIPELINE-123", "DB row wins");
+        let starts: Vec<_> = merged.iter().map(|v| v["started_at"].as_str()).collect();
+        assert_eq!(starts, [Some("2026-02-02"), Some("2026-01-01"), None]);
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn orbit_pipelines_filters_sidecars_by_project() {
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: relocates the DB store to the temp dir so the real
+        // ~/.harness is never opened; restored below.
+        unsafe { std::env::set_var("HARNESS_DIR", tmp.path().join("projects").join("a")) };
+        write_sidecar(tmp.path(), "a", "PIPELINE-1.json", r#"{"id":"1"}"#);
+        write_sidecar(tmp.path(), "b", "PIPELINE-2.json", r#"{"id":"2"}"#);
+        let harness_dir = tmp.path().join("projects").join("a");
+        let rows = orbit_pipelines(&harness_dir, Some("a"));
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert_eq!(rows[0]["_project"], "a");
+        assert_eq!(orbit_pipelines(&harness_dir, None).len(), 2);
+        unsafe { std::env::remove_var("HARNESS_DIR") };
+    }
+
+    #[test]
+    fn scan_orbit_pipeline_files_defaults_id_to_file_stem() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_sidecar(tmp.path(), "proj-a", "PIPELINE-5.json", "{}");
+        let all = scan_orbit_pipeline_files(&tmp.path().join("projects"));
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0]["id"], "PIPELINE-5");
+    }
+
+    #[test]
+    fn session_snapshot_serializes_as_object_with_type_key() {
+        let snap = crate::shared::types::SessionSnapshot {
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            snap_type: "auto".into(),
+            summary: "s".into(),
+            pending_tasks: vec![],
+            context_usage: None,
+            pipeline_state: None,
+        };
+        let v: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&vec![snap]).unwrap()).unwrap();
+        assert!(v[0].is_object() && v[0]["type"] == "auto");
+        assert!(v.as_array().unwrap().iter().all(|i| !i.is_string()));
+    }
+
+    #[test]
+    fn session_date_requires_eight_digit_prefix() {
+        assert_eq!(session_date("20260602_12345"), "20260602");
+        assert_eq!(
+            session_date("9f1c2b3a-0000-4000-8000-000000000000"),
+            "unknown"
+        );
+        assert_eq!(session_date(""), "unknown");
+        assert_eq!(session_date("2026060_x"), "unknown");
     }
 
     #[test]
