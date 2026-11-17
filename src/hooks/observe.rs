@@ -49,8 +49,7 @@ fn failure_quality(failure_category: Option<&str>) -> f64 {
     }
 }
 
-fn score_bash(output: &str, command: &str) -> ScoreDimensions {
-    let failure = classify_failure(output);
+fn score_bash(output: &str, command: &str, failure: Option<&str>) -> ScoreDimensions {
     let tool_success = if failure.is_none() { 1.0 } else { 0.0 };
 
     let is_empty = output.trim().is_empty();
@@ -378,6 +377,15 @@ fn resolve_action(v: &serde_json::Value) -> String {
     v.get("file_path")
         .and_then(|c| c.as_str())
         .filter(|c| !c.is_empty())
+        .or_else(|| {
+            // `path` is a file alias only on its own: Grep/Glob pair it with
+            // `pattern`, and a shell payload with `command`.
+            let obj = v.as_object()?;
+            if obj.contains_key("pattern") || obj.contains_key("command") {
+                return None;
+            }
+            obj.get("path")?.as_str().filter(|c| !c.is_empty())
+        })
         .map(|c| truncate_str(&mask_path_action(c), 500).to_string())
         .or_else(|| {
             let cmd = v.get("command").and_then(|c| c.as_str())?;
@@ -484,6 +492,8 @@ pub fn run(input: &HookInput) -> i32 {
     if let Some((output, stderr, streams_separated)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
+        // Host-reported error text of a failed read/glob/grep, if any.
+        let mut host_error: Option<String> = None;
         record.failure_category = if tool_cat == "bash" {
             let cmd = input
                 .tool_input
@@ -508,6 +518,7 @@ pub fn run(input: &HookInput) -> i32 {
                 .and_then(|v| v.get("error"))
                 .and_then(|e| e.as_str())
                 .filter(|e| !e.is_empty());
+            host_error = err.map(String::from);
             (is_error || err.is_some()).then(|| {
                 classify_failure(err.unwrap_or(&combined))
                     .unwrap_or("runtime_error")
@@ -533,7 +544,7 @@ pub fn run(input: &HookInput) -> i32 {
                     .and_then(|v| v.get("command"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                score_bash(&combined, cmd)
+                score_bash(&combined, cmd, record.failure_category.as_deref())
             }
             "edit" => {
                 let prev = db
@@ -581,8 +592,16 @@ pub fn run(input: &HookInput) -> i32 {
         record.score = Some(compute_score(&dims));
 
         if record.failure_category.is_some() {
-            let masked = mask_snippet(&combined, 500);
-            record.error_snippet = Some(masked);
+            let src: &str = match tool_cat {
+                "bash" if !stderr.trim().is_empty() && classify_failure(&stderr).is_some() => {
+                    &stderr
+                }
+                "read" | "glob" | "grep" => host_error.as_deref().unwrap_or(&combined),
+                _ => &combined,
+            };
+            if !src.trim().is_empty() {
+                record.error_snippet = Some(mask_snippet(src, 500));
+            }
         }
     }
 
@@ -704,41 +723,85 @@ mod tests {
         assert_eq!(resolve_action(&v), "cargo test --lib");
     }
 
+    /// A bare `path` is a file alias; Grep/Glob pair it with `pattern`, so
+    /// they keep the JSON action.
+    #[test]
+    fn path_alias_is_the_action_unless_pattern_or_command() {
+        assert_eq!(
+            resolve_action(&serde_json::json!({"path": "src/a.rs"})),
+            "src/a.rs"
+        );
+        assert_eq!(
+            resolve_action(&serde_json::json!({"path": "src/b.rs"})),
+            "src/b.rs"
+        );
+        assert!(
+            resolve_action(&serde_json::json!({"pattern": "x", "path": "src"})).contains("pattern")
+        );
+    }
+
+    /// A merged-stream host reports `cat f` printing failure words as one
+    /// string: the read-only command is a success and scores as one.
+    #[test]
+    fn merged_stream_read_only_bash_is_success() {
+        let out = "TypeError: x";
+        let failure = classify_bash_failure("cat f", out, "", false);
+        assert!(failure.is_none());
+        let dims = score_bash(out, "cat f", failure);
+        assert_eq!(dims.tool_success, 1.0);
+    }
+
     // ── score_bash ──────────────────────────────────
     #[test]
     fn bash_success_full_score() {
-        let dims = score_bash("all tests passed", "npm test");
+        let dims = score_bash(
+            "all tests passed",
+            "npm test",
+            classify_failure("all tests passed"),
+        );
         assert_eq!(dims.tool_success, 1.0);
         assert_eq!(dims.output_quality, 1.0);
     }
 
     #[test]
     fn bash_error_zero_success() {
-        let dims = score_bash("TypeError: x is not a function", "node main.js");
+        let dims = score_bash(
+            "TypeError: x is not a function",
+            "node main.js",
+            classify_failure("TypeError: x is not a function"),
+        );
         assert_eq!(dims.tool_success, 0.0);
     }
 
     #[test]
     fn bash_empty_output_silent_ok() {
-        let dims = score_bash("", "mkdir -p /tmp/test");
+        let dims = score_bash("", "mkdir -p /tmp/test", classify_failure(""));
         assert_eq!(dims.output_quality, 1.0);
     }
 
     #[test]
     fn bash_empty_output_not_silent_ok() {
-        let dims = score_bash("", "echo hello");
+        let dims = score_bash("", "echo hello", classify_failure(""));
         assert_eq!(dims.output_quality, 0.7);
     }
 
     #[test]
     fn bash_warning_reduces_quality() {
-        let dims = score_bash("warning: unused variable", "cargo build");
+        let dims = score_bash(
+            "warning: unused variable",
+            "cargo build",
+            classify_failure("warning: unused variable"),
+        );
         assert!(dims.output_quality < 1.0);
     }
 
     #[test]
     fn score_bash_no_warnings_found_not_penalized() {
-        let dims = score_bash("No warnings found", "cargo check");
+        let dims = score_bash(
+            "No warnings found",
+            "cargo check",
+            classify_failure("No warnings found"),
+        );
         assert_eq!(
             dims.output_quality, 1.0,
             "substring 'warning' in negative phrase must not penalize"
@@ -748,14 +811,14 @@ mod tests {
     #[test]
     fn bash_large_output_reduces_cost() {
         let large = "x".repeat(60000);
-        let dims = score_bash(&large, "cat bigfile");
+        let dims = score_bash(&large, "cat bigfile", classify_failure(&large));
         assert_eq!(dims.execution_cost, 0.3);
     }
 
     #[test]
     fn bash_medium_output_mid_cost() {
         let medium = "x".repeat(30000);
-        let dims = score_bash(&medium, "cat medfile");
+        let dims = score_bash(&medium, "cat medfile", classify_failure(&medium));
         assert_eq!(dims.execution_cost, 0.6);
     }
 
@@ -851,14 +914,22 @@ mod tests {
     // ── compute_score integration ───────────────────
     #[test]
     fn score_bash_perfect_run() {
-        let dims = score_bash("tests passed", "git add .");
+        let dims = score_bash(
+            "tests passed",
+            "git add .",
+            classify_failure("tests passed"),
+        );
         let score = compute_score(&dims);
         assert_eq!(score, 1.0);
     }
 
     #[test]
     fn score_bash_failure() {
-        let dims = score_bash("SyntaxError: unexpected token", "node broken.js");
+        let dims = score_bash(
+            "SyntaxError: unexpected token",
+            "node broken.js",
+            classify_failure("SyntaxError: unexpected token"),
+        );
         let score = compute_score(&dims);
         assert!(score <= 0.5);
         assert_eq!(dims.tool_success, 0.0);
@@ -1310,21 +1381,33 @@ mod tests {
     // ── bash failure differentiated quality ──────────
     #[test]
     fn bash_failure_gets_differentiated_quality() {
-        let dims = score_bash("TypeError: x is not a function", "node main.js");
+        let dims = score_bash(
+            "TypeError: x is not a function",
+            "node main.js",
+            classify_failure("TypeError: x is not a function"),
+        );
         assert_eq!(dims.tool_success, 0.0);
         assert_eq!(dims.output_quality, 0.4, "type_error should map to 0.4");
     }
 
     #[test]
     fn bash_syntax_error_quality() {
-        let dims = score_bash("SyntaxError: unexpected token", "node broken.js");
+        let dims = score_bash(
+            "SyntaxError: unexpected token",
+            "node broken.js",
+            classify_failure("SyntaxError: unexpected token"),
+        );
         assert_eq!(dims.tool_success, 0.0);
         assert_eq!(dims.output_quality, 0.3, "syntax_error should map to 0.3");
     }
 
     #[test]
     fn bash_runtime_error_quality() {
-        let dims = score_bash("Error: something went wrong", "node main.js");
+        let dims = score_bash(
+            "Error: something went wrong",
+            "node main.js",
+            classify_failure("Error: something went wrong"),
+        );
         assert_eq!(dims.tool_success, 0.0);
         assert_eq!(dims.output_quality, 0.5, "runtime_error should map to 0.5");
     }
@@ -1350,7 +1433,11 @@ mod tests {
     // ── bash success with warning still penalized ──
     #[test]
     fn bash_success_with_warning_still_penalized() {
-        let dims = score_bash("warning: unused variable", "cargo build");
+        let dims = score_bash(
+            "warning: unused variable",
+            "cargo build",
+            classify_failure("warning: unused variable"),
+        );
         assert_eq!(dims.tool_success, 1.0);
         assert!(
             dims.output_quality < 1.0,
@@ -1362,7 +1449,11 @@ mod tests {
     #[test]
     fn bash_failure_with_warning_not_double_penalized() {
         // When there is a failure, warning penalty should NOT apply
-        let dims = score_bash("TypeError: x\nwarning: something", "node main.js");
+        let dims = score_bash(
+            "TypeError: x\nwarning: something",
+            "node main.js",
+            classify_failure("TypeError: x\nwarning: something"),
+        );
         assert_eq!(dims.tool_success, 0.0);
         assert_eq!(
             dims.output_quality, 0.4,

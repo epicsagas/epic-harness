@@ -81,8 +81,22 @@ pub fn classify_failure(output: &str) -> Option<&'static str> {
     if output.is_empty() {
         return None;
     }
-    let sample = truncate_str(output, 2000);
-    let sample = ZERO_TIMEOUT.replace_all(sample, "");
+    // A long output is sampled head and tail: the verdict line of a build or
+    // test run sits at the end, where a head-only sample never reached.
+    let sample = if output.len() <= 4000 {
+        std::borrow::Cow::Borrowed(output)
+    } else {
+        let mut start = output.len() - 2000;
+        while !output.is_char_boundary(start) {
+            start += 1;
+        }
+        std::borrow::Cow::Owned(format!(
+            "{}\n{}",
+            truncate_str(output, 2000),
+            &output[start..]
+        ))
+    };
+    let sample = ZERO_TIMEOUT.replace_all(&sample, "");
     for (rx, cat) in COMPILED_RULES.iter() {
         if rx.is_match(&sample) {
             return Some(cat);
@@ -138,20 +152,23 @@ static CHAINED_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[;&]|\$\(|`"
 static REDIRECT_CMD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r">|<\(").unwrap());
 
 /// True for the `sed` flags that request an in-place edit: `-i`, the GNU
-/// bundled forms (`-i.bak`, `-Ein`) and `--in-place[=SUFFIX]`. No documented
-/// sed short flag other than `-i` contains an `i`, so "short token containing
-/// i" is exact for the flag set.
+/// bundled forms (`-i.bak`, `-Ein`), BSD `-I`, and `--in-place[=SUFFIX]`. No
+/// documented sed short flag other than `-i`/`-I` contains an `i`, so "short
+/// token containing i or I" is exact for the flag set.
 fn is_in_place_sed_flag(token: &str) -> bool {
     token.starts_with("--in-place")
-        || (token.starts_with('-') && !token.starts_with("--") && token.contains('i'))
+        || (token.starts_with('-')
+            && !token.starts_with("--")
+            && (token.contains('i') || token.contains('I')))
 }
 
 /// A stage that survives [`READ_ONLY_CMD`] but can still write: an in-place
 /// `sed` rewrites its input file, so `sed -i s/a/b/ f.txt` is not read-only.
 /// Head-classifying it as read-only meant a merged-stream host (Codex)
-/// recorded its failures as successful reads. `awk` needs no equivalent
-/// guard — an in-script write requires `>` or `>>`, which [`REDIRECT_CMD`]
-/// already rejects.
+/// recorded its failures as successful reads. `find -delete/-exec`, `fd
+/// --exec`/`-x`, `git branch <name>` and `git remote add` mutate the same way.
+/// `awk` needs no equivalent guard: an in-script write requires `>` or `>>`,
+/// which [`REDIRECT_CMD`] already rejects.
 fn stage_is_read_only(stage: &str) -> bool {
     if REDIRECT_CMD.is_match(stage) || !READ_ONLY_CMD.is_match(stage) {
         return false;
@@ -160,7 +177,53 @@ fn stage_is_read_only(stage: &str) -> bool {
         .trim_start()
         .trim_start_matches("sudo ")
         .split_whitespace();
-    !(tokens.next() == Some("sed") && tokens.any(is_in_place_sed_flag))
+    match tokens.next() {
+        Some("sed") => !tokens.any(is_in_place_sed_flag),
+        Some("find") => !tokens.any(|t| {
+            matches!(
+                t,
+                "-delete"
+                    | "-exec"
+                    | "-execdir"
+                    | "-ok"
+                    | "-okdir"
+                    | "-fprint"
+                    | "-fprint0"
+                    | "-fprintf"
+                    | "-fls"
+            )
+        }),
+        Some("fd") => !tokens.any(|t| {
+            matches!(t, "--exec" | "--exec-batch")
+                || (t.starts_with('-') && !t.starts_with("--") && t.contains(['x', 'X']))
+        }),
+        Some("git") => match tokens.next() {
+            Some("branch") => tokens.all(|t| {
+                matches!(
+                    t,
+                    "-a" | "--all"
+                        | "-r"
+                        | "--remotes"
+                        | "-v"
+                        | "-vv"
+                        | "--verbose"
+                        | "--show-current"
+                        | "--list"
+                        | "-l"
+                        | "--no-color"
+                        | "--color"
+                ) || ["--sort=", "--format=", "--color="]
+                    .iter()
+                    .any(|p| t.starts_with(p))
+            }),
+            Some("remote") => match tokens.next() {
+                None | Some("-v" | "--verbose") => tokens.next().is_none(),
+                Some(first) => matches!(first, "show" | "get-url"),
+            },
+            _ => true,
+        },
+        _ => true,
+    }
 }
 
 /// True when `command`'s output should not be keyword-scanned for failures.
@@ -225,7 +288,7 @@ pub fn classify_bash_failure(
     streams_separated: bool,
 ) -> Option<&'static str> {
     if !is_read_only_command(command) {
-        return classify_failure(&format!("{stdout}\n{stderr}"));
+        return classify_failure(stderr).or_else(|| classify_failure(stdout));
     }
     if streams_separated {
         return classify_failure(stderr);
@@ -508,6 +571,68 @@ mod tests {
         assert_eq!(
             classify_bash_failure("cargo build", "error TS2304: cannot find name", "", true),
             Some("build_fail")
+        );
+    }
+
+    #[test]
+    fn read_only_command_golden() {
+        for cmd in [
+            "git branch",
+            "git branch -a",
+            "git branch -vv",
+            "git branch --show-current",
+            "git remote",
+            "git remote -v",
+            "git remote show origin",
+            "git remote get-url origin",
+            "find . -name x",
+            "fd foo",
+            "sed -n 1,5p f",
+        ] {
+            assert!(is_read_only_command(cmd), "should be read-only: {cmd}");
+        }
+        for cmd in [
+            "git branch -D x",
+            "git branch feature",
+            "git branch -m a b",
+            "git remote remove origin",
+            "git remote add o u",
+            "find . -delete",
+            "find . -execdir rm {} +",
+            "find . -fprint out",
+            "fd -x rm",
+            "fd --exec rm",
+            "fd -HX rm",
+            "sed -I '' s/a/b/ f",
+            "sed -i.bak s/a/b/ f",
+        ] {
+            assert!(!is_read_only_command(cmd), "must not be read-only: {cmd}");
+        }
+    }
+
+    #[test]
+    fn classify_samples_head_and_tail_of_long_output() {
+        let tail_error = "x".repeat(3000) + "\nTypeError: boom";
+        assert_eq!(classify_failure(&tail_error), Some("type_error"));
+
+        let mut mid = "x".repeat(4000);
+        mid.replace_range(3500..3500 + "TypeError".len(), "TypeError");
+        assert_eq!(mid.len(), 4000);
+        assert_eq!(classify_failure(&mid), Some("type_error"));
+
+        // 5000 bytes of 3-byte chars: both sample cuts land mid-char.
+        let multibyte = "가".repeat(1667);
+        assert_eq!(multibyte.len(), 5001);
+        assert_eq!(classify_failure(&multibyte), None);
+    }
+
+    #[test]
+    fn stderr_failure_found_behind_long_clean_stdout() {
+        let stdout = "ok\n".repeat(834);
+        assert!(stdout.len() > 2000);
+        assert_eq!(
+            classify_bash_failure("cargo test", &stdout, "TypeError: x", true),
+            Some("type_error")
         );
     }
 

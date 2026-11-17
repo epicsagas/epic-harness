@@ -87,6 +87,27 @@ fn read_with_explicit_host_error_is_failure() {
 }
 
 #[test]
+fn read_host_error_text_is_the_snippet() {
+    let rec = observe(payload(
+        "Read",
+        serde_json::json!({"is_error": true, "error": "File does not exist."}),
+    ));
+    assert!(
+        rec["error_snippet"]
+            .as_str()
+            .is_some_and(|s| s.contains("File does not exist.")),
+        "{rec}"
+    );
+}
+
+#[test]
+fn read_host_error_without_body_has_no_snippet() {
+    let rec = observe(payload("Read", serde_json::json!({"is_error": true})));
+    assert_eq!(rec["result"], "error");
+    assert!(rec["error_snippet"].is_null(), "{rec}");
+}
+
+#[test]
 fn non_read_tool_keyword_classification_is_unchanged() {
     let rec = observe(payload(
         "WebFetch",
