@@ -149,12 +149,33 @@ fn run_accept_synth(args: &[String]) -> i32 {
     };
     let loaded = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
-        crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&project_slug()))
+        let slug = project_slug();
+        let m = crate::store::metrics::load_metrics_scoped_pool(&pool, Some(&slug))
             .await
-            .map_err(std::io::Error::other)
+            .map_err(std::io::Error::other)?;
+        // The shared loader treats a failed flag read as false; the gate must not.
+        let flag = sqlx::query_scalar::<_, String>(
+            "SELECT value FROM metrics_state WHERE key = 'reward_hacking_suspected' \
+             AND project = ? LIMIT 1",
+        )
+        .bind(&slug)
+        .fetch_optional(&pool)
+        .await
+        .map(|v| v.is_some_and(|v| v == "true" || v == "1"))
+        .map_err(std::io::Error::other);
+        Ok::<_, std::io::Error>((m, flag))
     });
     let metrics: Metrics = match loaded {
-        Ok(m) => m,
+        Ok((mut m, flag)) => match flag {
+            Ok(f) => {
+                m.reward_hacking_suspected = f;
+                m
+            }
+            Err(e) => {
+                eprintln!("cannot read the reward-hacking flag for the gate: {e}");
+                return EXIT_IO;
+            }
+        },
         Err(e) => match fs::read_to_string(metrics_file())
             .ok()
             .and_then(|s| parse_persisted_json::<Metrics>(&s).ok())

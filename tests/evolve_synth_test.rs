@@ -177,3 +177,49 @@ fn reward_hacking_flag_in_sqlite_blocks_accept_synth() {
     assert_eq!(code, 5, "{err}");
     assert_eq!(env.pending_status(), "pending");
 }
+
+#[test]
+fn unreadable_reward_hacking_flag_refuses_accept_synth() {
+    let env = Env::new();
+    let skill_md = env.project().join("evolved").join(SKILL).join("SKILL.md");
+    fs::create_dir_all(&skill_md).unwrap();
+    let (code, err) = env.accept();
+    assert_eq!(code, EXIT_IO, "{err}");
+    fs::remove_dir(&skill_md).unwrap();
+
+    // Swap metrics_state for a view that errors only when the flag row is read
+    // (abs of the minimum integer overflows), so the pool opens and every
+    // other key still loads.
+    let db = env.harness.join("harness.db");
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        use sqlx::sqlite::SqliteConnectOptions;
+        let pool = sqlx::SqlitePool::connect_with(SqliteConnectOptions::new().filename(&db))
+            .await
+            .unwrap();
+        sqlx::raw_sql(
+            "ALTER TABLE metrics_state RENAME TO metrics_state_real;
+             CREATE VIEW metrics_state AS SELECT key, project,
+                CASE WHEN key = 'reward_hacking_suspected'
+                     THEN abs(-9223372036854775807 - 1) ELSE value END AS value
+                FROM metrics_state_real;",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO metrics_state_real (key, value, project) \
+             VALUES ('reward_hacking_suspected', 'false', ?)",
+        )
+        .bind(SLUG)
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+    });
+
+    let (code, err) = env.accept();
+    assert_eq!(code, EXIT_IO, "{err}");
+    assert!(err.contains("reward-hacking flag"), "{err}");
+    assert_eq!(env.pending_status(), "pending");
+    assert_eq!(env.ledger_lines(), 0);
+}

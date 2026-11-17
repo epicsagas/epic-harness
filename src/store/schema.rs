@@ -187,20 +187,32 @@ async fn migrate_skill_attribution_pk(pool: &AnyPool) -> io::Result<()> {
 /// re-inserts them). `project` and `result` are part of the key so two
 /// outcomes of the same call are both kept.
 ///
-/// Runs once: the existence of `idx_obs_dedup_v3` is the gate, so a migrated
-/// database costs one read and no write lock. v3 is finer than v2, so
+/// Runs once: `idx_obs_dedup_v3` present with no older index is the gate, so a
+/// migrated database costs one read and no write lock. v3 is finer than v2, so
 /// migrating from v2 deletes nothing. The transaction holds the write lock,
 /// so a concurrent hook cannot insert a duplicate between the DELETE and the
 /// CREATE. The older action-keyed and v2 indexes are dropped.
 async fn migrate_obs_dedup_index(pool: &AnyPool) -> io::Result<()> {
-    let done: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_obs_dedup_v3'",
+    let present: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'index' \
+         AND name IN ('idx_obs_dedup_v3', 'idx_obs_dedup_v2', 'idx_obs_dedup')",
     )
-    .fetch_one(pool)
+    .fetch_all(pool)
     .await
     .map_err(super::sqlx_err)?;
 
-    if done > 0 {
+    if present.iter().any(|n| n == "idx_obs_dedup_v3") {
+        // An older binary sharing this DB (for example the desktop app) re-ran
+        // its DDL and re-created a coarser index. Drop only; the rows it
+        // already collapsed are gone and no more are deleted.
+        if present.len() > 1 {
+            sqlx::raw_sql(
+                "DROP INDEX IF EXISTS idx_obs_dedup_v2; DROP INDEX IF EXISTS idx_obs_dedup;",
+            )
+            .execute(pool)
+            .await
+            .map_err(super::sqlx_err)?;
+        }
         return Ok(());
     }
 
@@ -667,6 +679,37 @@ mod tests {
         super::init_schema_pool(&pool).await.unwrap();
 
         assert_eq!(obs_count(&pool).await, 2, "no DELETE ran behind the gate");
+    }
+
+    #[tokio::test]
+    async fn obs_dedup_recreated_v2_is_dropped_without_deleting_rows() {
+        // An older binary re-ran its DDL on a v3 database and re-created v2.
+        let pool = super::super::pool::test_memory_pool().await;
+        super::init_schema_pool(&pool).await.unwrap();
+        assert_eq!(insert_obs(&pool, "a", "success").await, 1);
+        sqlx::raw_sql(
+            "CREATE UNIQUE INDEX idx_obs_dedup_v2
+                ON observations(session_id, timestamp, tool, COALESCE(action, ''));
+             CREATE UNIQUE INDEX idx_obs_dedup
+                ON observations(session_id, timestamp, tool, action);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert_eq!(insert_obs(&pool, "a", "error").await, 0, "v2 blocks it");
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        assert_eq!(index_count(&pool, "idx_obs_dedup_v2").await, 0);
+        assert_eq!(index_count(&pool, "idx_obs_dedup").await, 0);
+        assert_eq!(index_count(&pool, "idx_obs_dedup_v3").await, 1);
+        assert_eq!(obs_count(&pool).await, 1, "no rows deleted");
+        assert_eq!(insert_obs(&pool, "a", "error").await, 1, "result differs");
+        assert_eq!(
+            insert_obs(&pool, "a", "success").await,
+            0,
+            "exact duplicate"
+        );
     }
 
     #[tokio::test]

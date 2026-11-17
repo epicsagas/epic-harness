@@ -139,10 +139,24 @@ static MASK_PATH: LazyLock<Regex> = LazyLock::new(|| {
 /// rooted (a Codex `apply_patch` names its files that way, `~/x` too) has no
 /// home directory or username in it and only gets the secret masks.
 pub fn mask_path_action(path: &str) -> String {
-    if !is_rooted(path) {
+    let trimmed = path.trim();
+    let tilde_user = trimmed
+        .strip_prefix('~')
+        .is_some_and(|r| !r.is_empty() && !r.starts_with('/'));
+    if tilde_user {
+        return "<PATH>".to_string();
+    }
+    if !is_rooted(trimmed) {
         return mask_credentials(path);
     }
-    match std::path::Path::new(path).strip_prefix(crate::shared::paths::cwd()) {
+    // A `..` can climb out of the project even when the prefix matches.
+    if std::path::Path::new(trimmed)
+        .components()
+        .any(|c| c == std::path::Component::ParentDir)
+    {
+        return "<PATH>".to_string();
+    }
+    match std::path::Path::new(trimmed).strip_prefix(crate::shared::paths::cwd()) {
         Ok(r) => mask_credentials(&r.to_string_lossy()),
         // `mask_secrets` stops at whitespace and misses UNC paths.
         Err(_) => "<PATH>".to_string(),
@@ -264,9 +278,29 @@ mod tests {
             r"\\server\share name\x.rs",
             r"D:\work dir\x.rs",
             "C:/Users/u/x.rs",
+            " /home/u/x.rs",
+            "/home/u/x.rs\n",
+            "~user/x.rs",
+            "~user",
+            "/home/u/../../etc/x.rs",
         ] {
-            assert_eq!(mask_path_action(p), "<PATH>");
+            assert_eq!(mask_path_action(p), "<PATH>", "{p:?}");
         }
+    }
+
+    #[test]
+    fn escaping_path_under_cwd_is_path_token() {
+        let p = format!(
+            "{}/../../home/u/x.rs",
+            crate::shared::paths::cwd().display()
+        );
+        assert_eq!(mask_path_action(&p), "<PATH>");
+    }
+
+    #[test]
+    fn plain_tilde_and_relative_paths_stay_readable() {
+        assert_eq!(mask_path_action("~/x.rs"), "~/x.rs");
+        assert_eq!(mask_path_action("src/a.rs"), "src/a.rs");
     }
 
     #[test]

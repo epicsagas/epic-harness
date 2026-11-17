@@ -411,7 +411,12 @@ pub async fn harness_pool() -> io::Result<AnyPool> {
 /// Postgres goes through `build_postgres_pool` (TLS enforced, no schema init).
 /// MySQL is unsupported and yields `Ok(None)`.
 pub async fn harness_pool_if_exists() -> io::Result<Option<AnyPool>> {
-    let url = harness_url();
+    harness_pool_if_exists_for(harness_url()).await
+}
+
+async fn harness_pool_if_exists_for(url: String) -> io::Result<Option<AnyPool>> {
+    // sqlx panics on connect when no driver is installed, on every backend.
+    ensure_drivers();
     match DbType::from_url(&url)? {
         DbType::Sqlite => {
             let path = url
@@ -422,7 +427,6 @@ pub async fn harness_pool_if_exists() -> io::Result<Option<AnyPool>> {
             if path.is_empty() || path == ":memory:" || !PathBuf::from(path).is_file() {
                 return Ok(None);
             }
-            ensure_drivers();
             let sep = if url.contains('?') { "&" } else { "?" };
             AnyPoolOptions::new()
                 .max_connections(1)
@@ -555,6 +559,15 @@ mod tests {
             DbType::Mysql
         );
         assert!(DbType::from_url("oracle://bad").is_err());
+    }
+
+    #[tokio::test]
+    async fn harness_pool_if_exists_postgres_unreachable_is_err_not_panic() {
+        // Port 1 on loopback refuses at once; without ensure_drivers() sqlx
+        // panics with "No drivers installed" in a fresh process.
+        let r =
+            harness_pool_if_exists_for("postgres://fixture@127.0.0.1:1/fixture".to_string()).await;
+        assert!(r.is_err());
     }
 
     #[tokio::test]

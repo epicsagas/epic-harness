@@ -1187,8 +1187,21 @@ mod tests {
     #[serial_test::serial]
     fn orbit_pipelines_filters_sidecars_by_project() {
         let tmp = tempfile::tempdir().unwrap();
+        struct RestoreHarnessDir(Option<std::ffi::OsString>);
+        impl Drop for RestoreHarnessDir {
+            fn drop(&mut self) {
+                // SAFETY: serial test, no other thread reads the environment.
+                unsafe {
+                    match self.0.take() {
+                        Some(v) => std::env::set_var("HARNESS_DIR", v),
+                        None => std::env::remove_var("HARNESS_DIR"),
+                    }
+                }
+            }
+        }
+        let _restore = RestoreHarnessDir(std::env::var_os("HARNESS_DIR"));
         // SAFETY: relocates the DB store to the temp dir so the real
-        // ~/.harness is never opened; restored below.
+        // ~/.harness is never opened; restored by the guard above.
         unsafe { std::env::set_var("HARNESS_DIR", tmp.path().join("projects").join("a")) };
         write_sidecar(tmp.path(), "a", "PIPELINE-1.json", r#"{"id":"1"}"#);
         write_sidecar(tmp.path(), "b", "PIPELINE-2.json", r#"{"id":"2"}"#);
@@ -1197,7 +1210,6 @@ mod tests {
         assert_eq!(rows.len(), 1, "{rows:?}");
         assert_eq!(rows[0]["_project"], "a");
         assert_eq!(orbit_pipelines(&harness_dir, None).len(), 2);
-        unsafe { std::env::remove_var("HARNESS_DIR") };
     }
 
     #[test]

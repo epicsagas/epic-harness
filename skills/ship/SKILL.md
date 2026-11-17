@@ -82,12 +82,12 @@ gh pr checks <PR_NUMBER> --json name,state
 
   ```bash
   HEAD=$(gh pr view <PR_NUMBER> --json headRefOid --jq .headRefOid)
-  gh run list --commit "$HEAD" --json name,status,conclusion,url
+  gh run list --commit "$HEAD" --json databaseId,name,status,conclusion,url
   ```
 
   - Any run with conclusion `action_required`: skip the watch (it can never finish), report CI as BLOCKED (not PASS, not N/A) with the run URLs, and note that a maintainer must approve the runs. Inside `/orbit`, record `"ci_status": "approval_required"` with the run URLs in `phase_history`.
   - No runs: report CI as N/A (no CI configured) and skip the watch.
-  - Runs exist without `action_required`: watch as above.
+  - Runs exist without `action_required`: do not call `gh pr checks --watch` (with no checks it exits at once with "no checks reported" and reads as a failure, which is not a CI failure). Watch each run for the HEAD commit with `gh run watch <run-id>` (the `databaseId` above) and treat its result as the CI result. If the runs cannot be watched, report CI as BLOCKED.
 
 ### Step 5: Report
 

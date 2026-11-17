@@ -188,7 +188,7 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
      runs for the PR head:
      ```bash
      HEAD=$(gh pr view <PR_NUMBER> --json headRefOid --jq .headRefOid)
-     gh run list --commit "$HEAD" --json name,status,conclusion,url
+     gh run list --commit "$HEAD" --json databaseId,name,status,conclusion,url
      ```
      - Any run with conclusion `action_required`: append a `phase_history`
        entry recording `"ci_status": "approval_required"` with the run URLs,
@@ -200,7 +200,7 @@ Initialize pipeline state at `$HARNESS_DIR/orbit/PIPELINE-{timestamp}.json`:
        recording `"ci_watch": "skipped"`, and proceed to Step 7 (evolve runs
        regardless of CI outcome, so the pipeline must never wait on checks
        that will never appear).
-     - Runs exist without `action_required`: watch as above.
+     - Runs exist without `action_required`: do not call `gh pr checks --watch` (with no checks it exits at once with "no checks reported" and reads as a failure, which is not a CI failure). Watch each run for the HEAD commit with `gh run watch <run-id>` (the `databaseId` above) and treat its result as the CI result. If the runs cannot be watched, report CI as BLOCKED.
 6. **Exit worktree**: Return to original directory and keep the worktree
 
 ## Step 7: Evolve
@@ -255,6 +255,7 @@ Run the evolution engine to analyze this session and generate/improve skills.
 | Go | complete | 0 |
 | Audit | PASS | {count} |
 | Eval | {PASS|WARN|SKIPPED} | 0 |
+| CI | {PASS|FAIL|BLOCKED|N/A} | 0 |
 | Ship | complete | 0 |
 | Evolve | complete | 0 |
 
