@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.9.0] - 2026-11-17
 
+This release also ships every change listed under 0.8.14 and 0.8.15 below. Those versions were tagged but not published separately.
+
 Pipeline changes designed from a literature and practice review (docs/references/research-0.9.0-pipeline.md) and recorded in docs/adr/0001 to 0006. Thanks to @Tomauskasz for the reports and reference PRs behind these changes.
 
 ### Changed
