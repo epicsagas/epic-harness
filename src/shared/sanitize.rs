@@ -130,31 +130,37 @@ static MASK_PATH: LazyLock<Regex> = LazyLock::new(|| {
 /// (`long_debug_loop`), per-file weak-spot stats and the observation dedup key
 /// all collapse onto a single value.
 ///
-/// A path under the project is made relative, which drops the part that
+/// A rooted path (leading `/` or `\`, a drive prefix such as `C:`, or a UNC
+/// share) under the project is made relative, which drops the part that
 /// actually leaks (home directory, username) while keeping files distinct,
 /// and then gets the secret masks but *not* the path mask, which would
-/// re-collapse `src/a.rs` and `src/b.rs` onto `src<PATH>`. A path outside the
-/// project keeps the full masking, including `<PATH>`.
+/// re-collapse `src/a.rs` and `src/b.rs` onto `src<PATH>`. A rooted path
+/// outside the project becomes the literal `<PATH>`. A path that is not
+/// rooted (a Codex `apply_patch` names its files that way, `~/x` too) has no
+/// home directory or username in it and only gets the secret masks.
 pub fn mask_path_action(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    // Already relative (a Codex `apply_patch` names its files that way, and a
-    // host may send a relative `file_path`): there is no home directory or
-    // username in it to strip, so it only needs the secret masks. Running the
-    // full `mask_secrets` here would apply the path mask and collapse
-    // `src/b.py` to `src<PATH>`, which is the very thing this function exists
-    // to prevent.
-    let rel = if p.is_relative() {
-        std::borrow::Cow::Borrowed(path)
-    } else {
-        match p.strip_prefix(crate::shared::paths::cwd()) {
-            Ok(r) => std::borrow::Cow::Owned(r.to_string_lossy().into_owned()),
-            // Absolute and outside the project: mask it in full, `<PATH>`
-            // included.
-            Err(_) => return mask_secrets(path),
-        }
-    };
+    if !is_rooted(path) {
+        return mask_credentials(path);
+    }
+    match std::path::Path::new(path).strip_prefix(crate::shared::paths::cwd()) {
+        Ok(r) => mask_credentials(&r.to_string_lossy()),
+        // `mask_secrets` stops at whitespace and misses UNC paths.
+        Err(_) => "<PATH>".to_string(),
+    }
+}
 
-    mask_credentials(&rel)
+/// True for a path that names a root, identically on every OS: a leading `/`
+/// or `\` (POSIX, UNC, root-relative), a drive prefix (`C:\x`, `C:/x`,
+/// `C:foo`), or whatever the host's `Path` parser calls a root or prefix.
+fn is_rooted(path: &str) -> bool {
+    use std::path::{Component, Path};
+    let b = path.as_bytes();
+    matches!(b.first(), Some(b'/' | b'\\'))
+        || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
+        || matches!(
+            Path::new(path).components().next(),
+            Some(Component::RootDir | Component::Prefix(_))
+        )
 }
 
 /// Mask common secret patterns in a string.
@@ -221,6 +227,46 @@ mod tests {
         let masked = mask_path_action("/home/someone/secret/x.rs");
         assert!(!masked.contains("someone"), "home dir survived masking");
         assert!(masked.contains("<PATH>"), "outside path was not masked");
+    }
+
+    #[test]
+    fn rooted_outside_paths_become_path_token() {
+        for p in [
+            "/home/u/a b/x.rs",
+            r"\\server\share\x",
+            r"\Users\u\x.rs",
+            r"C:\Users\u\x.rs",
+            r"C:foo\bar",
+        ] {
+            assert_eq!(mask_path_action(p), "<PATH>");
+        }
+    }
+
+    #[test]
+    fn non_rooted_paths_are_unchanged() {
+        for p in ["src/a.rs", "./src/a.rs", "../x/y.rs"] {
+            assert_eq!(mask_path_action(p), p);
+        }
+    }
+
+    #[test]
+    fn cwd_join_becomes_relative() {
+        let p = crate::shared::paths::cwd().join("src/a.rs");
+        assert_eq!(mask_path_action(&p.to_string_lossy()), "src/a.rs");
+    }
+
+    #[test]
+    fn outside_cwd_absolute_paths_are_exactly_path_token() {
+        for p in [
+            "/home/u/proj/x.rs",
+            "/home/u/my proj/x.rs",
+            r"\\server\share\dir\x.rs",
+            r"\\server\share name\x.rs",
+            r"D:\work dir\x.rs",
+            "C:/Users/u/x.rs",
+        ] {
+            assert_eq!(mask_path_action(p), "<PATH>");
+        }
     }
 
     #[test]
