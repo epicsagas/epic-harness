@@ -132,8 +132,9 @@ fn score_write(output: &str) -> ScoreDimensions {
     }
 }
 
-fn score_read_search(output: &str) -> ScoreDimensions {
-    let failure = classify_failure(output);
+/// `failure` is the classified outcome; the printed body is quoted material and
+/// is not scanned for failure keywords here (#144).
+fn score_read_search(output: &str, failure: Option<&str>) -> ScoreDimensions {
     static NO_MATCH_RE: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?i)no matches|0 results").unwrap());
     let has_results =
@@ -491,6 +492,27 @@ pub fn run(input: &HookInput) -> i32 {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             classify_bash_failure(cmd, &output, &stderr, streams_separated).map(String::from)
+        } else if matches!(tool_cat, "read" | "glob" | "grep") {
+            // PostToolUse fires only for successful calls, so the printed body
+            // is quoted material. Only an explicit host error flag counts.
+            let raw = if input.tool_output.is_some() {
+                None
+            } else {
+                input.tool_response.as_ref().or(input.tool_result.as_ref())
+            };
+            let is_error = raw
+                .and_then(|v| v.get("is_error"))
+                .and_then(|b| b.as_bool())
+                == Some(true);
+            let err = raw
+                .and_then(|v| v.get("error"))
+                .and_then(|e| e.as_str())
+                .filter(|e| !e.is_empty());
+            (is_error || err.is_some()).then(|| {
+                classify_failure(err.unwrap_or(&combined))
+                    .unwrap_or("runtime_error")
+                    .to_string()
+            })
         } else {
             classify_failure(&combined).map(String::from)
         };
@@ -540,7 +562,7 @@ pub fn run(input: &HookInput) -> i32 {
                 },
                 execution_cost: 1.0,
             },
-            "glob" | "grep" => score_read_search(&combined),
+            "glob" | "grep" => score_read_search(&combined, record.failure_category.as_deref()),
             _ => {
                 let fq = failure_quality(record.failure_category.as_deref());
                 ScoreDimensions {
@@ -780,20 +802,28 @@ mod tests {
     // ── score_read_search ───────────────────────────
     #[test]
     fn read_with_results() {
-        let dims = score_read_search("found: main.rs");
+        let dims = score_read_search("found: main.rs", None);
         assert_eq!(dims.tool_success, 1.0);
     }
 
     #[test]
     fn read_no_results() {
-        let dims = score_read_search("0 results found");
+        let dims = score_read_search("0 results found", None);
         assert_eq!(dims.tool_success, 0.0);
         assert_eq!(dims.output_quality, 0.5);
     }
 
     #[test]
     fn read_empty_output() {
-        let dims = score_read_search("");
+        let dims = score_read_search("", None);
+        assert_eq!(dims.tool_success, 0.0);
+    }
+
+    #[test]
+    fn search_hit_quoting_a_traceback_is_a_success() {
+        let dims = score_read_search("src/a.py: Traceback (most recent call last)", None);
+        assert_eq!(dims.tool_success, 1.0);
+        let dims = score_read_search("", Some("not_found"));
         assert_eq!(dims.tool_success, 0.0);
     }
 

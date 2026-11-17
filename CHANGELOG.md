@@ -28,6 +28,7 @@ Pipeline changes designed from a literature and practice review (docs/references
 - **`fail_on_regression: false` is honored**: a regression now reports WARN instead of FAIL when the option is false.
 - **Retried backfills no longer double count**: the observation dedup key treats a missing action as empty, so a retried JSONL backfill cannot re-insert rows that reflection would count twice. Existing exact duplicates are collapsed when the database opens.
 - **A clock-skewed orbit pipeline no longer blocks orbit**: an `updated_at` more than 5 minutes in the future counts as stale.
+- **Read, Glob, and Grep output is not scanned for failure keywords**: a file that prints `Error:`, `Traceback`, or a stack frame is no longer recorded as a runtime error when read. These tools count as failed only when the host reports an error. Completes #144 with the PowerShell classification fixes in 0.8.15.
 
 ### Docs
 - **Cross-project learning opt-in path corrected**: the opt-in marker is global, `~/.harness/global/.cross-project-enabled`, and patterns are stored in `~/.harness/global/patterns.jsonl`. The previously documented per-project marker never enabled sharing; create the global marker to opt in. (#272)
