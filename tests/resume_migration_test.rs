@@ -12,6 +12,8 @@ const SLUG: &str = "fixture_project";
 const GUARD: &str = "blocked:\n  - pattern: rm\\s+-rf | msg: synthetic rule\n";
 const HINT: &str = "pre-v0.1.4";
 
+const DASHBOARD_OFF: &str = "[dashboard]\nport = 0\nauto_open = false\n";
+
 struct Env {
     _temp: tempfile::TempDir,
     cwd: PathBuf,
@@ -29,6 +31,10 @@ impl Env {
         fs::create_dir_all(cwd.join(".harness")).unwrap();
         fs::create_dir_all(home.join(".config/epic-harness")).unwrap();
         fs::write(home.join(".config/epic-harness/telemetry-consent"), "off").unwrap();
+        // No dashboard auto-launch: it would add dashboard.lock (and spawn a
+        // server) whenever port 7700 is free, as on CI.
+        fs::create_dir_all(&harness).unwrap();
+        fs::write(harness.join("config.toml"), DASHBOARD_OFF).unwrap();
         Self {
             _temp: temp,
             cwd,
@@ -160,6 +166,7 @@ fn cwd_equal_to_home_leaves_harness_root_alone() {
     fs::create_dir_all(root.join("obs")).unwrap();
     fs::write(root.join("obs/session_1.jsonl"), "{}\n").unwrap();
     fs::write(root.join("metrics.json"), "{\"legacy\":true}").unwrap();
+    fs::write(root.join("config.toml"), DASHBOARD_OFF).unwrap();
     fs::create_dir_all(env.cwd.join(".config/epic-harness")).unwrap();
     fs::write(
         env.cwd.join(".config/epic-harness/telemetry-consent"),

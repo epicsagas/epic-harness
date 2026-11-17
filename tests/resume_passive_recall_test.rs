@@ -56,6 +56,13 @@ fn c_resume_does_not_bump_access_count() {
     .unwrap();
     // Resume step 5a only runs when this directory exists.
     fs::create_dir_all(root.join("harness-root/memory")).unwrap();
+    // No dashboard auto-launch: it would add dashboard.lock (and spawn a
+    // server) whenever port 7700 is free, as on CI.
+    fs::write(
+        root.join("harness-root/config.toml"),
+        "[dashboard]\nport = 0\nauto_open = false\n",
+    )
+    .unwrap();
 
     run(
         root,

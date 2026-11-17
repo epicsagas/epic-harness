@@ -316,10 +316,25 @@ pub fn partition_holdout(
     (active, holdout)
 }
 
+/// Split the active arm into (exposed, withheld). A skill is exposed (injected
+/// at session start) when templates are injected or its body was synthesized;
+/// the rest were withheld and must not be credited with the session score.
+pub fn split_exposed(
+    active: Vec<String>,
+    inject_templates: bool,
+    is_synth: impl Fn(&str) -> bool,
+) -> (Vec<String>, Vec<String>) {
+    active
+        .into_iter()
+        .partition(|name| inject_templates || is_synth(name))
+}
+
 /// Update per-skill A/B attribution from one session.
 ///
 /// `active` are skills that were exposed (injected at session start);
-/// `holdout` are skills deliberately withheld this session. The session score
+/// `holdout` are skills deliberately withheld by the A/B arm; `withheld` are
+/// skills kept out of context by the injection policy (they get no counter
+/// change, only survive the final retain). The session score
 /// updates avg_score_with for the former and avg_score_without for the latter
 /// — a genuine counterfactual. The legacy scheme (credit every skill on disk,
 /// derive "without" from pre-creation history) was confounded by regression
@@ -330,6 +345,7 @@ pub fn update_skill_attribution(
     analysis: &crate::shared::evolution::SessionAnalysis,
     active: &[String],
     holdout: &[String],
+    withheld: &[String],
 ) {
     for skill in active {
         let attr = entry_for(metrics, skill);
@@ -362,9 +378,9 @@ pub fn update_skill_attribution(
     // The settled-verdict path (attribution_eval_sessions) is unchanged:
     // after the eval window the skill simply stays active every session.
 
-    metrics
-        .skill_attribution
-        .retain(|name, _| active.contains(name) || holdout.contains(name));
+    metrics.skill_attribution.retain(|name, _| {
+        active.contains(name) || holdout.contains(name) || withheld.contains(name)
+    });
 }
 
 fn entry_for<'m>(metrics: &'m mut Metrics, skill: &str) -> &'m mut SkillAttribution {
@@ -592,7 +608,7 @@ mod tests {
             ..Default::default()
         };
         let active = vec!["evo-test".to_string()];
-        update_skill_attribution(&mut metrics, &analysis, &active, &[]);
+        update_skill_attribution(&mut metrics, &analysis, &active, &[], &[]);
 
         let attr = metrics
             .skill_attribution
@@ -619,7 +635,7 @@ mod tests {
             ..Default::default()
         };
         let holdout = vec!["evo-test".to_string()];
-        update_skill_attribution(&mut metrics, &analysis, &[], &holdout);
+        update_skill_attribution(&mut metrics, &analysis, &[], &holdout, &[]);
 
         let attr = metrics.skill_attribution.get("evo-test").unwrap();
         assert_eq!(attr.sessions_active, 0);
@@ -649,7 +665,13 @@ mod tests {
             avg_score: 0.90,
             ..Default::default()
         };
-        update_skill_attribution(&mut metrics, &analysis, &[], &["evo-legacy".to_string()]);
+        update_skill_attribution(
+            &mut metrics,
+            &analysis,
+            &[],
+            &["evo-legacy".to_string()],
+            &[],
+        );
 
         let attr = metrics.skill_attribution.get("evo-legacy").unwrap();
         assert!(
@@ -679,11 +701,63 @@ mod tests {
             avg_score: 0.40,
             ..Default::default()
         };
-        update_skill_attribution(&mut metrics, &analysis, &["evo-suspect".to_string()], &[]);
+        update_skill_attribution(
+            &mut metrics,
+            &analysis,
+            &["evo-suspect".to_string()],
+            &[],
+            &[],
+        );
         assert!(
             metrics.skill_attribution.contains_key("evo-suspect"),
             "eviction without a holdout counterfactual is forbidden"
         );
+    }
+
+    #[test]
+    fn skill_attribution_withheld_keeps_entry_untouched() {
+        let mut metrics = default_metrics();
+        metrics.skill_attribution.insert(
+            "evo-withheld".into(),
+            SkillAttribution {
+                skill_name: "evo-withheld".into(),
+                sessions_active: 2,
+                avg_score_with: 0.60,
+                avg_score_without: 0.50,
+                first_seen: "2026-06-01T00:00:00Z".into(),
+                sessions_holdout: 1,
+            },
+        );
+        let analysis = crate::shared::evolution::SessionAnalysis {
+            avg_score: 0.90,
+            ..Default::default()
+        };
+        update_skill_attribution(
+            &mut metrics,
+            &analysis,
+            &[],
+            &[],
+            &["evo-withheld".to_string(), "evo-new".to_string()],
+        );
+        let attr = metrics.skill_attribution.get("evo-withheld").unwrap();
+        assert_eq!(attr.sessions_active, 2);
+        assert_eq!(attr.sessions_holdout, 1);
+        assert_eq!(attr.avg_score_with, 0.60);
+        assert!(
+            !metrics.skill_attribution.contains_key("evo-new"),
+            "withheld skill without an entry must not get one"
+        );
+    }
+
+    #[test]
+    fn split_exposed_withholds_templates_unless_injected() {
+        let names = || vec!["a".to_string(), "b".to_string()];
+        let (exposed, withheld) = split_exposed(names(), false, |n| n == "b");
+        assert_eq!(exposed, vec!["b".to_string()]);
+        assert_eq!(withheld, vec!["a".to_string()]);
+        let (exposed, withheld) = split_exposed(names(), true, |_| false);
+        assert_eq!(exposed, names());
+        assert!(withheld.is_empty());
     }
 
     #[test]

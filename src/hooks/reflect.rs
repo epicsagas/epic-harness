@@ -280,96 +280,8 @@ pub fn run_context(
         project_slugs.first().cloned()
     };
 
-    // 2. Evolution stats (SQLite first, fallback to JSONL)
-    let evo_records: Vec<serde_json::Value> = crate::store::runtime::block_on(async {
-        let pool = crate::store::pool::harness_pool().await?;
-        crate::store::evolution::query_recent_records_scoped_pool(
-            &pool,
-            i64::MAX,
-            context_scope.as_deref(),
-        )
-        .await
-    })
-    .map(|recs| {
-        recs.iter()
-            .filter_map(|r| serde_json::to_value(r).ok())
-            .collect()
-    })
-    .unwrap_or_else(|e| {
-        eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
-        read_jsonl_typed::<serde_json::Value>(&evolution_file())
-    });
-    let mut pattern_freq: HashMap<String, u64> = HashMap::new();
-    let mut trend_hist: Vec<String> = Vec::new();
-    let mut skills_generated: u64 = 0;
-    let mut stagnation_count: u64 = 0;
-    for r in &evo_records {
-        if let Some(pats) = r.get("patterns").and_then(|p| p.as_array()) {
-            for p in pats {
-                if let Some(t) = p.get("type").and_then(|v| v.as_str()) {
-                    *pattern_freq.entry(t.to_string()).or_default() += 1;
-                }
-            }
-        }
-        if let Some(t) = r.get("trend").and_then(|v| v.as_str())
-            && !t.is_empty()
-        {
-            trend_hist.push(t.to_string());
-        }
-        skills_generated += r
-            .get("skills_generated")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
-        if r.get("stagnation_triggered")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-        {
-            stagnation_count += 1;
-        }
-    }
-    let recent_evo: Vec<&serde_json::Value> = evo_records.iter().rev().take(10).collect();
-    let recent_weak: Vec<String> = recent_evo
-        .iter()
-        .filter_map(|r| r.get("weak_tools").and_then(|v| v.as_array()))
-        .flat_map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)))
-        .collect();
-    let recent_weak: Vec<String> = {
-        let mut seen = std::collections::HashSet::new();
-        recent_weak
-            .into_iter()
-            .filter(|s| seen.insert(s.clone()))
-            .collect()
-    };
-    let recent_seeded: Vec<String> = recent_evo
-        .iter()
-        .filter_map(|r| r.get("seeded_skills").and_then(|v| v.as_array()))
-        .flat_map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)))
-        .collect();
-    let recent_seeded: Vec<String> = {
-        let mut seen = std::collections::HashSet::new();
-        recent_seeded
-            .into_iter()
-            .filter(|s| seen.insert(s.clone()))
-            .collect()
-    };
-    let mut pf_sorted: Vec<(String, u64)> = pattern_freq.into_iter().collect();
-    pf_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
-    let pf_map: serde_json::Map<String, serde_json::Value> = pf_sorted
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::from(*v)))
-        .collect();
-    let evo_stats = serde_json::json!({
-        "total_sessions": evo_records.len(),
-        "patterns_detected": evo_records.iter().filter(|r| r.get("patterns").and_then(|p| p.as_object()).map(|o| !o.is_empty()).unwrap_or(false)).count(),
-        "skills_generated": skills_generated,
-        "pattern_frequency": pf_map,
-        "trend_last10": trend_hist.into_iter().rev().take(10).collect::<Vec<_>>(),
-        "recent_weak_tools": recent_weak,
-        "recent_seeded_skills": recent_seeded,
-        "stagnation_count": stagnation_count,
-    });
-
-    // 3. Metrics summary (SQLite first, fallback to JSON)
+    // 2. Metrics (SQLite first, fallback to JSON); loaded before the evolution
+    // stats because `stagnation_count` comes from the stored metrics.
     let metrics: Metrics = crate::store::runtime::block_on(async {
         let pool = crate::store::pool::harness_pool().await?;
         crate::store::metrics::load_metrics_scoped_pool(&pool, context_scope.as_deref()).await
@@ -378,6 +290,22 @@ pub fn run_context(
         eprintln!("[reflect] SQLite metrics read failed, falling back to JSON: {e}");
         read_json(&metrics_file(), default_metrics())
     });
+
+    // 3. Evolution stats (SQLite first, fallback to JSONL)
+    let evo_records: Vec<EvolutionRecord> = crate::store::runtime::block_on(async {
+        let pool = crate::store::pool::harness_pool().await?;
+        crate::store::evolution::query_recent_records_scoped_pool(
+            &pool,
+            i64::MAX,
+            context_scope.as_deref(),
+        )
+        .await
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[reflect] SQLite evolution read failed, falling back to JSONL: {e}");
+        read_jsonl_typed::<EvolutionRecord>(&evolution_file())
+    });
+    let evo_stats = evolution_stats(&evo_records, metrics.stagnation_count);
     let sh = &metrics.score_history;
     let score_trend_delta: f64 = if sh.len() >= 3 {
         let recent: Vec<f64> = sh.iter().rev().take(10).map(|s| s.avg_score).collect();
@@ -574,6 +502,32 @@ pub fn run_context(
         serde_json::to_string_pretty(&output).unwrap_or_default()
     );
     0
+}
+
+/// Evolution stats from typed records. `trend_last10`, `recent_weak_tools` and
+/// `recent_seeded_skills` have no stored source, so they are null rather than
+/// a misleading zero or empty value.
+fn evolution_stats(records: &[EvolutionRecord], stagnation_count: u64) -> serde_json::Value {
+    let mut pattern_freq: HashMap<String, u64> = HashMap::new();
+    for p in records.iter().flat_map(|r| &r.failure_patterns) {
+        *pattern_freq.entry(p.pattern_type.clone()).or_default() += 1;
+    }
+    let mut pf_sorted: Vec<(String, u64)> = pattern_freq.into_iter().collect();
+    pf_sorted.sort_by_key(|b| std::cmp::Reverse(b.1));
+    let pf_map: serde_json::Map<String, serde_json::Value> = pf_sorted
+        .into_iter()
+        .map(|(k, v)| (k, serde_json::Value::from(v)))
+        .collect();
+    serde_json::json!({
+        "total_sessions": records.len(),
+        "patterns_detected": records.iter().filter(|r| !r.failure_patterns.is_empty()).count(),
+        "skills_generated": records.iter().map(|r| r.skills_seeded).sum::<u64>(),
+        "pattern_frequency": pf_map,
+        "trend_last10": null,
+        "recent_weak_tools": null,
+        "recent_seeded_skills": null,
+        "stagnation_count": stagnation_count,
+    })
 }
 
 /// Collect mem nodes from ~/.harness/memory.db.
@@ -1312,7 +1266,18 @@ pub fn run(_input: &HookInput) -> i32 {
     let partition_date = crate::shared::helpers::read_session_start_date().unwrap_or_else(today);
     let (active_skills, holdout_skills) =
         evolve::partition_holdout(&existing, &metrics, &partition_date);
-    evolve::update_skill_attribution(&mut metrics, &analysis, &active_skills, &holdout_skills);
+    let (exposed_skills, withheld_skills) = evolve::metrics::split_exposed(
+        active_skills,
+        CONFIG.model.inject_templates(),
+        evolve::is_synthesized,
+    );
+    evolve::update_skill_attribution(
+        &mut metrics,
+        &analysis,
+        &exposed_skills,
+        &holdout_skills,
+        &withheld_skills,
+    );
 
     // 7. Cross-project export
     evolve::export_to_global(&analysis, &analysis.failure_patterns);
@@ -1748,6 +1713,51 @@ fn detect_session_stack(observations: &[ObsRecord]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evolution_stats_counts_typed_records_and_nulls_unavailable_fields() {
+        let rec = |patterns: &[&str], seeded: u64| EvolutionRecord {
+            timestamp: "2026-01-01T00:00:00Z".into(),
+            observations: 10,
+            success_rate: 0.5,
+            avg_score: 0.5,
+            error_patterns: HashMap::new(),
+            failure_patterns: patterns
+                .iter()
+                .map(|p| DetectedPattern {
+                    pattern_type: (*p).into(),
+                    description: String::new(),
+                    count: 1,
+                    involved_files: vec![],
+                    suggested_remediation: String::new(),
+                    implicated_components: vec![],
+                })
+                .collect(),
+            skills_seeded: seeded,
+            skills_rolled_back: 0,
+            total_evolved: 0,
+            analysis_summary: String::new(),
+            edit_type: EditType::AddSkill,
+            manifests: vec![],
+        };
+        let records = [
+            rec(&["thrashing"], 2),
+            rec(&["thrashing", "repeated_same_error"], 1),
+            rec(&[], 0),
+        ];
+        let v = evolution_stats(&records, 4);
+        assert_eq!(v["total_sessions"], 3);
+        assert_eq!(v["patterns_detected"], 2);
+        assert_eq!(v["skills_generated"], 3);
+        assert_eq!(v["stagnation_count"], 4);
+        assert_eq!(
+            v["pattern_frequency"],
+            serde_json::json!({"thrashing": 2, "repeated_same_error": 1})
+        );
+        for k in ["trend_last10", "recent_weak_tools", "recent_seeded_skills"] {
+            assert!(v[k].is_null(), "{k} must be null");
+        }
+    }
 
     #[test]
     fn epoch_days_to_ymd_known_date() {

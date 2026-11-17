@@ -422,6 +422,28 @@ pub fn run(input: &HookInput) -> i32 {
         }
     }
 
+    // Cold-start presets (#1): seed before enumerating/injecting so a first
+    // session receives the presets it just created, subject to model policy
+    // and holdout below.
+    let stacks: Vec<&str> = STACK_FILES
+        .iter()
+        .filter(|(f, _)| wd.join(f).is_file())
+        .map(|(_, s)| *s)
+        .collect();
+
+    if list_dirs(&evolved_dir()).is_empty() && metrics.total_sessions == 0 && !stacks.is_empty() {
+        let applied = apply_cold_start_presets(&stacks);
+        if applied > 0 {
+            hint(
+                "resume",
+                &format!(
+                    "Cold-start: applied {applied} preset skill(s) for {}",
+                    stacks.join(", ")
+                ),
+            );
+        }
+    }
+
     // 3. Evolved skills — deterministic injection.
     //
     // Previously this emitted only the skill NAMES as a stderr hint and
@@ -514,26 +536,6 @@ pub fn run(input: &HookInput) -> i32 {
             crate::shared::helpers::mirror_line(&backlog);
         } else {
             println!("{backlog}");
-        }
-    }
-
-    // 4. Cold-start presets (#1)
-    let stacks: Vec<&str> = STACK_FILES
-        .iter()
-        .filter(|(f, _)| wd.join(f).is_file())
-        .map(|(_, s)| *s)
-        .collect();
-
-    if evolved.is_empty() && metrics.total_sessions == 0 && !stacks.is_empty() {
-        let applied = apply_cold_start_presets(&stacks);
-        if applied > 0 {
-            hint(
-                "resume",
-                &format!(
-                    "Cold-start: applied {applied} preset skill(s) for {}",
-                    stacks.join(", ")
-                ),
-            );
         }
     }
 
