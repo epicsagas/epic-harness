@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Cold-start presets apply in the first session** instead of the second. (#271)
 - **`epic harness snapshot` no longer creates or migrates the database** and rejects unknown flags; `--help` prints usage. (#261)
 - **Snapshot diff reports reordered scoring weights**, forked variants get unique ids that keep the parent's shape, and accept-synth reads the reward-hacking flag from the database and refuses when no metrics can be read. (#202, #209, #205)
+- **harness-mem MCP server follows JSON-RPC**: invalid input gets an error response, notifications get none, and `ping` is answered. (#235, #236)
+- **Memory recall keeps words containing AND, OR or NOT**, such as CORS or ALGORITHM. (#231)
+- **Eval commands keep empty and escaped arguments**: an unmatched quote now fails with a clear message instead of running, and `--init --json` and `--scaffold --json` print one valid JSON document. (#201, #199)
+
+### Changed
+- **Faster hook startup**: the observation dedup migration runs once instead of on every hook process (about 130 ms to under 5 ms per hook at 50,000 observations). Repeats of the same command in the same second with a different outcome or project are now kept. Existing databases are migrated once when first opened. (#188)
 
 ### Docs
 - **Team sync scope documented**: project syncs also copy agents to the global Codex, Antigravity, Cursor and OpenCode agent folders, and unlink does not remove those copies. (#248)

@@ -31,7 +31,8 @@ pub async fn insert_observation_pool(
     // Cross-process dedup: Codex fires each matched hook command twice per
     // tool call (measured on codex-cli 0.155.0), and each hook runs as its
     // own process, so the in-batch dedup key can never see the duplicate.
-    // The unique index on (session_id, timestamp, tool, COALESCE(action, '')) absorbs the
+    // The unique index idx_obs_dedup_v3 on (session_id, timestamp, tool,
+    // COALESCE(action, ''), COALESCE(project, ''), COALESCE(result, '')) absorbs the
     // race atomically — a WHERE NOT EXISTS pre-check lost it once two hook
     // processes SELECTed between each other's INSERTs.
     let res = sqlx::query(
@@ -68,12 +69,16 @@ pub async fn insert_observation_pool(
             "SELECT id FROM observations
              WHERE session_id = ? AND timestamp = ? AND tool = ?
                AND COALESCE(action, '') = COALESCE(?, '')
+               AND COALESCE(project, '') = COALESCE(?, '')
+               AND COALESCE(result, '') = COALESCE(?, '')
              ORDER BY id DESC LIMIT 1",
         )
         .bind(session_id)
         .bind(&rec.timestamp)
         .bind(&rec.tool)
         .bind(&rec.action)
+        .bind(project)
+        .bind(&rec.result)
         .fetch_optional(pool)
         .await
         .map_err(super::sqlx_err)?;
@@ -896,5 +901,31 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    /// An exact duplicate must resolve to its own row, not to a sibling that
+    /// differs only in `result`.
+    #[tokio::test]
+    async fn duplicate_resolves_to_row_with_same_result() {
+        let pool = test_pool().await;
+        let mut first = null_action_rec("2026-06-02T10:00:00Z", "Bash");
+        first.result = Some("success".into());
+        let mut second = first.clone();
+        second.result = Some("error".into());
+        let id1 = insert_observation_pool(&pool, &first, "s1", "p")
+            .await
+            .unwrap();
+        let id2 = insert_observation_pool(&pool, &second, "s1", "p")
+            .await
+            .unwrap();
+        assert_ne!(id1, id2, "different result is a distinct row");
+        let again = insert_observation_pool(&pool, &second, "s1", "p")
+            .await
+            .unwrap();
+        assert_eq!(again, id2, "duplicate of the second row returns its id");
+        let again = insert_observation_pool(&pool, &first, "s1", "p")
+            .await
+            .unwrap();
+        assert_eq!(again, id1, "duplicate of the first row returns its id");
     }
 }

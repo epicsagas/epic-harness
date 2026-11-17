@@ -26,6 +26,8 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
             .map_err(super::sqlx_err)?;
     }
 
+    migrate_obs_dedup_index(pool).await?;
+
     // Idempotent column migrations for pre-existing databases.
     // SQLite has no ADD COLUMN IF NOT EXISTS, so guard with pragma_table_info.
     ensure_column(
@@ -174,6 +176,68 @@ async fn migrate_skill_attribution_pk(pool: &AnyPool) -> io::Result<()> {
     Ok(())
 }
 
+/// Cross-process dedup index for `observations` (see `insert_observation_pool`).
+///
+/// Codex 0.155.x fires each matched hook command twice per tool call, and
+/// hooks are separate processes, so the in-batch key never sees the
+/// duplicate. Historical rows are collapsed first because the unique index
+/// cannot be created over them. SQLite treats NULLs as distinct in a unique
+/// index, so the key wraps `action`, `project` and `result` in
+/// `COALESCE(.., '')` to dedup NULL-valued rows too (a retried JSONL backfill
+/// re-inserts them). `project` and `result` are part of the key so two
+/// outcomes of the same call are both kept.
+///
+/// Runs once: the existence of `idx_obs_dedup_v3` is the gate, so a migrated
+/// database costs one read and no write lock. v3 is finer than v2, so
+/// migrating from v2 deletes nothing. The transaction holds the write lock,
+/// so a concurrent hook cannot insert a duplicate between the DELETE and the
+/// CREATE. The older action-keyed and v2 indexes are dropped.
+async fn migrate_obs_dedup_index(pool: &AnyPool) -> io::Result<()> {
+    let done: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_obs_dedup_v3'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    if done > 0 {
+        return Ok(());
+    }
+
+    let mut tx = pool.begin().await.map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "DELETE FROM observations WHERE id NOT IN (SELECT MIN(id) FROM observations \
+         GROUP BY session_id, timestamp, tool, COALESCE(action, ''), \
+         COALESCE(project, ''), COALESCE(result, ''))",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_dedup_v3 ON observations(\
+         session_id, timestamp, tool, COALESCE(action, ''), \
+         COALESCE(project, ''), COALESCE(result, ''))",
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(super::sqlx_err)?;
+
+    sqlx::query("DROP INDEX IF EXISTS idx_obs_dedup_v2")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    sqlx::query("DROP INDEX IF EXISTS idx_obs_dedup")
+        .execute(&mut *tx)
+        .await
+        .map_err(super::sqlx_err)?;
+
+    tx.commit().await.map_err(super::sqlx_err)?;
+    Ok(())
+}
+
 async fn migrate_metrics_state_pk(pool: &AnyPool) -> io::Result<()> {
     let done: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM _harness_meta WHERE key = 'metrics_pk_v2' AND value = '1'",
@@ -284,20 +348,6 @@ pub(crate) const DDL_SQLITE: &str = r#"
     -- Reflection's primary query is `WHERE project = ? AND timestamp BETWEEN ? AND ?`.
     -- Leading column must be `project` for the range scan to use this index.
     CREATE INDEX IF NOT EXISTS idx_obs_proj_ts    ON observations(project, timestamp);
-    -- Cross-process dedup (see insert_observation_pool): codex 0.155.x fires
-    -- each matched hook command twice per tool call, and hooks are separate
-    -- processes, so the in-batch key never sees the duplicate. Collapse
-    -- historical rows first — the unique index cannot be created over them.
-    -- SQLite treats NULLs as distinct in a unique index, so the key uses
-    -- COALESCE(action, '') to dedup action-less rows too (a retried JSONL
-    -- backfill re-inserts them). The old action-keyed index is dropped.
-    DROP INDEX IF EXISTS idx_obs_dedup;
-    DELETE FROM observations
-     WHERE id NOT IN (SELECT MIN(id) FROM observations
-                       GROUP BY session_id, timestamp, tool, COALESCE(action, ''));
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_obs_dedup_v2
-        ON observations(session_id, timestamp, tool, COALESCE(action, ''));
-
     CREATE TABLE IF NOT EXISTS sessions (
         id                INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp         TEXT NOT NULL,
@@ -470,6 +520,35 @@ pub(crate) const DDL_SQLITE: &str = r#"
 
 #[cfg(test)]
 mod tests {
+    async fn index_count(pool: &sqlx::AnyPool, name: &str) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM sqlite_master WHERE name = ?")
+            .bind(name)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn obs_count(pool: &sqlx::AnyPool) -> i64 {
+        sqlx::query_scalar("SELECT COUNT(*) FROM observations")
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    }
+
+    async fn insert_obs(pool: &sqlx::AnyPool, project: &str, result: &str) -> u64 {
+        sqlx::query(
+            "INSERT OR IGNORE INTO observations \
+             (timestamp, session_id, tool, tool_category, action, result, project) \
+             VALUES ('2026-06-02T10:00:00Z', 's', 'Bash', 'bash', 'ls', ?, ?)",
+        )
+        .bind(result)
+        .bind(project)
+        .execute(pool)
+        .await
+        .unwrap()
+        .rows_affected()
+    }
+
     #[tokio::test]
     async fn migrate_metrics_state_legacy_single_pk_to_composite() {
         // Regression: a legacy single-PK metrics_state must migrate to the
@@ -554,6 +633,8 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(old, 0, "old action-keyed index is dropped");
+        assert_eq!(index_count(&pool, "idx_obs_dedup_v2").await, 0);
+        assert_eq!(index_count(&pool, "idx_obs_dedup_v3").await, 1);
         let dup = sqlx::query(
             "INSERT INTO observations (timestamp, session_id, tool, tool_category, action)
              VALUES ('2026-06-02T10:00:00Z', 's', 'Read', 'read', NULL)",
@@ -564,5 +645,83 @@ mod tests {
             dup.is_err(),
             "NULL-action duplicate is rejected by the index"
         );
+    }
+
+    #[tokio::test]
+    async fn obs_dedup_gate_skips_delete_when_v3_index_exists() {
+        // Gate proof: with idx_obs_dedup_v3 present (even a non-unique one),
+        // init must not run the DELETE, so v3-identical rows survive.
+        let pool = super::super::pool::test_memory_pool().await;
+        super::init_schema_pool(&pool).await.unwrap();
+        sqlx::raw_sql(
+            "DROP INDEX idx_obs_dedup_v3;
+             INSERT INTO observations (timestamp, session_id, tool, tool_category)
+                VALUES ('2026-06-02T10:00:00Z', 's', 'Read', 'read'),
+                       ('2026-06-02T10:00:00Z', 's', 'Read', 'read');
+             CREATE INDEX idx_obs_dedup_v3 ON observations(id);",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        assert_eq!(obs_count(&pool).await, 2, "no DELETE ran behind the gate");
+    }
+
+    #[tokio::test]
+    async fn obs_dedup_v2_migrates_to_v3_without_losing_rows() {
+        let pool = super::super::pool::test_memory_pool().await;
+        sqlx::raw_sql(
+            "CREATE TABLE observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+                session_id TEXT NOT NULL, tool TEXT NOT NULL, tool_category TEXT NOT NULL,
+                action TEXT, result TEXT, score REAL, dim_success REAL, dim_quality REAL,
+                dim_cost REAL, failure_category TEXT, error_snippet TEXT, file_ext TEXT,
+                sequence_id INTEGER, pipeline_id TEXT, project TEXT);
+             CREATE UNIQUE INDEX idx_obs_dedup_v2
+                ON observations(session_id, timestamp, tool, COALESCE(action, ''));
+             INSERT INTO observations (timestamp, session_id, tool, tool_category, action)
+                VALUES ('2026-06-02T10:00:00Z', 's', 'Read', 'read', NULL),
+                       ('2026-06-02T10:00:01Z', 's', 'Read', 'read', NULL),
+                       ('2026-06-02T10:00:00Z', 's', 'Bash', 'bash', 'ls');",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        super::init_schema_pool(&pool).await.unwrap();
+
+        assert_eq!(obs_count(&pool).await, 3, "v3 is finer, nothing is deleted");
+        assert_eq!(index_count(&pool, "idx_obs_dedup_v2").await, 0);
+        assert_eq!(index_count(&pool, "idx_obs_dedup_v3").await, 1);
+    }
+
+    #[tokio::test]
+    async fn obs_dedup_key_is_outcome_aware() {
+        let pool = super::super::pool::test_memory_pool().await;
+        super::init_schema_pool(&pool).await.unwrap();
+
+        assert_eq!(insert_obs(&pool, "a", "success").await, 1);
+        assert_eq!(insert_obs(&pool, "a", "error").await, 1, "result differs");
+        assert_eq!(
+            insert_obs(&pool, "b", "success").await,
+            1,
+            "project differs"
+        );
+        assert_eq!(
+            insert_obs(&pool, "a", "success").await,
+            0,
+            "exact duplicate"
+        );
+        assert_eq!(obs_count(&pool).await, 3);
+    }
+
+    #[tokio::test]
+    async fn init_schema_pool_is_repeatable() {
+        let pool = super::super::pool::test_memory_pool().await;
+        for _ in 0..3 {
+            super::init_schema_pool(&pool).await.unwrap();
+        }
     }
 }
