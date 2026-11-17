@@ -490,3 +490,21 @@ fn issue_233_malformed_unicode_timestamp_is_rejected_without_panicking() {
     }
     assert_eq!(parse_iso_to_secs("2024-01-01T00:00:00Z"), 1_704_067_200);
 }
+
+#[tokio::test]
+async fn issue_231_recall_keeps_operator_substrings_in_words() {
+    let pool = mem_pool().await;
+    for (id, title) in [("algorithm", "ALGORITHM"), ("cors", "CORS")] {
+        write_node_pool(&pool, &scoped_node(id, title, "x", &[], &[]))
+            .await
+            .unwrap();
+    }
+    assert_eq!(
+        recall_ids(&pool, None, Some("ALGORITHM"), 5).await,
+        vec!["algorithm".to_string()]
+    );
+    assert_eq!(
+        recall_ids(&pool, None, Some("CORS"), 5).await,
+        vec!["cors".to_string()]
+    );
+}

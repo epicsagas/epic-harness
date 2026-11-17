@@ -423,7 +423,6 @@ fn call_tool(pool: &AnyPool, name: &str, args: &Value) -> Value {
 
 #[derive(Deserialize)]
 struct RpcRequest {
-    #[allow(dead_code)]
     jsonrpc: String,
     id: Option<Value>,
     method: String,
@@ -436,7 +435,19 @@ fn send(obj: &Value) {
     let _ = out.flush();
 }
 
+fn send_error(id: Value, code: i64, message: &str) {
+    send(&json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": { "code": code, "message": message }
+    }));
+}
+
 fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
+    // Notifications (no id, or a null id which MCP forbids) never get a response.
+    if msg.id.is_none() {
+        return;
+    }
     match msg.method.as_str() {
         "initialize" => {
             let resp = json!({
@@ -450,9 +461,7 @@ fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
             });
             send(&resp);
         }
-        "notifications/initialized" => {
-            // client notification, no response
-        }
+        "ping" => send(&json!({ "jsonrpc": "2.0", "id": msg.id, "result": {} })),
         "tools/list" => {
             let resp = json!({
                 "jsonrpc": "2.0",
@@ -480,16 +489,11 @@ fn handle_message(pool: &AnyPool, msg: &RpcRequest) {
             });
             send(&resp);
         }
-        _ => {
-            if msg.id.is_some() {
-                let resp = json!({
-                    "jsonrpc": "2.0",
-                    "id": msg.id,
-                    "error": { "code": -32601, "message": "Method not found" }
-                });
-                send(&resp);
-            }
-        }
+        _ => send_error(
+            msg.id.clone().unwrap_or(Value::Null),
+            -32601,
+            "Method not found",
+        ),
     }
 }
 
@@ -519,11 +523,23 @@ pub fn run_mcp_server() -> i32 {
         if line.is_empty() {
             continue;
         }
-        match serde_json::from_str::<RpcRequest>(&line) {
-            Ok(msg) => handle_message(&pool, &msg),
-            Err(_) => {
-                // Ignore parse errors silently (per MCP spec)
-            }
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            send_error(Value::Null, -32700, "Parse error");
+            continue;
+        };
+        let Some(obj) = value.as_object() else {
+            send_error(Value::Null, -32600, "Invalid Request");
+            continue;
+        };
+        let has_id = obj.contains_key("id");
+        let err_id = match obj.get("id") {
+            Some(id) if id.is_string() || id.is_number() => id.clone(),
+            _ => Value::Null,
+        };
+        match serde_json::from_value::<RpcRequest>(value) {
+            Ok(msg) if msg.jsonrpc == "2.0" => handle_message(&pool, &msg),
+            _ if has_id => send_error(err_id, -32600, "Invalid Request"),
+            _ => {}
         }
     }
     0
