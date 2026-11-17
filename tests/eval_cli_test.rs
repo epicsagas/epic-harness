@@ -331,3 +331,33 @@ fn nested_eval_of_another_config_is_allowed() {
     let out = env.run(&["--json"]);
     assert_eq!(out.code, 0, "{} {}", out.stdout, out.stderr);
 }
+
+// ── #199 init and scaffold JSON output ───────────────────────────────
+
+#[test]
+fn init_and_scaffold_json_print_one_document() {
+    let mut env = Env::new();
+    // A quote and a space in the path must survive JSON escaping.
+    env.harness = env.root.join("harness \"root\"");
+    fs::create_dir_all(&env.harness).unwrap();
+
+    let out = env.run(&["--init", "--json"]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let doc: serde_json::Value = serde_json::from_str(&out.stdout)
+        .unwrap_or_else(|e| panic!("init stdout is not one JSON document: {e}: {}", out.stdout));
+    assert_eq!(doc["action"], "init");
+    let path = PathBuf::from(doc["path"].as_str().unwrap());
+    assert!(path.starts_with(&env.harness), "{path:?}");
+    assert!(path.exists());
+
+    fs::write(env.cwd.join("package.json"), "{}").unwrap();
+    let out = env.run(&["--scaffold", "--json"]);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let doc: serde_json::Value = serde_json::from_str(&out.stdout).unwrap_or_else(|e| {
+        panic!(
+            "scaffold stdout is not one JSON document: {e}: {}",
+            out.stdout
+        )
+    });
+    assert_eq!(doc["action"], "scaffold");
+}

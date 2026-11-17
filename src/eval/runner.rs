@@ -351,7 +351,16 @@ struct CmdOutput {
 
 fn exec_command(cmd: &str) -> CmdOutput {
     // Split command into program + args for safe execution
-    let parts = shell_words(cmd);
+    let parts = match shell_words(cmd) {
+        Ok(p) => p,
+        Err(e) => {
+            return CmdOutput {
+                exit_code: 1,
+                stdout: String::new(),
+                stderr: e,
+            };
+        }
+    };
     let (program, args) = match parts.split_first() {
         Some((p, a)) => (p.as_str(), a.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
         None => {
@@ -384,29 +393,64 @@ fn exec_command(cmd: &str) -> CmdOutput {
     }
 }
 
-/// Simple shell word splitting (handles quoted strings).
-fn shell_words(s: &str) -> Vec<String> {
+/// Shell word splitting (handles quoted strings). Quotes keep empty arguments
+/// (`""`). The only escapes are `\"` and, inside double quotes, `\\`, so
+/// Windows paths keep their backslashes. An unmatched quote is an error.
+fn shell_words(s: &str) -> Result<Vec<String>, String> {
     let mut words = Vec::new();
     let mut current = String::new();
+    let mut has_token = false;
     let mut in_single = false;
     let mut in_double = false;
+    let mut chars = s.chars().peekable();
 
-    for ch in s.chars() {
-        match ch {
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            ' ' | '\t' if !in_single && !in_double => {
-                if !current.is_empty() {
-                    words.push(std::mem::take(&mut current));
+    while let Some(ch) = chars.next() {
+        if in_single {
+            if ch == '\'' {
+                in_single = false;
+            } else {
+                current.push(ch);
+            }
+        } else if in_double {
+            match ch {
+                '"' => in_double = false,
+                '\\' if matches!(chars.peek(), Some('"' | '\\')) => current.extend(chars.next()),
+                _ => current.push(ch),
+            }
+        } else {
+            match ch {
+                ' ' | '\t' => {
+                    if has_token {
+                        words.push(std::mem::take(&mut current));
+                        has_token = false;
+                    }
+                }
+                '\'' => {
+                    in_single = true;
+                    has_token = true;
+                }
+                '"' => {
+                    in_double = true;
+                    has_token = true;
+                }
+                '\\' if chars.peek() == Some(&'"') => {
+                    current.extend(chars.next());
+                    has_token = true;
+                }
+                _ => {
+                    current.push(ch);
+                    has_token = true;
                 }
             }
-            _ => current.push(ch),
         }
     }
-    if !current.is_empty() {
+    if in_single || in_double {
+        return Err(format!("unmatched quote in command: {s}"));
+    }
+    if has_token {
         words.push(current);
     }
-    words
+    Ok(words)
 }
 
 /// Parse test output for pass/fail counts.
@@ -499,6 +543,41 @@ fn truncate(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn words(s: &str) -> Vec<String> {
+        shell_words(s).unwrap()
+    }
+
+    #[test]
+    fn shell_words_golden() {
+        assert_eq!(words(r#"echo """#), ["echo", ""]);
+        assert_eq!(words("echo '' x"), ["echo", "", "x"]);
+        assert_eq!(words(r#"cmd "a b" c"#), ["cmd", "a b", "c"]);
+        assert_eq!(words(r#"cmd a\"b"#), ["cmd", "a\"b"]);
+        assert_eq!(words(r#"cmd "say \"hi\"""#), ["cmd", "say \"hi\""]);
+        assert_eq!(words(r#"cmd "C:\\dir""#), ["cmd", r"C:\dir"]);
+        assert_eq!(words(r"type C:\dir\x.txt"), ["type", r"C:\dir\x.txt"]);
+        assert_eq!(words(r"ls \\server\share"), ["ls", r"\\server\share"]);
+        assert_eq!(words("cmd 'it''s'"), ["cmd", "its"]);
+        assert_eq!(words("a\tb  c"), ["a", "b", "c"]);
+        assert!(words("").is_empty());
+        assert!(words(" \t ").is_empty());
+    }
+
+    #[test]
+    fn shell_words_unmatched_quote_is_an_error() {
+        for cmd in [r#"cmd "x"#, "cmd 'x"] {
+            let err = shell_words(cmd).unwrap_err();
+            assert!(err.contains("unmatched quote"), "{err}");
+        }
+    }
+
+    #[test]
+    fn exec_command_reports_unmatched_quote() {
+        let out = exec_command(r#"echo "x"#);
+        assert_eq!(out.exit_code, 1);
+        assert!(out.stderr.contains("unmatched quote"), "{}", out.stderr);
+    }
 
     fn dim(name: &str, score: f64, verdict: &str) -> DimResult {
         DimResult {
