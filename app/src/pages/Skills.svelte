@@ -1,41 +1,6 @@
 <script lang="ts">
   import { tStore } from '$lib/i18n.js';
-
-  type SkillDescKey =
-    | 'skillDispatchDesc' | 'skillTddDesc' | 'skillDebugDesc' | 'skillSecureDesc'
-    | 'skillVerifyDesc' | 'skillSimplifyDesc' | 'skillPerfDesc' | 'skillReviewDesc'
-    | 'skillRefactorDesc' | 'skillMigrateDesc' | 'skillApiDesignDesc' | 'skillDocDesc'
-    | 'skillTestGenDesc' | 'skillCiDesc' | 'skillDeployDesc'
-    | 'skillSpecDesc' | 'skillGoDesc' | 'skillCheckDesc' | 'skillShipDesc';
-
-  interface Skill {
-    name: string;
-    descKey: SkillDescKey;
-    special?: boolean;
-    pipeline?: boolean;
-  }
-
-  const skills: Skill[] = [
-    { name: '_dispatch', descKey: 'skillDispatchDesc', special: true },
-    { name: 'spec',      descKey: 'skillSpecDesc',     pipeline: true },
-    { name: 'go',        descKey: 'skillGoDesc',       pipeline: true },
-    { name: 'check',     descKey: 'skillCheckDesc',    pipeline: true },
-    { name: 'ship',      descKey: 'skillShipDesc',     pipeline: true },
-    { name: 'tdd',       descKey: 'skillTddDesc' },
-    { name: 'debug',     descKey: 'skillDebugDesc' },
-    { name: 'secure',    descKey: 'skillSecureDesc' },
-    { name: 'verify',    descKey: 'skillVerifyDesc' },
-    { name: 'simplify',  descKey: 'skillSimplifyDesc' },
-    { name: 'perf',      descKey: 'skillPerfDesc' },
-    { name: 'review',    descKey: 'skillReviewDesc' },
-    { name: 'refactor',  descKey: 'skillRefactorDesc' },
-    { name: 'migrate',   descKey: 'skillMigrateDesc' },
-    { name: 'api-design',descKey: 'skillApiDesignDesc' },
-    { name: 'doc',       descKey: 'skillDocDesc' },
-    { name: 'test-gen',  descKey: 'skillTestGenDesc' },
-    { name: 'ci',        descKey: 'skillCiDesc' },
-    { name: 'deploy',    descKey: 'skillDeployDesc' },
-  ];
+  import { SKILLS, type Skill } from '$lib/skillCatalog.js';
 
   let copiedSkill = $state<string | null>(null);
 
@@ -68,7 +33,7 @@
 </div>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;">
-  {#each skills as skill}
+  {#each SKILLS as skill}
     <div
       class="skill-card"
       role="button"

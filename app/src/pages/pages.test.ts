@@ -1,7 +1,24 @@
+// @vitest-environment jsdom
 // Tests for helper logic used in Memory, Integrations, Settings, Hooks pages.
 
-import { describe, it, expect } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { HarnessMetrics, GraphData, IntegrationStatus } from '../lib/harness.js';
+import { selectedProject } from '$lib/stores/project.js';
+import Settings from './Settings.svelte';
+
+const api = vi.hoisted(() => ({ metrics: vi.fn(), snapshots: vi.fn(), patterns: vi.fn() }));
+
+vi.mock('../lib/harness.js', () => ({
+  getHarnessMetrics: api.metrics,
+  getSessionSnapshots: api.snapshots,
+  getGlobalPatterns: api.patterns,
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 // ── Memory page helpers ────────────────────────────────────────────────────────
 
@@ -167,6 +184,23 @@ describe('Settings — scoreWeightTotal', () => {
   });
   it('returns 0 for empty weights', () => {
     expect(scoreWeightTotal({})).toBe(0);
+  });
+});
+
+describe('Settings — reload after error', () => {
+  it('shows content and no error after a successful load following a failed one', async () => {
+    api.metrics
+      .mockRejectedValueOnce(new Error('Previous project unavailable'))
+      .mockResolvedValue({ ...mockMetrics });
+    api.snapshots.mockResolvedValue([]);
+    api.patterns.mockResolvedValue([]);
+    selectedProject.set('alpha');
+    const view = render(Settings);
+    expect(await screen.findByText('Error: Previous project unavailable')).toBeTruthy();
+    selectedProject.set('beta');
+    await waitFor(() => expect(api.metrics).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('Error: Previous project unavailable')).toBeNull());
+    await waitFor(() => expect(view.container.querySelectorAll('.card').length).toBeGreaterThan(0));
   });
 });
 
