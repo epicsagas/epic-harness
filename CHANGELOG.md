@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Absolute paths outside the project are fully masked in observations**: paths with spaces, UNC paths, and rooted Windows paths are recorded as `<PATH>` instead of partly unmasked. (#168)
+- **Deleting an edge no longer removes a node's edges**: `DELETE /api/edges/{id}` with a node id now returns 404 instead of deleting every edge of that node, and creating an edge in the desktop app works again. Edge identity is still open in #227.
+- **`epic team unlink` and `delete` refuse another org's team**: when the local agent files belong to a different org than `--org`, nothing is removed. (#249)
+- **Re-running team creation keeps the team type in sync**: a new `--type` is saved to the team config, and without `--type` an existing team keeps its type. (#250)
+
+### Docs
+- **Team sync scope documented**: project syncs also copy agents to the global Codex, Antigravity, Cursor and OpenCode agent folders, and unlink does not remove those copies. (#248)
+
 ## [0.9.0] - 2026-11-17
 
 This release also ships every change listed under 0.8.14 and 0.8.15 below. Those versions were tagged but not published separately.

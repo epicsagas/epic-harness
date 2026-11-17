@@ -105,6 +105,8 @@ epic team delete backend --global    # permanently delete from org store + local
 epic team history backend reviewer   # list .history/ backups for an agent
 ```
 
+Without `--global`, `sync`, `link` and team creation also copy the agents into the global agent directories of any installed Codex, Antigravity, Cursor and OpenCode (for example `~/.codex/agents/{team}/`). `unlink` and `delete` only remove the project-local `.claude/agents/{team}/` and `.codex/agents/{team}/` copies, not those global copies.
+
 ### Flags
 
 | Flag | Description |
@@ -112,6 +114,7 @@ epic team history backend reviewer   # list .history/ backups for an agent
 | `--org <name>` | Target a specific org (default: `"epic"`) |
 | `--playbook` | `show` only: print full accumulated playbook |
 | `--global` | `sync` only: install agents to `~/.claude/agents/` instead of project-local `.claude/agents/` |
+| (no `--global`) | `sync`, `link`, create: also copies agents into the global Codex, Antigravity, Cursor and OpenCode agent directories; `unlink` and `delete` do not remove those copies |
 
 ---
 

@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::store::{
     TeamConfig, agent_md_to_codex_toml, append_playbook, build_agent_file, build_playbook_section,
@@ -540,6 +540,16 @@ fn sync_to_dest(org: &str, team: &str, global: bool) -> io::Result<u32> {
 
 // ── cmd_default: interactive design flow ──────────────
 
+/// Default team type: the stored type of an existing team, else the project suggestion.
+fn default_team_type(org: &str, team_name: &str, suggested: &str) -> String {
+    if team_exists(org, team_name)
+        && let Some(c) = load_team_config(org, team_name)
+    {
+        return c.team_type;
+    }
+    suggested.to_string()
+}
+
 fn cmd_default(org: &str, args: &[String]) -> i32 {
     let (_, flags) = parse_flags(args);
     let yes = flags.contains_key("yes");
@@ -578,7 +588,7 @@ fn cmd_default(org: &str, args: &[String]) -> i32 {
         let team_type = flags
             .get("type")
             .cloned()
-            .unwrap_or_else(|| suggested_type.to_string());
+            .unwrap_or_else(|| default_team_type(org, &team_name, suggested_type));
         if !valid_types.contains(&team_type.as_str()) {
             eprintln!(
                 "error: invalid --type '{}'. Must be one of: stream, platform, enabling, subsystem",
@@ -653,13 +663,14 @@ fn cmd_default(org: &str, args: &[String]) -> i32 {
     }
 
     // Team type
+    let default_type = default_team_type(org, &team_name, suggested_type);
     let team_type = loop {
         let input = prompt(&format!(
             "Team type (stream/platform/enabling/subsystem) [{}]: ",
-            suggested_type
+            default_type
         ));
         let t = if input.is_empty() {
-            suggested_type.to_string()
+            default_type.clone()
         } else {
             input
         };
@@ -800,6 +811,7 @@ fn cmd_default_write(
         println!("+ Playbook updated");
 
         if let Some(mut config) = load_team_config(org, team_name) {
+            config.team_type = team_type.to_string();
             let cwd_path = std::env::current_dir()
                 .ok()
                 .and_then(|p| p.canonicalize().ok().or(Some(p)))
@@ -1242,6 +1254,57 @@ fn cmd_unlink(args: &[String]) -> i32 {
 
 // ── cmd_delete ────────────────────────────────────────
 
+/// Orgs recorded in the local Claude (`*.md`) and Codex (`*.toml`) mirrors of a team.
+/// Invalid org names are skipped; an unreadable file is an error so deletion never
+/// proceeds on partial ownership information.
+fn local_team_orgs(claude_dir: &Path, codex_dir: &Path) -> io::Result<Vec<String>> {
+    let mut owners: Vec<String> = Vec::new();
+    for dir in [claude_dir, codex_dir] {
+        if !dir.is_dir() {
+            continue;
+        }
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_file() {
+                paths.push(entry.path());
+            }
+        }
+        paths.sort();
+        for path in paths {
+            let org = match path.extension().and_then(|e| e.to_str()) {
+                Some("md") => read_org_from_agent_file(&fs::read_to_string(&path)?),
+                Some("toml") => read_org_from_codex_agent_toml(&fs::read_to_string(&path)?),
+                _ => None,
+            };
+            if let Some(org) = org
+                && validate_org_name(&org).is_ok()
+                && !owners.contains(&org)
+            {
+                owners.push(org);
+            }
+        }
+    }
+    Ok(owners)
+}
+
+/// Pick the org for unlink/delete: `--org` flag, else the first local owner, else the
+/// default. Errors with the first local owner that differs from the chosen org.
+fn resolve_unlink_org(
+    flag: Option<&str>,
+    owners: &[String],
+    default: &str,
+) -> Result<String, String> {
+    let org = flag
+        .or_else(|| owners.first().map(String::as_str))
+        .unwrap_or(default)
+        .to_string();
+    match owners.iter().find(|o| **o != org) {
+        Some(owner) => Err(owner.clone()),
+        None => Ok(org),
+    }
+}
+
 fn cmd_delete(args: &[String]) -> i32 {
     let (pos, flags) = parse_flags(args);
     let team = match pos.first() {
@@ -1266,25 +1329,29 @@ fn cmd_delete(args: &[String]) -> i32 {
     // too, or the team stays live in Codex after being unlinked.
     let local_codex_dir = cwd.join(".codex").join("agents").join(&team);
 
-    // Resolve org: --org flag > frontmatter in any local agent file > "epic"
-    let org = flags.get("org").cloned().unwrap_or_else(|| {
-        // Try reading org from frontmatter of any synced agent file
-        if local_agents_dir.is_dir()
-            && let Ok(entries) = fs::read_dir(&local_agents_dir)
-        {
-            for entry in entries.flatten() {
-                if entry.file_type().map(|t| t.is_file()).unwrap_or(false)
-                    && entry.path().extension().and_then(|e| e.to_str()) == Some("md")
-                    && let Ok(content) = fs::read_to_string(entry.path())
-                    && let Some(org) = read_org_from_agent_file(&content)
-                    && validate_org_name(&org).is_ok()
-                {
-                    return org;
-                }
-            }
+    // Resolve org before any removal: --org flag > local mirror owner > default. A
+    // local mirror owned by another org blocks the operation.
+    let owners = match local_team_orgs(&local_agents_dir, &local_codex_dir) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("error: cannot read local team agents: {}", e);
+            return 1;
         }
-        default_org()
-    });
+    };
+    let flag_org = flags.get("org").map(String::as_str);
+    let org = match resolve_unlink_org(flag_org, &owners, &default_org()) {
+        Ok(org) => org,
+        Err(owner) => {
+            let org = flag_org
+                .or_else(|| owners.first().map(String::as_str))
+                .unwrap_or_default();
+            eprintln!(
+                "error: team '{}' in this project belongs to org '{}', not '{}'",
+                team, owner, org
+            );
+            return 1;
+        }
+    };
 
     if let Err(e) = validate_org_name(&org) {
         eprintln!("error: {}", e);
@@ -1994,5 +2061,98 @@ mod tests {
             projects.contains(&relative),
             "relative (legacy) entry must be kept"
         );
+    }
+
+    // ── unlink ownership / team type persistence ──────────
+
+    #[test]
+    fn test_resolve_unlink_org_golden() {
+        let own = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            resolve_unlink_org(Some("a"), &own(&["a"]), "d"),
+            Ok("a".into())
+        );
+        assert_eq!(
+            resolve_unlink_org(Some("a"), &own(&["b"]), "d"),
+            Err("b".into())
+        );
+        assert_eq!(resolve_unlink_org(None, &own(&["b"]), "d"), Ok("b".into()));
+        assert_eq!(resolve_unlink_org(None, &own(&[]), "d"), Ok("d".into()));
+        assert_eq!(
+            resolve_unlink_org(Some("a"), &own(&[]), "d"),
+            Ok("a".into())
+        );
+        assert_eq!(
+            resolve_unlink_org(None, &own(&["b", "c"]), "d"),
+            Err("c".into())
+        );
+    }
+
+    #[test]
+    fn test_local_team_orgs_reads_md_and_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let claude = tmp.path().join("claude");
+        let codex = tmp.path().join("codex");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::create_dir_all(&codex).unwrap();
+        std::fs::write(
+            claude.join("tester.md"),
+            "---\nname: \"tester\"\norg: \"a\"\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            codex.join("tester.toml"),
+            "name = \"tester\"\norg = \"b\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(local_team_orgs(&claude, &codex).unwrap(), vec!["a", "b"]);
+        let missing = tmp.path().join("missing");
+        assert!(local_team_orgs(&missing, &missing).unwrap().is_empty());
+    }
+
+    /// Re-running create on an existing team with a different type persists the new type.
+    #[test]
+    fn test_cmd_default_write_persists_team_type() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+        seed_team(tmp.path(), "typeorg", "alpha");
+        let project_dir = tmp.path().join("myproject");
+        std::fs::create_dir_all(&project_dir).unwrap();
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(&project_dir).unwrap();
+
+        let ctx = ProjectContext {
+            name: "myproject".to_string(),
+            stacks: vec![],
+        };
+        let code = cmd_default_write("typeorg", &ctx, "alpha", "platform", "Test mission", true);
+        assert_eq!(code, 0);
+        assert_eq!(
+            load_team_config("typeorg", "alpha").unwrap().team_type,
+            "platform"
+        );
+    }
+
+    /// With a stored type and no --type, the stored type is the default.
+    #[test]
+    fn test_default_team_type_uses_stored_type() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: HOME_LOCK serializes HOME mutation across team tests
+        unsafe {
+            env::set_var("HOME", tmp.path());
+        }
+        seed_team(tmp.path(), "typeorg", "alpha");
+        let mut config = load_team_config("typeorg", "alpha").unwrap();
+        config.team_type = "platform".to_string();
+        save_team_config(&config).unwrap();
+
+        assert_eq!(default_team_type("typeorg", "alpha", "stream"), "platform");
+        assert_eq!(default_team_type("typeorg", "ghost", "stream"), "stream");
     }
 }
