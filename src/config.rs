@@ -168,6 +168,8 @@ pub struct EvolutionConfig {
     pub rollback_degradation: f64,
 
     /// If best_score is below this floor, always rollback on stagnation.
+    /// Applies only to pre-epoch scores (`score_epoch` 0); failure-aware
+    /// scores roll back on real degradation only.
     pub rollback_best_floor: f64,
 
     /// Number of recent sessions averaged for stagnation detection.

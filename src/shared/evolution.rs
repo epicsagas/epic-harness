@@ -275,6 +275,15 @@ pub struct Metrics {
     /// suggesting the evolution is gaming the metric rather than improving outcomes.
     #[serde(default)]
     pub reward_hacking_suspected: bool,
+    /// Score baseline generation. Bumped by `check_stagnation` when the score
+    /// distribution changes (tool failures start being recorded), so scores
+    /// from the old regime are not compared against the new one.
+    #[serde(default)]
+    pub score_epoch: u32,
+    /// Timestamp (`now_iso()`) of the last epoch bump. The rolling average
+    /// only reads `score_history` entries at or after it.
+    #[serde(default)]
+    pub score_epoch_since: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -319,6 +328,9 @@ pub fn default_metrics() -> Metrics {
         epoch_class: None,
         last_error_context: None,
         reward_hacking_suspected: false,
+        // A fresh baseline has no old-regime scores to discount.
+        score_epoch: crate::evolve::metrics::SCORE_EPOCH,
+        score_epoch_since: None,
     }
 }
 

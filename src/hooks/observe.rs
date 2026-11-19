@@ -227,6 +227,15 @@ fn track_agent_spawn(input: &HookInput) {
         _ => {}
     }
 
+    // A failed Agent call carries no output container, so without this it
+    // would take the PreToolUse branch and be marked Running again.
+    if input.is_failure_event() {
+        if let Err(e) = orchestrate::run_post_checked(input) {
+            eprintln!("[harness] agent track post error: {e}");
+        }
+        return;
+    }
+
     let has_output =
         input.tool_output.is_some() || input.tool_response.is_some() || input.tool_result.is_some();
 
@@ -403,6 +412,13 @@ fn resolve_action(v: &serde_json::Value) -> String {
         })
 }
 
+fn tool_name_is_agent(input: &HookInput) -> bool {
+    input
+        .tool_name
+        .as_deref()
+        .is_some_and(|t| t.eq_ignore_ascii_case("agent"))
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_OBSERVE) {
         return 0;
@@ -447,6 +463,15 @@ pub fn run(input: &HookInput) -> i32 {
         pipeline_id: super::common::detect_active_orbit_id(),
     };
 
+    // An interrupted call is a user abort, not a tool failure. A row without a
+    // result would count as a success in the stats, so write nothing.
+    if input.is_failure_event() && input.interrupted() {
+        if tool_name_is_agent(input) {
+            track_agent_spawn(input);
+        }
+        return 0;
+    }
+
     // Resolve tool output: tool_output (structured) → tool_response (Claude Code canonical) → tool_result (legacy)
     // Keeps stdout and stderr apart: a read-only command's stdout is quoted
     // material, while its stderr is the command's own diagnostic. Merging them
@@ -489,7 +514,24 @@ pub fn run(input: &HookInput) -> i32 {
         })
     };
 
-    if let Some((output, stderr, streams_separated)) = resolved_output {
+    if input.is_failure_event() {
+        // PostToolUseFailure: `error` is the host's own diagnostic, so the
+        // quoted-material rules of the success path do not apply.
+        let text = input.failure_text().unwrap_or("");
+        let cat = classify_failure(text).unwrap_or("runtime_error");
+        let dims = ScoreDimensions {
+            tool_success: 0.0,
+            output_quality: failure_quality(Some(cat)),
+            execution_cost: 1.0,
+        };
+        record.failure_category = Some(cat.into());
+        record.result = Some("error".into());
+        record.dimensions = Some(dims);
+        record.score = Some(compute_score(&dims));
+        if !text.is_empty() {
+            record.error_snippet = Some(mask_snippet(text, 500));
+        }
+    } else if let Some((output, stderr, streams_separated)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
         // Host-reported error text of a failed read/glob/grep, if any.
@@ -641,7 +683,9 @@ pub fn run(input: &HookInput) -> i32 {
 
     // GateGuard: emit concrete investigation hints for Edit/Write to force
     // fact-based verification instead of generic "are you sure?" prompts.
-    generate_investigation_hints(input.tool_name.as_deref().unwrap_or(""), action.as_deref());
+    if !input.is_failure_event() {
+        generate_investigation_hints(input.tool_name.as_deref().unwrap_or(""), action.as_deref());
+    }
 
     // Agent tracking: record spawn/completion to orchestrator state for
     // dashboard display. Always active — no EPIC_ORCHESTRATION gate.
@@ -656,11 +700,12 @@ pub fn run(input: &HookInput) -> i32 {
         track_agent_spawn(input);
 
         // Timeout detection still gated by EPIC_ORCHESTRATION
-        if let Some(agent_id) = input
-            .tool_input
-            .as_ref()
-            .and_then(|v| v.get("agent_id"))
-            .and_then(|v| v.as_str())
+        if !input.is_failure_event()
+            && let Some(agent_id) = input
+                .tool_input
+                .as_ref()
+                .and_then(|v| v.get("agent_id"))
+                .and_then(|v| v.as_str())
             && let Some(timeout_msg) = check_agent_timeout(agent_id)
         {
             hint("agent-timeout", &timeout_msg);

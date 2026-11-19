@@ -68,6 +68,41 @@ fn claude_observes_tool_completion() {
     );
 }
 
+/// Claude fires `PostToolUse` on success only; failed calls arrive as
+/// `PostToolUseFailure`, so without this entry no failure is ever observed.
+#[test]
+fn claude_observes_tool_failures() {
+    let m = manifest(CLAUDE);
+    let cmds = commands_for(&m, "PostToolUseFailure", "*");
+    assert!(
+        cmds.iter().any(|c| invokes(c, "observe")),
+        "PostToolUseFailure/* must invoke observe; got {cmds:?}"
+    );
+    let handlers = m["hooks"]["PostToolUseFailure"][0]["hooks"]
+        .as_array()
+        .unwrap();
+    assert!(
+        handlers.iter().all(|h| h["async"] == true),
+        "the failure observer must be async like the success observer"
+    );
+}
+
+#[test]
+fn grok_observes_tool_failures() {
+    let m = manifest(GROK);
+    let cmds = commands_for(&m, "PostToolUseFailure", "*");
+    assert!(
+        cmds.iter().any(|c| invokes(c, "observe")),
+        "PostToolUseFailure/* must invoke observe; got {cmds:?}"
+    );
+}
+
+/// Codex has no failure event; it fires `PostToolUse` for non-zero Bash exits.
+#[test]
+fn codex_has_no_tool_failure_event() {
+    assert!(manifest(CODEX)["hooks"].get("PostToolUseFailure").is_none());
+}
+
 /// Guard must not be dragged onto the Agent matcher: it is a Bash gate, and
 /// running it per subagent spawn would cost a process for nothing.
 #[test]

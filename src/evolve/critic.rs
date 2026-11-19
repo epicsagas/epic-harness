@@ -126,6 +126,8 @@ mod tests {
             epoch_class: Some(EpochClass::StableSuccess),
             last_error_context: None,
             reward_hacking_suspected: suspected,
+            score_epoch: 1,
+            score_epoch_since: None,
         }
     }
 

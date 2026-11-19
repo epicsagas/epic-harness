@@ -187,7 +187,13 @@ fn main() {
     let input: hooks::common::HookInput = if stdin_buf.is_empty() {
         hooks::common::HookInput::default()
     } else {
-        serde_json::from_str(&stdin_buf).unwrap_or_default()
+        serde_json::from_str::<serde_json::Value>(&stdin_buf)
+            .ok()
+            .and_then(|mut v| {
+                shared::types::normalize_hook_payload(&mut v);
+                serde_json::from_value(v).ok()
+            })
+            .unwrap_or_default()
     };
 
     let exit_code = match subcmd {

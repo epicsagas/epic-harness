@@ -357,18 +357,20 @@ fn spawn_status(directive: Option<&orch_state::ControlDirective>, agent_id: &str
 
 /// True when the host reports the tool call as an error: `tool_response` or
 /// `tool_result` is an object with `is_error == true` or a non-empty string
-/// `error`. Hosts that send neither field give false.
+/// `error`, or the event is `PostToolUseFailure` (which also covers
+/// interrupted calls). Hosts that send none of these give false.
 fn tool_reported_error(input: &HookInput) -> bool {
-    [&input.tool_response, &input.tool_result]
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_object())
-        .any(|o| {
-            o.get("is_error").and_then(|v| v.as_bool()) == Some(true)
-                || o.get("error")
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|e| !e.is_empty())
-        })
+    input.is_failure_event()
+        || [&input.tool_response, &input.tool_result]
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_object())
+            .any(|o| {
+                o.get("is_error").and_then(|v| v.as_bool()) == Some(true)
+                    || o.get("error")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|e| !e.is_empty())
+            })
 }
 
 /// Resolve the output text from hook input.
@@ -672,6 +674,26 @@ mod tests {
             ..Default::default()
         };
         assert!(tool_reported_error(&result));
+    }
+
+    #[test]
+    fn tool_reported_error_for_failure_event() {
+        let failure = |extra: serde_json::Value| HookInput {
+            hook_event_name: Some("PostToolUseFailure".into()),
+            tool_name: Some("Agent".into()),
+            error: Some(extra),
+            ..Default::default()
+        };
+        assert!(tool_reported_error(&failure(serde_json::json!("boom"))));
+        // No usable error text still counts: the event itself is the signal.
+        assert!(tool_reported_error(&failure(
+            serde_json::json!({"code": 1})
+        )));
+        let interrupted = HookInput {
+            is_interrupt: Some(serde_json::json!(true)),
+            ..failure(serde_json::json!(null))
+        };
+        assert!(tool_reported_error(&interrupted));
     }
 
     #[test]

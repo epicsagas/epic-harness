@@ -18,8 +18,36 @@ pub fn compute_rolling_avg(history: &[SessionScoreEntry], window: usize) -> f64 
     slice.iter().map(|e| e.avg_score).sum::<f64>() / slice.len() as f64
 }
 
+/// Current score baseline generation. Bump it when the score distribution
+/// changes. Epoch 1: tool failures are recorded (PostToolUseFailure), so
+/// session scores drop relative to the success-only scores before it.
+pub const SCORE_EPOCH: u32 = 1;
+
+/// Pure rollback decision. Real degradation against the best score always
+/// qualifies. The absolute floor applies only to pre-epoch scores: failure-aware
+/// scores (epoch >= `SCORE_EPOCH`) are naturally lower, so a floor would roll
+/// back any flat project.
+fn rollback_warranted(
+    score_epoch: u32,
+    best: f64,
+    current: f64,
+    degradation_limit: f64,
+    floor: f64,
+) -> bool {
+    best - current > degradation_limit || (score_epoch < SCORE_EPOCH && best < floor)
+}
+
 pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u64) {
     // Returns (should_rollback, improved, rolled_back_count)
+    if metrics.score_epoch < SCORE_EPOCH {
+        // One-time baseline reset: scores from the old regime must not be
+        // compared against the new one, or the first failure-bearing sessions
+        // would look like stagnation and roll back evolved skills.
+        metrics.score_epoch = SCORE_EPOCH;
+        metrics.score_epoch_since = Some(now_iso());
+        metrics.best_score = None;
+        metrics.stagnation_count = 0;
+    }
     if metrics.total_sessions == 0 || metrics.best_score.is_none() {
         // First session or genuinely uninitialized — set best_score and treat as improved.
         metrics.best_score = Some(current_score);
@@ -31,13 +59,21 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
     // as stagnant when the all-time best was an outlier.
     // Guard: if score_history is empty (e.g. after migration), fall back to
     // best_score comparison to avoid treating any positive score as improvement.
-    let rolling_avg = if metrics.score_history.is_empty() {
+    // Only entries from the current score epoch count. Filter by timestamp,
+    // not index: reflect truncates the history from the front.
+    let history = match metrics.score_epoch_since.as_deref() {
+        Some(since) => {
+            let start = metrics
+                .score_history
+                .partition_point(|e| e.timestamp.as_str() < since);
+            &metrics.score_history[start..]
+        }
+        None => &metrics.score_history[..],
+    };
+    let rolling_avg = if history.is_empty() {
         metrics.best_score.unwrap_or(0.0)
     } else {
-        compute_rolling_avg(
-            &metrics.score_history,
-            CONFIG.evolution.stagnation_rolling_window,
-        )
+        compute_rolling_avg(history, CONFIG.evolution.stagnation_rolling_window)
     };
     let improvement = current_score - rolling_avg;
     if improvement >= CONFIG.evolution.improvement_threshold {
@@ -55,11 +91,13 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
     metrics.stagnation_count += 1;
     if metrics.stagnation_count >= CONFIG.evolution.stagnation_limit {
         // Rollback decision still uses absolute best_score
-        let best = metrics.best_score.unwrap_or(0.0);
-        let degradation = best - current_score;
-        if degradation > CONFIG.evolution.rollback_degradation
-            || best < CONFIG.evolution.rollback_best_floor
-        {
+        if rollback_warranted(
+            metrics.score_epoch,
+            metrics.best_score.unwrap_or(0.0),
+            current_score,
+            CONFIG.evolution.rollback_degradation,
+            CONFIG.evolution.rollback_best_floor,
+        ) {
             let backup = evolved_backup_dir();
             if backup.is_dir() {
                 let evolved = evolved_dir();
@@ -469,6 +507,131 @@ mod tests {
             metrics.stagnation_count, 1,
             "stagnation_count must increment for score=0.0"
         );
+    }
+
+    fn scored_entry(timestamp: &str, avg_score: f64) -> SessionScoreEntry {
+        SessionScoreEntry {
+            timestamp: timestamp.into(),
+            success_rate: avg_score,
+            avg_score,
+            observations: 10,
+            dimension_averages: ScoreDimensions::default(),
+        }
+    }
+
+    /// Upgrade from a success-only baseline: the first failure-bearing sessions
+    /// score far below `best_score`, yet must neither count as stagnation nor
+    /// reach a rollback.
+    #[test]
+    fn score_epoch_bump_prevents_rollback_on_first_failure_sessions() {
+        let mut metrics = default_metrics();
+        metrics.score_epoch = 0;
+        metrics.total_sessions = 20;
+        metrics.best_score = Some(0.98);
+        metrics.stagnation_count = 2;
+        for _ in 0..3 {
+            metrics
+                .score_history
+                .push(scored_entry("2026-04-09T00:00:00Z", 0.98));
+        }
+        for _ in 0..3 {
+            let (rollback, _, _) = check_stagnation(&mut metrics, 0.6);
+            assert!(!rollback);
+            assert!(metrics.stagnation_count < CONFIG.evolution.stagnation_limit);
+            // What reflect does after check_stagnation.
+            metrics.score_history.push(scored_entry(&now_iso(), 0.6));
+            metrics.total_sessions += 1;
+        }
+        assert_eq!(metrics.score_epoch, SCORE_EPOCH);
+        assert!(metrics.score_epoch_since.is_some());
+        // The reset session re-based best_score on the new regime.
+        assert_eq!(metrics.best_score, Some(0.6));
+    }
+
+    /// Epoch >= 1: three stagnant sessions just below best, degradation under
+    /// the threshold, never roll back (the floor is not applied). Runs through
+    /// `check_stagnation`, which does no directory I/O unless it rolls back.
+    #[test]
+    fn epoch_one_stagnation_below_degradation_threshold_does_not_roll_back() {
+        let mut metrics = default_metrics();
+        metrics.total_sessions = 10;
+        metrics.best_score = Some(0.80);
+        for _ in 0..3 {
+            metrics
+                .score_history
+                .push(scored_entry("2026-04-09T00:00:00Z", 0.80));
+        }
+        for _ in 0..3 {
+            let (rollback, improved, _) = check_stagnation(&mut metrics, 0.79);
+            assert!(!rollback && !improved);
+        }
+        assert_eq!(metrics.stagnation_count, 3);
+        // The same decision as a pure function.
+        assert!(!rollback_warranted(1, 0.80, 0.79, 0.05, 0.90));
+    }
+
+    #[test]
+    fn epoch_one_real_degradation_still_rolls_back() {
+        assert!(rollback_warranted(1, 0.80, 0.70, 0.05, 0.90));
+        assert!(
+            !rollback_warranted(1, 0.80, 0.76, 0.05, 0.90),
+            "under threshold"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_floor_behavior_is_unchanged() {
+        // Below the floor rolls back even without degradation.
+        assert!(rollback_warranted(0, 0.80, 0.80, 0.05, 0.90));
+        // At or above the floor, only degradation counts.
+        assert!(!rollback_warranted(0, 0.95, 0.94, 0.05, 0.90));
+        assert!(rollback_warranted(0, 0.95, 0.80, 0.05, 0.90));
+    }
+
+    #[test]
+    fn score_epoch_reset_runs_once() {
+        let mut metrics = default_metrics();
+        metrics.score_epoch = 0;
+        metrics.total_sessions = 5;
+        metrics.best_score = Some(0.98);
+        check_stagnation(&mut metrics, 0.6);
+        let since = metrics.score_epoch_since.clone();
+        metrics.best_score = Some(0.7);
+        metrics.total_sessions = 6;
+        check_stagnation(&mut metrics, 0.6);
+        assert_eq!(metrics.best_score, Some(0.7), "no second reset");
+        assert_eq!(metrics.score_epoch_since, since);
+    }
+
+    /// Rolling average reads only entries from the current epoch, and the cut
+    /// survives reflect's front truncation to 50 entries.
+    #[test]
+    fn rolling_average_ignores_entries_before_epoch_after_truncation() {
+        let mut metrics = default_metrics();
+        metrics.total_sessions = 60;
+        metrics.best_score = Some(0.98);
+        metrics.score_epoch_since = Some("2026-06-01T00:00:00Z".into());
+        for i in 0..58 {
+            metrics.score_history.push(scored_entry(
+                &format!("2026-05-{:02}T00:00:00Z", i % 28 + 1),
+                0.98,
+            ));
+        }
+        metrics
+            .score_history
+            .push(scored_entry("2026-06-02T00:00:00Z", 0.6));
+        metrics
+            .score_history
+            .push(scored_entry("2026-06-03T00:00:00Z", 0.6));
+        let start = metrics.score_history.len() - 50;
+        metrics.score_history = metrics.score_history[start..].to_vec();
+        assert_eq!(metrics.score_history.len(), 50);
+
+        // Current-epoch average is 0.6, so 0.65 improves. Unfiltered, the
+        // last three entries average about 0.73 and 0.65 would not.
+        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.65);
+        assert!(!rollback);
+        assert!(improved);
     }
 
     #[test]

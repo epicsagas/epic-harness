@@ -128,6 +128,8 @@ pub async fn load_metrics_pool(pool: &AnyPool) -> io::Result<Metrics> {
         epoch_class,
         last_error_context,
         reward_hacking_suspected,
+        score_epoch: 0,
+        score_epoch_since: None,
     })
 }
 
@@ -215,6 +217,10 @@ pub async fn save_metrics_pool(pool: &AnyPool, m: &Metrics, project: &str) -> io
         && let Ok(s) = serde_json::to_string(epoch)
     {
         upsert(&mut tx, "epoch_class", &s, project).await?;
+    }
+    upsert(&mut tx, "score_epoch", &m.score_epoch.to_string(), project).await?;
+    if let Some(ref v) = m.score_epoch_since {
+        upsert(&mut tx, "score_epoch_since", v, project).await?;
     }
 
     // Score history — project-scoped: delete only this project's rows, then
@@ -591,6 +597,22 @@ pub async fn load_metrics_scoped_pool(
     } else {
         None
     };
+    // Epoch state is per project; the aggregate view keeps the defaults.
+    let score_epoch: u32 = if let Some(p) = project {
+        get_str(pool, "score_epoch", Some(p))
+            .await
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let score_epoch_since: Option<String> = if let Some(p) = project {
+        get_str(pool, "score_epoch_since", Some(p))
+            .await
+            .filter(|v| !v.is_empty())
+    } else {
+        None
+    };
 
     // Score history — filter by project, or union all.
     let sh_rows = if let Some(p) = project {
@@ -676,6 +698,8 @@ pub async fn load_metrics_scoped_pool(
         epoch_class,
         last_error_context,
         reward_hacking_suspected,
+        score_epoch,
+        score_epoch_since,
     })
 }
 
@@ -728,6 +752,8 @@ mod tests {
             },
             last_error_context: Some("type_error in main.rs".into()),
             reward_hacking_suspected: false,
+            score_epoch: 1,
+            score_epoch_since: Some("2026-06-02T10:00:00Z".into()),
         }
     }
 
@@ -837,6 +863,35 @@ mod tests {
             "proj-a must not be overwritten by proj-b"
         );
         assert_eq!(lb.total_sessions, 99);
+    }
+
+    #[tokio::test]
+    async fn score_epoch_round_trips_per_project() {
+        let pool = test_pool().await;
+        let mut a = sample_metrics();
+        a.score_epoch = 3;
+        a.score_epoch_since = Some("2026-11-19T00:00:00Z".into());
+        save_metrics_pool(&pool, &a, "proj-a").await.unwrap();
+        let mut b = sample_metrics();
+        b.score_epoch = 0;
+        b.score_epoch_since = None;
+        save_metrics_pool(&pool, &b, "proj-b").await.unwrap();
+
+        let la = load_metrics_scoped_pool(&pool, Some("proj-a"))
+            .await
+            .unwrap();
+        assert_eq!(la.score_epoch, 3);
+        assert_eq!(
+            la.score_epoch_since.as_deref(),
+            Some("2026-11-19T00:00:00Z")
+        );
+        let lb = load_metrics_scoped_pool(&pool, Some("proj-b"))
+            .await
+            .unwrap();
+        assert_eq!(lb.score_epoch, 0);
+        assert_eq!(lb.score_epoch_since, None);
+        let all = load_metrics_scoped_pool(&pool, None).await.unwrap();
+        assert_eq!((all.score_epoch, all.score_epoch_since), (0, None));
     }
 
     #[tokio::test]

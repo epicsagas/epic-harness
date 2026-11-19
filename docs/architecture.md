@@ -148,6 +148,10 @@ sequenceDiagram
 | AdaptiveEvolveEngine | `checkStagnation()` | Stagnation detection → checkpoint rollback |
 | Benchmark scoring | 3-axis scoring | tool_success / quality / cost |
 
+### Where Failures Come From
+
+Claude Code and grok fire `PostToolUse` only for successful calls, so their failures reach observe through the `PostToolUseFailure` event (`error` carries the host diagnostic, scored as an error observation with `runtime_error` when no classifier rule matches). Codex has no failure event and fires `PostToolUse` for non-zero Bash exits, so its failures are still classified from the output content. User interrupts (`is_interrupt: true`) are aborts, not failures, and record no observation. Because recorded failures lower session scores, stagnation detection starts a new score epoch once (`SCORE_EPOCH`): `best_score` is re-based and the rolling average ignores earlier history, so the drop is not mistaken for stagnation. In the new epoch a stagnation rollback needs real degradation against the epoch's own best (`rollback_degradation`); the absolute `rollback_best_floor` applies only to pre-epoch scores.
+
 ### What We Intentionally Excluded
 
 | A-Evolve Feature | Reason for Exclusion |
