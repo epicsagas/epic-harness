@@ -18,10 +18,10 @@ let n = 0;
 const shimName = win ? "epic.cmd" : "epic";
 const shimBody = win ? "@echo off\r\necho shim-ran %1\r\n" : '#!/bin/sh\necho "shim-ran $1"\n';
 
-function writeShim(dir) {
+function writeShim(dir, body = shimBody) {
   mkdirSync(dir, { recursive: true });
   const p = path.join(dir, shimName);
-  writeFileSync(p, shimBody);
+  writeFileSync(p, body);
   chmodSync(p, 0o755);
 }
 
@@ -37,13 +37,13 @@ function layout(fakeBootstrap) {
   return { root, home, bin: path.join(home, ".local", "bin") };
 }
 
-function run(l, args) {
-  const env = { HOME: l.home, USERPROFILE: l.home, PATH: "" };
+function run(l, args, pathDir = "") {
+  const env = { HOME: l.home, USERPROFILE: l.home, PATH: pathDir };
   if (win) {
     // What a real Windows hook env always has: System32 on PATH, PATHEXT and
     // ComSpec (spawn shell:true runs ComSpec), SystemRoot (absolute where.exe).
     const { SystemRoot, PATHEXT, ComSpec } = process.env;
-    Object.assign(env, { SystemRoot, PATHEXT, ComSpec, PATH: path.join(SystemRoot, "System32") });
+    Object.assign(env, { SystemRoot, PATHEXT, ComSpec, PATH: [path.join(SystemRoot, "System32"), pathDir].filter(Boolean).join(";") });
   }
   return spawnSync(process.execPath, [path.join(l.root, "registry", "scripts", "hooks", "run.mjs"), ...args], {
     env,
@@ -81,6 +81,26 @@ test("guard with a binary only in ~/.local/bin still runs it (PATH append)", () 
   assert.match(r.stdout, /shim-ran guard/);
 });
 
+test("~/.local/bin/epic wins over an older epic earlier on PATH", { skip: win }, () => {
+  const l = layout("");
+  writeShim(l.bin, '#!/bin/sh\necho "local-ran $1"\n');
+  const other = path.join(path.dirname(l.root), "other-bin");
+  writeShim(other, '#!/bin/sh\necho "path-ran $1"\n');
+  const r = run(l, ["guard"], other);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /local-ran guard/);
+  assert.doesNotMatch(r.stdout, /path-ran/);
+});
+
+test("with no ~/.local/bin/epic the PATH epic is still used", { skip: win }, () => {
+  const l = layout("");
+  const other = path.join(path.dirname(l.root), "other-bin");
+  writeShim(other, '#!/bin/sh\necho "path-ran $1"\n');
+  const r = run(l, ["guard"], other);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /path-ran guard/);
+});
+
 test("guard with no binary anywhere prints the notice and exits 0", () => {
   const l = layout("");
   const r = run(l, ["guard"]);
@@ -89,7 +109,7 @@ test("guard with no binary anywhere prints the notice and exits 0", () => {
 });
 
 // run.mjs does its work at import time; with no subcommand that is one notice line.
-const { appendToPath } = await (async () => {
+const { appendToPath, localEpicPath } = await (async () => {
   const [argv, log] = [process.argv, console.log];
   process.argv = [process.execPath, runMjs];
   console.log = () => {};
@@ -115,4 +135,14 @@ test("appendToPath creates PATH when absent or empty, appends with ':' on POSIX"
   const p = { PATH: "/usr/bin", Path: "ignored" };
   appendToPath(p, "/h/.local/bin", "linux");
   assert.deepEqual(p, { PATH: "/usr/bin:/h/.local/bin", Path: "ignored" });
+});
+
+test("localEpicPath returns the absolute ~/.local/bin binary only when it exists", () => {
+  const yes = () => true;
+  const no = () => false;
+  assert.equal(localEpicPath("/home/u", "linux", yes), "/home/u/.local/bin/epic");
+  assert.equal(localEpicPath("/Users/u", "darwin", yes), "/Users/u/.local/bin/epic");
+  assert.equal(localEpicPath("C:\\Users\\u", "win32", yes), "C:\\Users\\u\\.local\\bin\\epic.exe");
+  assert.equal(localEpicPath("/home/u", "linux", no), null);
+  assert.equal(localEpicPath("C:\\Users\\u", "win32", no), null);
 });

@@ -40,6 +40,18 @@ export function appendToPath(env, dir, platform = process.platform) {
   env[key] = [env[key], dir].filter(Boolean).join(win ? path.win32.delimiter : path.posix.delimiter);
 }
 
+// The bootstrap keeps ~/.local/bin/epic at the plugin version, so hooks run it
+// by absolute path instead of whatever older epic PATH resolves first.
+export function localEpicPath(home, platform = process.platform, exists = existsSync) {
+  const p = (platform === "win32" ? path.win32 : path.posix).join(
+    home,
+    ".local",
+    "bin",
+    platform === "win32" ? "epic.exe" : "epic",
+  );
+  return exists(p) ? p : null;
+}
+
 const args = process.argv.slice(2);
 if (args.length === 0) {
   // exitCode (not process.exit): stdout to a pipe is an async write, and a
@@ -76,8 +88,9 @@ if (args.length === 0) {
   // exit 1, or an error event) and leaks "'epic' is not recognized" to the
   // hook's stderr — measured on windows-latest, Node 22. `where.exe` ships
   // with every Windows and gives a deterministic answer.
+  const localEpic = localEpicPath(os.homedir());
   let epicMissing = false;
-  if (process.platform === "win32") {
+  if (!localEpic && process.platform === "win32") {
     // Absolute path: libuv does not search System32 itself, so a PATH without
     // it (a hook env that was trimmed down) would make the probe itself fail
     // and read as "epic not found".
@@ -98,9 +111,10 @@ if (args.length === 0) {
     // without a shell throws EINVAL since the Node 18.20/20.12 security fix.
     // The args are static words (no user input), so a shell is safe there.
     // On POSIX spawn(3) resolves `epic` via PATH directly.
-    const child = spawn("epic", args, {
+    // An absolute .exe/binary needs no shell, even on Windows.
+    const child = spawn(localEpic || "epic", args, {
       stdio: "inherit",
-      shell: process.platform === "win32",
+      shell: !localEpic && process.platform === "win32",
     });
 
     let spawnFailed = false;

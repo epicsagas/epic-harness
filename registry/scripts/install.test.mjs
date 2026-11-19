@@ -13,8 +13,10 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
+import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -262,32 +264,151 @@ test("main: unknown plugin version downloads nothing", { skip: mainSkip }, async
   assert.equal(f.calls.length, 0);
 });
 
-// An existing epic outside ~/.local/bin (brew, cargo, manual) must only get a notice.
-for (const [label, sub, hint] of [
-  ["brew", ["Cellar", "epic-harness", "bin"], "brew upgrade epic-harness"],
-  ["cargo", [".cargo", "bin"], "cargo binstall epic-harness@9.9.9"],
-  ["manual", ["bin"], "epic update"],
+// A stand-in epic that only answers `--version`, like the real probe; `version` fails.
+function writeStubEpic(dir, ver, argLog) {
+  mkdirSync(dir, { recursive: true });
+  const shim = path.join(dir, "epic");
+  const log = argLog ? `echo "$@" >> '${argLog}'\n` : "";
+  writeFileSync(shim, `#!/bin/sh\n${log}case "$1" in --version) echo 'epic-harness ${ver}';; *) exit 1;; esac\n`);
+  chmodSync(shim, 0o755);
+  return shim;
+}
+
+async function captureStderr(fn) {
+  const lines = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => (lines.push(String(s)), true);
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = orig;
+  }
+  return lines;
+}
+
+// An epic older than the plugin outside ~/.local/bin (brew, cargo, manual) is never
+// touched: the pinned copy goes to ~/.local/bin and the user gets one notice line.
+for (const [label, sub, registry, hint] of [
+  ["brew", ["Cellar", "epic-harness", "bin"], null, "brew upgrade epic-harness"],
+  ["cargo-built", [".cargo", "bin"], '{"installs":{"epic-harness 0.0.1 (registry+x)":{}}}', "cargo install epic-harness --locked --force"],
+  ["bootstrap ~/.cargo/bin", [".cargo", "bin"], null, "re-run the installer command"],
+  ["manual", ["bin"], null, "epic update"],
 ]) {
-  test(`main: existing ${label} install gets a notice and no download`, { skip: win || mainSkip }, async () => {
+  test(`main: older ${label} epic gets a ~/.local/bin install and one notice`, { skip: win || mainSkip }, async () => {
     const f = mainFixture();
-    const dir = path.join(fresh(label), ...sub);
-    mkdirSync(dir, { recursive: true });
-    const shim = path.join(dir, "epic");
-    writeFileSync(shim, "#!/bin/sh\necho 'epic 0.0.1'\n");
-    chmodSync(shim, 0o755);
-    const lines = [];
-    const orig = process.stderr.write;
-    process.stderr.write = (s) => (lines.push(String(s)), true);
-    try {
-      await install.main({ ...f.deps, pathEnv: dir });
-    } finally {
-      process.stderr.write = orig;
-    }
-    assert.equal(f.calls.length, 0);
-    assert.equal(existsSync(f.installDir), false);
-    assert.equal(lines.filter((l) => l.includes(hint)).length, 1, lines.join(""));
+    const root = fresh("shell");
+    const dir = path.join(root, ...sub);
+    const shim = writeStubEpic(dir, "0.0.1");
+    const before = readFileSync(shim, "utf8");
+    if (registry) writeFileSync(path.join(root, ".cargo", ".crates2.json"), registry);
+    const lines = await captureStderr(() => install.main({ ...f.deps, pathEnv: dir }));
+    assert.equal(f.calls.length, 2);
+    assert.ok(existsSync(path.join(f.installDir, "epic")));
+    assert.equal(readFileSync(shim, "utf8"), before, "PATH binary is never modified");
+    const notices = lines.filter((l) => l.includes(hint));
+    assert.equal(notices.length, 1, lines.join(""));
+    assert.match(notices[0], /shell epic 0\.0\.1 is older than the plugin's 9\.9\.9/);
   });
 }
+
+for (const ver of ["9.9.9", "10.0.0"]) {
+  test(`main: PATH epic ${ver} (equal or newer than 9.9.9) does nothing`, { skip: win || mainSkip }, async () => {
+    const f = mainFixture();
+    const dir = path.join(fresh("shell"), "bin");
+    writeStubEpic(dir, ver);
+    const lines = await captureStderr(() => install.main({ ...f.deps, pathEnv: dir }));
+    assert.equal(f.calls.length, 0);
+    assert.equal(existsSync(f.installDir), false);
+    assert.deepEqual(lines, []);
+  });
+}
+
+test("main: older PATH epic with a current ~/.local/bin copy downloads nothing", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const dir = path.join(fresh("shell"), "bin");
+  writeStubEpic(dir, "0.0.1");
+  writeStubEpic(f.installDir, "9.9.9");
+  const lines = await captureStderr(() => install.main({ ...f.deps, pathEnv: dir }));
+  assert.equal(f.calls.length, 0);
+  assert.deepEqual(lines, []);
+});
+
+test("main: an older ~/.local/bin epic is updated in place without a shell notice", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  writeStubEpic(f.installDir, "0.0.1");
+  const lines = await captureStderr(() => install.main({ ...f.deps, pathEnv: f.installDir }));
+  assert.equal(f.calls.length, 2);
+  assert.equal(readFileSync(path.join(f.installDir, "epic"), "utf8"), "binary epic");
+  assert.equal(lines.filter((l) => l.includes("shell epic")).length, 0);
+});
+
+test("main: the version probe runs `epic --version`, never `epic version`", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const argLog = path.join(fresh("args"), "log");
+  const dir = path.join(fresh("shell"), "bin");
+  writeStubEpic(dir, "9.9.9", argLog);
+  await install.main({ ...f.deps, pathEnv: dir });
+  assert.equal(readFileSync(argLog, "utf8"), "--version\n");
+});
+
+test("main: the attempt marker exists before the download starts", { skip: mainSkip }, async () => {
+  const f = mainFixture();
+  const seen = [];
+  const download = async () => {
+    seen.push(JSON.parse(readFileSync(path.join(f.deps.harnessDir, "bootstrap_attempt.json"), "utf8")));
+    throw new Error("session killed");
+  };
+  await install.main({ ...f.deps, download });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].version, "9.9.9");
+  assert.equal(seen[0].ok, false);
+});
+
+test("main: a download timeout installs nothing and backs off", { skip: mainSkip }, async () => {
+  const f = mainFixture();
+  const before = tmpLeftovers();
+  let calls = 0;
+  const download = async () => {
+    calls++;
+    throw new Error("timeout");
+  };
+  const lines = await captureStderr(async () => {
+    await install.main({ ...f.deps, download });
+    await install.main({ ...f.deps, download });
+  });
+  assert.equal(calls, 1);
+  assert.equal(existsSync(f.installDir), false);
+  assert.ok(lines.some((l) => l.includes("Install failed: timeout")));
+  assert.deepEqual(tmpLeftovers(), before);
+});
+
+test("downloadFile times out a transfer that never answers and removes the partial file", async () => {
+  const dest = path.join(fresh("dl"), "x");
+  writeFileSync(dest, "partial");
+  const hangingGet = () => {
+    const req = new EventEmitter();
+    req.destroy = (e) => req.emit("error", e);
+    return req;
+  };
+  await assert.rejects(install.downloadFile("https://example.invalid/x", dest, { timeoutMs: 20, get: hangingGet }), /timeout/);
+  assert.equal(existsSync(dest), false);
+});
+
+test("sweepStaleTmp removes only epic-bootstrap-* dirs older than an hour", () => {
+  const dir = fresh("tmp");
+  const mk = (name, ageMs) => {
+    const d = path.join(dir, name);
+    mkdirSync(d);
+    writeFileSync(path.join(d, "f"), "x");
+    const t = new Date(Date.now() - ageMs);
+    utimesSync(d, t, t);
+  };
+  mk("epic-bootstrap-old", 2 * 60 * 60 * 1000);
+  mk("epic-bootstrap-new", 60 * 1000);
+  mk("unrelated-old", 2 * 60 * 60 * 1000);
+  install.sweepStaleTmp(dir);
+  assert.deepEqual(readdirSync(dir).sort(), ["epic-bootstrap-new", "unrelated-old"]);
+});
 
 test("install.cjs has no releases/latest, installer script, or elevated shell path", () => {
   const src = readFileSync(path.join(here, "install.cjs"), "utf8");

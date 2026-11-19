@@ -9,8 +9,9 @@
 // (v<manifest version>) into ~/.local/bin and verifies its sha256 from the
 // same release before anything is extracted. Integrity, not authenticity: the
 // pin comes from the plugin manifest delivered through the marketplace. No
-// downloaded script is ever executed. brew / cargo / other installs are never
-// touched: they get an update notice instead.
+// downloaded script is ever executed. An older epic elsewhere on PATH (brew,
+// cargo, manual) is never touched: the pinned copy goes to ~/.local/bin, which
+// run.mjs prefers for hooks, and the user gets a one-line update notice.
 
 "use strict";
 
@@ -26,6 +27,8 @@ const REPO = "epicsagas/epic-harness";
 const README_URL = `https://github.com/${REPO}#installation`;
 const SEMVER = /^\d+\.\d+\.\d+$/;
 const RETRY_AFTER_MS = 60 * 60 * 1000;
+const DOWNLOAD_TIMEOUT_MS = 120 * 1000;
+const TMP_PREFIX = "epic-bootstrap-";
 
 function log(msg) {
   process.stderr.write(`[epic-harness plugin] ${msg}\n`);
@@ -121,13 +124,29 @@ function recordAttempt(version, ok, dir, now = Date.now()) {
   } catch (_) {}
 }
 
-function downloadFile(url, dest, hops = 5) {
+// Leftovers of a killed session: nothing else removes them.
+function sweepStaleTmp(dir = os.tmpdir(), now = Date.now()) {
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.startsWith(TMP_PREFIX)) continue;
+      const p = path.join(dir, f);
+      if (now - fs.statSync(p).mtimeMs > RETRY_AFTER_MS)
+        fs.rmSync(p, { recursive: true, force: true });
+    }
+  } catch (_) {}
+}
+
+// timeoutMs bounds the whole transfer (redirects and body), not socket idleness.
+function downloadFile(url, dest, { hops = 5, deadline, timeoutMs = DOWNLOAD_TIMEOUT_MS, get = https.get } = {}) {
+  deadline = deadline ?? Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
+    let timer;
     const fail = (e) => {
+      clearTimeout(timer);
       fs.rmSync(dest, { force: true });
       reject(e);
     };
-    const req = https.get(url, (res) => {
+    const req = get(url, (res) => {
       if ([301, 302, 303, 307, 308].includes(res.statusCode)) {
         res.resume();
         let next = null;
@@ -138,15 +157,20 @@ function downloadFile(url, dest, hops = 5) {
           return fail(new Error(`unsafe redirect from ${url}`));
         }
         if (hops <= 0) return fail(new Error("too many redirects"));
-        return downloadFile(next, dest, hops - 1).then(resolve, fail);
+        clearTimeout(timer);
+        return downloadFile(next, dest, { hops: hops - 1, deadline, get }).then(resolve, fail);
       }
       if (res.statusCode !== 200) {
         res.resume();
         return fail(new Error(`HTTP ${res.statusCode} for ${url}`));
       }
-      pipeline(res, fs.createWriteStream(dest), (e) => (e ? fail(e) : resolve()));
+      pipeline(res, fs.createWriteStream(dest), (e) => {
+        if (e) return fail(e);
+        clearTimeout(timer);
+        resolve();
+      });
     });
-    req.setTimeout(60000, () => req.destroy(new Error("timeout")));
+    timer = setTimeout(() => req.destroy(new Error("timeout")), Math.max(0, deadline - Date.now()));
     req.on("error", fail);
   });
 }
@@ -169,7 +193,7 @@ function installFromArchive({
   if (actual !== expected) throw new Error("checksum mismatch");
 
   const win = platform === "win32";
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "epic-bootstrap-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), TMP_PREFIX));
   try {
     // Absolute tar.exe on Windows: a Git-for-Windows GNU tar earlier on PATH
     // cannot read zip.
@@ -206,7 +230,7 @@ function installFromArchive({
 
 async function fetchAndInstall({ version, target, installDir, platform, download }) {
   const a = assetNames(version, target);
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "epic-bootstrap-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), TMP_PREFIX));
   try {
     const archive = path.join(tmp, a.archive);
     const sum = path.join(tmp, a.checksum);
@@ -237,7 +261,8 @@ function findEpic(pathEnv, installDir, platform) {
 }
 
 function binaryVersion(bin) {
-  const r = spawnSync(bin, ["version"], { stdio: "pipe", shell: false, timeout: 10000 });
+  // --version exits before the telemetry consent step that `version` runs
+  const r = spawnSync(bin, ["--version"], { stdio: "pipe", shell: false, timeout: 10000 });
   const m = r.status === 0 && r.stdout.toString().match(/(\d+\.\d+\.\d+)/);
   return m ? m[1] : null;
 }
@@ -247,9 +272,20 @@ function sameDir(a, b, platform) {
   return platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 
-function updateCommand(bin, version) {
+function updateCommand(bin) {
   if (/cellar|homebrew|linuxbrew/i.test(bin)) return "brew upgrade epic-harness";
-  if (/[\\/]\.cargo[\\/]/.test(bin)) return `cargo binstall epic-harness@${version}`;
+  if (/[\\/]\.cargo[\\/]/.test(bin)) {
+    // cargo records its own installs; anything else in ~/.cargo/bin came from
+    // the installer script the old bootstrap used.
+    let cargoOwned = false;
+    try {
+      const reg = path.join(path.dirname(path.dirname(bin)), ".crates2.json");
+      cargoOwned = fs.readFileSync(reg, "utf8").includes('"epic-harness ');
+    } catch (_) {}
+    return cargoOwned
+      ? "cargo install epic-harness --locked --force"
+      : `re-run the installer command from ${README_URL}`;
+  }
   return "epic update";
 }
 
@@ -273,14 +309,16 @@ async function main(deps = {}) {
   }
 
   const found = findEpic(pathEnv, installDir, platform);
+  let notice = null;
   if (found) {
     const current = binaryVersion(found);
     if (!current || !semverGt(version, current)) return; // up to date, never downgrade
     if (!sameDir(path.dirname(found), installDir, platform)) {
-      log(
-        `epic ${current} is installed, plugin expects ${version}; update with: ${updateCommand(found, version)}`,
-      );
-      return;
+      // Hooks run the ~/.local/bin copy, so a current one there needs no download.
+      const local = findEpic("", installDir, platform);
+      const localVersion = local && binaryVersion(local);
+      if (localVersion && !semverGt(version, localVersion)) return;
+      notice = `your shell epic ${current} is older than the plugin's ${version} (hooks use ${installDir}); update it with: ${updateCommand(found)}`;
     }
   }
 
@@ -292,12 +330,15 @@ async function main(deps = {}) {
   if (!shouldAttempt(version, harnessDir)) return;
 
   log(found ? `Updating epic to ${version}...` : `epic not found, installing ${version}...`);
+  // Marker first: a killed session must not cause a download per session.
+  recordAttempt(version, false, harnessDir);
+  sweepStaleTmp();
   try {
     await fetchAndInstall({ version, target, installDir, platform, download });
     recordAttempt(version, true, harnessDir);
     log(`Installed epic ${version} to ${installDir}`);
+    if (notice) log(notice);
   } catch (e) {
-    recordAttempt(version, false, harnessDir);
     log(`Install failed: ${e.message}`);
     log(`Install manually: ${README_URL}`);
   }
@@ -311,6 +352,9 @@ module.exports = {
   isSafeRedirect,
   shouldAttempt,
   recordAttempt,
+  sweepStaleTmp,
+  downloadFile,
+  updateCommand,
   installFromArchive,
   main,
 };
