@@ -190,7 +190,11 @@ fn main() {
         serde_json::from_str::<serde_json::Value>(&stdin_buf)
             .ok()
             .and_then(|mut v| {
-                shared::types::normalize_hook_payload(&mut v);
+                // guard and polish keep reading snake_case only, so grok
+                // payloads behave as before on those hooks.
+                if subcmd == "observe" {
+                    shared::types::normalize_hook_payload(&mut v);
+                }
                 serde_json::from_value(v).ok()
             })
             .unwrap_or_default()

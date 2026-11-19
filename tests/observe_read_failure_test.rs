@@ -42,7 +42,15 @@ fn observe(payload: serde_json::Value) -> serde_json::Value {
         .unwrap();
     assert!(child.wait().unwrap().success());
 
-    let file = fs::read_dir(&obs).unwrap().next().unwrap().unwrap().path();
+    // obs/ also holds telemetry_error_count_*.txt, so pick the log by name.
+    let file = fs::read_dir(&obs)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|p| {
+            let name = p.file_name().unwrap().to_string_lossy();
+            name.starts_with("session_") && name.ends_with(".jsonl")
+        })
+        .unwrap();
     let line = fs::read_to_string(file).unwrap();
     serde_json::from_str(line.lines().next().unwrap()).unwrap()
 }

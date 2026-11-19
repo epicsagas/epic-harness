@@ -673,7 +673,8 @@ pub fn run(input: &HookInput) -> i32 {
     // Capped at 50 events per session to avoid flooding PostHog during error loops.
     if let Some(failure_cat) = &record.failure_category {
         let tool_cat = &record.tool_category;
-        if should_sample_tool_error(&sid) {
+        // Check consent first: the sampling counter is a file write.
+        if TELEMETRY.is_enabled() && should_sample_tool_error(&sid) {
             TELEMETRY.track_tool_error(
                 tool_cat.parse().unwrap_or(ToolCategory::Other),
                 failure_cat.parse().unwrap_or(FailureClass::Unknown),

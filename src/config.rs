@@ -711,6 +711,8 @@ gated_promotion_min = 2
 # rollback_degradation = 0.05
 
 # If best_score is below this floor, always rollback on stagnation.
+# Applies only to pre-epoch scores (before failures were recorded) and is
+# inactive in the failure-aware epoch, where only real degradation rolls back.
 # rollback_best_floor = 0.90
 
 # Number of recent sessions used for rolling-average stagnation check.

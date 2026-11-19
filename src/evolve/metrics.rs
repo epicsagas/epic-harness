@@ -23,21 +23,49 @@ pub fn compute_rolling_avg(history: &[SessionScoreEntry], window: usize) -> f64 
 /// session scores drop relative to the success-only scores before it.
 pub const SCORE_EPOCH: u32 = 1;
 
-/// Pure rollback decision. Real degradation against the best score always
-/// qualifies. The absolute floor applies only to pre-epoch scores: failure-aware
-/// scores (epoch >= `SCORE_EPOCH`) are naturally lower, so a floor would roll
-/// back any flat project.
+/// Scored sessions a new epoch needs before any rollback. The epoch's best
+/// comes from a single sample, so earlier than this a lucky first session
+/// would make ordinary variance look like degradation.
+const MIN_EPOCH_SESSIONS_FOR_ROLLBACK: usize = 5;
+
+/// Pure rollback decision. Real degradation against the best score qualifies
+/// once the epoch has `MIN_EPOCH_SESSIONS_FOR_ROLLBACK` scored sessions. The
+/// absolute floor applies only to pre-epoch scores: failure-aware scores
+/// (epoch >= `SCORE_EPOCH`) are naturally lower, so a floor would roll back any
+/// flat project.
 fn rollback_warranted(
     score_epoch: u32,
+    epoch_sessions: usize,
     best: f64,
     current: f64,
     degradation_limit: f64,
     floor: f64,
 ) -> bool {
-    best - current > degradation_limit || (score_epoch < SCORE_EPOCH && best < floor)
+    epoch_sessions >= MIN_EPOCH_SESSIONS_FOR_ROLLBACK
+        && (best - current > degradation_limit || (score_epoch < SCORE_EPOCH && best < floor))
+}
+
+/// Replace `backup` with a copy of `evolved`.
+fn refresh_backup(evolved: &std::path::Path, backup: &std::path::Path) {
+    rm_dir(backup);
+    copy_dir(evolved, backup);
 }
 
 pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, bool, u64) {
+    check_stagnation_in(
+        metrics,
+        current_score,
+        &evolved_dir(),
+        &evolved_backup_dir(),
+    )
+}
+
+fn check_stagnation_in(
+    metrics: &mut Metrics,
+    current_score: f64,
+    evolved: &std::path::Path,
+    backup: &std::path::Path,
+) -> (bool, bool, u64) {
     // Returns (should_rollback, improved, rolled_back_count)
     if metrics.score_epoch < SCORE_EPOCH {
         // One-time baseline reset: scores from the old regime must not be
@@ -47,6 +75,9 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
         metrics.score_epoch_since = Some(now_iso());
         metrics.best_score = None;
         metrics.stagnation_count = 0;
+        // The old backup predates the upgrade: a later rollback would restore
+        // it and delete every skill evolved since.
+        refresh_backup(evolved, backup);
     }
     if metrics.total_sessions == 0 || metrics.best_score.is_none() {
         // First session or genuinely uninitialized — set best_score and treat as improved.
@@ -61,28 +92,30 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
     // best_score comparison to avoid treating any positive score as improvement.
     // Only entries from the current score epoch count. Filter by timestamp,
     // not index: reflect truncates the history from the front.
-    let history = match metrics.score_epoch_since.as_deref() {
-        Some(since) => {
-            let start = metrics
-                .score_history
-                .partition_point(|e| e.timestamp.as_str() < since);
-            &metrics.score_history[start..]
-        }
-        None => &metrics.score_history[..],
-    };
+    // The history is not guaranteed to be in time order (merge-project, clock
+    // skew), so select by timestamp and sort; it holds at most 50 entries.
+    let mut history: Vec<SessionScoreEntry> = metrics
+        .score_history
+        .iter()
+        .filter(|e| {
+            metrics
+                .score_epoch_since
+                .as_deref()
+                .is_none_or(|since| e.timestamp.as_str() >= since)
+        })
+        .cloned()
+        .collect();
+    history.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
     let rolling_avg = if history.is_empty() {
         metrics.best_score.unwrap_or(0.0)
     } else {
-        compute_rolling_avg(history, CONFIG.evolution.stagnation_rolling_window)
+        compute_rolling_avg(&history, CONFIG.evolution.stagnation_rolling_window)
     };
     let improvement = current_score - rolling_avg;
     if improvement >= CONFIG.evolution.improvement_threshold {
         // Improved over rolling average! Backup evolved skills
-        let evolved = evolved_dir();
-        let backup = evolved_backup_dir();
         if evolved.is_dir() {
-            rm_dir(&backup);
-            copy_dir(&evolved, &backup);
+            refresh_backup(evolved, backup);
         }
         return (false, true, 0);
     }
@@ -93,27 +126,25 @@ pub fn check_stagnation(metrics: &mut Metrics, current_score: f64) -> (bool, boo
         // Rollback decision still uses absolute best_score
         if rollback_warranted(
             metrics.score_epoch,
+            history.len(),
             metrics.best_score.unwrap_or(0.0),
             current_score,
             CONFIG.evolution.rollback_degradation,
             CONFIG.evolution.rollback_best_floor,
-        ) {
-            let backup = evolved_backup_dir();
-            if backup.is_dir() {
-                let evolved = evolved_dir();
-                let before_count = list_dirs(&evolved).len() as u64;
-                rm_dir(&evolved);
-                copy_dir(&backup, &evolved);
-                metrics.stagnation_count = 0;
-                hint(
-                    "reflect",
-                    &format!(
-                        "Stagnation detected ({} sessions). Rolled back evolved skills.",
-                        CONFIG.evolution.stagnation_limit
-                    ),
-                );
-                return (true, false, before_count);
-            }
+        ) && backup.is_dir()
+        {
+            let before_count = list_dirs(evolved).len() as u64;
+            rm_dir(evolved);
+            copy_dir(backup, evolved);
+            metrics.stagnation_count = 0;
+            hint(
+                "reflect",
+                &format!(
+                    "Stagnation detected ({} sessions). Rolled back evolved skills.",
+                    CONFIG.evolution.stagnation_limit
+                ),
+            );
+            return (true, false, before_count);
         }
     }
 
@@ -441,10 +472,92 @@ mod tests {
     use crate::shared::evolution::default_metrics;
     use crate::shared::scoring::ScoreDimensions;
 
+    /// `check_stagnation` against throwaway directories, never the real harness.
+    fn check_in_tmp(metrics: &mut Metrics, score: f64) -> (bool, bool, u64) {
+        let dir = tempfile::tempdir().unwrap();
+        check_stagnation_in(
+            metrics,
+            score,
+            &dir.path().join("evolved"),
+            &dir.path().join("evolved_backup"),
+        )
+    }
+
+    fn write_skill(root: &std::path::Path, name: &str) {
+        let skill = root.join(name);
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), name).unwrap();
+    }
+
+    #[test]
+    fn rollback_needs_enough_epoch_sessions() {
+        assert!(!rollback_warranted(1, 4, 0.95, 0.80, 0.05, 0.90));
+        assert!(rollback_warranted(1, 5, 0.95, 0.80, 0.05, 0.90));
+    }
+
+    /// Upgrade day: the reset session scores high by luck, later sessions score
+    /// lower. No rollback in the first epoch sessions, and the backup refreshed
+    /// at the reset means a later rollback keeps the skills that existed then.
+    #[test]
+    fn epoch_reset_refreshes_backup_and_noisy_scores_do_not_roll_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let evolved = tmp.path().join("evolved");
+        let backup = tmp.path().join("evolved_backup");
+        write_skill(&evolved, "created-since-upgrade");
+        write_skill(&backup, "pre-upgrade");
+
+        let mut metrics = default_metrics();
+        metrics.score_epoch = 0;
+        metrics.total_sessions = 20;
+        metrics.best_score = Some(0.98);
+
+        let (rollback, _, _) = check_stagnation_in(&mut metrics, 0.95, &evolved, &backup);
+        assert!(!rollback);
+        assert!(backup.join("created-since-upgrade").is_dir());
+        assert!(!backup.join("pre-upgrade").exists());
+        // What reflect does after check_stagnation.
+        metrics.score_history.push(scored_entry(&now_iso(), 0.95));
+        metrics.total_sessions += 1;
+
+        for session in 1..=5 {
+            let (rollback, _, _) = check_stagnation_in(&mut metrics, 0.85, &evolved, &backup);
+            let epoch_sessions = session; // scored sessions recorded in the epoch so far
+            assert_eq!(
+                rollback,
+                epoch_sessions >= MIN_EPOCH_SESSIONS_FOR_ROLLBACK,
+                "session {session}"
+            );
+            metrics.score_history.push(scored_entry(&now_iso(), 0.85));
+            metrics.total_sessions += 1;
+        }
+        // The first rollback restored the epoch-start snapshot, not the old one.
+        assert!(evolved.join("created-since-upgrade").is_dir());
+    }
+
+    #[test]
+    fn epoch_cut_does_not_assume_history_is_in_time_order() {
+        let mut metrics = default_metrics();
+        metrics.total_sessions = 10;
+        metrics.best_score = Some(0.9);
+        metrics.score_epoch_since = Some("2026-06-01T00:00:00Z".into());
+        for (ts, score) in [
+            ("2026-06-05T00:00:00Z", 0.5),
+            ("2026-06-02T00:00:00Z", 0.9),
+            ("2026-05-01T00:00:00Z", 0.98), // before the epoch
+            ("2026-06-03T00:00:00Z", 0.5),
+            ("2026-06-04T00:00:00Z", 0.5),
+        ] {
+            metrics.score_history.push(scored_entry(ts, score));
+        }
+        // By time the last three epoch entries average 0.5, so 0.60 improves.
+        let (_, improved, _) = check_in_tmp(&mut metrics, 0.60);
+        assert!(improved);
+    }
+
     #[test]
     fn stagnation_first_session() {
         let mut metrics = default_metrics();
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.8);
+        let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.8);
         assert!(!rollback);
         assert!(improved);
     }
@@ -466,7 +579,7 @@ mod tests {
                 dimension_averages: ScoreDimensions::default(),
             });
         }
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.80);
+        let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.80);
         assert!(!rollback);
         assert!(improved);
     }
@@ -488,7 +601,7 @@ mod tests {
                 dimension_averages: ScoreDimensions::default(),
             });
         }
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.78);
+        let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.78);
         assert!(!rollback);
         assert!(!improved);
         assert_eq!(metrics.stagnation_count, 1);
@@ -500,7 +613,7 @@ mod tests {
         metrics.total_sessions = 3;
         metrics.best_score = Some(0.0);
         metrics.stagnation_count = 0;
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.0);
+        let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.0);
         assert!(!rollback);
         assert!(!improved);
         assert_eq!(
@@ -535,7 +648,7 @@ mod tests {
                 .push(scored_entry("2026-04-09T00:00:00Z", 0.98));
         }
         for _ in 0..3 {
-            let (rollback, _, _) = check_stagnation(&mut metrics, 0.6);
+            let (rollback, _, _) = check_in_tmp(&mut metrics, 0.6);
             assert!(!rollback);
             assert!(metrics.stagnation_count < CONFIG.evolution.stagnation_limit);
             // What reflect does after check_stagnation.
@@ -562,19 +675,19 @@ mod tests {
                 .push(scored_entry("2026-04-09T00:00:00Z", 0.80));
         }
         for _ in 0..3 {
-            let (rollback, improved, _) = check_stagnation(&mut metrics, 0.79);
+            let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.79);
             assert!(!rollback && !improved);
         }
         assert_eq!(metrics.stagnation_count, 3);
         // The same decision as a pure function.
-        assert!(!rollback_warranted(1, 0.80, 0.79, 0.05, 0.90));
+        assert!(!rollback_warranted(1, 5, 0.80, 0.79, 0.05, 0.90));
     }
 
     #[test]
     fn epoch_one_real_degradation_still_rolls_back() {
-        assert!(rollback_warranted(1, 0.80, 0.70, 0.05, 0.90));
+        assert!(rollback_warranted(1, 5, 0.80, 0.70, 0.05, 0.90));
         assert!(
-            !rollback_warranted(1, 0.80, 0.76, 0.05, 0.90),
+            !rollback_warranted(1, 5, 0.80, 0.76, 0.05, 0.90),
             "under threshold"
         );
     }
@@ -582,10 +695,10 @@ mod tests {
     #[test]
     fn epoch_zero_floor_behavior_is_unchanged() {
         // Below the floor rolls back even without degradation.
-        assert!(rollback_warranted(0, 0.80, 0.80, 0.05, 0.90));
+        assert!(rollback_warranted(0, 5, 0.80, 0.80, 0.05, 0.90));
         // At or above the floor, only degradation counts.
-        assert!(!rollback_warranted(0, 0.95, 0.94, 0.05, 0.90));
-        assert!(rollback_warranted(0, 0.95, 0.80, 0.05, 0.90));
+        assert!(!rollback_warranted(0, 5, 0.95, 0.94, 0.05, 0.90));
+        assert!(rollback_warranted(0, 5, 0.95, 0.80, 0.05, 0.90));
     }
 
     #[test]
@@ -594,11 +707,11 @@ mod tests {
         metrics.score_epoch = 0;
         metrics.total_sessions = 5;
         metrics.best_score = Some(0.98);
-        check_stagnation(&mut metrics, 0.6);
+        check_in_tmp(&mut metrics, 0.6);
         let since = metrics.score_epoch_since.clone();
         metrics.best_score = Some(0.7);
         metrics.total_sessions = 6;
-        check_stagnation(&mut metrics, 0.6);
+        check_in_tmp(&mut metrics, 0.6);
         assert_eq!(metrics.best_score, Some(0.7), "no second reset");
         assert_eq!(metrics.score_epoch_since, since);
     }
@@ -629,7 +742,7 @@ mod tests {
 
         // Current-epoch average is 0.6, so 0.65 improves. Unfiltered, the
         // last three entries average about 0.73 and 0.65 would not.
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.65);
+        let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.65);
         assert!(!rollback);
         assert!(improved);
     }
@@ -637,7 +750,7 @@ mod tests {
     #[test]
     fn stagnation_first_session_zero_score_initializes_best() {
         let mut metrics = default_metrics();
-        let (rollback, improved, _) = check_stagnation(&mut metrics, 0.0);
+        let (rollback, improved, _) = check_in_tmp(&mut metrics, 0.0);
         assert!(!rollback);
         assert!(improved);
         assert_eq!(metrics.best_score, Some(0.0));

@@ -251,6 +251,63 @@ fn grok_camel_case_payload_is_recorded() {
     assert_eq!(rec["result"], "error");
 }
 
+/// Telemetry consent is "off" in the fixture: no sampling counter may be written.
+#[test]
+fn no_telemetry_counter_file_when_consent_is_off() {
+    let fx = Fixture::new();
+    fx.observe(bash_failure(BASH_ERROR), &[]);
+    assert_eq!(fx.single_record()["result"], "error");
+    let counters = fs::read_dir(fx.project_dir().join("obs"))
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("telemetry_error_count_")
+        })
+        .count();
+    assert_eq!(counters, 0);
+}
+
+/// Exit code of `guard` for one payload.
+fn guard_exit(fx: &Fixture, payload: serde_json::Value) -> i32 {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_epic-harness"))
+        .arg("guard")
+        .current_dir(&fx.cwd)
+        .env("HOME", &fx.home)
+        .env("HARNESS_DIR", &fx.harness)
+        .env("GIT_CEILING_DIRECTORIES", fx.cwd.parent().unwrap())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(payload.to_string().as_bytes())
+        .unwrap();
+    child.wait().unwrap().code().unwrap()
+}
+
+/// Payload normalization is observe-only in 0.9.2: guard must see the same
+/// (empty) input on a camelCase grok payload as before.
+#[test]
+fn grok_camel_case_payload_is_not_normalized_for_guard() {
+    let fx = Fixture::new();
+    let command = "DROP TABLE prod_users";
+    let snake = serde_json::json!({"tool_name": "Bash", "tool_input": {"command": command}});
+    assert_eq!(
+        guard_exit(&fx, snake),
+        2,
+        "control: guard blocks this command"
+    );
+    let camel = serde_json::json!({"toolName": "Bash", "toolInput": {"command": command}});
+    assert_eq!(guard_exit(&fx, camel), 0);
+}
+
 #[test]
 fn event_name_from_env_is_recorded() {
     let fx = Fixture::new();
