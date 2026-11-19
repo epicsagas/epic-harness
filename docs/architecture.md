@@ -339,7 +339,7 @@ epic-harness/
 │   ├── presets/       # Cold-start skill templates per stack
 │   ├── rules/         # Seeded host rule files
 │   └── scripts/       # install.js plugin bootstrap
-├── hooks.json         # Antigravity/Codex-style host hook wiring (repo root)
+├── hooks.json         # agy (Antigravity CLI) lifecycle hook wiring (repo root)
 ├── .claude-plugin/    # Claude Code plugin manifest + hooks.json + marketplace.json
 ├── .codex-plugin/     # Codex plugin manifest
 ├── mcp_config.json    # harness-mem MCP server wiring

@@ -184,12 +184,22 @@ fn main() {
         }
     }
 
+    let mut agy = false;
     let input: hooks::common::HookInput = if stdin_buf.is_empty() {
         hooks::common::HookInput::default()
     } else {
         serde_json::from_str::<serde_json::Value>(&stdin_buf)
             .ok()
             .and_then(|mut v| {
+                if let Some(a) = shared::types::adapt_agy_payload(&mut v) {
+                    agy = true;
+                    if let Some(dir) = a.workspace {
+                        // Must run before anything calls project_slug() /
+                        // harness_dir(): both cache the cwd-derived slug in a
+                        // LazyLock.
+                        let _ = env::set_current_dir(dir);
+                    }
+                }
                 // guard and polish keep reading snake_case only, so grok
                 // payloads behave as before on those hooks.
                 if subcmd == "observe" {
@@ -353,9 +363,22 @@ fn main() {
 
     // stdout output varies by host protocol:
     // - Claude Code: stdin passthrough (original contract)
-    // - Codex/Antigravity: event-specific JSON (detected via hook_event_name)
-    if input.hook_event_name.is_some() {
-        // Codex / Antigravity protocol
+    // - Codex: event-specific JSON (detected via hook_event_name)
+    // - Antigravity (agy): one strict-protojson object, `{}` or `injectSteps`
+    if agy {
+        let mirrored = shared::helpers::take_hint_mirror();
+        if subcmd == "resume" && !mirrored.is_empty() {
+            let out = serde_json::json!({
+                "injectSteps": [
+                    {"systemMessage": {"systemMessage": mirrored.join("\n")}}
+                ]
+            });
+            println!("{out}");
+        } else {
+            println!("{{}}");
+        }
+    } else if input.hook_event_name.is_some() {
+        // Codex protocol
         match subcmd {
             "guard" if exit_code == 2 => {
                 // PreToolUse block: explicit deny JSON so Codex never ignores the block

@@ -10,6 +10,7 @@ use serde_json::Value;
 const CLAUDE_HOOKS: &str = include_str!("../.claude-plugin/hooks.json");
 const CODEX_HOOKS: &str = include_str!("../.codex-plugin/hooks.json");
 const GROK_HOOKS: &str = include_str!("../.grok-plugin/hooks.json");
+const AGY_HOOKS: &str = include_str!("../hooks.json");
 const MCP_CONFIG: &str = include_str!("../mcp_config.json");
 const RUN_MJS: &str = include_str!("../registry/scripts/hooks/run.mjs");
 
@@ -98,6 +99,35 @@ fn grok_hook_commands_all_use_launcher() {
     let handlers = command_handlers(&hooks);
     assert_eq!(handlers.len(), 8, "expected 8 command handlers");
     assert_launcher_form(&handlers, GROK_LAUNCHER);
+}
+
+/// agy (Antigravity CLI) runs handlers with cwd = plugin root and never
+/// substitutes variables, so the manifest is a flat handler list with a
+/// relative launcher path. SessionStart only: Stop waits for agy observe (#404).
+#[test]
+fn agy_hooks_manifest_is_flat_and_relative() {
+    let hooks: Value = serde_json::from_str(AGY_HOOKS).expect("valid JSON");
+    let top = hooks.as_object().unwrap();
+    assert_eq!(top.keys().collect::<Vec<_>>(), ["epic"]);
+    let events = top["epic"].as_object().unwrap();
+    assert_eq!(events.keys().collect::<Vec<_>>(), ["SessionStart"]);
+
+    let handlers = events["SessionStart"].as_array().unwrap();
+    assert_eq!(handlers.len(), 1);
+    let handler = handlers[0].as_object().unwrap();
+    let mut keys: Vec<_> = handler.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["command", "timeout", "type"]);
+    assert_eq!(handler["type"], "command");
+
+    let cmd = handler["command"].as_str().unwrap();
+    assert_eq!(cmd, "node registry/scripts/hooks/run.mjs session-start");
+    for token in FORBIDDEN.iter().chain(&["${", "$", "%"]) {
+        assert!(
+            !cmd.contains(token),
+            "hook command contains {token:?}: {cmd}"
+        );
+    }
 }
 
 #[test]

@@ -516,7 +516,7 @@ All tools share the same `~/.harness/projects/{slug}/` data directory.
 | **Codex CLI** | ✓ Full¹ | ✓ 3 prompts (incl. /orbit) | ✓ 25 | Live³ |
 | **Antigravity** | ✓ Partial² | ✓ 3 commands (incl. /orbit) | ✓ 25 | — |
 
-¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² PreInvocation/PostInvocation only — no PreToolUse (guard/polish unavailable) · ³ via `SubagentStart`/`SubagentStop`
+¹ `plugin_hooks = true` in `~/.codex/config.toml` · ² SessionStart (resume) only. No guard, observe, polish or reflect yet (#404). A conversation resumed with `-c`/`--conversation` gets no resume context because agy fires SessionStart only for new conversations · ³ via `SubagentStart`/`SubagentStop`
 
 ### Codex specifics
 

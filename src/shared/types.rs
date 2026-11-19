@@ -103,6 +103,45 @@ pub fn normalize_hook_payload(v: &mut serde_json::Value) {
     }
 }
 
+/// What `adapt_agy_payload` learned from an agy (Antigravity CLI) payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgyPayload {
+    /// Directory to chdir into before anything resolves the project slug.
+    pub workspace: Option<std::path::PathBuf>,
+}
+
+/// Detect an agy hook payload and rewrite it in place for `HookInput`.
+/// Returns `None` (and leaves `v` untouched) for every other host: agy is the
+/// only one that sends a string `conversationId` and `hookEventName` without
+/// a snake_case `hook_event_name` (grok sends both event keys).
+///
+/// `lastUserInput`, `transcriptPath` and `artifactDirectoryPath` are never
+/// copied: user prompt text can hold personal data.
+pub fn adapt_agy_payload(v: &mut serde_json::Value) -> Option<AgyPayload> {
+    let obj = v.as_object_mut()?;
+    let id = obj.get("conversationId")?.as_str()?.to_string();
+    let event = obj.get("hookEventName")?.as_str()?.to_string();
+    if obj.contains_key("hook_event_name") {
+        return None;
+    }
+    obj.entry("session_id")
+        .or_insert_with(|| serde_json::Value::String(id));
+    obj.insert("hook_event_name".into(), serde_json::Value::String(event));
+
+    let usable = |c: &serde_json::Value| {
+        c.as_str()
+            .map(std::path::Path::new)
+            .filter(|p| p.is_absolute() && p.is_dir())
+            .map(std::path::Path::to_path_buf)
+    };
+    let workspace = obj
+        .get("workspacePaths")
+        .and_then(|w| w.as_array())
+        .and_then(|w| w.iter().find_map(usable))
+        .or_else(|| obj.get("cwd").and_then(usable));
+    Some(AgyPayload { workspace })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ToolOutput {
     pub output: Option<String>,
@@ -227,5 +266,102 @@ mod tests {
         assert_eq!(mk(json!("  boom \n")).failure_text(), Some("boom"));
         assert_eq!(mk(json!("  ")).failure_text(), None);
         assert_eq!(mk(json!({"code": 1})).failure_text(), None);
+    }
+
+    fn agy_value(extra: serde_json::Value) -> serde_json::Value {
+        let mut v = json!({"conversationId": "c-1", "hookEventName": "SessionStart"});
+        v.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        v
+    }
+
+    #[test]
+    fn agy_payload_detected_and_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut v = agy_value(json!({"workspacePaths": [tmp.path()]}));
+        assert_eq!(
+            adapt_agy_payload(&mut v),
+            Some(AgyPayload {
+                workspace: Some(tmp.path().to_path_buf())
+            })
+        );
+        let input: HookInput = serde_json::from_value(v).unwrap();
+        assert_eq!(input.session_id.as_deref(), Some("c-1"));
+        assert_eq!(input.hook_event_name.as_deref(), Some("SessionStart"));
+    }
+
+    #[test]
+    fn agy_never_overwrites() {
+        let mut v = agy_value(json!({"session_id": "s-0"}));
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert_eq!(v["session_id"], "s-0");
+    }
+
+    #[test]
+    fn grok_payload_is_not_agy() {
+        let mut v = json!({
+            "conversationId": "c",
+            "hookEventName": "post_tool_use",
+            "hook_event_name": "PostToolUse"
+        });
+        let before = v.clone();
+        assert!(adapt_agy_payload(&mut v).is_none());
+        assert_eq!(v, before);
+    }
+
+    #[test]
+    fn claude_and_codex_payloads_are_not_agy() {
+        for original in [
+            json!({
+                "session_id": "s", "hook_event_name": "PostToolUseFailure",
+                "tool_name": "Bash", "tool_input": {"command": "false"},
+                "error": "Exit code 1", "is_interrupt": false
+            }),
+            json!({
+                "session_id": "s", "hook_event_name": "PostToolUse",
+                "tool_name": "Bash", "tool_input": {"command": "ls"},
+                "tool_response": "ok\n"
+            }),
+        ] {
+            let mut v = original.clone();
+            assert!(adapt_agy_payload(&mut v).is_none());
+            assert_eq!(v, original);
+        }
+    }
+
+    #[test]
+    fn non_objects_untouched() {
+        for original in [json!("text"), json!([1]), json!(null)] {
+            let mut v = original.clone();
+            assert!(adapt_agy_payload(&mut v).is_none());
+            assert_eq!(v, original);
+        }
+    }
+
+    #[test]
+    fn conversation_id_must_be_string() {
+        let mut v = json!({"conversationId": 7, "hookEventName": "Stop"});
+        let before = v.clone();
+        assert!(adapt_agy_payload(&mut v).is_none());
+        assert_eq!(v, before);
+    }
+
+    #[test]
+    fn workspace_order() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let missing = a.path().join("missing");
+        let ws = |v: serde_json::Value| adapt_agy_payload(&mut agy_value(v)).unwrap().workspace;
+
+        assert_eq!(
+            ws(json!({"workspacePaths": [missing, a.path()], "cwd": b.path()})),
+            Some(a.path().to_path_buf())
+        );
+        assert_eq!(
+            ws(json!({"workspacePaths": [], "cwd": b.path()})),
+            Some(b.path().to_path_buf())
+        );
+        assert_eq!(ws(json!({"workspacePaths": ["rel"]})), None);
     }
 }
