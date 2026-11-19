@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import OrbitPipeline from './OrbitPipeline.svelte';
 
-const api = vi.hoisted(() => ({ list: vi.fn(), dismiss: vi.fn() }));
-vi.mock('../lib/harness.js', () => ({ getOrbitPipelines: api.list, dismissOrbitPipeline: api.dismiss }));
+const api = vi.hoisted(() => ({ list: vi.fn(), dismiss: vi.fn(), desktop: vi.fn(() => false) }));
+vi.mock('../lib/harness.js', () => ({ getOrbitPipelines: api.list, dismissOrbitPipeline: api.dismiss, isDesktop: api.desktop }));
 
 const pipeline = (phase: string, extra: Record<string, unknown> = {}) => ({
   id: 'sid-1-fixture', goal_slug: 'fixture-goal', phase, status: 'running', mode: 'direct', branch: null,
@@ -14,7 +14,7 @@ const pipeline = (phase: string, extra: Record<string, unknown> = {}) => ({
 
 const runningLabel = (c: HTMLElement) => c.querySelector('.pipeline-stage.running .stage-label')?.textContent;
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); api.desktop.mockReturnValue(false); });
 
 describe('OrbitPipeline phases', () => {
   it.each(['audit', 'eval', 'evolve'])('marks the %s phase as running', async phase => {
@@ -27,6 +27,23 @@ describe('OrbitPipeline phases', () => {
     api.list.mockResolvedValue([pipeline('check')]);
     const view = render(OrbitPipeline);
     await waitFor(() => expect(runningLabel(view.container)).toBe('audit'));
+  });
+});
+
+describe('OrbitPipeline dismiss control by runtime', () => {
+  it('shows the dismiss control in the browser build', async () => {
+    api.list.mockResolvedValue([pipeline('go')]);
+    render(OrbitPipeline);
+    await screen.findByText('fixture-goal');
+    expect(screen.getAllByTitle('Dismiss').length).toBeGreaterThan(0);
+  });
+
+  it('hides the dismiss control in the desktop app', async () => {
+    api.desktop.mockReturnValue(true);
+    api.list.mockResolvedValue([pipeline('go')]);
+    render(OrbitPipeline);
+    await screen.findByText('fixture-goal');
+    expect(screen.queryByTitle('Dismiss')).toBeNull();
   });
 });
 

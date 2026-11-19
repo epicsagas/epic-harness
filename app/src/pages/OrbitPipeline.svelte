@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getOrbitPipelines, dismissOrbitPipeline } from '../lib/harness.js';
+  import { getOrbitPipelines, dismissOrbitPipeline, isDesktop } from '../lib/harness.js';
   import type { OrbitPipeline } from '../lib/harness.js';
   import DateRangePicker from '$lib/components/DateRangePicker.svelte';
   import { tStore, t } from '$lib/i18n.js';
@@ -221,11 +221,13 @@
           <span style="font-size:11px;color:var(--muted);font-family:var(--font-mono);">
             ID: {shortId(p.id)} · Mode: {p.mode ?? '--'} · Check fails: {p.audit_fail_count}
           </span>
-          <button
-            onclick={() => dismiss(p.id)}
-            title="Dismiss"
-            style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;cursor:pointer;padding:0;line-height:1;"
-          >✕</button>
+          {#if !isDesktop()}
+            <button
+              onclick={() => dismiss(p.id)}
+              title="Dismiss"
+              style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;cursor:pointer;padding:0;line-height:1;"
+            >✕</button>
+          {/if}
         </div>
       </div>
       <div class="panel-body">
@@ -335,11 +337,13 @@
               <td style="font-family:var(--font-mono);font-size:11px;white-space:nowrap;">{fmtDatetime(p.started_at)}</td>
               <td style="font-family:var(--font-mono);text-align:right;">{$tStore('durationMin', durationMinutes(p.started_at, p.updated_at))}</td>
               <td>
-                <button
-                  onclick={() => dismiss(p.id)}
-                  title="Dismiss"
-                  style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
-                >✕</button>
+                {#if !isDesktop()}
+                  <button
+                    onclick={() => dismiss(p.id)}
+                    title="Dismiss"
+                    style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);width:20px;height:20px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;cursor:pointer;padding:0;line-height:1;"
+                  >✕</button>
+                {/if}
               </td>
             </tr>
           {/each}

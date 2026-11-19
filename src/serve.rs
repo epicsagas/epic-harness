@@ -115,20 +115,9 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             .with_header(Header::from_bytes(b"Content-Type", b"text/html; charset=utf-8").unwrap()),
 
             // ── Orchestration API ───────────────────────────
-            (Method::Get, "/api/run") => {
-                let body = if let Ok(Some(run)) = crate::store::runtime::block_on(async {
-                    let pool = crate::store::pool::harness_pool().await?;
-                    crate::store::orchestrator::read_run_pool(&pool).await
-                }) {
-                    serde_json::to_string(&run).unwrap_or_else(|_| "{}".into())
-                } else {
-                    let harness_dir = common::harness_dir();
-                    match orch::read_run(&harness_dir) {
-                        Some(run) => serde_json::to_string(&run).unwrap_or_else(|_| "{}".into()),
-                        None => "{}".into(),
-                    }
-                };
-                json_response(&body)
+            (Method::Get, url) if url.split('?').next() == Some("/api/run") => {
+                let (status, body) = handle_orch_request(url);
+                json_response(&body).with_status_code(status)
             }
 
             (Method::Get, "/api/events") => {
@@ -277,33 +266,15 @@ pub fn run_serve(port: Option<u16>) -> i32 {
             }
 
             // ── Agents API ───────────────────────────────────
-            (Method::Get, url) if url.starts_with("/api/agents/") && url.ends_with("/status") => {
-                let agent_id = url
-                    .trim_start_matches("/api/agents/")
-                    .trim_end_matches("/status");
-                if !orch::validate_agent_id(agent_id) {
-                    json_response("{\"error\":\"invalid agent id\"}").with_status_code(400)
-                } else if let Ok(Some(a)) = crate::store::runtime::block_on(async {
-                    let pool = crate::store::pool::harness_pool().await?;
-                    crate::store::orchestrator::read_agent_pool(&pool, agent_id).await
-                }) {
-                    let body = serde_json::json!({
-                        "agent_id": a.id,
-                        "phase": a.phase,
-                        "progress": a.progress,
-                        "last_heartbeat": a.last_heartbeat,
-                        "status": a.status,
-                    })
-                    .to_string();
-                    json_response(&body)
-                } else {
-                    let harness_dir = common::harness_dir();
-                    let body = match orch::read_agent_status(&harness_dir, agent_id) {
-                        Some(s) => serde_json::to_string(&s).unwrap_or_else(|_| "{}".into()),
-                        None => "{}".into(),
-                    };
-                    json_response(&body)
-                }
+            (Method::Get, url)
+                if url.starts_with("/api/agents/")
+                    && url
+                        .split('?')
+                        .next()
+                        .is_some_and(|p| p.ends_with("/status")) =>
+            {
+                let (status, body) = handle_orch_request(url);
+                json_response(&body).with_status_code(status)
             }
 
             (Method::Delete, url) if url.starts_with("/api/agents/") => {
@@ -511,6 +482,36 @@ fn is_loopback_same_origin(headers: &[Header], port: u16) -> bool {
 
 fn forbidden_response() -> Response<std::io::Cursor<Vec<u8>>> {
     json_response("{\"error\":\"cross-origin request rejected\"}").with_status_code(403)
+}
+
+/// `/api/run` and `/api/agents/{id}/status`, optionally scoped by `?project=`.
+/// Same selector rules as `handle_harness_request`: absent or `__all__` is the
+/// dashboard process's own project, an invalid slug is a 400 before any path
+/// is built. A missing file keeps the old `{}` body.
+fn handle_orch_request(url: &str) -> (u16, String) {
+    let project = parse_query_param(url, "project").filter(|p| !p.is_empty() && p != "__all__");
+    if let Some(p) = &project
+        && !crate::shared::paths::is_valid_project_slug(p)
+    {
+        return (400, "{\"error\":\"invalid project\"}".into());
+    }
+    let base = crate::shared::paths::resolve_harness_dir(project.as_deref());
+    let path = url.split('?').next().unwrap_or("");
+    let body = if path == "/api/run" {
+        serde_json::to_string(&orch::read_run(&base))
+    } else {
+        let agent_id = path
+            .trim_start_matches("/api/agents/")
+            .trim_end_matches("/status");
+        if !orch::validate_agent_id(agent_id) {
+            return (400, "{\"error\":\"invalid agent id\"}".into());
+        }
+        serde_json::to_string(&orch::read_agent_status(&base, agent_id))
+    };
+    match body {
+        Ok(b) if b != "null" => (200, b),
+        _ => (200, "{}".into()),
+    }
 }
 
 /// `/api/harness?cmd=..&project=..`. `project` selects a specific project
@@ -1298,6 +1299,123 @@ mod tests {
             let (status, body) = handle_harness_request(url, &harness_dir);
             assert_eq!(status, 200, "{url}");
             assert!(body.contains("enabled"), "{url}");
+        }
+    }
+
+    /// Point `HARNESS_DIR` at `root` for one serial test, restoring on drop.
+    struct HarnessDirGuard(Option<std::ffi::OsString>);
+    impl HarnessDirGuard {
+        fn set(root: &std::path::Path) -> Self {
+            let prev = std::env::var_os("HARNESS_DIR");
+            // SAFETY: serial test, no other thread reads the environment.
+            unsafe { std::env::set_var("HARNESS_DIR", root) };
+            Self(prev)
+        }
+    }
+    impl Drop for HarnessDirGuard {
+        fn drop(&mut self) {
+            // SAFETY: serial test, no other thread reads the environment.
+            unsafe {
+                match self.0.take() {
+                    Some(v) => std::env::set_var("HARNESS_DIR", v),
+                    None => std::env::remove_var("HARNESS_DIR"),
+                }
+            }
+        }
+    }
+
+    fn write_orch_run(root: &std::path::Path, slug: &str, run_id: &str, agent_id: &str) {
+        let base = root.join("projects").join(slug);
+        let run = orch::OrchestrationRun {
+            id: run_id.into(),
+            status: orch::RunStatus::Running,
+            agents: vec![],
+            dependency_graph: Default::default(),
+            created_at: "2026-01-01T00:00:00Z".into(),
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        };
+        std::fs::create_dir_all(orch::orchestrator_dir(&base)).unwrap();
+        orch::write_run(&base, &run).unwrap();
+        let status = orch::AgentStatusFile {
+            agent_id: agent_id.into(),
+            phase: format!("phase-{slug}"),
+            progress: 0.5,
+            last_heartbeat: "2026-01-01T00:00:00Z".into(),
+            status: orch::AgentStatus::Running,
+        };
+        orch::write_agent_status(&base, agent_id, &status).unwrap();
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn api_run_is_scoped_by_project_query() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = HarnessDirGuard::set(tmp.path());
+        write_orch_run(tmp.path(), "proj-a", "run-a", "ag-1");
+        write_orch_run(tmp.path(), "proj-b", "run-b", "ag-1");
+
+        let (status, body) = handle_orch_request("/api/run?project=proj-a");
+        assert_eq!(status, 200);
+        assert!(body.contains("run-a") && !body.contains("run-b"), "{body}");
+        let (_, body) = handle_orch_request("/api/run?project=proj-b");
+        assert!(body.contains("run-b") && !body.contains("run-a"), "{body}");
+
+        // Valid slug with no data keeps the old empty-object body.
+        assert_eq!(
+            handle_orch_request("/api/run?project=proj-none"),
+            (200, "{}".into())
+        );
+
+        // Absent and `__all__` both mean the dashboard process's own project.
+        let own = serde_json::to_string(&orch::read_run(&common::harness_dir()))
+            .map(|b| if b == "null" { "{}".into() } else { b })
+            .unwrap();
+        for url in ["/api/run", "/api/run?project=__all__", "/api/run?project="] {
+            assert_eq!(handle_orch_request(url), (200, own.clone()), "{url}");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn api_run_and_status_reject_unsafe_project_selectors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = HarnessDirGuard::set(tmp.path());
+        for bad in ["..", "a/b", "a%2Fb", "%2e%2e", "%2Fetc"] {
+            for path in ["/api/run", "/api/agents/ag-1/status"] {
+                let url = format!("{path}?project={bad}");
+                assert_eq!(
+                    handle_orch_request(&url),
+                    (400, "{\"error\":\"invalid project\"}".into()),
+                    "{url}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn agent_status_route_is_scoped_and_validates_agent_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = HarnessDirGuard::set(tmp.path());
+        write_orch_run(tmp.path(), "proj-a", "run-a", "ag-1");
+        write_orch_run(tmp.path(), "proj-b", "run-b", "ag-1");
+
+        let (status, body) = handle_orch_request("/api/agents/ag-1/status?project=proj-b");
+        assert_eq!(status, 200);
+        assert!(body.contains("phase-proj-b"), "{body}");
+        let (_, body) = handle_orch_request("/api/agents/ag-1/status?project=proj-a");
+        assert!(body.contains("phase-proj-a"), "{body}");
+        assert_eq!(
+            handle_orch_request("/api/agents/ag-2/status?project=proj-a"),
+            (200, "{}".into())
+        );
+        for id in ["..", "a%2Fb", "a.b"] {
+            let url = format!("/api/agents/{id}/status?project=proj-a");
+            assert_eq!(
+                handle_orch_request(&url),
+                (400, "{\"error\":\"invalid agent id\"}".into()),
+                "{url}"
+            );
         }
     }
 

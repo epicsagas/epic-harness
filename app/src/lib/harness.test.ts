@@ -4,7 +4,7 @@
 // state), never resolve with invented numbers.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dismissOrbitPipeline, getEvolvedSkills, getGraphStats, getHarnessMetrics, getObsSummary, getOrbitPipelines, searchMemory } from './harness.js';
+import { dismissOrbitPipeline, getEvolvedSkills, getGraphStats, getHarnessMetrics, getObsSummary, getOrbitPipelines, getOrchestratorAgentStatus, getOrchestratorRun, isDesktop, searchMemory } from './harness.js';
 import { selectedProject } from './stores/project.js';
 
 function stubFetch(impl: () => Promise<Partial<Response>>) {
@@ -159,5 +159,58 @@ describe('Tauri runtime memory transport', () => {
     const h = await load();
     invokeMock.mockRejectedValueOnce(new Error('invalid uuid'));
     await expect(h.getMemoryNode('not-a-uuid')).resolves.toBeNull();
+  });
+
+  it('reads the run and agent status over read-only native commands', async () => {
+    const h = await load();
+    expect(h.isDesktop()).toBe(true);
+
+    invokeMock.mockResolvedValueOnce({ id: 'run-1', agents: [] });
+    await expect(h.getOrchestratorRun('proj-a')).resolves.toMatchObject({ id: 'run-1' });
+    expect(invokeMock).toHaveBeenLastCalledWith('get_orchestrator_run', { project: 'proj-a' });
+
+    invokeMock.mockResolvedValueOnce(null);
+    await expect(h.getOrchestratorRun('__all__')).resolves.toBeNull();
+    expect(invokeMock).toHaveBeenLastCalledWith('get_orchestrator_run', undefined);
+
+    invokeMock.mockResolvedValueOnce({ agent_id: 'ag-1', status: 'running' });
+    await h.getOrchestratorAgentStatus('ag-1', 'proj-a');
+    expect(invokeMock).toHaveBeenLastCalledWith('get_orchestrator_agent_status', { project: 'proj-a', agentId: 'ag-1' });
+
+    invokeMock.mockResolvedValueOnce({});
+    await expect(h.getOrchestratorAgentStatus('ag-1', '__all__')).resolves.toBeNull();
+    expect(invokeMock).toHaveBeenLastCalledWith('get_orchestrator_agent_status', { agentId: 'ag-1' });
+  });
+});
+
+describe('orchestrator reads over fetch', () => {
+  afterEach(() => selectedProject.set('__all__'));
+
+  it('is not the desktop runtime and builds an encoded project query', async () => {
+    expect(isDesktop()).toBe(false);
+    const fetchMock = stubFetch(() => json({ id: 'run-1' }));
+    await expect(getOrchestratorRun('proj a/1')).resolves.toMatchObject({ id: 'run-1' });
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/run?project=proj%20a%2F1');
+
+    await getOrchestratorAgentStatus('ag-1', 'proj-a');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/agents/ag-1/status?project=proj-a');
+  });
+
+  it('omits the query for all projects and defaults to the selected project', async () => {
+    const fetchMock = stubFetch(() => json({}));
+    await getOrchestratorRun('__all__');
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/run');
+
+    selectedProject.set('proj-b');
+    await getOrchestratorRun();
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/run?project=proj-b');
+  });
+
+  it('maps an empty object and a failed response to null', async () => {
+    stubFetch(() => json({}));
+    await expect(getOrchestratorRun('proj-a')).resolves.toBeNull();
+    await expect(getOrchestratorAgentStatus('ag-1', 'proj-a')).resolves.toBeNull();
+    stubFetch(() => json({ error: 'invalid project' }, false, 400));
+    await expect(getOrchestratorRun('proj-a')).resolves.toBeNull();
   });
 });

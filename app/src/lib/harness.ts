@@ -14,6 +14,10 @@ function isTauriRuntime(): boolean {
     !!((window as unknown) as Record<string, unknown>)['__TAURI_INTERNALS__'];
 }
 
+export function isDesktop(): boolean {
+  return isTauriRuntime();
+}
+
 async function resolveInvoke(): Promise<void> {
   if (!isTauriRuntime()) {
     _invoke = browserFallback;
@@ -400,23 +404,30 @@ export const getManifests = () => invoke<EditManifestEntry[]>('get_manifests', p
 
 // ── Orchestration API ──────────────────────────────────────────────────────
 
-export async function getOrchestratorRun(): Promise<OrchestrationRun | null> {
+// Desktop reads go over read-only native commands; the browser build calls the
+// served routes with the same project scope.
+async function readOrchestrator(command: string, path: string, project: string | undefined, extra?: Record<string, unknown>): Promise<Record<string, unknown> | null> {
+  const args = projectArgs(project);
+  if (isTauriRuntime()) {
+    return invoke<Record<string, unknown> | null>(command, extra ? { ...args, ...extra } : args);
+  }
+  const res = await fetch(args ? `${path}?project=${encodeURIComponent(args.project as string)}` : path);
+  return res.ok ? res.json() : null;
+}
+
+export async function getOrchestratorRun(project: string | undefined = get(selectedProject)): Promise<OrchestrationRun | null> {
   try {
-    const res = await fetch('/api/run');
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && Object.keys(data).length > 0 ? data as OrchestrationRun : null;
+    const data = await readOrchestrator('get_orchestrator_run', '/api/run', project);
+    return data && Object.keys(data).length > 0 ? data as unknown as OrchestrationRun : null;
   } catch {
     return null;
   }
 }
 
-export async function getOrchestratorAgentStatus(agentId: string): Promise<OrchAgentStatus | null> {
+export async function getOrchestratorAgentStatus(agentId: string, project: string | undefined = get(selectedProject)): Promise<OrchAgentStatus | null> {
   try {
-    const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/status`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data && Object.keys(data).length > 0 ? data as OrchAgentStatus : null;
+    const data = await readOrchestrator('get_orchestrator_agent_status', `/api/agents/${encodeURIComponent(agentId)}/status`, project, { agentId });
+    return data && Object.keys(data).length > 0 ? data as unknown as OrchAgentStatus : null;
   } catch {
     return null;
   }

@@ -71,6 +71,8 @@ pub fn run() {
             commands::harness::get_harness_snapshot,
             commands::harness::get_adaptation_landscape,
             commands::harness::get_manifests,
+            commands::harness::get_orchestrator_run,
+            commands::harness::get_orchestrator_agent_status,
         ])
         .run(tauri::generate_context!())
     {

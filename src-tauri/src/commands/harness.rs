@@ -402,8 +402,9 @@ pub async fn get_global_patterns(
 
 /// File-backed readers join the project onto the data root, so a selector from
 /// the webview must be a plain slug (same allowlist as the dashboard server).
+/// `__all__` means no project, as on the server, so it is never used as a slug.
 fn checked_project(project: Option<&str>) -> Result<Option<&str>, String> {
-    match project.filter(|p| !p.is_empty()) {
+    match project.filter(|p| !p.is_empty() && *p != "__all__") {
         Some(p) if !epic_harness::shared::paths::is_valid_project_slug(p) => {
             Err("invalid project".to_string())
         }
@@ -437,6 +438,33 @@ pub async fn get_harness_snapshot(project: Option<String>) -> Result<serde_json:
 pub async fn get_manifests(project: Option<String>) -> Result<serde_json::Value, String> {
     let p = checked_project(project.as_deref())?;
     to_json(epic_harness::serve::recent_manifests(p))
+}
+
+/// Read-only: the desktop app never mutates orchestration state over IPC.
+#[tauri::command]
+pub async fn get_orchestrator_run(
+    project: Option<String>,
+) -> Result<Option<serde_json::Value>, String> {
+    let p = checked_project(project.as_deref())?;
+    let base = epic_harness::shared::paths::resolve_harness_dir(p);
+    epic_harness::orchestrate::state::read_run(&base)
+        .map(to_json)
+        .transpose()
+}
+
+#[tauri::command]
+pub async fn get_orchestrator_agent_status(
+    project: Option<String>,
+    agent_id: String,
+) -> Result<Option<serde_json::Value>, String> {
+    let p = checked_project(project.as_deref())?;
+    if !epic_harness::orchestrate::state::validate_agent_id(&agent_id) {
+        return Err("invalid agent id".to_string());
+    }
+    let base = epic_harness::shared::paths::resolve_harness_dir(p);
+    epic_harness::orchestrate::state::read_agent_status(&base, &agent_id)
+        .map(to_json)
+        .transpose()
 }
 
 #[tauri::command]
@@ -675,6 +703,7 @@ mod tests {
     fn project_selector_must_be_a_plain_slug() {
         assert_eq!(checked_project(None), Ok(None));
         assert_eq!(checked_project(Some("")), Ok(None));
+        assert_eq!(checked_project(Some("__all__")), Ok(None));
         assert_eq!(checked_project(Some("proj-a.1")), Ok(Some("proj-a.1")));
         for bad in ["..", ".", "../x", "a/b", "a\\b", "/abs", "C:"] {
             assert!(checked_project(Some(bad)).is_err(), "{bad:?}");
@@ -692,6 +721,25 @@ mod tests {
             assert!(get_variant_pool(bad()).await.is_err());
             assert!(get_harness_snapshot(bad()).await.is_err());
             assert!(get_manifests(bad()).await.is_err());
+        });
+    }
+
+    #[test]
+    fn orchestrator_readers_reject_unsafe_selectors() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let bad = || Some("../x".to_string());
+            assert!(get_orchestrator_run(bad()).await.is_err());
+            assert_eq!(
+                get_orchestrator_agent_status(bad(), "ag-1".into()).await,
+                Err("invalid project".to_string())
+            );
+            assert_eq!(
+                get_orchestrator_agent_status(None, "../x".into()).await,
+                Err("invalid agent id".to_string())
+            );
         });
     }
 }

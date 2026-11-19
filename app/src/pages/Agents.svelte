@@ -36,13 +36,19 @@
     return [...agentStatuses.entries()].map(([id, s]) => `${id}:${s.status ?? '?'}`).sort().join('|');
   }
 
+  // A slow older load (poll or previous project) must not overwrite a newer one.
+  let seq = 0;
+
   async function load() {
+    const mine = ++seq;
+    const project = $selectedProject;
     try {
       error = null;
       const [orchRun, orchObs] = await Promise.all([
-        getOrchestratorRun(),
+        getOrchestratorRun(project),
         getObsSummary(),
       ]);
+      if (mine !== seq) return;
       run = orchRun;
       obs = orchObs;
 
@@ -52,18 +58,20 @@
         await Promise.all(
           orchRun.agents.map(async (agent) => {
             try {
-              const status = await getOrchestratorAgentStatus(agent.id);
+              const status = await getOrchestratorAgentStatus(agent.id, project);
               if (status) statusMap.set(agent.id, status);
             } catch { /* skip missing */ }
           })
         );
+        if (mine !== seq) return;
         agentStatuses = statusMap;
       }
       flashIfChanged('agents', statusSignal());
     } catch (e) {
+      if (mine !== seq) return;
       error = e instanceof Error ? e.message : String(e);
     } finally {
-      loading = false;
+      if (mine === seq) loading = false;
     }
   }
 
