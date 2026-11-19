@@ -7,15 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Failed tool calls are now recorded on Claude Code and grok, so session scores drop once after updating. That drop is the missing failures showing up, not a regression. Scores restart from a new baseline and evolved skills are not rolled back because of it.
+## [0.9.2] - 2026-11-19
+
+Thanks to @Tomauskasz for the reports and reference PRs behind these fixes.
+
+Failed tool calls are now recorded on Claude Code and grok, so session scores drop once after updating. That drop is the missing failures showing up, not a regression. Scores restart from a new baseline: the evolved-skill backup is refreshed at that point and no stagnation rollback happens until at least 5 sessions have been scored on the new baseline. Failure-driven features (pattern detection, skill seeding, synthesis evidence and opt-in telemetry error sampling) now see Claude Code and grok failures for the first time.
 
 ### Fixed
 - **Failed tool calls are recorded**: Claude Code and grok send failures to a separate `PostToolUseFailure` hook event that was never registered, so failures were invisible to scoring and skill evolution. The event is now registered and the host's error text is classified and masked; interrupted calls are skipped. (#192)
 - **Stagnation rollback no longer wipes skills after the score change**: scores restart in a new epoch, and in that epoch evolved skills roll back only on a real drop from the epoch's best score instead of whenever the best score is below 0.90.
+- **Telemetry off means no telemetry files**: the tool-error sampling counter is no longer written when telemetry is off.
 - **Live Agents follows the selected project**: `/api/run` and agent status read the selected project's run, and the desktop app reads them through new read-only commands. The desktop app hides the dismiss buttons it cannot perform. (#175, #238)
 
 ### Security
-- **The plugin bootstrap installs only a pinned, checksum-verified release**: it downloads the archive for the plugin's own version, checks it against the release's `.sha256` file before extracting, and never runs a downloaded install script. An existing Homebrew or cargo install gets an update notice instead of an automatic download. (#223, #225)
+- **The plugin bootstrap installs only a pinned, checksum-verified release**: it downloads the archive for the plugin's own version, checks it against the release's `.sha256` file before extracting, and never runs a downloaded install script. Hooks run the plugin-matched binary from `~/.local/bin` by absolute path. When the `epic` on your PATH (Homebrew, cargo, or an older plugin bootstrap in `~/.cargo/bin`) is older than the plugin, the bootstrap installs the verified copy into `~/.local/bin` for the hooks and prints one line on how to update your shell binary; it never modifies or deletes the PATH binary. On Windows, a missing `epic` is now installed on the first session. Downloads time out after 120 s and a failed attempt is retried after an hour. (#223, #225)
 
 ## [0.9.1] - 2026-11-17
 
