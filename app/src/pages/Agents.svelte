@@ -65,6 +65,8 @@
         );
         if (mine !== seq) return;
         agentStatuses = statusMap;
+      } else {
+        agentStatuses = new Map();
       }
       flashIfChanged('agents', statusSignal());
     } catch (e) {
@@ -78,6 +80,9 @@
   // Reload on project switch (getObsSummary is project-scoped) + poll for live view.
   $effect(() => {
     const _project = $selectedProject; // reactive dependency
+    run = null; // drop the previous project's run and statuses before the new fetch resolves
+    agentStatuses = new Map();
+    loading = true;
     load();
     const id = setInterval(load, 5000);
     return () => clearInterval(id);

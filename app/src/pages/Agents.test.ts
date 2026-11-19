@@ -45,4 +45,57 @@ describe('Agents page', () => {
     expect(screen.queryByText('task-first')).toBeNull();
     expect(screen.getByText('task-second')).toBeTruthy();
   });
+  it('does not render the previous project statuses while the new request is pending', async () => {
+    const shared = (task: string) => ({ ...run('x'), agents: [{ ...run('x').agents[0], id: 'ag-shared', task }] });
+    selectedProject.set('proj-a');
+    api.getObsSummary.mockResolvedValue(null);
+    api.getOrchestratorRun.mockImplementation((project: string) =>
+      Promise.resolve(shared(project === 'proj-a' ? 'task-a' : 'task-b')));
+    api.getOrchestratorAgentStatus.mockImplementation((_id: string, project: string) =>
+      project === 'proj-a'
+        ? Promise.resolve({ progress: 0.5, status: 'running', last_heartbeat: new Date().toISOString() })
+        : new Promise(() => {}));
+    render(Agents);
+    await screen.findByText(/heartbeat/);
+    selectedProject.set('proj-b');
+    await waitFor(() => expect(api.getOrchestratorAgentStatus).toHaveBeenCalledWith('ag-shared', 'proj-b'));
+    expect(screen.queryByText(/heartbeat/)).toBeNull();
+  });
+  it('shows the loading skeleton instead of the empty panel while the new project loads', async () => {
+    selectedProject.set('proj-a');
+    api.getObsSummary.mockResolvedValue(null);
+    api.getOrchestratorAgentStatus.mockResolvedValue(null);
+    api.getOrchestratorRun.mockImplementation((project: string) =>
+      project === 'proj-a' ? Promise.resolve(run('a')) : new Promise(() => {}));
+    const { container } = render(Agents);
+    await screen.findByText('task-a');
+    selectedProject.set('proj-b');
+    await waitFor(() => expect(container.querySelector('.skeleton')).toBeTruthy());
+    expect(screen.queryByText('task-a')).toBeNull();
+  });
+
+  it('clears the statuses when a poll returns no run', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const shared = { ...run('x'), agents: [{ ...run('x').agents[0], id: 'ag-shared' }] };
+      selectedProject.set('proj-a');
+      api.getObsSummary.mockResolvedValue(null);
+      api.getOrchestratorRun
+        .mockResolvedValueOnce(shared)
+        .mockResolvedValueOnce(null)
+        .mockResolvedValue(shared);
+      api.getOrchestratorAgentStatus
+        .mockResolvedValueOnce({ progress: 0.5, status: 'running', last_heartbeat: new Date().toISOString() })
+        .mockImplementation(() => new Promise(() => {}));
+      render(Agents);
+      await screen.findByText(/heartbeat/);
+      await vi.advanceTimersByTimeAsync(5000);
+      await screen.findByText('No active agents');
+      await vi.advanceTimersByTimeAsync(5000);
+      await screen.findByText('task-x');
+      expect(screen.queryByText(/heartbeat/)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
