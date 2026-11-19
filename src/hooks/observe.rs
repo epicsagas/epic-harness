@@ -384,6 +384,7 @@ pub fn generate_investigation_hints(tool_name: &str, action: Option<&str>) {
 /// reading patch text instead of a path.
 fn resolve_action(v: &serde_json::Value) -> String {
     v.get("file_path")
+        .or_else(|| v.get("target_file"))
         .and_then(|c| c.as_str())
         .filter(|c| !c.is_empty())
         .or_else(|| {
@@ -410,6 +411,19 @@ fn resolve_action(v: &serde_json::Value) -> String {
             let s = serde_json::to_string(&mask_json_secrets(v)).unwrap_or_default();
             mask_snippet(&s, 200)
         })
+}
+
+/// Host-reported shell outcome (grok `tool_response`): `Some(category)` when
+/// the host says the command failed, `None` when it says nothing or success.
+fn host_shell_failure(resp: &serde_json::Value, output: &str) -> Option<&'static str> {
+    let obj = resp.as_object()?;
+    if obj.get("timed_out").and_then(|b| b.as_bool()) == Some(true) {
+        return Some("timeout");
+    }
+    match obj.get("exit_code").and_then(|c| c.as_i64()) {
+        Some(code) if code != 0 => Some(classify_failure(output).unwrap_or("runtime_error")),
+        _ => None,
+    }
 }
 
 fn tool_name_is_agent(input: &HookInput) -> bool {
@@ -480,9 +494,12 @@ pub fn run(input: &HookInput) -> i32 {
         match v {
             serde_json::Value::String(s) => (s.clone(), String::new()),
             serde_json::Value::Object(obj) => {
+                // grok sends `output` as a byte array and the text as
+                // `output_for_prompt`.
                 let out = obj
                     .get("output")
                     .and_then(|v| v.as_str())
+                    .or_else(|| obj.get("output_for_prompt").and_then(|v| v.as_str()))
                     .unwrap_or("")
                     .to_string();
                 let err = obj
@@ -536,6 +553,11 @@ pub fn run(input: &HookInput) -> i32 {
 
         // Host-reported error text of a failed read/glob/grep, if any.
         let mut host_error: Option<String> = None;
+        let raw = if input.tool_output.is_some() {
+            None
+        } else {
+            input.tool_response.as_ref().or(input.tool_result.as_ref())
+        };
         record.failure_category = if tool_cat == "bash" {
             let cmd = input
                 .tool_input
@@ -543,23 +565,21 @@ pub fn run(input: &HookInput) -> i32 {
                 .and_then(|v| v.get("command"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
-            classify_bash_failure(cmd, &output, &stderr, streams_separated).map(String::from)
+            // A host-reported exit status wins; otherwise scan the output.
+            raw.and_then(|r| host_shell_failure(r, &output))
+                .or_else(|| classify_bash_failure(cmd, &output, &stderr, streams_separated))
+                .map(String::from)
         } else if matches!(tool_cat, "read" | "glob" | "grep") {
             // PostToolUse fires only for successful calls, so the printed body
             // is quoted material. Only an explicit host error flag counts.
-            let raw = if input.tool_output.is_some() {
-                None
-            } else {
-                input.tool_response.as_ref().or(input.tool_result.as_ref())
-            };
             let is_error = raw
                 .and_then(|v| v.get("is_error"))
                 .and_then(|b| b.as_bool())
                 == Some(true);
-            let err = raw
-                .and_then(|v| v.get("error"))
-                .and_then(|e| e.as_str())
-                .filter(|e| !e.is_empty());
+            // grok reports a missing file as `FileNotFound` text.
+            let err = ["error", "FileNotFound"]
+                .iter()
+                .find_map(|k| raw?.get(*k)?.as_str().filter(|e| !e.is_empty()));
             host_error = err.map(String::from);
             (is_error || err.is_some()).then(|| {
                 classify_failure(err.unwrap_or(&combined))
@@ -738,6 +758,49 @@ mod tests {
             resolve_action(&serde_json::json!({"file_path": "src/b.py"})),
             "src/b.py"
         );
+    }
+
+    #[test]
+    fn resolve_action_reads_target_file() {
+        assert_eq!(
+            resolve_action(&serde_json::json!({"target_file": "src/a.rs"})),
+            "src/a.rs"
+        );
+        assert_eq!(
+            resolve_action(
+                &serde_json::json!({"file_path": "src/a.rs", "target_file": "src/b.rs"})
+            ),
+            "src/a.rs"
+        );
+    }
+
+    #[test]
+    fn host_shell_failure_rules() {
+        let table = [
+            (
+                serde_json::json!({"exit_code": 1}),
+                "",
+                Some("runtime_error"),
+            ),
+            (
+                serde_json::json!({"exit_code": 1}),
+                "Tests: 3 failed, 5 passed",
+                Some("test_fail"),
+            ),
+            (serde_json::json!({"exit_code": 0}), "", None),
+            (serde_json::json!({"exit_code": null}), "", None),
+            (serde_json::json!({}), "", None),
+            (
+                serde_json::json!({"timed_out": true, "exit_code": null}),
+                "",
+                Some("timeout"),
+            ),
+            (serde_json::json!("text"), "", None),
+            (serde_json::json!({"exit_code": "1"}), "", None),
+        ];
+        for (resp, output, want) in table {
+            assert_eq!(host_shell_failure(&resp, output), want, "{resp}");
+        }
     }
 
     #[test]

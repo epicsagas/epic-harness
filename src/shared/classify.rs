@@ -299,12 +299,16 @@ pub fn classify_bash_failure(
 pub fn classify_tool(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
         // Windows hosts run shell commands through PowerShell; same command/output shape.
-        "bash" | "powershell" | "pwsh" => "bash",
+        // grok names its tools `run_terminal_command`, `search_replace`,
+        // `hashline_edit`, `write_file` and `read_file`. `list_dir` and
+        // `web_search` stay "other": `glob` scoring reads grok's object-shaped
+        // listing as an empty result and would mark every call a failure.
+        "bash" | "powershell" | "pwsh" | "run_terminal_command" => "bash",
         // Codex's canonical edit tool — without this every Codex edit was
         // categorized as "other" and scored by the generic path.
-        "edit" | "apply_patch" => "edit",
-        "write" => "write",
-        "read" => "read",
+        "edit" | "apply_patch" | "search_replace" | "hashline_edit" => "edit",
+        "write" | "write_file" => "write",
+        "read" | "read_file" => "read",
         "glob" => "glob",
         "grep" => "grep",
         _ => "other",
@@ -314,6 +318,7 @@ pub fn classify_tool(name: &str) -> &'static str {
 pub fn extract_file_ext(input: &serde_json::Value) -> Option<String> {
     let file_path = input
         .get("file_path")
+        .or_else(|| input.get("target_file"))
         .or_else(|| input.get("path"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
@@ -711,5 +716,47 @@ mod tests {
             extract_file("src\\b\\index.rs")
         );
         assert_eq!(extract_file("src/a/index.rs"), Some("src/a/index.rs"));
+    }
+
+    // ── grok tool names and path key ────────────────────────
+
+    #[test]
+    fn classify_tool_grok_names() {
+        assert_eq!(classify_tool("run_terminal_command"), "bash");
+        assert_eq!(classify_tool("read_file"), "read");
+        assert_eq!(classify_tool("search_replace"), "edit");
+        assert_eq!(classify_tool("hashline_edit"), "edit");
+        assert_eq!(classify_tool("write_file"), "write");
+        assert_eq!(classify_tool("list_dir"), "other");
+        assert_eq!(classify_tool("web_search"), "other");
+    }
+
+    #[test]
+    fn classify_tool_existing_names_unchanged() {
+        let table = [
+            ("Bash", "bash"),
+            ("bash", "bash"),
+            ("PowerShell", "bash"),
+            ("pwsh", "bash"),
+            ("Edit", "edit"),
+            ("apply_patch", "edit"),
+            ("Write", "write"),
+            ("Read", "read"),
+            ("Glob", "glob"),
+            ("Grep", "grep"),
+            ("WebFetch", "other"),
+            ("Agent", "other"),
+        ];
+        for (name, cat) in table {
+            assert_eq!(classify_tool(name), cat, "{name}");
+        }
+    }
+
+    #[test]
+    fn extract_file_ext_reads_target_file() {
+        let v = serde_json::json!({"target_file": "/tmp/x/a.rs"});
+        assert_eq!(extract_file_ext(&v), Some(".rs".into()));
+        let v = serde_json::json!({"file_path": "a.py", "target_file": "b.rs"});
+        assert_eq!(extract_file_ext(&v), Some(".py".into()));
     }
 }
