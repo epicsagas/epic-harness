@@ -25,6 +25,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Plugin bootstrap tests
+        run: node --test registry/scripts/install.test.mjs registry/scripts/hooks/run.test.mjs
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -63,6 +65,9 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
+      - name: Plugin bootstrap tests (zip and tar.exe paths)
+        shell: pwsh
+        run: node --test registry/scripts/install.test.mjs registry/scripts/hooks/run.test.mjs
       # Phase A — no epic on a fresh windows-latest: every hook must degrade
       # to "[harness] epic not found" + exit 0 through real cmd.exe /C.
       - name: Hook degrade contract (no harness installed)

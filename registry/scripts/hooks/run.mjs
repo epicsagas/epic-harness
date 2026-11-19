@@ -21,6 +21,8 @@
 // of "type" (require() inside an ESM-treated .js file throws ReferenceError).
 
 import { spawn, spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,6 +37,34 @@ if (args.length === 0) {
   console.log("[harness] run.mjs: no subcommand given");
   process.exitCode = 0;
 } else {
+  // session-start: bootstrap first, on every OS, so a freshly installed
+  // binary is found by the probe and spawn below.
+  if (args[0] === "session-start") {
+    // Best-effort bootstrap; its failure must not block resume. Stdout is
+    // ignored (SessionStart stdout reaches the model context — bootstrap
+    // noise must not be injected), but stderr is inherited so a failing
+    // install.cjs is visible instead of silently skipped.
+    await new Promise((resolve) => {
+      const bootstrap = spawn(
+        process.execPath,
+        [path.join(PLUGIN_ROOT, "registry", "scripts", "install.cjs")],
+        { stdio: ["ignore", "ignore", "inherit"] },
+      );
+      bootstrap.on("error", () => resolve());
+      bootstrap.on("close", () => resolve());
+    });
+    args[0] = "resume";
+  }
+
+  // Append (never prepend) the bootstrap install dir: a binary installed
+  // there runs in this same session without shadowing other tools on PATH.
+  const localBin = path.join(os.homedir(), ".local", "bin");
+  if (existsSync(localBin)) {
+    process.env.PATH = [process.env.PATH, localBin]
+      .filter(Boolean)
+      .join(path.delimiter);
+  }
+
   // Windows: probe for `epic` BEFORE spawning. spawn(shell:true) on a missing
   // command reports failure inconsistently across Node versions (cmd.exe 9009,
   // exit 1, or an error event) and leaks "'epic' is not recognized" to the
@@ -52,23 +82,6 @@ if (args.length === 0) {
     console.log("[harness] epic not found");
     process.exitCode = 0;
   } else {
-    if (args[0] === "session-start") {
-      // Best-effort bootstrap; its failure must not block resume. Stdout is
-      // ignored (SessionStart stdout reaches the model context — bootstrap
-      // noise must not be injected), but stderr is inherited so a failing
-      // install.cjs is visible instead of silently skipped.
-      await new Promise((resolve) => {
-        const bootstrap = spawn(
-          process.execPath,
-          [path.join(PLUGIN_ROOT, "registry", "scripts", "install.cjs")],
-          { stdio: ["ignore", "ignore", "inherit"] },
-        );
-        bootstrap.on("error", () => resolve());
-        bootstrap.on("close", () => resolve());
-      });
-      args[0] = "resume";
-    }
-
     // On Windows `epic` may be a .cmd shim (npm install); spawning .cmd files
     // without a shell throws EINVAL since the Node 18.20/20.12 security fix.
     // The args are static words (no user input), so a shell is safe there.
