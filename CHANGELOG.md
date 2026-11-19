@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-11-19
+
+grok projects record failed tool calls from this version on, so their session scores drop once after updating. That drop is the missing failures showing up, not a regression.
+
+### Fixed
+- **Antigravity (agy) loads the epic hooks again**: agy rejected the root `hooks.json` as a whole, so no epic hook ran on agy. The file now uses agy's lifecycle format, and a new agy conversation gets the resume context injected through agy's `injectSteps` output, filed under the workspace's project instead of the plugin folder. Resumed conversations (`-c`) get no resume context because agy only fires its start event for new conversations. Guard, observe and reflect on agy follow in #404. (#408)
+- **grok tool failures are recorded**: grok reports a failed shell command through its exit code and a missing file through a `FileNotFound` result, and names its tools `run_terminal_command`, `read_file`, `search_replace` and `write_file`. Observe now reads all of these, so grok failures reach scoring, pattern detection and skill seeding instead of counting as successes. (#409)
+
 ## [0.9.2] - 2026-11-19
 
 Thanks to @Tomauskasz for the reports and reference PRs behind these fixes.
