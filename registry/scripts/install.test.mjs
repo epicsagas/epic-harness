@@ -175,7 +175,7 @@ test("installFromArchive installs both binaries", () => {
     assert.equal(readFileSync(p, "utf8"), `binary ${name}`);
     if (!win) assert.equal(statSync(p).mode & 0o777, 0o755);
   }
-  assert.deepEqual(readdirSync(installDir).sort(), [`epic${ext}`, `epic-harness${ext}`]);
+  assert.deepEqual(readdirSync(installDir).sort(), [`epic${ext}`, `epic-harness${ext}`].sort());
   assert.deepEqual(tmpLeftovers(), before);
 });
 

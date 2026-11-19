@@ -7,7 +7,7 @@ import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync 
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const win = process.platform === "win32";
 const runMjs = path.join(path.dirname(fileURLToPath(import.meta.url)), "run.mjs");
@@ -39,7 +39,12 @@ function layout(fakeBootstrap) {
 
 function run(l, args) {
   const env = { HOME: l.home, USERPROFILE: l.home, PATH: "" };
-  if (win) env.SystemRoot = process.env.SystemRoot; // cmd.exe and where.exe need it
+  if (win) {
+    // What a real Windows hook env always has: System32 on PATH, PATHEXT and
+    // ComSpec (spawn shell:true runs ComSpec), SystemRoot (absolute where.exe).
+    const { SystemRoot, PATHEXT, ComSpec } = process.env;
+    Object.assign(env, { SystemRoot, PATHEXT, ComSpec, PATH: path.join(SystemRoot, "System32") });
+  }
   return spawnSync(process.execPath, [path.join(l.root, "registry", "scripts", "hooks", "run.mjs"), ...args], {
     env,
     encoding: "utf8",
@@ -81,4 +86,33 @@ test("guard with no binary anywhere prints the notice and exits 0", () => {
   const r = run(l, ["guard"]);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /\[harness\] epic not found/);
+});
+
+// run.mjs does its work at import time; with no subcommand that is one notice line.
+const { appendToPath } = await (async () => {
+  const [argv, log] = [process.argv, console.log];
+  process.argv = [process.execPath, runMjs];
+  console.log = () => {};
+  try {
+    return await import(pathToFileURL(runMjs).href);
+  } finally {
+    [process.argv, console.log] = [argv, log];
+    process.exitCode = undefined;
+  }
+})();
+
+test("appendToPath reuses the existing Windows key casing and never adds a duplicate", () => {
+  const env = { Path: "C:\\Windows\\System32", SystemRoot: "C:\\Windows" };
+  appendToPath(env, "C:\\Users\\u\\.local\\bin", "win32");
+  assert.deepEqual(Object.keys(env).sort(), ["Path", "SystemRoot"]);
+  assert.equal(env.Path, "C:\\Windows\\System32;C:\\Users\\u\\.local\\bin");
+});
+
+test("appendToPath creates PATH when absent or empty, appends with ':' on POSIX", () => {
+  const w = {};
+  appendToPath(w, "D:\\bin", "win32");
+  assert.deepEqual(w, { PATH: "D:\\bin" });
+  const p = { PATH: "/usr/bin", Path: "ignored" };
+  appendToPath(p, "/h/.local/bin", "linux");
+  assert.deepEqual(p, { PATH: "/usr/bin:/h/.local/bin", Path: "ignored" });
 });

@@ -30,6 +30,16 @@ const PLUGIN_ROOT =
   process.env.PLUGIN_ROOT ||
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
+// Append (never prepend) `dir` to PATH so a binary installed there runs without
+// shadowing other tools. Windows names the variable "Path" (or any casing) and
+// process.env is case-insensitive there, but a plain env object is not: reuse
+// the existing key so no second PATH/Path entry is ever created.
+export function appendToPath(env, dir, platform = process.platform) {
+  const win = platform === "win32";
+  const key = (win && Object.keys(env).find((k) => k.toLowerCase() === "path")) || "PATH";
+  env[key] = [env[key], dir].filter(Boolean).join(win ? path.win32.delimiter : path.posix.delimiter);
+}
+
 const args = process.argv.slice(2);
 if (args.length === 0) {
   // exitCode (not process.exit): stdout to a pipe is an async write, and a
@@ -59,11 +69,7 @@ if (args.length === 0) {
   // Append (never prepend) the bootstrap install dir: a binary installed
   // there runs in this same session without shadowing other tools on PATH.
   const localBin = path.join(os.homedir(), ".local", "bin");
-  if (existsSync(localBin)) {
-    process.env.PATH = [process.env.PATH, localBin]
-      .filter(Boolean)
-      .join(path.delimiter);
-  }
+  if (existsSync(localBin)) appendToPath(process.env, localBin);
 
   // Windows: probe for `epic` BEFORE spawning. spawn(shell:true) on a missing
   // command reports failure inconsistently across Node versions (cmd.exe 9009,
@@ -72,7 +78,13 @@ if (args.length === 0) {
   // with every Windows and gives a deterministic answer.
   let epicMissing = false;
   if (process.platform === "win32") {
-    const probe = spawnSync("where.exe", ["epic"], { encoding: "utf8" });
+    // Absolute path: libuv does not search System32 itself, so a PATH without
+    // it (a hook env that was trimmed down) would make the probe itself fail
+    // and read as "epic not found".
+    const where = process.env.SystemRoot
+      ? path.join(process.env.SystemRoot, "System32", "where.exe")
+      : "where.exe";
+    const probe = spawnSync(where, ["epic"], { encoding: "utf8" });
     epicMissing = probe.status !== 0;
   }
 
