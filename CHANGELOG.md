@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-11-23
+
+A `memory.db` created by an early build is converted once on the next start. A backup copy (`memory.db.pre-edges-migration-*.bak`, owner-only) is written next to it first; delete it once you are satisfied. Restart a long-running MCP server (`epic mem mcp`) or desktop app from an older build after updating, since it still expects the old table.
+
+### Fixed
+- **Knowledge-graph links work on early stores**: a `memory.db` created by an early build kept the old `edges` table (`relation`, `weight`, `ts`), so the graph view was empty in the web dashboard, the desktop app's Memory page failed with `no such column: label`, and links added at session end were silently dropped. The table is now converted on open, inside one transaction, after an owner-only backup; concurrent hooks convert it once. Ingest now reports the first failed link write instead of discarding it. (#418)
+- **Desktop app dev mode**: `pnpm app:dev` showed a white screen because a custom fallback rewrote vite's client script to `index.html`, and `tauri dev` restarted cargo hundreds of times because the build rewrote watched files. (#421)
+
+### Security
+- **`url` 2.5.9**: fixes RUSTSEC-2026-0592, a stack overflow in `Url::origin()` on nested `blob:` URLs. (#417)
+
+### Internal
+- Unit tests no longer read or write the developer's real `~/.harness`; CI runs the suite with an empty `HOME` and fails if anything is written there. The `tsc` cache used by the polish hook now follows `HARNESS_DIR`. (#420)
+- Dependency updates: tauri 2.12.7, tauri-build 2.7.5, @tauri-apps/api 2.12.5, axum-test 21.1.0, d3 7.9.2, jsdom 31.0.1.
+
 ## [0.9.3] - 2026-11-19
 
 grok projects record failed tool calls from this version on, so their session scores drop once after updating. That drop is the missing failures showing up, not a regression.
