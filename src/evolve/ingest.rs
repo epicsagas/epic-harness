@@ -122,6 +122,21 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
     block_on(ingest_to_memory_async(&pool, analysis, patterns))
 }
 
+/// Append an edge; report only the first failure per ingest run on stderr.
+async fn append_edge(
+    warned: &std::sync::atomic::AtomicBool,
+    pool: &AnyPool,
+    edge: &store::Edge,
+) -> std::io::Result<()> {
+    let r = store::append_edge_pool(pool, edge).await;
+    if let Err(e) = &r
+        && !warned.swap(true, std::sync::atomic::Ordering::Relaxed)
+    {
+        eprintln!("[harness] edge write failed: {e}");
+    }
+    r
+}
+
 async fn ingest_to_memory_async(
     pool: &AnyPool,
     analysis: &SessionAnalysis,
@@ -133,6 +148,7 @@ async fn ingest_to_memory_async(
 
     let mut nodes_created = 0u64;
     let mut edges_created = 0u64;
+    let edge_warned = std::sync::atomic::AtomicBool::new(false);
     let mut session_node_id = String::new();
 
     // 8a. Session summary node
@@ -219,7 +235,7 @@ async fn ingest_to_memory_async(
                     weight: 1.0,
                     ts: ts.clone(),
                 };
-                if store::append_edge_pool(pool, &edge).await.is_ok() {
+                if append_edge(&edge_warned, pool, &edge).await.is_ok() {
                     edges_created += 1;
                 }
             }
@@ -272,12 +288,13 @@ async fn ingest_to_memory_async(
                         weight: 1.0,
                         ts: ts.clone(),
                     };
-                    if store::append_edge_pool(pool, &edge).await.is_ok() {
+                    if append_edge(&edge_warned, pool, &edge).await.is_ok() {
                         edges_created += 1;
                     }
                     // Link resolution to project hub
                     if let Ok(ref hub_id) = ensure_project_hub_async(pool, &slug).await {
-                        let _ = store::append_edge_pool(
+                        let _ = append_edge(
+                            &edge_warned,
                             pool,
                             &store::Edge {
                                 id: store::new_uuid(),
@@ -387,7 +404,7 @@ async fn ingest_to_memory_async(
                     weight: shared.len() as f64,
                     ts: ts.clone(),
                 };
-                if store::append_edge_pool(pool, &edge).await.is_ok() {
+                if append_edge(&edge_warned, pool, &edge).await.is_ok() {
                     edges_created += 1;
                 }
             }
@@ -398,7 +415,8 @@ async fn ingest_to_memory_async(
     if let Ok(hub_id) = ensure_project_hub_async(pool, &slug).await {
         // Link session node to project hub
         if !session_node_id.is_empty() {
-            let _ = store::append_edge_pool(
+            let _ = append_edge(
+                &edge_warned,
                 pool,
                 &store::Edge {
                     id: store::new_uuid(),
@@ -414,7 +432,8 @@ async fn ingest_to_memory_async(
         }
         // Link pattern nodes to project hub
         for (pid, _) in &pattern_node_ids {
-            let _ = store::append_edge_pool(
+            let _ = append_edge(
+                &edge_warned,
                 pool,
                 &store::Edge {
                     id: store::new_uuid(),
@@ -430,7 +449,8 @@ async fn ingest_to_memory_async(
         }
         // Link error nodes to project hub
         for eid in &error_node_ids {
-            let _ = store::append_edge_pool(
+            let _ = append_edge(
+                &edge_warned,
                 pool,
                 &store::Edge {
                     id: store::new_uuid(),
@@ -451,7 +471,8 @@ async fn ingest_to_memory_async(
         let prev_session = find_prev_session_async(pool, &session_node_id, &slug).await;
 
         if let Some(prev_id) = prev_session {
-            let _ = store::append_edge_pool(
+            let _ = append_edge(
+                &edge_warned,
                 pool,
                 &store::Edge {
                     id: store::new_uuid(),
@@ -489,7 +510,8 @@ async fn ingest_to_memory_async(
                     .cloned()
                     .collect();
                 if !shared.is_empty() {
-                    let _ = store::append_edge_pool(
+                    let _ = append_edge(
+                        &edge_warned,
                         pool,
                         &store::Edge {
                             id: store::new_uuid(),

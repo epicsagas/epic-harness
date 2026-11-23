@@ -84,6 +84,9 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     // Existing importance values (including 0.5 and session overrides) are user data.
     // Type defaults are applied when a node is created or imported, never on open.
 
+    // Convert a pre-label edges table (id/relation/weight/ts) in place.
+    migrate_legacy_edges(pool).await;
+
     // Migrate FTS schema if it lacks the 'id' and 'projects' columns added in v2.
     migrate_fts_schema(pool).await;
 
@@ -91,6 +94,112 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     migrate_legacy_files(pool).await;
 
     Ok(())
+}
+
+const EDGES_LEGACY_SQL: &str =
+    "SELECT COUNT(*) FROM pragma_table_info('edges') WHERE name = 'label'";
+
+async fn edges_is_legacy(conn: &mut sqlx::AnyConnection) -> Result<bool, sqlx::Error> {
+    let n: i64 = sqlx::query_scalar(EDGES_LEGACY_SQL).fetch_one(conn).await?;
+    Ok(n == 0)
+}
+
+/// Old memory.db files have `edges(id, source, target, relation, weight, ts)`; the
+/// `CREATE TABLE IF NOT EXISTS` in `GRAPH_SCHEMA_SQL` never converts them.
+/// Failures are logged to stderr and never fail `init_schema_pool`.
+async fn migrate_legacy_edges(pool: &AnyPool) {
+    if let Err(e) = try_migrate_legacy_edges(pool).await {
+        eprintln!("[harness] memory.db: legacy edges migration failed: {e}");
+    }
+}
+
+async fn try_migrate_legacy_edges(pool: &AnyPool) -> Result<(), sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    if !edges_is_legacy(&mut conn).await? {
+        return Ok(());
+    }
+
+    // In-memory DBs have no file: migrate without a backup (the data is ephemeral).
+    let path: String =
+        sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")
+            .fetch_one(&mut *conn)
+            .await?;
+    let mut backup = None;
+    if !path.is_empty() {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let bak = format!("{path}.pre-edges-migration-{secs}.bak");
+        if let Err(e) = sqlx::query("VACUUM INTO ?")
+            .bind(&bak)
+            .execute(&mut *conn)
+            .await
+        {
+            // Likely a same-second backup collision with a concurrent process: wait for
+            // its write lock (and commit), then re-check. Stay quiet if it converted.
+            sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+            let legacy = edges_is_legacy(&mut conn).await;
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            if legacy? {
+                eprintln!("[harness] memory.db: edges backup failed, not migrating: {e}");
+            }
+            return Ok(());
+        }
+        backup = Some(bak);
+    }
+
+    // BEGIN IMMEDIATE takes the write lock up front, so the re-check below cannot race.
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
+    match convert_legacy_edges(&mut conn).await {
+        Ok(Some(n)) => {
+            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            eprintln!(
+                "[harness] memory.db: converted {n} legacy edges (backup: {})",
+                backup.as_deref().unwrap_or("none, in-memory")
+            );
+            Ok(())
+        }
+        other => {
+            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            other.map(|_| ())
+        }
+    }
+}
+
+/// Runs inside the write transaction. `Ok(None)` means another process already converted.
+async fn convert_legacy_edges(conn: &mut sqlx::AnyConnection) -> Result<Option<u64>, sqlx::Error> {
+    if !edges_is_legacy(conn).await? {
+        return Ok(None);
+    }
+    for stmt in [
+        "ALTER TABLE edges RENAME TO edges_legacy",
+        "CREATE TABLE edges (
+            source TEXT NOT NULL,
+            target TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (source, target, label)
+        )",
+    ] {
+        sqlx::query(stmt).execute(&mut *conn).await?;
+    }
+    let n = sqlx::query(
+        "INSERT OR IGNORE INTO edges (source, target, label, created) \
+         SELECT source, target, COALESCE(NULLIF(relation, ''), 'related'), COALESCE(ts, '') \
+         FROM edges_legacy",
+    )
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    for stmt in [
+        "DROP TABLE edges_legacy",
+        "CREATE INDEX idx_edges_source ON edges(source)",
+        "CREATE INDEX idx_edges_target ON edges(target)",
+    ] {
+        sqlx::query(stmt).execute(&mut *conn).await?;
+    }
+    Ok(Some(n))
 }
 
 /// Check if nodes_fts has the v2 columns (id, projects). If not, drop and recreate with triggers.

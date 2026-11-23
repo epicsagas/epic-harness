@@ -508,3 +508,177 @@ async fn issue_231_recall_keeps_operator_substrings_in_words() {
         vec!["cors".to_string()]
     );
 }
+
+// ── Legacy edges table conversion (#418) ──────────────
+use super::schema::append_graph_edge;
+
+async fn legacy_file_pool(dir: &std::path::Path) -> (sqlx::AnyPool, PathBuf) {
+    let _ = crate::store::pool::test_memory_pool().await; // installs drivers
+    let db = dir.join("memory.db");
+    let pool = sqlx::any::AnyPoolOptions::new()
+        .max_connections(1)
+        .connect(&format!("sqlite:{}?mode=rwc", db.display()))
+        .await
+        .unwrap();
+    for sql in [
+        "CREATE TABLE edges (id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL, \
+         relation TEXT NOT NULL DEFAULT 'related', weight REAL NOT NULL DEFAULT 1.0, ts TEXT NOT NULL)",
+        "CREATE INDEX idx_edges_source ON edges(source)",
+        "CREATE INDEX idx_edges_target ON edges(target)",
+        "INSERT INTO edges VALUES ('e1', 'n1', 'n2', 'detected_in', 1.0, '2024-01-01T00:00:00Z')",
+        "INSERT INTO edges VALUES ('e2', 'n1', 'n2', 'detected_in', 0.5, '2024-01-02T00:00:00Z')",
+        "INSERT INTO edges VALUES ('e3', 'n2', 'n3', '', 1.0, '2024-01-03T00:00:00Z')",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    (pool, db)
+}
+
+fn backups_of(dir: &std::path::Path) -> Vec<PathBuf> {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains(".pre-edges-migration-"))
+        .collect()
+}
+
+#[tokio::test]
+async fn issue_418_legacy_edges_table_is_converted_with_backup() {
+    use sqlx::Row as _;
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, _db) = legacy_file_pool(dir.path()).await;
+
+    init_schema_pool(&pool).await.unwrap();
+
+    let rows = sqlx::query("SELECT source, target, label, created FROM edges ORDER BY created")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    let got: Vec<(String, String, String, String)> = rows
+        .iter()
+        .map(|r| (r.get(0), r.get(1), r.get(2), r.get(3)))
+        .collect();
+    assert_eq!(
+        got.len(),
+        2,
+        "duplicate (source, target, relation) is deduped"
+    );
+    assert_eq!(got[0].2, "detected_in");
+    assert_eq!(got[0].3, "2024-01-01T00:00:00Z");
+    assert_eq!(got[1].2, "related", "empty relation becomes 'related'");
+    let idx: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name LIKE 'idx_edges_%'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(idx, 2);
+
+    let backups = backups_of(dir.path());
+    assert_eq!(backups.len(), 1);
+    let bak = sqlx::any::AnyPoolOptions::new()
+        .max_connections(1)
+        .connect(&format!("sqlite:{}?mode=ro", backups[0].display()))
+        .await
+        .unwrap();
+    let legacy_cols: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info('edges') WHERE name = 'relation'",
+    )
+    .fetch_one(&bak)
+    .await
+    .unwrap();
+    assert_eq!(legacy_cols, 1, "backup keeps the legacy table");
+}
+
+#[tokio::test]
+async fn issue_418_second_init_is_noop() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, _db) = legacy_file_pool(dir.path()).await;
+    init_schema_pool(&pool).await.unwrap();
+    init_schema_pool(&pool).await.unwrap();
+
+    assert_eq!(backups_of(dir.path()).len(), 1);
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+}
+
+#[tokio::test]
+async fn issue_418_fresh_db_creates_no_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let _ = crate::store::pool::test_memory_pool().await; // installs drivers
+    let db = dir.path().join("memory.db");
+    let pool = sqlx::any::AnyPoolOptions::new()
+        .max_connections(1)
+        .connect(&format!("sqlite:{}?mode=rwc", db.display()))
+        .await
+        .unwrap();
+    init_schema_pool(&pool).await.unwrap();
+    assert!(backups_of(dir.path()).is_empty());
+}
+
+#[tokio::test]
+async fn issue_418_graph_and_append_work_after_conversion() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, _db) = legacy_file_pool(dir.path()).await;
+    init_schema_pool(&pool).await.unwrap();
+
+    let ge = super::types::GraphEdge {
+        source: "n3".into(),
+        target: "n4".into(),
+        label: "follows".into(),
+        created: "2024-01-04T00:00:00Z".into(),
+    };
+    append_graph_edge(&pool, &ge).await.unwrap();
+    crate::mem::graph::build_graph_pool(&pool).await.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 3);
+}
+
+#[tokio::test]
+async fn issue_418_concurrent_init_converts_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, db) = legacy_file_pool(dir.path()).await;
+    let other = sqlx::any::AnyPoolOptions::new()
+        .max_connections(1)
+        .connect(&format!("sqlite:{}?mode=rwc", db.display()))
+        .await
+        .unwrap();
+    let (a, b) = tokio::join!(init_schema_pool(&pool), init_schema_pool(&other));
+    a.unwrap();
+    b.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+}
+
+#[tokio::test]
+async fn issue_418_in_memory_legacy_table_converts_without_backup() {
+    let pool = crate::store::pool::test_memory_pool().await;
+    sqlx::query(
+        "CREATE TABLE edges (id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL, \
+         relation TEXT NOT NULL DEFAULT 'related', weight REAL NOT NULL DEFAULT 1.0, ts TEXT NOT NULL)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO edges VALUES ('e1', 'n1', 'n2', 'follows', 1.0, '2024-01-01T00:00:00Z')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    init_schema_pool(&pool).await.unwrap();
+    let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM edges WHERE label = 'follows'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+}
