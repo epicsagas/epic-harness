@@ -54,8 +54,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Test
-        run: cargo test
+      - name: Test (empty HOME, must not write to ~/.harness)
+        run: |
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}" RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          HOME="$(mktemp -d)"
+          export HOME
+          unset HARNESS_DIR HARNESS_ROOT
+          cargo test
+          if [ -d "$HOME/.harness" ] && [ -n "$(find "$HOME/.harness" -mindepth 1 -print -quit)" ]; then
+            echo "tests wrote to \$HOME/.harness:"
+            find "$HOME/.harness"
+            exit 1
+          fi
 
   windows-hooks:
     name: Windows hook portability

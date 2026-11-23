@@ -109,6 +109,11 @@ pub fn harness_root() -> PathBuf {
     {
         return PathBuf::from(d);
     }
+    // Unit tests must never touch the developer's real `~/.harness`: default
+    // to a per-process temp dir (callers create it on demand).
+    #[cfg(test)]
+    return std::env::temp_dir().join(format!("epic-harness-test-{}", std::process::id()));
+    #[cfg(not(test))]
     dirs_home().join(".harness")
 }
 
