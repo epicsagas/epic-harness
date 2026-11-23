@@ -1,0 +1,5 @@
+# tauri dev watches the whole repo (the root crate is a path dependency).
+# build.rs rewrites these on every build; watching them restarts cargo in a loop.
+app/
+assets/dashboard.html
+target/
