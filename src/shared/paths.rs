@@ -5,6 +5,25 @@ pub fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
+/// `(--git-common-dir, --show-toplevel)` from one `git rev-parse` call, shared
+/// by `project_slug` and `legacy_project_slug`. `--git-common-dir` points at
+/// the shared git dir even from a linked worktree (so the slug stays stable
+/// inside an orbit-{goal_slug} worktree); `--show-toplevel` is only the
+/// fallback name. `None` outside a work tree, in a bare repo or without git.
+fn git_rev_parse() -> &'static Option<(String, String)> {
+    static REV: LazyLock<Option<(String, String)>> = LazyLock::new(|| {
+        let out = std::process::Command::new("git")
+            .args(["rev-parse", "--git-common-dir", "--show-toplevel"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut lines = text.lines();
+        Some((lines.next()?.to_string(), lines.next()?.to_string()))
+    });
+    &REV
+}
+
 /// Returns a stable slug for the current project: the sanitized name of the
 /// git common dir's repo (`<name>/.git`, `<name>.git`, or a submodule's
 /// `modules/<name>`).
@@ -19,21 +38,10 @@ pub fn project_slug() -> String {
     static SLUG: LazyLock<String> = LazyLock::new(|| {
         let cwd_path = cwd();
 
-        // --git-common-dir points at the shared git dir even from a linked
-        // worktree (so the slug stays stable inside an orbit-{goal_slug}
-        // worktree); --show-toplevel is only the fallback name.
-        if let Ok(out) = std::process::Command::new("git")
-            .args(["rev-parse", "--git-common-dir", "--show-toplevel"])
-            .output()
-            && out.status.success()
+        if let Some((common, top)) = git_rev_parse()
+            && let Some(slug) = slug_from_rev_parse(common, top, &cwd_path)
         {
-            let text = String::from_utf8_lossy(&out.stdout);
-            let mut lines = text.lines();
-            if let (Some(common), Some(top)) = (lines.next(), lines.next())
-                && let Some(slug) = slug_from_rev_parse(common, top, &cwd_path)
-            {
-                return slug;
-            }
+            return slug;
         }
 
         // Fallback: CWD-based (non-git directories).
@@ -56,11 +64,11 @@ pub fn project_slug() -> String {
 
 /// Slug from `git rev-parse --git-common-dir --show-toplevel` output.
 ///
-/// `<repo>/.git` (normal repo, primary or linked worktree) gives `<repo>`;
-/// any other git dir name (separate git dir `backing.git`, submodule
-/// `modules/<name>`) gives its own name minus a trailing `.git`, falling back
-/// to the toplevel dirname when nothing is left. `None` means the caller uses
-/// its own fallback.
+/// A git dir named `.git` or any dot-name (`.bare`) gives its parent dir name
+/// (normal repo, primary or linked worktree, bare-container layout); any other
+/// git dir name (separate git dir `backing.git`, submodule `modules/<name>`)
+/// gives its own name minus a trailing `.git`, falling back to the toplevel
+/// dirname when nothing is left. `None` means the caller uses its own fallback.
 fn slug_from_rev_parse(common_dir: &str, toplevel: &str, cwd: &Path) -> Option<String> {
     let top_name = || {
         Path::new(toplevel)
@@ -82,9 +90,12 @@ fn slug_from_rev_parse(common_dir: &str, toplevel: &str, cwd: &Path) -> Option<S
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if name == ".git" {
-        let parent = common.parent()?.file_name()?;
-        return Some(sanitize_slug_name(&parent.to_string_lossy()));
+    if name.starts_with('.') {
+        // A repo at the filesystem root has no parent name: stay cwd-independent.
+        return match common.parent().and_then(Path::file_name) {
+            Some(parent) => Some(sanitize_slug_name(&parent.to_string_lossy())),
+            None => top_name().or_else(|| Some("project".into())),
+        };
     }
     let stem = name.strip_suffix(".git").unwrap_or(&name);
     if stem.is_empty() {
@@ -95,18 +106,29 @@ fn slug_from_rev_parse(common_dir: &str, toplevel: &str, cwd: &Path) -> Option<S
 }
 
 /// Pre-0.10 slug for this checkout when it differs from `project_slug()`
-/// (separate git dirs and submodules moved to a new slug); `None` otherwise.
+/// (separate git dirs, submodules and symlinked `.git` moved to a new slug);
+/// `None` otherwise.
 pub fn legacy_project_slug() -> Option<String> {
-    let out = std::process::Command::new("git")
-        .args(["rev-parse", "--git-common-dir"])
-        .output()
-        .ok()
-        .filter(|o| o.status.success())?;
-    legacy_slug(String::from_utf8_lossy(&out.stdout).trim(), &project_slug())
+    let (common, top) = git_rev_parse().as_ref()?;
+    legacy_slug(common, top, &project_slug())
 }
 
-fn legacy_slug(common_dir: &str, new: &str) -> Option<String> {
-    slug_from_git_common_dir(common_dir).filter(|old| old != new)
+/// Whether this checkout is a submodule, whose pre-0.10 slug was one bucket
+/// shared by every submodule.
+pub fn is_submodule_checkout() -> bool {
+    git_rev_parse()
+        .as_ref()
+        .is_some_and(|(common, _)| common.contains("/modules/"))
+}
+
+/// The full 0.9.x rule: an absolute common dir gives its parent dir name,
+/// anything else the toplevel dirname.
+fn legacy_slug(common_dir: &str, toplevel: &str, new: &str) -> Option<String> {
+    let old = slug_from_git_common_dir(common_dir).unwrap_or_else(|| {
+        let name = Path::new(toplevel).file_name();
+        sanitize_slug_name(&name.map_or("project".into(), |n| n.to_string_lossy()))
+    });
+    (old != new).then_some(old)
 }
 
 /// Pre-0.10 slug from `git rev-parse --git-common-dir` output, kept only for
@@ -474,10 +496,19 @@ mod tests {
             slug("/x/store/.git", "/x/store", &root).as_deref(),
             Some("store")
         );
+        // Dot-named git dirs use the parent dir name like `.git`.
+        assert_eq!(slug("/x/y/.dotfiles", "/w/p", &root).as_deref(), Some("y"));
+        assert_eq!(
+            slug("/x/alpha/.bare", "/x/alpha/main", &root).as_deref(),
+            Some("alpha")
+        );
+        // Repo at the filesystem root: toplevel dirname, else a literal.
+        assert_eq!(slug("/.git", "/w/proj", &root).as_deref(), Some("proj"));
+        assert_eq!(slug("/.git", "/", &root).as_deref(), Some("project"));
         // Sanitized on every branch.
         assert_eq!(
-            slug("/x/y/.dotfiles", "/w/p", &root).as_deref(),
-            Some("_dotfiles")
+            slug("/x/my repo/.git", "/w/p", &root).as_deref(),
+            Some("my_repo")
         );
         // Empty stem falls back to the toplevel dirname.
         assert_eq!(slug("/", "/w/proj", &root).as_deref(), Some("proj"));
@@ -521,17 +552,26 @@ mod tests {
     fn legacy_slug_detects_moved_slugs_only() {
         // Separate git dir: 0.9.1 used the parent dir name, 0.10 uses `backing`.
         assert_eq!(
-            legacy_slug("/x/metadata/backing.git", "backing").as_deref(),
+            legacy_slug("/x/metadata/backing.git", "/w/proj", "backing").as_deref(),
             Some("metadata")
         );
         // Submodule: every one shared `modules` before.
         assert_eq!(
-            legacy_slug("/s/.git/modules/libsub", "libsub").as_deref(),
+            legacy_slug("/s/.git/modules/libsub", "/s/libsub", "libsub").as_deref(),
             Some("modules")
         );
         // Normal repo and linked worktree: unchanged slug.
-        assert_eq!(legacy_slug(".git", "repo"), None);
-        assert_eq!(legacy_slug("/a/main/.git", "main"), None);
+        assert_eq!(legacy_slug(".git", "/w/repo", "repo"), None);
+        assert_eq!(legacy_slug("/a/main/.git", "/w/wt", "main"), None);
+        assert_eq!(
+            legacy_slug("/x/alpha/.bare", "/x/alpha/main", "alpha"),
+            None
+        );
+        // Symlinked `.git`: git prints `.git`, 0.9.x used the toplevel dirname.
+        assert_eq!(
+            legacy_slug(".git", "/w/r2", "realrepo").as_deref(),
+            Some("r2")
+        );
     }
 
     #[test]

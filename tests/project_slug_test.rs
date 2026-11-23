@@ -12,7 +12,8 @@ fn git_available() -> bool {
     Command::new("git").arg("--version").output().is_ok()
 }
 
-fn git(dir: &Path, args: &[&str]) {
+/// Runs git in `dir`, returns trimmed stdout.
+fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .args(["-c", "protocol.file.allow=always"])
         .args(["-c", "user.name=Test", "-c", "user.email=test@example.com"])
@@ -33,6 +34,7 @@ fn git(dir: &Path, args: &[&str]) {
         "git {args:?} failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
 }
 
 struct Fx {
@@ -44,9 +46,20 @@ impl Fx {
     fn new() -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().canonicalize().unwrap();
-        for d in ["home", "harness", "work"] {
+        for d in ["home/.config/epic-harness", "harness", "work"] {
             fs::create_dir_all(root.join(d)).unwrap();
         }
+        // No dashboard auto-launch and no telemetry prompt for `resume`.
+        fs::write(
+            root.join("harness/config.toml"),
+            "[dashboard]\nport = 0\nauto_open = false\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("home/.config/epic-harness/telemetry-consent"),
+            "off",
+        )
+        .unwrap();
         Self { _temp: temp, root }
     }
 
@@ -65,7 +78,7 @@ impl Fx {
                 &["init", "--separate-git-dir", g.to_str().unwrap(), "."],
             ),
             None => git(&dir, &["init"]),
-        }
+        };
         git(&dir, &["commit", "--allow-empty", "-m", "init"]);
         dir
     }
@@ -83,6 +96,47 @@ impl Fx {
         assert!(out.status.success());
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
+
+    /// Runs the `resume` hook in `cwd`; returns (stdout, stderr).
+    fn resume(&self, cwd: &Path, source: &str) -> (String, String) {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_epic-harness"))
+            .arg("resume")
+            .current_dir(cwd)
+            .env("HOME", self.root.join("home"))
+            .env("HARNESS_DIR", self.root.join("harness"))
+            .env("GIT_CEILING_DIRECTORIES", &self.root)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let payload = format!(r#"{{"session_id":"sid-1","source":"{source}"}}"#);
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        (
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+}
+
+/// The 0.9.x rule from real git output: an absolute common dir gives its
+/// parent dirname, otherwise the toplevel dirname.
+fn slug_0_9(cwd: &Path) -> String {
+    let common = git(cwd, &["rev-parse", "--git-common-dir"]);
+    let top = git(cwd, &["rev-parse", "--show-toplevel"]);
+    let path = if Path::new(&common).is_absolute() {
+        Path::new(&common).parent().unwrap().to_path_buf()
+    } else {
+        PathBuf::from(top)
+    };
+    path.file_name().unwrap().to_string_lossy().into_owned()
 }
 
 #[test]
@@ -95,6 +149,8 @@ fn normal_repo_root_and_subdir() {
     fs::create_dir_all(repo.join("a/b")).unwrap();
     assert_eq!(fx.slug(&repo), "myrepo");
     assert_eq!(fx.slug(&repo.join("a/b")), "myrepo");
+    assert_eq!(fx.slug(&repo), slug_0_9(&repo));
+    assert_eq!(fx.slug(&repo.join("a/b")), slug_0_9(&repo.join("a/b")));
 }
 
 #[test]
@@ -108,6 +164,7 @@ fn linked_worktree_equals_primary() {
     git(&repo, &["worktree", "add", wt.to_str().unwrap()]);
     assert_eq!(fx.slug(&wt), fx.slug(&repo));
     assert_eq!(fx.slug(&wt), "myrepo");
+    assert_eq!(fx.slug(&wt), slug_0_9(&wt));
 }
 
 #[test]
@@ -153,7 +210,30 @@ fn non_git_dir_uses_dir_name() {
     assert_eq!(fx.slug(&fx.work("plainproj")), "plainproj");
 }
 
-/// The pre-0.10 slug dir is only pointed at (stderr), never read or merged.
+/// Bare-container layout: `<name>/.bare` + `<name>/.git` file + worktrees. A
+/// dot-named git dir must not collapse every such project into one slug.
+#[test]
+fn dot_bare_container_layouts_keep_their_own_slug() {
+    if !git_available() {
+        return;
+    }
+    let fx = Fx::new();
+    for name in ["alpha", "beta"] {
+        let src = fx.repo(&format!("src-{name}"), None);
+        let container = fx.work(name);
+        git(
+            &container,
+            &["clone", "--bare", src.to_str().unwrap(), ".bare"],
+        );
+        fs::write(container.join(".git"), "gitdir: ./.bare\n").unwrap();
+        git(&container, &["worktree", "add", "main", "main"]);
+        assert_eq!(fx.slug(&container), name);
+        assert_eq!(fx.slug(&container.join("main")), name);
+    }
+}
+
+/// The pre-0.10 slug dir is only pointed at (stderr), never read or merged,
+/// and the ack file silences the hint.
 #[test]
 fn resume_hints_legacy_slug_on_stderr_only() {
     if !git_available() {
@@ -163,49 +243,50 @@ fn resume_hints_legacy_slug_on_stderr_only() {
     let backing = fx.root.join("metadata/backing.git");
     fs::create_dir_all(backing.parent().unwrap()).unwrap();
     let repo = fx.repo("proj", Some(&backing));
-    let harness = fx.root.join("harness");
-    fs::write(
-        harness.join("config.toml"),
-        "[dashboard]\nport = 0\nauto_open = false\n",
-    )
-    .unwrap();
-    let cfg = fx.root.join("home/.config/epic-harness");
-    fs::create_dir_all(&cfg).unwrap();
-    fs::write(cfg.join("telemetry-consent"), "off").unwrap();
-    fs::create_dir_all(harness.join("projects/metadata")).unwrap();
+    let projects = fx.root.join("harness/projects");
+    fs::create_dir_all(projects.join("metadata")).unwrap();
 
-    let mut child = Command::new(env!("CARGO_BIN_EXE_epic-harness"))
-        .arg("resume")
-        .current_dir(&repo)
-        .env("HOME", fx.root.join("home"))
-        .env("HARNESS_DIR", &harness)
-        .env("GIT_CEILING_DIRECTORIES", &fx.root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(br#"{"session_id":"sid-1","source":"startup"}"#)
-        .unwrap();
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success());
-    let err = String::from_utf8_lossy(&out.stderr);
-    let stdout = String::from_utf8_lossy(&out.stdout);
+    let (stdout, stderr) = fx.resume(&repo, "startup");
     assert!(
-        err.contains("merge-project --from metadata --to backing"),
-        "{err}"
+        stderr.contains("merge-project --from metadata --to backing"),
+        "{stderr}"
     );
+    assert!(!stderr.contains("Submodules"), "{stderr}");
     assert!(!stdout.contains("pre-0.10"), "{stdout}");
     // Nothing merged: the new slug dir holds no copied data.
     assert!(
-        !harness
-            .join("projects/backing/obs")
+        !projects
+            .join("backing/obs")
             .read_dir()
             .map(|mut d| d.next().is_some())
             .unwrap_or(false)
+    );
+
+    fs::write(projects.join("backing/.legacy-slug-ack"), "").unwrap();
+    let (_, stderr) = fx.resume(&repo, "resume");
+    assert!(!stderr.contains("pre-0.10"), "{stderr}");
+}
+
+/// `.git` symlinked to a git dir elsewhere: git prints a relative `.git`, the
+/// slug follows the link, and 0.9.x used the toplevel dirname.
+#[test]
+fn symlinked_dot_git_changes_slug_and_hints() {
+    if !git_available() {
+        return;
+    }
+    let fx = Fx::new();
+    let real = fx.root.join("store/realrepo.git");
+    fs::create_dir_all(real.parent().unwrap()).unwrap();
+    let repo = fx.repo("r2", Some(&real));
+    fs::remove_file(repo.join(".git")).unwrap();
+    std::os::unix::fs::symlink(&real, repo.join(".git")).unwrap();
+    assert_eq!(fx.slug(&repo), "realrepo");
+    assert_eq!(slug_0_9(&repo), "r2");
+    fs::create_dir_all(fx.root.join("harness/projects/r2")).unwrap();
+
+    let (_, stderr) = fx.resume(&repo, "startup");
+    assert!(
+        stderr.contains("merge-project --from r2 --to realrepo"),
+        "{stderr}"
     );
 }
