@@ -10,6 +10,9 @@ use super::types::Edge;
 use super::types::edge_to_graph;
 use crate::store::runtime;
 
+/// Longest relation (edge label) the HTTP API stores or accepts for deletion.
+pub const MAX_RELATION_CHARS: usize = 64;
+
 pub fn append_edge(edge: &Edge) -> io::Result<()> {
     let pool = memory_pool_sync()?;
     let ge = edge_to_graph(edge);
@@ -47,35 +50,16 @@ async fn read_edges_pool_async(pool: &sqlx::AnyPool, limit: usize) -> Vec<Edge> 
         .map(|rows| {
             rows.iter()
                 .map(|r| Edge {
-                    id: String::new(), // edges table doesn't store id
+                    id: String::new(), // not persisted, edge identity is (source, target, label)
                     source: r.get::<String, _>(0),
                     target: r.get::<String, _>(1),
                     relation: r.get::<String, _>(2),
-                    weight: 1.0, // edges table doesn't store weight
+                    weight: 1.0, // not persisted
                     ts: r.get::<String, _>(3),
                 })
                 .collect()
         })
         .unwrap_or_default()
-}
-
-#[allow(dead_code)]
-pub fn delete_edge_by_id(edge_id: &str) -> io::Result<()> {
-    let pool = memory_pool_sync()?;
-    runtime::block_on(delete_edge_by_id_async(&pool, edge_id)).map(|_| ())
-}
-
-/// Returns the number of deleted rows.
-///
-/// Edges have no persisted id (#227), so this only matches `label`. It never
-/// matches `source` or `target`, so a node id cannot delete that node's edges.
-async fn delete_edge_by_id_async(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<u64> {
-    sqlx::query("DELETE FROM edges WHERE label = ?")
-        .bind(edge_id)
-        .execute(pool)
-        .await
-        .map(|r| r.rows_affected())
-        .map_err(io::Error::other)
 }
 
 pub fn remove_edges_for_node(node_id: &str) -> io::Result<()> {
@@ -105,9 +89,22 @@ pub async fn read_edges_pool(pool: &sqlx::AnyPool, limit: i64) -> io::Result<Vec
     Ok(read_edges_pool_async(pool, limit as usize).await)
 }
 
-#[allow(dead_code)]
-pub async fn delete_edge_by_id_pool(pool: &sqlx::AnyPool, edge_id: &str) -> io::Result<u64> {
-    delete_edge_by_id_async(pool, edge_id).await
+/// Delete the edge identified by its `(source, target, label)` primary key.
+/// Returns the number of deleted rows (0 or 1).
+pub async fn delete_edge_pool(
+    pool: &sqlx::AnyPool,
+    source: &str,
+    target: &str,
+    relation: &str,
+) -> io::Result<u64> {
+    sqlx::query("DELETE FROM edges WHERE source = ? AND target = ? AND label = ?")
+        .bind(source)
+        .bind(target)
+        .bind(relation)
+        .execute(pool)
+        .await
+        .map(|r| r.rows_affected())
+        .map_err(io::Error::other)
 }
 
 #[allow(dead_code)]

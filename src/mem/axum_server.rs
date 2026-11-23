@@ -26,10 +26,11 @@ use tower_http::cors::CorsLayer;
 
 use super::graph::{compute_stats_pool, rebuild_graph_json_pool_virtual};
 use super::store::{
-    Edge, Node, NodeFrontmatter, append_edge_pool, importance_for_type, now_iso, write_node_pool,
+    Edge, MAX_RELATION_CHARS, Node, NodeFrontmatter, append_edge_pool, importance_for_type,
+    now_iso, write_node_pool,
 };
 use super::store::{
-    delete_edge_by_id_pool, delete_node_with_edges_pool, read_node_pool, read_nodes_limited_pool,
+    delete_edge_pool, delete_node_with_edges_pool, read_node_pool, read_nodes_limited_pool,
     search_nodes_pool, validate_uuid,
 };
 use crate::store::pool;
@@ -112,7 +113,6 @@ const VALID_NODE_TYPES: &[&str] = &[
 const MAX_BODY_CHARS: usize = 65_536;
 const MAX_TITLE_CHARS: usize = 512;
 const MAX_ARRAY_ITEMS: usize = 50;
-const MAX_RELATION_CHARS: usize = 64;
 const WEIGHT_MIN: f64 = 0.0;
 const WEIGHT_MAX: f64 = 100.0;
 
@@ -235,6 +235,7 @@ fn parse_edge_payload(body: &str) -> Result<Edge, String> {
     }
     let relation: String = v["relation"]
         .as_str()
+        .filter(|r| !r.trim().is_empty())
         .unwrap_or("related")
         .chars()
         .take(MAX_RELATION_CHARS)
@@ -254,13 +255,12 @@ fn parse_edge_payload(body: &str) -> Result<Edge, String> {
 }
 
 /// Create an edge using a pool connection.
-async fn handle_post_edge_pool(body: &str, pool: &AnyPool) -> Result<String, String> {
+async fn handle_post_edge_pool(body: &str, pool: &AnyPool) -> Result<Edge, String> {
     let edge = parse_edge_payload(body)?;
-    let id = edge.id.clone();
     append_edge_pool(pool, &edge)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(id)
+    Ok(edge)
 }
 
 /// Compute degree centrality using a pool connection.
@@ -335,8 +335,10 @@ pub fn build_router(state: AppState, port: u16) -> Router {
         .route("/api/nodes/{id}", put(handle_update_node))
         .route("/api/nodes/{id}", delete(handle_delete_node))
         // Edges
-        .route("/api/edges", post(handle_create_edge))
-        .route("/api/edges/{id}", delete(handle_delete_edge))
+        .route(
+            "/api/edges",
+            post(handle_create_edge).delete(handle_delete_edge),
+        )
         // Search
         .route("/api/search", get(handle_search))
         .layer(middleware::from_fn_with_state(origins, guard_mutations))
@@ -582,29 +584,50 @@ async fn handle_delete_node(
 
 async fn handle_create_edge(State(state): State<AppState>, body: String) -> impl IntoResponse {
     match handle_post_edge_pool(&body, &state.pool).await {
-        Ok(id) => (StatusCode::CREATED, Json(json!({"edge_id": id}))).into_response(),
+        Ok(e) => (
+            StatusCode::CREATED,
+            Json(json!({"source": e.source, "target": e.target, "relation": e.relation})),
+        )
+            .into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response(),
     }
 }
 
+#[derive(serde::Deserialize)]
+struct EdgeKeyQuery {
+    source: Option<String>,
+    target: Option<String>,
+    relation: Option<String>,
+}
+
 async fn handle_delete_edge(
     State(state): State<AppState>,
-    Path(id): Path<String>,
+    Query(q): Query<EdgeKeyQuery>,
 ) -> impl IntoResponse {
-    if !validate_uuid(&id) {
+    let source = q.source.unwrap_or_default();
+    let target = q.target.unwrap_or_default();
+    let relation = q.relation.unwrap_or_default();
+    if !validate_uuid(&source)
+        || !validate_uuid(&target)
+        || relation.is_empty()
+        || relation.chars().count() > MAX_RELATION_CHARS
+    {
         return (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": "invalid edge id"})),
+            Json(json!({"error": "invalid source, target or relation"})),
         )
             .into_response();
     }
-    match delete_edge_by_id_pool(&state.pool, &id).await {
+    match delete_edge_pool(&state.pool, &source, &target, &relation).await {
         Ok(0) => (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "edge not found"})),
         )
             .into_response(),
-        Ok(_) => Json(json!({"deleted": id})).into_response(),
+        Ok(_) => {
+            Json(json!({"deleted": {"source": source, "target": target, "relation": relation}}))
+                .into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e.to_string()})),
@@ -852,12 +875,34 @@ mod tests {
         assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
     }
 
+    const MISSING_ID: &str = "00000000-0000-4000-8000-000000000000";
+
+    async fn create_edge(server: &TestServer, source: &str, target: &str, relation: &str) -> Value {
+        let res = server
+            .post("/api/edges")
+            .json(&json!({"source": source, "target": target, "relation": relation}))
+            .await;
+        assert_eq!(res.status_code(), StatusCode::CREATED);
+        res.json::<Value>()
+    }
+
+    fn delete_edge_req(
+        server: &TestServer,
+        source: &str,
+        target: &str,
+        relation: &str,
+    ) -> axum_test::TestRequest {
+        server
+            .delete("/api/edges")
+            .add_query_param("source", source)
+            .add_query_param("target", target)
+            .add_query_param("relation", relation)
+    }
+
     #[tokio::test]
     async fn delete_edge_reports_not_found_without_panic() {
         let server = test_server(build_router(make_state().await, 7700));
-        let res = server
-            .delete("/api/edges/00000000-0000-4000-8000-000000000000")
-            .await;
+        let res = delete_edge_req(&server, MISSING_ID, MISSING_ID, "related").await;
         assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
     }
 
@@ -868,18 +913,167 @@ mod tests {
         let a = create_node(&server, "Node A").await;
         let b = create_node(&server, "Node B").await;
         let c = create_node(&server, "Node C").await;
-        for (source, target) in [(&a, &b), (&b, &c)] {
-            let res = server
-                .post("/api/edges")
-                .json(&json!({"source": source, "target": target}))
-                .await;
-            assert_eq!(res.status_code(), StatusCode::CREATED);
-        }
+        create_edge(&server, &a, &b, "related").await;
+        create_edge(&server, &b, &c, "related").await;
         assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 2);
 
-        let res = server.delete(&format!("/api/edges/{a}")).await;
+        // A node id as source with a target that matches no edge deletes nothing.
+        let res = delete_edge_req(&server, &a, &c, "related").await;
         assert_eq!(res.status_code(), StatusCode::NOT_FOUND);
         assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 2);
+    }
+
+    #[tokio::test]
+    async fn delete_edge_removes_only_the_exact_triple() {
+        let state = make_state().await;
+        let server = test_server(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Node A").await;
+        let b = create_node(&server, "Node B").await;
+        create_edge(&server, &a, &b, "uses").await;
+        create_edge(&server, &a, &b, "blocks").await;
+
+        let res = delete_edge_req(&server, &a, &b, "uses").await;
+        assert_eq!(res.status_code(), StatusCode::OK);
+        assert_eq!(
+            res.json::<Value>(),
+            json!({"deleted": {"source": a, "target": b, "relation": "uses"}})
+        );
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 1);
+        assert_eq!(
+            count(
+                &state.pool,
+                "SELECT COUNT(*) FROM edges WHERE label = 'blocks'"
+            )
+            .await,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_edge_deletes_at_most_one_row_for_any_triple() {
+        let state = make_state().await;
+        let ids: Vec<String> = (0..4).map(|_| uuid::Uuid::new_v4().to_string()).collect();
+        let labels = ["uses", "blocks", "related"];
+        for s in &ids {
+            for t in &ids {
+                for l in labels {
+                    let e = Edge {
+                        id: String::new(),
+                        source: s.clone(),
+                        target: t.clone(),
+                        relation: l.to_string(),
+                        weight: 1.0,
+                        ts: now_iso(),
+                    };
+                    append_edge_pool(&state.pool, &e).await.unwrap();
+                }
+            }
+        }
+        // Random triples mix existing ids, a fresh id and a label no edge has.
+        let mut pool_ids = ids.clone();
+        pool_ids.push(uuid::Uuid::new_v4().to_string());
+        let pool_labels = ["uses", "blocks", "related", "absent"];
+        let rnd = |n: usize| uuid::Uuid::new_v4().as_u128() as usize % n;
+        for _ in 0..64 {
+            let s = &pool_ids[rnd(pool_ids.len())];
+            let t = &pool_ids[rnd(pool_ids.len())];
+            let label = pool_labels[rnd(pool_labels.len())];
+            let before = count(&state.pool, "SELECT COUNT(*) FROM edges").await;
+            let n = delete_edge_pool(&state.pool, s, t, label).await.unwrap();
+            let after = count(&state.pool, "SELECT COUNT(*) FROM edges").await;
+            assert!(n <= 1, "deleted {n} rows for one triple");
+            assert_eq!(before - after, n as i64);
+        }
+    }
+
+    #[tokio::test]
+    async fn post_edge_response_round_trips_into_delete() {
+        let state = make_state().await;
+        let server = test_server(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Node A").await;
+        let b = create_node(&server, "Node B").await;
+
+        // Default relation and a relation longer than the cap (stored truncated).
+        let long = "x".repeat(MAX_RELATION_CHARS + 6);
+        for body in [
+            json!({"source": a, "target": b}),
+            json!({"source": a, "target": b, "relation": long}),
+        ] {
+            let res = server.post("/api/edges").json(&body).await;
+            assert_eq!(res.status_code(), StatusCode::CREATED);
+            let key = res.json::<Value>();
+            let relation = key["relation"].as_str().unwrap();
+            assert!(relation.chars().count() <= MAX_RELATION_CHARS);
+            let res = delete_edge_req(
+                &server,
+                key["source"].as_str().unwrap(),
+                key["target"].as_str().unwrap(),
+                relation,
+            )
+            .await;
+            assert_eq!(res.status_code(), StatusCode::OK);
+            assert_eq!(res.json::<Value>(), json!({"deleted": key}));
+        }
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 0);
+    }
+
+    #[tokio::test]
+    async fn post_edge_blank_relation_defaults_and_round_trips() {
+        let state = make_state().await;
+        let server = test_server(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Node A").await;
+        let b = create_node(&server, "Node B").await;
+        for blank in ["", "  \t"] {
+            let key = create_edge(&server, &a, &b, blank).await;
+            assert_eq!(key["relation"], "related");
+            let res = delete_edge_req(&server, &a, &b, "related").await;
+            assert_eq!(res.status_code(), StatusCode::OK);
+            assert_eq!(res.json::<Value>(), json!({"deleted": key}));
+        }
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 0);
+    }
+
+    #[tokio::test]
+    async fn delete_edge_rejects_invalid_input() {
+        let state = make_state().await;
+        let server = test_server(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Node A").await;
+        let b = create_node(&server, "Node B").await;
+        create_edge(&server, &a, &b, "related").await;
+        let long = "x".repeat(MAX_RELATION_CHARS + 1);
+
+        for (s, t, r) in [
+            ("not-a-uuid", b.as_str(), "related"),
+            (a.as_str(), "../etc/passwd", "related"),
+            (a.as_str(), b.as_str(), ""),
+            (a.as_str(), b.as_str(), long.as_str()),
+        ] {
+            let res = delete_edge_req(&server, s, t, r).await;
+            assert_eq!(res.status_code(), StatusCode::BAD_REQUEST, "{s} {t} {r}");
+        }
+        // Missing parameters are invalid too.
+        let res = server.delete("/api/edges").await;
+        assert_eq!(res.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 1);
+    }
+
+    #[tokio::test]
+    async fn cross_site_delete_edge_is_rejected() {
+        let state = make_state().await;
+        let server = test_server(build_router(state.clone(), 7700));
+        let a = create_node(&server, "Node A").await;
+        let b = create_node(&server, "Node B").await;
+        create_edge(&server, &a, &b, "related").await;
+
+        let res = delete_edge_req(&server, &a, &b, "related")
+            .add_header("origin", "http://evil.example")
+            .await;
+        assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+        let res = delete_edge_req(&server, &a, &b, "related")
+            .add_header("sec-fetch-site", "cross-site")
+            .await;
+        assert_eq!(res.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(count(&state.pool, "SELECT COUNT(*) FROM edges").await, 1);
     }
 
     #[tokio::test]

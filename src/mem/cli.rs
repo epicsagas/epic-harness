@@ -9,10 +9,10 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    Edge, IndexNode, Node, NodeFrontmatter, append_edge, delete_node_file, importance_for_type,
-    list_node_ids, now_iso, parse_node, query_nodes, read_node, remove_edges_for_node,
-    remove_from_index, search_nodes, serialize_node, smart_recall, smart_recall_passive,
-    upsert_index, validate_uuid, write_node, write_node_dedup,
+    Edge, IndexNode, MAX_RELATION_CHARS, Node, NodeFrontmatter, append_edge, delete_node_file,
+    importance_for_type, list_node_ids, now_iso, parse_node, query_nodes, read_node,
+    remove_edges_for_node, remove_from_index, search_nodes, serialize_node, smart_recall,
+    smart_recall_passive, upsert_index, validate_uuid, write_node, write_node_dedup,
 };
 
 const SUBCOMMANDS: &[(&str, &str)] = &[
@@ -127,8 +127,10 @@ fn print_subcommand_help(sub: &str) {
             println!("  harness mem link <SRC-ID> <DST-ID> [OPTIONS]\n");
             println!("OPTIONS:");
             println!("  --relation <name>   Edge label (default: related)");
-            println!("  --weight <float>    Edge weight (default: 1.0)");
-            println!("\nOUTPUT: {{\"edge_id\":\"<uuid>\"}}");
+            println!("  --weight <float>    Accepted for compatibility, not stored");
+            println!(
+                "\nOUTPUT: {{\"source\":\"<uuid>\",\"target\":\"<uuid>\",\"relation\":\"<name>\"}}"
+            );
         }
         "graph" => {
             println!("harness mem graph — Manage the graph cache\n");
@@ -563,17 +565,25 @@ fn cmd_link(args: &[String]) -> io::Result<i32> {
             "invalid node id",
         ));
     }
-    let relation = flags
+    let relation: String = flags
         .get("relation")
-        .cloned()
-        .unwrap_or_else(|| "related".to_string());
+        .filter(|r| !r.trim().is_empty())
+        .map_or("related", String::as_str)
+        .chars()
+        .take(MAX_RELATION_CHARS)
+        .collect();
     let weight: f64 = flags
         .get("weight")
         .and_then(|w| w.parse().ok())
         .unwrap_or(1.0);
+    if flags.contains_key("weight") {
+        eprintln!(
+            "note: --weight is accepted but not stored (edges are keyed by source, target, relation)"
+        );
+    }
 
     let edge = Edge {
-        id: Uuid::new_v4().to_string(),
+        id: String::new(),
         source: src.clone(),
         target: dst.clone(),
         relation,
@@ -582,7 +592,10 @@ fn cmd_link(args: &[String]) -> io::Result<i32> {
     };
 
     append_edge(&edge)?;
-    println!("{{\"edge_id\":\"{}\"}}", edge.id);
+    println!(
+        "{}",
+        serde_json::json!({"source": edge.source, "target": edge.target, "relation": edge.relation})
+    );
     Ok(0)
 }
 

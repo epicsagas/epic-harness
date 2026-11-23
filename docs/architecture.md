@@ -263,7 +263,7 @@ A cross-agent knowledge graph that persists developer decisions, patterns, and c
 **Schema:**
 - `nodes` — id, type, title, tags, projects, agents, created, updated, body
 - `nodes_fts` — FTS5 virtual table (title + body + tags), auto-synced via triggers
-- `edges` — id, source, target, relation, weight, ts
+- `edges` — source, target, label, created (primary key: source, target, label)
 
 Legacy file-based stores (`memory/nodes/*.md`, `memory/edges.jsonl`) are automatically migrated to SQLite on first run and a `memory/.migrated` marker is written to prevent re-migration.
 
