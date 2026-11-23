@@ -77,11 +77,14 @@ After your first session ends, check evolution data (it's in your home directory
 ```bash
 ls ~/.harness/projects/
 # The directory name matches your project directory name (slugified)
+# Separate git dirs (backing.git) and submodules use the git dir name, not its parent
 
 /evolve status   # see your scores, trends, evolved skills
 ```
 
 If `metrics.json` exists and `obs/session_*.jsonl` is non-empty, observation is working.
+
+Since 0.10, a separate git dir or submodule gets its own slug (`epic-harness slug` prints it). Data from older versions stays in its old directory; the SessionStart hint prints the `epic-harness merge-project --from <old> --to <new>` command when one exists.
 
 ## What Happens Next
 

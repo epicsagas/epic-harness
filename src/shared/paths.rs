@@ -1,13 +1,35 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 pub fn cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Returns a stable slug for the current project: the sanitized git root dirname.
+/// `(--git-common-dir, --show-toplevel)` from one `git rev-parse` call, shared
+/// by `project_slug` and `legacy_project_slug`. `--git-common-dir` points at
+/// the shared git dir even from a linked worktree (so the slug stays stable
+/// inside an orbit-{goal_slug} worktree); `--show-toplevel` is only the
+/// fallback name. `None` outside a work tree, in a bare repo or without git.
+fn git_rev_parse() -> &'static Option<(String, String)> {
+    static REV: LazyLock<Option<(String, String)>> = LazyLock::new(|| {
+        let out = std::process::Command::new("git")
+            .args(["rev-parse", "--git-common-dir", "--show-toplevel"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut lines = text.lines();
+        Some((lines.next()?.to_string(), lines.next()?.to_string()))
+    });
+    &REV
+}
+
+/// Returns a stable slug for the current project: the sanitized name of the
+/// git common dir's repo (`<name>/.git`, `<name>.git`, or a submodule's
+/// `modules/<name>`).
 ///
-/// Uses git root when available (same slug for all subdirs of a repo).
+/// One `git rev-parse` call gives a slug that is the same for every subdir and
+/// linked worktree of a repo, including separate git dirs and submodules.
 /// Falls back to CWD dirname outside git repos.
 ///
 /// - Name is sanitized to `[a-zA-Z0-9_-]` to be safe as a directory component.
@@ -16,37 +38,10 @@ pub fn project_slug() -> String {
     static SLUG: LazyLock<String> = LazyLock::new(|| {
         let cwd_path = cwd();
 
-        // Prefer --git-common-dir: returns an absolute path in linked worktrees,
-        // pointing to the main repo's .git directory, so the slug stays stable
-        // even when the hook fires from inside an orbit-{goal_slug} worktree.
-        // In a normal (non-worktree) checkout it returns the relative string ".git",
-        // in which case we fall back to --show-toplevel as before.
-        if let Ok(out) = std::process::Command::new("git")
-            .args(["rev-parse", "--git-common-dir"])
-            .output()
-            && out.status.success()
+        if let Some((common, top)) = git_rev_parse()
+            && let Some(slug) = slug_from_rev_parse(common, top, &cwd_path)
         {
-            let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if let Some(slug) = slug_from_git_common_dir(&raw) {
-                return slug;
-            }
-        }
-
-        // Normal repo (--git-common-dir returned ".git"): use --show-toplevel.
-        if let Ok(git_root) = std::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
-            && git_root.status.success()
-        {
-            let root = String::from_utf8_lossy(&git_root.stdout).trim().to_string();
-            if !root.is_empty() {
-                let root_path = PathBuf::from(&root);
-                let name = root_path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "project".into());
-                return sanitize_slug_name(&name);
-            }
+            return slug;
         }
 
         // Fallback: CWD-based (non-git directories).
@@ -67,7 +62,77 @@ pub fn project_slug() -> String {
     SLUG.clone()
 }
 
-/// Slug from `git rev-parse --git-common-dir` output: `Some` only for an
+/// Slug from `git rev-parse --git-common-dir --show-toplevel` output.
+///
+/// A git dir named `.git` or any dot-name (`.bare`) gives its parent dir name
+/// (normal repo, primary or linked worktree, bare-container layout); any other
+/// git dir name (separate git dir `backing.git`, submodule `modules/<name>`)
+/// gives its own name minus a trailing `.git`, falling back to the toplevel
+/// dirname when nothing is left. `None` means the caller uses its own fallback.
+fn slug_from_rev_parse(common_dir: &str, toplevel: &str, cwd: &Path) -> Option<String> {
+    let top_name = || {
+        Path::new(toplevel)
+            .file_name()
+            .map(|n| sanitize_slug_name(&n.to_string_lossy()))
+            .filter(|n| !n.is_empty())
+    };
+    let b = common_dir.as_bytes();
+    let drive = b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/';
+    let common = if drive || Path::new(common_dir).is_absolute() {
+        PathBuf::from(common_dir)
+    } else {
+        match std::fs::canonicalize(cwd.join(common_dir)) {
+            Ok(p) => p,
+            Err(_) => return top_name(),
+        }
+    };
+    let name = common
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if name.starts_with('.') {
+        // A repo at the filesystem root has no parent name: stay cwd-independent.
+        return match common.parent().and_then(Path::file_name) {
+            Some(parent) => Some(sanitize_slug_name(&parent.to_string_lossy())),
+            None => top_name().or_else(|| Some("project".into())),
+        };
+    }
+    let stem = name.strip_suffix(".git").unwrap_or(&name);
+    if stem.is_empty() {
+        top_name()
+    } else {
+        Some(sanitize_slug_name(stem))
+    }
+}
+
+/// Pre-0.10 slug for this checkout when it differs from `project_slug()`
+/// (separate git dirs, submodules and symlinked `.git` moved to a new slug);
+/// `None` otherwise.
+pub fn legacy_project_slug() -> Option<String> {
+    let (common, top) = git_rev_parse().as_ref()?;
+    legacy_slug(common, top, &project_slug())
+}
+
+/// Whether this checkout is a submodule, whose pre-0.10 slug was one bucket
+/// shared by every submodule.
+pub fn is_submodule_checkout() -> bool {
+    git_rev_parse()
+        .as_ref()
+        .is_some_and(|(common, _)| common.contains("/modules/"))
+}
+
+/// The full 0.9.x rule: an absolute common dir gives its parent dir name,
+/// anything else the toplevel dirname.
+fn legacy_slug(common_dir: &str, toplevel: &str, new: &str) -> Option<String> {
+    let old = slug_from_git_common_dir(common_dir).unwrap_or_else(|| {
+        let name = Path::new(toplevel).file_name();
+        sanitize_slug_name(&name.map_or("project".into(), |n| n.to_string_lossy()))
+    });
+    (old != new).then_some(old)
+}
+
+/// Pre-0.10 slug from `git rev-parse --git-common-dir` output, kept only for
+/// legacy detection: `Some` only for an
 /// absolute path (linked worktree), where the main repo is the parent of the
 /// common `.git` dir. A normal checkout prints the relative `.git` (`None`).
 ///
@@ -389,6 +454,124 @@ mod tests {
         );
         // Normal checkout: relative, caller falls through to --show-toplevel.
         assert_eq!(slug_from_git_common_dir(".git"), None);
+    }
+
+    #[test]
+    fn rev_parse_slug_golden_table() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("rootname");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("sub/deep")).unwrap();
+        let slug = |c: &str, t: &str, cwd: &Path| slug_from_rev_parse(c, t, cwd);
+
+        assert_eq!(slug(".git", "/t", &root).as_deref(), Some("rootname"));
+        assert_eq!(
+            slug("../.git", "/t", &root.join("sub")).as_deref(),
+            Some("rootname")
+        );
+        assert_eq!(
+            slug("../../.git", "/t", &root.join("sub/deep")).as_deref(),
+            Some("rootname")
+        );
+        // Linked worktree: absolute common dir of the main checkout.
+        assert_eq!(
+            slug("/a/main/.git", "/a/wt", &root).as_deref(),
+            Some("main")
+        );
+        // Separate git dir and submodule git dir.
+        assert_eq!(
+            slug("/x/metadata/backing.git", "/w/proj", &root).as_deref(),
+            Some("backing")
+        );
+        assert_eq!(
+            slug("/s/.git/modules/libsub", "/s/libsub", &root).as_deref(),
+            Some("libsub")
+        );
+        // Windows drive form on every host.
+        assert_eq!(
+            slug("C:/repo/.git", "C:/repo", &root).as_deref(),
+            Some("repo")
+        );
+        assert_eq!(
+            slug("/x/store/.git", "/x/store", &root).as_deref(),
+            Some("store")
+        );
+        // Dot-named git dirs use the parent dir name like `.git`.
+        assert_eq!(slug("/x/y/.dotfiles", "/w/p", &root).as_deref(), Some("y"));
+        assert_eq!(
+            slug("/x/alpha/.bare", "/x/alpha/main", &root).as_deref(),
+            Some("alpha")
+        );
+        // Repo at the filesystem root: toplevel dirname, else a literal.
+        assert_eq!(slug("/.git", "/w/proj", &root).as_deref(), Some("proj"));
+        assert_eq!(slug("/.git", "/", &root).as_deref(), Some("project"));
+        // Sanitized on every branch.
+        assert_eq!(
+            slug("/x/my repo/.git", "/w/p", &root).as_deref(),
+            Some("my_repo")
+        );
+        // Empty stem falls back to the toplevel dirname.
+        assert_eq!(slug("/", "/w/proj", &root).as_deref(), Some("proj"));
+        // canonicalize failure: toplevel dirname, or None when that is empty too.
+        assert_eq!(
+            slug(".git", "/w/top", &root.join("missing")).as_deref(),
+            Some("top")
+        );
+        assert_eq!(slug(".git", "/", &root.join("missing")), None);
+    }
+
+    #[test]
+    fn rev_parse_slug_equals_legacy_for_normal_layouts() {
+        // 0.9.1 rule: absolute common dir gives its parent, else toplevel dirname.
+        let legacy = |common: &str, top: &str| {
+            slug_from_git_common_dir(common).unwrap_or_else(|| {
+                sanitize_slug_name(&Path::new(top).file_name().unwrap().to_string_lossy())
+            })
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("normal-repo");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let top = root.to_string_lossy().into_owned();
+        let common_abs = format!("{top}/.git");
+        let cases = [
+            (".git", top.as_str(), root.clone()),
+            ("../.git", top.as_str(), root.join("sub")),
+            (common_abs.as_str(), "/somewhere/linked-wt", root.clone()),
+        ];
+        for (common, toplevel, cwd) in cases {
+            assert_eq!(
+                slug_from_rev_parse(common, toplevel, &cwd).unwrap(),
+                legacy(common, toplevel),
+                "{common}"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_slug_detects_moved_slugs_only() {
+        // Separate git dir: 0.9.1 used the parent dir name, 0.10 uses `backing`.
+        assert_eq!(
+            legacy_slug("/x/metadata/backing.git", "/w/proj", "backing").as_deref(),
+            Some("metadata")
+        );
+        // Submodule: every one shared `modules` before.
+        assert_eq!(
+            legacy_slug("/s/.git/modules/libsub", "/s/libsub", "libsub").as_deref(),
+            Some("modules")
+        );
+        // Normal repo and linked worktree: unchanged slug.
+        assert_eq!(legacy_slug(".git", "/w/repo", "repo"), None);
+        assert_eq!(legacy_slug("/a/main/.git", "/w/wt", "main"), None);
+        assert_eq!(
+            legacy_slug("/x/alpha/.bare", "/x/alpha/main", "alpha"),
+            None
+        );
+        // Symlinked `.git`: git prints `.git`, 0.9.x used the toplevel dirname.
+        assert_eq!(
+            legacy_slug(".git", "/w/r2", "realrepo").as_deref(),
+            Some("r2")
+        );
     }
 
     #[test]

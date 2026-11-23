@@ -279,6 +279,33 @@ pub fn run(input: &HookInput) -> i32 {
         );
     }
 
+    // 0.10 changed the slug for separate git dirs, submodules and symlinked
+    // .git. Never fall back or merge automatically (the old buckets are
+    // shared); only point at the old dir until the user creates the ack file.
+    // Plain eprintln!, not hint(): hint() is mirrored into model context on
+    // Codex/agy, and this must stay stderr only.
+    if let Some(old) = legacy_project_slug()
+        && harness_projects_root().join(&old).is_dir()
+    {
+        let new = project_slug();
+        let ack = harness_projects_root().join(&new).join(".legacy-slug-ack");
+        if !ack.exists() {
+            let shared = if is_submodule_checkout() {
+                format!(
+                    " Submodules all shared '{old}' before 0.10, so merging copies other submodules' data too."
+                )
+            } else {
+                String::new()
+            };
+            eprintln!(
+                "[harness] project data for this checkout may be under '{old}' (pre-0.10 slug). \
+                 If '{old}' holds only this project, run: epic-harness merge-project --from {old} --to {new}.{shared} \
+                 To silence this, create an empty file {}.",
+                ack.display()
+            );
+        }
+    }
+
     // Auto-init ~/.harness/projects/{slug}/
     if !harness_exists() {
         for line in BANNER {
