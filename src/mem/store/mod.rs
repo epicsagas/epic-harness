@@ -53,8 +53,9 @@ pub use node::{
 
 #[allow(unused_imports)]
 pub use edge::{
-    append_edge, append_edge_pool, delete_edge_by_id, delete_edge_by_id_pool, read_edges,
-    read_edges_limit, read_edges_pool, remove_edges_for_node, remove_edges_for_node_pool,
+    MAX_RELATION_CHARS, append_edge, append_edge_pool, delete_edge_pool, normalize_relation,
+    read_edges, read_edges_limit, read_edges_pool, remove_edges_for_node,
+    remove_edges_for_node_pool,
 };
 
 // ── Re-exports: index ─────────────────────────────────

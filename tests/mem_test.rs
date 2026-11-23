@@ -260,9 +260,9 @@ fn test_validate() {
 // ── SQLite edge tests ──────────────────────────────────
 
 #[test]
-fn test_delete_edge_by_id_is_consistent() {
+fn test_delete_edge_by_key_is_consistent() {
     let _guard = ENV_LOCK.lock().unwrap();
-    use epic_harness::mem::store::{Edge, append_edge, delete_edge_by_id, read_edges};
+    use epic_harness::mem::store::{Edge, append_edge, delete_edge_pool, read_edges};
 
     let root = temp_root();
     set_root(&root);
@@ -298,15 +298,68 @@ fn test_delete_edge_by_id_is_consistent() {
     append_edge(&edge_c).unwrap();
     assert_eq!(read_edges().len(), 3, "should have 3 edges before delete");
 
-    // edges table has no id column (#227): delete_edge_by_id matches only the
-    // label (relation), never source or target.
-    delete_edge_by_id("src-1").unwrap();
-    assert_eq!(read_edges().len(), 3, "a source id must delete nothing");
+    // Edge identity is the (source, target, label) key. The pool was opened by
+    // append_edge on the store runtime, so this runtime only runs the query.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let pool = rt
+        .block_on(epic_harness::store::pool::memory_pool())
+        .unwrap();
+    let del = |s: &str, t: &str, r: &str| rt.block_on(delete_edge_pool(&pool, s, t, r)).unwrap();
 
-    delete_edge_by_id("uses").unwrap();
+    assert_eq!(del("src-1", "tgt-1", "blocks"), 0, "wrong label");
+    assert_eq!(del("src-1", "tgt-2", "uses"), 0, "wrong target");
+    assert_eq!(read_edges().len(), 3, "a partial key must delete nothing");
+
+    assert_eq!(del("src-1", "tgt-1", "uses"), 1);
     let remaining = read_edges();
-    assert_eq!(remaining.len(), 2, "only the edge labelled uses is deleted");
+    assert_eq!(remaining.len(), 2, "only the exact triple is deleted");
     assert!(remaining.iter().all(|e| e.relation == "blocks"));
+
+    // edge_b shares the label with edge_c but has other endpoints, so it survives.
+    assert_eq!(del("src-1", "tgt-3", "blocks"), 1);
+    assert_eq!(read_edges().len(), 1);
+}
+
+#[test]
+fn test_link_truncates_relation_to_max_chars() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    use epic_harness::mem::store::{MAX_RELATION_CHARS, read_edges};
+
+    let root = temp_root();
+    set_root(&root);
+    let (a, b) = (
+        "00000000-0000-4000-8000-00000000000a",
+        "00000000-0000-4000-8000-00000000000b",
+    );
+    let long = "é".repeat(MAX_RELATION_CHARS + 6);
+    let want = "é".repeat(MAX_RELATION_CHARS);
+
+    // Stored value.
+    assert_eq!(run_mem(&["link", a, b, "--relation", &long]), 0);
+    let edges = read_edges();
+    assert_eq!(edges.len(), 1);
+    assert_eq!(edges[0].relation, want);
+
+    // Blank only after truncation: 64 spaces then text falls back to the default.
+    let padded = format!("{}x", " ".repeat(MAX_RELATION_CHARS));
+    assert_eq!(run_mem(&["link", a, b, "--relation", &padded]), 0);
+    assert!(read_edges().iter().any(|e| e.relation == "related"));
+
+    // Printed value, from a separate process with its own empty home.
+    let home = temp_root();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_epic-harness"))
+        .args(["mem", "link", a, b, "--relation", &long])
+        .env("HOME", &home)
+        .env("HARNESS_ROOT", &home)
+        .env_remove("HARNESS_DIR")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let printed: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(printed["relation"], want.as_str());
 }
 
 #[test]
