@@ -279,6 +279,21 @@ pub fn run(input: &HookInput) -> i32 {
         );
     }
 
+    // 0.10 changed the slug for separate git dirs and submodules. Never
+    // fall back or merge automatically (the old buckets are shared); only
+    // point at the old dir. Plain eprintln!, not hint(): hint() is mirrored
+    // into model context on Codex/agy, and this must stay stderr only.
+    if let Some(old) = legacy_project_slug()
+        && harness_projects_root().join(&old).is_dir()
+    {
+        eprintln!(
+            "[harness] project data for this checkout may be under '{old}' (pre-0.10 slug). \
+             If '{old}' holds only this project, run: epic-harness merge-project --from {old} --to {new}. \
+             Submodules all shared '{old}' before 0.10, so merging copies other submodules' data too.",
+            new = project_slug()
+        );
+    }
+
     // Auto-init ~/.harness/projects/{slug}/
     if !harness_exists() {
         for line in BANNER {
