@@ -84,11 +84,11 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     // Existing importance values (including 0.5 and session overrides) are user data.
     // Type defaults are applied when a node is created or imported, never on open.
 
-    // Convert a pre-label edges table (id/relation/weight/ts) in place.
-    migrate_legacy_edges(pool).await;
-
     // Migrate FTS schema if it lacks the 'id' and 'projects' columns added in v2.
     migrate_fts_schema(pool).await;
+
+    // Convert a pre-label edges table (id/relation/weight/ts) in place.
+    migrate_legacy_edges(pool).await;
 
     // Legacy file migration
     migrate_legacy_files(pool).await;
@@ -124,36 +124,28 @@ async fn try_migrate_legacy_edges(pool: &AnyPool) -> Result<(), sqlx::Error> {
         sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")
             .fetch_one(&mut *conn)
             .await?;
-    let mut backup = None;
-    if !path.is_empty() {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let bak = format!("{path}.pre-edges-migration-{secs}.bak");
-        if let Err(e) = sqlx::query("VACUUM INTO ?")
-            .bind(&bak)
-            .execute(&mut *conn)
-            .await
-        {
-            // Likely a same-second backup collision with a concurrent process: wait for
-            // its write lock (and commit), then re-check. Stay quiet if it converted.
-            sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
-            let legacy = edges_is_legacy(&mut conn).await;
-            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
-            if legacy? {
+    let backup = if path.is_empty() {
+        None
+    } else if has_edges_backup(&path) {
+        // A persistently failing conversion must not write a full copy on every open.
+        Some("existing backup kept".to_string())
+    } else {
+        match backup_db(&mut conn, &path).await {
+            Ok(bak) => Some(bak),
+            Err(e) => {
                 eprintln!("[harness] memory.db: edges backup failed, not migrating: {e}");
+                return Ok(());
             }
-            return Ok(());
         }
-        backup = Some(bak);
-    }
+    };
 
     // BEGIN IMMEDIATE takes the write lock up front, so the re-check below cannot race.
-    sqlx::query("BEGIN IMMEDIATE").execute(&mut *conn).await?;
-    match convert_legacy_edges(&mut conn).await {
+    // The Transaction rolls back on drop, so a failed COMMIT never leaks an open
+    // transaction back into the pool.
+    let mut tx = sqlx::Connection::begin_with(&mut *conn, "BEGIN IMMEDIATE").await?;
+    match convert_legacy_edges(&mut tx).await {
         Ok(Some(n)) => {
-            sqlx::query("COMMIT").execute(&mut *conn).await?;
+            tx.commit().await?;
             eprintln!(
                 "[harness] memory.db: converted {n} legacy edges (backup: {})",
                 backup.as_deref().unwrap_or("none, in-memory")
@@ -161,10 +153,51 @@ async fn try_migrate_legacy_edges(pool: &AnyPool) -> Result<(), sqlx::Error> {
             Ok(())
         }
         other => {
-            let _ = sqlx::query("ROLLBACK").execute(&mut *conn).await;
+            let _ = tx.rollback().await;
             other.map(|_| ())
         }
     }
+}
+
+/// True when a completed `<db>.pre-edges-migration-*.bak` already sits next to the DB.
+fn has_edges_backup(db: &str) -> bool {
+    let db = std::path::Path::new(db);
+    let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
+        return false;
+    };
+    let prefix = format!("{}.pre-edges-migration-", name.to_string_lossy());
+    std::fs::read_dir(dir).is_ok_and(|rd| {
+        rd.flatten().any(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with(&prefix) && n.ends_with(".bak")
+        })
+    })
+}
+
+/// Copy the DB with `VACUUM INTO` to `<db>.pre-edges-migration-<secs>-<pid>.bak` (mode 0600
+/// like memory.db). Written to a `.tmp` name and renamed, so a `.bak` is always complete.
+async fn backup_db(conn: &mut sqlx::AnyConnection, db: &str) -> io::Result<String> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let bak = format!("{db}.pre-edges-migration-{secs}-{}.bak", std::process::id());
+    let tmp = format!("{bak}.tmp");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(&tmp)?;
+    let r = sqlx::query("VACUUM INTO ?")
+        .bind(&tmp)
+        .execute(conn)
+        .await
+        .map_err(io::Error::other)
+        .and_then(|_| std::fs::rename(&tmp, &bak));
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r.map(|_| bak)
 }
 
 /// Runs inside the write transaction. `Ok(None)` means another process already converted.
@@ -187,7 +220,7 @@ async fn convert_legacy_edges(conn: &mut sqlx::AnyConnection) -> Result<Option<u
     let n = sqlx::query(
         "INSERT OR IGNORE INTO edges (source, target, label, created) \
          SELECT source, target, COALESCE(NULLIF(relation, ''), 'related'), COALESCE(ts, '') \
-         FROM edges_legacy",
+         FROM edges_legacy ORDER BY ts, rowid",
     )
     .execute(&mut *conn)
     .await?

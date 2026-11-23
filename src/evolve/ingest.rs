@@ -124,13 +124,13 @@ pub fn ingest_to_memory(analysis: &SessionAnalysis, patterns: &[DetectedPattern]
 
 /// Append an edge; report only the first failure per ingest run on stderr.
 async fn append_edge(
-    warned: &std::sync::atomic::AtomicBool,
+    warned: &std::cell::Cell<bool>,
     pool: &AnyPool,
     edge: &store::Edge,
 ) -> std::io::Result<()> {
     let r = store::append_edge_pool(pool, edge).await;
     if let Err(e) = &r
-        && !warned.swap(true, std::sync::atomic::Ordering::Relaxed)
+        && !warned.replace(true)
     {
         eprintln!("[harness] edge write failed: {e}");
     }
@@ -148,7 +148,7 @@ async fn ingest_to_memory_async(
 
     let mut nodes_created = 0u64;
     let mut edges_created = 0u64;
-    let edge_warned = std::sync::atomic::AtomicBool::new(false);
+    let edge_warned = std::cell::Cell::new(false);
     let mut session_node_id = String::new();
 
     // 8a. Session summary node

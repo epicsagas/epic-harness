@@ -576,6 +576,12 @@ async fn issue_418_legacy_edges_table_is_converted_with_backup() {
 
     let backups = backups_of(dir.path());
     assert_eq!(backups.len(), 1);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&backups[0]).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "backup is private like memory.db");
+    }
     let bak = sqlx::any::AnyPoolOptions::new()
         .max_connections(1)
         .connect(&format!("sqlite:{}?mode=ro", backups[0].display()))
@@ -681,4 +687,54 @@ async fn issue_418_in_memory_legacy_table_converts_without_backup() {
         .await
         .unwrap();
     assert_eq!(n, 1);
+}
+
+#[tokio::test]
+async fn issue_418_unique_index_and_label_collision_keeps_earliest_row() {
+    use sqlx::Row as _;
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, _db) = legacy_file_pool(dir.path()).await;
+    for sql in [
+        "DELETE FROM edges WHERE id = 'e2'",
+        "CREATE UNIQUE INDEX idx_edges_src_tgt_rel ON edges(source, target, relation)",
+        "INSERT INTO edges VALUES ('e4', 'n5', 'n6', 'related', 1.0, '2024-02-02T00:00:00Z')",
+        "INSERT INTO edges VALUES ('e5', 'n5', 'n6', '', 1.0, '2024-02-01T00:00:00Z')",
+    ] {
+        sqlx::query(sql).execute(&pool).await.unwrap();
+    }
+    init_schema_pool(&pool).await.unwrap();
+
+    let rows = sqlx::query("SELECT label, created FROM edges WHERE source = 'n5'")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get::<String, _>(0), "related");
+    assert_eq!(rows[0].get::<String, _>(1), "2024-02-01T00:00:00Z");
+}
+
+#[tokio::test]
+async fn issue_418_failed_conversion_keeps_edges_and_backs_up_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (pool, _db) = legacy_file_pool(dir.path()).await;
+    sqlx::query("CREATE TABLE edges_legacy (x TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    init_schema_pool(&pool).await.unwrap();
+    init_schema_pool(&pool).await.unwrap();
+
+    assert_eq!(backups_of(dir.path()).len(), 1, "no second backup");
+    let n: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM edges WHERE relation IN ('detected_in', '')")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(n, 3, "original legacy edges are intact");
+    // The connection must not be left inside an open transaction.
+    sqlx::query("CREATE TABLE after_failure (x TEXT)")
+        .execute(&pool)
+        .await
+        .unwrap();
 }
