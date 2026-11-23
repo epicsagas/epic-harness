@@ -155,15 +155,12 @@ fn format_js(file_path: &str, wd: &Path) {
 /// debounce timestamp.
 const TSC_DEBOUNCE_SECS: u64 = 5;
 
-/// Per-workspace tsbuildinfo path (under the user's home when available —
+/// Per-workspace tsbuildinfo path (under the harness root —
 /// shared /tmp would leak project paths and invite symlink planting —
 /// keyed by workspace path hash, never written into the user's project).
 fn tsc_tsbuildinfo(wd: &Path) -> Option<std::path::PathBuf> {
     use std::hash::{Hash, Hasher};
-    let base = std::env::var_os("HOME")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    let dir = base.join(".harness").join("tsc");
+    let dir = crate::shared::paths::harness_root().join("tsc");
     std::fs::create_dir_all(&dir).ok()?;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     wd.hash(&mut hasher);
