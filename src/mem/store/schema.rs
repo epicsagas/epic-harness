@@ -87,10 +87,152 @@ pub async fn init_schema_pool(pool: &AnyPool) -> io::Result<()> {
     // Migrate FTS schema if it lacks the 'id' and 'projects' columns added in v2.
     migrate_fts_schema(pool).await;
 
+    // Convert a pre-label edges table (id/relation/weight/ts) in place.
+    migrate_legacy_edges(pool).await;
+
     // Legacy file migration
     migrate_legacy_files(pool).await;
 
     Ok(())
+}
+
+const EDGES_LEGACY_SQL: &str =
+    "SELECT COUNT(*) FROM pragma_table_info('edges') WHERE name = 'label'";
+
+async fn edges_is_legacy(conn: &mut sqlx::AnyConnection) -> Result<bool, sqlx::Error> {
+    let n: i64 = sqlx::query_scalar(EDGES_LEGACY_SQL).fetch_one(conn).await?;
+    Ok(n == 0)
+}
+
+/// Old memory.db files have `edges(id, source, target, relation, weight, ts)`; the
+/// `CREATE TABLE IF NOT EXISTS` in `GRAPH_SCHEMA_SQL` never converts them.
+/// Failures are logged to stderr and never fail `init_schema_pool`.
+async fn migrate_legacy_edges(pool: &AnyPool) {
+    if let Err(e) = try_migrate_legacy_edges(pool).await {
+        eprintln!("[harness] memory.db: legacy edges migration failed: {e}");
+    }
+}
+
+async fn try_migrate_legacy_edges(pool: &AnyPool) -> Result<(), sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    if !edges_is_legacy(&mut conn).await? {
+        return Ok(());
+    }
+
+    // In-memory DBs have no file: migrate without a backup (the data is ephemeral).
+    let path: String =
+        sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name = 'main'")
+            .fetch_one(&mut *conn)
+            .await?;
+    let backup = if path.is_empty() {
+        None
+    } else if has_edges_backup(&path) {
+        // A persistently failing conversion must not write a full copy on every open.
+        Some("existing backup kept".to_string())
+    } else {
+        match backup_db(&mut conn, &path).await {
+            Ok(bak) => Some(bak),
+            Err(e) => {
+                eprintln!("[harness] memory.db: edges backup failed, not migrating: {e}");
+                return Ok(());
+            }
+        }
+    };
+
+    // BEGIN IMMEDIATE takes the write lock up front, so the re-check below cannot race.
+    // The Transaction rolls back on drop, so a failed COMMIT never leaks an open
+    // transaction back into the pool.
+    let mut tx = sqlx::Connection::begin_with(&mut *conn, "BEGIN IMMEDIATE").await?;
+    match convert_legacy_edges(&mut tx).await {
+        Ok(Some(n)) => {
+            tx.commit().await?;
+            eprintln!(
+                "[harness] memory.db: converted {n} legacy edges (backup: {})",
+                backup.as_deref().unwrap_or("none, in-memory")
+            );
+            Ok(())
+        }
+        other => {
+            let _ = tx.rollback().await;
+            other.map(|_| ())
+        }
+    }
+}
+
+/// True when a completed `<db>.pre-edges-migration-*.bak` already sits next to the DB.
+fn has_edges_backup(db: &str) -> bool {
+    let db = std::path::Path::new(db);
+    let (Some(dir), Some(name)) = (db.parent(), db.file_name()) else {
+        return false;
+    };
+    let prefix = format!("{}.pre-edges-migration-", name.to_string_lossy());
+    std::fs::read_dir(dir).is_ok_and(|rd| {
+        rd.flatten().any(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with(&prefix) && n.ends_with(".bak")
+        })
+    })
+}
+
+/// Copy the DB with `VACUUM INTO` to `<db>.pre-edges-migration-<secs>-<pid>.bak` (mode 0600
+/// like memory.db). Written to a `.tmp` name and renamed, so a `.bak` is always complete.
+async fn backup_db(conn: &mut sqlx::AnyConnection, db: &str) -> io::Result<String> {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let bak = format!("{db}.pre-edges-migration-{secs}-{}.bak", std::process::id());
+    let tmp = format!("{bak}.tmp");
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(&tmp)?;
+    let r = sqlx::query("VACUUM INTO ?")
+        .bind(&tmp)
+        .execute(conn)
+        .await
+        .map_err(io::Error::other)
+        .and_then(|_| std::fs::rename(&tmp, &bak));
+    if r.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    r.map(|_| bak)
+}
+
+/// Runs inside the write transaction. `Ok(None)` means another process already converted.
+async fn convert_legacy_edges(conn: &mut sqlx::AnyConnection) -> Result<Option<u64>, sqlx::Error> {
+    if !edges_is_legacy(conn).await? {
+        return Ok(None);
+    }
+    for stmt in [
+        "ALTER TABLE edges RENAME TO edges_legacy",
+        "CREATE TABLE edges (
+            source TEXT NOT NULL,
+            target TEXT NOT NULL,
+            label TEXT NOT NULL DEFAULT '',
+            created TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (source, target, label)
+        )",
+    ] {
+        sqlx::query(stmt).execute(&mut *conn).await?;
+    }
+    let n = sqlx::query(
+        "INSERT OR IGNORE INTO edges (source, target, label, created) \
+         SELECT source, target, COALESCE(NULLIF(relation, ''), 'related'), COALESCE(ts, '') \
+         FROM edges_legacy ORDER BY ts, rowid",
+    )
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    for stmt in [
+        "DROP TABLE edges_legacy",
+        "CREATE INDEX idx_edges_source ON edges(source)",
+        "CREATE INDEX idx_edges_target ON edges(target)",
+    ] {
+        sqlx::query(stmt).execute(&mut *conn).await?;
+    }
+    Ok(Some(n))
 }
 
 /// Check if nodes_fts has the v2 columns (id, projects). If not, drop and recreate with triggers.
