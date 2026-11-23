@@ -7,16 +7,14 @@ use tauri::State;
 
 use crate::state::AppState;
 
-const MAX_RELATION_LEN: usize = 128;
-
 /// Validate that a relation string contains only alphanumeric, underscore, or hyphen characters.
 fn validate_relation(relation: &str) -> Result<(), String> {
     if relation.is_empty() {
         return Err("relation must not be empty".into());
     }
-    if relation.len() > MAX_RELATION_LEN {
+    if relation.chars().count() > MAX_RELATION_CHARS {
         return Err(format!(
-            "relation exceeds max length of {MAX_RELATION_LEN} characters"
+            "relation exceeds max length of {MAX_RELATION_CHARS} characters"
         ));
     }
     if !relation
@@ -266,6 +264,23 @@ mod tests {
 
         let again = delete_edge_in(&pool, A.into(), B.into(), "uses".into()).await;
         assert_eq!(again.unwrap_err(), "edge not found");
+    }
+
+    #[tokio::test]
+    async fn create_caps_relation_at_the_deletable_length() {
+        let pool = temp_pool().await;
+        assert!(
+            create_edge_in(&pool, input(&"x".repeat(MAX_RELATION_CHARS + 1)))
+                .await
+                .is_err()
+        );
+        let key = create_edge_in(&pool, input(&"x".repeat(MAX_RELATION_CHARS)))
+            .await
+            .unwrap();
+        delete_edge_in(&pool, key.source, key.target, key.relation)
+            .await
+            .unwrap();
+        assert_eq!(edge_count(&pool).await, 0);
     }
 
     #[tokio::test]

@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use super::graph::{rebuild_graph, related_nodes};
 use super::store::{
-    Edge, IndexNode, MAX_RELATION_CHARS, Node, NodeFrontmatter, append_edge, delete_node_file,
-    importance_for_type, list_node_ids, now_iso, parse_node, query_nodes, read_node,
+    Edge, IndexNode, Node, NodeFrontmatter, append_edge, delete_node_file, importance_for_type,
+    list_node_ids, normalize_relation, now_iso, parse_node, query_nodes, read_node,
     remove_edges_for_node, remove_from_index, search_nodes, serialize_node, smart_recall,
     smart_recall_passive, upsert_index, validate_uuid, write_node, write_node_dedup,
 };
@@ -565,13 +565,7 @@ fn cmd_link(args: &[String]) -> io::Result<i32> {
             "invalid node id",
         ));
     }
-    let relation: String = flags
-        .get("relation")
-        .filter(|r| !r.trim().is_empty())
-        .map_or("related", String::as_str)
-        .chars()
-        .take(MAX_RELATION_CHARS)
-        .collect();
+    let relation = normalize_relation(flags.get("relation").map(String::as_str));
     let weight: f64 = flags
         .get("weight")
         .and_then(|w| w.parse().ok())

@@ -27,7 +27,7 @@ use tower_http::cors::CorsLayer;
 use super::graph::{compute_stats_pool, rebuild_graph_json_pool_virtual};
 use super::store::{
     Edge, MAX_RELATION_CHARS, Node, NodeFrontmatter, append_edge_pool, importance_for_type,
-    now_iso, write_node_pool,
+    normalize_relation, now_iso, write_node_pool,
 };
 use super::store::{
     delete_edge_pool, delete_node_with_edges_pool, read_node_pool, read_nodes_limited_pool,
@@ -233,13 +233,7 @@ fn parse_edge_payload(body: &str) -> Result<Edge, String> {
     if !validate_uuid(&source) || !validate_uuid(&target) {
         return Err("invalid source or target node id".to_string());
     }
-    let relation: String = v["relation"]
-        .as_str()
-        .filter(|r| !r.trim().is_empty())
-        .unwrap_or("related")
-        .chars()
-        .take(MAX_RELATION_CHARS)
-        .collect();
+    let relation = normalize_relation(v["relation"].as_str());
     let weight = v["weight"]
         .as_f64()
         .unwrap_or(1.0)
@@ -1023,7 +1017,9 @@ mod tests {
         let server = test_server(build_router(state.clone(), 7700));
         let a = create_node(&server, "Node A").await;
         let b = create_node(&server, "Node B").await;
-        for blank in ["", "  \t"] {
+        // The last case is blank only after truncation to the cap.
+        let padded = format!("{}x", " ".repeat(MAX_RELATION_CHARS));
+        for blank in ["", "  \t", padded.as_str()] {
             let key = create_edge(&server, &a, &b, blank).await;
             assert_eq!(key["relation"], "related");
             let res = delete_edge_req(&server, &a, &b, "related").await;

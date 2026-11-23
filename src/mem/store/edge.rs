@@ -13,6 +13,16 @@ use crate::store::runtime;
 /// Longest relation (edge label) the HTTP API stores or accepts for deletion.
 pub const MAX_RELATION_CHARS: usize = 64;
 
+/// Truncate to `MAX_RELATION_CHARS` characters; a missing or blank result becomes "related".
+pub fn normalize_relation(raw: Option<&str>) -> String {
+    let r: String = raw.unwrap_or("").chars().take(MAX_RELATION_CHARS).collect();
+    if r.trim().is_empty() {
+        "related".to_string()
+    } else {
+        r
+    }
+}
+
 pub fn append_edge(edge: &Edge) -> io::Result<()> {
     let pool = memory_pool_sync()?;
     let ge = edge_to_graph(edge);

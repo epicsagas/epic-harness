@@ -57,10 +57,12 @@ pub struct Node {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Edge {
+    /// Not persisted: read as "". Edge identity is (source, target, relation).
     pub id: String,
     pub source: String,
     pub target: String,
     pub relation: String,
+    /// Not persisted: read as 1.0.
     pub weight: f64,
     pub ts: String,
 }

@@ -343,6 +343,11 @@ fn test_link_truncates_relation_to_max_chars() {
     assert_eq!(edges.len(), 1);
     assert_eq!(edges[0].relation, want);
 
+    // Blank only after truncation: 64 spaces then text falls back to the default.
+    let padded = format!("{}x", " ".repeat(MAX_RELATION_CHARS));
+    assert_eq!(run_mem(&["link", a, b, "--relation", &padded]), 0);
+    assert!(read_edges().iter().any(|e| e.relation == "related"));
+
     // Printed value, from a separate process with its own empty home.
     let home = temp_root();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_epic-harness"))
