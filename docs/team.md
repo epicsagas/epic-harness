@@ -105,7 +105,7 @@ epic team delete backend --global    # permanently delete from org store + local
 epic team history backend reviewer   # list .history/ backups for an agent
 ```
 
-Without `--global`, `sync`, `link` and team creation also copy the agents into the global agent directories of any installed Codex, Antigravity, Cursor and OpenCode (for example `~/.codex/agents/{team}/`). `unlink` and `delete` only remove the project-local `.claude/agents/{team}/` and `.codex/agents/{team}/` copies, not those global copies. `delete --global` also removes those global copies, but only real directories whose agent files all belong to the same org; symlinks and copies with another or no org marker are skipped with a warning.
+Without `--global`, `sync`, `link` and team creation also copy the agents into the global agent directories of any installed Codex, Antigravity, Cursor and OpenCode (for example `~/.codex/agents/{team}/`). `unlink` and `delete` only remove the project-local `.claude/agents/{team}/` and `.codex/agents/{team}/` copies, not those global copies. `delete --global` also removes those global copies, but only real directories whose entries are all agent files (`.md` or `.toml`) marked with the same org. A copy holding any other file, subdirectory, symlink, or an agent with another or no org marker is skipped whole with a warning, and so is a tool whose agent directory (or a parent below your home directory) is a symlink. Only the verified agent files are removed, and the directory is removed only if it is then empty, so files added after the confirmation prompt survive.
 
 ### Flags
 

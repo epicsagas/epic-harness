@@ -1288,46 +1288,73 @@ fn local_team_orgs(dirs: &[&Path]) -> io::Result<Vec<String>> {
     Ok(owners)
 }
 
-/// First entry of a tool team dir that is not a regular `.md`/`.toml` agent file marked
-/// with `org`, or the dir itself when it is empty. Sync writes only such files there, so
-/// any other entry (unmarked or other-org agent, unknown file, subdirectory, symlink)
-/// is user content. `None` means every entry is harness-written and owned by `org`.
-fn first_foreign_entry(dir: &Path, org: &str) -> io::Result<Option<PathBuf>> {
-    let mut paths = Vec::new();
-    let mut seen = false;
+/// `org` of a Codex agent TOML, accepted only as a top-level string key. A line scan
+/// would also match `org = "x"` inside a user's multi-line string.
+fn toml_top_level_org(content: &str) -> Option<String> {
+    let table: toml::Table = content.parse().ok()?;
+    table.get("org")?.as_str().map(str::to_string)
+}
+
+/// A tool team dir verified as safe to delete, with the exact files that were checked.
+struct ToolCopy {
+    dir: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+/// Verify every entry of a tool team dir is a regular `.md`/`.toml` agent file marked
+/// with `org` (sync writes nothing else there). `Ok(Err(entry))` names the first entry
+/// that is not (unmarked or other-org agent, unknown file such as `.DS_Store`,
+/// subdirectory, symlink); `Ok(Ok(files))` is the verified list, empty for an empty dir.
+fn verify_tool_copy(dir: &Path, org: &str) -> io::Result<Result<Vec<PathBuf>, PathBuf>> {
+    let mut files = Vec::new();
+    let mut foreign = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
-        seen = true;
+        let path = entry.path();
         // DirEntry::file_type does not follow symlinks.
         let owned = entry.file_type()?.is_file() && {
-            let path = entry.path();
             let marker = match path.extension().and_then(|e| e.to_str()) {
                 Some("md") => read_org_from_agent_file(&fs::read_to_string(&path)?),
-                Some("toml") => read_org_from_codex_agent_toml(&fs::read_to_string(&path)?),
+                Some("toml") => toml_top_level_org(&fs::read_to_string(&path)?),
                 _ => None,
             };
             marker.as_deref() == Some(org)
         };
-        if !owned {
-            paths.push(entry.path());
+        if owned {
+            files.push(path);
+        } else {
+            foreign.push(path);
         }
     }
-    paths.sort();
-    Ok(paths
-        .into_iter()
-        .next()
-        .or_else(|| (!seen).then(|| dir.to_path_buf())))
+    foreign.sort();
+    Ok(match foreign.into_iter().next() {
+        Some(entry) => Err(entry),
+        None => Ok(files),
+    })
 }
 
 /// Global tool copies of `team` that are safe to delete for `org`: a real directory
-/// (never a symlink) inside the tool agents dir whose entries are all agent files owned
-/// by `org`. Anything else is skipped with a warning, never deleted on a guess.
-fn global_tool_team_dirs(org: &str, team: &str) -> Vec<PathBuf> {
+/// (never a symlink, nor below one) in the tool agents dir whose entries are all agent
+/// files owned by `org`. Anything else is skipped with a warning, never deleted on a guess.
+fn global_tool_team_dirs(org: &str, team: &str) -> Vec<ToolCopy> {
+    let home = home_dir();
     let mut kept = Vec::new();
     for tool in ["codex", "antigravity", "cursor", "opencode"] {
         let Some(agents_dir) = installed_tool_agents_dir(tool) else {
             continue;
         };
+        // A symlinked ancestor below HOME could point the deletion anywhere.
+        let linked = agents_dir
+            .ancestors()
+            .take_while(|a| *a != home)
+            .find(|a| fs::symlink_metadata(a).is_ok_and(|m| m.is_symlink()));
+        if let Some(link) = linked {
+            eprintln!(
+                "[harness] warn: {} is a symlink, skipping {tool} agent copies",
+                link.display()
+            );
+            continue;
+        }
         let dir = agents_dir.join(team);
         match fs::symlink_metadata(&dir) {
             Ok(m) if m.is_dir() => {}
@@ -1340,20 +1367,12 @@ fn global_tool_team_dirs(org: &str, team: &str) -> Vec<PathBuf> {
             }
             Err(_) => continue,
         }
-        let inside = match (dir.canonicalize(), agents_dir.canonicalize()) {
-            (Ok(d), Ok(a)) => d.starts_with(a),
-            _ => false,
-        };
-        if !inside {
-            eprintln!(
-                "[harness] warn: {} escapes the {tool} agents dir, skipping",
-                dir.display()
-            );
-            continue;
-        }
-        match first_foreign_entry(&dir, org) {
-            Ok(None) => kept.push(dir),
-            Ok(Some(entry)) => eprintln!(
+        match verify_tool_copy(&dir, org) {
+            Ok(Ok(files)) if files.is_empty() => {
+                eprintln!("[harness] warn: {} is empty, skipping", dir.display())
+            }
+            Ok(Ok(files)) => kept.push(ToolCopy { dir, files }),
+            Ok(Err(entry)) => eprintln!(
                 "[harness] warn: {} is not an agent file owned by org '{org}', skipping {}",
                 entry.display(),
                 dir.display()
@@ -1367,12 +1386,36 @@ fn global_tool_team_dirs(org: &str, team: &str) -> Vec<PathBuf> {
     kept
 }
 
-/// Remove each dir, reporting a failure without aborting the rest.
-fn remove_tool_team_dirs(dirs: &[PathBuf]) {
-    for dir in dirs {
-        match fs::remove_dir_all(dir) {
+/// Remove only the verified files of each copy, then the (non-recursive) dir. Content that
+/// appeared after verification keeps the dir alive. A failure never aborts the rest.
+fn remove_tool_team_dirs(copies: &[ToolCopy]) {
+    for ToolCopy { dir, files } in copies {
+        if !fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir()) {
+            eprintln!(
+                "warning: {} changed since verification, skipping",
+                dir.display()
+            );
+            continue;
+        }
+        for file in files {
+            if !fs::symlink_metadata(file).is_ok_and(|m| m.is_file()) {
+                eprintln!(
+                    "warning: {} changed since verification, skipping",
+                    file.display()
+                );
+                continue;
+            }
+            if let Err(e) = fs::remove_file(file) {
+                eprintln!("warning: could not remove {}: {}", file.display(), e);
+            }
+        }
+        match fs::remove_dir(dir) {
             Ok(_) => println!("✓ Removed tool agents: {}", dir.display()),
-            Err(e) => eprintln!("warning: could not remove {}: {}", dir.display(), e),
+            Err(e) => eprintln!(
+                "warning: kept {} (not removed, it may hold other files): {}",
+                dir.display(),
+                e
+            ),
         }
     }
 }
@@ -1395,6 +1438,10 @@ fn resolve_unlink_org(
 }
 
 fn cmd_delete(args: &[String]) -> i32 {
+    cmd_delete_with(args, |msg| confirm(msg, false))
+}
+
+fn cmd_delete_with(args: &[String], ask: impl Fn(&str) -> bool) -> i32 {
     let (pos, flags) = parse_flags(args);
     let team = match pos.first() {
         Some(t) => t.clone(),
@@ -1461,17 +1508,17 @@ fn cmd_delete(args: &[String]) -> i32 {
         if local_agents_dir.exists() {
             println!("  Local agents: {}", local_agents_dir.display());
         }
-        for dir in &tool_dirs {
-            println!("  Tool agents: {}", dir.display());
+        for copy in &tool_dirs {
+            println!("  Tool agents: {}", copy.dir.display());
         }
         println!();
         println!("  ⚠  This cannot be undone. All agents and .history/ backups will be removed.");
         println!();
 
-        if !confirm(
-            &format!("Permanently delete team '{}' from org '{}'?", team, org),
-            false,
-        ) {
+        if !ask(&format!(
+            "Permanently delete team '{}' from org '{}'?",
+            team, org
+        )) {
             println!("Aborted.");
             return 0;
         }
@@ -1919,10 +1966,6 @@ mod tests {
         let store = team_store_dir("deleteorg", "alpha");
         assert!(store.exists(), "store dir must exist before delete");
 
-        // cmd_delete calls confirm() interactively — we can't drive stdin in a unit test.
-        // Instead we call sync_to_dest and then remove the store directly to verify
-        // the code path up to the confirmation guard, and also test validation logic.
-
         // Re-test: invalid team name must fail before reaching confirm()
         let args_bad = to_args(&["../../../etc", "--org", "deleteorg", "--global"]);
         let code = cmd_delete(&args_bad);
@@ -1931,10 +1974,9 @@ mod tests {
             "path-traversal team name must be rejected (exit 1)"
         );
 
-        // Valid call hits confirm() which reads from a closed stdin → empty input →
-        // defaults to 'n' (default=false) → Aborted.  Exit code must be 0 (not an error).
+        // Valid call with a declining confirm seam → Aborted.  Exit code must be 0 (not an error).
         let args_ok = to_args(&["alpha", "--org", "deleteorg", "--global"]);
-        let code = cmd_delete(&args_ok);
+        let code = cmd_delete_with(&args_ok, |_| false);
         assert_eq!(code, 0, "aborting at confirm() should return 0");
 
         // Store must still exist because we aborted
@@ -2280,7 +2322,10 @@ mod tests {
         seed_tool_copies(tmp.path(), "alpha", Some("o1"));
         add(&tmp.path().join(".cursor/agents/alpha"));
 
-        let dirs = global_tool_team_dirs("o1", "alpha");
+        let dirs: Vec<_> = global_tool_team_dirs("o1", "alpha")
+            .into_iter()
+            .map(|c| c.dir)
+            .collect();
         assert_eq!(dirs, vec![tmp.path().join(".codex/agents/alpha")]);
         assert!(tmp.path().join(".cursor/agents/alpha/tester.md").exists());
     }
@@ -2314,10 +2359,167 @@ mod tests {
         let codex = tmp.path().join(".codex/agents/alpha");
         std::fs::write(codex.join("old.md"), "---\norg: \"o1\"\n---\n").unwrap();
 
-        let dirs = global_tool_team_dirs("o1", "alpha");
-        assert!(dirs.contains(&codex));
-        remove_tool_team_dirs(&dirs);
+        let copies = global_tool_team_dirs("o1", "alpha");
+        assert!(copies.iter().any(|c| c.dir == codex));
+        remove_tool_team_dirs(&copies);
         assert!(!codex.exists());
+    }
+
+    /// Content added after verification (while the confirm prompt waits) is never deleted.
+    #[test]
+    #[serial_test::serial]
+    fn test_delete_global_keeps_content_added_after_verification() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        seed_tool_copies(tmp.path(), "alpha", Some("o1"));
+        let cursor = tmp.path().join(".cursor/agents/alpha");
+
+        let copies = global_tool_team_dirs("o1", "alpha");
+        std::fs::write(cursor.join("notes.txt"), "keep\n").unwrap();
+        remove_tool_team_dirs(&copies);
+
+        assert!(cursor.join("notes.txt").exists());
+        assert!(!cursor.join("tester.md").exists());
+        assert!(!tmp.path().join(".codex/agents/alpha").exists());
+    }
+
+    /// `org = "o1"` inside a multi-line string is not a top-level key.
+    #[test]
+    #[serial_test::serial]
+    fn test_delete_global_keeps_toml_with_org_inside_multiline_string() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        let codex = tmp.path().join(".codex/agents/alpha");
+        std::fs::create_dir_all(&codex).unwrap();
+        std::fs::write(
+            codex.join("mine.toml"),
+            "notes = \"\"\"\norg = \"o1\"\n\"\"\"\n",
+        )
+        .unwrap();
+
+        assert!(global_tool_team_dirs("o1", "alpha").is_empty());
+        assert!(codex.join("mine.toml").exists());
+    }
+
+    /// The real sync output (with `developer_instructions`) is still recognized.
+    #[test]
+    fn test_toml_top_level_org_reads_generated_codex_toml() {
+        let md = inject_team_context("---\nname: \"t\"\n---\n# T\n", "o1", "alpha", "stream", "m");
+        let toml = agent_md_to_codex_toml("t", &md);
+        assert_eq!(toml_top_level_org(&toml).as_deref(), Some("o1"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[serial_test::serial]
+    fn test_delete_global_skips_symlinked_agents_dir() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        let target = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(target.join("alpha")).unwrap();
+        std::fs::write(target.join("alpha/tester.md"), "---\norg: \"o1\"\n---\n").unwrap();
+        std::fs::create_dir_all(tmp.path().join(".cursor")).unwrap();
+        std::os::unix::fs::symlink(&target, tmp.path().join(".cursor/agents")).unwrap();
+
+        assert!(global_tool_team_dirs("o1", "alpha").is_empty());
+        assert!(target.join("alpha/tester.md").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    #[serial_test::serial]
+    fn test_delete_global_skips_symlinked_tool_parent_dir() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        let target = tmp.path().join("elsewhere");
+        std::fs::create_dir_all(target.join("agents/alpha")).unwrap();
+        std::fs::write(
+            target.join("agents/alpha/tester.md"),
+            "---\norg: \"o1\"\n---\n",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&target, tmp.path().join(".cursor")).unwrap();
+
+        assert!(global_tool_team_dirs("o1", "alpha").is_empty());
+        assert!(target.join("agents/alpha/tester.md").exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn test_delete_global_skips_empty_tool_team_dir() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        let dir = tmp.path().join(".cursor/agents/alpha");
+        std::fs::create_dir_all(&dir).unwrap();
+
+        assert!(global_tool_team_dirs("o1", "alpha").is_empty());
+        assert!(dir.exists());
+    }
+
+    /// Declining the prompt removes nothing: store, local and tool copies all survive.
+    #[test]
+    #[serial_test::serial]
+    fn test_cmd_delete_global_declined_keeps_everything() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        seed_team(tmp.path(), "o1", "alpha");
+        seed_tool_copies(tmp.path(), "alpha", Some("o1"));
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let args = to_args(&["alpha", "--org", "o1", "--global"]);
+        assert_eq!(cmd_delete_with(&args, |_| false), 0);
+        assert!(team_store_dir("o1", "alpha").exists());
+        assert!(tmp.path().join(".codex/agents/alpha/tester.toml").exists());
+        assert!(tmp.path().join(".cursor/agents/alpha/tester.md").exists());
+    }
+
+    /// Confirming removes the store and the org-owned tool copies.
+    #[test]
+    #[serial_test::serial]
+    fn test_cmd_delete_global_confirmed_removes_store_and_tool_copies() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        seed_team(tmp.path(), "o1", "alpha");
+        seed_tool_copies(tmp.path(), "alpha", Some("o1"));
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(tmp.path()).unwrap();
+
+        let args = to_args(&["alpha", "--org", "o1", "--global"]);
+        assert_eq!(cmd_delete_with(&args, |_| true), 0);
+        assert!(!team_store_dir("o1", "alpha").exists());
+        assert!(!tmp.path().join(".codex/agents/alpha").exists());
+        assert!(!tmp.path().join(".cursor/agents/alpha").exists());
+    }
+
+    /// `delete` without `--global` leaves the home copies and the store alone.
+    #[test]
+    #[serial_test::serial]
+    fn test_cmd_delete_local_leaves_global_tool_copies() {
+        let _guard = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        set_home(tmp.path());
+        seed_team(tmp.path(), "o1", "alpha");
+        seed_tool_copies(tmp.path(), "alpha", Some("o1"));
+        let project = tmp.path().join("proj");
+        let local = project.join(".claude").join("agents").join("alpha");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("tester.md"), "---\norg: \"o1\"\n---\n").unwrap();
+        let _cwd = CwdGuard(std::env::current_dir().unwrap());
+        std::env::set_current_dir(&project).unwrap();
+
+        assert_eq!(cmd_delete(&to_args(&["alpha", "--org", "o1"])), 0);
+        assert!(!local.exists());
+        assert!(team_store_dir("o1", "alpha").exists());
+        assert!(tmp.path().join(".codex/agents/alpha/tester.toml").exists());
+        assert!(tmp.path().join(".cursor/agents/alpha/tester.md").exists());
     }
 
     #[test]
