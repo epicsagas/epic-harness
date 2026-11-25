@@ -95,8 +95,15 @@ fn codex_hook_commands_all_use_launcher() {
 fn claude_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CLAUDE_HOOKS).expect("valid JSON");
     let handlers = command_handlers(&hooks);
-    assert_eq!(handlers.len(), 8, "expected 8 command handlers");
+    assert_eq!(handlers.len(), 9, "expected 9 command handlers");
     assert_launcher_form(&handlers, CLAUDE_LAUNCHER, CLAUDE_FORBIDDEN);
+}
+
+/// The prompt hook ships on Claude only until Codex has a live probe (ADR 0008).
+#[test]
+fn codex_has_no_prompt_submit() {
+    let hooks: Value = serde_json::from_str(CODEX_HOOKS).unwrap();
+    assert!(hooks["hooks"].get("UserPromptSubmit").is_none());
 }
 
 /// The Grok manifest shares the launcher (grok injects `GROK_PLUGIN_ROOT` and

@@ -440,6 +440,13 @@ async fn harness_pool_if_exists_for(url: String) -> io::Result<Option<AnyPool>> 
     }
 }
 
+/// `memory.db` counterpart of [`harness_pool_if_exists`]: same rules (read-only,
+/// never cached, no schema init), so a latency-bounded hook never creates or
+/// migrates the store.
+pub async fn memory_pool_if_exists() -> io::Result<Option<AnyPool>> {
+    harness_pool_if_exists_for(memory_url()).await
+}
+
 /// Returns a shared `AnyPool` for `memory.db`.
 ///
 /// Same lock-drop-await pattern as `harness_pool()`.

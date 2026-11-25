@@ -108,6 +108,54 @@ test("guard with no binary anywhere prints the notice and exits 0", () => {
   assert.match(r.stdout, /\[harness\] epic not found/);
 });
 
+test("prompt with no binary anywhere prints nothing and exits 0", () => {
+  const l = layout("");
+  const r = run(l, ["prompt"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+});
+
+// An older epic does not know `prompt`: it prints an error and exits 1. On this
+// event every child failure must be silent and exit 0; other hooks keep theirs.
+test("prompt maps a failing epic (non-zero exit, stderr noise) to a silent exit 0", { skip: win }, () => {
+  const l = layout("");
+  writeShim(l.bin, '#!/bin/sh\necho "error: unknown subcommand $1" >&2\nexit 1\n');
+  const r = run(l, ["prompt"]);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr, "");
+  assert.equal(run(l, ["guard"]).status, 1, "other subcommands keep the child's exit code");
+});
+
+test("prompt maps an epic killed by a signal to a silent exit 0", { skip: win }, () => {
+  const l = layout("");
+  writeShim(l.bin, "#!/bin/sh\nkill -9 $$\n");
+  const r = run(l, ["prompt"]);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr, "");
+  assert.equal(run(l, ["guard"]).status, 1, "guard still fails on a signal");
+});
+
+test("prompt maps a spawn failure (EACCES) to a silent exit 0", { skip: win }, () => {
+  const l = layout("");
+  writeShim(l.bin);
+  chmodSync(path.join(l.bin, shimName), 0o644);
+  const r = run(l, ["prompt"]);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "");
+  assert.equal(r.stderr, "");
+  assert.equal(run(l, ["guard"]).status, 1, "guard still surfaces the spawn error");
+});
+
+test("prompt passes a working epic's stdout and exit code through", { skip: win }, () => {
+  const l = layout("");
+  writeShim(l.bin, '#!/bin/sh\necho "ctx"\n');
+  const r = run(l, ["prompt"]);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, "ctx\n");
+});
+
 // run.mjs does its work at import time; with no subcommand that is one notice line.
 const { appendToPath, localEpicPath } = await (async () => {
   const [argv, log] = [process.argv, console.log];

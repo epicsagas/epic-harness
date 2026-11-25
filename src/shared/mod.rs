@@ -466,6 +466,7 @@ warned:
         assert_eq!(PROFILE_REFLECT, HookProfile::Standard);
         assert_eq!(PROFILE_SNAPSHOT, HookProfile::Standard);
         assert_eq!(PROFILE_RESUME, HookProfile::Minimal);
+        assert_eq!(PROFILE_PROMPT, HookProfile::Standard);
     }
 
     // ── sanitize_orbit_field ────────────────────────
