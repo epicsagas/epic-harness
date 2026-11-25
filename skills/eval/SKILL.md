@@ -39,7 +39,7 @@ dimensions:
       trials: 3              # 1..=50, default 3; the median is compared
 ```
 
-- The command prints a JSON object on stdout with a top-level numeric field named by `metric`, for example `{"latency_ms": 7.67}`. The last object that has the key wins. Nested keys are not searched, and the command, not eval, does the measuring.
+- The command prints a JSON object on stdout with a top-level numeric field named by `metric`, for example `{"latency_ms": 7.67}`. The last object that has the key wins. Nested keys are not searched, and the command, not eval, does the measuring. Stdout must be strict JSON: a line that mentions the metric key but is not valid JSON (Python's `json.dumps` writes `NaN` by default; pass `allow_nan=False`) makes the metric `metric_invalid` and FAILs.
 - Each eval runs the command `trials` times and compares the median to the median stored in the baseline. FAIL when it is worse than `max_regression_pct` percent (exactly at the limit passes). A metric regression stays FAIL even when `fail_on_regression` is false.
 - `details.metric.status` is one of `compared`, `no_baseline`, `no_baseline_metric` (baseline predates the metric), `baseline_mismatch` (metric name or direction changed), `zero_baseline`, `command_failed`, `metric_missing`, `metric_invalid`, `invalid_config` (metric set without `max_regression_pct`, or no trials ran). `compared` passes or fails by the limit; `no_baseline`, `no_baseline_metric`, `baseline_mismatch` and `zero_baseline` pass and print a stderr note to run `epic eval --baseline-update` and record a baseline median; the last four statuses fail.
 - Use `trials` of 3 or more for timing metrics. A FAIL here loops /orbit Step 5.5, and a noisy metric can fail unchanged code.

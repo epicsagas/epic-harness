@@ -3,7 +3,7 @@
 - Status: Accepted (maintainer approved decisions D1 to D5 for issue #275)
 - Date: 2026-11-25
 - Area: A (issue #275; supersedes decision 7 of ADR 0001)
-- Spec: issue #275 spec, narrowed form of A2 in `docs/specs/0.9.0-pipeline.md` section A.8
+- Spec: [issue #275](https://github.com/epicsagas/epic-harness/issues/275), narrowed form of A2 in `docs/specs/0.9.0-pipeline.md` section A.8
 - Literature: `docs/references/research-0.9.0-pipeline.md`, Area A
 
 ## Context
@@ -21,7 +21,7 @@ Ship a narrowed A2 (D1). It is opt-in, explicit, and never measures time itself.
 2. Reading the metric (D4): the last JSON object on stdout that has the top-level key wins, using the same scanner as composite benchmarks. Nested keys are not searched. A string, null, boolean or non-finite number is `metric_invalid`; an absent key is `metric_missing`. Both FAIL.
 3. Trials run in order and stop at the first non-zero exit (`command_failed`) or metric error. When all succeed, the median is compared against the median stored in the baseline (`details.metric.median`).
 4. Regression rule: `pct_worse` is `(cur - base) * 100 / |base|` for `lower` and `(base - cur) * 100 / |base|` for `higher`. The dimension FAILs when `pct_worse > max_regression_pct` (strict, so exactly at the limit passes).
-5. Not compared, never a failure: no baseline, a baseline written before this change or without a metric median, a different metric name or direction, and a zero baseline median. The report carries `details.metric.status` (`no_baseline`, `no_baseline_metric`, `baseline_mismatch`, `zero_baseline`) and the CLI prints a one-line stderr note. A metric run therefore never silently reports a comparison it did not make. A metric config that skipped validation (no `max_regression_pct`, or no trials ran) FAILs with status `invalid_config` instead of panicking.
+5. Not compared, never a failure: no baseline, a baseline written before this change or without a metric median, a different metric name or direction, and a zero baseline median. The report carries `details.metric.status` (`no_baseline`, `no_baseline_metric`, `baseline_mismatch`, `zero_baseline`) and the CLI prints a one-line stderr note. A metric run therefore never silently reports a comparison it did not make. A metric config that skipped validation (no `max_regression_pct`, or no trials ran) FAILs with status `invalid_config` instead of panicking. A zero baseline median is not compared (`zero_baseline`), a known limitation for count metrics that can legitimately be 0. Stdout containing the metric key in a region that is not strict JSON (for example Python's `NaN`) is `metric_invalid`, never a fallback to an earlier line or nested object. The limit check allows a relative tolerance of 1e-9 so a value exactly at the limit passes despite float rounding.
 6. A metric regression stays FAIL even when `regression.extra.fail_on_regression` is false (D3). The regression dimension then reports WARN for the resulting score drop, and the overall verdict is FAIL with exit 1.
 7. The baseline is loaded whenever the metric needs it, not only when the regression dimension runs, so `--dimension performance` and a disabled regression dimension still compare. An unreadable baseline exits 1 with the existing message.
 8. `--baseline-update` is not guarded (D5). A run whose performance FAILed on regression is still saved if requested and becomes the new comparison point, as for every other dimension. The eval skill documents this.

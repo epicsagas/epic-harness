@@ -384,7 +384,8 @@ impl Env {
         assert_eq!(code, 0, "{out} {err}");
         let m = &json(&out)["dimensions"]["performance"]["details"]["metric"];
         assert_eq!(m["status"], "no_baseline", "{out}");
-        assert!(err.contains("was not compared"), "{err}");
+        assert!(err.contains("recorded as the new baseline"), "{err}");
+        assert!(!err.contains("run epic eval --baseline-update"), "{err}");
         self.lat(second);
         self.eval()
     }
@@ -552,6 +553,45 @@ fn p_corrupt_baseline_metric_only() {
     let (code, out, err) = env.eval();
     assert_eq!(code, 1, "{out} {err}");
     assert!(err.contains("baseline unreadable"), "{err}");
+}
+
+#[test]
+fn p_metric_with_performance_disabled_does_not_load_baseline() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: false\n",
+    );
+    env.config(&format!(
+        "dimensions:\n  performance:\n    enabled: false\n    command: \"sh p.sh\"\n    extra:\n{METRIC_EXTRA}  regression:\n    enabled: false\n"
+    ));
+    let dir = env.cwd.join("benchmarks/baselines");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("latest.json"), "{").unwrap();
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    assert!(
+        json(&out)["dimensions"].get("performance").is_none(),
+        "{out}"
+    );
+}
+
+#[test]
+fn p_metric_without_command_does_not_load_baseline() {
+    let env = Env::new();
+    env.config(&format!(
+        "dimensions:\n  performance:\n    enabled: true\n    extra:\n{METRIC_EXTRA}  regression:\n    enabled: false\n"
+    ));
+    let dir = env.cwd.join("benchmarks/baselines");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("latest.json"), "{").unwrap();
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(
+        json(&out)["dimensions"]["performance"]["verdict"],
+        "SKIPPED"
+    );
+    assert!(!err.contains("baseline unreadable"), "{err}");
 }
 
 #[test]

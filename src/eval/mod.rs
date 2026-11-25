@@ -219,10 +219,16 @@ pub fn run(args: &[String]) -> i32 {
             status @ ("no_baseline" | "no_baseline_metric" | "baseline_mismatch" | "zero_baseline"),
         ) = m["status"].as_str()
         {
-            eprintln!(
-                "note: performance metric {} was not compared ({status}); run epic eval --baseline-update to record one",
-                m["name"].as_str().unwrap_or_default()
-            );
+            let name = m["name"].as_str().unwrap_or_default();
+            if baseline_update {
+                eprintln!(
+                    "note: performance metric {name} was not compared ({status}); recorded as the new baseline"
+                );
+            } else {
+                eprintln!(
+                    "note: performance metric {name} was not compared ({status}); run epic eval --baseline-update to record one"
+                );
+            }
         }
         results.push(perf);
     }

@@ -200,7 +200,7 @@ fn run_performance_metric(
         match baseline_metric(baseline, name, better) {
             Ok(b) => {
                 let p = pct_worse(better, b, m);
-                regressed = p > max;
+                regressed = exceeds(p, max);
                 base_median = Some(b);
                 // JSON has no non-finite numbers: write null explicitly.
                 pct = p.is_finite().then_some(p);
@@ -270,6 +270,12 @@ fn pct_worse(better: Better, base: f64, cur: f64) -> f64 {
         Better::Higher => base - cur,
     };
     diff * 100.0 / base.abs()
+}
+
+/// Strictly above the limit, with a relative tolerance so a value exactly at the
+/// limit passes even when float rounding nudges it over (0.3 to 0.33 is 10.000000000000009).
+fn exceeds(pct: f64, max: f64) -> bool {
+    pct > max * (1.0 + 1e-9)
 }
 
 /// Median stored by a previous run, or the status explaining why none is usable.
@@ -520,9 +526,35 @@ enum MetricError {
     Invalid,
 }
 
+/// Like the composite scanner, but fail closed: a `{` region that is not strict
+/// JSON (Python writes `NaN`) and mentions the quoted key is `Invalid`, so an
+/// earlier warmup line or a nested object inside it is never used instead.
+/// The region runs to the next line that starts with `{`, or to the end.
 fn parse_metric(stdout: &str, name: &str) -> Result<f64, MetricError> {
-    let v = last_json_field(stdout, &[name]).ok_or(MetricError::Missing)?;
-    v.as_f64()
+    let quoted = format!("\"{name}\"");
+    let mut last = None;
+    let mut rest = stdout;
+    while let Some(i) = rest.find('{') {
+        let tail = &rest[i..];
+        let mut stream = serde_json::Deserializer::from_str(tail).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(v)) => {
+                if let Some(s) = v.get(name) {
+                    last = Some(s.clone());
+                }
+                rest = &tail[stream.byte_offset()..];
+            }
+            _ => {
+                let region = tail[1..].find("\n{").map_or(tail, |n| &tail[..n + 1]);
+                if region.contains(&quoted) {
+                    return Err(MetricError::Invalid);
+                }
+                rest = &tail[1..];
+            }
+        }
+    }
+    last.ok_or(MetricError::Missing)?
+        .as_f64()
         .filter(|n| n.is_finite())
         .ok_or(MetricError::Invalid)
 }
@@ -1005,6 +1037,44 @@ mod tests {
             parse_metric(r#"{"latency_ms":true}"#, "latency_ms"),
             Err(Invalid)
         );
+    }
+
+    #[test]
+    fn p_parse_metric_non_strict_json_fails_closed() {
+        use MetricError::*;
+        let cases = [
+            // Warmup line, then a summary Python wrote with NaN.
+            (
+                "{\"latency_ms\": 5}\n{\"latency_ms\": 900, \"x\": NaN}",
+                Err(Invalid),
+            ),
+            ("{\"latency_ms\": 5}\n{\"latency_ms\": NaN}", Err(Invalid)),
+            // NaN outer object: the nested key must not be used.
+            ("{\"x\": NaN, \"m\": {\"latency_ms\": 5}}", Err(Invalid)),
+            (
+                "{\n  \"x\": NaN,\n  \"m\": {\n    \"latency_ms\": 5\n  }\n}",
+                Err(Invalid),
+            ),
+            // A broken region without the key, or stray braces in logs, are ignored.
+            ("{\"latency_ms\": 5}\n{\"x\": NaN}", Ok(5.0)),
+            ("{debug\n{\"latency_ms\": 3}", Ok(3.0)),
+            ("{\"x\": NaN}\n{\"latency_ms\": 4}", Ok(4.0)),
+        ];
+        for (stdout, want) in cases {
+            assert_eq!(parse_metric(stdout, "latency_ms"), want, "{stdout:?}");
+        }
+    }
+
+    #[test]
+    fn p_exceeds_tolerates_float_rounding() {
+        let p = pct_worse(Better::Lower, 0.3, 0.33);
+        assert!(p > 10.0, "premise: rounding pushes {p} above 10");
+        assert!(!exceeds(p, 10.0));
+        assert!(exceeds(pct_worse(Better::Lower, 0.3, 0.331), 10.0));
+        assert!(!exceeds(20.0, 20.0));
+        assert!(exceeds(20.5, 20.0));
+        assert!(exceeds(f64::INFINITY, 1000.0));
+        assert!(!exceeds(f64::NEG_INFINITY, 1000.0));
     }
 
     /// Pre-refactor implementation, kept verbatim as the differential oracle.
