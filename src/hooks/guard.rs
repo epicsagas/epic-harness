@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use super::common::{self, CONFLICT_LOOKBACK, HookInput, PROFILE_GUARD, hint, should_run};
-use crate::orchestrate::state::{ControlAction, read_control};
+use crate::orchestrate::state::{ControlAction, RunStatus, read_control, read_run};
 use crate::orchestrate::{directive_targets, extract_agent_id};
 use crate::telemetry::{RuleKind, Telemetry};
 
@@ -401,24 +401,34 @@ pub fn run(input: &HookInput) -> i32 {
 
         // Synchronous spawn gate: a paused or cancelled target must not start.
         // Fails open: no id, no control.json, or an unreadable one all pass.
+        // Needs the env opt-in AND a Running run: the orchestrator dir exists
+        // after any spawn, so a stale directive must not block spawns forever.
         if tool_lower == "agent" {
-            let Some(agent_id) = extract_agent_id(input) else {
+            if !crate::orchestrate::is_enabled() {
                 return 0;
-            };
+            }
             // Not harness_dir(): that one is cached for the process lifetime.
             let base = crate::shared::paths::harness_projects_root()
                 .join(crate::shared::paths::project_slug());
-            if let Some(d) = read_control(&base)
-                && directive_targets(&d, &agent_id)
-            {
-                let verb = match d.action {
-                    ControlAction::Pause => "paused",
-                    ControlAction::Cancel => "cancelled",
-                    _ => return 0,
-                };
+            if read_run(&base).is_none_or(|r| r.status != RunStatus::Running) {
+                return 0;
+            }
+            let Some(agent_id) = extract_agent_id(input) else {
+                return 0;
+            };
+            let directive = read_control(&base);
+            let cancelled = directive.as_ref().is_some_and(|d| {
+                d.action == ControlAction::Cancel && directive_targets(d, &agent_id)
+            });
+            // Same pause rule (both control.json formats) as the Edit/Write gate.
+            let paused = check_control_json_pause(Some(&agent_id), &base.join("orchestrator"));
+            if cancelled || paused {
+                let verb = if cancelled { "cancelled" } else { "paused" };
+                let generation = directive
+                    .map(|d| format!(" (gen {})", d.generation))
+                    .unwrap_or_default();
                 eprintln!(
-                    "[orchestrator] Agent {agent_id} is {verb} by user directive (gen {})",
-                    d.generation
+                    "[orchestrator] Agent {agent_id} is {verb} by user directive{generation}"
                 );
                 return 2;
             }
@@ -1234,19 +1244,32 @@ mod tests {
     // ── Agent spawn gate ────────────────────────────────────
 
     /// Runs `run()` on an Agent spawn against a temp harness root holding
-    /// `control` (when given) as control.json.
-    fn run_agent_spawn(control: Option<&str>) -> i32 {
+    /// `control` as control.json and a run.json with `run_status` (each when
+    /// given), with `EPIC_ORCHESTRATION` set or not.
+    fn run_agent_spawn(control: Option<&str>, run_status: Option<&str>, env_on: bool) -> i32 {
         let dir = tempfile::tempdir().unwrap();
-        if let Some(c) = control {
-            let orch_dir = harness_orch_dir(dir.path());
+        let orch_dir = harness_orch_dir(dir.path());
+        if control.is_some() || run_status.is_some() {
             std::fs::create_dir_all(&orch_dir).unwrap();
+        }
+        if let Some(c) = control {
             std::fs::write(orch_dir.join("control.json"), c).unwrap();
+        }
+        if let Some(st) = run_status {
+            let run = format!(
+                r#"{{"id":"r","status":"{st}","agents":[],"created_at":"t","updated_at":"t"}}"#
+            );
+            std::fs::write(orch_dir.join("run.json"), run).unwrap();
         }
         // SAFETY: serial tests; HARNESS_DIR and EPIC_ORCHESTRATION are only
         // read by the guard under test.
         unsafe {
             std::env::set_var("HARNESS_DIR", dir.path());
-            std::env::remove_var("EPIC_ORCHESTRATION");
+            if env_on {
+                std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+            } else {
+                std::env::remove_var("EPIC_ORCHESTRATION");
+            }
         }
         let input = HookInput {
             tool_name: Some("Agent".into()),
@@ -1256,49 +1279,80 @@ mod tests {
         let code = run(&input);
         unsafe {
             std::env::remove_var("HARNESS_DIR");
+            std::env::remove_var("EPIC_ORCHESTRATION");
         }
         code
     }
+
+    const RUNNING: Option<&str> = Some("running");
 
     #[test]
     #[serial]
     fn agent_spawn_paused_target_blocked() {
         let c = r#"{"action":"pause","target":"agent-x","message":null,"generation":3}"#;
-        assert_eq!(run_agent_spawn(Some(c)), 2);
+        assert_eq!(run_agent_spawn(Some(c), RUNNING, true), 2);
     }
 
     #[test]
     #[serial]
     fn agent_spawn_cancelled_target_blocked() {
         let c = r#"{"action":"cancel","target":"agent-x","message":null,"generation":4}"#;
-        assert_eq!(run_agent_spawn(Some(c)), 2);
+        assert_eq!(run_agent_spawn(Some(c), RUNNING, true), 2);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_legacy_pause_format_blocked() {
+        assert_eq!(
+            run_agent_spawn(Some(r#"{"pause":["agent-x"]}"#), RUNNING, true),
+            2
+        );
     }
 
     #[test]
     #[serial]
     fn agent_spawn_other_agent_passes() {
         let c = r#"{"action":"pause","target":"agent-other","message":null,"generation":3}"#;
-        assert_eq!(run_agent_spawn(Some(c)), 0);
+        assert_eq!(run_agent_spawn(Some(c), RUNNING, true), 0);
     }
 
     #[test]
     #[serial]
     fn agent_spawn_non_blocking_action_passes() {
         let c = r#"{"action":"resume","target":"agent-x","message":null,"generation":5}"#;
-        assert_eq!(run_agent_spawn(Some(c)), 0);
+        assert_eq!(run_agent_spawn(Some(c), RUNNING, true), 0);
     }
 
     #[test]
     #[serial]
     fn agent_spawn_orchestration_disabled_passes() {
         // No orchestrator dir and no env flag: the gate never reads anything.
-        assert_eq!(run_agent_spawn(None), 0);
+        assert_eq!(run_agent_spawn(None, None, false), 0);
+    }
+
+    /// The orchestrator dir exists after any spawn, so a stale `cancel all`
+    /// must not block spawns when the env opt-in is absent.
+    #[test]
+    #[serial]
+    fn agent_spawn_stale_cancel_all_without_env_passes() {
+        let c = r#"{"action":"cancel","target":"all","message":null,"generation":9}"#;
+        assert_eq!(run_agent_spawn(Some(c), RUNNING, false), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_run_not_running_passes() {
+        let c = r#"{"action":"cancel","target":"all","message":null,"generation":9}"#;
+        for status in ["complete", "aborted", "paused"] {
+            assert_eq!(run_agent_spawn(Some(c), Some(status), true), 0, "{status}");
+        }
+        assert_eq!(run_agent_spawn(Some(c), None, true), 0, "no run.json");
     }
 
     #[test]
     #[serial]
     fn agent_spawn_malformed_control_fails_open() {
-        assert_eq!(run_agent_spawn(Some("{not json")), 0);
+        assert_eq!(run_agent_spawn(Some("{not json"), RUNNING, true), 0);
     }
 
     // ── grok camelCase payloads ─────────────────────────────

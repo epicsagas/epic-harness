@@ -167,22 +167,44 @@ if (mode === "degrade") {
           ]
         : [{ name: "sh", file: "sh", args: (cmd) => ["-c", textual(cmd)], env }];
 
+    const runShell = (shell, hook, input) =>
+      spawnSync(shell.file, shell.args(hook.raw), {
+        input,
+        encoding: "utf8",
+        timeout: 60_000,
+        env: shell.env,
+      });
+    const detail = (r) =>
+      `status=${r.status} stdout=${(r.stdout ?? "").trim().slice(0, 120)} stderr=${(r.stderr ?? "").trim().slice(0, 120)}${r.error ? ` error=${r.error.message}` : ""}`;
+
+    // The temp root holds only run.mjs, so the install.cjs bootstrap that
+    // session-start runs first is not available here.
+    console.log("NOTE session-start is skipped in claude-shell mode (needs install.cjs)");
     for (const shell of shells) {
       for (const hook of claudeHooks) {
-        if (phase === "degrade" && hook.sub === "session-start") continue; // the installer
-        const r = spawnSync(shell.file, shell.args(hook.raw), {
-          input: "{}",
-          encoding: "utf8",
-          timeout: 60_000,
-          env: shell.env,
-        });
+        if (hook.sub === "session-start") continue;
+        const r = runShell(shell, hook, "{}");
         const ok =
           r.status === 0 &&
           (phase === "live" || r.stdout.includes("[harness] epic not found"));
+        check(`claude-shell ${shell.name} ${phase}: ${hook.raw}`, ok, detail(r));
+      }
+      if (phase === "live") {
+        // A guard block (exit 2) must survive the shell: `pwsh -Command` maps
+        // external exit codes other than 0/1 to 1, which would turn a block
+        // into a pass-through. A mismatch is reported, never masked.
+        const guard = claudeHooks.find((h) => h.sub === "guard");
+        const r = runShell(
+          shell,
+          guard,
+          JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /" } }),
+        );
         check(
-          `claude-shell ${shell.name} ${phase}: ${hook.raw}`,
-          ok,
-          `status=${r.status} stdout=${(r.stdout ?? "").trim().slice(0, 120)} stderr=${(r.stderr ?? "").trim().slice(0, 120)}${r.error ? ` error=${r.error.message}` : ""}`,
+          `claude-shell ${shell.name} live: guard block keeps exit 2`,
+          r.status === 2,
+          r.status === 2
+            ? detail(r)
+            : `${shell.name} returned exit ${r.status} for a blocked command, expected 2 (blocking contract broken in this shell); ${detail(r)}`,
         );
       }
     }
