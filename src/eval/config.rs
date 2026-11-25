@@ -53,10 +53,26 @@ pub struct CorrectnessExtra {
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct PerformanceExtra {
-    /// Not implemented: performance is gated on exit status only. Kept so old
-    /// eval.yaml files still parse; never scaffolded.
+    /// Percent limit for `metric` against the baseline median. Required when
+    /// `metric` is set; without `metric` it is ignored (warning).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_regression_pct: Option<f64>,
+    /// Top-level numeric field read from the command's JSON stdout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<String>,
+    /// Direction. Default `lower` when `metric` is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub better: Option<Better>,
+    /// Runs of the command per eval; the median is compared. Default 3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trials: Option<u32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Better {
+    Lower,
+    Higher,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -215,6 +231,42 @@ fn validate(cfg: &EvalConfig, path: &Path) -> Result<(), String> {
             path.display()
         ));
     }
+    let perf = &cfg.dimensions.performance.extra;
+    if let Some(m) = &perf.metric {
+        if !(1..=64).contains(&m.len())
+            || !m
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        {
+            return Err(format!(
+                "{}: dimensions.performance.extra.metric must match [A-Za-z0-9_-]{{1,64}}, got {m:?}",
+                path.display()
+            ));
+        }
+        match perf.max_regression_pct {
+            None => {
+                return Err(format!(
+                    "{}: dimensions.performance.extra.max_regression_pct is required when metric is set",
+                    path.display()
+                ));
+            }
+            Some(x) if !(x.is_finite() && x > 0.0 && x <= 1000.0) => {
+                return Err(format!(
+                    "{}: dimensions.performance.extra.max_regression_pct must be a finite number in (0, 1000], got {x:?}",
+                    path.display()
+                ));
+            }
+            Some(_) => {}
+        }
+        if let Some(t) = perf.trials
+            && !(1..=50).contains(&t)
+        {
+            return Err(format!(
+                "{}: dimensions.performance.extra.trials must be within 1..=50, got {t}",
+                path.display()
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -222,11 +274,19 @@ fn validate(cfg: &EvalConfig, path: &Path) -> Result<(), String> {
 pub fn warnings(cfg: &EvalConfig) -> Vec<String> {
     let perf = &cfg.dimensions.performance;
     let mut out = Vec::new();
-    if perf.enabled && perf.extra.max_regression_pct.is_some() {
-        out.push(
-            "dimensions.performance.extra.max_regression_pct is ignored: epic eval gates performance on exit status only. Remove the key to silence this warning."
-                .to_string(),
-        );
+    if perf.enabled && perf.extra.metric.is_none() {
+        if perf.extra.max_regression_pct.is_some() {
+            out.push(
+                "dimensions.performance.extra.max_regression_pct is ignored without dimensions.performance.extra.metric: epic eval gates performance on exit status only. Set metric or remove the key."
+                    .to_string(),
+            );
+        }
+        if perf.extra.better.is_some() || perf.extra.trials.is_some() {
+            out.push(
+                "dimensions.performance.extra.better and trials are ignored without dimensions.performance.extra.metric."
+                    .to_string(),
+            );
+        }
     }
     out
 }
@@ -444,5 +504,107 @@ mod tests {
         assert!(load_with("1.5").is_err());
         assert!(load_with("0.0").is_ok());
         assert!(load_with("1.0").is_ok());
+    }
+
+    fn load_perf(extra: &str) -> Result<EvalConfig, String> {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("eval.yaml"),
+            format!("dimensions:\n  performance:\n    extra:\n{extra}"),
+        )
+        .unwrap();
+        load(dir.path())
+    }
+
+    #[test]
+    fn p_config_validation_table() {
+        let long = "a".repeat(65);
+        let bad = [
+            (
+                "      metric: \"\"\n      max_regression_pct: 20\n",
+                "metric",
+            ),
+            (
+                "      metric: \"a b\"\n      max_regression_pct: 20\n",
+                "metric",
+            ),
+            (
+                &format!("      metric: {long}\n      max_regression_pct: 20\n"),
+                "metric",
+            ),
+            ("      metric: m\n", "max_regression_pct is required"),
+            (
+                "      metric: m\n      max_regression_pct: 0\n",
+                "max_regression_pct",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: -1\n",
+                "max_regression_pct",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: 1000.5\n",
+                "max_regression_pct",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: .nan\n",
+                "max_regression_pct",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: .inf\n",
+                "max_regression_pct",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: 20\n      trials: 0\n",
+                "trials",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: 20\n      trials: 51\n",
+                "trials",
+            ),
+            (
+                "      metric: m\n      max_regression_pct: 20\n      better: faster\n",
+                "faster",
+            ),
+        ];
+        for (yaml, key) in bad {
+            let err = load_perf(yaml).unwrap_err();
+            assert!(err.contains(key), "{yaml}: {err}");
+        }
+        for yaml in [
+            "      metric: m\n      max_regression_pct: 1000\n",
+            "      metric: a_B-9\n      max_regression_pct: 20\n      trials: 50\n",
+            "      metric: m\n      max_regression_pct: 20\n      trials: 1\n      better: higher\n",
+            "      max_regression_pct: 10.0\n",
+            "      max_regression_pct: 0\n      trials: 0\n",
+        ] {
+            load_perf(yaml).unwrap_or_else(|e| panic!("{yaml}: {e}"));
+        }
+    }
+
+    #[test]
+    fn p_warnings_table() {
+        let warn = |enabled: bool, extra: &str| {
+            let yaml =
+                format!("dimensions:\n  performance:\n    enabled: {enabled}\n    extra:\n{extra}");
+            warnings(&serde_yaml::from_str(&yaml).unwrap())
+        };
+        let max = "dimensions.performance.extra.max_regression_pct is ignored without dimensions.performance.extra.metric: epic eval gates performance on exit status only. Set metric or remove the key.";
+        let other = "dimensions.performance.extra.better and trials are ignored without dimensions.performance.extra.metric.";
+        assert_eq!(warn(true, "      max_regression_pct: 5\n"), [max]);
+        assert_eq!(warn(true, "      trials: 3\n"), [other]);
+        assert_eq!(warn(true, "      better: lower\n"), [other]);
+        assert_eq!(
+            warn(true, "      max_regression_pct: 5\n      trials: 3\n"),
+            [max, other]
+        );
+        assert!(warn(true, "      {}\n").is_empty());
+        assert!(warn(false, "      max_regression_pct: 5\n      trials: 3\n").is_empty());
+        assert!(
+            warn(
+                true,
+                "      metric: m\n      max_regression_pct: 5\n      trials: 3\n      better: lower\n"
+            )
+            .is_empty()
+        );
     }
 }

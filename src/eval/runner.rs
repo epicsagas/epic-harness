@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use super::config::{Benchmark, ResolvedCommands};
+use super::config::{Benchmark, Better, PerformanceExtra, ResolvedCommands};
 
 /// Single dimension evaluation result.
 #[derive(Debug, Clone)]
@@ -90,7 +90,11 @@ pub fn run_correctness(cmds: &ResolvedCommands, min_pass_rate: f64) -> DimResult
 
 // ── Performance ─────────────────────────────────────────────────────
 
-pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
+pub fn run_performance(
+    cmds: &ResolvedCommands,
+    extra: &PerformanceExtra,
+    baseline: Option<&Value>,
+) -> DimResult {
     let start = Instant::now();
 
     let bench_cmd = match &cmds.bench_command {
@@ -106,6 +110,10 @@ pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
             };
         }
     };
+
+    if let Some(name) = &extra.metric {
+        return run_performance_metric(bench_cmd, name, extra, baseline, start);
+    }
 
     let output = exec_command(bench_cmd);
     let duration = start.elapsed().as_millis() as u64;
@@ -124,6 +132,171 @@ pub fn run_performance(cmds: &ResolvedCommands) -> DimResult {
         }),
         duration_ms: duration,
     }
+}
+
+/// FAIL for a metric config that `config::load` would have rejected, so a caller
+/// that skips validation gets a failed dimension instead of a panic.
+fn metric_config_error(bench_cmd: &str, name: &str, message: &str, start: Instant) -> DimResult {
+    DimResult {
+        dimension: "performance".into(),
+        score: 0.0,
+        passed: false,
+        verdict: "FAIL".into(),
+        details: json!({
+            "command": bench_cmd,
+            "error": message,
+            "metric": {"name": name, "status": "invalid_config"},
+        }),
+        duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+/// Run `trials` times, take the median of the metric, compare to the baseline median.
+fn run_performance_metric(
+    bench_cmd: &str,
+    name: &str,
+    extra: &PerformanceExtra,
+    baseline: Option<&Value>,
+    start: Instant,
+) -> DimResult {
+    let better = extra.better.unwrap_or(Better::Lower);
+    let trials = extra.trials.unwrap_or(3);
+    let Some(max) = extra.max_regression_pct else {
+        let msg = "performance metric configured without max_regression_pct";
+        return metric_config_error(bench_cmd, name, msg, start);
+    };
+
+    let mut samples = Vec::new();
+    let mut failure = None;
+    let mut last = None;
+    for _ in 0..trials {
+        let out = exec_command(bench_cmd);
+        let parsed = if out.exit_code != 0 {
+            Err("command_failed")
+        } else {
+            parse_metric(&out.stdout, name).map_err(|e| match e {
+                MetricError::Missing => "metric_missing",
+                MetricError::Invalid => "metric_invalid",
+            })
+        };
+        let stderr_tail = truncate(&out.stderr, 200);
+        last = Some((out, stderr_tail));
+        match parsed {
+            Ok(v) => samples.push(v),
+            Err(s) => {
+                failure = Some(s);
+                break;
+            }
+        }
+    }
+    let Some((output, stderr_tail)) = last else {
+        return metric_config_error(bench_cmd, name, "no trials ran", start);
+    };
+
+    let median = failure.is_none().then(|| median(&samples));
+    let mut status = failure.unwrap_or("compared");
+    let (mut base_median, mut pct, mut regressed) = (None, None, false);
+    if let Some(m) = median {
+        match baseline_metric(baseline, name, better) {
+            Ok(b) => {
+                let p = pct_worse(better, b, m);
+                regressed = exceeds(p, max);
+                base_median = Some(b);
+                // JSON has no non-finite numbers: write null explicitly.
+                pct = p.is_finite().then_some(p);
+            }
+            Err(s) => status = s,
+        }
+    }
+
+    let passed = !matches!(
+        status,
+        "command_failed" | "metric_missing" | "metric_invalid"
+    ) && !regressed;
+    let mut details = json!({
+        "command": bench_cmd,
+        "exit_code": output.exit_code,
+        "stdout_tail": truncate(&output.stdout, 500),
+        "metric": {
+            "name": name,
+            "better": better_str(better),
+            "trials": trials,
+            "samples": samples,
+            "median": median.filter(|m| m.is_finite()),
+            "baseline_median": base_median,
+            "pct_worse": pct,
+            "max_regression_pct": max,
+            "regressed": regressed,
+            "status": status,
+        },
+    });
+    if status == "command_failed" {
+        details["stderr_tail"] = json!(stderr_tail);
+    }
+
+    DimResult {
+        dimension: "performance".into(),
+        score: if passed { 1.0 } else { 0.0 },
+        passed,
+        verdict: if passed { "PASS" } else { "FAIL" }.into(),
+        details,
+        duration_ms: start.elapsed().as_millis() as u64,
+    }
+}
+
+fn better_str(b: Better) -> &'static str {
+    match b {
+        Better::Lower => "lower",
+        Better::Higher => "higher",
+    }
+}
+
+fn median(samples: &[f64]) -> f64 {
+    let mut s = samples.to_vec();
+    s.sort_by(f64::total_cmp);
+    let n = s.len();
+    if n % 2 == 1 {
+        s[n / 2]
+    } else {
+        (s[n / 2 - 1] + s[n / 2]) / 2.0
+    }
+}
+
+/// How much worse `cur` is than `base`, in percent (negative = improvement).
+/// Multiplies before dividing so integer inputs hit the boundary exactly.
+fn pct_worse(better: Better, base: f64, cur: f64) -> f64 {
+    let diff = match better {
+        Better::Lower => cur - base,
+        Better::Higher => base - cur,
+    };
+    diff * 100.0 / base.abs()
+}
+
+/// Strictly above the limit, with a relative tolerance so a value exactly at the
+/// limit passes even when float rounding nudges it over (0.3 to 0.33 is 10.000000000000009).
+fn exceeds(pct: f64, max: f64) -> bool {
+    pct > max * (1.0 + 1e-9)
+}
+
+/// Median stored by a previous run, or the status explaining why none is usable.
+fn baseline_metric(
+    baseline: Option<&Value>,
+    name: &str,
+    better: Better,
+) -> Result<f64, &'static str> {
+    let baseline = baseline.ok_or("no_baseline")?;
+    let m = &baseline["dimensions"]["performance"]["details"]["metric"];
+    let median = m["median"]
+        .as_f64()
+        .filter(|v| v.is_finite())
+        .ok_or("no_baseline_metric")?;
+    if m["name"] != name || m["better"] != better_str(better) {
+        return Err("baseline_mismatch");
+    }
+    if median == 0.0 {
+        return Err("zero_baseline");
+    }
+    Ok(median)
 }
 
 // ── Quality ─────────────────────────────────────────────────────────
@@ -321,6 +494,14 @@ pub fn run_benchmark(bench: &Benchmark) -> DimResult {
 /// carries one. Objects may span lines (pretty-printed) or follow log text.
 /// Returns `None` when the score is missing, not a number, or outside 0.0..=1.0.
 fn parse_composite_score(stdout: &str) -> Option<f64> {
+    last_json_field(stdout, &["composite", "score"])?
+        .as_f64()
+        .filter(|s| s.is_finite() && (0.0..=1.0).contains(s))
+}
+
+/// Value of the first present key, taken from the last JSON object in `stdout`
+/// that carries any of `keys` (top level only).
+fn last_json_field(stdout: &str, keys: &[&str]) -> Option<Value> {
     let mut last = None;
     let mut rest = stdout;
     while let Some(i) = rest.find('{') {
@@ -328,7 +509,7 @@ fn parse_composite_score(stdout: &str) -> Option<f64> {
         match stream.next() {
             Some(Ok(v)) => {
                 let end = stream.byte_offset();
-                if let Some(s) = v.get("composite").or_else(|| v.get("score")) {
+                if let Some(s) = keys.iter().find_map(|k| v.get(k)) {
                     last = Some(s.clone());
                 }
                 rest = &rest[i + end..];
@@ -336,9 +517,46 @@ fn parse_composite_score(stdout: &str) -> Option<f64> {
             _ => rest = &rest[i + 1..],
         }
     }
-    last?
+    last
+}
+
+#[derive(Debug, PartialEq)]
+enum MetricError {
+    Missing,
+    Invalid,
+}
+
+/// Like the composite scanner, but fail closed: a `{` region that is not strict
+/// JSON (Python writes `NaN`) and mentions the quoted key is `Invalid`, so an
+/// earlier warmup line or a nested object inside it is never used instead.
+/// The region runs to the next line that starts with `{`, or to the end.
+fn parse_metric(stdout: &str, name: &str) -> Result<f64, MetricError> {
+    let quoted = format!("\"{name}\"");
+    let mut last = None;
+    let mut rest = stdout;
+    while let Some(i) = rest.find('{') {
+        let tail = &rest[i..];
+        let mut stream = serde_json::Deserializer::from_str(tail).into_iter::<Value>();
+        match stream.next() {
+            Some(Ok(v)) => {
+                if let Some(s) = v.get(name) {
+                    last = Some(s.clone());
+                }
+                rest = &tail[stream.byte_offset()..];
+            }
+            _ => {
+                let region = tail[1..].find("\n{").map_or(tail, |n| &tail[..n + 1]);
+                if region.contains(&quoted) {
+                    return Err(MetricError::Invalid);
+                }
+                rest = &tail[1..];
+            }
+        }
+    }
+    last.ok_or(MetricError::Missing)?
         .as_f64()
-        .filter(|s| s.is_finite() && (0.0..=1.0).contains(s))
+        .filter(|n| n.is_finite())
+        .ok_or(MetricError::Invalid)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -757,5 +975,243 @@ mod tests {
             r.details["skipped"],
             json!({"benchmark:a": "baseline_skipped", "performance": "baseline_skipped"})
         );
+    }
+
+    fn perf_with(extra: PerformanceExtra) -> DimResult {
+        let cmds = ResolvedCommands {
+            test_command: None,
+            lint_command: None,
+            bench_command: Some("false".into()),
+            mutation_command: None,
+            stack: "auto".into(),
+        };
+        run_performance(&cmds, &extra, None)
+    }
+
+    #[test]
+    fn p_metric_without_max_regression_pct_fails_not_panics() {
+        let r = perf_with(PerformanceExtra {
+            metric: Some("m".into()),
+            ..Default::default()
+        });
+        assert_eq!(r.verdict, "FAIL");
+        assert!(!r.passed);
+        assert_eq!(r.score, 0.0);
+        assert_eq!(
+            r.details["error"],
+            "performance metric configured without max_regression_pct"
+        );
+    }
+
+    #[test]
+    fn p_metric_with_zero_trials_fails_not_panics() {
+        let r = perf_with(PerformanceExtra {
+            metric: Some("m".into()),
+            max_regression_pct: Some(20.0),
+            trials: Some(0),
+            ..Default::default()
+        });
+        assert_eq!(r.verdict, "FAIL");
+        assert!(!r.passed);
+        assert_eq!(r.details["error"], "no trials ran");
+    }
+
+    #[test]
+    fn p_parse_metric_golden() {
+        use MetricError::*;
+        let cases: [(&str, Result<f64, MetricError>); 9] = [
+            (r#"{"latency_ms": 7.5}"#, Ok(7.5)),
+            ("log line\n{\n \"latency_ms\": 8\n}", Ok(8.0)),
+            ("{\"latency_ms\":1}\n{\"latency_ms\":2}", Ok(2.0)),
+            ("{\"latency_ms\":1}\n{\"other\":2}", Ok(1.0)),
+            (r#"{"other":1}"#, Err(Missing)),
+            (r#"{"latency_ms":"12"}"#, Err(Invalid)),
+            (r#"{"latency_ms":null}"#, Err(Invalid)),
+            (r#"{"m":{"latency_ms":1}}"#, Err(Missing)),
+            ("", Err(Missing)),
+        ];
+        for (stdout, want) in cases {
+            assert_eq!(parse_metric(stdout, "latency_ms"), want, "{stdout:?}");
+        }
+        assert_eq!(
+            parse_metric(r#"{"latency_ms":true}"#, "latency_ms"),
+            Err(Invalid)
+        );
+    }
+
+    #[test]
+    fn p_parse_metric_non_strict_json_fails_closed() {
+        use MetricError::*;
+        let cases = [
+            // Warmup line, then a summary Python wrote with NaN.
+            (
+                "{\"latency_ms\": 5}\n{\"latency_ms\": 900, \"x\": NaN}",
+                Err(Invalid),
+            ),
+            ("{\"latency_ms\": 5}\n{\"latency_ms\": NaN}", Err(Invalid)),
+            // NaN outer object: the nested key must not be used.
+            ("{\"x\": NaN, \"m\": {\"latency_ms\": 5}}", Err(Invalid)),
+            (
+                "{\n  \"x\": NaN,\n  \"m\": {\n    \"latency_ms\": 5\n  }\n}",
+                Err(Invalid),
+            ),
+            // A broken region without the key, or stray braces in logs, are ignored.
+            ("{\"latency_ms\": 5}\n{\"x\": NaN}", Ok(5.0)),
+            ("{debug\n{\"latency_ms\": 3}", Ok(3.0)),
+            ("{\"x\": NaN}\n{\"latency_ms\": 4}", Ok(4.0)),
+        ];
+        for (stdout, want) in cases {
+            assert_eq!(parse_metric(stdout, "latency_ms"), want, "{stdout:?}");
+        }
+    }
+
+    #[test]
+    fn p_exceeds_tolerates_float_rounding() {
+        let p = pct_worse(Better::Lower, 0.3, 0.33);
+        assert!(p > 10.0, "premise: rounding pushes {p} above 10");
+        assert!(!exceeds(p, 10.0));
+        assert!(exceeds(pct_worse(Better::Lower, 0.3, 0.331), 10.0));
+        assert!(!exceeds(20.0, 20.0));
+        assert!(exceeds(20.5, 20.0));
+        assert!(exceeds(f64::INFINITY, 1000.0));
+        assert!(!exceeds(f64::NEG_INFINITY, 1000.0));
+    }
+
+    /// Pre-refactor implementation, kept verbatim as the differential oracle.
+    fn composite_before(stdout: &str) -> Option<f64> {
+        let mut last = None;
+        let mut rest = stdout;
+        while let Some(i) = rest.find('{') {
+            let mut stream = serde_json::Deserializer::from_str(&rest[i..]).into_iter::<Value>();
+            match stream.next() {
+                Some(Ok(v)) => {
+                    let end = stream.byte_offset();
+                    if let Some(s) = v.get("composite").or_else(|| v.get("score")) {
+                        last = Some(s.clone());
+                    }
+                    rest = &rest[i + end..];
+                }
+                _ => rest = &rest[i + 1..],
+            }
+        }
+        last?
+            .as_f64()
+            .filter(|s| s.is_finite() && (0.0..=1.0).contains(s))
+    }
+
+    #[test]
+    fn p_composite_unchanged_differential() {
+        let cases = [
+            "",
+            "no json here",
+            r#"{"composite": 0.75}"#,
+            r#"{"score": 0.5}"#,
+            r#"{"composite": 0.9, "score": 0.1}"#,
+            r#"{"score": 0.1, "composite": 0.9}"#,
+            r#"{"composite": 0.2}{"score": 0.8}"#,
+            r#"{"composite": 0.2}{"other": 1}"#,
+            "log line\n{\n  \"composite\": 0.75,\n  \"detail\": {\"a\": 1}\n}\n",
+            r#"{"composite": 1.5}"#,
+            r#"{"composite": -0.1}"#,
+            r#"{"composite": "0.5"}"#,
+            r#"{"composite": null}"#,
+            r#"{"composite": null, "score": 0.5}"#,
+            r#"{"composite": 1e999}"#,
+            r#"{"detail": {"score": 0.5}}"#,
+            r#"{"score": 0.3} trailing {"score": 0.6}"#,
+            r#"{broken {"score": 0.4}"#,
+            r#"{"composite": 0.1} {"composite": 2.0}"#,
+            r#"{"score": 1.0}"#,
+        ];
+        for c in cases {
+            assert_eq!(parse_composite_score(c), composite_before(c), "{c:?}");
+        }
+    }
+
+    #[test]
+    fn p_median_golden() {
+        assert_eq!(median(&[3.0]), 3.0);
+        assert_eq!(median(&[1.0, 3.0]), 2.0);
+        assert_eq!(median(&[5.0, 1.0, 3.0]), 3.0);
+        assert_eq!(median(&[4.0, 1.0, 3.0, 2.0]), 2.5);
+    }
+
+    #[test]
+    fn p_pct_worse_boundary() {
+        let regressed = |b, base, cur, max: f64| pct_worse(b, base, cur) > max;
+        assert_eq!(pct_worse(Better::Lower, 100.0, 120.0), 20.0);
+        assert!(!regressed(Better::Lower, 100.0, 120.0, 20.0));
+        assert!(regressed(Better::Lower, 100.0, 120.5, 20.0));
+        assert_eq!(pct_worse(Better::Higher, 100.0, 80.0), 20.0);
+        assert!(!regressed(Better::Higher, 100.0, 80.0, 20.0));
+        assert!(regressed(Better::Higher, 100.0, 79.5, 20.0));
+        assert_eq!(pct_worse(Better::Lower, 100.0, 50.0), -50.0);
+        assert!(!regressed(Better::Lower, 100.0, 50.0, 20.0));
+    }
+
+    #[test]
+    fn p_pct_worse_monotonic() {
+        for better in [Better::Lower, Better::Higher] {
+            for base in [0.001, 1.0, 7.67, 100.0, 1e6, -5.0] {
+                for max in [0.5, 5.0, 20.0, 100.0, 1000.0] {
+                    assert!(pct_worse(better, base, base) <= max);
+                    if base < 0.0 {
+                        continue;
+                    }
+                    // r from 0.0 to 3.0, best to worst for the direction.
+                    let mut rs: Vec<f64> = (0..=60).map(|i| i as f64 * 0.05).collect();
+                    if better == Better::Higher {
+                        rs.reverse();
+                    }
+                    let flags: Vec<bool> = rs
+                        .iter()
+                        .map(|r| pct_worse(better, base, base * r) > max)
+                        .collect();
+                    assert!(
+                        flags.windows(2).all(|w| !w[0] || w[1]),
+                        "{better:?} {base} {max}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn p_baseline_metric_table() {
+        let mk =
+            |m: Value| Some(json!({"dimensions": {"performance": {"details": {"metric": m}}}}));
+        let row = |name: &str, better: &str, median: Value| {
+            mk(json!({"name": name, "better": better, "median": median}))
+        };
+        let cases: [(Option<Value>, Result<f64, &str>); 12] = [
+            (None, Err("no_baseline")),
+            (Some(json!({})), Err("no_baseline_metric")),
+            (
+                Some(json!({"dimensions": {"performance": {"details": {}}}})),
+                Err("no_baseline_metric"),
+            ),
+            (mk(json!("x")), Err("no_baseline_metric")),
+            (
+                mk(json!({"name": "m", "better": "lower"})),
+                Err("no_baseline_metric"),
+            ),
+            (row("m", "lower", json!(null)), Err("no_baseline_metric")),
+            (row("m", "lower", json!("x")), Err("no_baseline_metric")),
+            (
+                row("m", "lower", json!("Infinity")),
+                Err("no_baseline_metric"),
+            ),
+            (row("other", "lower", json!(10.0)), Err("baseline_mismatch")),
+            (row("m", "higher", json!(10.0)), Err("baseline_mismatch")),
+            (row("m", "lower", json!(0.0)), Err("zero_baseline")),
+            (row("m", "lower", json!(10.0)), Ok(10.0)),
+        ];
+        for (b, want) in cases {
+            assert_eq!(
+                baseline_metric(b.as_ref(), "m", Better::Lower),
+                want,
+                "{b:?}"
+            );
+        }
     }
 }

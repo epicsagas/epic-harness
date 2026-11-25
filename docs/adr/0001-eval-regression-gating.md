@@ -31,7 +31,7 @@ Adopt option A1 from the memo, refined:
 4. Zero comparable dimensions, including "no baseline yet", gives the regression dimension the verdict SKIPPED instead of PASS.
 5. The overall verdict gains SKIPPED, which applies only when every dimension is SKIPPED or there are no dimensions. Precedence: FAIL, then WARN, then PASS, then SKIPPED. `overall_score` averages non-SKIPPED dimensions only.
 6. Exit code for an overall SKIPPED is 0 (non-blocking but visible), pending maintainer confirmation (spec, Decision needed A-1). Orbit Step 5.5 treats SKIPPED as "proceed to Ship and record SKIPPED".
-7. `max_regression_pct` becomes `Option<f64>`, is no longer written by `--init`, and prints a one-line stderr warning when it is set while the performance dimension is enabled. It never gates.
+7. `max_regression_pct` becomes `Option<f64>`, is no longer written by `--init`, and prints a one-line stderr warning when it is set while the performance dimension is enabled. It never gates. Superseded by ADR 0007: with `metric` set it gates against the baseline median; without `metric` it still only warns.
 8. `--baseline-update` refuses to save a baseline when the overall verdict is SKIPPED (stderr warning, exit 0), so an empty run cannot become the comparison point.
 
 Option A2 (opt-in measured metrics with trials and a noise floor) is specified in the spec as a stretch item and ships only with maintainer approval (Decision needed A-2). Option A3 (change point detection) is deferred.
