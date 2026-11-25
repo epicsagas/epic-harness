@@ -454,7 +454,14 @@ impl Default for DbConfig {
 
 // ── Global Config Instance ──────────────────────────
 
-pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
+// Unit tests use defaults so a developer's real config.toml cannot change outcomes.
+pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(|| {
+    if cfg!(test) {
+        HarnessConfig::default()
+    } else {
+        load_config()
+    }
+});
 
 fn harness_dir() -> PathBuf {
     crate::shared::paths::harness_root()
@@ -1282,5 +1289,33 @@ max_docs = 5
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Outer half: re-run this binary with HARNESS_DIR pointing at a config
+    /// that overrides a threshold, and require the probe below to still see
+    /// the default (CONFIG is a process-wide static, so it needs a fresh process).
+    #[test]
+    fn config_ignores_config_file_in_unit_tests() {
+        let dir = scratch_dir("probe");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.toml"), "[model]\ninject_total_chars = 1\n").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["config_probe_inner", "--nocapture"])
+            .env("HARNESS_DIR", &dir)
+            .env("EPIC_CONFIG_PROBE", "1")
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "probe failed: {stdout}");
+        assert!(stdout.contains("1 passed"), "probe did not run: {stdout}");
+    }
+
+    #[test]
+    fn config_probe_inner() {
+        if std::env::var_os("EPIC_CONFIG_PROBE").is_none() {
+            return;
+        }
+        assert_eq!(CONFIG.model.inject_total_chars, 10_000);
     }
 }

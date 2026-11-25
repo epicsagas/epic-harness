@@ -217,37 +217,52 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T 
         .unwrap_or(fallback)
 }
 
-/// On-disk shape of `session_start_file` — just the partition date the
-/// SessionStart hook used, plus a write timestamp for debugging.
+/// On-disk shape of `session_start_file`: the partition date the SessionStart
+/// hook used, the evolved skills whose bodies it actually injected (absent in
+/// records written before this field existed), and a write timestamp for
+/// debugging.
 #[derive(serde::Deserialize)]
 struct SessionStartRec {
     date: String,
+    #[serde(default)]
+    injected: Option<Vec<String>>,
 }
 
 /// JSON payload for the session-start record. Separate so the write/read
 /// round-trip is unit-testable without touching `harness_dir()`.
-fn session_start_payload(date: &str) -> String {
-    serde_json::json!({ "date": date, "written_at": now_iso() }).to_string()
+fn session_start_payload(date: &str, injected: &[String]) -> String {
+    serde_json::json!({ "date": date, "injected": injected, "written_at": now_iso() }).to_string()
 }
 
 /// Record the partition date the SessionStart hook used this session, so
 /// SessionEnd reproduces the same holdout arm even if the session spans UTC
-/// midnight. Best-effort: failure is non-fatal (reflect falls back to today).
-pub fn write_session_start(date: &str) {
+/// midnight, and which skills were really injected so attribution credits only
+/// those. Best-effort: failure is non-fatal (reflect falls back to today and to
+/// the injection policy).
+pub fn write_session_start(date: &str, injected: &[String]) {
     let _ = fs::write(
         super::paths::session_start_file(),
-        session_start_payload(date),
+        session_start_payload(date, injected),
     );
+}
+
+fn read_session_start() -> Option<SessionStartRec> {
+    let data = fs::read_to_string(super::paths::session_start_file()).ok()?;
+    serde_json::from_str(&data).ok()
 }
 
 /// The partition date the current session started with, if `resume` wrote one.
 /// None on a cold start (no session yet) or an unreadable/corrupt record —
 /// callers fall back to `today()`.
 pub fn read_session_start_date() -> Option<String> {
-    let data = fs::read_to_string(super::paths::session_start_file()).ok()?;
-    serde_json::from_str::<SessionStartRec>(&data)
-        .ok()
-        .map(|r| r.date)
+    read_session_start().map(|r| r.date)
+}
+
+/// Skills whose bodies `resume` actually injected this session. None when no
+/// record or an older record without the list exists (callers fall back to the
+/// injection policy).
+pub fn read_session_injected() -> Option<Vec<String>> {
+    read_session_start().and_then(|r| r.injected)
 }
 
 pub fn read_jsonl(path: &Path) -> Vec<serde_json::Value> {
@@ -406,10 +421,18 @@ mod tests {
 
     #[test]
     fn session_start_payload_round_trips_date() {
-        let payload = session_start_payload("20260703");
+        let payload = session_start_payload("20260703", &["evo-a".to_string()]);
         let rec: SessionStartRec = serde_json::from_str(&payload).unwrap();
         assert_eq!(rec.date, "20260703");
+        assert_eq!(rec.injected, Some(vec!["evo-a".to_string()]));
         assert!(payload.contains("written_at"));
+    }
+
+    #[test]
+    fn session_start_record_without_injected_list_reads_as_none() {
+        let rec: SessionStartRec =
+            serde_json::from_str(r#"{"date":"20260703","written_at":"x"}"#).unwrap();
+        assert_eq!(rec.injected, None);
     }
 
     // ── truncate_str ────────────────────────────────

@@ -385,17 +385,22 @@ pub fn partition_holdout(
     (active, holdout)
 }
 
-/// Split the active arm into (exposed, withheld). A skill is exposed (injected
-/// at session start) when templates are injected or its body was synthesized;
-/// the rest were withheld and must not be credited with the session score.
+/// Split the active arm into (exposed, withheld). `injected` is the list
+/// `resume` recorded of skills whose bodies actually reached the context: when
+/// present it is authoritative, so a skill dropped by the character budget is
+/// withheld. Without a record, a skill is exposed when templates are injected
+/// or its body was synthesized. Withheld skills must not be credited with the
+/// session score.
 pub fn split_exposed(
     active: Vec<String>,
+    injected: Option<&[String]>,
     inject_templates: bool,
     is_synth: impl Fn(&str) -> bool,
 ) -> (Vec<String>, Vec<String>) {
-    active
-        .into_iter()
-        .partition(|name| inject_templates || is_synth(name))
+    active.into_iter().partition(|name| match injected {
+        Some(list) => list.contains(name),
+        None => inject_templates || is_synth(name),
+    })
 }
 
 /// Update per-skill A/B attribution from one session.
@@ -1028,12 +1033,26 @@ mod tests {
     #[test]
     fn split_exposed_withholds_templates_unless_injected() {
         let names = || vec!["a".to_string(), "b".to_string()];
-        let (exposed, withheld) = split_exposed(names(), false, |n| n == "b");
+        let (exposed, withheld) = split_exposed(names(), None, false, |n| n == "b");
         assert_eq!(exposed, vec!["b".to_string()]);
         assert_eq!(withheld, vec!["a".to_string()]);
-        let (exposed, withheld) = split_exposed(names(), true, |_| false);
+        let (exposed, withheld) = split_exposed(names(), None, true, |_| false);
         assert_eq!(exposed, names());
         assert!(withheld.is_empty());
+    }
+
+    #[test]
+    fn split_exposed_withholds_skills_dropped_by_injection_budget() {
+        let names = || vec!["a".to_string(), "b".to_string()];
+        // Both would pass the policy, but only "a" survived the budget.
+        let injected = vec!["a".to_string()];
+        let (exposed, withheld) = split_exposed(names(), Some(&injected), true, |_| true);
+        assert_eq!(exposed, vec!["a".to_string()]);
+        assert_eq!(withheld, vec!["b".to_string()]);
+        // An empty record means nothing was injected: nothing is credited.
+        let (exposed, withheld) = split_exposed(names(), Some(&[]), true, |_| true);
+        assert!(exposed.is_empty());
+        assert_eq!(withheld, names());
     }
 
     #[test]
