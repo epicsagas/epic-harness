@@ -27,6 +27,8 @@ pub enum AgentStatus {
     Done,
     Blocked,
     Failed,
+    /// Written by `/intervene cancel {agent_id}` (see the orchestrate skill).
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -92,6 +94,11 @@ pub struct ControlDirective {
     pub target: Option<String>,
     pub message: Option<String>,
     pub generation: u64,
+    /// Id of the run.json run this directive was issued for. Absent in files
+    /// written before run scoping; the Agent spawn gate then only honors a
+    /// cancel while the run is Running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 // ── Constants ─────────────────────────────────────────
@@ -276,7 +283,10 @@ pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -
     // Build a set of completed/failed agent IDs
     let mut finished = std::collections::HashSet::new();
     for agent in &run.agents {
-        if agent.status == AgentStatus::Done || agent.status == AgentStatus::Failed {
+        if matches!(
+            agent.status,
+            AgentStatus::Done | AgentStatus::Failed | AgentStatus::Cancelled
+        ) {
             finished.insert(agent.id.clone());
         }
     }
@@ -303,11 +313,14 @@ pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -
     unblocked
 }
 
-/// Check if the run is complete: all agents are Done or Failed.
+/// Check if the run is complete: all agents are Done, Failed or Cancelled.
 pub fn is_run_complete(run: &OrchestrationRun) -> bool {
-    run.agents
-        .iter()
-        .all(|a| a.status == AgentStatus::Done || a.status == AgentStatus::Failed)
+    run.agents.iter().all(|a| {
+        matches!(
+            a.status,
+            AgentStatus::Done | AgentStatus::Failed | AgentStatus::Cancelled
+        )
+    })
 }
 
 /// Acquire an exclusive advisory file lock on `path`.
@@ -446,6 +459,7 @@ pub fn upsert_agent_to_run(
                 AgentStatus::Done => "complete",
                 AgentStatus::Running => "running",
                 AgentStatus::Failed => "failed",
+                AgentStatus::Cancelled => "cancelled",
                 AgentStatus::Blocked => "blocked",
                 AgentStatus::Pending => "pending",
             }
@@ -906,6 +920,7 @@ mod tests {
             target: Some("agent-1".to_string()),
             message: Some("Waiting for approval".to_string()),
             generation: 1,
+            run_id: None,
         };
 
         write_control(tmp.path(), &directive).unwrap();
@@ -933,6 +948,7 @@ mod tests {
             target: None, // cancel all
             message: None,
             generation: 2,
+            run_id: None,
         };
         write_control(tmp.path(), &directive).unwrap();
 
@@ -952,6 +968,7 @@ mod tests {
             target: None,
             message: None,
             generation: 1,
+            run_id: None,
         };
         write_control(tmp.path(), &directive).unwrap();
 
@@ -973,6 +990,7 @@ mod tests {
             target: Some("a".to_string()),
             message: None,
             generation: 1,
+            run_id: None,
         };
         write_control(tmp.path(), &d1).unwrap();
 
@@ -981,6 +999,7 @@ mod tests {
             target: Some("b".to_string()),
             message: Some("new target".to_string()),
             generation: 2,
+            run_id: None,
         };
         write_control(tmp.path(), &d2).unwrap();
 
@@ -1001,6 +1020,7 @@ mod tests {
             target: None,
             message: None,
             generation: 3,
+            run_id: None,
         };
         write_control(tmp.path(), &d3).unwrap();
 
@@ -1010,6 +1030,7 @@ mod tests {
             target: Some("x".to_string()),
             message: None,
             generation: 5,
+            run_id: None,
         };
         write_control(tmp.path(), &d5).unwrap();
 
@@ -1164,6 +1185,25 @@ mod tests {
     }
 
     #[test]
+    fn control_directive_without_run_id_still_parses() {
+        let old = r#"{"action":"cancel","target":"all","message":null,"generation":2}"#;
+        let d: ControlDirective = serde_json::from_str(old).unwrap();
+        assert_eq!(d.run_id, None);
+        let json = serde_json::to_string(&d).unwrap();
+        assert!(!json.contains("run_id"), "{json}");
+    }
+
+    #[test]
+    fn cancelled_agent_counts_as_finished() {
+        let run = make_run(
+            "c",
+            vec![("a", AgentStatus::Cancelled), ("b", AgentStatus::Done)],
+            vec![],
+        );
+        assert!(is_run_complete(&run));
+    }
+
+    #[test]
     fn agent_status_serialization() {
         let statuses = vec![
             (AgentStatus::Pending, "\"pending\""),
@@ -1171,6 +1211,7 @@ mod tests {
             (AgentStatus::Done, "\"done\""),
             (AgentStatus::Blocked, "\"blocked\""),
             (AgentStatus::Failed, "\"failed\""),
+            (AgentStatus::Cancelled, "\"cancelled\""),
         ];
         for (status, expected) in statuses {
             let json = serde_json::to_string(&status).unwrap();

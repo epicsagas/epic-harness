@@ -132,12 +132,12 @@ fn claude_agent_spawn_block_is_a_deny() {
         fs::create_dir_all(orch).unwrap();
         fs::write(
             orch.join("run.json"),
-            r#"{"id":"r","status":"running","agents":[],"created_at":"t","updated_at":"t"}"#,
+            r#"{"id":"r","status":"aborted","agents":[],"created_at":"t","updated_at":"t"}"#,
         )
         .unwrap();
         fs::write(
             orch.join("control.json"),
-            r#"{"action":"cancel","target":"all","message":null,"generation":2}"#,
+            r#"{"action":"cancel","target":"all","message":"","generation":2,"run_id":"r"}"#,
         )
         .unwrap();
     });
@@ -190,6 +190,15 @@ fn codex_payload_still_exits_2() {
     p["turn_id"] = "synthetic-turn".into();
     let out = guard(p, CLAUDE_ENV, no_setup);
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    // The Codex deny object carries the same reason line as stderr.
+    let h = &only_json(&out.stdout)["hookSpecificOutput"];
+    assert_eq!(h["permissionDecision"], "deny");
+    assert!(
+        h["permissionDecisionReason"]
+            .as_str()
+            .unwrap()
+            .contains("BLOCKED: rm -rf / blocked")
+    );
 }
 
 #[test]

@@ -703,6 +703,7 @@ mod tests {
             target: target.map(String::from),
             message: None,
             generation: 1,
+            run_id: None,
         };
         let blocked = |dir: orch_state::ControlDirective| {
             spawn_status(Some(&dir), "agent-1") == AgentStatus::Blocked

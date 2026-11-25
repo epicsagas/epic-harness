@@ -404,9 +404,16 @@ fn main() {
         match subcmd {
             "guard" if exit_code == 2 => {
                 // PreToolUse block: explicit deny JSON so Codex never ignores the block
-                println!(
-                    r#"{{"hookSpecificOutput":{{"hookEventName":"PreToolUse","permissionDecision":"deny"}}}}"#
-                );
+                // The reason is the block's own stderr line (hint() mirror).
+                let mut out = serde_json::json!({"hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                }});
+                let reason = shared::helpers::take_hint_mirror().join("\n");
+                if !reason.is_empty() {
+                    out["hookSpecificOutput"]["permissionDecisionReason"] = reason.into();
+                }
+                println!("{out}");
             }
             "guard" | "observe" | "polish" | "resume" => {
                 // hint() writes to stderr, which Codex does NOT feed to the
@@ -461,8 +468,8 @@ fn main() {
 /// but grok exports it too and Codex also knows the `CLAUDE_*` plugin names.
 /// So the Claude form is the intersection: snake_case `PreToolUse` event,
 /// `CLAUDE_PROJECT_DIR` set, and none of the other hosts' markers (Codex
-/// `turn_id`, grok camelCase keys and `GROK_*` hook variables). An unknown
-/// host falls through to the exit-2 contract.
+/// `turn_id`, grok camelCase keys and grok's hook-scoped `GROK_HOOK_EVENT`).
+/// An unknown host falls through to the exit-2 contract.
 fn is_claude_pretooluse(v: &serde_json::Value) -> bool {
     let set = |k: &str| env::var(k).is_ok_and(|s| !s.is_empty());
     v.get("hook_event_name").and_then(|e| e.as_str()) == Some("PreToolUse")
@@ -470,9 +477,7 @@ fn is_claude_pretooluse(v: &serde_json::Value) -> bool {
             .iter()
             .all(|k| v.get(k).is_none())
         && set("CLAUDE_PROJECT_DIR")
-        && !["GROK_HOOK_EVENT", "GROK_SESSION_ID", "GROK_WORKSPACE_ROOT"]
-            .iter()
-            .any(|k| set(k))
+        && !set("GROK_HOOK_EVENT")
 }
 
 /// Gracefully close connection pools before exit to flush WAL.

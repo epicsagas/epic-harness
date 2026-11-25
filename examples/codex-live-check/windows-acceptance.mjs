@@ -203,9 +203,25 @@ if (mode === "degrade") {
         permissionDecisionReason: "stub",
       },
     });
+    // The stub answers only the expected blocked payload, so a launcher that
+    // drops or mangles stdin fails the check instead of passing on a canned reply.
     writeFileSync(
       path.join(stubDir, "epic-stub.mjs"),
-      `process.stdout.write(${JSON.stringify(deny)});\n`,
+      [
+        'let body = "";',
+        'process.stdin.setEncoding("utf8");',
+        'process.stdin.on("data", (c) => (body += c));',
+        'process.stdin.on("end", () => {',
+        "  let ok = false;",
+        '  try { ok = JSON.parse(body).tool_input.command === "rm -rf /"; } catch {}',
+        "  if (!ok) {",
+        '    process.stderr.write("stub epic: unexpected stdin: " + body.slice(0, 200) + "\\n");',
+        "    process.exit(3);",
+        "  }",
+        `  process.stdout.write(${JSON.stringify(deny)});`,
+        "});",
+        "",
+      ].join("\n"),
     );
     if (process.platform === "win32") {
       writeFileSync(path.join(stubDir, "epic.cmd"), '@node "%~dp0epic-stub.mjs" %*\r\n');
