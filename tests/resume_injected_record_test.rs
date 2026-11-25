@@ -53,7 +53,12 @@ fn resume_records_only_skills_that_survived_the_budget() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(b"{}").unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(br#"{"session_id":"s1"}"#)
+        .unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "{out:?}");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -68,6 +73,7 @@ fn resume_records_only_skills_that_survived_the_budget() {
         .unwrap(),
     )
     .unwrap();
+    assert_eq!(rec["session_id"], "s1", "record names the writing session");
     let injected: Vec<&str> = rec["injected"]
         .as_array()
         .expect("injected list recorded")

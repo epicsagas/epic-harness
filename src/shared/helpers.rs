@@ -219,30 +219,40 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path, fallback: T) -> T 
 
 /// On-disk shape of `session_start_file`: the partition date the SessionStart
 /// hook used, the evolved skills whose bodies it actually injected (absent in
-/// records written before this field existed), and a write timestamp for
+/// records written before this field existed), the host session id that wrote
+/// the record (absent when the host sends none), and a write timestamp for
 /// debugging.
 #[derive(serde::Deserialize)]
 struct SessionStartRec {
     date: String,
     #[serde(default)]
     injected: Option<Vec<String>>,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 /// JSON payload for the session-start record. Separate so the write/read
 /// round-trip is unit-testable without touching `harness_dir()`.
-fn session_start_payload(date: &str, injected: &[String]) -> String {
-    serde_json::json!({ "date": date, "injected": injected, "written_at": now_iso() }).to_string()
+fn session_start_payload(date: &str, injected: &[String], session_id: Option<&str>) -> String {
+    serde_json::json!({
+        "date": date,
+        "injected": injected,
+        "session_id": session_id,
+        "written_at": now_iso(),
+    })
+    .to_string()
 }
 
 /// Record the partition date the SessionStart hook used this session, so
 /// SessionEnd reproduces the same holdout arm even if the session spans UTC
 /// midnight, and which skills were really injected so attribution credits only
 /// those. Best-effort: failure is non-fatal (reflect falls back to today and to
-/// the injection policy).
-pub fn write_session_start(date: &str, injected: &[String]) {
+/// the injection policy). `session_id` is the host id from the SessionStart
+/// payload, so a later session in the same project cannot be mistaken for it.
+pub fn write_session_start(date: &str, injected: &[String], session_id: Option<&str>) {
     let _ = fs::write(
         super::paths::session_start_file(),
-        session_start_payload(date, injected),
+        session_start_payload(date, injected, session_id),
     );
 }
 
@@ -259,10 +269,22 @@ pub fn read_session_start_date() -> Option<String> {
 }
 
 /// Skills whose bodies `resume` actually injected this session. None when no
-/// record or an older record without the list exists (callers fall back to the
-/// injection policy).
-pub fn read_session_injected() -> Option<Vec<String>> {
-    read_session_start().and_then(|r| r.injected)
+/// record or an older record without the list exists, or when the record was
+/// written by a different session (callers fall back to the injection policy).
+pub fn read_session_injected(session_id: Option<&str>) -> Option<Vec<String>> {
+    read_session_start().and_then(|r| injected_for_session(r, session_id))
+}
+
+/// `session_start.json` is one file per project, so a newer session overwrites
+/// an older one's record. Trust the list only when the ids are equal: two ids
+/// must match, and two absent ids (a host that sends none) are trusted as the
+/// best available guess; one present and one absent falls back to the policy.
+fn injected_for_session(rec: SessionStartRec, session_id: Option<&str>) -> Option<Vec<String>> {
+    if rec.session_id.as_deref() == session_id {
+        rec.injected
+    } else {
+        None
+    }
 }
 
 pub fn read_jsonl(path: &Path) -> Vec<serde_json::Value> {
@@ -421,10 +443,11 @@ mod tests {
 
     #[test]
     fn session_start_payload_round_trips_date() {
-        let payload = session_start_payload("20260703", &["evo-a".to_string()]);
+        let payload = session_start_payload("20260703", &["evo-a".to_string()], Some("s1"));
         let rec: SessionStartRec = serde_json::from_str(&payload).unwrap();
         assert_eq!(rec.date, "20260703");
         assert_eq!(rec.injected, Some(vec!["evo-a".to_string()]));
+        assert_eq!(rec.session_id.as_deref(), Some("s1"));
         assert!(payload.contains("written_at"));
     }
 
@@ -433,6 +456,29 @@ mod tests {
         let rec: SessionStartRec =
             serde_json::from_str(r#"{"date":"20260703","written_at":"x"}"#).unwrap();
         assert_eq!(rec.injected, None);
+        assert_eq!(rec.session_id, None);
+    }
+
+    #[test]
+    fn injected_list_is_trusted_only_for_the_same_session() {
+        let rec = |sid: Option<&str>| {
+            serde_json::from_str::<SessionStartRec>(&session_start_payload(
+                "20260703",
+                &["evo-a".to_string()],
+                sid,
+            ))
+            .unwrap()
+        };
+        let list = Some(vec!["evo-a".to_string()]);
+        // Matching ids use the list.
+        assert_eq!(injected_for_session(rec(Some("s1")), Some("s1")), list);
+        // A record written by another session falls back to the policy.
+        assert_eq!(injected_for_session(rec(Some("s2")), Some("s1")), None);
+        // Mixed present and absent falls back.
+        assert_eq!(injected_for_session(rec(Some("s1")), None), None);
+        assert_eq!(injected_for_session(rec(None), Some("s1")), None);
+        // Both absent: trusted.
+        assert_eq!(injected_for_session(rec(None), None), list);
     }
 
     // ── truncate_str ────────────────────────────────

@@ -170,7 +170,8 @@ pub fn mask_path_action(path: &str) -> String {
 }
 
 /// True when a relative path's `..` components climb above its starting
-/// directory (`../x`, `a/../../x`); `src/../a.rs` stays inside.
+/// directory (`../x`, `a/../../x`); `src/../a.rs` stays inside. A path that
+/// climbs out and back in (`../<project>/src/a.rs`) is masked too, by design.
 fn escapes_project(path: &str) -> bool {
     use std::path::{Component, Path};
     let mut depth = 0usize;

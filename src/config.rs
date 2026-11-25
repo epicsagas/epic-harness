@@ -448,10 +448,11 @@ impl Default for DbConfig {
 
 // ── Global Config Instance ──────────────────────────
 
-// Unit tests use defaults so a developer's real config.toml cannot change outcomes.
+// Unit tests skip reading config.toml so a developer's real file cannot change
+// outcomes; env overrides, validation and driver auto-correct still apply.
 pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(|| {
     if cfg!(test) {
-        HarnessConfig::default()
+        finish_config(HarnessConfig::default())
     } else {
         load_config()
     }
@@ -467,7 +468,7 @@ fn load_config() -> HarnessConfig {
     let path = harness_dir().join("config.toml");
     // Every branch ends in the same validate/override steps, so a missing or
     // unreadable file never bypasses HARNESS_DB_URL / HARNESS_MEM_URL.
-    let mut cfg = match std::fs::read_to_string(&path) {
+    let cfg = match std::fs::read_to_string(&path) {
         Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
             eprintln!(
                 "[epic-harness] warning: failed to parse {}: {} — using defaults",
@@ -486,6 +487,11 @@ fn load_config() -> HarnessConfig {
             HarnessConfig::default()
         }
     };
+    finish_config(cfg)
+}
+
+/// Validate, then apply env overrides and the URL-driven driver correction.
+fn finish_config(mut cfg: HarnessConfig) -> HarnessConfig {
     validate_config(&mut cfg);
 
     apply_env_overrides(&mut cfg);
@@ -1305,6 +1311,7 @@ max_docs = 5
             .args(["config_probe_inner", "--nocapture"])
             .env("HARNESS_DIR", &dir)
             .env("EPIC_CONFIG_PROBE", "1")
+            .env("HARNESS_DB_URL", "postgres://localhost/synthetic")
             .output()
             .unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -1318,6 +1325,9 @@ max_docs = 5
         if std::env::var_os("EPIC_CONFIG_PROBE").is_none() {
             return;
         }
+        // config.toml is not read, but env overrides and driver auto-correct still run.
         assert_eq!(CONFIG.model.inject_total_chars, 10_000);
+        assert_eq!(CONFIG.db.harness_url, "postgres://localhost/synthetic");
+        assert_eq!(CONFIG.db.driver, "postgres");
     }
 }

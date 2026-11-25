@@ -976,7 +976,7 @@ fn sweep_old_observations() -> Option<u64> {
     Some(deleted)
 }
 
-pub fn run(_input: &HookInput) -> i32 {
+pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_REFLECT) {
         return 0;
     }
@@ -1268,7 +1268,7 @@ pub fn run(_input: &HookInput) -> i32 {
         evolve::partition_holdout(&existing, &metrics, &partition_date);
     // `resume` records which bodies survived the injection budget; that list
     // wins over the policy so budget-dropped skills are not credited.
-    let injected = crate::shared::helpers::read_session_injected();
+    let injected = crate::shared::helpers::read_session_injected(input.session_id.as_deref());
     let (exposed_skills, withheld_skills) = evolve::metrics::split_exposed(
         active_skills,
         injected.as_deref(),

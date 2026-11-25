@@ -553,7 +553,11 @@ pub fn run(input: &HookInput) -> i32 {
             );
         }
     }
-    crate::shared::helpers::write_session_start(&today_str, &injected_names);
+    crate::shared::helpers::write_session_start(
+        &today_str,
+        &injected_names,
+        input.session_id.as_deref(),
+    );
 
     // Surface the synthesis backlog on stdout so the host agent sees it —
     // stderr hints don't reach the model, and the loop only closes when a
