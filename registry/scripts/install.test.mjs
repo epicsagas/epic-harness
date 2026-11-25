@@ -412,6 +412,8 @@ test("main: a win32 epic.cmd shim on PATH is not found, so the install proceeds"
   );
   assert.equal(f.calls.length, 1);
   assert.ok(lines.some((l) => l.includes("epic not found, installing 9.9.9")), lines.join(""));
+  const notices = lines.filter((l) => l.includes("epic.cmd") && l.includes("installing epic 9.9.9"));
+  assert.equal(notices.length, 1, lines.join(""));
 });
 
 // A PATH epic that cannot report a version is "unknown", not "up to date".
@@ -442,6 +444,32 @@ test("main: an unknown-version epic is attempted once per plugin version", { ski
   install.recordAttempt("9.9.8", true, f.deps.harnessDir);
   await install.main({ ...f.deps, pathEnv: dir });
   assert.equal(f.calls.length, 2);
+});
+
+// A probe that is killed (timeout or signal) is unknown, not "reported nothing".
+function writeKilledEpic(dir) {
+  mkdirSync(dir, { recursive: true });
+  const shim = path.join(dir, "epic");
+  writeFileSync(shim, "#!/bin/sh\nkill -9 $$\n");
+  chmodSync(shim, 0o755);
+}
+
+test("main: a PATH epic whose version probe is killed installs nothing", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const dir = path.join(fresh("shell"), "bin");
+  writeKilledEpic(dir);
+  await install.main({ ...f.deps, pathEnv: dir });
+  assert.equal(f.calls.length, 0);
+  assert.equal(existsSync(f.installDir), false);
+});
+
+test("main: a killed ~/.local/bin probe is never overwritten by an older PATH epic's update", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const dir = path.join(fresh("shell"), "bin");
+  writeStubEpic(dir, "0.0.1");
+  writeKilledEpic(f.installDir);
+  await install.main({ ...f.deps, pathEnv: dir });
+  assert.equal(f.calls.length, 0);
 });
 
 test("main: an unknown-version PATH epic with a current ~/.local/bin copy downloads nothing", { skip: win || mainSkip }, async () => {
