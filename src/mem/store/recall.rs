@@ -82,7 +82,8 @@ pub enum RecallReadError {
 /// Read-only project recall for latency-bounded hooks. Opens memory.db with
 /// `mode=ro` (never cached in `MEMORY_POOL`, no schema init or migration),
 /// applies `budget` as a tokio timeout around connect plus query, and closes
-/// the pool before returning. `Ok(vec![])` when the database does not exist.
+/// the pool before returning (outside the timeout). `Ok(vec![])` when the
+/// database does not exist.
 pub fn smart_recall_readonly(
     project: Option<&str>,
     hint: Option<&str>,
@@ -91,18 +92,28 @@ pub fn smart_recall_readonly(
 ) -> Result<Vec<ScoredNode>, RecallReadError> {
     // `timeout` registers a timer on construction, so it must be built inside the runtime.
     runtime::block_on(async {
-        tokio::time::timeout(budget, async {
+        let fetched = tokio::time::timeout(budget, async {
             let Some(pool) = crate::store::pool::memory_pool_if_exists().await? else {
-                return Ok(vec![]);
+                return Ok((None, vec![]));
             };
-            let got = smart_recall_async(&pool, project, hint, limit, RecallAccess::ReadOnly).await;
-            pool.close().await;
-            got
+            let got =
+                smart_recall_async(&pool, project, hint, limit, RecallAccess::ReadOnly).await?;
+            Ok::<_, io::Error>((Some(pool), got))
         })
-        .await
+        .await;
+        match fetched {
+            Err(_) => Err(RecallReadError::TimedOut),
+            Ok(Err(e)) => Err(RecallReadError::Io(e)),
+            Ok(Ok((pool, got))) => {
+                // Closed outside the cap: rows already fetched must not be
+                // discarded as a timeout.
+                if let Some(pool) = pool {
+                    pool.close().await;
+                }
+                Ok(got)
+            }
+        }
     })
-    .map_err(|_| RecallReadError::TimedOut)?
-    .map_err(RecallReadError::Io)
 }
 
 /// Async core — shared by sync wrapper and pool variant.

@@ -55,9 +55,13 @@ export function localEpicPath(home, platform = process.platform, exists = exists
 const args = process.argv.slice(2);
 
 // `prompt` (UserPromptSubmit) stdout becomes model context on every prompt, so
-// a missing harness stays silent there instead of injecting the notice.
+// a missing harness stays silent there instead of injecting the notice. For the
+// same reason every child failure (an older epic that does not know `prompt`,
+// EACCES, a signal) ends in a silent exit 0 with nothing on stdout or stderr:
+// the hook must never surface an error on the user's prompt.
+const quiet = args[0] === "prompt";
 const epicNotFound = () => {
-  if (args[0] !== "prompt") console.log("[harness] epic not found");
+  if (!quiet) console.log("[harness] epic not found");
 };
 if (args.length === 0) {
   // exitCode (not process.exit): stdout to a pipe is an async write, and a
@@ -118,10 +122,14 @@ if (args.length === 0) {
     // The args are static words (no user input), so a shell is safe there.
     // On POSIX spawn(3) resolves `epic` via PATH directly.
     // An absolute .exe/binary needs no shell, even on Windows.
-    const child = spawn(localEpic || "epic", args, {
+    const options = {
       stdio: "inherit",
       shell: !localEpic && process.platform === "win32",
-    });
+    };
+    // `prompt`: stdout carries the hook JSON, stderr (an older epic's
+    // unknown-subcommand error) must never reach the host.
+    if (quiet) options.stdio = ["inherit", "inherit", "ignore"];
+    const child = spawn(localEpic || "epic", args, options);
 
     let spawnFailed = false;
 
@@ -136,6 +144,8 @@ if (args.length === 0) {
         // Missing harness: degrade on stdout, exit 0.
         epicNotFound();
         process.exitCode = 0;
+      } else if (quiet) {
+        process.exitCode = 0;
       } else {
         // Present-but-broken install (EACCES, ...): surface on stderr and
         // fail the hook (exit 1 is a hook error, not a block) instead of
@@ -147,6 +157,10 @@ if (args.length === 0) {
 
     child.on("close", (code, signal) => {
       if (spawnFailed) return;
+      if (quiet) {
+        // Silent fail-open; a current epic already exits 0 for `prompt`.
+        process.exit(0);
+      }
       if (signal) {
         // Guard killed by a signal must not read as a pass.
         process.exit(1);

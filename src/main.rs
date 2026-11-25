@@ -463,7 +463,7 @@ fn main() {
 
     let skip_shutdown = matches!(
         subcmd,
-        "help" | "--help" | "-h" | "path" | "version" | "--version" | "-v"
+        "help" | "--help" | "-h" | "path" | "version" | "--version" | "-v" | "prompt"
     );
     exit_with_cleanup(exit_code, skip_shutdown);
 }

@@ -276,6 +276,7 @@ fn pr_dispatch_log_has_no_prompt_text() {
         "delivered_chars",
         "truncated",
         "timed_out",
+        "recall_error",
         "elapsed_ms",
         "session",
     ];
@@ -289,6 +290,7 @@ fn pr_dispatch_log_has_no_prompt_text() {
     );
     assert_eq!(obj["context_hint"], "debug.failure,secure.sensitive");
     assert_eq!(obj["recalled"], 1);
+    assert_eq!(obj["recall_error"], false);
     assert_eq!(obj["session"], "s-1");
 
     let log = fs::read_to_string(
@@ -388,6 +390,36 @@ fn pr_timeout_fails_open() {
     assert!(s.contains("debug") && !s.contains("- ["), "{s}");
     let lines = env.dispatch_lines();
     assert_eq!(lines[0]["timed_out"], true, "{lines:?}");
+}
+
+/// A memory.db that cannot be opened is told apart from "no match" in the log.
+/// (A garbage file does not do it: the shared recall query swallows its FTS
+/// error and returns no rows, so only connect and second-query errors surface.)
+#[cfg(unix)]
+#[test]
+fn pr_recall_error_is_flagged() {
+    use std::os::unix::fs::PermissionsExt;
+    let env = Env::enabled();
+    env.mem_add(
+        SLUG,
+        "Refresh policy NONCE-7Q2",
+        "kestrel rotates refresh tokens",
+    );
+    fs::set_permissions(env.memory_db(), fs::Permissions::from_mode(0o000)).unwrap();
+    if fs::read(env.memory_db()).is_ok() {
+        return; // running as root: permissions do not apply
+    }
+    let out = env.hook("why does the kestrel login fail");
+    let s = context_of(&out);
+    assert!(s.contains("debug") && !s.contains("- ["), "{s}");
+    let lines = env.dispatch_lines();
+    assert_eq!(lines[0]["recall_error"], true, "{lines:?}");
+    assert_eq!(lines[0]["timed_out"], false, "{lines:?}");
+    let log = lines[0].to_string().to_lowercase();
+    assert!(
+        !log.contains("permission") && !log.contains("denied"),
+        "no error text: {log}"
+    );
 }
 
 #[test]

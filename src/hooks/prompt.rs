@@ -206,8 +206,12 @@ fn memory_line(sn: &ScoredNode) -> String {
 }
 
 /// Render the context within `max_chars`. Memory lines are dropped from the
-/// tail rather than cut; the flag is true when anything did not fit.
+/// tail rather than cut; the flag is true when anything did not fit. Empty when
+/// no skill matched and no memory line fit.
 fn render(skills: &[&Rule], memories: &[ScoredNode], max_chars: usize) -> (String, bool) {
+    if skills.is_empty() && memories.is_empty() {
+        return (String::new(), false);
+    }
     let mut head = HEADER.to_string();
     if !skills.is_empty() {
         let list: Vec<String> = skills
@@ -220,7 +224,12 @@ fn render(skills: &[&Rule], memories: &[ScoredNode], max_chars: usize) -> (Strin
         ));
     }
     if head.chars().count() > max_chars {
-        return (head.chars().take(max_chars).collect(), true);
+        let cut = if skills.is_empty() {
+            String::new()
+        } else {
+            head.chars().take(max_chars).collect()
+        };
+        return (cut, true);
     }
     let mut text = format!("{head}\n{MEMORY_HEADER}");
     let mut kept = 0;
@@ -233,6 +242,10 @@ fn render(skills: &[&Rule], memories: &[ScoredNode], max_chars: usize) -> (Strin
         kept += 1;
     }
     if kept == 0 {
+        if skills.is_empty() {
+            // Nothing to say: a bare header would be noise on every prompt.
+            return (String::new(), !memories.is_empty());
+        }
         text = head;
     }
     (text, kept < memories.len())
@@ -276,6 +289,7 @@ pub fn run(input: &HookInput) -> i32 {
     let skills = select_skills(&clean);
 
     let mut timed_out = false;
+    let mut recall_error = false;
     let mut memories: Vec<ScoredNode> = Vec::new();
     if cfg.recall_limit() > 0
         && let Some(hint) = recall_hint(&clean)
@@ -293,7 +307,7 @@ pub fn run(input: &HookInput) -> i32 {
                         .collect();
                 }
                 Err(RecallReadError::TimedOut) => timed_out = true,
-                Err(RecallReadError::Io(_)) => {}
+                Err(RecallReadError::Io(_)) => recall_error = true,
             }
         }
     }
@@ -303,7 +317,9 @@ pub fn run(input: &HookInput) -> i32 {
         (text, truncated) = render(&skills, &memories, cfg.max_chars());
         // Memory lines are dropped from the tail, so the first `delivered` ids were shown.
         delivered = text.lines().filter(|l| l.starts_with("- [")).count();
-        mirror_line(&text);
+        if !text.is_empty() {
+            mirror_line(&text);
+        }
     }
 
     let session = input
@@ -331,6 +347,7 @@ pub fn run(input: &HookInput) -> i32 {
             "delivered_chars": text.chars().count(),
             "truncated": truncated,
             "timed_out": timed_out,
+            "recall_error": recall_error,
             "elapsed_ms": start.elapsed().as_millis() as u64,
             "session": session,
     }));
@@ -527,6 +544,23 @@ mod tests {
                 "{HEADER}\nSkills that match this request: debug (a failure or unexpected behavior).\n{MEMORY_HEADER}\n- [decision] Use refresh tokens: Tokens expire."
             )
         );
+    }
+
+    #[test]
+    fn pr_render_is_empty_when_nothing_fits_and_no_skill() {
+        let mems = vec![node("decision", "Some title", "some body")];
+        // No skill and no memory line fits: no bare header.
+        assert_eq!(render(&[], &mems, 50), (String::new(), true));
+        // Nothing at all to say.
+        assert_eq!(render(&[], &[], 1_500), (String::new(), false));
+        // A skill still renders its header and line when memories do not fit.
+        let skills: Vec<&Rule> = RULES.iter().filter(|r| r.skill == "debug").collect();
+        let (text, truncated) = render(&skills, &mems, 150);
+        assert!(
+            text.contains("Skills that match") && !text.contains("- ["),
+            "{text}"
+        );
+        assert!(truncated);
     }
 
     #[test]
