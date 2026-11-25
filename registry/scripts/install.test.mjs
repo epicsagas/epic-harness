@@ -389,6 +389,70 @@ test("main: the version probe runs `epic --version`, never `epic version`", { sk
   assert.equal(readFileSync(argLog, "utf8"), "--version\n");
 });
 
+test("findEpic on win32 accepts epic.exe but never an epic.cmd or epic.bat shim", () => {
+  const shimDir = fresh("shim");
+  for (const shim of ["epic.cmd", "epic.bat"]) writeFileSync(path.join(shimDir, shim), "@echo off\n");
+  const empty = fresh("empty");
+  assert.equal(install.findEpic(shimDir, empty, "win32"), null);
+  const exeDir = fresh("exe");
+  writeFileSync(path.join(exeDir, "epic.exe"), "");
+  assert.equal(install.findEpic([shimDir, exeDir].join(path.delimiter), empty, "win32"), path.join(exeDir, "epic.exe"));
+});
+
+test("main: a win32 epic.cmd shim on PATH is not found, so the install proceeds", async () => {
+  const f = mainFixture();
+  const shimDir = fresh("shim");
+  writeFileSync(path.join(shimDir, "epic.cmd"), "@echo off\n");
+  const download = async (url) => {
+    f.calls.push(url);
+    throw new Error("stop after first request");
+  };
+  const lines = await captureStderr(() =>
+    install.main({ ...f.deps, download, pathEnv: shimDir, platform: "win32", arch: "x64" }),
+  );
+  assert.equal(f.calls.length, 1);
+  assert.ok(lines.some((l) => l.includes("epic not found, installing 9.9.9")), lines.join(""));
+});
+
+// A PATH epic that cannot report a version is "unknown", not "up to date".
+function writeBrokenEpic(dir) {
+  mkdirSync(dir, { recursive: true });
+  const shim = path.join(dir, "epic");
+  writeFileSync(shim, "#!/bin/sh\nexit 1\n");
+  chmodSync(shim, 0o755);
+}
+
+test("main: a PATH epic with an unknown version proceeds to install, silently", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const dir = path.join(fresh("shell"), "bin");
+  writeBrokenEpic(dir);
+  const lines = await captureStderr(() => install.main({ ...f.deps, pathEnv: dir }));
+  assert.equal(f.calls.length, 2);
+  assert.ok(existsSync(path.join(f.installDir, "epic")));
+  assert.equal(lines.filter((l) => l.includes("shell epic")).length, 0);
+});
+
+test("main: an unknown-version epic is attempted once per plugin version", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const dir = path.join(fresh("shell"), "bin");
+  writeBrokenEpic(dir);
+  install.recordAttempt("9.9.9", true, f.deps.harnessDir);
+  await install.main({ ...f.deps, pathEnv: dir });
+  assert.equal(f.calls.length, 0);
+  install.recordAttempt("9.9.8", true, f.deps.harnessDir);
+  await install.main({ ...f.deps, pathEnv: dir });
+  assert.equal(f.calls.length, 2);
+});
+
+test("main: an unknown-version PATH epic with a current ~/.local/bin copy downloads nothing", { skip: win || mainSkip }, async () => {
+  const f = mainFixture();
+  const dir = path.join(fresh("shell"), "bin");
+  writeBrokenEpic(dir);
+  writeStubEpic(f.installDir, "9.9.9");
+  await install.main({ ...f.deps, pathEnv: dir });
+  assert.equal(f.calls.length, 0);
+});
+
 test("main: the attempt marker exists before the download starts", { skip: mainSkip }, async () => {
   const f = mainFixture();
   const seen = [];
