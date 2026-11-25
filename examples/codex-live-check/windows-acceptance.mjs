@@ -20,7 +20,15 @@
 //             ${CLAUDE_PLUGIN_ROOT} substitution; ${env:CLAUDE_PLUGIN_ROOT}
 //             for PowerShell); a real Claude install is checked separately.
 
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -169,19 +177,61 @@ if (mode === "degrade") {
           ]
         : [{ name: "sh", file: "sh", args: (cmd) => ["-c", textual(cmd)], env }];
 
-    const runShell = (shell, hook, input) =>
+    const runShell = (shell, hook, input, env = shell.env) =>
       spawnSync(shell.file, shell.args(hook.raw), {
         input,
         encoding: "utf8",
         timeout: 60_000,
-        env: shell.env,
+        env,
       });
+
+    // Stub `epic` for the block-contract check only. It prints the deny
+    // object and exits 0, so the check covers the shell transport (what
+    // `pwsh -Command` broke for exit 2) independently of which epic build is
+    // installed. Windows: epic.cmd (run.mjs spawns `epic` through cmd.exe,
+    // which resolves it by PATHEXT); POSIX: an executable `epic`. The stub dir
+    // goes first on PATH and HOME/USERPROFILE point at an empty dir so
+    // run.mjs's ~/.local/bin lookup cannot pick another epic.
+    const stubDir = path.join(tmp, "stub-bin");
+    const stubHome = path.join(tmp, "stub-home");
+    mkdirSync(stubDir);
+    mkdirSync(stubHome);
+    const deny = JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "stub",
+      },
+    });
+    writeFileSync(
+      path.join(stubDir, "epic-stub.mjs"),
+      `process.stdout.write(${JSON.stringify(deny)});\n`,
+    );
+    if (process.platform === "win32") {
+      writeFileSync(path.join(stubDir, "epic.cmd"), '@node "%~dp0epic-stub.mjs" %*\r\n');
+    } else {
+      const bin = path.join(stubDir, "epic");
+      writeFileSync(bin, '#!/bin/sh\nexec node "$(dirname "$0")/epic-stub.mjs" "$@"\n');
+      chmodSync(bin, 0o755);
+    }
+    const withStub = (base) => {
+      const out = { ...base, HOME: stubHome, USERPROFILE: stubHome };
+      // Reuse the existing PATH key (Windows: "Path") so no second one appears.
+      const key = Object.keys(out).find((k) => k.toLowerCase() === "path") ?? "PATH";
+      out[key] = [stubDir, out[key]].filter(Boolean).join(path.delimiter);
+      return out;
+    };
     const detail = (r) =>
       `status=${r.status} stdout=${(r.stdout ?? "").trim().slice(0, 120)} stderr=${(r.stderr ?? "").trim().slice(0, 120)}${r.error ? ` error=${r.error.message}` : ""}`;
 
     // The temp root holds only run.mjs, so the install.cjs bootstrap that
     // session-start runs first is not available here.
     console.log("NOTE session-start is skipped in claude-shell mode (needs install.cjs)");
+    if (phase === "live") {
+      console.log(
+        "NOTE the guard block check below runs against a stub epic (transport only); the binary-level deny contract is covered by tests/claude_guard_deny_test.rs and the real-host check M1",
+      );
+    }
     for (const shell of shells) {
       for (const hook of claudeHooks) {
         if (hook.sub === "session-start") continue;
@@ -194,8 +244,9 @@ if (mode === "degrade") {
       if (phase === "live") {
         // On Claude a guard block is exit 0 plus one PreToolUse deny object,
         // not exit 2: `pwsh -Command` maps external exit codes other than 0/1
-        // to 1, which Claude reads as a non-blocking error. A mismatch is
-        // reported, never masked.
+        // to 1, which Claude reads as a non-blocking error. Here a stub epic
+        // emits that object; the launcher and shell must deliver it intact.
+        // A mismatch is reported, never masked.
         const guard = claudeHooks.find((h) => h.sub === "guard");
         const r = runShell(
           shell,
@@ -205,6 +256,7 @@ if (mode === "degrade") {
             tool_name: "Bash",
             tool_input: { command: "rm -rf /" },
           }),
+          withStub(shell.env),
         );
         let decision;
         try {
@@ -214,11 +266,11 @@ if (mode === "degrade") {
         }
         const ok = r.status === 0 && decision === "deny";
         check(
-          `claude-shell ${shell.name} live: guard block is exit 0 with a deny decision`,
+          `claude-shell ${shell.name} live: stub epic deny reaches the host as exit 0 with a deny decision`,
           ok,
           ok
             ? detail(r)
-            : `${shell.name} returned exit ${r.status} with permissionDecision=${decision} for a blocked command, expected exit 0 and "deny" (blocking contract broken in this shell); ${detail(r)}`,
+            : `${shell.name} returned exit ${r.status} with permissionDecision=${decision} from the stub epic, expected exit 0 and "deny" (block transport broken in this shell); ${detail(r)}`,
         );
       }
     }
