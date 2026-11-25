@@ -985,6 +985,7 @@ dependencies = [
  "axum",
  "axum-test",
  "libc",
+ "libsqlite3-sys",
  "regex",
  "serde",
  "serde_json",

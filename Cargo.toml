@@ -38,6 +38,7 @@ tiny_http = "0.12"
 libc = "0.2"
 url = "2"
 sqlx = { version = "0.9.1", default-features = false, features = ["runtime-tokio", "sqlite", "any"] }
+libsqlite3-sys = { version = ">=0.40", default-features = false }
 
 # harness-mem axum server (M1)
 axum = { version = "0.8", features = ["macros"] }
