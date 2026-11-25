@@ -170,12 +170,9 @@ Write to `$HARNESS_DIR/orchestrator/control.json`:
   "action": "pause|cancel|redirect|resume",
   "target": "agent_id or 'all'",
   "message": "optional user message",
-  "generation": <current_generation + 1>,
-  "run_id": "<the id field of the current run.json>"
+  "generation": <current_generation + 1>
 }
 ```
-
-Always write `run_id` (copy `id` from the run.json read in Step 1). The Agent spawn guard uses it to scope a `cancel` to this run: a cancel for an older run never blocks later spawns, and a cancel without `run_id` only blocks while the run is still "running".
 
 For `redirect`, the message field contains the new instruction.
 For `pause`/`cancel`, the message field is optional — use an empty string if none provided.

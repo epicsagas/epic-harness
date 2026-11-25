@@ -182,8 +182,17 @@ pub fn run_post_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Er
     let output = resolve_output(input);
     let new_status = orch_state::parse_agent_state(&output);
 
-    // Always: update agent status in run.json (agent tracking, no gate)
-    let final_status = if tool_reported_error(input) {
+    // Always: update agent status in run.json (agent tracking, no gate).
+    // A user-cancelled agent stays Cancelled (upsert_agent_to_run enforces it;
+    // this also skips the dependency unblock and "completed" inbox below).
+    let cancelled = orch_state::read_run(&base).is_some_and(|r| {
+        r.agents
+            .iter()
+            .any(|a| a.id == agent_id && a.status == AgentStatus::Cancelled)
+    });
+    let final_status = if cancelled {
+        AgentStatus::Cancelled
+    } else if tool_reported_error(input) {
         AgentStatus::Failed
     } else {
         new_status.clone().unwrap_or(AgentStatus::Done)
@@ -258,7 +267,7 @@ pub(crate) fn is_agent_event(input: &HookInput) -> bool {
     )
 }
 
-pub(crate) fn extract_agent_id(input: &HookInput) -> Option<String> {
+fn extract_agent_id(input: &HookInput) -> Option<String> {
     // Codex supplies a stable id; prefer it over the prompt hash.
     if let Some(id) = input.agent_id.as_deref()
         && !id.trim().is_empty()
@@ -335,7 +344,7 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
 }
 
 /// True when the directive addresses this agent (its id, `"all"`, or no target).
-pub(crate) fn directive_targets(directive: &orch_state::ControlDirective, agent_id: &str) -> bool {
+fn directive_targets(directive: &orch_state::ControlDirective, agent_id: &str) -> bool {
     directive.target.as_deref() == Some(agent_id)
         || directive.target.as_deref() == Some("all")
         || directive.target.is_none()
@@ -468,6 +477,30 @@ mod tests {
         }
         let input = HookInput::default();
         assert_eq!(run_post(&input), 0);
+    }
+
+    /// A late `## Status: DONE` from an agent the user cancelled must not
+    /// flip it back to Done.
+    #[test]
+    #[serial_test::serial]
+    fn run_post_never_overwrites_a_cancelled_agent() {
+        let base = common::harness_dir();
+        let id = "cancelled-post-test";
+        orch_state::upsert_agent_to_run(&base, id, "t", "builder", AgentStatus::Running).unwrap();
+        let mut run = orch_state::read_run(&base).unwrap();
+        run.agents.iter_mut().find(|a| a.id == id).unwrap().status = AgentStatus::Cancelled;
+        orch_state::write_run(&base, &run).unwrap();
+
+        let input = HookInput {
+            tool_name: Some("Agent".to_string()),
+            agent_id: Some(id.to_string()),
+            tool_response: Some(serde_json::json!("## Status: DONE")),
+            ..Default::default()
+        };
+        assert_eq!(run_post(&input), 0);
+        let run = orch_state::read_run(&base).unwrap();
+        let agent = run.agents.iter().find(|a| a.id == id).unwrap();
+        assert_eq!(agent.status, AgentStatus::Cancelled);
     }
 
     /// Codex has no `Agent` tool — subagents arrive as lifecycle events.
@@ -703,7 +736,6 @@ mod tests {
             target: target.map(String::from),
             message: None,
             generation: 1,
-            run_id: None,
         };
         let blocked = |dir: orch_state::ControlDirective| {
             spawn_status(Some(&dir), "agent-1") == AgentStatus::Blocked

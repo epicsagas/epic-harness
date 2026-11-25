@@ -120,32 +120,6 @@ fn claude_guard_rules_block_is_a_deny() {
 }
 
 #[test]
-fn claude_agent_spawn_block_is_a_deny() {
-    let payload = serde_json::json!({
-        "hook_event_name": "PreToolUse",
-        "session_id": "synthetic-session",
-        "tool_name": "Agent",
-        "tool_input": {"prompt": "synthetic task"},
-    });
-    let envs = [CLAUDE_ENV, &[("EPIC_ORCHESTRATION", "enabled")]].concat();
-    let out = guard(payload, &envs, |orch| {
-        fs::create_dir_all(orch).unwrap();
-        fs::write(
-            orch.join("run.json"),
-            r#"{"id":"r","status":"aborted","agents":[],"created_at":"t","updated_at":"t"}"#,
-        )
-        .unwrap();
-        fs::write(
-            orch.join("control.json"),
-            r#"{"action":"cancel","target":"all","message":"","generation":2,"run_id":"r"}"#,
-        )
-        .unwrap();
-    });
-    assert_deny(&out, "[orchestrator] Agent ");
-    assert!(out.stderr.contains("cancelled by user directive (gen 2)"));
-}
-
-#[test]
 fn claude_edit_orchestration_block_is_a_deny() {
     let payload = serde_json::json!({
         "hook_event_name": "PreToolUse",

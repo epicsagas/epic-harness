@@ -94,11 +94,6 @@ pub struct ControlDirective {
     pub target: Option<String>,
     pub message: Option<String>,
     pub generation: u64,
-    /// Id of the run.json run this directive was issued for. Absent in files
-    /// written before run scoping; the Agent spawn gate then only honors a
-    /// cancel while the run is Running.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
 }
 
 // ── Constants ─────────────────────────────────────────
@@ -396,6 +391,18 @@ pub fn upsert_agent_to_run(
             created_at: now.clone(),
             updated_at: now.clone(),
         },
+    };
+
+    // A user-cancelled agent only ever stays Cancelled: a late Done, Blocked or
+    // Pending (or a respawn's Running) must not undo `/intervene cancel`.
+    let status = if run
+        .agents
+        .iter()
+        .any(|a| a.id == agent_id && a.status == AgentStatus::Cancelled)
+    {
+        AgentStatus::Cancelled
+    } else {
+        status
     };
 
     // Ensure agent directory exists
@@ -920,7 +927,6 @@ mod tests {
             target: Some("agent-1".to_string()),
             message: Some("Waiting for approval".to_string()),
             generation: 1,
-            run_id: None,
         };
 
         write_control(tmp.path(), &directive).unwrap();
@@ -948,7 +954,6 @@ mod tests {
             target: None, // cancel all
             message: None,
             generation: 2,
-            run_id: None,
         };
         write_control(tmp.path(), &directive).unwrap();
 
@@ -968,7 +973,6 @@ mod tests {
             target: None,
             message: None,
             generation: 1,
-            run_id: None,
         };
         write_control(tmp.path(), &directive).unwrap();
 
@@ -990,7 +994,6 @@ mod tests {
             target: Some("a".to_string()),
             message: None,
             generation: 1,
-            run_id: None,
         };
         write_control(tmp.path(), &d1).unwrap();
 
@@ -999,7 +1002,6 @@ mod tests {
             target: Some("b".to_string()),
             message: Some("new target".to_string()),
             generation: 2,
-            run_id: None,
         };
         write_control(tmp.path(), &d2).unwrap();
 
@@ -1020,7 +1022,6 @@ mod tests {
             target: None,
             message: None,
             generation: 3,
-            run_id: None,
         };
         write_control(tmp.path(), &d3).unwrap();
 
@@ -1030,7 +1031,6 @@ mod tests {
             target: Some("x".to_string()),
             message: None,
             generation: 5,
-            run_id: None,
         };
         write_control(tmp.path(), &d5).unwrap();
 
@@ -1185,15 +1185,6 @@ mod tests {
     }
 
     #[test]
-    fn control_directive_without_run_id_still_parses() {
-        let old = r#"{"action":"cancel","target":"all","message":null,"generation":2}"#;
-        let d: ControlDirective = serde_json::from_str(old).unwrap();
-        assert_eq!(d.run_id, None);
-        let json = serde_json::to_string(&d).unwrap();
-        assert!(!json.contains("run_id"), "{json}");
-    }
-
-    #[test]
     fn cancelled_agent_counts_as_finished() {
         let run = make_run(
             "c",
@@ -1257,6 +1248,35 @@ mod tests {
         assert_eq!(run.status, RunStatus::Running);
         let a = run.agents.iter().find(|x| x.id == "a").unwrap();
         assert!(a.completed_at.is_none(), "restart clears completed_at");
+    }
+
+    #[test]
+    fn upsert_never_overwrites_a_cancelled_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        // What `/intervene cancel a` writes.
+        let mut run = read_run(base).unwrap();
+        run.agents[0].status = AgentStatus::Cancelled;
+        write_run(base, &run).unwrap();
+
+        for late in [
+            AgentStatus::Blocked,
+            AgentStatus::Pending,
+            AgentStatus::Done,
+            AgentStatus::Failed,
+            AgentStatus::Running,
+        ] {
+            upsert_agent_to_run(base, "a", "t", "builder", late.clone()).unwrap();
+            let run = read_run(base).unwrap();
+            assert_eq!(run.agents[0].status, AgentStatus::Cancelled, "{late:?}");
+            assert!(run.agents[0].completed_at.is_none(), "{late:?}");
+            assert_eq!(
+                read_agent_status(base, "a").unwrap().status,
+                AgentStatus::Cancelled,
+                "{late:?}"
+            );
+        }
     }
 
     #[test]

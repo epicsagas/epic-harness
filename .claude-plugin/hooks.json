@@ -27,16 +27,6 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" guard",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "Agent",
-        "hooks": [
-          {
-            "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\" observe",
             "async": true,
             "timeout": 5

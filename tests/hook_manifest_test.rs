@@ -103,11 +103,10 @@ fn codex_has_no_tool_failure_event() {
     assert!(manifest(CODEX)["hooks"].get("PostToolUseFailure").is_none());
 }
 
-/// Guard stays on Bash and also gates Agent spawns, so a paused or cancelled
-/// agent is blocked before it starts. The spawn gate must be synchronous: an
-/// `async` hook cannot block.
+/// Guard must not be dragged onto the Agent matcher: it is a Bash gate, and
+/// running it per subagent spawn would cost a process for nothing.
 #[test]
-fn claude_guard_gates_bash_and_agent_spawns() {
+fn claude_guard_stays_scoped_to_bash() {
     let m = manifest(CLAUDE);
     assert!(
         commands_for(&m, "PreToolUse", "Bash")
@@ -116,23 +115,10 @@ fn claude_guard_gates_bash_and_agent_spawns() {
         "guard must stay registered for Bash"
     );
     assert!(
-        commands_for(&m, "PreToolUse", "Agent")
+        !commands_for(&m, "PreToolUse", "Agent")
             .iter()
             .any(|c| invokes(c, "guard")),
-        "PreToolUse/Agent must invoke guard"
-    );
-    let guards: Vec<&Value> = m["hooks"]["PreToolUse"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|g| g["matcher"] == "Agent")
-        .flat_map(|g| g["hooks"].as_array().unwrap())
-        .filter(|h| h["command"].as_str().is_some_and(|c| invokes(c, "guard")))
-        .collect();
-    assert!(!guards.is_empty());
-    assert!(
-        guards.iter().all(|h| h["async"] != true),
-        "the Agent guard must not be async"
+        "guard must not run on Agent spawns"
     );
 }
 
