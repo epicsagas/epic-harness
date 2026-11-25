@@ -167,11 +167,6 @@ pub struct EvolutionConfig {
     /// Score degradation threshold that triggers rollback (e.g. 0.05 = 5% drop).
     pub rollback_degradation: f64,
 
-    /// If best_score is below this floor, always rollback on stagnation.
-    /// Applies only to pre-epoch scores (`score_epoch` 0); failure-aware
-    /// scores roll back on real degradation only.
-    pub rollback_best_floor: f64,
-
     /// Number of recent sessions averaged for stagnation detection.
     /// Prevents outlier sessions from permanently gating improvement.
     pub stagnation_rolling_window: usize,
@@ -295,7 +290,6 @@ impl Default for EvolutionConfig {
             improvement_threshold: 0.02,
             gated_promotion_min: 2,
             rollback_degradation: 0.05,
-            rollback_best_floor: 0.90,
             stagnation_rolling_window: 3,
             rejected_buffer_ttl: 10,
             minibatch_size: 8,
@@ -717,11 +711,6 @@ gated_promotion_min = 2
 # 0.05 = 5% drop from best_score triggers rollback.
 # rollback_degradation = 0.05
 
-# If best_score is below this floor, always rollback on stagnation.
-# Applies only to pre-epoch scores (before failures were recorded) and is
-# inactive in the failure-aware epoch, where only real degradation rolls back.
-# rollback_best_floor = 0.90
-
 # Number of recent sessions used for rolling-average stagnation check.
 # stagnation_rolling_window = 3
 
@@ -1032,6 +1021,19 @@ max_docs = 5
         assert_eq!(c.db.driver, "sqlite");
         assert_eq!(c.db.max_connections, 5);
         assert_eq!(c.db.tls_mode, "prefer");
+    }
+
+    #[test]
+    fn evolution_config_ignores_removed_floor_key() {
+        let c: HarnessConfig =
+            toml::from_str("[evolution]\nrollback_best_floor = 0.5\nmax_skills = 7\n").unwrap();
+        assert_eq!(c.evolution.max_skills, 7);
+        assert_eq!(c.evolution.rollback_degradation, 0.05);
+    }
+
+    #[test]
+    fn template_has_no_rollback_best_floor() {
+        assert!(!default_config_template().contains("rollback_best_floor"));
     }
 
     #[test]
