@@ -7,7 +7,9 @@
 // Modes (run by the ci.yml windows-hooks job):
 //   degrade — epic must NOT be on PATH: every hook exits 0 with the
 //             `[harness] epic not found` notice (session-start excluded: it
-//             IS the installer, covered by `live`).
+//             IS the installer, covered by `live`). The `prompt` hook is the
+//             exception: its stdout becomes model context on every prompt, so
+//             it must exit 0 with empty stdout AND empty stderr.
 //   live    — epic on PATH (installed from the latest release artifact by
 //             the workflow): every hook exits 0.
 //   mcp     — `epic mem mcp` JSON-RPC initialize handshake proves the
@@ -69,6 +71,14 @@ const check = (name, ok, extra = "") => {
 
 // Same effective command Codex runs, resolved as argv instead of a shell
 // string (see above).
+// Degrade expectation: the notice for every hook except `prompt`, which must be
+// completely silent (a regression that prints context or noise fails here).
+const degradedOk = (sub, r) =>
+  r.status === 0 &&
+  (sub === "prompt"
+    ? r.stdout === "" && (r.stderr ?? "") === ""
+    : r.stdout.includes("[harness] epic not found"));
+
 const runHook = (hook) =>
   spawnSync("node", [path.join(root, hook.script), hook.sub], {
     input: "{}",
@@ -83,7 +93,7 @@ if (mode === "degrade") {
     const r = runHook(hook);
     check(
       `degrade: ${hook.raw}`,
-      r.status === 0 && r.stdout.includes("[harness] epic not found"),
+      degradedOk(hook.sub, r),
       `status=${r.status} stdout=${r.stdout.trim().slice(0, 120)} stderr=${(r.stderr ?? "").trim().slice(0, 120)}`,
     );
   }
@@ -252,9 +262,8 @@ if (mode === "degrade") {
       for (const hook of claudeHooks) {
         if (hook.sub === "session-start") continue;
         const r = runShell(shell, hook, "{}");
-        const ok =
-          r.status === 0 &&
-          (phase === "live" || r.stdout.includes("[harness] epic not found"));
+        // Live: exit 0 only (stdout may be empty, e.g. `prompt` while disabled).
+        const ok = phase === "live" ? r.status === 0 : degradedOk(hook.sub, r);
         check(`claude-shell ${shell.name} ${phase}: ${hook.raw}`, ok, detail(r));
       }
       if (phase === "live") {
