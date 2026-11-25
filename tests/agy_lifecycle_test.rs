@@ -91,10 +91,10 @@ fn agy_resume_injects_and_uses_workspace_slug() {
     let inner = step["systemMessage"].as_object().unwrap();
     assert_eq!(inner.keys().collect::<Vec<_>>(), ["systemMessage"]);
     // The temp HOME makes the default-team hint deterministic. The first-run
-    // banner is suppressed by the startup lock ordering in resume.rs (pre-existing
-    // on all hosts, tracked separately).
+    // banner rides the same single systemMessage, never extra stdout.
     let msg = inner["systemMessage"].as_str().unwrap();
     assert!(!msg.is_empty() && msg.contains("[resume]"), "{out}");
+    assert!(msg.contains("[resume] Initialized"), "{out}");
 
     // The chdir must beat the cwd-derived slug LazyLock.
     assert!(env.harness().join("projects/agy_proj").exists());
