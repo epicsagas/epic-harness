@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
 use super::common::{self, CONFLICT_LOOKBACK, HookInput, PROFILE_GUARD, hint, should_run};
+use crate::orchestrate::state::{ControlAction, read_control};
+use crate::orchestrate::{directive_targets, extract_agent_id};
 use crate::telemetry::{RuleKind, Telemetry};
 
 struct BuiltinRule {
@@ -396,6 +398,32 @@ pub fn run(input: &HookInput) -> i32 {
     if is_orchestration_enabled() {
         let tool_name = input.tool_name.as_deref().unwrap_or("");
         let tool_lower = tool_name.to_lowercase();
+
+        // Synchronous spawn gate: a paused or cancelled target must not start.
+        // Fails open: no id, no control.json, or an unreadable one all pass.
+        if tool_lower == "agent" {
+            let Some(agent_id) = extract_agent_id(input) else {
+                return 0;
+            };
+            // Not harness_dir(): that one is cached for the process lifetime.
+            let base = crate::shared::paths::harness_projects_root()
+                .join(crate::shared::paths::project_slug());
+            if let Some(d) = read_control(&base)
+                && directive_targets(&d, &agent_id)
+            {
+                let verb = match d.action {
+                    ControlAction::Pause => "paused",
+                    ControlAction::Cancel => "cancelled",
+                    _ => return 0,
+                };
+                eprintln!(
+                    "[orchestrator] Agent {agent_id} is {verb} by user directive (gen {})",
+                    d.generation
+                );
+                return 2;
+            }
+            return 0;
+        }
 
         if tool_lower == "edit" || tool_lower == "write" || tool_lower == "apply_patch" {
             let orch_dir = orchestrator_dir();
@@ -1201,5 +1229,99 @@ mod tests {
         unsafe {
             std::env::remove_var("HARNESS_DIR");
         }
+    }
+
+    // ── Agent spawn gate ────────────────────────────────────
+
+    /// Runs `run()` on an Agent spawn against a temp harness root holding
+    /// `control` (when given) as control.json.
+    fn run_agent_spawn(control: Option<&str>) -> i32 {
+        let dir = tempfile::tempdir().unwrap();
+        if let Some(c) = control {
+            let orch_dir = harness_orch_dir(dir.path());
+            std::fs::create_dir_all(&orch_dir).unwrap();
+            std::fs::write(orch_dir.join("control.json"), c).unwrap();
+        }
+        // SAFETY: serial tests; HARNESS_DIR and EPIC_ORCHESTRATION are only
+        // read by the guard under test.
+        unsafe {
+            std::env::set_var("HARNESS_DIR", dir.path());
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+        let input = HookInput {
+            tool_name: Some("Agent".into()),
+            agent_id: Some("agent-x".into()),
+            ..Default::default()
+        };
+        let code = run(&input);
+        unsafe {
+            std::env::remove_var("HARNESS_DIR");
+        }
+        code
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_paused_target_blocked() {
+        let c = r#"{"action":"pause","target":"agent-x","message":null,"generation":3}"#;
+        assert_eq!(run_agent_spawn(Some(c)), 2);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_cancelled_target_blocked() {
+        let c = r#"{"action":"cancel","target":"agent-x","message":null,"generation":4}"#;
+        assert_eq!(run_agent_spawn(Some(c)), 2);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_other_agent_passes() {
+        let c = r#"{"action":"pause","target":"agent-other","message":null,"generation":3}"#;
+        assert_eq!(run_agent_spawn(Some(c)), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_non_blocking_action_passes() {
+        let c = r#"{"action":"resume","target":"agent-x","message":null,"generation":5}"#;
+        assert_eq!(run_agent_spawn(Some(c)), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_orchestration_disabled_passes() {
+        // No orchestrator dir and no env flag: the gate never reads anything.
+        assert_eq!(run_agent_spawn(None), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_malformed_control_fails_open() {
+        assert_eq!(run_agent_spawn(Some("{not json")), 0);
+    }
+
+    // ── grok camelCase payloads ─────────────────────────────
+
+    /// Deserialize like main.rs does for the guard hook: normalize first.
+    fn from_grok(mut v: serde_json::Value, normalize: bool) -> HookInput {
+        if normalize {
+            crate::shared::types::normalize_hook_payload(&mut v);
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn grok_camelcase_payload_matches_snake_case_decision() {
+        let cmd = "rm -rf /";
+        let snake = from_grok(
+            serde_json::json!({"tool_name": "Bash", "tool_input": {"command": cmd}}),
+            false,
+        );
+        let camel = serde_json::json!({"toolName": "Bash", "toolInput": {"command": cmd}});
+        assert_eq!(run(&snake), 2);
+        assert_eq!(run(&from_grok(camel.clone(), true)), 2);
+        // Without normalization the camelCase payload is silently unguarded.
+        assert_eq!(run(&from_grok(camel, false)), 0);
     }
 }

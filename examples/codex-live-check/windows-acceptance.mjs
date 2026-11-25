@@ -13,8 +13,15 @@
 //   mcp     — `epic mem mcp` JSON-RPC initialize handshake proves the
 //             harness-mem server starts (this is what mcp_config.json
 //             launches).
+//   claude-shell <degrade|live> — the quoted Claude commands run through the
+//             shells Claude uses, from a plugin root whose name has a space,
+//             `%EPIC_QA%` and `&`: Git Bash and pwsh on Windows, `sh -c`
+//             elsewhere. Emulates the documented host behavior (textual
+//             ${CLAUDE_PLUGIN_ROOT} substitution; ${env:CLAUDE_PLUGIN_ROOT}
+//             for PowerShell); a real Claude install is checked separately.
 
-import { readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
@@ -102,8 +109,88 @@ if (mode === "degrade") {
     r.status === 0 && r.stdout.includes('"serverInfo"'),
     `status=${r.status} stdout=${r.stdout.trim().slice(0, 160)} stderr=${(r.stderr ?? "").trim().slice(0, 160)}`,
   );
+} else if (mode === "claude-shell") {
+  const phase = process.argv[3];
+  if (phase !== "degrade" && phase !== "live") {
+    console.error("usage: windows-acceptance.mjs claude-shell <degrade|live>");
+    process.exit(64);
+  }
+  const claude = JSON.parse(
+    readFileSync(path.join(root, ".claude-plugin", "hooks.json"), "utf8"),
+  );
+  // Exact quoted form only; anything else is a hard error, never a skip.
+  const claudeHooks = Object.values(claude.hooks)
+    .flat()
+    .flatMap((group) => group.hooks)
+    .filter((handler) => handler.type === "command")
+    .map((handler) => {
+      const m = handler.command.match(
+        /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/registry\/scripts\/hooks\/run\.mjs" (\S+)$/,
+      );
+      if (!m) throw new Error(`unrecognized hook command: ${handler.command}`);
+      return { raw: handler.command, sub: m[1] };
+    });
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "epic-claude-shell-"));
+  try {
+    const pluginDir = path.join(tmp, "epic qa %EPIC_QA% & x");
+    const script = path.join("registry", "scripts", "hooks", "run.mjs");
+    mkdirSync(path.dirname(path.join(pluginDir, script)), { recursive: true });
+    copyFileSync(path.join(root, script), path.join(pluginDir, script));
+
+    // Textual ${CLAUDE_PLUGIN_ROOT} substitution (bash family).
+    const textual = (cmd) =>
+      cmd.replaceAll("${CLAUDE_PLUGIN_ROOT}", () => pluginDir.replaceAll("\\", "/"));
+    // PLUGIN_ROOT must not leak in: run.mjs would resolve install.cjs from it.
+    const { PLUGIN_ROOT: _unused, ...baseEnv } = process.env;
+    // A cmd.exe-style expansion of %EPIC_QA% would corrupt the path.
+    const env = { ...baseEnv, EPIC_QA: "expanded" };
+    const shells =
+      process.platform === "win32"
+        ? [
+            {
+              name: "git-bash",
+              file: "C:\\Program Files\\Git\\bin\\bash.exe",
+              args: (cmd) => ["-c", textual(cmd)],
+              env,
+            },
+            {
+              name: "pwsh",
+              file: "pwsh",
+              args: (cmd) => [
+                "-NoProfile",
+                "-Command",
+                cmd.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${env:CLAUDE_PLUGIN_ROOT}"),
+              ],
+              env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir },
+            },
+          ]
+        : [{ name: "sh", file: "sh", args: (cmd) => ["-c", textual(cmd)], env }];
+
+    for (const shell of shells) {
+      for (const hook of claudeHooks) {
+        if (phase === "degrade" && hook.sub === "session-start") continue; // the installer
+        const r = spawnSync(shell.file, shell.args(hook.raw), {
+          input: "{}",
+          encoding: "utf8",
+          timeout: 60_000,
+          env: shell.env,
+        });
+        const ok =
+          r.status === 0 &&
+          (phase === "live" || r.stdout.includes("[harness] epic not found"));
+        check(
+          `claude-shell ${shell.name} ${phase}: ${hook.raw}`,
+          ok,
+          `status=${r.status} stdout=${(r.stdout ?? "").trim().slice(0, 120)} stderr=${(r.stderr ?? "").trim().slice(0, 120)}${r.error ? ` error=${r.error.message}` : ""}`,
+        );
+      }
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 } else {
-  console.error(`usage: windows-acceptance.mjs <degrade|live|mcp>`);
+  console.error(`usage: windows-acceptance.mjs <degrade|live|mcp|claude-shell>`);
   process.exit(64);
 }
 

@@ -15,7 +15,9 @@ const MCP_CONFIG: &str = include_str!("../mcp_config.json");
 const RUN_MJS: &str = include_str!("../registry/scripts/hooks/run.mjs");
 
 const LAUNCHER: &str = "node ${PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
-const CLAUDE_LAUNCHER: &str = "node ${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
+/// Claude quotes the whole path: unambiguous in bash and, after the host's
+/// rewrite to `${env:CLAUDE_PLUGIN_ROOT}`, in PowerShell.
+const CLAUDE_LAUNCHER: &str = "node \"${CLAUDE_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs\"";
 const GROK_LAUNCHER: &str = "node ${GROK_PLUGIN_ROOT}/registry/scripts/hooks/run.mjs";
 
 /// Command handlers, in manifest order: events, matcher groups, handlers.
@@ -48,9 +50,13 @@ const FORBIDDEN: &[&str] = &[
     "|",
 ];
 
+/// Claude's list: the quoted launcher path is the one allowed `"` pair, and
+/// `assert_launcher_form` pins it to exactly two.
+const CLAUDE_FORBIDDEN: &[&str] = &["$(", "test ", "command -v", ";", "&&", "||", ">", "<", "|"];
+
 /// Shared manifest contract: every handler is exactly `<launcher> <sub>` (one
 /// trailing word) and carries no shell syntax.
-fn assert_launcher_form(handlers: &[&str], launcher: &str) {
+fn assert_launcher_form(handlers: &[&str], launcher: &str, forbidden: &[&str]) {
     assert!(!handlers.is_empty(), "no command handlers found");
     for (i, cmd) in handlers.iter().enumerate() {
         assert!(
@@ -62,7 +68,10 @@ fn assert_launcher_form(handlers: &[&str], launcher: &str) {
             Some(cmd.rsplit(' ').next().unwrap()),
             "handler {i}: launcher takes exactly one subcommand word: {cmd}"
         );
-        for token in FORBIDDEN {
+        if launcher == CLAUDE_LAUNCHER {
+            assert_eq!(cmd.matches('"').count(), 2, "handler {i}: quotes: {cmd}");
+        }
+        for token in forbidden {
             assert!(
                 !cmd.contains(token),
                 "hook command contains {token:?}: {cmd}"
@@ -76,7 +85,7 @@ fn codex_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CODEX_HOOKS).expect("valid JSON");
     let handlers = command_handlers(&hooks);
     assert_eq!(handlers.len(), 10, "expected 10 command handlers");
-    assert_launcher_form(&handlers, LAUNCHER);
+    assert_launcher_form(&handlers, LAUNCHER, FORBIDDEN);
 }
 
 /// The Claude manifest shares the launcher (claude expands `${CLAUDE_PLUGIN_ROOT}`
@@ -86,8 +95,8 @@ fn codex_hook_commands_all_use_launcher() {
 fn claude_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CLAUDE_HOOKS).expect("valid JSON");
     let handlers = command_handlers(&hooks);
-    assert_eq!(handlers.len(), 8, "expected 8 command handlers");
-    assert_launcher_form(&handlers, CLAUDE_LAUNCHER);
+    assert_eq!(handlers.len(), 9, "expected 9 command handlers");
+    assert_launcher_form(&handlers, CLAUDE_LAUNCHER, CLAUDE_FORBIDDEN);
 }
 
 /// The Grok manifest shares the launcher (grok injects `GROK_PLUGIN_ROOT` and
@@ -98,7 +107,7 @@ fn grok_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(GROK_HOOKS).expect("valid JSON");
     let handlers = command_handlers(&hooks);
     assert_eq!(handlers.len(), 8, "expected 8 command handlers");
-    assert_launcher_form(&handlers, GROK_LAUNCHER);
+    assert_launcher_form(&handlers, GROK_LAUNCHER, FORBIDDEN);
 }
 
 /// agy (Antigravity CLI) runs handlers with cwd = plugin root and never

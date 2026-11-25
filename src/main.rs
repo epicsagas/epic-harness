@@ -200,9 +200,8 @@ fn main() {
                         let _ = env::set_current_dir(dir);
                     }
                 }
-                // guard and polish keep reading snake_case only, so grok
-                // payloads behave as before on those hooks.
-                if subcmd == "observe" {
+                // grok sends camelCase keys (alongside snake_case on some events).
+                if matches!(subcmd, "observe" | "guard" | "polish") {
                     shared::types::normalize_hook_payload(&mut v);
                 }
                 serde_json::from_value(v).ok()

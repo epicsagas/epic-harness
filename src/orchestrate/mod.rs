@@ -258,7 +258,7 @@ pub(crate) fn is_agent_event(input: &HookInput) -> bool {
     )
 }
 
-fn extract_agent_id(input: &HookInput) -> Option<String> {
+pub(crate) fn extract_agent_id(input: &HookInput) -> Option<String> {
     // Codex supplies a stable id; prefer it over the prompt hash.
     if let Some(id) = input.agent_id.as_deref()
         && !id.trim().is_empty()
@@ -335,7 +335,7 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
 }
 
 /// True when the directive addresses this agent (its id, `"all"`, or no target).
-fn directive_targets(directive: &orch_state::ControlDirective, agent_id: &str) -> bool {
+pub(crate) fn directive_targets(directive: &orch_state::ControlDirective, agent_id: &str) -> bool {
     directive.target.as_deref() == Some(agent_id)
         || directive.target.as_deref() == Some("all")
         || directive.target.is_none()

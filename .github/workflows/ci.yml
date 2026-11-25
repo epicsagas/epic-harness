@@ -27,6 +27,8 @@ jobs:
           node-version: 22
       - name: Plugin bootstrap tests
         run: node --test registry/scripts/install.test.mjs registry/scripts/hooks/run.test.mjs
+      - name: Claude hook launcher through sh (plugin path with spaces)
+        run: node examples/codex-live-check/windows-acceptance.mjs claude-shell degrade
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
@@ -85,6 +87,11 @@ jobs:
         env:
           PLUGIN_ROOT: ${{ github.workspace }}
         run: node examples/codex-live-check/windows-acceptance.mjs degrade
+      - name: Claude hook launcher degrade (Git Bash and pwsh, plugin path with spaces)
+        shell: pwsh
+        env:
+          PLUGIN_ROOT: ${{ github.workspace }}
+        run: node examples/codex-live-check/windows-acceptance.mjs claude-shell degrade
       # Install epic from the released artifact — the same bytes users get,
       # not a source build (issue #132: acceptance must exercise the release path).
       - name: Install epic from latest release artifact
@@ -107,6 +114,11 @@ jobs:
         env:
           PLUGIN_ROOT: ${{ github.workspace }}
         run: node examples/codex-live-check/windows-acceptance.mjs live
+      - name: Claude hook launcher live (Git Bash and pwsh, plugin path with spaces)
+        shell: pwsh
+        env:
+          PLUGIN_ROOT: ${{ github.workspace }}
+        run: node examples/codex-live-check/windows-acceptance.mjs claude-shell live
       # harness-mem must start via plain PATH argv — what mcp_config.json
       # launches. Proves no `sh` anywhere in the MCP path.
       - name: harness-mem MCP handshake

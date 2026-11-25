@@ -34,9 +34,9 @@ fn commands_for(m: &Value, event: &str, matcher: &str) -> Vec<String> {
 
 /// True when `cmd` invokes `epic <sub>`. All three host manifests route
 /// through the launcher (`node ${...}/registry/scripts/hooks/run.mjs <sub>`,
-/// with the host's own root variable).
+/// with the host's own root variable; Claude quotes the whole path).
 fn invokes(cmd: &str, sub: &str) -> bool {
-    cmd.ends_with(&format!("run.mjs {sub}"))
+    cmd.ends_with(&format!("run.mjs {sub}")) || cmd.ends_with(&format!("run.mjs\" {sub}"))
 }
 
 const CLAUDE: &str = ".claude-plugin/hooks.json";
@@ -103,10 +103,11 @@ fn codex_has_no_tool_failure_event() {
     assert!(manifest(CODEX)["hooks"].get("PostToolUseFailure").is_none());
 }
 
-/// Guard must not be dragged onto the Agent matcher: it is a Bash gate, and
-/// running it per subagent spawn would cost a process for nothing.
+/// Guard stays on Bash and also gates Agent spawns, so a paused or cancelled
+/// agent is blocked before it starts. The spawn gate must be synchronous: an
+/// `async` hook cannot block.
 #[test]
-fn claude_guard_stays_scoped_to_bash() {
+fn claude_guard_gates_bash_and_agent_spawns() {
     let m = manifest(CLAUDE);
     assert!(
         commands_for(&m, "PreToolUse", "Bash")
@@ -115,10 +116,23 @@ fn claude_guard_stays_scoped_to_bash() {
         "guard must stay registered for Bash"
     );
     assert!(
-        !commands_for(&m, "PreToolUse", "Agent")
+        commands_for(&m, "PreToolUse", "Agent")
             .iter()
             .any(|c| invokes(c, "guard")),
-        "guard must not run on Agent spawns"
+        "PreToolUse/Agent must invoke guard"
+    );
+    let guards: Vec<&Value> = m["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|g| g["matcher"] == "Agent")
+        .flat_map(|g| g["hooks"].as_array().unwrap())
+        .filter(|h| h["command"].as_str().is_some_and(|c| invokes(c, "guard")))
+        .collect();
+    assert!(!guards.is_empty());
+    assert!(
+        guards.iter().all(|h| h["async"] != true),
+        "the Agent guard must not be async"
     );
 }
 
