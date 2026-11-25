@@ -187,7 +187,11 @@ pub fn run(args: &[String]) -> i32 {
 
     // A missing baseline is a first run; an unreadable one must not pass silently.
     let regression_runs = dims.regression.enabled && (run_all || regression_only);
-    let prev = if regression_runs {
+    let perf_runs = (producers || dimension_filter.as_deref() == Some("performance"))
+        && dims.performance.enabled;
+    let perf_metric =
+        perf_runs && dims.performance.command.is_some() && dims.performance.extra.metric.is_some();
+    let prev = if regression_runs || perf_metric {
         match baseline::load_latest(&baseline_path) {
             Ok(prev) => prev,
             Err(e) => {
@@ -208,9 +212,19 @@ pub fn run(args: &[String]) -> i32 {
             dims.correctness.extra.min_pass_rate,
         ));
     }
-    if (producers || dimension_filter.as_deref() == Some("performance")) && dims.performance.enabled
-    {
-        results.push(runner::run_performance(&effective));
+    if perf_runs {
+        let perf = runner::run_performance(&effective, &dims.performance.extra, prev.as_ref());
+        let m = &perf.details["metric"];
+        if let Some(
+            status @ ("no_baseline" | "no_baseline_metric" | "baseline_mismatch" | "zero_baseline"),
+        ) = m["status"].as_str()
+        {
+            eprintln!(
+                "note: performance metric {} was not compared ({status}); run epic eval --baseline-update to record one",
+                m["name"].as_str().unwrap_or_default()
+            );
+        }
+        results.push(perf);
     }
     if (producers || dimension_filter.as_deref() == Some("quality")) && dims.quality.enabled {
         results.push(runner::run_quality(&effective));
