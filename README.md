@@ -736,7 +736,7 @@ These were considered for enhancement but kept as-is after evaluation:
 <details>
 <summary>Plugin install path contains spaces or %</summary>
 
-Plugin install paths containing spaces or `%` are not supported by the hook launchers yet (#167, #265); install under a path without them.
+The Claude Code hooks quote the plugin path, which should make a path with spaces, `%` or `&` work there; this is pending confirmation on a real Windows host (#405). The Codex and grok launchers are still unquoted pending Windows checks (#167, #265); install those plugins under a path without them.
 </details>
 
 <details>

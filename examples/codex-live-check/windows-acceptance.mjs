@@ -13,8 +13,23 @@
 //   mcp     — `epic mem mcp` JSON-RPC initialize handshake proves the
 //             harness-mem server starts (this is what mcp_config.json
 //             launches).
+//   claude-shell <degrade|live> — the quoted Claude commands run through the
+//             shells Claude uses, from a plugin root whose name has a space,
+//             `%EPIC_QA%` and `&`: Git Bash and pwsh on Windows, `sh -c`
+//             elsewhere. Emulates the documented host behavior (textual
+//             ${CLAUDE_PLUGIN_ROOT} substitution; ${env:CLAUDE_PLUGIN_ROOT}
+//             for PowerShell); a real Claude install is checked separately.
 
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
@@ -102,8 +117,184 @@ if (mode === "degrade") {
     r.status === 0 && r.stdout.includes('"serverInfo"'),
     `status=${r.status} stdout=${r.stdout.trim().slice(0, 160)} stderr=${(r.stderr ?? "").trim().slice(0, 160)}`,
   );
+} else if (mode === "claude-shell") {
+  const phase = process.argv[3];
+  if (phase !== "degrade" && phase !== "live") {
+    console.error("usage: windows-acceptance.mjs claude-shell <degrade|live>");
+    process.exit(64);
+  }
+  const claude = JSON.parse(
+    readFileSync(path.join(root, ".claude-plugin", "hooks.json"), "utf8"),
+  );
+  // Exact quoted form only; anything else is a hard error, never a skip.
+  const claudeHooks = Object.values(claude.hooks)
+    .flat()
+    .flatMap((group) => group.hooks)
+    .filter((handler) => handler.type === "command")
+    .map((handler) => {
+      const m = handler.command.match(
+        /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/registry\/scripts\/hooks\/run\.mjs" (\S+)$/,
+      );
+      if (!m) throw new Error(`unrecognized hook command: ${handler.command}`);
+      return { raw: handler.command, sub: m[1] };
+    });
+
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "epic-claude-shell-"));
+  try {
+    const pluginDir = path.join(tmp, "epic qa %EPIC_QA% & x");
+    const script = path.join("registry", "scripts", "hooks", "run.mjs");
+    mkdirSync(path.dirname(path.join(pluginDir, script)), { recursive: true });
+    copyFileSync(path.join(root, script), path.join(pluginDir, script));
+
+    // Textual ${CLAUDE_PLUGIN_ROOT} substitution (bash family).
+    const textual = (cmd) =>
+      cmd.replaceAll("${CLAUDE_PLUGIN_ROOT}", () => pluginDir.replaceAll("\\", "/"));
+    // PLUGIN_ROOT must not leak in: run.mjs would resolve install.cjs from it.
+    const { PLUGIN_ROOT: _unused, ...baseEnv } = process.env;
+    // A cmd.exe-style expansion of %EPIC_QA% would corrupt the path.
+    // CLAUDE_PROJECT_DIR is what Claude exports to hooks; the binary uses it to
+    // recognize a Claude PreToolUse call.
+    const env = { ...baseEnv, EPIC_QA: "expanded", CLAUDE_PROJECT_DIR: tmp };
+    const shells =
+      process.platform === "win32"
+        ? [
+            {
+              name: "git-bash",
+              file: "C:\\Program Files\\Git\\bin\\bash.exe",
+              args: (cmd) => ["-c", textual(cmd)],
+              env,
+            },
+            {
+              name: "pwsh",
+              file: "pwsh",
+              args: (cmd) => [
+                "-NoProfile",
+                "-Command",
+                cmd.replaceAll("${CLAUDE_PLUGIN_ROOT}", "${env:CLAUDE_PLUGIN_ROOT}"),
+              ],
+              env: { ...env, CLAUDE_PLUGIN_ROOT: pluginDir },
+            },
+          ]
+        : [{ name: "sh", file: "sh", args: (cmd) => ["-c", textual(cmd)], env }];
+
+    const runShell = (shell, hook, input, env = shell.env) =>
+      spawnSync(shell.file, shell.args(hook.raw), {
+        input,
+        encoding: "utf8",
+        timeout: 60_000,
+        env,
+      });
+
+    // Stub `epic` for the block-contract check only. It prints the deny
+    // object and exits 0, so the check covers the shell transport (what
+    // `pwsh -Command` broke for exit 2) independently of which epic build is
+    // installed. Windows: epic.cmd (run.mjs spawns `epic` through cmd.exe,
+    // which resolves it by PATHEXT); POSIX: an executable `epic`. The stub dir
+    // goes first on PATH and HOME/USERPROFILE point at an empty dir so
+    // run.mjs's ~/.local/bin lookup cannot pick another epic.
+    const stubDir = path.join(tmp, "stub-bin");
+    const stubHome = path.join(tmp, "stub-home");
+    mkdirSync(stubDir);
+    mkdirSync(stubHome);
+    const deny = JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "stub",
+      },
+    });
+    // The stub answers only the expected blocked payload, so a launcher that
+    // drops or mangles stdin fails the check instead of passing on a canned reply.
+    writeFileSync(
+      path.join(stubDir, "epic-stub.mjs"),
+      [
+        'let body = "";',
+        'process.stdin.setEncoding("utf8");',
+        'process.stdin.on("data", (c) => (body += c));',
+        'process.stdin.on("end", () => {',
+        "  let ok = false;",
+        '  try { ok = JSON.parse(body).tool_input.command === "rm -rf /"; } catch {}',
+        "  if (!ok) {",
+        '    process.stderr.write("stub epic: unexpected stdin: " + body.slice(0, 200) + "\\n");',
+        "    process.exit(3);",
+        "  }",
+        `  process.stdout.write(${JSON.stringify(deny)});`,
+        "});",
+        "",
+      ].join("\n"),
+    );
+    if (process.platform === "win32") {
+      writeFileSync(path.join(stubDir, "epic.cmd"), '@node "%~dp0epic-stub.mjs" %*\r\n');
+    } else {
+      const bin = path.join(stubDir, "epic");
+      writeFileSync(bin, '#!/bin/sh\nexec node "$(dirname "$0")/epic-stub.mjs" "$@"\n');
+      chmodSync(bin, 0o755);
+    }
+    const withStub = (base) => {
+      const out = { ...base, HOME: stubHome, USERPROFILE: stubHome };
+      // Reuse the existing PATH key (Windows: "Path") so no second one appears.
+      const key = Object.keys(out).find((k) => k.toLowerCase() === "path") ?? "PATH";
+      out[key] = [stubDir, out[key]].filter(Boolean).join(path.delimiter);
+      return out;
+    };
+    const detail = (r) =>
+      `status=${r.status} stdout=${(r.stdout ?? "").trim().slice(0, 120)} stderr=${(r.stderr ?? "").trim().slice(0, 120)}${r.error ? ` error=${r.error.message}` : ""}`;
+
+    // The temp root holds only run.mjs, so the install.cjs bootstrap that
+    // session-start runs first is not available here.
+    console.log("NOTE session-start is skipped in claude-shell mode (needs install.cjs)");
+    if (phase === "live") {
+      console.log(
+        "NOTE the guard block check below runs against a stub epic (transport only); the binary-level deny contract is covered by tests/claude_guard_deny_test.rs and the real-host check M1",
+      );
+    }
+    for (const shell of shells) {
+      for (const hook of claudeHooks) {
+        if (hook.sub === "session-start") continue;
+        const r = runShell(shell, hook, "{}");
+        const ok =
+          r.status === 0 &&
+          (phase === "live" || r.stdout.includes("[harness] epic not found"));
+        check(`claude-shell ${shell.name} ${phase}: ${hook.raw}`, ok, detail(r));
+      }
+      if (phase === "live") {
+        // On Claude a guard block is exit 0 plus one PreToolUse deny object,
+        // not exit 2: `pwsh -Command` maps external exit codes other than 0/1
+        // to 1, which Claude reads as a non-blocking error. Here a stub epic
+        // emits that object; the launcher and shell must deliver it intact.
+        // A mismatch is reported, never masked.
+        const guard = claudeHooks.find((h) => h.sub === "guard");
+        const r = runShell(
+          shell,
+          guard,
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            tool_name: "Bash",
+            tool_input: { command: "rm -rf /" },
+          }),
+          withStub(shell.env),
+        );
+        let decision;
+        try {
+          decision = JSON.parse(r.stdout).hookSpecificOutput?.permissionDecision;
+        } catch {
+          decision = undefined;
+        }
+        const ok = r.status === 0 && decision === "deny";
+        check(
+          `claude-shell ${shell.name} live: stub epic deny reaches the host as exit 0 with a deny decision`,
+          ok,
+          ok
+            ? detail(r)
+            : `${shell.name} returned exit ${r.status} with permissionDecision=${decision} from the stub epic, expected exit 0 and "deny" (block transport broken in this shell); ${detail(r)}`,
+        );
+      }
+    }
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 } else {
-  console.error(`usage: windows-acceptance.mjs <degrade|live|mcp>`);
+  console.error(`usage: windows-acceptance.mjs <degrade|live|mcp|claude-shell>`);
   process.exit(64);
 }
 

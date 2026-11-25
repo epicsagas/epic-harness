@@ -292,10 +292,11 @@ fn guard_exit(fx: &Fixture, payload: serde_json::Value) -> i32 {
     child.wait().unwrap().code().unwrap()
 }
 
-/// Payload normalization is observe-only in 0.9.2: guard must see the same
-/// (empty) input on a camelCase grok payload as before.
+/// Payload normalization covers guard and polish too (it was observe-only in
+/// 0.9.2): a camelCase grok payload reaches the same guard decision as the
+/// snake_case one.
 #[test]
-fn grok_camel_case_payload_is_not_normalized_for_guard() {
+fn grok_camel_case_payload_is_normalized_for_guard() {
     let fx = Fixture::new();
     let command = "DROP TABLE prod_users";
     let snake = serde_json::json!({"tool_name": "Bash", "tool_input": {"command": command}});
@@ -305,7 +306,7 @@ fn grok_camel_case_payload_is_not_normalized_for_guard() {
         "control: guard blocks this command"
     );
     let camel = serde_json::json!({"toolName": "Bash", "toolInput": {"command": command}});
-    assert_eq!(guard_exit(&fx, camel), 0);
+    assert_eq!(guard_exit(&fx, camel), 2);
 }
 
 #[test]

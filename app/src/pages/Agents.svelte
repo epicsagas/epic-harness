@@ -92,7 +92,8 @@
     switch (status) {
       case 'running': return 'info';
       case 'done': return 'success';
-      case 'failed': return 'danger';
+      case 'failed':
+      case 'cancelled': return 'danger';
       case 'blocked': return 'warning';
       default: return 'info';
     }

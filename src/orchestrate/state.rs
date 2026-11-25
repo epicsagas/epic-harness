@@ -27,6 +27,8 @@ pub enum AgentStatus {
     Done,
     Blocked,
     Failed,
+    /// Written by `/intervene cancel {agent_id}` (see the orchestrate skill).
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -276,7 +278,10 @@ pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -
     // Build a set of completed/failed agent IDs
     let mut finished = std::collections::HashSet::new();
     for agent in &run.agents {
-        if agent.status == AgentStatus::Done || agent.status == AgentStatus::Failed {
+        if matches!(
+            agent.status,
+            AgentStatus::Done | AgentStatus::Failed | AgentStatus::Cancelled
+        ) {
             finished.insert(agent.id.clone());
         }
     }
@@ -303,11 +308,14 @@ pub fn evaluate_dependencies(run: &OrchestrationRun, completed_agent_id: &str) -
     unblocked
 }
 
-/// Check if the run is complete: all agents are Done or Failed.
+/// Check if the run is complete: all agents are Done, Failed or Cancelled.
 pub fn is_run_complete(run: &OrchestrationRun) -> bool {
-    run.agents
-        .iter()
-        .all(|a| a.status == AgentStatus::Done || a.status == AgentStatus::Failed)
+    run.agents.iter().all(|a| {
+        matches!(
+            a.status,
+            AgentStatus::Done | AgentStatus::Failed | AgentStatus::Cancelled
+        )
+    })
 }
 
 /// Acquire an exclusive advisory file lock on `path`.
@@ -385,6 +393,18 @@ pub fn upsert_agent_to_run(
         },
     };
 
+    // A user-cancelled agent only ever stays Cancelled: a late Done, Blocked or
+    // Pending (or a respawn's Running) must not undo `/intervene cancel`.
+    let status = if run
+        .agents
+        .iter()
+        .any(|a| a.id == agent_id && a.status == AgentStatus::Cancelled)
+    {
+        AgentStatus::Cancelled
+    } else {
+        status
+    };
+
     // Ensure agent directory exists
     let a_dir = agent_dir(base, agent_id);
     fs::create_dir_all(&a_dir)?;
@@ -446,6 +466,7 @@ pub fn upsert_agent_to_run(
                 AgentStatus::Done => "complete",
                 AgentStatus::Running => "running",
                 AgentStatus::Failed => "failed",
+                AgentStatus::Cancelled => "cancelled",
                 AgentStatus::Blocked => "blocked",
                 AgentStatus::Pending => "pending",
             }
@@ -1164,6 +1185,16 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_agent_counts_as_finished() {
+        let run = make_run(
+            "c",
+            vec![("a", AgentStatus::Cancelled), ("b", AgentStatus::Done)],
+            vec![],
+        );
+        assert!(is_run_complete(&run));
+    }
+
+    #[test]
     fn agent_status_serialization() {
         let statuses = vec![
             (AgentStatus::Pending, "\"pending\""),
@@ -1171,6 +1202,7 @@ mod tests {
             (AgentStatus::Done, "\"done\""),
             (AgentStatus::Blocked, "\"blocked\""),
             (AgentStatus::Failed, "\"failed\""),
+            (AgentStatus::Cancelled, "\"cancelled\""),
         ];
         for (status, expected) in statuses {
             let json = serde_json::to_string(&status).unwrap();
@@ -1216,6 +1248,35 @@ mod tests {
         assert_eq!(run.status, RunStatus::Running);
         let a = run.agents.iter().find(|x| x.id == "a").unwrap();
         assert!(a.completed_at.is_none(), "restart clears completed_at");
+    }
+
+    #[test]
+    fn upsert_never_overwrites_a_cancelled_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        // What `/intervene cancel a` writes.
+        let mut run = read_run(base).unwrap();
+        run.agents[0].status = AgentStatus::Cancelled;
+        write_run(base, &run).unwrap();
+
+        for late in [
+            AgentStatus::Blocked,
+            AgentStatus::Pending,
+            AgentStatus::Done,
+            AgentStatus::Failed,
+            AgentStatus::Running,
+        ] {
+            upsert_agent_to_run(base, "a", "t", "builder", late.clone()).unwrap();
+            let run = read_run(base).unwrap();
+            assert_eq!(run.agents[0].status, AgentStatus::Cancelled, "{late:?}");
+            assert!(run.agents[0].completed_at.is_none(), "{late:?}");
+            assert_eq!(
+                read_agent_status(base, "a").unwrap().status,
+                AgentStatus::Cancelled,
+                "{late:?}"
+            );
+        }
     }
 
     #[test]

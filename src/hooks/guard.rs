@@ -1202,4 +1202,28 @@ mod tests {
             std::env::remove_var("HARNESS_DIR");
         }
     }
+
+    // ── grok camelCase payloads ─────────────────────────────
+
+    /// Deserialize like main.rs does for the guard hook: normalize first.
+    fn from_grok(mut v: serde_json::Value, normalize: bool) -> HookInput {
+        if normalize {
+            crate::shared::types::normalize_hook_payload(&mut v);
+        }
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn grok_camelcase_payload_matches_snake_case_decision() {
+        let cmd = "rm -rf /";
+        let snake = from_grok(
+            serde_json::json!({"tool_name": "Bash", "tool_input": {"command": cmd}}),
+            false,
+        );
+        let camel = serde_json::json!({"toolName": "Bash", "toolInput": {"command": cmd}});
+        assert_eq!(run(&snake), 2);
+        assert_eq!(run(&from_grok(camel.clone(), true)), 2);
+        // Without normalization the camelCase payload is silently unguarded.
+        assert_eq!(run(&from_grok(camel, false)), 0);
+    }
 }

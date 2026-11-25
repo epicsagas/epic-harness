@@ -521,4 +521,17 @@ mod tests {
         assert_ne!(a, b);
         assert!(a.to_string_lossy().ends_with(".tsbuildinfo"));
     }
+
+    /// grok sends camelCase keys; main.rs normalizes them before `run`.
+    #[test]
+    fn grok_camelcase_payload_targets_same_files_as_snake_case() {
+        let mut camel = serde_json::json!({"toolInput": {"file_path": "src/only.rs"}});
+        crate::shared::types::normalize_hook_payload(&mut camel);
+        let camel: HookInput = serde_json::from_value(camel).unwrap();
+        let snake: HookInput =
+            serde_json::from_value(serde_json::json!({"tool_input": {"file_path": "src/only.rs"}}))
+                .unwrap();
+        assert_eq!(target_files(&camel), vec!["src/only.rs".to_string()]);
+        assert_eq!(target_files(&camel), target_files(&snake));
+    }
 }
