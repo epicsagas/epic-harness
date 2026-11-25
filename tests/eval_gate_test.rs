@@ -355,3 +355,285 @@ fn a_fail_on_regression_false_warns() {
     assert_eq!(v["dimensions"]["regression"]["verdict"], "WARN");
     assert_eq!(v["overall_verdict"], "WARN");
 }
+
+// ── Performance metric gate (#275) ──────────────────────────────────
+
+const METRIC_EXTRA: &str = "      metric: latency_ms\n      max_regression_pct: 20\n";
+
+impl Env {
+    /// Performance runs `p.sh`, which prints the value in `lat.txt` as `latency_ms`.
+    fn perf(&self, extra: &str, regression: &str) {
+        self.script(
+            "p.sh",
+            "printf '{\"latency_ms\": %s}\\n' \"$(cat lat.txt)\"\n",
+        );
+        self.lat("1");
+        self.config(&format!(
+            "dimensions:\n  performance:\n    enabled: true\n    command: \"sh p.sh\"\n    extra:\n{extra}  regression:\n{regression}"
+        ));
+    }
+
+    fn lat(&self, value: &str) {
+        fs::write(self.cwd.join("lat.txt"), value).unwrap();
+    }
+
+    /// Baseline-update run at `first`, then a plain run at `second`.
+    fn perf_two_runs(&self, first: &str, second: &str) -> (i32, String, String) {
+        self.lat(first);
+        let (code, out, err) = self.run(&["--baseline-update", "--json"]);
+        assert_eq!(code, 0, "{out} {err}");
+        let m = &json(&out)["dimensions"]["performance"]["details"]["metric"];
+        assert_eq!(m["status"], "no_baseline", "{out}");
+        assert!(err.contains("recorded as the new baseline"), "{err}");
+        assert!(!err.contains("run epic eval --baseline-update"), "{err}");
+        self.lat(second);
+        self.eval()
+    }
+}
+
+fn perf_metric(out: &str) -> serde_json::Value {
+    json(out)["dimensions"]["performance"]["details"]["metric"].clone()
+}
+
+#[test]
+fn p_issue_275_repro() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: true\n",
+    );
+    let (code, out, err) = env.perf_two_runs("7.67", "250.35");
+    assert_eq!(code, 1, "{out} {err}");
+    let v = json(&out);
+    assert_eq!(v["dimensions"]["performance"]["verdict"], "FAIL");
+    assert_eq!(v["overall_verdict"], "FAIL");
+    let m = perf_metric(&out);
+    assert_eq!(m["status"], "compared");
+    assert_eq!(m["regressed"], true);
+    assert_eq!(m["baseline_median"], 7.67);
+    assert!(m["pct_worse"].as_f64().unwrap() > 3000.0, "{m}");
+}
+
+#[test]
+fn p_within_limit_passes() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: true\n",
+    );
+    let (code, out, err) = env.perf_two_runs("100", "119");
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(json(&out)["dimensions"]["performance"]["verdict"], "PASS");
+    assert_eq!(perf_metric(&out)["pct_worse"], 19.0);
+}
+
+#[test]
+fn p_higher_is_better() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n      better: higher\n"),
+        "    enabled: true\n",
+    );
+    let (code, out, err) = env.perf_two_runs("100", "70");
+    assert_eq!(code, 1, "{out} {err}");
+    assert_eq!(json(&out)["dimensions"]["performance"]["verdict"], "FAIL");
+    assert_eq!(perf_metric(&out)["pct_worse"], 30.0);
+}
+
+#[test]
+fn p_metric_missing_fails() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: false\n",
+    );
+    env.script("p.sh", "echo '{\"other\": 1}'\n");
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 1, "{out} {err}");
+    assert_eq!(json(&out)["dimensions"]["performance"]["verdict"], "FAIL");
+    assert_eq!(perf_metric(&out)["status"], "metric_missing");
+}
+
+#[test]
+fn p_metric_invalid_fails() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: false\n",
+    );
+    env.script("p.sh", "echo '{\"latency_ms\": \"12\"}'\n");
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 1, "{out} {err}");
+    assert_eq!(perf_metric(&out)["status"], "metric_invalid");
+}
+
+#[test]
+fn p_trial_failure_stops() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 3\n"),
+        "    enabled: false\n",
+    );
+    env.script("p.sh", "echo x >> count.txt\nexit 1\n");
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 1, "{out} {err}");
+    let m = perf_metric(&out);
+    assert_eq!(m["status"], "command_failed");
+    assert!(m["median"].is_null(), "{m}");
+    let count = fs::read_to_string(env.cwd.join("count.txt")).unwrap();
+    assert_eq!(count.lines().count(), 1);
+}
+
+#[test]
+fn p_trials_median() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 3\n"),
+        "    enabled: true\n",
+    );
+    env.script(
+        "p.sh",
+        "n=$(cat n.txt 2>/dev/null || echo 0)\nn=$((n+1))\necho $n > n.txt\nprintf '{\"latency_ms\": %s}\\n' \"$(sed -n \"${n}p\" vals.txt)\"\n",
+    );
+    fs::write(env.cwd.join("vals.txt"), "11\n11\n11\n").unwrap();
+    let (code, out, err) = env.run(&["--baseline-update", "--json"]);
+    assert_eq!(code, 0, "{out} {err}");
+    fs::remove_file(env.cwd.join("n.txt")).unwrap();
+    fs::write(env.cwd.join("vals.txt"), "10\n1000\n12\n").unwrap();
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    let m = perf_metric(&out);
+    assert_eq!(m["samples"], serde_json::json!([10.0, 1000.0, 12.0]));
+    assert_eq!(m["median"], 12.0);
+    assert_eq!(m["baseline_median"], 11.0);
+    assert_eq!(json(&out)["dimensions"]["performance"]["verdict"], "PASS");
+}
+
+#[test]
+fn p_old_baseline_not_compared() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: true\n",
+    );
+    env.baseline(r#"{"performance": {"score": 1.0, "verdict": "PASS"}}"#);
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(json(&out)["dimensions"]["performance"]["verdict"], "PASS");
+    assert_eq!(perf_metric(&out)["status"], "no_baseline_metric");
+    assert!(err.contains("was not compared"), "{err}");
+}
+
+#[test]
+fn p_filter_loads_baseline() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: false\n",
+    );
+    env.baseline(
+        r#"{"performance": {"score": 1.0, "verdict": "PASS", "details": {"metric": {"name": "latency_ms", "better": "lower", "median": 100.0}}}}"#,
+    );
+    env.lat("150");
+    let (code, out, err) = env.run(&["--dimension", "performance", "--json"]);
+    assert_eq!(code, 1, "{out} {err}");
+    assert_eq!(perf_metric(&out)["status"], "compared");
+}
+
+#[test]
+fn p_corrupt_baseline_metric_only() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: false\n",
+    );
+    let dir = env.cwd.join("benchmarks/baselines");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("latest.json"), "{").unwrap();
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 1, "{out} {err}");
+    assert!(err.contains("baseline unreadable"), "{err}");
+}
+
+#[test]
+fn p_metric_with_performance_disabled_does_not_load_baseline() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    enabled: false\n",
+    );
+    env.config(&format!(
+        "dimensions:\n  performance:\n    enabled: false\n    command: \"sh p.sh\"\n    extra:\n{METRIC_EXTRA}  regression:\n    enabled: false\n"
+    ));
+    let dir = env.cwd.join("benchmarks/baselines");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("latest.json"), "{").unwrap();
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    assert!(
+        json(&out)["dimensions"].get("performance").is_none(),
+        "{out}"
+    );
+}
+
+#[test]
+fn p_metric_without_command_does_not_load_baseline() {
+    let env = Env::new();
+    env.config(&format!(
+        "dimensions:\n  performance:\n    enabled: true\n    extra:\n{METRIC_EXTRA}  regression:\n    enabled: false\n"
+    ));
+    let dir = env.cwd.join("benchmarks/baselines");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("latest.json"), "{").unwrap();
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    assert_eq!(
+        json(&out)["dimensions"]["performance"]["verdict"],
+        "SKIPPED"
+    );
+    assert!(!err.contains("baseline unreadable"), "{err}");
+}
+
+#[test]
+fn p_legacy_details_unchanged() {
+    let env = Env::new();
+    env.perf("      {}\n", "    enabled: false\n");
+    let (code, out, err) = env.eval();
+    assert_eq!(code, 0, "{out} {err}");
+    let details = json(&out)["dimensions"]["performance"]["details"].clone();
+    let mut keys: Vec<_> = details.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+    assert_eq!(keys, ["command", "exit_code", "stdout_tail"]);
+}
+
+#[test]
+fn p_fail_on_regression_false_still_fails() {
+    let env = Env::new();
+    env.perf(
+        &format!("{METRIC_EXTRA}      trials: 1\n"),
+        "    extra:\n      fail_on_regression: false\n",
+    );
+    let (code, out, err) = env.perf_two_runs("7.67", "250.35");
+    assert_eq!(code, 1, "{out} {err}");
+    let v = json(&out);
+    assert_eq!(v["dimensions"]["performance"]["verdict"], "FAIL");
+    assert_eq!(v["dimensions"]["regression"]["verdict"], "WARN");
+    assert_eq!(v["overall_verdict"], "FAIL");
+}
+
+#[test]
+fn p_init_omits_new_keys() {
+    let env = Env::new();
+    let (code, _, err) = env.run(&["--init"]);
+    assert_eq!(code, 0, "{err}");
+    let yaml = fs::read_to_string(
+        env.harness
+            .join("projects")
+            .join(SLUG)
+            .join("eval/eval.yaml"),
+    )
+    .unwrap();
+    for key in ["metric", "better", "trials", "max_regression_pct"] {
+        assert!(!yaml.contains(key), "{key}: {yaml}");
+    }
+}
