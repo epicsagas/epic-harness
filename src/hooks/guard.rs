@@ -385,9 +385,39 @@ fn check_control_json_pause(current_agent: Option<&str>, orch_dir: &Path) -> boo
     false
 }
 
+/// Synchronous Agent spawn gate: the same `spawn_block` decision the observe
+/// hook records. Fails open on a missing or invalid agent id. No telemetry,
+/// rules file or DB access.
+fn agent_spawn_gate(input: &HookInput) -> i32 {
+    let Some(id) = crate::orchestrate::extract_agent_id(input)
+        .filter(|id| crate::orchestrate::state::validate_agent_id(id))
+    else {
+        return 0;
+    };
+    let base =
+        crate::shared::paths::harness_projects_root().join(crate::shared::paths::project_slug());
+    match crate::orchestrate::state::spawn_block(
+        &base,
+        &id,
+        crate::orchestrate::state::epoch_secs_now(),
+    ) {
+        Some(block) => {
+            for line in block.reason_lines(&id) {
+                hint("orchestrator", &line);
+            }
+            2
+        }
+        None => 0,
+    }
+}
+
 pub fn run(input: &HookInput) -> i32 {
     if !should_run(PROFILE_GUARD) {
         return 0;
+    }
+
+    if input.tool_name.as_deref().map(str::to_lowercase).as_deref() == Some("agent") {
+        return agent_spawn_gate(input);
     }
 
     // ── Orchestration checks (write-type tools only) ────
@@ -400,9 +430,18 @@ pub fn run(input: &HookInput) -> i32 {
         if tool_lower == "edit" || tool_lower == "write" || tool_lower == "apply_patch" {
             let orch_dir = orchestrator_dir();
 
-            // control.json pause check — blocks the tool call entirely
+            // control.json pause check: blocks the tool call entirely, but only
+            // while the run is live and control.json was written during it.
             let agent_id = current_agent_id();
-            if let Some(ref orch) = orch_dir
+            let live_run = orch_dir.as_deref().and_then(Path::parent).and_then(|base| {
+                let run = crate::orchestrate::state::read_run(base)?;
+                (crate::orchestrate::state::is_live(
+                    &run,
+                    crate::orchestrate::state::epoch_secs_now(),
+                ) && crate::orchestrate::state::control_is_bound(base, &run))
+                .then_some(run)
+            });
+            if let (Some(orch), Some(run)) = (&orch_dir, &live_run)
                 && check_control_json_pause(agent_id.as_deref(), orch)
             {
                 hint(
@@ -410,6 +449,13 @@ pub fn run(input: &HookInput) -> i32 {
                     &format!(
                         "BLOCKED: control.json pause directive active for agent {}",
                         agent_id.as_deref().unwrap_or("unknown")
+                    ),
+                );
+                hint(
+                    "guard",
+                    &format!(
+                        "To lift: the user runs /intervene resume all. Otherwise the pause ends by itself after 2 hours without run activity (earliest {}).",
+                        crate::orchestrate::state::run_expiry(run)
                     ),
                 );
                 return 2;
@@ -1057,6 +1103,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = harness_orch_dir(dir.path());
         std::fs::create_dir_all(&orch_dir).unwrap();
+        seed_run(dir.path(), orch_state::RunStatus::Running, 100, 10);
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-x\"}").unwrap();
 
         // SAFETY: env mutation scoped to this test; HARNESS_DIR only read by
@@ -1089,6 +1136,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let orch_dir = harness_orch_dir(dir.path());
         std::fs::create_dir_all(&orch_dir).unwrap();
+        seed_run(dir.path(), orch_state::RunStatus::Running, 100, 10);
         std::fs::write(orch_dir.join("control.json"), "{\"pause\":\"agent-other\"}").unwrap();
 
         // SAFETY: env mutation scoped to this test
@@ -1200,6 +1248,263 @@ mod tests {
 
         unsafe {
             std::env::remove_var("HARNESS_DIR");
+        }
+    }
+
+    // ── Agent spawn gate and live-run Edit/Write pause ──────
+
+    use crate::orchestrate::state as orch_state;
+
+    /// Points HARNESS_DIR at a temp root for one test and clears every env var
+    /// these tests set when dropped (also on a failed assertion).
+    struct HarnessEnv;
+
+    impl HarnessEnv {
+        fn new(root: &Path) -> Self {
+            // SAFETY: #[serial] tests only
+            unsafe {
+                std::env::set_var("HARNESS_DIR", root);
+            }
+            HarnessEnv
+        }
+    }
+
+    impl Drop for HarnessEnv {
+        fn drop(&mut self) {
+            unsafe {
+                std::env::remove_var("HARNESS_DIR");
+                std::env::remove_var("EPIC_AGENT_ID");
+                std::env::remove_var("EPIC_ORCHESTRATION");
+            }
+        }
+    }
+
+    fn set_mtime(path: &Path, secs: u64) {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+            .unwrap();
+    }
+
+    /// Write run.json `auto-r1` into `<root>/projects/<slug>/orchestrator`.
+    /// Returns the base (`projects/<slug>`).
+    fn seed_run(
+        root: &Path,
+        status: orch_state::RunStatus,
+        created_ago: u64,
+        updated_ago: u64,
+    ) -> PathBuf {
+        let base = harness_orch_dir(root).parent().unwrap().to_path_buf();
+        let now = orch_state::epoch_secs_now();
+        let run = orch_state::OrchestrationRun {
+            id: "auto-r1".to_string(),
+            status,
+            agents: vec![orch_state::AgentDef {
+                id: "agent-x".to_string(),
+                role: "builder".to_string(),
+                task: "t".to_string(),
+                satisfies: vec![],
+                status: orch_state::AgentStatus::Running,
+                started_at: None,
+                completed_at: None,
+            }],
+            dependency_graph: Default::default(),
+            created_at: crate::shared::helpers::iso_from_secs(now - created_ago),
+            updated_at: crate::shared::helpers::iso_from_secs(now - updated_ago),
+        };
+        std::fs::create_dir_all(orch_state::orchestrator_dir(&base)).unwrap();
+        orch_state::write_run(&base, &run).unwrap();
+        base
+    }
+
+    fn put_control(base: &Path, action: orch_state::ControlAction, target: &str) {
+        orch_state::write_control(
+            base,
+            &orch_state::ControlDirective {
+                action,
+                target: Some(target.to_string()),
+                message: None,
+                generation: 1,
+            },
+        )
+        .unwrap();
+    }
+
+    fn agent_input(session: &str) -> HookInput {
+        HookInput {
+            tool_name: Some("Agent".into()),
+            session_id: Some(session.into()),
+            agent_id: Some("agent-new".into()),
+            tool_input: Some(serde_json::json!({
+                "description": "synthetic task",
+                "prompt": "Synthetic task prompt",
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn edit_input() -> HookInput {
+        HookInput {
+            tool_name: Some("Edit".into()),
+            tool_input: Some(
+                serde_json::json!({"file_path": "/src/main.rs", "old_string": "x", "new_string": "y"}),
+            ),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_paused_returns_2() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Running, 100, 10);
+        put_control(&base, orch_state::ControlAction::Pause, "all");
+        assert_eq!(run(&agent_input("s1")), 2);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_other_target_returns_0() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Running, 100, 10);
+        put_control(&base, orch_state::ControlAction::Pause, "agent-other");
+        assert_eq!(run(&agent_input("s1")), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_no_run_returns_0() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        assert_eq!(run(&agent_input("s1")), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_malformed_control_returns_0() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Running, 100, 10);
+        // Not JSON, legacy shape, and a directive without a generation.
+        for raw in [
+            "{not json",
+            r#"{"pause":true}"#,
+            r#"{"action":"pause","target":"all"}"#,
+        ] {
+            std::fs::write(orch_state::control_file(&base), raw).unwrap();
+            assert_eq!(run(&agent_input("s1")), 0, "{raw}");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_stale_abort_returns_0() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Aborted, 8000, 7201);
+        put_control(&base, orch_state::ControlAction::Cancel, "all");
+        assert_eq!(run(&agent_input("s1")), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn agent_spawn_skips_bash_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let mut input = agent_input("s1");
+        input.tool_input = Some(serde_json::json!({"command": "rm -rf /"}));
+        assert_eq!(
+            run(&input),
+            0,
+            "no block: the Bash rules do not apply to Agent"
+        );
+    }
+
+    /// The block lives in run.json and control.json, not in the session.
+    #[test]
+    #[serial]
+    fn block_applies_across_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Running, 100, 10);
+        put_control(&base, orch_state::ControlAction::Pause, "all");
+        assert_eq!(run(&agent_input("session-one")), 2);
+        assert_eq!(run(&agent_input("session-two")), 2);
+    }
+
+    #[test]
+    #[serial]
+    fn auto_cleanup_does_not_lift_live_abort() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Aborted, 500, 100);
+        orch_state::auto_cleanup_stale_runs(&base);
+        let block = orch_state::spawn_block(&base, "agent-new", orch_state::epoch_secs_now());
+        assert_eq!(
+            block.map(|b| b.kind),
+            Some(orch_state::BlockKind::RunCancelled)
+        );
+        assert_eq!(run(&agent_input("s1")), 2);
+    }
+
+    #[test]
+    #[serial]
+    fn stale_pause_does_not_block_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Running, 8000, 7201);
+        std::fs::write(orch_state::control_file(&base), r#"{"pause":"agent-x"}"#).unwrap();
+        unsafe {
+            std::env::set_var("EPIC_AGENT_ID", "agent-x");
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        assert_eq!(run(&edit_input()), 0, "an idle run holds no pause");
+    }
+
+    #[test]
+    #[serial]
+    fn pause_from_previous_run_does_not_block_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        let base = seed_run(dir.path(), orch_state::RunStatus::Running, 0, 0);
+        let control = orch_state::control_file(&base);
+        std::fs::write(&control, r#"{"pause":"agent-x"}"#).unwrap();
+        set_mtime(&control, orch_state::epoch_secs_now() - 60);
+        unsafe {
+            std::env::set_var("EPIC_AGENT_ID", "agent-x");
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        assert_eq!(run(&edit_input()), 0, "written before this run started");
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_pause_true_blocks_only_when_bound_and_live() {
+        // (run created ago, run updated ago, control mtime offset before now, blocks)
+        for (created, updated, mtime_ago, blocks) in [
+            (100, 10, 0, true),
+            (8000, 7201, 0, false),
+            (100, 10, 200, false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let _env = HarnessEnv::new(dir.path());
+            unsafe {
+                std::env::set_var("EPIC_AGENT_ID", "agent-x");
+                std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+            }
+            let base = seed_run(dir.path(), orch_state::RunStatus::Running, created, updated);
+            let control = orch_state::control_file(&base);
+            std::fs::write(&control, r#"{"pause":true}"#).unwrap();
+            set_mtime(&control, orch_state::epoch_secs_now() - mtime_ago);
+            assert_eq!(
+                run(&edit_input()),
+                if blocks { 2 } else { 0 },
+                "created {created} updated {updated} mtime_ago {mtime_ago}"
+            );
         }
     }
 

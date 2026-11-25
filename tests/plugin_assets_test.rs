@@ -95,7 +95,7 @@ fn codex_hook_commands_all_use_launcher() {
 fn claude_hook_commands_all_use_launcher() {
     let hooks: Value = serde_json::from_str(CLAUDE_HOOKS).expect("valid JSON");
     let handlers = command_handlers(&hooks);
-    assert_eq!(handlers.len(), 9, "expected 9 command handlers");
+    assert_eq!(handlers.len(), 10, "expected 10 command handlers");
     assert_launcher_form(&handlers, CLAUDE_LAUNCHER, CLAUDE_FORBIDDEN);
 }
 
