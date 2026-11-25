@@ -221,6 +221,9 @@ pub fn run(input: &HookInput) -> i32 {
     // second compaction of a long session from ever re-injecting.
     // `acquire_session_lock` uses O_CREAT|O_EXCL — atomically prevents the
     // TOCTOU race that the old exists()+write() pattern introduced.
+    // Checked before the startup lock below: `acquire_session_lock` creates
+    // the project dir, which would otherwise hide a genuine first run.
+    let first_run = !harness_exists();
     prune_stale_resume_locks();
     let source = input
         .source
@@ -307,7 +310,7 @@ pub fn run(input: &HookInput) -> i32 {
     }
 
     // Auto-init ~/.harness/projects/{slug}/
-    if !harness_exists() {
+    if first_run {
         for line in BANNER {
             raw(line);
         }
@@ -487,7 +490,9 @@ pub fn run(input: &HookInput) -> i32 {
     // Record the partition date so reflect (SessionEnd) reproduces the same
     // holdout arm even when this session spans UTC midnight — otherwise an
     // active-injected skill could be scored against the holdout baseline.
-    crate::shared::helpers::write_session_start(&today_str);
+    // The record is written after the injection below, together with the names
+    // of the skills whose bodies were actually injected.
+    let mut injected_names: Vec<String> = Vec::new();
     // Frontier-class models skip template (un-synthesized) skill bodies —
     // generic advice is noise there; synthesized skills always inject.
     let inject_templates = crate::config::CONFIG.model.inject_templates();
@@ -503,7 +508,8 @@ pub fn run(input: &HookInput) -> i32 {
             })
             .collect();
         if !bodies.is_empty() {
-            let injection = build_evolved_injection(&bodies);
+            let (injection, injected) = build_evolved_injection(&bodies);
+            injected_names = injected;
             if input.hook_event_name.is_some() {
                 // Codex: stdout must stay a single JSON document — any raw
                 // text before it makes the host parse the whole stream as
@@ -517,7 +523,7 @@ pub fn run(input: &HookInput) -> i32 {
             }
             hint(
                 "resume",
-                &format!("Evolved skills injected: {}", active.join(", ")),
+                &format!("Evolved skills injected: {}", injected_names.join(", ")),
             );
         }
         let withheld: Vec<&String> = active
@@ -547,6 +553,11 @@ pub fn run(input: &HookInput) -> i32 {
             );
         }
     }
+    crate::shared::helpers::write_session_start(
+        &today_str,
+        &injected_names,
+        input.session_id.as_deref(),
+    );
 
     // Surface the synthesis backlog on stdout so the host agent sees it —
     // stderr hints don't reach the model, and the loop only closes when a
@@ -877,7 +888,9 @@ fn pending_synth_count() -> usize {
 
 /// Render active evolved skills as a context block for SessionStart stdout.
 /// Frontmatter is stripped (metadata noise), bodies are truncated to budget.
-fn build_evolved_injection(skills: &[(String, String)]) -> String {
+/// Also returns the skills whose header and at least one body char survived
+/// the total budget, which are the only ones the model actually saw.
+fn build_evolved_injection(skills: &[(String, String)]) -> (String, Vec<String>) {
     let (per_skill, total) = (inject_per_skill_chars(), inject_total_chars());
     let mut out = String::from(
         "## Evolved Skills (epic-harness Ring 3)\n\
@@ -897,7 +910,18 @@ fn build_evolved_injection(skills: &[(String, String)]) -> String {
         out.push_str(&format!("\n### {name}\n{truncated}\n"));
     }
     let capped: String = out.chars().take(total).collect();
-    capped
+    let injected = skills
+        .iter()
+        .map(|(name, _)| name)
+        .filter(|name| {
+            let header = format!("\n### {name}\n");
+            capped
+                .find(&header)
+                .is_some_and(|i| capped.len() > i + header.len())
+        })
+        .cloned()
+        .collect();
+    (capped, injected)
 }
 
 #[cfg(test)]
@@ -920,7 +944,7 @@ mod tests {
                 "## Process\n1. step\n".repeat(300)
             ),
         );
-        let out = build_evolved_injection(&[skill]);
+        let (out, _) = build_evolved_injection(&[skill]);
         assert!(out.contains("### evo-fix-test-fail"));
         assert!(
             !out.contains("description:"),
@@ -942,9 +966,36 @@ mod tests {
                 )
             })
             .collect();
-        let out = build_evolved_injection(&skills);
+        let (out, injected) = build_evolved_injection(&skills);
         for i in 0..3 {
             assert!(out.contains(&format!("### evo-skill-{i}")));
+        }
+        assert_eq!(injected.len(), 3);
+    }
+
+    #[test]
+    fn evolved_injection_reports_only_skills_that_survived_the_budget() {
+        let skills: Vec<(String, String)> = (0..10)
+            .map(|i| {
+                (
+                    format!("evo-skill-{i}"),
+                    format!("---\nname: evo-skill-{i}\n---\n\n{}", "x".repeat(2_000)),
+                )
+            })
+            .collect();
+        let (out, injected) = build_evolved_injection(&skills);
+        assert!(out.chars().count() <= inject_total_chars());
+        assert!(injected.contains(&"evo-skill-0".to_string()));
+        assert!(
+            !injected.contains(&"evo-skill-9".to_string()),
+            "a skill dropped by the budget must not be reported as injected"
+        );
+        for (name, _) in &skills {
+            assert_eq!(
+                injected.contains(name),
+                out.contains(&format!("### {name}\n")),
+                "{name}"
+            );
         }
     }
 

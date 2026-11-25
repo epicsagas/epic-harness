@@ -117,6 +117,16 @@ function shouldAttempt(version, dir, now = Date.now()) {
   return true;
 }
 
+// True when this plugin version was already installed once (marker ok:true).
+function installedOnce(version, dir) {
+  try {
+    const m = JSON.parse(fs.readFileSync(markerPath(dir), "utf8"));
+    return m.version === version && m.ok === true;
+  } catch (_) {
+    return false;
+  }
+}
+
 function recordAttempt(version, ok, dir, now = Date.now()) {
   try {
     fs.mkdirSync(dir, { recursive: true });
@@ -250,7 +260,9 @@ async function fetchAndInstall({ version, target, installDir, platform, download
 }
 
 function findEpic(pathEnv, installDir, platform) {
-  const exts = platform === "win32" ? [".exe", ".cmd"] : [""];
+  // Only a real .exe: spawnSync(shell: false) cannot run a .cmd/.bat shim
+  // (CVE-2024-27980), so a shim counts as not found and the installer proceeds.
+  const exts = platform === "win32" ? [".exe"] : [""];
   for (const dir of [...pathEnv.split(path.delimiter).filter(Boolean), installDir]) {
     for (const ext of exts) {
       const p = path.join(dir, `epic${ext}`);
@@ -260,11 +272,26 @@ function findEpic(pathEnv, installDir, platform) {
   return null;
 }
 
+// A .cmd/.bat shim is never run (see findEpic); report the first one on PATH.
+function findShim(pathEnv, platform) {
+  if (platform !== "win32") return null;
+  for (const dir of pathEnv.split(path.delimiter).filter(Boolean)) {
+    for (const ext of [".cmd", ".bat"]) {
+      const p = path.join(dir, `epic${ext}`);
+      if (fs.existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+
+// killed: the probe timed out or was signalled, so the version is unknown and
+// must not be guessed. version null with killed false: it ran but printed none.
 function binaryVersion(bin) {
   // --version exits before the telemetry consent step that `version` runs
   const r = spawnSync(bin, ["--version"], { stdio: "pipe", shell: false, timeout: 10000 });
+  const killed = r.error?.code === "ETIMEDOUT" || !!r.signal;
   const m = r.status === 0 && r.stdout.toString().match(/(\d+\.\d+\.\d+)/);
-  return m ? m[1] : null;
+  return { version: m ? m[1] : null, killed };
 }
 
 function sameDir(a, b, platform) {
@@ -311,14 +338,19 @@ async function main(deps = {}) {
   const found = findEpic(pathEnv, installDir, platform);
   let notice = null;
   if (found) {
-    const current = binaryVersion(found);
-    if (!current || !semverGt(version, current)) return; // up to date, never downgrade
+    const { version: current, killed } = binaryVersion(found);
+    if (killed) return; // timed out: version unknown, never risk a downgrade
+    // ran but reported no version: proceed, but only once per plugin version
+    if (!current && installedOnce(version, harnessDir)) return;
+    if (current && !semverGt(version, current)) return; // up to date, never downgrade
     if (!sameDir(path.dirname(found), installDir, platform)) {
       // Hooks run the ~/.local/bin copy, so a current one there needs no download.
       const local = findEpic("", installDir, platform);
-      const localVersion = local && binaryVersion(local);
+      const probe = local && binaryVersion(local);
+      if (probe && probe.killed) return;
+      const localVersion = probe && probe.version;
       if (localVersion && !semverGt(version, localVersion)) return;
-      notice = `your shell epic ${current} is older than the plugin's ${version} (hooks use ${installDir}); update it with: ${updateCommand(found)}`;
+      if (current) notice = `your shell epic ${current} is older than the plugin's ${version} (hooks use ${installDir}); update it with: ${updateCommand(found)}`;
     }
   }
 
@@ -329,6 +361,8 @@ async function main(deps = {}) {
   }
   if (!shouldAttempt(version, harnessDir)) return;
 
+  const shim = findShim(pathEnv, platform);
+  if (shim) log(`skipping ${shim}: Node cannot run .cmd/.bat shims without a shell; installing epic ${version} to ${installDir}`);
   log(found ? `Updating epic to ${version}...` : `epic not found, installing ${version}...`);
   // Marker first: a killed session must not cause a download per session.
   recordAttempt(version, false, harnessDir);
@@ -356,6 +390,7 @@ module.exports = {
   downloadFile,
   updateCommand,
   installFromArchive,
+  findEpic,
   main,
 };
 

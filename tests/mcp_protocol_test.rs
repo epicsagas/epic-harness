@@ -27,6 +27,9 @@ fn mcp_server_follows_json_rpc() {
         r#"[{"jsonrpc":"2.0","id":3,"method":"ping"}]"#,
         r#"{"jsonrpc":"2.0","id":4,"method":"nope"}"#,
         r#"{"jsonrpc":"2.0","id":"s","method":42}"#,
+        r#"{"jsonrpc":"2.0","id":{"a":1},"method":"ping"}"#,
+        r#"{"jsonrpc":"2.0","id":[1],"method":"ping"}"#,
+        r#"{"jsonrpc":"2.0","id":true,"method":"ping"}"#,
         r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
     ]
     .join("\n");
@@ -50,6 +53,9 @@ fn mcp_server_follows_json_rpc() {
         err(Value::Null, -32600, "Invalid Request"),
         err(json!(4), -32601, "Method not found"),
         err(json!("s"), -32600, "Invalid Request"),
+        err(Value::Null, -32600, "Invalid Request"),
+        err(Value::Null, -32600, "Invalid Request"),
+        err(Value::Null, -32600, "Invalid Request"),
     ];
     assert_eq!(lines, expected);
 }

@@ -137,7 +137,8 @@ static MASK_PATH: LazyLock<Regex> = LazyLock::new(|| {
 /// re-collapse `src/a.rs` and `src/b.rs` onto `src<PATH>`. A rooted path
 /// outside the project becomes the literal `<PATH>`. A path that is not
 /// rooted (a Codex `apply_patch` names its files that way, `~/x` too) has no
-/// home directory or username in it and only gets the secret masks.
+/// home directory or username in it and only gets the secret masks, unless its
+/// `..` components climb out of the project, which gives `<PATH>` too.
 pub fn mask_path_action(path: &str) -> String {
     let trimmed = path.trim();
     let tilde_user = trimmed
@@ -147,6 +148,11 @@ pub fn mask_path_action(path: &str) -> String {
         return "<PATH>".to_string();
     }
     if !is_rooted(trimmed) {
+        // A relative path that climbs above the project root with `..` leaks
+        // the same thing a rooted path outside it does.
+        if escapes_project(trimmed) {
+            return "<PATH>".to_string();
+        }
         return mask_credentials(path);
     }
     // A `..` can climb out of the project even when the prefix matches.
@@ -161,6 +167,27 @@ pub fn mask_path_action(path: &str) -> String {
         // `mask_secrets` stops at whitespace and misses UNC paths.
         Err(_) => "<PATH>".to_string(),
     }
+}
+
+/// True when a relative path's `..` components climb above its starting
+/// directory (`../x`, `a/../../x`); `src/../a.rs` stays inside. A path that
+/// climbs out and back in (`../<project>/src/a.rs`) is masked too, by design.
+fn escapes_project(path: &str) -> bool {
+    use std::path::{Component, Path};
+    let mut depth = 0usize;
+    // Windows hosts send `..\x`, which `Path` only splits on Windows.
+    let path = path.replace('\\', "/");
+    for c in Path::new(&path).components() {
+        match c {
+            Component::Normal(_) => depth += 1,
+            Component::ParentDir => match depth.checked_sub(1) {
+                Some(d) => depth = d,
+                None => return true,
+            },
+            _ => {}
+        }
+    }
+    false
 }
 
 /// True for a path that names a root, identically on every OS: a leading `/`
@@ -258,8 +285,29 @@ mod tests {
 
     #[test]
     fn non_rooted_paths_are_unchanged() {
-        for p in ["src/a.rs", "./src/a.rs", "../x/y.rs"] {
+        for p in [
+            "src/a.rs",
+            "./src/a.rs",
+            "src/../a.rs",
+            "a/b/../../c.rs",
+            r"src\..\a.rs",
+        ] {
             assert_eq!(mask_path_action(p), p);
+        }
+    }
+
+    #[test]
+    fn relative_paths_escaping_the_project_become_path_token() {
+        for p in [
+            "../x/y.rs",
+            "..",
+            "../../home/u/x",
+            "src/../../x.rs",
+            "./../x.rs",
+            r"..\..\Users\x",
+            r"src\..\..\x.rs",
+        ] {
+            assert_eq!(mask_path_action(p), "<PATH>", "{p:?}");
         }
     }
 

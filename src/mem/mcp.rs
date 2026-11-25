@@ -531,6 +531,14 @@ pub fn run_mcp_server() -> i32 {
             send_error(Value::Null, -32600, "Invalid Request");
             continue;
         };
+        // JSON-RPC ids are a string, number or null; reject object, array and boolean.
+        if matches!(
+            obj.get("id"),
+            Some(Value::Object(_) | Value::Array(_) | Value::Bool(_))
+        ) {
+            send_error(Value::Null, -32600, "Invalid Request");
+            continue;
+        }
         let has_id = obj.contains_key("id");
         let err_id = match obj.get("id") {
             Some(id) if id.is_string() || id.is_number() => id.clone(),

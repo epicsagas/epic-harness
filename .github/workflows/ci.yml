@@ -141,9 +141,7 @@ jobs:
         # RUSTSEC-2026-0194/0195: quick-xml DoS via plist (tauri toolchain) — fix needs
         # quick-xml >= 0.41 but even plist 1.9.0 pins ^0.39; no untrusted XML is parsed.
         # Revisit when plist releases a 0.41-compatible version.
-        # RUSTSEC-2026-0459: bundled SQLite < 3.54 in libsqlite3-sys 0.30.1, pinned by sqlx 0.9;
-        # fixed range starts at 0.39. Temporary ignore, tracked in #278.
-        run: cargo audit --ignore RUSTSEC-2026-0009 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195 --ignore RUSTSEC-2026-0459
+        run: cargo audit --ignore RUSTSEC-2026-0009 --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
 
   sbom:
     name: Generate SBOM

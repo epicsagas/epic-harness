@@ -167,11 +167,6 @@ pub struct EvolutionConfig {
     /// Score degradation threshold that triggers rollback (e.g. 0.05 = 5% drop).
     pub rollback_degradation: f64,
 
-    /// If best_score is below this floor, always rollback on stagnation.
-    /// Applies only to pre-epoch scores (`score_epoch` 0); failure-aware
-    /// scores roll back on real degradation only.
-    pub rollback_best_floor: f64,
-
     /// Number of recent sessions averaged for stagnation detection.
     /// Prevents outlier sessions from permanently gating improvement.
     pub stagnation_rolling_window: usize,
@@ -295,7 +290,6 @@ impl Default for EvolutionConfig {
             improvement_threshold: 0.02,
             gated_promotion_min: 2,
             rollback_degradation: 0.05,
-            rollback_best_floor: 0.90,
             stagnation_rolling_window: 3,
             rejected_buffer_ttl: 10,
             minibatch_size: 8,
@@ -454,7 +448,15 @@ impl Default for DbConfig {
 
 // ── Global Config Instance ──────────────────────────
 
-pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(load_config);
+// Unit tests skip reading config.toml so a developer's real file cannot change
+// outcomes; env overrides, validation and driver auto-correct still apply.
+pub static CONFIG: LazyLock<HarnessConfig> = LazyLock::new(|| {
+    if cfg!(test) {
+        finish_config(HarnessConfig::default())
+    } else {
+        load_config()
+    }
+});
 
 fn harness_dir() -> PathBuf {
     crate::shared::paths::harness_root()
@@ -466,7 +468,7 @@ fn load_config() -> HarnessConfig {
     let path = harness_dir().join("config.toml");
     // Every branch ends in the same validate/override steps, so a missing or
     // unreadable file never bypasses HARNESS_DB_URL / HARNESS_MEM_URL.
-    let mut cfg = match std::fs::read_to_string(&path) {
+    let cfg = match std::fs::read_to_string(&path) {
         Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
             eprintln!(
                 "[epic-harness] warning: failed to parse {}: {} — using defaults",
@@ -485,6 +487,11 @@ fn load_config() -> HarnessConfig {
             HarnessConfig::default()
         }
     };
+    finish_config(cfg)
+}
+
+/// Validate, then apply env overrides and the URL-driven driver correction.
+fn finish_config(mut cfg: HarnessConfig) -> HarnessConfig {
     validate_config(&mut cfg);
 
     apply_env_overrides(&mut cfg);
@@ -709,11 +716,6 @@ gated_promotion_min = 2
 # Score degradation threshold that triggers evolved-skill rollback.
 # 0.05 = 5% drop from best_score triggers rollback.
 # rollback_degradation = 0.05
-
-# If best_score is below this floor, always rollback on stagnation.
-# Applies only to pre-epoch scores (before failures were recorded) and is
-# inactive in the failure-aware epoch, where only real degradation rolls back.
-# rollback_best_floor = 0.90
 
 # Number of recent sessions used for rolling-average stagnation check.
 # stagnation_rolling_window = 3
@@ -1028,6 +1030,19 @@ max_docs = 5
     }
 
     #[test]
+    fn evolution_config_ignores_removed_floor_key() {
+        let c: HarnessConfig =
+            toml::from_str("[evolution]\nrollback_best_floor = 0.5\nmax_skills = 7\n").unwrap();
+        assert_eq!(c.evolution.max_skills, 7);
+        assert_eq!(c.evolution.rollback_degradation, 0.05);
+    }
+
+    #[test]
+    fn template_has_no_rollback_best_floor() {
+        assert!(!default_config_template().contains("rollback_best_floor"));
+    }
+
+    #[test]
     fn template_is_valid_toml() {
         let template = default_config_template();
         let c: HarnessConfig = toml::from_str(template).unwrap();
@@ -1282,5 +1297,37 @@ max_docs = 5
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Outer half: re-run this binary with HARNESS_DIR pointing at a config
+    /// that overrides a threshold, and require the probe below to still see
+    /// the default (CONFIG is a process-wide static, so it needs a fresh process).
+    #[test]
+    fn config_ignores_config_file_in_unit_tests() {
+        let dir = scratch_dir("probe");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.toml"), "[model]\ninject_total_chars = 1\n").unwrap();
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["config_probe_inner", "--nocapture"])
+            .env("HARNESS_DIR", &dir)
+            .env("EPIC_CONFIG_PROBE", "1")
+            .env("HARNESS_DB_URL", "postgres://localhost/synthetic")
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(out.status.success(), "probe failed: {stdout}");
+        assert!(stdout.contains("1 passed"), "probe did not run: {stdout}");
+    }
+
+    #[test]
+    fn config_probe_inner() {
+        if std::env::var_os("EPIC_CONFIG_PROBE").is_none() {
+            return;
+        }
+        // config.toml is not read, but env overrides and driver auto-correct still run.
+        assert_eq!(CONFIG.model.inject_total_chars, 10_000);
+        assert_eq!(CONFIG.db.harness_url, "postgres://localhost/synthetic");
+        assert_eq!(CONFIG.db.driver, "postgres");
     }
 }

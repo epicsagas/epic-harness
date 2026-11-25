@@ -28,21 +28,15 @@ pub const SCORE_EPOCH: u32 = 1;
 /// would make ordinary variance look like degradation.
 const MIN_EPOCH_SESSIONS_FOR_ROLLBACK: usize = 5;
 
-/// Pure rollback decision. Real degradation against the best score qualifies
-/// once the epoch has `MIN_EPOCH_SESSIONS_FOR_ROLLBACK` scored sessions. The
-/// absolute floor applies only to pre-epoch scores: failure-aware scores
-/// (epoch >= `SCORE_EPOCH`) are naturally lower, so a floor would roll back any
-/// flat project.
+/// Pure rollback decision: real degradation against the epoch's best score,
+/// once the epoch has `MIN_EPOCH_SESSIONS_FOR_ROLLBACK` scored sessions.
 fn rollback_warranted(
-    score_epoch: u32,
     epoch_sessions: usize,
     best: f64,
     current: f64,
     degradation_limit: f64,
-    floor: f64,
 ) -> bool {
-    epoch_sessions >= MIN_EPOCH_SESSIONS_FOR_ROLLBACK
-        && (best - current > degradation_limit || (score_epoch < SCORE_EPOCH && best < floor))
+    epoch_sessions >= MIN_EPOCH_SESSIONS_FOR_ROLLBACK && best - current > degradation_limit
 }
 
 /// Replace `backup` with a copy of `evolved`.
@@ -125,12 +119,10 @@ fn check_stagnation_in(
     if metrics.stagnation_count >= CONFIG.evolution.stagnation_limit {
         // Rollback decision still uses absolute best_score
         if rollback_warranted(
-            metrics.score_epoch,
             history.len(),
             metrics.best_score.unwrap_or(0.0),
             current_score,
             CONFIG.evolution.rollback_degradation,
-            CONFIG.evolution.rollback_best_floor,
         ) && backup.is_dir()
         {
             let before_count = list_dirs(evolved).len() as u64;
@@ -385,17 +377,22 @@ pub fn partition_holdout(
     (active, holdout)
 }
 
-/// Split the active arm into (exposed, withheld). A skill is exposed (injected
-/// at session start) when templates are injected or its body was synthesized;
-/// the rest were withheld and must not be credited with the session score.
+/// Split the active arm into (exposed, withheld). `injected` is the list
+/// `resume` recorded of skills whose bodies actually reached the context: when
+/// present it is authoritative, so a skill dropped by the character budget is
+/// withheld. Without a record, a skill is exposed when templates are injected
+/// or its body was synthesized. Withheld skills must not be credited with the
+/// session score.
 pub fn split_exposed(
     active: Vec<String>,
+    injected: Option<&[String]>,
     inject_templates: bool,
     is_synth: impl Fn(&str) -> bool,
 ) -> (Vec<String>, Vec<String>) {
-    active
-        .into_iter()
-        .partition(|name| inject_templates || is_synth(name))
+    active.into_iter().partition(|name| match injected {
+        Some(list) => list.contains(name),
+        None => inject_templates || is_synth(name),
+    })
 }
 
 /// Update per-skill A/B attribution from one session.
@@ -491,8 +488,8 @@ mod tests {
 
     #[test]
     fn rollback_needs_enough_epoch_sessions() {
-        assert!(!rollback_warranted(1, 4, 0.95, 0.80, 0.05, 0.90));
-        assert!(rollback_warranted(1, 5, 0.95, 0.80, 0.05, 0.90));
+        assert!(!rollback_warranted(4, 0.95, 0.80, 0.05));
+        assert!(rollback_warranted(5, 0.95, 0.80, 0.05));
     }
 
     /// Upgrade day: the reset session scores high by luck, later sessions score
@@ -680,25 +677,59 @@ mod tests {
         }
         assert_eq!(metrics.stagnation_count, 3);
         // The same decision as a pure function.
-        assert!(!rollback_warranted(1, 5, 0.80, 0.79, 0.05, 0.90));
+        assert!(!rollback_warranted(5, 0.80, 0.79, 0.05));
     }
 
     #[test]
     fn epoch_one_real_degradation_still_rolls_back() {
-        assert!(rollback_warranted(1, 5, 0.80, 0.70, 0.05, 0.90));
-        assert!(
-            !rollback_warranted(1, 5, 0.80, 0.76, 0.05, 0.90),
-            "under threshold"
-        );
+        assert!(rollback_warranted(5, 0.80, 0.70, 0.05));
+        assert!(!rollback_warranted(5, 0.80, 0.76, 0.05), "under threshold");
     }
 
     #[test]
-    fn epoch_zero_floor_behavior_is_unchanged() {
-        // Below the floor rolls back even without degradation.
-        assert!(rollback_warranted(0, 5, 0.80, 0.80, 0.05, 0.90));
-        // At or above the floor, only degradation counts.
-        assert!(!rollback_warranted(0, 5, 0.95, 0.94, 0.05, 0.90));
-        assert!(rollback_warranted(0, 5, 0.95, 0.80, 0.05, 0.90));
+    fn rollback_warranted_is_pure_degradation() {
+        for n in 0..=8usize {
+            for b in 0..=20 {
+                for c in 0..=20 {
+                    for limit in [0.0, 0.02, 0.05, 0.2] {
+                        let (best, current) = (b as f64 * 0.05, c as f64 * 0.05);
+                        assert_eq!(
+                            rollback_warranted(n, best, current, limit),
+                            n >= 5 && best - current > limit,
+                            "n={n} best={best} current={current} limit={limit}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A low but flat best score must not roll back: only real degradation does.
+    #[test]
+    fn low_best_flat_scores_do_not_roll_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let (evolved, backup) = (dir.path().join("evolved"), dir.path().join("backup"));
+        write_skill(&backup, "old");
+        write_skill(&evolved, "old");
+        write_skill(&evolved, "newer");
+        let mut metrics = default_metrics();
+        metrics.total_sessions = 10;
+        metrics.best_score = Some(0.80);
+        for _ in 0..5 {
+            metrics
+                .score_history
+                .push(scored_entry("2026-04-09T00:00:00Z", 0.80));
+        }
+        for _ in 0..3 {
+            let (rollback, improved, _) =
+                check_stagnation_in(&mut metrics, 0.80, &evolved, &backup);
+            assert!(!rollback && !improved);
+        }
+        assert_eq!(metrics.stagnation_count, 3);
+        assert!(
+            evolved.join("newer").is_dir(),
+            "skills must not be rolled back"
+        );
     }
 
     #[test]
@@ -1028,12 +1059,26 @@ mod tests {
     #[test]
     fn split_exposed_withholds_templates_unless_injected() {
         let names = || vec!["a".to_string(), "b".to_string()];
-        let (exposed, withheld) = split_exposed(names(), false, |n| n == "b");
+        let (exposed, withheld) = split_exposed(names(), None, false, |n| n == "b");
         assert_eq!(exposed, vec!["b".to_string()]);
         assert_eq!(withheld, vec!["a".to_string()]);
-        let (exposed, withheld) = split_exposed(names(), true, |_| false);
+        let (exposed, withheld) = split_exposed(names(), None, true, |_| false);
         assert_eq!(exposed, names());
         assert!(withheld.is_empty());
+    }
+
+    #[test]
+    fn split_exposed_withholds_skills_dropped_by_injection_budget() {
+        let names = || vec!["a".to_string(), "b".to_string()];
+        // Both would pass the policy, but only "a" survived the budget.
+        let injected = vec!["a".to_string()];
+        let (exposed, withheld) = split_exposed(names(), Some(&injected), true, |_| true);
+        assert_eq!(exposed, vec!["a".to_string()]);
+        assert_eq!(withheld, vec!["b".to_string()]);
+        // An empty record means nothing was injected: nothing is credited.
+        let (exposed, withheld) = split_exposed(names(), Some(&[]), true, |_| true);
+        assert!(exposed.is_empty());
+        assert_eq!(withheld, names());
     }
 
     #[test]
