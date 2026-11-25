@@ -36,6 +36,8 @@ pub enum RecallAccess {
     Explicit,
     /// accessed_at = now only; access_count unchanged
     Passive,
+    /// No writes at all: neither access_count nor accessed_at
+    ReadOnly,
 }
 
 pub fn smart_recall(
@@ -66,6 +68,41 @@ pub fn smart_recall_passive(
         limit,
         RecallAccess::Passive,
     ))
+}
+
+/// Why [`smart_recall_readonly`] returned no result.
+#[derive(Debug)]
+pub enum RecallReadError {
+    TimedOut,
+    /// Carried for callers and `Debug`; the prompt hook only fails open on it.
+    #[allow(dead_code)]
+    Io(io::Error),
+}
+
+/// Read-only project recall for latency-bounded hooks. Opens memory.db with
+/// `mode=ro` (never cached in `MEMORY_POOL`, no schema init or migration),
+/// applies `budget` as a tokio timeout around connect plus query, and closes
+/// the pool before returning. `Ok(vec![])` when the database does not exist.
+pub fn smart_recall_readonly(
+    project: Option<&str>,
+    hint: Option<&str>,
+    limit: usize,
+    budget: std::time::Duration,
+) -> Result<Vec<ScoredNode>, RecallReadError> {
+    // `timeout` registers a timer on construction, so it must be built inside the runtime.
+    runtime::block_on(async {
+        tokio::time::timeout(budget, async {
+            let Some(pool) = crate::store::pool::memory_pool_if_exists().await? else {
+                return Ok(vec![]);
+            };
+            let got = smart_recall_async(&pool, project, hint, limit, RecallAccess::ReadOnly).await;
+            pool.close().await;
+            got
+        })
+        .await
+    })
+    .map_err(|_| RecallReadError::TimedOut)?
+    .map_err(RecallReadError::Io)
 }
 
 /// Async core — shared by sync wrapper and pool variant.
@@ -186,6 +223,7 @@ pub(crate) async fn smart_recall_async(
 }
 
 /// Update accessed_at (and access_count when explicit) for the given node IDs.
+/// `ReadOnly` touches nothing.
 async fn touch_nodes_async(
     pool: &sqlx::AnyPool,
     ids: &[String],
@@ -198,6 +236,7 @@ async fn touch_nodes_async(
                 "UPDATE nodes SET access_count = access_count + 1, accessed_at = ? WHERE id = ?"
             }
             RecallAccess::Passive => "UPDATE nodes SET accessed_at = ? WHERE id = ?",
+            RecallAccess::ReadOnly => return Ok(()),
         };
         sqlx::query(sql)
             .bind(&now)

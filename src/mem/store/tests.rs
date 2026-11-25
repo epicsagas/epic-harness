@@ -403,6 +403,22 @@ async fn c_passive_recall_keeps_access_count() {
 }
 
 #[tokio::test]
+async fn c_readonly_recall_writes_nothing() {
+    let pool = mem_pool().await;
+    let mut node = scoped_node("node-a", "topic", "x", &["p"], &[]);
+    node.frontmatter.access_count = 3;
+    node.frontmatter.accessed_at = String::new();
+    write_node_pool(&pool, &node).await.unwrap();
+    let got = smart_recall_async(&pool, Some("p"), None, 5, RecallAccess::ReadOnly)
+        .await
+        .unwrap();
+    assert_eq!(got.len(), 1);
+    let after = read_node_pool(&pool, "node-a").await.unwrap();
+    assert_eq!(after.frontmatter.access_count, 3);
+    assert_eq!(after.frontmatter.accessed_at, "");
+}
+
+#[tokio::test]
 async fn c_explicit_recall_bumps_access_count() {
     let pool = mem_pool().await;
     let mut node = scoped_node("node-a", "topic", "x", &["p"], &[]);

@@ -73,7 +73,9 @@ pub use decay::{decay_importance, tag_stale_nodes, touch_nodes_pool};
 
 // ── Re-exports: recall ────────────────────────────────
 
-pub use recall::{smart_recall, smart_recall_passive, smart_recall_pool};
+pub use recall::{
+    RecallReadError, smart_recall, smart_recall_passive, smart_recall_pool, smart_recall_readonly,
+};
 
 // ── Re-exports: search ────────────────────────────────
 

@@ -10,7 +10,7 @@
   - `rules/` — Seeded host rule files
   - `scripts/install.js` — Plugin bootstrap (SessionStart)
 - `src/` — Rust crate; single binary (`epic-harness`)
-  - `src/hooks/` — Ring 0 automation (guard, polish, observe, resume, snapshot, reflect)
+  - `src/hooks/` — Ring 0 automation (guard, polish, observe, resume, snapshot, reflect, prompt)
   - `src/evolve/` — Ring 3 evolution loop
 - `docs/` — User-facing documentation and assets
   - `architecture.md`, `quickstart.md`, `demo/`, `references/`, `specs/`
@@ -260,6 +260,10 @@ Pipeline flow: `/threat-model` → `/vuln-scan` → `/triage`
 Polish hook (format/typecheck) results auto-record into observe pipeline.
 Format failure = lint_fail, typecheck failure = build_fail — feeds into pattern detection.
 
+## Prompt Hook (opt-in, Claude Code only)
+
+`epic prompt` runs on `UserPromptSubmit` and is off unless `[prompt] enabled = true` (ADR 0008). When enabled it adds at most `max_chars` (default 1500) of context: skills from a static rule table (`src/hooks/prompt.rs`) and project memories matched by an FTS hint, recalled read-only (`RecallAccess::ReadOnly`, `memory.db` opened `mode=ro`, no schema init) within `timeout_ms` (default 250). It always exits 0, prints nothing on the stdin passthrough branch, and never logs the prompt: the dispatch line in `dispatch/dispatch_YYYYMMDD.jsonl` holds rule ids, counts, memory ids, and timings only. Codex registration is phase 2 after a live probe.
+
 ## Dispatch Logging
 
 Skill dispatches logged to `~/.harness/projects/{slug}/dispatch/dispatch_YYYYMMDD.jsonl`.
@@ -291,7 +295,7 @@ Memory retrieval uses composite scoring instead of simple latest-N:
 
 ### Memory Lifecycle
 
-- **Access tracking**: Explicit recall and context calls (CLI, MCP) increment `access_count` and update `accessed_at`. Hook-driven reads (SessionStart, reflect --context) and calls with `--passive` update `accessed_at` only, so they do not inflate ranking.
+- **Access tracking**: Explicit recall and context calls (CLI, MCP) increment `access_count` and update `accessed_at`. Hook-driven reads (SessionStart, reflect --context) and calls with `--passive` update `accessed_at` only, so they do not inflate ranking. The prompt hook is `ReadOnly` and writes neither column.
 - **Gradual decay**: Nodes untouched for 30+ days lose 10% importance per cycle (floor=0.05). `pinned` tag prevents decay.
 - **Stale tagging**: Nodes untouched for 180+ days tagged as `stale` and excluded from recall.
 - **Graph augmentation**: `epic mem recall` follows 1-hop edges from top results, returning related nodes with connection counts.

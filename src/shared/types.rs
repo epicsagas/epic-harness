@@ -41,6 +41,10 @@ pub struct HookInput {
     /// `hook_event_name`, whose presence switches the stdout protocol.
     #[serde(rename = "hookEventName")]
     pub hook_event_name_camel: Option<serde_json::Value>,
+    /// UserPromptSubmit prompt text (Claude, Codex). Untrusted user content:
+    /// never logged, persisted, serialized, or interpolated into a command.
+    #[serde(default, skip_serializing)]
+    pub prompt: Option<String>,
 }
 
 impl HookInput {
@@ -213,6 +217,7 @@ pub const PROFILE_POLISH: HookProfile = HookProfile::Standard;
 pub const PROFILE_REFLECT: HookProfile = HookProfile::Standard;
 pub const PROFILE_SNAPSHOT: HookProfile = HookProfile::Standard;
 pub const PROFILE_RESUME: HookProfile = HookProfile::Minimal;
+pub const PROFILE_PROMPT: HookProfile = HookProfile::Standard;
 
 #[cfg(test)]
 mod tests {

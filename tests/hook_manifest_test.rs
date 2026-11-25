@@ -57,6 +57,24 @@ fn claude_marks_subagents_running_before_they_finish() {
     );
 }
 
+/// The prompt hook is registered once, never blocks (no onFailure, no async)
+/// and has a short timeout. UserPromptSubmit takes no matcher.
+#[test]
+fn claude_registers_prompt_submit() {
+    let m = manifest(CLAUDE);
+    let groups = m["hooks"]["UserPromptSubmit"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{groups:?}");
+    assert!(groups[0].get("matcher").is_none(), "{groups:?}");
+    let handlers = groups[0]["hooks"].as_array().unwrap();
+    assert_eq!(handlers.len(), 1, "{handlers:?}");
+    let h = &handlers[0];
+    assert!(invokes(h["command"].as_str().unwrap(), "prompt"), "{h:?}");
+    assert_eq!(h["timeout"], 5);
+    assert!(h.get("async").is_none(), "{h:?}");
+    assert!(h.get("onFailure").is_none(), "{h:?}");
+    assert!(h.get("matcher").is_none(), "{h:?}");
+}
+
 /// Completion must stay observed too — the wildcard PostToolUse covers it.
 #[test]
 fn claude_observes_tool_completion() {

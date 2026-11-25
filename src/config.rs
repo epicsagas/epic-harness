@@ -16,6 +16,7 @@ pub struct HarnessConfig {
     pub context: ContextConfig,
     pub dashboard: DashboardConfig,
     pub db: DbConfig,
+    pub prompt: PromptConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -392,6 +393,44 @@ impl Default for DashboardConfig {
             port: 7700,
             auto_open: true,
         }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct PromptConfig {
+    /// Master switch for the UserPromptSubmit hook. Off by default (ADR 0008).
+    pub enabled: bool,
+    /// Hard cap on the injected context, in chars. Clamped to 200..=4000.
+    pub max_chars: usize,
+    /// Memories to recall per prompt. 0 disables recall. Clamped to 0..=5.
+    pub recall_limit: usize,
+    /// In-process budget from hook entry to end of recall, in ms. Clamped to 50..=2000.
+    pub timeout_ms: u64,
+}
+
+impl Default for PromptConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_chars: 1_500,
+            recall_limit: 3,
+            timeout_ms: 250,
+        }
+    }
+}
+
+impl PromptConfig {
+    pub fn max_chars(&self) -> usize {
+        self.max_chars.clamp(200, 4_000)
+    }
+
+    pub fn recall_limit(&self) -> usize {
+        self.recall_limit.min(5)
+    }
+
+    pub fn timeout_ms(&self) -> u64 {
+        self.timeout_ms.clamp(50, 2_000)
     }
 }
 
@@ -813,6 +852,22 @@ max_docs = 20
 # Automatically open the browser on first session start.
 # auto_open = true
 
+# ── Prompt hook ───────────────────────────────────────
+[prompt]
+# Task-scoped skill and memory context on every user prompt (Claude Code
+# UserPromptSubmit). Off by default; see docs/adr/0008-prompt-hook-opt-in.md.
+# Read-only: it never writes memory.db. Needs profile "standard" or above.
+# enabled = false
+
+# Hard cap on the injected context, in chars (200-4000).
+# max_chars = 1500
+
+# Memories recalled per prompt (0-5). 0 disables recall.
+# recall_limit = 3
+
+# In-process budget in ms from hook entry to end of recall (50-2000).
+# timeout_ms = 250
+
 # ── Database ──────────────────────────────────────────
 [db]
 # Database driver: "sqlite" | "postgres" | "mysql".
@@ -1027,6 +1082,28 @@ max_docs = 5
         assert_eq!(c.db.driver, "sqlite");
         assert_eq!(c.db.max_connections, 5);
         assert_eq!(c.db.tls_mode, "prefer");
+    }
+
+    #[test]
+    fn cfg_prompt_defaults_and_clamps() {
+        let c = HarnessConfig::default();
+        assert!(!c.prompt.enabled);
+        assert_eq!(c.prompt.max_chars(), 1_500);
+        assert_eq!(c.prompt.recall_limit(), 3);
+        assert_eq!(c.prompt.timeout_ms(), 250);
+
+        let c: HarnessConfig = toml::from_str(
+            "[prompt]\nenabled = true\nmax_chars = 10\ntimeout_ms = 0\nrecall_limit = 99\nunknown = 1\n",
+        )
+        .unwrap();
+        assert!(c.prompt.enabled);
+        assert_eq!(c.prompt.max_chars(), 200);
+        assert_eq!(c.prompt.timeout_ms(), 50);
+        assert_eq!(c.prompt.recall_limit(), 5);
+        let c: HarnessConfig =
+            toml::from_str("[prompt]\nmax_chars = 99999\ntimeout_ms = 99999\n").unwrap();
+        assert_eq!(c.prompt.max_chars(), 4_000);
+        assert_eq!(c.prompt.timeout_ms(), 2_000);
     }
 
     #[test]

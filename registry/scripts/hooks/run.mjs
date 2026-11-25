@@ -53,6 +53,12 @@ export function localEpicPath(home, platform = process.platform, exists = exists
 }
 
 const args = process.argv.slice(2);
+
+// `prompt` (UserPromptSubmit) stdout becomes model context on every prompt, so
+// a missing harness stays silent there instead of injecting the notice.
+const epicNotFound = () => {
+  if (args[0] !== "prompt") console.log("[harness] epic not found");
+};
 if (args.length === 0) {
   // exitCode (not process.exit): stdout to a pipe is an async write, and a
   // piped notice must not be truncated by an early exit.
@@ -104,7 +110,7 @@ if (args.length === 0) {
   if (epicMissing) {
     // No child is pending, so exitCode (not process.exit) lets the piped
     // notice flush before the event loop drains.
-    console.log("[harness] epic not found");
+    epicNotFound();
     process.exitCode = 0;
   } else {
     // On Windows `epic` may be a .cmd shim (npm install); spawning .cmd files
@@ -128,7 +134,7 @@ if (args.length === 0) {
       spawnFailed = true;
       if (err.code === "ENOENT") {
         // Missing harness: degrade on stdout, exit 0.
-        console.log("[harness] epic not found");
+        epicNotFound();
         process.exitCode = 0;
       } else {
         // Present-but-broken install (EACCES, ...): surface on stderr and
@@ -148,7 +154,7 @@ if (args.length === 0) {
       // Belt-and-suspenders for the win32 shell:true 9009 path (the where.exe
       // probe above should normally catch it first).
       if (process.platform === "win32" && code === 9009) {
-        console.log("[harness] epic not found");
+        epicNotFound();
         process.exitCode = 0;
         return;
       }

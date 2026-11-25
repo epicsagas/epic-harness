@@ -108,6 +108,13 @@ test("guard with no binary anywhere prints the notice and exits 0", () => {
   assert.match(r.stdout, /\[harness\] epic not found/);
 });
 
+test("prompt with no binary anywhere prints nothing and exits 0", () => {
+  const l = layout("");
+  const r = run(l, ["prompt"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+});
+
 // run.mjs does its work at import time; with no subcommand that is one notice line.
 const { appendToPath, localEpicPath } = await (async () => {
   const [argv, log] = [process.argv, console.log];

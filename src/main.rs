@@ -163,7 +163,7 @@ fn main() {
     // the dispatch below let a new hook subcommand silently skip stdin
     // (HookInput::default() → session_id None → degraded resume lock keys).
     const HOOK_SUBCMDS: &[&str] = &[
-        "resume", "guard", "polish", "observe", "snapshot", "reflect",
+        "resume", "guard", "polish", "observe", "snapshot", "reflect", "prompt",
     ];
 
     // Read stdin once, pass to hook subcommands only. Other subcommands
@@ -218,6 +218,7 @@ fn main() {
         "observe" => hooks::observe::run(&input),
         "snapshot" => hooks::snapshot::run(&input),
         "reflect" => hooks::reflect::run(&input),
+        "prompt" => hooks::prompt::run(&input),
         "migrate" => {
             let dry_run = args.iter().any(|a| a == "--dry-run");
             let reset = args.iter().any(|a| a == "--reset");
@@ -305,6 +306,7 @@ fn main() {
             eprintln!("  observe      Record tool call observations for pattern analysis");
             eprintln!("  polish       Auto-format and typecheck after file edits");
             eprintln!("  snapshot     Save session state mid-conversation");
+            eprintln!("  prompt       Task-scoped skill and memory context on prompt submit");
             eprintln!("  reflect      Analyze observations and evolve skills (session end)");
             eprintln!(
                 "  reflect --context [OPTIONS]  Collect harness data as JSON for /reflect skill"
@@ -415,7 +417,7 @@ fn main() {
                 }
                 println!("{out}");
             }
-            "guard" | "observe" | "polish" | "resume" => {
+            "guard" | "observe" | "polish" | "resume" | "prompt" => {
                 // hint() writes to stderr, which Codex does NOT feed to the
                 // model, so replay the mirrored lines on stdout. Raw text is
                 // not safe: Codex parses stdout that starts with `{` or `[`
@@ -434,7 +436,8 @@ fn main() {
                     let payload = serde_json::to_string(&mirrored.join("\n"))
                         .unwrap_or_else(|_| "\"\"".to_string());
                     match event {
-                        "SessionStart" | "SubagentStart" | "PreToolUse" | "PostToolUse" => {
+                        "SessionStart" | "SubagentStart" | "PreToolUse" | "PostToolUse"
+                        | "UserPromptSubmit" => {
                             println!(
                                 r#"{{"hookSpecificOutput":{{"hookEventName":"{event}","additionalContext":{payload}}}}}"#
                             );
@@ -451,8 +454,10 @@ fn main() {
             }
             _ => {}
         }
-    } else {
-        // Claude Code: stdin passthrough contract
+    } else if subcmd != "prompt" {
+        // Claude Code: stdin passthrough contract. Never for `prompt`: the
+        // echo would put the raw prompt JSON on stdout, where Claude parses it
+        // as hook output or adds it to the model context.
         print!("{stdin_buf}");
     }
 
