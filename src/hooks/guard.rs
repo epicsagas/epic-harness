@@ -427,8 +427,11 @@ pub fn run(input: &HookInput) -> i32 {
                 let generation = directive
                     .map(|d| format!(" (gen {})", d.generation))
                     .unwrap_or_default();
-                eprintln!(
-                    "[orchestrator] Agent {agent_id} is {verb} by user directive{generation}"
+                // hint() prints the same "[orchestrator] ..." line on stderr and
+                // mirrors it, so main can use it as the Claude deny reason.
+                hint(
+                    "orchestrator",
+                    &format!("Agent {agent_id} is {verb} by user directive{generation}"),
                 );
                 return 2;
             }

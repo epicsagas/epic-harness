@@ -144,7 +144,9 @@ if (mode === "degrade") {
     // PLUGIN_ROOT must not leak in: run.mjs would resolve install.cjs from it.
     const { PLUGIN_ROOT: _unused, ...baseEnv } = process.env;
     // A cmd.exe-style expansion of %EPIC_QA% would corrupt the path.
-    const env = { ...baseEnv, EPIC_QA: "expanded" };
+    // CLAUDE_PROJECT_DIR is what Claude exports to hooks; the binary uses it to
+    // recognize a Claude PreToolUse call.
+    const env = { ...baseEnv, EPIC_QA: "expanded", CLAUDE_PROJECT_DIR: tmp };
     const shells =
       process.platform === "win32"
         ? [
@@ -190,21 +192,33 @@ if (mode === "degrade") {
         check(`claude-shell ${shell.name} ${phase}: ${hook.raw}`, ok, detail(r));
       }
       if (phase === "live") {
-        // A guard block (exit 2) must survive the shell: `pwsh -Command` maps
-        // external exit codes other than 0/1 to 1, which would turn a block
-        // into a pass-through. A mismatch is reported, never masked.
+        // On Claude a guard block is exit 0 plus one PreToolUse deny object,
+        // not exit 2: `pwsh -Command` maps external exit codes other than 0/1
+        // to 1, which Claude reads as a non-blocking error. A mismatch is
+        // reported, never masked.
         const guard = claudeHooks.find((h) => h.sub === "guard");
         const r = runShell(
           shell,
           guard,
-          JSON.stringify({ tool_name: "Bash", tool_input: { command: "rm -rf /" } }),
+          JSON.stringify({
+            hook_event_name: "PreToolUse",
+            tool_name: "Bash",
+            tool_input: { command: "rm -rf /" },
+          }),
         );
+        let decision;
+        try {
+          decision = JSON.parse(r.stdout).hookSpecificOutput?.permissionDecision;
+        } catch {
+          decision = undefined;
+        }
+        const ok = r.status === 0 && decision === "deny";
         check(
-          `claude-shell ${shell.name} live: guard block keeps exit 2`,
-          r.status === 2,
-          r.status === 2
+          `claude-shell ${shell.name} live: guard block is exit 0 with a deny decision`,
+          ok,
+          ok
             ? detail(r)
-            : `${shell.name} returned exit ${r.status} for a blocked command, expected 2 (blocking contract broken in this shell); ${detail(r)}`,
+            : `${shell.name} returned exit ${r.status} with permissionDecision=${decision} for a blocked command, expected exit 0 and "deny" (blocking contract broken in this shell); ${detail(r)}`,
         );
       }
     }

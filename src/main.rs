@@ -185,6 +185,7 @@ fn main() {
     }
 
     let mut agy = false;
+    let mut claude_pretooluse = false;
     let input: hooks::common::HookInput = if stdin_buf.is_empty() {
         hooks::common::HookInput::default()
     } else {
@@ -200,6 +201,7 @@ fn main() {
                         let _ = env::set_current_dir(dir);
                     }
                 }
+                claude_pretooluse = !agy && is_claude_pretooluse(&v);
                 // grok sends camelCase keys (alongside snake_case on some events).
                 if matches!(subcmd, "observe" | "guard" | "polish") {
                     shared::types::normalize_hook_payload(&mut v);
@@ -209,7 +211,7 @@ fn main() {
             .unwrap_or_default()
     };
 
-    let exit_code = match subcmd {
+    let mut exit_code = match subcmd {
         "resume" => hooks::resume::run(&input),
         "guard" => hooks::guard::run(&input),
         "polish" => hooks::polish::run(&input),
@@ -364,7 +366,28 @@ fn main() {
     // - Claude Code: stdin passthrough (original contract)
     // - Codex: event-specific JSON (detected via hook_event_name)
     // - Antigravity (agy): one strict-protojson object, `{}` or `injectSteps`
-    if agy {
+    // - Claude Code PreToolUse block: exit 0 plus one deny JSON object (below)
+    if claude_pretooluse && subcmd == "guard" && exit_code == 2 {
+        // `pwsh -Command` turns an external exit 2 into 1, which Claude treats
+        // as a non-blocking error, so the block rides the documented JSON
+        // decision instead (https://code.claude.com/docs/en/hooks, "PreToolUse
+        // decision control"). Claude parses stdout only when it is exactly one
+        // JSON object, so nothing else (stdin echo, hints) is printed here;
+        // the reason is the block's own stderr line, mirrored by hint().
+        let mut reason = shared::helpers::take_hint_mirror().join("\n");
+        if reason.is_empty() {
+            reason = "Blocked by epic-harness guard".into();
+        }
+        println!(
+            "{}",
+            serde_json::json!({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }})
+        );
+        exit_code = 0;
+    } else if agy {
         let mirrored = shared::helpers::take_hint_mirror();
         if subcmd == "resume" && !mirrored.is_empty() {
             let out = serde_json::json!({
@@ -431,6 +454,25 @@ fn main() {
         "help" | "--help" | "-h" | "path" | "version" | "--version" | "-v"
     );
     exit_with_cleanup(exit_code, skip_shutdown);
+}
+
+/// True for a Claude Code PreToolUse payload. No single signal is enough:
+/// Claude exports `CLAUDE_PROJECT_DIR` to hooks (measured on claude 2.1.332),
+/// but grok exports it too and Codex also knows the `CLAUDE_*` plugin names.
+/// So the Claude form is the intersection: snake_case `PreToolUse` event,
+/// `CLAUDE_PROJECT_DIR` set, and none of the other hosts' markers (Codex
+/// `turn_id`, grok camelCase keys and `GROK_*` hook variables). An unknown
+/// host falls through to the exit-2 contract.
+fn is_claude_pretooluse(v: &serde_json::Value) -> bool {
+    let set = |k: &str| env::var(k).is_ok_and(|s| !s.is_empty());
+    v.get("hook_event_name").and_then(|e| e.as_str()) == Some("PreToolUse")
+        && ["turn_id", "hookEventName", "toolName"]
+            .iter()
+            .all(|k| v.get(k).is_none())
+        && set("CLAUDE_PROJECT_DIR")
+        && !["GROK_HOOK_EVENT", "GROK_SESSION_ID", "GROK_WORKSPACE_ROOT"]
+            .iter()
+            .any(|k| set(k))
 }
 
 /// Gracefully close connection pools before exit to flush WAL.
