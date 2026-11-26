@@ -466,13 +466,13 @@ fn agy_observe_edit_never_records_content() {
     assert_eq!(rec["tool_category"], "edit");
     assert_eq!(rec["result"], "success");
     let transcript = env.root.join("transcript.jsonl");
-    for secret in [
+    for needle in [
         "SENTINEL-REPLACEMENT",
         "SENTINEL-TARGET",
         "SENTINEL-USER-INPUT",
         transcript.to_str().unwrap(),
     ] {
-        assert!(!raw.contains(secret), "record leaks {secret}: {raw}");
+        assert!(!raw.contains(needle), "record leaks {needle}");
     }
 }
 
