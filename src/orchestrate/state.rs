@@ -452,35 +452,96 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     Ok(file)
 }
 
-/// Earliest time the run's blocks end by themselves.
-pub(crate) fn run_expiry(run: &OrchestrationRun) -> String {
-    crate::shared::helpers::iso_from_secs(epoch_secs_from_iso(&run.updated_at) + RUN_IDLE_SECS)
+fn mtime_secs(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
-/// A run is live while its last activity is at most `RUN_IDLE_SECS` old.
-/// Derived, never persisted: a malformed or far-future `updated_at` is not live.
-pub fn is_live(run: &OrchestrationRun, now: u64) -> bool {
+/// Last activity of the run in epoch seconds, as far as blocks are concerned;
+/// 0 when unknown (malformed `updated_at`).
+///
+/// A timestamp beyond the clock skew allowance (a model-written local time
+/// without offset, a wrong clock) is replaced by the run.json mtime, which
+/// comes from the harness host clock. An aborted run with a bound control.json
+/// is anchored at the earlier of that and control.json's mtime: denied spawns
+/// rewrite run.json, and they must not extend a cancel.
+fn run_activity_secs(base: &Path, run: &OrchestrationRun, now: u64) -> u64 {
     let t = epoch_secs_from_iso(&run.updated_at);
-    t != 0 && t <= now + CLOCK_SKEW_SECS && now.saturating_sub(t) <= RUN_IDLE_SECS
+    if t == 0 {
+        return 0;
+    }
+    let t = if t > now + CLOCK_SKEW_SECS {
+        mtime_secs(&run_file(base)).unwrap_or(0)
+    } else {
+        t
+    };
+    if run.status == RunStatus::Aborted
+        && control_is_bound(base, run)
+        && let Some(c) = mtime_secs(&control_file(base))
+    {
+        return t.min(c);
+    }
+    t
+}
+
+/// Newest sign of life among the run's Running agents: the later of
+/// `started_at` and the agent status file heartbeat (the rule
+/// `auto_cleanup_stale_runs` uses).
+fn agent_last_alive(base: &Path, run: &OrchestrationRun) -> Option<u64> {
+    run.agents
+        .iter()
+        .filter(|a| a.status == AgentStatus::Running)
+        .filter_map(|a| {
+            let started = a.started_at.as_deref().map(epoch_secs_from_iso);
+            let heartbeat =
+                read_agent_status(base, &a.id).map(|s| epoch_secs_from_iso(&s.last_heartbeat));
+            started.into_iter().chain(heartbeat).max()
+        })
+        .filter(|t| *t != 0)
+        .max()
+}
+
+/// Earliest time the run's blocks end by themselves.
+pub(crate) fn run_expiry(base: &Path, run: &OrchestrationRun, now: u64) -> String {
+    let mut last = run_activity_secs(base, run, now);
+    if run.status != RunStatus::Aborted {
+        last = last.max(agent_last_alive(base, run).unwrap_or(0));
+    }
+    crate::shared::helpers::iso_from_secs(last + RUN_IDLE_SECS)
+}
+
+/// A run is live while its last activity is at most `RUN_IDLE_SECS` old, or
+/// (unless aborted) while a Running agent has shown life within that time.
+/// Derived, never persisted: a malformed `updated_at` is not live. An agent
+/// stuck Running is bounded by its last start or heartbeat, so it cannot
+/// extend a block past `RUN_IDLE_SECS` without writing a new heartbeat. An
+/// aborted run never counts agents, so a cancel always expires on schedule.
+pub fn is_live(base: &Path, run: &OrchestrationRun, now: u64) -> bool {
+    let t = run_activity_secs(base, run, now);
+    if t == 0 {
+        return false;
+    }
+    let within = |t: u64| t <= now + CLOCK_SKEW_SECS && now.saturating_sub(t) <= RUN_IDLE_SECS;
+    within(t)
+        || (run.status != RunStatus::Aborted && agent_last_alive(base, run).is_some_and(within))
 }
 
 /// control.json counts for a run only when it was written during that run:
 /// its mtime (whole seconds) is at or after `run.created_at`.
 pub fn control_is_bound(base: &Path, run: &OrchestrationRun) -> bool {
     let created = epoch_secs_from_iso(&run.created_at);
-    let mtime = fs::metadata(control_file(base))
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|d| d.as_secs());
-    created != 0 && mtime.is_some_and(|m| m >= created)
+    created != 0 && mtime_secs(&control_file(base)).is_some_and(|m| m >= created)
 }
 
 /// Whether an Agent spawn is blocked. Pure apart from reading run.json,
 /// control.json and its mtime. Never writes.
 pub fn spawn_block(base: &Path, agent_id: &str, now: u64) -> Option<SpawnBlock> {
     let run = read_run(base)?;
-    if !is_live(&run, now) {
+    if !is_live(base, &run, now) {
         return None;
     }
     let directive = if control_is_bound(base, &run) {
@@ -498,7 +559,7 @@ pub fn spawn_block(base: &Path, agent_id: &str, now: u64) -> Option<SpawnBlock> 
             .map(str::trim)
             .filter(|m| !m.is_empty())
             .map(String::from),
-        expires_at: run_expiry(&run),
+        expires_at: run_expiry(base, &run, now),
     };
     let targeted = directive.as_ref().filter(|d| d.targets(agent_id));
     let resumes = targeted.is_some_and(|d| d.action == ControlAction::Resume);
@@ -554,7 +615,7 @@ pub fn upsert_agent_to_run(
         Some(r)
             if status != AgentStatus::Running
                 || (!matches!(r.status, RunStatus::Complete | RunStatus::Aborted)
-                    && is_live(&r, epoch_secs_now())) =>
+                    && is_live(base, &r, epoch_secs_now())) =>
         {
             r
         }
@@ -775,8 +836,8 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     let run_epoch = epoch_secs_from_iso(&run.updated_at);
     let stale_complete =
         run.status == RunStatus::Complete && current_epoch.saturating_sub(run_epoch) > 3600;
-    let stale_running =
-        run.status == RunStatus::Running && current_epoch.saturating_sub(run_epoch) > RUN_IDLE_SECS;
+    // Same liveness as the gate: a run with a living agent is not stale.
+    let stale_running = run.status == RunStatus::Running && !is_live(base, &run, current_epoch);
 
     // Also mark as complete if all agents are now done
     if run.status == RunStatus::Running && is_run_complete(&run) {
@@ -784,8 +845,9 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
         any_agent_cleaned = true;
     }
 
+    // Cleanup is not run activity: `updated_at` stays, else a session start
+    // would make an expired run live again and revive its pause or cancel.
     if any_agent_cleaned {
-        run.updated_at = now;
         let _ = write_run(base, &run);
     }
 
@@ -796,7 +858,6 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     // Mark as complete if running and stale
     if stale_running {
         run.status = RunStatus::Complete;
-        run.updated_at = crate::shared::helpers::now_iso();
         let _ = write_run(base, &run);
     }
 
@@ -827,9 +888,37 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
 }
 
 /// Parse an ISO-8601 timestamp to epoch seconds.
-/// Reuses the accurate `days_since_epoch` logic from mem::store::util.
+/// Reuses the accurate `days_since_epoch` logic from mem::store::util for the
+/// `YYYY-MM-DDThh:mm:ss` part, then honors optional fractional seconds and a
+/// `Z` or `+hh:mm` / `-hh:mm` offset (what `date -Iseconds` writes). No suffix
+/// means UTC.
 fn epoch_secs_from_iso(iso: &str) -> u64 {
-    crate::mem::store::parse_iso_to_secs(iso)
+    let utc_as_written = crate::mem::store::parse_iso_to_secs(iso);
+    if utc_as_written == 0 {
+        return 0;
+    }
+    let rest = iso.get(19..).unwrap_or("");
+    let rest = match rest.strip_prefix('.') {
+        Some(frac) => frac.trim_start_matches(|c: char| c.is_ascii_digit()),
+        None => rest,
+    };
+    let (west, offset) = match rest.split_at_checked(1) {
+        Some(("+", o)) => (false, o),
+        Some(("-", o)) => (true, o),
+        _ => return utc_as_written,
+    };
+    let digits = offset.replacen(':', "", 1);
+    let number = |range| digits.get(range).and_then(|d: &str| d.parse::<u64>().ok());
+    let secs = match (digits.len(), number(0..2), number(2..4)) {
+        (2, Some(h), _) => h * 3600,
+        (4, Some(h), Some(m)) => h * 3600 + m * 60,
+        _ => return utc_as_written,
+    };
+    if west {
+        utc_as_written + secs
+    } else {
+        utc_as_written.saturating_sub(secs)
+    }
 }
 
 /// Current time as approximate epoch seconds.
@@ -2006,16 +2095,25 @@ mod tests {
             0,
             &[("x", AgentStatus::Running)],
         );
+        // Malformed: not live whatever the files say.
+        run.updated_at = "garbage".to_string();
+        write_run(base, &run).unwrap();
+        assert!(!is_live(base, &run, now));
+        assert_eq!(spawn_block(base, "x", now), None);
+
+        // Future beyond the skew allowance: the run.json mtime stands in, so an
+        // old mtime means expired (a future time cannot pin a block forever).
         let just_too_far = iso_from_secs(now + 301);
-        for bad in ["2099-01-01T00:00:00Z", "garbage", just_too_far.as_str()] {
-            run.updated_at = bad.to_string();
+        for future in ["2099-01-01T00:00:00Z", just_too_far.as_str()] {
+            run.updated_at = future.to_string();
             write_run(base, &run).unwrap();
-            assert!(!is_live(&run, now), "{bad}");
-            assert_eq!(spawn_block(base, "x", now), None, "{bad}");
+            set_mtime(&run_file(base), now - 3 * 3600);
+            assert!(!is_live(base, &run, now), "{future}");
+            assert_eq!(spawn_block(base, "x", now), None, "{future}");
         }
-        // Within the clock skew allowance the run is still live.
+        // Within the clock skew allowance the timestamp is trusted.
         run.updated_at = iso_from_secs(now + 300);
-        assert!(is_live(&run, now));
+        assert!(is_live(base, &run, now));
 
         // Malformed created_at: control.json is unbound.
         let mut run = live_run(
@@ -2517,5 +2615,244 @@ mod tests {
         ids.sort_unstable();
         let expected: Vec<String> = (0..8).map(|i| format!("agent-{i}")).collect();
         assert_eq!(ids, expected);
+    }
+
+    // Review round 2.
+
+    /// Run `auto-r1` created 4h and updated 3h ago (expired) with a bound
+    /// `pause all` written 3h + 1 min ago.
+    fn expired_pause(base: &Path, now: u64, agents: &[(&str, AgentStatus)]) {
+        live_run(base, now, RunStatus::Running, 4 * 3600, 3 * 3600, agents);
+        put_control(
+            base,
+            ControlAction::Pause,
+            Some("all"),
+            None,
+            now - 3 * 3600 - 60,
+        );
+    }
+
+    /// Cleanup is not run activity: it must not make an expired run live again.
+    #[test]
+    fn cleanup_does_not_revive_expired_pause_stale_running_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        expired_pause(
+            base,
+            now,
+            &[("a", AgentStatus::Done), ("b", AgentStatus::Blocked)],
+        );
+        let before = read_run(base).unwrap();
+        assert_eq!(spawn_block(base, "new", now), None);
+        auto_cleanup_stale_runs(base);
+        let after = read_run(base).unwrap();
+        assert_eq!(after.status, RunStatus::Complete, "stale run is closed");
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(spawn_block(base, "new", epoch_secs_now()), None);
+    }
+
+    #[test]
+    fn cleanup_does_not_revive_expired_pause_stale_agent_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        // No start and no heartbeat: cleanup marks `a` done.
+        expired_pause(base, now, &[("a", AgentStatus::Running)]);
+        let before = read_run(base).unwrap();
+        auto_cleanup_stale_runs(base);
+        let after = read_run(base).unwrap();
+        assert_eq!(after.agents[0].status, AgentStatus::Done, "agent cleaned");
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(spawn_block(base, "new", epoch_secs_now()), None);
+    }
+
+    #[test]
+    fn epoch_parsing_honors_offsets() {
+        let utc = epoch_secs_from_iso("2026-11-26T10:00:00Z");
+        assert_ne!(utc, 0);
+        assert_eq!(
+            epoch_secs_from_iso("2026-11-26T10:00:00"),
+            utc,
+            "no suffix is UTC"
+        );
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00+09:00"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00+0900"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00+09"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T05:00:00-05:00"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T10:00:00.250Z"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00.5+09:00"), utc);
+        // An unreadable suffix keeps the old UTC reading.
+        assert_eq!(epoch_secs_from_iso("2026-11-26T10:00:00+zz"), utc);
+        assert_eq!(epoch_secs_from_iso("garbage"), 0);
+    }
+
+    /// The reviewer's scenario: the skill text lets the model write local time
+    /// with an offset (`date -Iseconds`); that must not look like the future.
+    #[test]
+    fn offset_timestamp_blocks_cancel_all() {
+        let now = epoch_secs_now();
+        for (offset, shift) in [("+09:00", 9 * 3600i64), ("-05:00", -5 * 3600)] {
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            let mut run = live_run(
+                base,
+                now,
+                RunStatus::Aborted,
+                600,
+                0,
+                &[("a", AgentStatus::Running)],
+            );
+            let local = iso_from_secs((now as i64 + shift) as u64);
+            run.updated_at = format!("{}{offset}", &local[..19]);
+            write_run(base, &run).unwrap();
+            put_control(base, ControlAction::Cancel, Some("all"), None, now);
+            assert_eq!(
+                kind_of(base, "new", now),
+                Some(BlockKind::RunCancelled),
+                "cancel all ignored: {}",
+                run.updated_at
+            );
+            // The same abort written 2h + 1s ago has expired.
+            let old = iso_from_secs((now as i64 + shift) as u64 - 7201);
+            run.updated_at = format!("{}{offset}", &old[..19]);
+            write_run(base, &run).unwrap();
+            put_control(base, ControlAction::Cancel, Some("all"), None, now - 7201);
+            assert_eq!(kind_of(base, "new", now), None, "{offset} expired");
+        }
+    }
+
+    #[test]
+    fn future_updated_at_on_aborted_run_blocks_until_mtime_plus_2h() {
+        let now = epoch_secs_now();
+        for (mtime_ago, blocked) in [(7000u64, true), (7300, false)] {
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            let mut run = live_run(
+                base,
+                now,
+                RunStatus::Aborted,
+                20000,
+                0,
+                &[("a", AgentStatus::Running)],
+            );
+            run.updated_at = "2099-01-01T00:00:00Z".to_string();
+            write_run(base, &run).unwrap();
+            set_mtime(&run_file(base), now - mtime_ago);
+            put_control(base, ControlAction::Cancel, Some("all"), None, now);
+            let block = spawn_block(base, "new", now);
+            assert_eq!(block.is_some(), blocked, "mtime {mtime_ago}s ago");
+            if let Some(b) = block {
+                assert_eq!(
+                    b.expires_at,
+                    iso_from_secs(now - mtime_ago + RUN_IDLE_SECS),
+                    "expiry anchored at the run.json mtime"
+                );
+            }
+        }
+    }
+
+    /// Denied spawns rewrite run.json, so a bound control.json (written when
+    /// the abort was) is the earlier anchor and caps the abort at 2h.
+    #[test]
+    fn abort_expiry_is_anchored_at_the_earlier_of_control_and_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let mut run = live_run(base, now, RunStatus::Aborted, 20000, 0, &[]);
+        run.updated_at = "2099-01-01T00:00:00Z".to_string();
+        write_run(base, &run).unwrap(); // run.json mtime: now (a denied retry)
+        put_control(base, ControlAction::Cancel, Some("all"), None, now - 7201);
+        assert_eq!(kind_of(base, "new", now), None);
+        put_control(base, ControlAction::Cancel, Some("all"), None, now - 7000);
+        assert_eq!(kind_of(base, "new", now), Some(BlockKind::RunCancelled));
+    }
+
+    /// One long-running agent (fresh heartbeat) keeps the run live although
+    /// nothing else touched run.json for 2.5h.
+    fn long_running_agent(base: &Path, now: u64, heartbeat_ago: Option<u64>) {
+        let mut run = live_run(
+            base,
+            now,
+            RunStatus::Running,
+            9000,
+            9000,
+            &[("a", AgentStatus::Running)],
+        );
+        run.agents[0].started_at = Some(iso_from_secs(now - 9000));
+        write_run(base, &run).unwrap();
+        if let Some(ago) = heartbeat_ago {
+            heartbeat(base, "a", ago);
+        }
+        put_control(base, ControlAction::Pause, Some("all"), None, now);
+    }
+
+    #[test]
+    fn pause_on_long_running_agent_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        long_running_agent(base, now, Some(60));
+        assert_eq!(kind_of(base, "new", now), Some(BlockKind::Paused));
+        let run = read_run(base).unwrap();
+        assert!(is_live(base, &run, now));
+    }
+
+    #[test]
+    fn stuck_running_agent_does_not_pin_a_block_forever() {
+        let now = epoch_secs_now();
+        // No heartbeat: its start is 2.5h old.
+        let tmp = tempfile::tempdir().unwrap();
+        long_running_agent(tmp.path(), now, None);
+        assert_eq!(kind_of(tmp.path(), "new", now), None);
+        // A stale heartbeat does not count either.
+        let tmp = tempfile::tempdir().unwrap();
+        long_running_agent(tmp.path(), now, Some(7201));
+        assert_eq!(kind_of(tmp.path(), "new", now), None);
+    }
+
+    #[test]
+    fn rotation_does_not_drop_a_living_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        long_running_agent(base, now, Some(60));
+        // Gate and rotation agree: the run is live, so a spawn joins it.
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_eq!(run.id, "auto-r1");
+        assert_eq!(agent_ids(&run), ["a", "new"]);
+    }
+
+    /// A cancel expires exactly on schedule: agents never extend an aborted run.
+    #[test]
+    fn aborted_run_expires_despite_a_living_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let mut run = live_run(
+            base,
+            now,
+            RunStatus::Aborted,
+            9000,
+            7201,
+            &[("a", AgentStatus::Running)],
+        );
+        run.agents[0].started_at = Some(iso_from_secs(now - 60));
+        write_run(base, &run).unwrap();
+        heartbeat(base, "a", 30);
+        assert_eq!(spawn_block(base, "new", now), None);
+    }
+
+    #[test]
+    fn cleanup_keeps_a_run_with_a_living_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        long_running_agent(base, now, Some(60));
+        auto_cleanup_stale_runs(base);
+        let run = read_run(base).unwrap();
+        assert_eq!(run.status, RunStatus::Running);
+        assert_eq!(run.agents[0].status, AgentStatus::Running);
     }
 }

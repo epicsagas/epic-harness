@@ -63,9 +63,14 @@ fn run_pre_in(base: &Path, input: &HookInput) -> Result<i32, Box<dyn std::error:
     // The same decision the Claude PreToolUse guard enforces, evaluated before
     // the upsert so the recorded status always matches the gate (I3): only an
     // allowed spawn is recorded as Running, and only that can start a new run.
+    // Hosts that cannot refuse the spawn run it anyway, so they record Running.
     // Known limitation: `Blocked` is shared with dependency blocking, so a
     // paused agent can be flipped to `Pending` when its dependency finishes.
-    let block = orch_state::spawn_block(base, &agent_id, orch_state::epoch_secs_now());
+    let block = if spawn_gate_enforced(input) {
+        orch_state::spawn_block(base, &agent_id, orch_state::epoch_secs_now())
+    } else {
+        None
+    };
 
     // Always: record agent (agent tracking, no EPIC_ORCHESTRATION gate)
     let (description, subagent_type) = extract_agent_meta(input);
@@ -127,6 +132,17 @@ fn run_pre_in(base: &Path, input: &HookInput) -> Result<i32, Box<dyn std::error:
     }
 
     Ok(0)
+}
+
+/// True when the host refuses a blocked spawn synchronously: Claude's
+/// `PreToolUse/Agent` guard handler, which only runs with the guard profile
+/// enabled. Codex `SubagentStart` and a disabled guard cannot stop the
+/// subagent, so a block there must not be recorded as Blocked.
+fn spawn_gate_enforced(input: &HookInput) -> bool {
+    input.hook_event_name.as_deref() == Some("PreToolUse")
+        && input.hook_event_name_camel.is_none()
+        && !std::env::var("GROK_HOOK_EVENT").is_ok_and(|v| !v.is_empty())
+        && common::should_run(common::PROFILE_GUARD)
 }
 
 /// Post-invocation hook logic (returns exit code, errors logged to stderr).
@@ -787,6 +803,7 @@ mod tests {
             },
         ];
         let input = HookInput {
+            hook_event_name: Some("PreToolUse".to_string()),
             tool_name: Some("Agent".to_string()),
             agent_id: Some("x".to_string()),
             tool_input: Some(serde_json::json!({"description": "synthetic task"})),
@@ -825,6 +842,45 @@ mod tests {
                     );
                 }
             }
+        }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+    }
+
+    /// Codex runs the subagent whatever `SubagentStart` returns, so a live
+    /// pause must not be recorded as Blocked there (or hide a running agent).
+    #[test]
+    #[serial_test::serial]
+    fn codex_subagent_start_records_running_under_a_live_pause() {
+        let input = HookInput {
+            hook_event_name: Some("SubagentStart".to_string()),
+            agent_id: Some("x".to_string()),
+            tool_input: Some(serde_json::json!({"description": "synthetic task"})),
+            ..Default::default()
+        };
+        for orchestration in [false, true] {
+            // SAFETY: serial test, the var is removed below
+            unsafe {
+                if orchestration {
+                    std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+                } else {
+                    std::env::remove_var("EPIC_ORCHESTRATION");
+                }
+            }
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            gate_fixture(
+                base,
+                orch_state::RunStatus::Running,
+                &[("y", AgentStatus::Running)],
+                Some((ControlAction::Pause, Some("all"))),
+            );
+            assert_eq!(run_pre_in(base, &input).unwrap(), 0);
+            let run = orch_state::read_run(base).unwrap();
+            assert_eq!(run.id, "auto-r1", "same live run");
+            let x = run.agents.iter().find(|a| a.id == "x").unwrap();
+            assert_eq!(x.status, AgentStatus::Running);
         }
         unsafe {
             std::env::remove_var("EPIC_ORCHESTRATION");

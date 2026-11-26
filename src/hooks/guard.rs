@@ -433,15 +433,14 @@ pub fn run(input: &HookInput) -> i32 {
             // control.json pause check: blocks the tool call entirely, but only
             // while the run is live and control.json was written during it.
             let agent_id = current_agent_id();
+            let now = crate::orchestrate::state::epoch_secs_now();
             let live_run = orch_dir.as_deref().and_then(Path::parent).and_then(|base| {
                 let run = crate::orchestrate::state::read_run(base)?;
-                (crate::orchestrate::state::is_live(
-                    &run,
-                    crate::orchestrate::state::epoch_secs_now(),
-                ) && crate::orchestrate::state::control_is_bound(base, &run))
-                .then_some(run)
+                (crate::orchestrate::state::is_live(base, &run, now)
+                    && crate::orchestrate::state::control_is_bound(base, &run))
+                .then_some((base, run))
             });
-            if let (Some(orch), Some(run)) = (&orch_dir, &live_run)
+            if let (Some(orch), Some((base, run))) = (&orch_dir, &live_run)
                 && check_control_json_pause(agent_id.as_deref(), orch)
             {
                 hint(
@@ -455,7 +454,7 @@ pub fn run(input: &HookInput) -> i32 {
                     "guard",
                     &format!(
                         "To lift: the user runs /intervene resume all. Otherwise the pause ends by itself after 2 hours without run activity (earliest {}).",
-                        crate::orchestrate::state::run_expiry(run)
+                        crate::orchestrate::state::run_expiry(base, run, now)
                     ),
                 );
                 return 2;
@@ -1530,5 +1529,31 @@ mod tests {
         assert_eq!(run(&from_grok(camel.clone(), true)), 2);
         // Without normalization the camelCase payload is silently unguarded.
         assert_eq!(run(&from_grok(camel, false)), 0);
+    }
+
+    #[test]
+    #[serial]
+    fn cleanup_does_not_revive_expired_pause_for_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let _env = HarnessEnv::new(dir.path());
+        // Expired run (updated 3h ago) with a bound legacy pause, one stale
+        // agent for cleanup to close.
+        let base = seed_run(
+            dir.path(),
+            orch_state::RunStatus::Running,
+            4 * 3600,
+            3 * 3600,
+        );
+        let control = orch_state::control_file(&base);
+        std::fs::write(&control, r#"{"pause":"agent-x"}"#).unwrap();
+        set_mtime(&control, orch_state::epoch_secs_now() - 3 * 3600 - 60);
+        unsafe {
+            std::env::set_var("EPIC_AGENT_ID", "agent-x");
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        assert_eq!(run(&edit_input()), 0, "expired before cleanup");
+        orch_state::auto_cleanup_stale_runs(&base);
+        assert_eq!(run(&edit_input()), 0, "cleanup must not make the run live");
+        assert_eq!(run(&agent_input("s1")), 0);
     }
 }
