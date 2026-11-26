@@ -303,10 +303,11 @@ pub fn classify_tool(name: &str) -> &'static str {
         // `hashline_edit`, `write_file` and `read_file`. `list_dir` and
         // `web_search` stay "other": `glob` scoring reads grok's object-shaped
         // listing as an empty result and would mark every call a failure.
-        "bash" | "powershell" | "pwsh" | "run_terminal_command" => "bash",
+        // agy names its tools `run_command`, `read_file` and `edit_file`.
+        "bash" | "powershell" | "pwsh" | "run_terminal_command" | "run_command" => "bash",
         // Codex's canonical edit tool — without this every Codex edit was
         // categorized as "other" and scored by the generic path.
-        "edit" | "apply_patch" | "search_replace" | "hashline_edit" => "edit",
+        "edit" | "apply_patch" | "search_replace" | "hashline_edit" | "edit_file" => "edit",
         "write" | "write_file" => "write",
         "read" | "read_file" => "read",
         "glob" => "glob",
@@ -729,6 +730,14 @@ mod tests {
         assert_eq!(classify_tool("write_file"), "write");
         assert_eq!(classify_tool("list_dir"), "other");
         assert_eq!(classify_tool("web_search"), "other");
+    }
+
+    #[test]
+    fn classify_tool_agy_names() {
+        assert_eq!(classify_tool("run_command"), "bash");
+        assert_eq!(classify_tool("read_file"), "read");
+        assert_eq!(classify_tool("edit_file"), "edit");
+        assert_eq!(classify_tool("exit_plan_mode"), "other");
     }
 
     #[test]

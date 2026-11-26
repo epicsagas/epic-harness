@@ -119,30 +119,61 @@ fn grok_hook_commands_all_use_launcher() {
 
 /// agy (Antigravity CLI) runs handlers with cwd = plugin root and never
 /// substitutes variables, so the manifest is a flat handler list with a
-/// relative launcher path. SessionStart only: Stop waits for agy observe (#404).
+/// relative launcher path. SessionStart and Stop are flat handler lists;
+/// PreToolUse and PostToolUse use matcher groups. Every handler is
+/// synchronous (no `async` key) and routes through an `agy-*` launcher word.
 #[test]
 fn agy_hooks_manifest_is_flat_and_relative() {
     let hooks: Value = serde_json::from_str(AGY_HOOKS).expect("valid JSON");
     let top = hooks.as_object().unwrap();
     assert_eq!(top.keys().collect::<Vec<_>>(), ["epic"]);
     let events = top["epic"].as_object().unwrap();
-    assert_eq!(events.keys().collect::<Vec<_>>(), ["SessionStart"]);
+    let mut names: Vec<_> = events.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["PostToolUse", "PreToolUse", "SessionStart", "Stop"]);
 
-    let handlers = events["SessionStart"].as_array().unwrap();
-    assert_eq!(handlers.len(), 1);
-    let handler = handlers[0].as_object().unwrap();
-    let mut keys: Vec<_> = handler.keys().map(String::as_str).collect();
-    keys.sort_unstable();
-    assert_eq!(keys, ["command", "timeout", "type"]);
-    assert_eq!(handler["type"], "command");
+    let sorted_keys = |o: &serde_json::Map<String, Value>| {
+        let mut keys: Vec<_> = o.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        keys.into_iter().map(String::from).collect::<Vec<_>>()
+    };
+    // A handler: exactly command, timeout, type; returns its command.
+    let check_handler = |h: &Value, sub: &str, timeout: u64| {
+        let h = h.as_object().unwrap();
+        assert_eq!(sorted_keys(h), ["command", "timeout", "type"]);
+        assert_eq!(h["type"], "command");
+        assert_eq!(h["timeout"], timeout);
+        let cmd = h["command"].as_str().unwrap();
+        assert_eq!(cmd, format!("node registry/scripts/hooks/run.mjs {sub}"));
+        for token in FORBIDDEN.iter().chain(&["${", "$", "%"]) {
+            assert!(
+                !cmd.contains(token),
+                "hook command contains {token:?}: {cmd}"
+            );
+        }
+    };
 
-    let cmd = handler["command"].as_str().unwrap();
-    assert_eq!(cmd, "node registry/scripts/hooks/run.mjs session-start");
-    for token in FORBIDDEN.iter().chain(&["${", "$", "%"]) {
-        assert!(
-            !cmd.contains(token),
-            "hook command contains {token:?}: {cmd}"
-        );
+    for (event, sub, timeout) in [
+        ("SessionStart", "session-start", 60),
+        ("Stop", "agy-reflect", 60),
+    ] {
+        let handlers = events[event].as_array().unwrap();
+        assert_eq!(handlers.len(), 1, "{event}");
+        check_handler(&handlers[0], sub, timeout);
+    }
+
+    for (event, matcher, sub) in [
+        ("PreToolUse", "run_command", "agy-guard"),
+        ("PostToolUse", ".*", "agy-observe"),
+    ] {
+        let groups = events[event].as_array().unwrap();
+        assert_eq!(groups.len(), 1, "{event}");
+        let group = groups[0].as_object().unwrap();
+        assert_eq!(sorted_keys(group), ["hooks", "matcher"], "{event}");
+        assert_eq!(group["matcher"], matcher);
+        let handlers = group["hooks"].as_array().unwrap();
+        assert_eq!(handlers.len(), 1, "{event}");
+        check_handler(&handlers[0], sub, 10);
     }
 }
 
@@ -180,6 +211,9 @@ fn run_mjs_static_sanity() {
         // win32 shell:true degrades through cmd.exe's 9009, not ENOENT.
         "9009",
         "signal",
+        // agy mode: guard deny passthrough.
+        "agy-guard",
+        "\"deny\"",
     ] {
         assert!(RUN_MJS.contains(needle), "run.mjs missing {needle:?}");
     }

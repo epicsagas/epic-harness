@@ -156,6 +156,73 @@ test("prompt passes a working epic's stdout and exit code through", { skip: win 
   assert.equal(r.stdout, "ctx\n");
 });
 
+// agy mode: stdout is empty unless guard prints a deny object, and the exit
+// code is 0 on every path (a non-zero exit or a stray `{}` blocks the tool call).
+const agyShim = (body) => {
+  const l = layout("");
+  writeShim(l.bin, `#!/bin/sh\n${body}\n`);
+  return l;
+};
+const silent = (r) => {
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, "");
+};
+
+test("agy-guard drops an older binary's {}", { skip: win }, () => {
+  silent(run(agyShim("echo '{}'"), ["agy-guard"]));
+});
+
+test("agy-guard drops a stdin echo", { skip: win }, () => {
+  // cat needs a PATH: without it the shim would fail with 127 and prove nothing.
+  const r = run(agyShim("cat"), ["agy-guard"], "/usr/bin:/bin");
+  silent(r);
+});
+
+test("agy-guard drops non-JSON text and arrays", { skip: win }, () => {
+  silent(run(agyShim("echo hi"), ["agy-guard"]));
+  silent(run(agyShim(`echo '[{"decision":"deny"}]'`), ["agy-guard"]));
+});
+
+test("agy-guard forwards a deny as one line with only decision and reason", { skip: win }, () => {
+  const l = agyShim(`printf '%s\\n' '{"decision":"deny","reason":"[guard] BLOCKED: x","extra":1}'`);
+  const r = run(l, ["agy-guard"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '{"decision":"deny","reason":"[guard] BLOCKED: x"}\n');
+});
+
+test("agy-guard fails open on exit 1", { skip: win }, () => {
+  silent(run(agyShim("echo boom >&2; exit 1"), ["agy-guard"]));
+});
+
+test("agy-guard fails open on a signal", { skip: win }, () => {
+  silent(run(agyShim("kill -9 $$"), ["agy-guard"]));
+});
+
+test("agy-guard fails open on EACCES", { skip: win }, () => {
+  const l = agyShim("echo '{}'");
+  chmodSync(path.join(l.bin, shimName), 0o644);
+  silent(run(l, ["agy-guard"]));
+});
+
+test("agy-guard with no binary exits 0 with the notice on stderr only", () => {
+  const r = run(layout(""), ["agy-guard"]);
+  silent(r);
+  assert.match(r.stderr, /epic not found/);
+});
+
+test("agy-observe and agy-reflect drop stdout and an exit code", { skip: win }, () => {
+  const l = agyShim("echo '{}'; exit 3");
+  for (const sub of ["agy-observe", "agy-reflect"]) silent(run(l, [sub]));
+});
+
+test("agy hooks run the plain subcommand with the payload on stdin", { skip: win }, () => {
+  const r = run(agyShim('echo "sub=$1" >&2; cat >&2'), ["agy-guard"], "/usr/bin:/bin");
+  assert.equal(r.status, 0);
+  assert.match(r.stderr, /sub=guard/);
+  assert.match(r.stderr, /\{\}/);
+  assert.doesNotMatch(r.stderr, /agy-guard/);
+});
+
 // run.mjs does its work at import time; with no subcommand that is one notice line.
 const { appendToPath, localEpicPath } = await (async () => {
   const [argv, log] = [process.argv, console.log];

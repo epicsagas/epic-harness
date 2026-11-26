@@ -367,7 +367,10 @@ fn main() {
     // stdout output varies by host protocol:
     // - Claude Code: stdin passthrough (original contract)
     // - Codex: event-specific JSON (detected via hook_event_name)
-    // - Antigravity (agy): one strict-protojson object, `{}` or `injectSteps`
+    // - Antigravity (agy): one strict-protojson object, `{}` or `injectSteps`;
+    //   guard allow and observe print nothing because agy reads any
+    //   PreToolUse stdout object, even `{}`, as a deny; PostToolUse output
+    //   acceptance was not captured, so it is left empty
     // - Claude Code PreToolUse block: exit 0 plus one deny JSON object (below)
     if claude_pretooluse && subcmd == "guard" && exit_code == 2 {
         // `pwsh -Command` turns an external exit 2 into 1, which Claude treats
@@ -391,15 +394,28 @@ fn main() {
         exit_code = 0;
     } else if agy {
         let mirrored = shared::helpers::take_hint_mirror();
-        if subcmd == "resume" && !mirrored.is_empty() {
-            let out = serde_json::json!({
-                "injectSteps": [
-                    {"systemMessage": {"systemMessage": mirrored.join("\n")}}
-                ]
-            });
-            println!("{out}");
-        } else {
-            println!("{{}}");
+        match subcmd {
+            "guard" if exit_code == 2 => {
+                let mut reason = mirrored.join("\n");
+                if reason.is_empty() {
+                    reason = "Blocked by epic-harness guard".into();
+                }
+                println!(
+                    "{}",
+                    serde_json::json!({"decision": "deny", "reason": reason})
+                );
+                exit_code = 0;
+            }
+            "guard" | "observe" => {}
+            "resume" if !mirrored.is_empty() => {
+                let out = serde_json::json!({
+                    "injectSteps": [
+                        {"systemMessage": {"systemMessage": mirrored.join("\n")}}
+                    ]
+                });
+                println!("{out}");
+            }
+            _ => println!("{{}}"),
         }
     } else if input.hook_event_name.is_some() {
         // Codex protocol

@@ -6,6 +6,37 @@
         "command": "node registry/scripts/hooks/run.mjs session-start",
         "timeout": 60
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node registry/scripts/hooks/run.mjs agy-guard",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node registry/scripts/hooks/run.mjs agy-observe",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "node registry/scripts/hooks/run.mjs agy-reflect",
+        "timeout": 60
+      }
     ]
   }
 }
