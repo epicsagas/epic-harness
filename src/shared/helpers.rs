@@ -85,10 +85,16 @@ fn is_leap(y: i64) -> bool {
 }
 
 pub fn now_iso() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    iso_from_secs(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+    )
+}
+
+/// `YYYY-MM-DDThh:mm:ssZ` for `secs` seconds since the Unix epoch.
+pub fn iso_from_secs(secs: u64) -> String {
     // Reuse today() logic for full ISO
     let days = secs / 86400;
     let time_of_day = secs % 86400;

@@ -10,6 +10,7 @@ pub mod state;
 use state::{
     self as orch_state, AgentEvent, AgentStatus, AgentStatusFile, ControlAction, InboxMessage,
 };
+use std::path::Path;
 
 use crate::hooks::common::{self, HookInput, hint, now_iso};
 
@@ -30,8 +31,8 @@ fn orch_base() -> std::path::PathBuf {
 
 /// Pre-invocation hook logic (returns exit code, errors logged to stderr).
 ///
-/// Always: record agent as "running" in orchestrator state (agent tracking).
-/// Full orchestration only: check control directives, read inbox, update heartbeat.
+/// Always: record agent as "running" (or "blocked" when `spawn_block` refuses it).
+/// Full orchestration only: deny a blocked spawn, read inbox, update heartbeat.
 pub fn run_pre(input: &HookInput) -> i32 {
     run_pre_checked(input).unwrap_or_else(|e| {
         eprintln!("[harness] orchestrate run_pre error: {e}");
@@ -41,11 +42,14 @@ pub fn run_pre(input: &HookInput) -> i32 {
 
 /// Pre-invocation hook logic (returns Result for callers that want error handling).
 pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
+    run_pre_in(&orch_base(), input)
+}
+
+fn run_pre_in(base: &Path, input: &HookInput) -> Result<i32, Box<dyn std::error::Error>> {
     if !is_agent_event(input) {
         return Ok(0);
     }
 
-    let base = orch_base();
     let agent_id = match extract_agent_id(input) {
         Some(id) => id,
         None => return Ok(0),
@@ -56,12 +60,14 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
         return Ok(0);
     }
 
-    // Full orchestration: read the control directive once, before the upsert,
-    // so a paused or cancelled agent is recorded as Blocked at spawn.
+    // The same decision the Claude PreToolUse guard enforces, evaluated before
+    // the upsert so the recorded status always matches the gate (I3): only an
+    // allowed spawn is recorded as Running, and only that can start a new run.
+    // Hosts that cannot refuse the spawn run it anyway, so they record Running.
     // Known limitation: `Blocked` is shared with dependency blocking, so a
     // paused agent can be flipped to `Pending` when its dependency finishes.
-    let control = if is_full_orchestration() {
-        orch_state::read_control(&base)
+    let block = if spawn_gate_enforced(input) {
+        orch_state::spawn_block(base, &agent_id, orch_state::epoch_secs_now())
     } else {
         None
     };
@@ -69,11 +75,15 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     // Always: record agent (agent tracking, no EPIC_ORCHESTRATION gate)
     let (description, subagent_type) = extract_agent_meta(input);
     orch_state::upsert_agent_to_run(
-        &base,
+        base,
         &agent_id,
         &description,
         &subagent_type,
-        spawn_status(control.as_ref(), &agent_id),
+        if block.is_some() {
+            AgentStatus::Blocked
+        } else {
+            AgentStatus::Running
+        },
     )?;
 
     // Full orchestration: control, inbox, heartbeat
@@ -81,49 +91,23 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
         return Ok(0);
     }
 
-    // Check control directive
-    if let Some(directive) = control {
-        let matches_target = directive_targets(&directive, &agent_id);
-
-        if matches_target {
-            match directive.action {
-                ControlAction::Pause => {
-                    hint(
-                        "orchestrator",
-                        &format!(
-                            "Agent {} is paused by user directive (gen {})",
-                            agent_id, directive.generation
-                        ),
-                    );
-                    if let Some(msg) = &directive.message {
-                        hint("orchestrator", &format!("Reason: {}", msg));
-                    }
-                    return Ok(2); // block the tool call
-                }
-                ControlAction::Cancel => {
-                    hint(
-                        "orchestrator",
-                        &format!(
-                            "Agent {} cancelled by user directive (gen {})",
-                            agent_id, directive.generation
-                        ),
-                    );
-                    return Ok(2);
-                }
-                ControlAction::Redirect => {
-                    if let Some(msg) = &directive.message {
-                        hint("orchestrator", &format!("Redirect notice: {}", msg));
-                    }
-                }
-                ControlAction::Resume => {
-                    // Resume clears any prior pause; no action needed at pre-invocation
-                }
-            }
+    if let Some(block) = block {
+        for line in block.reason_lines(&agent_id) {
+            hint("orchestrator", &line);
         }
+        return Ok(2); // block the tool call
+    }
+
+    if let Some(directive) = orch_state::read_control(base)
+        && directive.action == ControlAction::Redirect
+        && directive.targets(&agent_id)
+        && let Some(msg) = &directive.message
+    {
+        hint("orchestrator", &format!("Redirect notice: {}", msg));
     }
 
     // Read inbox messages
-    let messages = orch_state::read_inbox(&base, &agent_id);
+    let messages = orch_state::read_inbox(base, &agent_id);
     for msg in &messages {
         hint(
             "orchestrator",
@@ -132,9 +116,9 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
     }
 
     // Update heartbeat
-    if let Some(mut status) = orch_state::read_agent_status(&base, &agent_id) {
+    if let Some(mut status) = orch_state::read_agent_status(base, &agent_id) {
         status.last_heartbeat = now_iso();
-        let _ = orch_state::write_agent_status(&base, &agent_id, &status);
+        let _ = orch_state::write_agent_status(base, &agent_id, &status);
     } else {
         // First time seeing this agent -- create status
         let status = AgentStatusFile {
@@ -144,10 +128,21 @@ pub fn run_pre_checked(input: &HookInput) -> Result<i32, Box<dyn std::error::Err
             last_heartbeat: now_iso(),
             status: AgentStatus::Running,
         };
-        let _ = orch_state::write_agent_status(&base, &agent_id, &status);
+        let _ = orch_state::write_agent_status(base, &agent_id, &status);
     }
 
     Ok(0)
+}
+
+/// True when the host refuses a blocked spawn synchronously: Claude's
+/// `PreToolUse/Agent` guard handler, which only runs with the guard profile
+/// enabled. Codex `SubagentStart` and a disabled guard cannot stop the
+/// subagent, so a block there must not be recorded as Blocked.
+fn spawn_gate_enforced(input: &HookInput) -> bool {
+    input.hook_event_name.as_deref() == Some("PreToolUse")
+        && input.hook_event_name_camel.is_none()
+        && !std::env::var("GROK_HOOK_EVENT").is_ok_and(|v| !v.is_empty())
+        && common::should_run(common::PROFILE_GUARD)
 }
 
 /// Post-invocation hook logic (returns exit code, errors logged to stderr).
@@ -267,7 +262,7 @@ pub(crate) fn is_agent_event(input: &HookInput) -> bool {
     )
 }
 
-fn extract_agent_id(input: &HookInput) -> Option<String> {
+pub(crate) fn extract_agent_id(input: &HookInput) -> Option<String> {
     // Codex supplies a stable id; prefer it over the prompt hash.
     if let Some(id) = input.agent_id.as_deref()
         && !id.trim().is_empty()
@@ -341,27 +336,6 @@ fn extract_agent_meta(input: &HookInput) -> (String, String) {
         })
         .unwrap_or_else(|| "general-purpose".to_string());
     (desc, sub_type)
-}
-
-/// True when the directive addresses this agent (its id, `"all"`, or no target).
-fn directive_targets(directive: &orch_state::ControlDirective, agent_id: &str) -> bool {
-    directive.target.as_deref() == Some(agent_id)
-        || directive.target.as_deref() == Some("all")
-        || directive.target.is_none()
-}
-
-/// Status recorded at spawn: Blocked when a Pause or Cancel directive targets
-/// this agent, else Running.
-fn spawn_status(directive: Option<&orch_state::ControlDirective>, agent_id: &str) -> AgentStatus {
-    match directive {
-        Some(d)
-            if directive_targets(d, agent_id)
-                && matches!(d.action, ControlAction::Pause | ControlAction::Cancel) =>
-        {
-            AgentStatus::Blocked
-        }
-        _ => AgentStatus::Running,
-    }
 }
 
 /// True when the host reports the tool call as an error: `tool_response` or
@@ -729,23 +703,187 @@ mod tests {
         assert!(tool_reported_error(&interrupted));
     }
 
+    // ── Spawn gate: run_pre records what the guard decides (I3) ──
+
+    use crate::shared::helpers::iso_from_secs;
+
+    /// run.json `auto-r1` created 100s and updated 10s ago, control.json (if
+    /// any) written now.
+    fn gate_fixture(
+        base: &Path,
+        status: orch_state::RunStatus,
+        agents: &[(&str, AgentStatus)],
+        control: Option<(ControlAction, Option<&str>)>,
+    ) {
+        let now = orch_state::epoch_secs_now();
+        let run = orch_state::OrchestrationRun {
+            id: "auto-r1".to_string(),
+            status,
+            agents: agents
+                .iter()
+                .map(|(id, st)| orch_state::AgentDef {
+                    id: id.to_string(),
+                    role: "builder".to_string(),
+                    task: "t".to_string(),
+                    satisfies: vec![],
+                    status: st.clone(),
+                    started_at: None,
+                    completed_at: None,
+                })
+                .collect(),
+            dependency_graph: Default::default(),
+            created_at: iso_from_secs(now - 100),
+            updated_at: iso_from_secs(now - 10),
+        };
+        std::fs::create_dir_all(orch_state::orchestrator_dir(base)).unwrap();
+        orch_state::write_run(base, &run).unwrap();
+        if let Some((action, target)) = control {
+            let directive = orch_state::ControlDirective {
+                action,
+                target: target.map(String::from),
+                message: None,
+                generation: 1,
+            };
+            orch_state::write_control(base, &directive).unwrap();
+        }
+    }
+
     #[test]
-    fn spawn_status_golden() {
-        let d = |action, target: Option<&str>| orch_state::ControlDirective {
-            action,
-            target: target.map(String::from),
-            message: None,
-            generation: 1,
+    #[serial_test::serial]
+    fn run_pre_records_blocked_iff_gate_blocks() {
+        use orch_state::RunStatus::{Aborted, Running};
+        struct Row {
+            name: &'static str,
+            status: orch_state::RunStatus,
+            agents: Vec<(&'static str, AgentStatus)>,
+            control: Option<(ControlAction, Option<&'static str>)>,
+            blocked: bool,
+            recorded: AgentStatus,
+        }
+        let rows = [
+            Row {
+                name: "3: aborted + resume all",
+                status: Aborted,
+                agents: vec![("a", AgentStatus::Running)],
+                control: Some((ControlAction::Resume, Some("all"))),
+                blocked: false,
+                recorded: AgentStatus::Running,
+            },
+            Row {
+                name: "4: aborted, no directive",
+                status: Aborted,
+                agents: vec![("a", AgentStatus::Running)],
+                control: None,
+                blocked: true,
+                recorded: AgentStatus::Blocked,
+            },
+            Row {
+                name: "6: agent cancelled (the denied respawn stays cancelled)",
+                status: Running,
+                agents: vec![("x", AgentStatus::Cancelled), ("y", AgentStatus::Running)],
+                control: None,
+                blocked: true,
+                recorded: AgentStatus::Cancelled,
+            },
+            Row {
+                name: "7: pause x",
+                status: Running,
+                agents: vec![("y", AgentStatus::Running)],
+                control: Some((ControlAction::Pause, Some("x"))),
+                blocked: true,
+                recorded: AgentStatus::Blocked,
+            },
+            Row {
+                name: "9: pause for another id",
+                status: Running,
+                agents: vec![("y", AgentStatus::Running)],
+                control: Some((ControlAction::Pause, Some("y"))),
+                blocked: false,
+                recorded: AgentStatus::Running,
+            },
+        ];
+        let input = HookInput {
+            hook_event_name: Some("PreToolUse".to_string()),
+            tool_name: Some("Agent".to_string()),
+            agent_id: Some("x".to_string()),
+            tool_input: Some(serde_json::json!({"description": "synthetic task"})),
+            ..Default::default()
         };
-        let blocked = |dir: orch_state::ControlDirective| {
-            spawn_status(Some(&dir), "agent-1") == AgentStatus::Blocked
+        for orchestration in [false, true] {
+            // SAFETY: serial test, the var is restored below
+            unsafe {
+                if orchestration {
+                    std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+                } else {
+                    std::env::remove_var("EPIC_ORCHESTRATION");
+                }
+            }
+            for row in &rows {
+                let tmp = tempfile::tempdir().unwrap();
+                let base = tmp.path();
+                gate_fixture(base, row.status.clone(), &row.agents, row.control.clone());
+                let code = run_pre_in(base, &input).unwrap();
+                let case = format!("{} (EPIC_ORCHESTRATION {orchestration})", row.name);
+                assert_eq!(
+                    code,
+                    if orchestration && row.blocked { 2 } else { 0 },
+                    "{case}"
+                );
+                let run = orch_state::read_run(base).unwrap();
+                let x = run.agents.iter().find(|a| a.id == "x").unwrap();
+                assert_eq!(x.status, row.recorded, "{case}");
+                if row.status == Aborted && row.blocked {
+                    assert_eq!(run.status, Aborted, "{case}: abort stays");
+                }
+                if row.status == Aborted && !row.blocked {
+                    assert_ne!(
+                        run.id, "auto-r1",
+                        "{case}: resume then spawn starts a new run"
+                    );
+                }
+            }
+        }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
+    }
+
+    /// Codex runs the subagent whatever `SubagentStart` returns, so a live
+    /// pause must not be recorded as Blocked there (or hide a running agent).
+    #[test]
+    #[serial_test::serial]
+    fn codex_subagent_start_records_running_under_a_live_pause() {
+        let input = HookInput {
+            hook_event_name: Some("SubagentStart".to_string()),
+            agent_id: Some("x".to_string()),
+            tool_input: Some(serde_json::json!({"description": "synthetic task"})),
+            ..Default::default()
         };
-        assert!(blocked(d(ControlAction::Pause, Some("agent-1"))));
-        assert!(blocked(d(ControlAction::Cancel, Some("all"))));
-        assert!(blocked(d(ControlAction::Pause, None)));
-        assert!(!blocked(d(ControlAction::Pause, Some("agent-2"))));
-        assert!(!blocked(d(ControlAction::Redirect, Some("agent-1"))));
-        assert!(!blocked(d(ControlAction::Resume, None)));
-        assert_eq!(spawn_status(None, "agent-1"), AgentStatus::Running);
+        for orchestration in [false, true] {
+            // SAFETY: serial test, the var is removed below
+            unsafe {
+                if orchestration {
+                    std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+                } else {
+                    std::env::remove_var("EPIC_ORCHESTRATION");
+                }
+            }
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            gate_fixture(
+                base,
+                orch_state::RunStatus::Running,
+                &[("y", AgentStatus::Running)],
+                Some((ControlAction::Pause, Some("all"))),
+            );
+            assert_eq!(run_pre_in(base, &input).unwrap(), 0);
+            let run = orch_state::read_run(base).unwrap();
+            assert_eq!(run.id, "auto-r1", "same live run");
+            let x = run.agents.iter().find(|a| a.id == "x").unwrap();
+            assert_eq!(x.status, AgentStatus::Running);
+        }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
     }
 }
