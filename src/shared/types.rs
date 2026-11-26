@@ -131,10 +131,11 @@ pub struct AgyPayload {
 /// `lastUserInput`, `transcriptPath` and `artifactDirectoryPath` are never
 /// copied: user prompt text can hold personal data. Neither are `toolCall.id`
 /// or `stepIdx`. A `toolCall` object maps to `tool_name` and `tool_input`
-/// (never overwriting a root key). Its args stay as sent, plus two aliases:
-/// `CommandLine` always sets `command` (guard must check the string agy
-/// executes) and `Path` fills an absent `file_path`. Observe records only
-/// `command` or `file_path`, so other args (edit content) are never persisted.
+/// (never overwriting a root key). `tool_input` holds only `command` (from a
+/// string `CommandLine`, so guard checks the string agy executes) and
+/// `file_path` (from a string `Path`); every other arg is dropped, because
+/// observe's fallback action would persist it (edit content, plan text that
+/// restates the prompt). With neither key there is no `tool_input` at all.
 pub fn adapt_agy_payload(v: &mut serde_json::Value) -> Option<AgyPayload> {
     let obj = v.as_object_mut()?;
     let id = obj.get("conversationId")?.as_str()?.to_string();
@@ -160,18 +161,18 @@ pub fn adapt_agy_payload(v: &mut serde_json::Value) -> Option<AgyPayload> {
     {
         obj.insert("tool_name".into(), serde_json::Value::String(name));
     }
-    if let Some(mut args) = args
+    if let Some(args) = args
         && !obj.contains_key("tool_input")
     {
-        if let Some(cmd) = args.get("CommandLine").filter(|c| c.is_string()).cloned() {
-            args.insert("command".into(), cmd);
+        let mut input = serde_json::Map::new();
+        for (from, to) in [("CommandLine", "command"), ("Path", "file_path")] {
+            if let Some(val) = args.get(from).filter(|a| a.is_string()) {
+                input.insert(to.into(), val.clone());
+            }
         }
-        if !args.contains_key("file_path")
-            && let Some(path) = args.get("Path").filter(|p| p.is_string()).cloned()
-        {
-            args.insert("file_path".into(), path);
+        if !input.is_empty() {
+            obj.insert("tool_input".into(), serde_json::Value::Object(input));
         }
-        obj.insert("tool_input".into(), serde_json::Value::Object(args));
     }
 
     let usable = |c: &serde_json::Value| {
@@ -426,8 +427,21 @@ mod tests {
         let input: HookInput = serde_json::from_value(v).unwrap();
         assert_eq!(input.tool_name.as_deref(), Some("run_command"));
         let args = input.tool_input.unwrap();
-        assert_eq!(args["command"], "false");
-        assert_eq!(args["CommandLine"], "false");
+        assert_eq!(args, json!({"command": "false"}));
+    }
+
+    #[test]
+    fn agy_tool_input_drops_every_other_arg() {
+        let mut v = agy_tool_value(
+            "edit_file",
+            json!({"Path": "/p/a.txt", "Replacement": "R", "Target": "T", "plan": "P"}),
+        );
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert_eq!(v["tool_input"], json!({"file_path": "/p/a.txt"}));
+        // No command or path: no tool_input, so observe stores no action.
+        let mut v = agy_tool_value("exit_plan_mode", json!({"plan": "synthetic plan text"}));
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert!(v.get("tool_input").is_none());
     }
 
     #[test]

@@ -439,9 +439,12 @@ fn agy_observe_missing_file_is_failure() {
 #[test]
 fn agy_observe_read_success() {
     let env = Env::new();
-    let (rec, _) = observe_one(&env, &post_read(&env, &env.proj().join("existing.txt"), ""));
+    let path = env.proj().join("existing.txt");
+    let (rec, _) = observe_one(&env, &post_read(&env, &path, ""));
     assert_eq!(rec["result"], "success");
     assert_eq!(rec["score"], 1.0);
+    // file_path still reaches the record (observe stores it project-relative).
+    assert_eq!(rec["action"], "existing.txt");
 }
 
 #[test]
@@ -484,9 +487,12 @@ fn agy_observe_unknown_tool() {
         json!({"plan": "synthetic plan text"}),
         Some(""),
     );
-    let (rec, _) = observe_one(&env, &payload);
+    let (rec, raw) = observe_one(&env, &payload);
     assert_eq!(rec["tool_category"], "other");
     assert_eq!(rec["result"], "success");
+    // The plan restates the user prompt: no arg of an unmapped tool is stored.
+    assert!(rec["action"].is_null(), "{rec}");
+    assert!(!raw.contains("synthetic plan text"), "{raw}");
 }
 
 #[test]
